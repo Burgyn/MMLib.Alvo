@@ -46,27 +46,56 @@ internal static class ManagementCallers
     /// An evaluator over <paramref name="catalogs"/> judging every level by <paramref name="evaluator"/>.
     /// </summary>
     /// <remarks>
-    /// The evaluator is a parameter so a fact can count how many levels were actually evaluated — the only
-    /// way the "no short-circuit" rule is observable, since a first-match scan from the top would answer
+    /// The evaluator is a parameter so a fact can record which levels actually reached it — the only way
+    /// the "no short-circuit" rule is observable, since a first-match scan from the top would answer
     /// identically on every input.
     /// </remarks>
     /// <param name="catalogs">The catalog holder the evaluator reads the levels from.</param>
     /// <param name="evaluator">The evaluator every level is judged by.</param>
     internal static ManagementAccessEvaluator Evaluator(
-        IPolicyCatalogProvider catalogs, IPredicateEvaluator evaluator)
+        IPolicyCatalogProvider catalogs, IPredicateEvaluator evaluator) =>
+        Evaluator(catalogs, evaluator, Bootstrapped(user => user == Bootstrap));
+
+    /// <summary>
+    /// An evaluator over <paramref name="catalogs"/> with every collaborator supplied.
+    /// </summary>
+    /// <remarks>
+    /// The bootstrap port is a parameter so a fact can drive a <em>misbehaving</em> implementation. It is
+    /// <see langword="public"/> in Abstractions, so a host writes one, and a host that answers
+    /// <see langword="true"/> for the reserved all-zero id would hand every anonymous management request
+    /// full administration — a claim the port's own doc comment makes and only the gate can enforce.
+    /// </remarks>
+    /// <param name="catalogs">The catalog holder the evaluator reads the levels from.</param>
+    /// <param name="evaluator">The evaluator every level is judged by.</param>
+    /// <param name="bootstrapAdmin">The bootstrap port the gate consults.</param>
+    internal static ManagementAccessEvaluator Evaluator(
+        IPolicyCatalogProvider catalogs, IPredicateEvaluator evaluator, IAlvoBootstrapAdmin bootstrapAdmin) =>
+        new(catalogs, evaluator, bootstrapAdmin);
+
+    /// <summary>A bootstrap port answering <paramref name="recognises"/>.</summary>
+    /// <param name="recognises">Which callers the port reports as the bootstrap administrator.</param>
+    internal static IAlvoBootstrapAdmin Bootstrapped(Func<UserId, bool> recognises)
     {
         var bootstrap = Substitute.For<IAlvoBootstrapAdmin>();
-        bootstrap.IsBootstrapAdmin(Arg.Any<UserId>()).Returns(call => call.Arg<UserId>() == Bootstrap);
-
-        return new ManagementAccessEvaluator(catalogs, evaluator, bootstrap);
+        bootstrap.IsBootstrapAdmin(Arg.Any<UserId>()).Returns(call => recognises(call.Arg<UserId>()));
+        return bootstrap;
     }
 
     /// <summary>A catalog holder primed with the catalogue one apply of <paramref name="levels"/> produces.</summary>
     /// <param name="levels">The <c>access</c> block the host applied.</param>
-    internal static IPolicyCatalogProvider Primed(Access levels)
+    internal static IPolicyCatalogProvider Primed(Access levels) =>
+        Holding(PolicyCatalogBuilderProbe.Build(levels));
+
+    /// <summary>A catalog holder primed with <paramref name="catalog"/>.</summary>
+    /// <remarks>
+    /// Separate from <see cref="Primed(Access)"/> so a fact that needs to name the <em>compiled</em> levels
+    /// — rather than the source they were compiled from — holds the same instance the gate reads.
+    /// </remarks>
+    /// <param name="catalog">The catalogue one apply produced.</param>
+    internal static IPolicyCatalogProvider Holding(PolicyCatalog catalog)
     {
         var catalogs = Substitute.For<IPolicyCatalogProvider>();
-        catalogs.Current.Returns(PolicyCatalogBuilderProbe.Build(levels));
+        catalogs.Current.Returns(catalog);
         return catalogs;
     }
 }

@@ -13,8 +13,10 @@ namespace MMLib.Alvo.Management.Internal;
 /// <b>All three predicates are evaluated, and the highest match wins.</b> Not short-circuited: the levels
 /// are independent by design, and evaluating them all is what makes that structural rather than argued.
 /// The cost is two extra evaluations of a context-only expression, which is nothing beside a management
-/// call. A first-match scan from the top would answer identically on every input, so the property is held
-/// by a fact that counts evaluations rather than by one that compares verdicts.
+/// call. A first-match scan from the top would answer identically on every input — it is correct only
+/// because the levels are totally ordered and the required level is monotone in that order, which a fourth
+/// level, a deny level or a "which levels matched?" diagnostic would end — so the property is held by a
+/// fact that records which predicates reached the evaluator, never by one that compares verdicts.
 /// </para>
 /// <para>
 /// <b>Everything fails closed.</b> An unprimed catalog, a descriptor with no <c>access</c> block, a
@@ -25,9 +27,8 @@ namespace MMLib.Alvo.Management.Internal;
 /// <para>
 /// <b>The bootstrap administrator is above the descriptor, deliberately.</b> It is infrastructure
 /// configuration, never the descriptor (<c>docs/PLAN.md</c> invariant 4), so a project whose
-/// <c>access</c> block locks everyone out still has exactly one person who can fix it. It answers
-/// <see langword="false"/> for the reserved all-zero <see cref="UserId"/>, so an anonymous caller is
-/// never lifted by this branch.
+/// <c>access</c> block locks everyone out still has exactly one person who can fix it. The reserved
+/// all-zero <see cref="UserId"/> never reaches that port at all — see <see cref="IsBootstrapAdmin"/>.
 /// </para>
 /// </remarks>
 /// <param name="catalogs">The holder the applied <c>access</c> levels are read from.</param>
@@ -42,7 +43,20 @@ internal sealed class ManagementAccessEvaluator(
     /// <param name="operation">The operation about to be performed.</param>
     /// <param name="context">The caller.</param>
     internal bool Allows(ManagementOperation operation, AlvoContext context) =>
-        Resolve(context) >= ManagementOperations.RequiredLevel(operation);
+        Allows(ManagementOperations.RequiredLevel(operation), context);
+
+    /// <summary>Whether <paramref name="context"/> reaches <paramref name="required"/>.</summary>
+    /// <remarks>
+    /// <b><see cref="ManagementLevel.None"/> is refused rather than satisfied.</b> A plain
+    /// <c>Resolve(context) &gt;= required</c> answers <see langword="true"/> for every caller when the
+    /// requirement is zero, so a single mistyped table entry would open an operation to everyone. No entry
+    /// is <c>None</c> today and a fact asserts none ever is — but a fail-closed invariant belongs in the
+    /// code, with the completeness fact as the second line rather than the only one.
+    /// </remarks>
+    /// <param name="required">The level the operation needs.</param>
+    /// <param name="context">The caller.</param>
+    internal bool Allows(ManagementLevel required, AlvoContext context) =>
+        required != ManagementLevel.None && Resolve(context) >= required;
 
     /// <summary>The highest level <paramref name="context"/> matches.</summary>
     /// <param name="context">The caller.</param>
@@ -50,10 +64,24 @@ internal sealed class ManagementAccessEvaluator(
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        return bootstrapAdmin.IsBootstrapAdmin(context.User)
-            ? ManagementLevel.Admin
-            : HighestMatch(context);
+        return IsBootstrapAdmin(context.User) ? ManagementLevel.Admin : HighestMatch(context);
     }
+
+    /// <summary>
+    /// Whether <paramref name="user"/> is the deployment's bootstrap administrator.
+    /// </summary>
+    /// <remarks>
+    /// <b>The reserved all-zero <see cref="UserId"/> is refused here, not merely forbidden in the port's
+    /// contract.</b> <see cref="IAlvoBootstrapAdmin"/> is public, so a host writes the implementation, and
+    /// every unauthenticated management request arrives as <see cref="AlvoContext.Anonymous"/> — whose id
+    /// is that reserved value. A host answering <see langword="true"/> for it would turn every anonymous
+    /// request into full administration, project deletion included, with no second check anywhere. Both
+    /// shipped implementations honour the contract; this is the gate making that structural rather than
+    /// conventional, which is the security-core checklist's own standard.
+    /// </remarks>
+    /// <param name="user">The caller's internal identifier.</param>
+    private bool IsBootstrapAdmin(UserId user) =>
+        user != default && bootstrapAdmin.IsBootstrapAdmin(user);
 
     /// <summary>The highest of the three levels the caller matches, or none.</summary>
     /// <param name="context">The caller.</param>

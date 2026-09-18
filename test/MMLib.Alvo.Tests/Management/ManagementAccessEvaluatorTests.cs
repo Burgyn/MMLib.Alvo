@@ -5,6 +5,7 @@ using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Management.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Tests.Rules;
 using NSubstitute;
 
 namespace MMLib.Alvo.Tests.Management;
@@ -135,20 +136,52 @@ public class ManagementAccessEvaluatorTests
     /// top, return the first match" — the two answer identically for every caller, so a verdict-comparing
     /// fact cannot tell them apart and would leave the rule held by nothing but a comment.
     /// </summary>
+    /// <remarks>
+    /// The recorded <em>expressions</em> are compared rather than a call count: "each declared level
+    /// reached the evaluator" is the claim, and a count says it only by arithmetic that a fourth level
+    /// would silently invalidate.
+    /// </remarks>
     [Fact]
     public void Every_declared_level_is_evaluated_even_after_the_highest_has_matched()
     {
-        var counting = new CountingEvaluator(new PredicateEvaluator());
+        var catalog = PolicyCatalogBuilderProbe.Build(Levels(
+            admin: "'manager' in @user.roles",
+            developer: "'editor' in @user.roles",
+            viewer: "'sales' in @user.roles"));
+        var recording = new RecordingEvaluator(new PredicateEvaluator());
+
+        ManagementCallers.Evaluator(ManagementCallers.Holding(catalog), recording)
+            .Resolve(Caller("manager", "editor", "sales"))
+            .ShouldBe(ManagementLevel.Admin);
+
+        var levels = catalog.ManagementAccess;
+        recording.Evaluated.ShouldBe(
+            [levels.Viewer!, levels.Developer!, levels.Admin!],
+            ignoreOrder: true,
+            "a level the gate never evaluates is a level the gate does not enforce");
+    }
+
+    /// <summary>
+    /// <b>A host's own <see cref="IAlvoBootstrapAdmin"/> cannot lift the anonymous caller.</b> The port is
+    /// public, so a host writes the implementation, and the filter maps every unauthenticated management
+    /// request onto <see cref="AlvoContext.Anonymous"/> — whose <see cref="UserId"/> is the reserved
+    /// all-zero one. An implementation answering <see langword="true"/> for it would turn every anonymous
+    /// request into full administration, project deletion included, with no second check anywhere. The
+    /// port's doc comment forbids it; this is the gate enforcing it, which is the security-core
+    /// checklist's own standard — structural, not merely discouraged by convention.
+    /// </summary>
+    [Fact]
+    public void A_bootstrap_port_that_recognises_everyone_still_does_not_lift_the_anonymous_caller()
+    {
         var subject = ManagementCallers.Evaluator(
-            ManagementCallers.Primed(Levels(
-                admin: "'manager' in @user.roles",
-                developer: "'editor' in @user.roles",
-                viewer: "'sales' in @user.roles")),
-            counting);
+            ManagementCallers.Primed(Levels()),
+            new PredicateEvaluator(),
+            ManagementCallers.Bootstrapped(_ => true));
 
-        subject.Resolve(Caller("manager", "editor", "sales")).ShouldBe(ManagementLevel.Admin);
-
-        counting.Calls.ShouldBe(3, "a level the gate never evaluates is a level the gate does not enforce");
+        subject.Resolve(AlvoContext.Anonymous).ShouldBe(ManagementLevel.None);
+        subject.Allows(ManagementOperation.DeleteProject, AlvoContext.Anonymous).ShouldBeFalse();
+        subject.Resolve(Caller("sales")).ShouldBe(
+            ManagementLevel.Admin, "an identified caller the port does recognise is still lifted");
     }
 
     // ---- Allows, the layer where levels DO form a hierarchy -----------------------------------
@@ -195,6 +228,24 @@ public class ManagementAccessEvaluatorTests
         subject.Allows(ManagementOperation.RollbackRevision, caller).ShouldBeFalse();
     }
 
+    /// <summary>
+    /// <b>An operation requiring <see cref="ManagementLevel.None"/> is refused, not opened.</b> No table
+    /// entry is <c>None</c> today and a fact asserts none ever is — but a plain
+    /// <c>Resolve(context) &gt;= required</c> answers <see langword="true"/> for <em>every</em> caller the
+    /// moment one is, so a one-word typo in the table would be the difference between an operation and an
+    /// open door. The refusal belongs in the code; the completeness fact is then belt-and-braces.
+    /// </summary>
+    [Fact]
+    public void An_operation_with_no_required_level_is_refused_even_for_an_admin()
+    {
+        var subject = ManagementCallers.Evaluator(Levels(admin: "'manager' in @user.roles"));
+
+        subject.Resolve(Caller("manager")).ShouldBe(ManagementLevel.Admin);
+        subject.Allows(ManagementLevel.None, Caller("manager")).ShouldBeFalse(
+            "an operation nobody has decided a level for is undecided, and undecided is refused");
+        subject.Allows(ManagementLevel.None, AlvoContext.Anonymous).ShouldBeFalse();
+    }
+
     [Fact]
     public void A_caller_matching_no_level_may_do_nothing_at_all()
     {
@@ -217,18 +268,20 @@ public class ManagementAccessEvaluatorTests
     private static ManagementLevel Resolve(AlvoContext caller, Access levels) =>
         ManagementCallers.Evaluator(levels).Resolve(caller);
 
-    /// <summary>The product's own evaluator, counting how many predicates were handed to it.</summary>
+    /// <summary>The product's own evaluator, recording which predicates were handed to it.</summary>
     /// <param name="inner">The real evaluator every call is delegated to.</param>
-    private sealed class CountingEvaluator(IPredicateEvaluator inner) : IPredicateEvaluator
+    private sealed class RecordingEvaluator(IPredicateEvaluator inner) : IPredicateEvaluator
     {
-        /// <summary>Gets how many predicates have been evaluated.</summary>
-        internal int Calls { get; private set; }
+        private readonly List<CompiledExpression> _evaluated = [];
+
+        /// <summary>Gets every predicate evaluated so far, in the order they arrived.</summary>
+        internal IReadOnlyList<CompiledExpression> Evaluated => _evaluated;
 
         /// <inheritdoc/>
         public bool Evaluate(
             CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, AlvoContext context)
         {
-            Calls++;
+            _evaluated.Add(expression);
             return inner.Evaluate(expression, current, previous, context);
         }
     }
