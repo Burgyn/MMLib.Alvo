@@ -143,10 +143,18 @@ namespace MMLib.Alvo.Migrations
         public AlvoStartupRefusedException(string message, string fixSuggestion) { }
         public string FixSuggestion { get; }
     }
+    public sealed class DescriptorApplyPreview : System.IEquatable<MMLib.Alvo.Migrations.DescriptorApplyPreview>
+    {
+        public DescriptorApplyPreview(MMLib.Alvo.Migrations.MigrationPlan Plan, int CurrentRevision, bool AllowedByGuardrail) { }
+        public bool AllowedByGuardrail { get; init; }
+        public int CurrentRevision { get; init; }
+        public MMLib.Alvo.Migrations.MigrationPlan Plan { get; init; }
+    }
     public sealed class RuntimeSchemaService
     {
         public RuntimeSchemaService(MMLib.Alvo.Descriptor.IDescriptorValidator validator, MMLib.Alvo.Migrations.ISchemaMigrator migrator, MMLib.Alvo.Migrations.IDescriptorVersionStore store, MMLib.Alvo.Migrations.IRuntimeSchemaWriter writer, MMLib.Alvo.Expressions.ICelCompiler compiler, MMLib.Alvo.Rules.IPolicyCatalogProvider policyCatalogProvider) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> ApplyAsync(string project, string descriptorJson, int expectedRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorApplyPreview> PreviewAsync(string project, string descriptorJson, int expectedRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.DescriptorVersion> RollbackAsync(string project, int targetRevision, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
     }
 }

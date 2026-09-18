@@ -98,10 +98,11 @@ public sealed class RuntimeSchemaService
     /// between this check and the atomic append.
     /// </exception>
     /// <exception cref="NotSupportedException">
-    /// <see cref="MigrationOptions.DryRun"/> is <see langword="true"/>. The runtime path has no
-    /// dry-run: <see cref="IRuntimeSchemaWriter"/> applies and appends in one atomic step, so there is
-    /// no seam to preview from without mutating. It is refused rather than ignored, so a caller
-    /// expecting a no-op preview does not get a real apply.
+    /// <see cref="MigrationOptions.DryRun"/> is <see langword="true"/>. This path has no dry-run:
+    /// <see cref="IRuntimeSchemaWriter"/> applies and appends in one atomic step, so there is no seam to
+    /// preview from without mutating. It is refused rather than ignored, so a caller expecting a no-op
+    /// preview does not get a real apply — <see cref="PreviewAsync"/> is the plan-only operation, and it
+    /// does not take the flag because being plan-only is what it is.
     /// </exception>
     public async Task<DescriptorVersion> ApplyAsync(string project, string descriptorJson, int expectedRevision, MigrationOptions options, CancellationToken ct = default)
     {
@@ -112,13 +113,8 @@ public sealed class RuntimeSchemaService
         Validate(descriptorJson);
         var descriptor = AlvoDescriptor.Parse(descriptorJson);
         var desired = DescriptorToSchemaMapper.Map(descriptor);
-        var current = await _store.GetCurrentAsync(project, ct).ConfigureAwait(false);
+        var current = await CurrentAtAsync(project, expectedRevision, ct).ConfigureAwait(false);
         var currentSchema = current?.Schema ?? new SchemaModel([]);
-        var currentRevision = current?.Revision ?? 0;
-        if (currentRevision != expectedRevision)
-        {
-            throw new DescriptorConcurrencyException(project, expectedRevision, currentRevision);
-        }
 
         var plan = await _migrator.PlanAsync(currentSchema, desired, options, ct).ConfigureAwait(false);
         Guard(project, plan, options);
@@ -134,6 +130,86 @@ public sealed class RuntimeSchemaService
         var applied = await _writer.ApplyAndAppendAsync(project, plan, candidate, expectedRevision, options, ct).ConfigureAwait(false);
         _policyCatalogProvider.SetCurrent(project, catalog);
         return applied;
+    }
+
+    /// <summary>
+    /// Plans what <see cref="ApplyAsync"/> would do, <b>without touching the database</b> — the plan-only
+    /// operation <see cref="ApplyAsync"/>'s dry-run refusal names.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It neither writes nor primes.</b> <see cref="IRuntimeSchemaWriter"/> is not called and
+    /// <see cref="IPolicyCatalogProvider.SetCurrent"/> is not: a preview that primed the catalog would let a
+    /// dry run change what the very next request is allowed to do, which is the opposite of what a caller
+    /// asking for a preview is asking for.
+    /// </para>
+    /// <para>
+    /// <b>The revision is still checked.</b> Planning against a base the caller never saw can misclassify the
+    /// diff as destructive — two unrelated field additions read as a drop plus an add — so a preview built on
+    /// the wrong base previews something nobody asked for.
+    /// </para>
+    /// <para>
+    /// <b><see cref="MigrationOptions.DryRun"/> is not consulted here, and is still refused on
+    /// <see cref="ApplyAsync"/>.</b> Being plan-only is what this member <em>is</em>, so an option asking for
+    /// it would be a second way to spell the same request; the flag stays a refusal on the applying path so a
+    /// caller who expected a no-op there does not get a real apply.
+    /// </para>
+    /// </remarks>
+    /// <param name="project">The project the descriptor would be applied to.</param>
+    /// <param name="descriptorJson">The untrusted descriptor JSON to validate, parse and plan.</param>
+    /// <param name="expectedRevision">The revision the caller believes is latest (0 for a fresh project).</param>
+    /// <param name="options">
+    /// Migration options; only <see cref="MigrationOptions.AllowDestructive"/> affects the verdict.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The plan, its base revision, and the guardrail's verdict.</returns>
+    /// <exception cref="DescriptorValidationException"><paramref name="descriptorJson"/> is invalid.</exception>
+    /// <exception cref="DescriptorConcurrencyException">
+    /// <paramref name="expectedRevision"/> is not the latest revision.
+    /// </exception>
+    public async Task<DescriptorApplyPreview> PreviewAsync(
+        string project, string descriptorJson, int expectedRevision, MigrationOptions options,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(project);
+        ArgumentNullException.ThrowIfNull(options);
+
+        Validate(descriptorJson);
+        var desired = DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(descriptorJson));
+        var current = await CurrentAtAsync(project, expectedRevision, ct).ConfigureAwait(false);
+        var plan = await _migrator.PlanAsync(
+            current?.Schema ?? new SchemaModel([]), desired, options, ct).ConfigureAwait(false);
+
+        return new DescriptorApplyPreview(
+            plan, current?.Revision ?? 0, !plan.HasDestructiveChanges || options.AllowDestructive);
+    }
+
+    /// <summary>
+    /// The project's current version, refusing a caller whose expected revision is not the latest one.
+    /// </summary>
+    /// <remarks>
+    /// Shared by <see cref="ApplyAsync"/> and <see cref="PreviewAsync"/> so the two cannot answer differently
+    /// about which base a change was written against — which would make a preview a preview of a diff the
+    /// apply then refuses, or worse, applies.
+    /// </remarks>
+    /// <param name="project">The project whose history is read.</param>
+    /// <param name="expectedRevision">The revision the caller believes is latest (0 for a fresh project).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The current version, or <see langword="null"/> when nothing has been applied yet.</returns>
+    /// <exception cref="DescriptorConcurrencyException">
+    /// <paramref name="expectedRevision"/> is not the latest revision.
+    /// </exception>
+    private async Task<DescriptorVersion?> CurrentAtAsync(
+        string project, int expectedRevision, CancellationToken ct)
+    {
+        var current = await _store.GetCurrentAsync(project, ct).ConfigureAwait(false);
+        var currentRevision = current?.Revision ?? 0;
+        if (currentRevision != expectedRevision)
+        {
+            throw new DescriptorConcurrencyException(project, expectedRevision, currentRevision);
+        }
+
+        return current;
     }
 
     private static bool IsUnchangedReapply(MigrationPlan plan, DescriptorVersion? current, AlvoDescriptor descriptor) =>
@@ -195,8 +271,8 @@ public sealed class RuntimeSchemaService
         {
             throw new NotSupportedException(
                 "Runtime schema apply does not support dry-run (MigrationOptions.DryRun). " +
-                "Preview is not available on the runtime path; inspect the plan via a plan-only " +
-                "operation, or use the code-first path for dry-run.");
+                "Call RuntimeSchemaService.PreviewAsync for a plan-only preview, or use the code-first " +
+                "path for dry-run.");
         }
     }
 }
