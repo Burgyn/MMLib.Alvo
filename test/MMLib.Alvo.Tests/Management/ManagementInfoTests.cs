@@ -25,8 +25,17 @@ public class ManagementInfoTests
         info.Mode.ShouldBe("embedded");
     }
 
+    /// <summary>
+    /// The internal label, when set, wins over the registered mode.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AlvoManagementOptions.ModeLabel"/> is <see langword="internal"/> deliberately: a public
+    /// free-text override would loosen <c>mode</c> from the two values <see cref="ManagementInfo.Mode"/>
+    /// documents. Nothing outside this assembly can reach it, so this fact is about a seam rather than about
+    /// a knob a host turns.
+    /// </remarks>
     [Fact]
-    public async Task A_host_may_label_its_own_mode()
+    public async Task The_mode_label_wins_over_the_registered_mode()
     {
         var management = Resolve(alvo =>
             alvo.Services.Configure<AlvoManagementOptions>(o => o.ModeLabel = "standalone"));
@@ -45,8 +54,19 @@ public class ManagementInfoTests
         info.StartupMode.ShouldBe("apply", "AlvoSchemaOptions.Startup defaults to Apply");
     }
 
+    /// <summary>
+    /// <b>The management surface activates in a container that has no data port at all</b>, and says so
+    /// rather than inventing a driver name.
+    /// </summary>
+    /// <remarks>
+    /// The fixture is the point. <see cref="Resolve"/> registers a schema migrator and no
+    /// <see cref="IAlvoData"/>, which is the composition that made
+    /// <c>TryAddSingleton&lt;IAlvoManagement, AlvoManagementService&gt;</c> fail to activate at all: a
+    /// nullable constructor parameter is not an optional dependency to the container. This is the regression
+    /// that guards the factory registration.
+    /// </remarks>
     [Fact]
-    public async Task A_deployment_with_no_driver_says_so_plainly()
+    public async Task The_management_surface_resolves_in_a_container_with_no_data_port()
     {
         var info = await Resolve(configure: null).GetInfoAsync(TestContext.Current.CancellationToken);
 

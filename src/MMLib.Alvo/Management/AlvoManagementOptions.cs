@@ -32,8 +32,18 @@ public sealed class AlvoManagementOptions
     public string RoutePrefix { get; set; } = "/management";
 
     /// <summary>
-    /// How <c>GET {prefix}/info</c> describes this deployment, when the host wants to say something other
-    /// than the <see cref="AlvoMode"/> it registered. <see langword="null"/> reports the mode itself.
+    /// How <c>GET {prefix}/info</c> describes this deployment, overriding the <see cref="AlvoMode"/>
+    /// registered. <see langword="null"/> — the only value anything outside this assembly can observe —
+    /// reports the mode itself.
     /// </summary>
-    public string? ModeLabel { get; set; }
+    /// <remarks>
+    /// <b><see langword="internal"/>, and that is what keeps <c>mode</c> a two-valued contract.</b>
+    /// <see cref="ManagementInfo.Mode"/> and spec §2.2 both document it as <c>standalone</c> or
+    /// <c>embedded</c>; a public free-text override would mean an agent branching on <c>info.mode</c> could
+    /// no longer rely on either value, in exchange for a capability <see cref="AlvoOptions.Mode"/> already
+    /// gives a host. It stays as the seam a later member of this surface can report through, and it does not
+    /// bind from configuration — <c>ConfigurationBinder</c> does not write non-public properties, which is
+    /// the behaviour wanted rather than an accident to work around.
+    /// </remarks>
+    internal string? ModeLabel { get; set; }
 }

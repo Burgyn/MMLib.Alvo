@@ -109,7 +109,6 @@ namespace MMLib.Alvo.Management
     {
         public const string SectionName = "Alvo:Management";
         public AlvoManagementOptions() { }
-        public string? ModeLabel { get; set; }
         public string RoutePrefix { get; set; }
     }
 }
