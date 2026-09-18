@@ -19,6 +19,10 @@
          *registered*, chosen by configuration in AlvoDatabaseSelector. -->
     <ProjectReference Include="../MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
     <ProjectReference Include="../MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
+    <!-- Human identity. A hosting decision, in the one project that is IsPackable=false and
+         therefore hands nothing to a NuGet consumer — the same category that already justifies
+         Scalar and both database drivers. -->
+    <ProjectReference Include="../MMLib.Alvo.Identity/MMLib.Alvo.Identity.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -31,6 +35,10 @@
     <!-- The only third-party package the host carries: the docs UI that renders the OpenAPI
          document the core emits. Host-only on purpose — see docs/architecture/host.md, "Docs". -->
     <PackageReference Include="Scalar.AspNetCore" />
+    <!-- Direct rather than transitive: the host calls UseSqlite/UseNpgsql itself, to configure the
+         identity store's DbContext beside the Alvo driver it already selects. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
   </ItemGroup>
 
 </Project>

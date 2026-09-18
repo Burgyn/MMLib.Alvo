@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Identity;
 using System.Net;
 using System.Text.Json.Nodes;
 
@@ -235,6 +236,47 @@ public class AlvoHostBootTests
         finally
         {
             AlvoHostWorld.TryDeleteDatabase(databasePath);
+        }
+    }
+
+    /// <summary>
+    /// The same acceptance criterion, one subsystem over: the image ships no <b>bootstrap</b>
+    /// credential either.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Read through <c>ConfigurationBuilder.AddJsonFile</c>, not through <c>JsonNode</c>, and that is
+    /// the trap this repository already recorded once: a <c>JsonNode</c> indexer is ordinal
+    /// case-sensitive and <c>Microsoft.Extensions.Configuration.Json</c> is not, so a lowercase
+    /// <c>"alvo"</c> section — or <c>"Alvo"</c> with a lowercase <c>"admin"</c> child, or a single
+    /// flattened <c>"Alvo:Admin:BootstrapPasswordFile"</c> key — binds a working administrator into the
+    /// published image while a hand-rolled lookup reports nothing. Asking the very parser the host binds
+    /// with removes the class rather than the instance.
+    /// </para>
+    /// <para>
+    /// <b>Every</b> <c>appsettings*.json</c>, for the reason the neighbouring fact gives: the SDK's
+    /// default Content glob publishes all of them, and an operator running the image with
+    /// <c>ASPNETCORE_ENVIRONMENT=Development</c> activates <c>appsettings.Development.json</c>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_hosts_own_settings_declare_no_bootstrap_credential()
+    {
+        var hostProject = Path.Combine(RepositoryRoot.Find(), "src", "MMLib.Alvo.Host");
+        var settingsFiles = Directory.GetFiles(hostProject, "appsettings*.json");
+
+        settingsFiles.ShouldNotBeEmpty(
+            $"no appsettings*.json was found under {hostProject}, so this fact would assert nothing "
+            + "about the files the image actually ships");
+
+        foreach (var file in settingsFiles)
+        {
+            var settings = new ConfigurationBuilder().AddJsonFile(file, optional: false).Build();
+
+            settings.GetSection(AlvoIdentity.ConfigurationSection).Exists().ShouldBeFalse(
+                "the image must never ship a preset administrator (§2.14), and the bootstrap "
+                + $"{Path.GetFileName(file)} declares is one every deployment of the image would "
+                + "inherit — the SDK's default Content glob publishes every appsettings*.json");
         }
     }
 
