@@ -259,14 +259,35 @@ internal static class CelTypeChecker
 
         private (CelNode, CelValueType, bool, int) CheckContextRef(CelContextRef contextRef)
         {
+            if (ContextRefKind(contextRef.Value) is not { } kind)
+            {
+                return UnrecognizedNode(contextRef);
+            }
+
             var position = FindPosition(ContextRefText(contextRef));
-            var kind = contextRef.Value == CelContextValue.TenantId
-                ? CelConstructKind.ContextRefTenant
-                : CelConstructKind.ContextRefUser;
             var profileBad = CheckConstruct(kind, ContextRefRefusal(), ContextRefFix(), position);
 
             return (contextRef, contextRef.Type, profileBad, position);
         }
+
+        /// <summary>
+        /// Which construct row a context value sits on, or <see langword="null"/> when it sits on none.
+        /// </summary>
+        /// <remarks>
+        /// <b>An unmapped value falls out as unrecognised rather than onto the user row, and the direction
+        /// is the whole point.</b> A two-way test against <see cref="CelContextValue.TenantId"/> would put
+        /// every value added later on <see cref="CelConstructKind.ContextRefUser"/> — which
+        /// <see cref="CelProfile.Access"/> <em>admits</em> — so a tenant-shaped member (<c>@tenant.plan</c>,
+        /// an organisation id) would become silently legal in an access level, making a project-scoped
+        /// predicate answer differently per request by default instead of by decision. Refusing the
+        /// unmapped case in every profile is the deny-by-default this table exists to enforce.
+        /// </remarks>
+        private static CelConstructKind? ContextRefKind(CelContextValue value) => value switch
+        {
+            CelContextValue.UserId or CelContextValue.UserRoles => CelConstructKind.ContextRefUser,
+            CelContextValue.TenantId => CelConstructKind.ContextRefTenant,
+            _ => null,
+        };
 
         private string ContextRefRefusal() =>
             profile == CelProfile.Access ? AccessProjectScopedMessage : ComputedNoContextMessage;

@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Tests.Expressions;
 
 namespace MMLib.Alvo.Tests.Rules;
 
@@ -76,6 +77,13 @@ public class AccessCatalogBuilderTests
             .ShouldContain(error => error.Path == "/access/viewer");
     }
 
+    /// <summary>
+    /// <b>One refusal, and it is the right one.</b> A level is compiled against a fieldless
+    /// <c>&lt;project&gt;</c> entity, so resolving <c>owner_id</c> would add a second
+    /// <c>'owner_id' is not a field of entity '&lt;project&gt;'</c> — which reads as "add the column"
+    /// when the real answer is that an access level has no row at all. The count is asserted, not just
+    /// the message, because the misleading error is an <em>extra</em> one rather than a wrong one.
+    /// </summary>
     [Fact]
     public void A_level_naming_a_row_field_is_refused_at_apply()
     {
@@ -83,12 +91,22 @@ public class AccessCatalogBuilderTests
 
         errors.ShouldContain(error => error.Path == "/access/admin");
         errors.ShouldContain(error => error.Message.Contains("no row", StringComparison.OrdinalIgnoreCase));
+        errors.ShouldNotContain(
+            error => error.Message.Contains(AccessProfileTests.UnknownFieldMessage, StringComparison.Ordinal),
+            "an access level names no entity, so it must never be told a column is missing from one");
+        errors.Count.ShouldBe(1, Report(errors));
     }
 
     [Fact]
     public void A_level_that_is_not_a_predicate_is_refused_at_apply()
-        => Refuse(AccessBlock(viewer: "'manager'"))
-            .ShouldContain(error => error.Path == "/access/viewer");
+    {
+        var errors = Refuse(AccessBlock(viewer: "'manager'"));
+
+        errors.ShouldContain(error => error.Path == "/access/viewer");
+        errors.ShouldContain(
+            error => error.Message.Contains("boolean", StringComparison.OrdinalIgnoreCase),
+            "the refusal is the result-type rule, not some other problem that happens to share the path");
+    }
 
     [Fact]
     public void Every_level_is_reported_rather_than_only_the_first()
@@ -130,4 +148,7 @@ public class AccessCatalogBuilderTests
 
     private static IReadOnlyList<DescriptorValidationError> Refuse(Access? access) =>
         PolicyCatalogBuilderProbe.Refuse(access);
+
+    private static string Report(IReadOnlyList<DescriptorValidationError> errors) =>
+        string.Join(" | ", errors.Select(error => $"{error.Path}: {error.Message}"));
 }

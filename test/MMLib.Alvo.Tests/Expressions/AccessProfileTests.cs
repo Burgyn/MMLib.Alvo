@@ -16,6 +16,9 @@ namespace MMLib.Alvo.Tests.Expressions;
 /// </remarks>
 public class AccessProfileTests
 {
+    /// <summary>The checker's unknown-field wording, which an access level must never be told.</summary>
+    internal const string UnknownFieldMessage = "is not a field of entity";
+
     private static readonly EntitySchema _project = new() { Name = "<project>", Fields = [] };
 
     private static readonly EntitySchema _deals = new()
@@ -127,6 +130,23 @@ public class AccessProfileTests
         Messages(result).ShouldContain(message => message.Contains("changed(", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// <b>The refusal is "there is no row", not "that column does not exist".</b> An access level is
+    /// type-checked against a fieldless entity, so resolving the name would add a second, misleading
+    /// <c>'stage' is not a field of entity '&lt;project&gt;'</c> — sending an author to add a column when
+    /// the real answer is that <c>changed(...)</c> belongs in a hook condition. The checker therefore
+    /// stops before resolving, and this fact is what holds that branch to its claim.
+    /// </summary>
+    [Fact]
+    public void Changed_does_not_also_report_a_missing_field_when_there_is_no_row()
+    {
+        var result = Compile("changed(stage)", _project);
+
+        result.IsSuccess.ShouldBeFalse();
+        Messages(result).ShouldNotContain(message => message.Contains(UnknownFieldMessage, StringComparison.Ordinal));
+        result.Errors.Count.ShouldBe(1, Report(result));
+    }
+
     [Fact]
     public void Arithmetic_does_not_compile()
     {
@@ -165,6 +185,51 @@ public class AccessProfileTests
         Messages(result).ShouldContain(
             message => message.Contains("project-scoped", StringComparison.Ordinal),
             "the refusal has to say why, or an author reads it as an oversight and files an issue");
+    }
+
+    /// <summary>
+    /// <b>Every <see cref="CelContextValue"/> has to be placed on a construct-kind row by hand.</b>
+    /// Enumerated from the enum rather than listed, so a context value added later — a
+    /// <c>@tenant.plan</c>, an organisation id — cannot escape the claim this fact's name makes: it
+    /// arrives unmapped, is refused as an unrecognised construct, and fails here until somebody decides
+    /// which row it belongs on.
+    /// </summary>
+    /// <param name="value">The context value that must be mapped.</param>
+    [Theory]
+    [MemberData(nameof(EveryContextValue))]
+    public void Every_context_value_is_placed_on_a_construct_kind_row(CelContextValue value)
+    {
+        var errors = CheckContextValue(value, CelProfile.Rule);
+
+        errors.ShouldBeEmpty(
+            "an unmapped context value is refused in every profile, which is the right default and the "
+            + "wrong place to discover it — put this value on ContextRefUser or ContextRefTenant");
+    }
+
+    /// <summary>
+    /// <b>The default direction of the <c>@user</c>/<c>@tenant</c> split is refusal, not admission.</b>
+    /// A context value the checker does not recognise would, under a two-way test defaulting to the user
+    /// row, be silently legal in an access level — and a tenant-shaped member reaching that row is
+    /// exactly the per-request answer §3.2 forbids. The unmapped case therefore refuses, in every
+    /// profile, rather than picking the admitting side.
+    /// </summary>
+    [Fact]
+    public void An_unrecognised_context_value_is_refused_rather_than_admitted()
+    {
+        var errors = CheckContextValue((CelContextValue)99, CelProfile.Access);
+
+        errors.ShouldNotBeEmpty("deny by default is the whole point of the construct table");
+    }
+
+    public static TheoryData<CelContextValue> EveryContextValue()
+    {
+        TheoryData<CelContextValue> values = [];
+        foreach (var value in Enum.GetValues<CelContextValue>())
+        {
+            values.Add(value);
+        }
+
+        return values;
     }
 
     [Fact]
@@ -212,6 +277,18 @@ public class AccessProfileTests
 
     private static CelCompilationResult Compile(string source, EntitySchema entity) =>
         new CelCompiler().Compile(source, CelProfile.Access, entity);
+
+    /// <summary>
+    /// Runs one hand-built <see cref="CelContextRef"/> through the checker. The tree is built rather than
+    /// parsed because a value outside the enum is a shape the parser cannot produce, and a guard whose
+    /// whole job is to hold when an earlier layer stops can be reached no other way.
+    /// </summary>
+    private static IReadOnlyList<CelCompilationError> CheckContextValue(CelContextValue value, CelProfile profile)
+    {
+        var node = new CelContextRef(value, CelValueType.Uuid);
+
+        return CelTypeChecker.Check(node, "@user.id", _project, profile).Errors;
+    }
 
     private static IReadOnlyList<string> Messages(CelCompilationResult result) =>
         [.. result.Errors.Select(error => error.Message)];
