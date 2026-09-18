@@ -14,15 +14,36 @@ namespace MMLib.Alvo.Management;
 /// </remarks>
 internal static class ManagementSetup
 {
-    /// <summary>Adds <see cref="AlvoManagementOptions"/> and <see cref="ManagementAccessEvaluator"/>.</summary>
+    /// <summary>
+    /// Adds <see cref="AlvoManagementOptions"/>, the operation surface, and
+    /// <see cref="ManagementAccessEvaluator"/>.
+    /// </summary>
     /// <param name="services">The service collection to add the management services to.</param>
     /// <returns><paramref name="services"/>, for chaining.</returns>
     internal static IServiceCollection AddAlvoManagement(this IServiceCollection services)
     {
         AddManagementOptions(services);
+        AddManagementService(services);
         services.TryAddSingleton<ManagementAccessEvaluator>();
         return services;
     }
+
+    /// <summary>
+    /// Registers the one <see cref="IAlvoManagement"/> implementation, with its data port resolved
+    /// <b>optionally</b>.
+    /// </summary>
+    /// <remarks>
+    /// Through a factory, for <see cref="AddManagementOptions"/>'s reason: a nullable constructor parameter
+    /// is not an optional dependency to the container, and <c>AddAlvo</c> without a driver is a supported
+    /// composition — so taking <c>IAlvoData</c> the ordinary way would make <c>info</c> unresolvable in it.
+    /// </remarks>
+    /// <param name="services">The service collection to add the service to.</param>
+    private static void AddManagementService(IServiceCollection services) =>
+        services.TryAddSingleton<IAlvoManagement>(provider => new AlvoManagementService(
+            provider.GetRequiredService<IOptions<AlvoOptions>>(),
+            provider.GetRequiredService<IOptions<AlvoManagementOptions>>(),
+            provider.GetRequiredService<IOptions<Migrations.AlvoSchemaOptions>>(),
+            provider.GetService<Data.IAlvoData>()));
 
     /// <summary>
     /// Registers <see cref="AlvoManagementOptions"/>, bound from its configuration section and validated at

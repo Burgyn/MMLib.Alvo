@@ -1090,6 +1090,21 @@ namespace MMLib.Alvo.Expressions
         public static MMLib.Alvo.Expressions.SqlPredicate AlwaysFalse(MMLib.Alvo.Expressions.IFieldSqlRenderer fields) { }
     }
 }
+namespace MMLib.Alvo.Management
+{
+    public interface IAlvoManagement
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementInfo> GetInfoAsync(System.Threading.CancellationToken ct = default);
+    }
+    public sealed class ManagementInfo : System.IEquatable<MMLib.Alvo.Management.ManagementInfo>
+    {
+        public ManagementInfo(string Version, string Mode, string DataProvider, string StartupMode) { }
+        public string DataProvider { get; init; }
+        public string Mode { get; init; }
+        public string StartupMode { get; init; }
+        public string Version { get; init; }
+    }
+}
 namespace MMLib.Alvo.Migrations
 {
     public enum AlvoSchemaStartupMode
