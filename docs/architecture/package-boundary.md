@@ -48,6 +48,18 @@
   them reference. It also takes `Microsoft.AspNetCore.OpenApi` directly rather than
   transitively, because a package's build targets do not travel through a
   `ProjectReference`. Details in [`host.md`](./host.md).
+- `src/MMLib.Alvo.Admin` — the admin dashboard's design system and, once #227's
+  second half lands, its Blazor components. **Earned by rule (a)**: Blazor is the
+  clearest heavy dependency in the family, and an embedded host that wants only the
+  Data API must never acquire it. It takes `Microsoft.AspNetCore.App` as a framework
+  reference rather than a `Microsoft.AspNetCore.Components.Web` package, for the same
+  NU1510 reason `MMLib.Alvo` does. **It holds no project reference to `MMLib.Alvo`**
+  — it reaches the core through `IAlvoManagement` in Abstractions, which is what
+  makes spec §0.5 contract 4 ("dashboard and CLI are clients of the same API") a
+  structural fact rather than a promise. Its public surface is deliberately one
+  type, `AlvoAdminAssets`: the design system is CSS and the components are Razor,
+  and neither is a type a consumer calls. Details in
+  [`2026-09-18-f5-admin-dashboard-design.md`](../superpowers/specs/2026-09-18-f5-admin-dashboard-design.md).
 - `samples/MMLib.Alvo.Samples.EmbeddedHost` — the runnable embedded-mode example
   (spec §2.14 mode 2, #24): an ASP.NET Core app that mounts Alvo with
   `AddAlvo`/`MapAlvoDataApi` over `examples/vehicle-registry/vehicles.alvo.json`,

@@ -1,0 +1,111 @@
+/* ===========================================================================
+   Alvo Admin — the design system.
+
+   This file is the source of truth. docs/design/gallery.html references it
+   directly rather than copying it, so a token that regresses regresses in both
+   at once, and DesignTokenTests parses it: every colour token must declare both
+   themes, and every foreground/background pair must meet WCAG AA in each.
+
+   Every colour token is declared ONCE, as light-dark(light, dark). Three copies
+   of the dark palette — one for [data-theme="dark"], one for the media query —
+   is how two themes come to disagree, and no test can catch a drift in a value
+   it was never told about. color-scheme carries the system preference; the
+   data-theme attribute overrides it, in both directions.
+
+   No component library (design deviation D1). No literal colour outside the
+   token block below — ComponentLayerTests refuses one.
+   =========================================================================== */
+
+:root {
+  color-scheme: light dark;
+
+  /* --- Surfaces --- */
+  --bg: light-dark(#f7f8fa, #1e2029);
+  --panel: light-dark(#ffffff, #262833);
+  --panel2: light-dark(#f2f4f7, #2e3040);
+  --codeBg: light-dark(#f4f6f8, #191b22);
+  --border: light-dark(#e8eaef, #34364a);
+  --border2: light-dark(#d3d7e0, #3b3e52);
+
+  /* --- Text. Three tiers, and all three meet AA: readability is the first
+     priority, so no tier is exempt from the contrast fact. --- */
+  --text: light-dark(#1c1e26, #e8eaf0);
+  --dim: light-dark(#5f6577, #9aa0b8);
+  --faint: light-dark(#6b7180, #8b92ab);
+
+  /* --- Accent. #0f7a48 rather than the reference drawing's #128a52 (design
+     deviation D6): #128a52 on white measures 4.39:1 and fails AA for normal
+     text, which the primary buttons set at 13px are. This measures 5.39:1. --- */
+  --accent: light-dark(#0f7a48, #39e991);
+  --accentText: light-dark(#ffffff, #12241a);
+  --accentSoft: light-dark(rgba(15, 122, 72, 0.09), rgba(57, 233, 145, 0.13));
+  --accentBorder: light-dark(rgba(15, 122, 72, 0.28), rgba(57, 233, 145, 0.36));
+
+  /* --- Semantic state. Named by meaning rather than by the reference
+     drawing's CRM domain (won/offer/lead/lost): this system dresses an admin
+     tool, not a sales pipeline. --- */
+  --ok-fg: light-dark(#0f7a48, #39e991);
+  --ok-bg: light-dark(rgba(15, 122, 72, 0.11), rgba(57, 233, 145, 0.14));
+  --warn-fg: light-dark(#8a5a00, #f5c451);
+  --warn-bg: light-dark(rgba(214, 158, 46, 0.14), rgba(245, 196, 81, 0.14));
+  --danger-fg: light-dark(#b3261e, #ff8f8f);
+  --danger-bg: light-dark(rgba(211, 47, 47, 0.1), rgba(255, 143, 143, 0.13));
+  --neutral-fg: light-dark(#5f6577, #9aa0b8);
+  --neutral-bg: light-dark(rgba(95, 101, 119, 0.1), rgba(154, 160, 184, 0.13));
+
+  --shadow-panel: light-dark(0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 2px rgba(0, 0, 0, 0.32));
+  --shadow-pop: light-dark(0 12px 32px rgba(16, 24, 40, 0.12), 0 12px 32px rgba(0, 0, 0, 0.44));
+
+  /* --- Type — seven steps, no half pixels. --- */
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 26px;
+
+  /* --- Weight — no 400 in chrome. --- */
+  --weight-normal: 500;
+  --weight-medium: 600;
+  --weight-bold: 700;
+
+  /* --- Radius — five steps. --- */
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /* --- Spacing — multiples of 4. --- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+
+  /* --- Density. compact is the default because an admin tool is read in bulk.
+     comfortable is a multiplier over the spacing scale, never a second set of
+     values. --- */
+  --density: 1;
+
+  --font-ui: 'Public Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+:root[data-density='comfortable'] {
+  --density: 1.25;
+}

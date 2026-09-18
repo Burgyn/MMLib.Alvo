@@ -4,6 +4,7 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
+    <Project Path="src/MMLib.Alvo.Admin/MMLib.Alvo.Admin.csproj" />
     <Project Path="src/MMLib.Alvo.Data.EntityFrameworkCore/MMLib.Alvo.Data.EntityFrameworkCore.csproj" />
     <Project Path="src/MMLib.Alvo.Data.PostgreSql/MMLib.Alvo.Data.PostgreSql.csproj" />
     <Project Path="src/MMLib.Alvo.Data.Sqlite/MMLib.Alvo.Data.Sqlite.csproj" />
@@ -14,6 +15,7 @@
   </Folder>
   <Folder Name="/test/">
     <Project Path="test/MMLib.Alvo.Abstractions.Tests/MMLib.Alvo.Abstractions.Tests.csproj" />
+    <Project Path="test/MMLib.Alvo.Admin.Tests/MMLib.Alvo.Admin.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Api.Invariants.Tests.Integration/MMLib.Alvo.Api.Invariants.Tests.Integration.csproj" />
     <Project Path="test/MMLib.Alvo.Api.Tests.Integration/MMLib.Alvo.Api.Tests.Integration.csproj" />
     <Project Path="test/MMLib.Alvo.Api.Tests/MMLib.Alvo.Api.Tests.csproj" />

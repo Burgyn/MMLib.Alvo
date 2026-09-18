@@ -1,0 +1,7 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo.Admin/MMLib.Alvo.Admin.csproj" />
+  </ItemGroup>
+
+</Project>

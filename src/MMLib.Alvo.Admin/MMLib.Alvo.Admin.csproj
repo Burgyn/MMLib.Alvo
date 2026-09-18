@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <ItemGroup>
+    <!-- Blazor is the heavy dependency this package is earned by (package-boundary.md rule (a)):
+         an embedded host that wants only the Data API must never acquire it. Taken as a framework
+         reference rather than a Microsoft.AspNetCore.Components.Web PackageReference for the same
+         reason MMLib.Alvo takes one — the explicit package would raise NU1510 ("will not be
+         pruned"), which this repository treats as an error. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+</Project>
