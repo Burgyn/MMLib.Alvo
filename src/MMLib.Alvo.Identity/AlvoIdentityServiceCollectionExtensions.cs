@@ -1,5 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using MMLib.Alvo;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Identity;
@@ -36,20 +38,40 @@ public static class AlvoIdentityServiceCollectionExtensions
         services.AddDbContext<AlvoIdentityDbContext>(configureStore);
         AddIdentityCore(services);
 
-        var options = services.AddOptions<AlvoIdentityOptions>();
-        if (configure is not null)
-        {
-            options.Configure(configure);
-        }
+        AddValidatedOptions(services, configure);
 
         services.TryAddScoped<IAlvoUserStore, AlvoIdentityUserStore>();
         services.TryAddSingleton<AlvoBootstrapAdmin>();
         services.Replace(ServiceDescriptor.Singleton<IAlvoBootstrapAdmin>(
             provider => provider.GetRequiredService<AlvoBootstrapAdmin>()));
         services.AddKeyedScoped<IAlvoContextResolver, AlvoIdentityContextResolver>(AlvoIdentity.ResolverKey);
-        services.AddHostedService<AlvoIdentityBootstrap>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AlvoIdentityBootstrap>());
 
         return services;
+    }
+
+    /// <summary>
+    /// Binds <see cref="AlvoIdentityOptions"/> and refuses a misconfigured bootstrap administrator at
+    /// startup — <c>extensibility.md</c> rule 5.
+    /// </summary>
+    /// <remarks>
+    /// <b>The package validates itself rather than leaving it to the standalone host.</b> An embedded
+    /// host calls this method directly and reaches none of the host's validation, so a check that
+    /// lived only there would leave half the distributions unchecked — with the misconfiguration
+    /// surfacing as a bootstrap that silently seeded nothing.
+    /// </remarks>
+    /// <param name="services">The service collection to register into.</param>
+    /// <param name="configure">Configures the bootstrap administrator, if there is one.</param>
+    private static void AddValidatedOptions(IServiceCollection services, Action<AlvoIdentityOptions>? configure)
+    {
+        var options = services.AddOptions<AlvoIdentityOptions>().ValidateOnStart();
+        if (configure is not null)
+        {
+            options.Configure(configure);
+        }
+
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<AlvoIdentityOptions>, AlvoIdentityOptionsValidation>());
     }
 
     /// <summary>Adds ASP.NET Core Identity's user and role managers over the Alvo identity store.</summary>

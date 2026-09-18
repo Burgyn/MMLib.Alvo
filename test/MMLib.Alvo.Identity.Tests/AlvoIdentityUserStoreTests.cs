@@ -84,6 +84,62 @@ public sealed class AlvoIdentityUserStoreTests : IAsyncLifetime
         user.ShouldNotBeNull().RoleNames.ShouldBe(["auditor"]);
     }
 
+    /// <summary>
+    /// <b>An assignment that did not happen must not be reported as one.</b> The port returns a bare
+    /// <see cref="ValueTask"/>, so a discarded <see cref="IdentityResult"/> leaves the caller — the
+    /// administration screen — showing a role the store never granted.
+    /// </summary>
+    [Fact]
+    public async Task Setting_a_role_the_store_has_never_heard_of_does_not_report_success()
+    {
+        var id = await CreateAsync("eva@example.test");
+        var store = Services.GetRequiredService<IAlvoUserStore>();
+
+        await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await store.SetRolesAsync(id, ["ghost"], TestContext.Current.CancellationToken));
+
+        var user = await store.FindAsync(id, TestContext.Current.CancellationToken);
+        user.ShouldNotBeNull().RoleNames.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// The same refusal for the failure ASP.NET Core Identity <b>reports rather than throws</b> — the
+    /// case the "never heard of" fact above cannot reach, because that one throws from the EF store.
+    /// </summary>
+    /// <remarks>
+    /// Asking for <c>["auditor", "Auditor"]</c> keeps the held row (nothing is removed, because the
+    /// ordinal difference is not a removal) and then adds a name that normalises onto it, which
+    /// Identity answers with a failed <c>UserAlreadyInRole</c> result and no exception. Without the
+    /// guard the caller is told the whole replacement succeeded.
+    /// </remarks>
+    [Fact]
+    public async Task A_failed_assignment_that_only_returns_a_result_is_not_swallowed()
+    {
+        var id = await CreateAsync("eva@example.test", "auditor");
+        var store = Services.GetRequiredService<IAlvoUserStore>();
+
+        var refusal = await Should.ThrowAsync<InvalidOperationException>(async () =>
+            await store.SetRolesAsync(id, ["auditor", "Auditor"], TestContext.Current.CancellationToken));
+
+        refusal.Message.ShouldContain(id.ToString());
+    }
+
+    /// <summary>
+    /// <b>A locked-out operator must not resolve as enabled.</b> <c>IsDisabled</c> is what the cookie
+    /// resolver refuses on, so this is the field the descriptor's <c>access</c> enforcement reads.
+    /// </summary>
+    [Fact]
+    public async Task A_locked_out_account_projects_as_disabled()
+    {
+        var id = await CreateAsync("eva@example.test");
+        await LockOutAsync(id);
+        var store = Services.GetRequiredService<IAlvoUserStore>();
+
+        var user = await store.FindAsync(id, TestContext.Current.CancellationToken);
+
+        user.ShouldNotBeNull().IsDisabled.ShouldBeTrue();
+    }
+
     /// <summary>The listing is the administration screen's source, so it holds everyone.</summary>
     [Fact]
     public async Task Listing_returns_every_stored_user()
@@ -127,5 +183,16 @@ public sealed class AlvoIdentityUserStoreTests : IAsyncLifetime
 
         (await users.AddToRolesAsync(user, roleNames)).Succeeded.ShouldBeTrue();
         return new UserId(user.Id);
+    }
+
+    /// <summary>Bars an account from signing in, the way the administration screen will.</summary>
+    /// <param name="id">The account to lock out.</param>
+    private async Task LockOutAsync(UserId id)
+    {
+        var users = Services.GetRequiredService<UserManager<AlvoIdentityUser>>();
+        var user = (await users.FindByIdAsync(id.Value.ToString())).ShouldNotBeNull();
+
+        (await users.SetLockoutEnabledAsync(user, true)).Succeeded.ShouldBeTrue();
+        (await users.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.AddHours(1))).Succeeded.ShouldBeTrue();
     }
 }

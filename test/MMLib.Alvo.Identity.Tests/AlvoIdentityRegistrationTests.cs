@@ -1,5 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Identity.Internal;
 
@@ -50,6 +52,45 @@ public class AlvoIdentityRegistrationTests
 
         scope.ServiceProvider.GetRequiredService<IAlvoUserStore>().ShouldBeOfType<AlvoIdentityUserStore>();
         provider.GetRequiredService<IAlvoBootstrapAdmin>().ShouldBeOfType<AlvoBootstrapAdmin>();
+    }
+
+    /// <summary>
+    /// <b><c>extensibility.md</c> rule 7, which names hosted services explicitly.</b>
+    /// <c>AddHostedService&lt;T&gt;()</c> appends unconditionally, so a host that composed
+    /// <c>AddAlvoIdentity</c> twice — one call in its own composition root, one inside a shared
+    /// extension — would run the bootstrap seeding twice over one store.
+    /// </summary>
+    [Fact]
+    public void Registering_twice_still_yields_exactly_one_bootstrap()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAlvoIdentity(store => store.UseSqlite("Data Source=:memory:"));
+        services.AddAlvoIdentity(store => store.UseSqlite("Data Source=:memory:"));
+
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+        provider.GetServices<IHostedService>().OfType<AlvoIdentityBootstrap>().ShouldHaveSingleItem();
+    }
+
+    /// <summary>
+    /// <b><c>extensibility.md</c> rule 5.</b> The embedded distribution never goes through the
+    /// standalone host's validation, so the package has to refuse its own misconfiguration or nobody
+    /// does.
+    /// </summary>
+    [Fact]
+    public void A_misconfigured_bootstrap_administrator_fails_the_start_rather_than_the_seeding()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddAlvoIdentity(
+            store => store.UseSqlite("Data Source=:memory:"),
+            admin => admin.BootstrapEmail = "admin");
+
+        using var provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+        Should.Throw<OptionsValidationException>(
+            () => provider.GetRequiredService<IOptions<AlvoIdentityOptions>>().Value);
     }
 
     /// <summary>

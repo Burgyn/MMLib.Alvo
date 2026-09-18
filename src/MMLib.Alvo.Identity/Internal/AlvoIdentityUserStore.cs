@@ -50,10 +50,41 @@ internal sealed class AlvoIdentityUserStore(
             ?? throw new InvalidOperationException($"No user with id '{user}' is stored.");
 
         var current = await users.GetRolesAsync(stored).ConfigureAwait(false);
-        await users.RemoveFromRolesAsync(stored, current.Except(roleNames, StringComparer.Ordinal))
-            .ConfigureAwait(false);
-        await users.AddToRolesAsync(stored, roleNames.Except(current, StringComparer.Ordinal))
-            .ConfigureAwait(false);
+
+        Succeeded(
+            await users.RemoveFromRolesAsync(stored, current.Except(roleNames, StringComparer.Ordinal))
+                .ConfigureAwait(false),
+            user);
+        Succeeded(
+            await users.AddToRolesAsync(stored, roleNames.Except(current, StringComparer.Ordinal))
+                .ConfigureAwait(false),
+            user);
+    }
+
+    /// <summary>
+    /// Turns a refused membership change into a throw, because the port has nowhere to report one.
+    /// </summary>
+    /// <remarks>
+    /// <b>ASP.NET Core Identity refuses without throwing.</b> <c>AddToRolesAsync</c> returns a failed
+    /// <see cref="IdentityResult"/> for a role the user already holds under a different casing, and
+    /// <c>RemoveFromRolesAsync</c> does the same for one they do not hold; the concurrency stamp fails
+    /// the same way. <see cref="IAlvoUserStore.SetRolesAsync"/> returns a bare <see cref="ValueTask"/>,
+    /// so a discarded result leaves the administration screen showing a grant that never happened —
+    /// which is the direction that matters, since the caller is an authorization decision's input.
+    /// </remarks>
+    /// <param name="result">What Identity said.</param>
+    /// <param name="user">The user whose memberships were being replaced.</param>
+    /// <exception cref="InvalidOperationException">The change was refused.</exception>
+    private static void Succeeded(IdentityResult result, UserId user)
+    {
+        if (result.Succeeded)
+        {
+            return;
+        }
+
+        var reasons = string.Join("; ", result.Errors.Select(error => error.Description));
+        throw new InvalidOperationException(
+            $"The role memberships of user '{user}' could not be replaced: {reasons}");
     }
 
     /// <summary>Projects a stored row onto the port's <see cref="AlvoUser"/>.</summary>
