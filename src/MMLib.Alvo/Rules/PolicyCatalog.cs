@@ -34,14 +34,21 @@ public sealed class PolicyCatalog
     /// <param name="entities">The compiled per-entity policy, keyed by entity name.</param>
     /// <param name="roles">The project's declared roles, built from the same descriptor.</param>
     /// <param name="schema">The schema every rule in <paramref name="entities"/> was compiled against.</param>
-    internal PolicyCatalog(IReadOnlyDictionary<string, EntityPolicy> entities, RoleCatalog roles, SchemaModel schema)
+    /// <param name="managementAccess">The compiled <c>access</c> levels, built from the same descriptor in the same pass.</param>
+    internal PolicyCatalog(
+        IReadOnlyDictionary<string, EntityPolicy> entities,
+        RoleCatalog roles,
+        SchemaModel schema,
+        ManagementAccessCatalog managementAccess)
     {
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(roles);
         ArgumentNullException.ThrowIfNull(schema);
+        ArgumentNullException.ThrowIfNull(managementAccess);
         _entities = entities;
         Roles = roles;
         Schema = schema;
+        ManagementAccess = managementAccess;
     }
 
     /// <summary>
@@ -72,6 +79,17 @@ public sealed class PolicyCatalog
     /// foreclose any other source — F7's dynamic-entity registry being the obvious next one.
     /// </remarks>
     internal SchemaModel Schema { get; }
+
+    /// <summary>
+    /// Gets the compiled <c>access</c> levels this project declares.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="internal"/> for the reason <see cref="Roles"/> and <see cref="Schema"/> are: the
+    /// management gate reads it through <see cref="IPolicyCatalogProvider.Current"/>, so nothing above
+    /// the rule engine has to know that the authoritative access levels currently happen to arrive with
+    /// a policy catalog.
+    /// </remarks>
+    internal ManagementAccessCatalog ManagementAccess { get; }
 
     /// <summary>Builds a <see cref="PolicyCatalog"/> from a descriptor and its mapped schema.</summary>
     /// <param name="descriptor">The project descriptor whose <c>rules</c>/<c>hidden</c>/<c>readOnly</c> are compiled.</param>
