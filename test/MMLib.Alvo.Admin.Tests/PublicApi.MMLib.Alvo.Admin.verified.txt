@@ -4,6 +4,7 @@ namespace MMLib.Alvo.Admin
 {
     public static class AlvoAdminAssets
     {
+        public static string Script { get; }
         public static string StyleSheet { get; }
     }
 }

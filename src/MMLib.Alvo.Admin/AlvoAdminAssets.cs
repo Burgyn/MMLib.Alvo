@@ -30,4 +30,16 @@ public static class AlvoAdminAssets
     /// component library beneath it (design deviation D1), so a host links exactly this.
     /// </remarks>
     public static string StyleSheet { get; } = $"{ContentRoot}/alvo.css";
+
+    /// <summary>
+    /// The three browser concerns the design system owns: the stored theme, the density, and the
+    /// keyboard map.
+    /// </summary>
+    /// <remarks>
+    /// A host loads this in <c>&lt;head&gt;</c> rather than at the end of the body: it applies the
+    /// stored theme before the first paint, and a theme applied after paint is a flash. It carries
+    /// no framework and takes over nothing Blazor renders — it publishes <c>alvo:*</c> events and
+    /// lets the component that owns the surface decide what they mean.
+    /// </remarks>
+    public static string Script { get; } = $"{ContentRoot}/alvo.js";
 }
