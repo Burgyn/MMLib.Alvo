@@ -144,14 +144,59 @@ first `docker run` goes wrong. The refusals name the environment spelling an ope
 **No default credential.** §2.14's acceptance criterion is that the image never ships a
 preset login, so the host seeds no API key. A host with none configured still starts and
 still refuses every operation, because an anonymous caller is judged by the same
-default-deny policy as any other (deviation 23). Two facts hold that line: an anonymous
-*write* is refused (a *read* would be an honest 200 with zero rows and would prove nothing),
-and every `appsettings*.json` the image publishes is asserted to declare no `Alvo:Auth`
-section — the realistic way a preset login reaches an operator is a dev key added there
-for convenience, which no runtime fact can tell apart from one the deployment configured.
-That assertion reads the files **through `ConfigurationBuilder.AddJsonFile`**, not through
-`JsonNode`: the binder is case-insensitive and a `JsonNode` indexer is not, so a lowercase
-`"alvo"` or `"auth"` would otherwise bind a working credential past a green fact.
+default-deny policy as any other (deviation 23). **Three** facts hold that line: an
+anonymous *write* is refused (a *read* would be an honest 200 with zero rows and would
+prove nothing); every `appsettings*.json` the image publishes is asserted to declare no
+`Alvo:Auth` section — the realistic way a preset login reaches an operator is a dev key
+added there for convenience, which no runtime fact can tell apart from one the deployment
+configured; and, the same way, every `appsettings*.json` is asserted to declare no
+`Alvo:Admin` section either, so the image ships no bootstrap credential any more than it
+ships a dev key. Both configuration assertions read the files **through
+`ConfigurationBuilder.AddJsonFile`**, not through `JsonNode`: the binder is case-insensitive
+and a `JsonNode` indexer is not, so a lowercase `"alvo"` or `"auth"`/`"admin"` would
+otherwise bind a working credential past a green fact.
+
+## The bootstrap administrator
+
+`MMLib.Alvo.Identity`'s human identity is optional infrastructure config, never part of the
+descriptor (`docs/PLAN.md` invariant 4), so the standalone host binds it the same way it
+binds everything else under `Alvo:*` — from `Alvo:Admin`, which
+`AlvoIdentity.ConfigurationSection` names. Two keys, spelled the container way:
+
+- `Alvo__Admin__BootstrapEmail` — the administrator's sign-in address.
+- `Alvo__Admin__BootstrapPasswordFile` — the path of a *mounted* file holding the password.
+
+`Alvo__Admin__BootstrapPassword` — the value directly, no file — is **refused outright**,
+by `AlvoHostOptionsValidation`, whichever half of the pair is otherwise configured. An
+environment variable is readable from a process listing, a crash dump and
+`docker inspect`; a mounted secret file is not, and that is the entire reason the option is
+a path rather than a value. Every other way the pair is half-set, malformed, or points at a
+file that does not exist (or exists and is empty) is refused too, all at once rather than one
+per restart — `AlvoHostOptionsValidation` reports its own host-specific refusals
+(the rejected `BootstrapPassword` key, an empty mounted file) alongside
+`AlvoIdentityOptionsValidation`'s own (the pairing and the address), read through
+`IOptions<AlvoIdentityOptions>` rather than re-derived, so the two do not drift into two
+wordings of the same refusal. The package validates itself for the same reason the identity
+package's own remarks give: an embedded host that calls `AddAlvoIdentity` directly never
+goes through the standalone host's validation at all, so a check that lived only there would
+leave that distribution's malformed credential silent.
+
+A descriptor with no `access` block means only the bootstrap administrator can manage the
+project — default-deny, and still a usable deployment, because the bootstrap is exactly the
+account a fresh install needs before anyone else exists to grant access.
+
+Seeding is idempotent and **does not reset an existing account's password**. Restarting the
+container with a rotated password file changes nothing about an account that already
+exists; rotating a live administrator's credential is a dashboard operation; the bootstrap
+only ever *creates* the account, once.
+
+**The identity tables always use the `alvo` prefix**, never `AlvoOptions.SchemaPrefix` —
+`AlvoIdentityOptions` has deliberately no `SchemaPrefix` of its own. EF's model cache is
+keyed on the `DbContext` type, so a *per-instance* table prefix is not expressible without a
+model-cache-key provider, and no host in this repository sets a non-default
+`AlvoOptions.SchemaPrefix` in the first place. Shipping a setting that could not do anything
+in the one shape that exists today would be a dead option; the narrowing is recorded here
+so a later reader can tell the decision from an oversight.
 
 ## The startup mode, and what production should set
 

@@ -86,6 +86,26 @@ public class EfDependencyBoundaryTests
     private static bool IsDataPackage(string name) =>
         name.StartsWith("MMLib.Alvo.Data.", StringComparison.Ordinal);
 
+    /// <summary>
+    /// <b>Only the standalone host acquires the identity package.</b> That is the whole of
+    /// package-boundary rule (a): an embedded host that wants only the Data API must not inherit
+    /// ASP.NET Core Identity and its EF stores. <c>MMLib.Alvo.Host</c> is <c>IsPackable=false</c>, so
+    /// its reference hands nothing to a NuGet consumer; a reference from the core or from the sample
+    /// would.
+    /// </summary>
+    [Fact]
+    public void Only_the_standalone_host_references_the_identity_package()
+    {
+        var referencing = ProjectFiles()
+            .Where(project => File.ReadAllText(project).Contains(
+                "MMLib.Alvo.Identity.csproj", StringComparison.Ordinal))
+            .Select(project => Path.GetFileNameWithoutExtension(project))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        referencing.ShouldBe(["MMLib.Alvo.Host", "MMLib.Alvo.Identity.Tests"]);
+    }
+
     private static bool IsEfPackage(string name) =>
         name.StartsWith("Microsoft.EntityFrameworkCore", StringComparison.Ordinal)
         || name.StartsWith("Npgsql", StringComparison.Ordinal);
@@ -127,16 +147,24 @@ public class EfDependencyBoundaryTests
         return reached;
     }
 
-    private static Dictionary<string, ProjectNode> LoadProjects()
+    private static Dictionary<string, ProjectNode> LoadProjects() =>
+        ProjectFiles()
+            .Select(Describe)
+            .ToDictionary(project => project.Name, StringComparer.Ordinal);
+
+    /// <summary>
+    /// Every <c>*.csproj</c> under the repository root, so a fact reading a project's raw text (rather
+    /// than the parsed <see cref="ProjectNode"/> graph <see cref="LoadProjects"/> builds from the same
+    /// glob) has one enumerator to share instead of a second copy of the exclusions.
+    /// </summary>
+    private static IEnumerable<string> ProjectFiles()
     {
         var matcher = new Matcher(StringComparison.OrdinalIgnoreCase);
         matcher.AddInclude("**/*.csproj");
         matcher.AddExclude("**/bin/**");
         matcher.AddExclude("**/obj/**");
 
-        return matcher.GetResultsInFullPath(_root)
-            .Select(Describe)
-            .ToDictionary(project => project.Name, StringComparer.Ordinal);
+        return matcher.GetResultsInFullPath(_root);
     }
 
     /// <summary>

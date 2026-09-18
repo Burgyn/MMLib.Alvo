@@ -277,6 +277,25 @@ public class EmbeddedSampleTests
         response.Headers.GetValues("Accept-Post").ShouldHaveSingleItem().ShouldBe("application/json");
     }
 
+    /// <summary>
+    /// <b>The sample resolves its own callers and takes no identity package with it.</b> #248's DoD
+    /// says so in as many words, and the reason is package-boundary rule (b): identity is a real swap
+    /// point, and this sample is the swap already in the tree — it mints an
+    /// <see cref="MMLib.Alvo.AlvoContext"/> from its own cookie and its own
+    /// <c>IRoleCatalogProvider</c> lookup.
+    /// </summary>
+    [Fact]
+    public void The_sample_carries_no_identity_assembly()
+    {
+        var loaded = typeof(SampleHost).Assembly
+            .GetReferencedAssemblies()
+            .Select(reference => reference.Name)
+            .ToList();
+
+        loaded.ShouldNotContain("MMLib.Alvo.Identity");
+        loaded.ShouldNotContain("Microsoft.AspNetCore.Identity.EntityFrameworkCore");
+    }
+
     /// <summary>Every generated Data API route under <paramref name="prefix"/>, as <c>METHOD path</c>.</summary>
     /// <remarks>
     /// The prefix is stripped so the two modes are compared on what they generate rather than on where each

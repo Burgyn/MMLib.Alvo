@@ -60,6 +60,11 @@
   type, `AlvoAdminAssets`: the design system is CSS and the components are Razor,
   and neither is a type a consumer calls. Details in
   [`2026-09-18-f5-admin-dashboard-design.md`](../superpowers/specs/2026-09-18-f5-admin-dashboard-design.md).
+- `src/MMLib.Alvo.Identity` — ASP.NET Core Identity + its EF stores: administrator accounts, role
+  membership, the cookie `IAlvoContextResolver`, and the bootstrap administrator. Earned by **(a)**
+  (a heavy dependency an embedded host that wants only the Data API must not acquire) and **(b)**
+  (identity is a real swap point — `samples/MMLib.Alvo.Samples.EmbeddedHost` already replaces it).
+  Referenced by `MMLib.Alvo.Host` only.
 - `samples/MMLib.Alvo.Samples.EmbeddedHost` — the runnable embedded-mode example
   (spec §2.14 mode 2, #24): an ASP.NET Core app that mounts Alvo with
   `AddAlvo`/`MapAlvoDataApi` over `examples/vehicle-registry/vehicles.alvo.json`,
