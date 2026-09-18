@@ -184,6 +184,14 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         // decision (ApiSetup.AddAlvoApi says so) — and because every route-table fact in this suite counts
         // the endpoints it finds. A world that always mapped one would silently add a sixteenth endpoint to
         // facts asserting there are fifteen, which is the kind of drift those counts exist to catch.
+        // Opt-in for the same reason, and one more: the management surface is mounted by its own seam, never
+        // by MapAlvo(), so a world that always mapped it would measure a composition no host is obliged to
+        // write.
+        if (setup.MapManagementApi)
+        {
+            app.MapAlvoManagementApi();
+        }
+
         if (setup.MapOpenApiDocument)
         {
             app.MapOpenApi();
@@ -487,6 +495,15 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     internal IReadOnlyList<AlvoPrincipal?> PublishedPrincipals =>
         ((RecordingContextAccessor)_app.Services.GetRequiredService<IAlvoContextAccessor>()).Published;
 
+    /// <summary>
+    /// Every management operation this world's route table actually carries, read off the endpoints' own
+    /// metadata rather than off a table a test could copy.
+    /// </summary>
+    internal IEnumerable<MMLib.Alvo.Management.Internal.ManagementRoute> ManagementRoutes() =>
+        _app.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .Select(endpoint => endpoint.Metadata.GetMetadata<MMLib.Alvo.Management.Internal.ManagementRoute>())
+            .OfType<MMLib.Alvo.Management.Internal.ManagementRoute>();
+
     /// <summary>Sends a request, presenting <paramref name="key"/> and <paramref name="tenant"/> the way an HTTP caller would.</summary>
     /// <param name="method">The HTTP method.</param>
     /// <param name="path">The request path, including the route prefix.</param>
@@ -749,6 +766,16 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// Conventions attached to the builder <c>MapAlvoDataApi()</c> returns — <c>RequireRateLimiting</c>, an
 /// authorization policy, a telemetry tag. The seam itself, which is what the convention facts measure.
 /// </param>
+/// <param name="MapManagementApi">
+/// Whether the world calls <c>app.MapAlvoManagementApi()</c> beside the Data API. Off by default, because
+/// that is a separate seam a host opts into — and because every route-table fact in this suite counts the
+/// endpoints it finds, so a world that always mapped it would add routes to facts asserting there are none.
+/// <para>
+/// No knob grants management access, deliberately. What a caller may do to a project's configuration is the
+/// descriptor's own <c>access</c> block, so a world that needs to reach past the gate applies a descriptor
+/// that declares one — exactly as a deployment does.
+/// </para>
+/// </param>
 internal sealed record AlvoApiWorldSetup(
     Action<AlvoApiOptions>? ConfigureApi = null,
     string? RevokedKeyId = null,
@@ -765,7 +792,8 @@ internal sealed record AlvoApiWorldSetup(
     Action<IServiceCollection>? ConfigureServices = null,
     Action<IServiceCollection>? ConfigureServicesAfterAlvo = null,
     Action<WebApplication>? ConfigureApp = null,
-    Action<IEndpointConventionBuilder>? ConfigureDataApiRoutes = null);
+    Action<IEndpointConventionBuilder>? ConfigureDataApiRoutes = null,
+    bool MapManagementApi = false);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
 /// <param name="KeyId">The key's public identifier.</param>

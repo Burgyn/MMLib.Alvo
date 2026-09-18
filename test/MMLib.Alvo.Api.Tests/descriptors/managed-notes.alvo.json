@@ -1,0 +1,28 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "managed-notes",
+  "description": "One entity nobody needs, plus the only thing this fixture exists for: an access block that names somebody. Every other descriptor in this directory declares none, which is the shipped default and admits nobody to the management surface — so a fact about a caller reaching a management route needs a project that granted one, exactly as a deployment does.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["ops"]
+  },
+  "access": {
+    "viewer": "'ops' in @user.roles"
+  },
+  "entities": {
+    "notes": {
+      "description": "A note. It exists because a descriptor declares at least one entity; no fact here reads it.",
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 }
+      },
+      "rules": {
+        "list": "false",
+        "get": "false",
+        "create": "false",
+        "update": "false",
+        "delete": "false"
+      }
+    }
+  }
+}

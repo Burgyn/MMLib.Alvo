@@ -178,6 +178,10 @@ namespace Microsoft.AspNetCore.Builder
     {
         public static Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapAlvoHealth(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
     }
+    public static class AlvoManagementEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapAlvoManagementApi(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+    }
 }
 namespace Microsoft.Extensions.DependencyInjection
 {
