@@ -138,7 +138,7 @@ new subsystem. Verified against the code:
 | Need | What ships today |
 |---|---|
 | runtime apply | `RuntimeSchemaService.ApplyAsync(project, descriptorJson, expectedRevision, options, ct)` |
-| **dry run** | `MigrationOptions.DryRun` — already a member |
+| **dry run** | **does not exist on the runtime path — see §2.1.1** |
 | destructive gate | `MigrationOptions.AllowDestructive` |
 | rollback | `RuntimeSchemaService.RollbackAsync(project, targetRevision, options, ct)` |
 | append-only history + optimistic lock | `IDescriptorVersionStore` (`GetCurrentAsync`/`GetAsync`/`ListAsync`/`AppendAsync(…, expectedRevision, …)`) |
@@ -148,9 +148,33 @@ new subsystem. Verified against the code:
 | policy evaluation | `IPolicyEngine`, `IPredicateEvaluator`, `IPredicateRenderer` |
 | record counts | `AlvoQuery.IncludeTotalCount` → `AlvoPage.TotalCount` (opt-in) |
 
-`MigrationOptions.DryRun` is the load-bearing find: the schema editor's diff, the rollback
-preview, and the later AI proposal card are **one mechanism with three consumers**, not three
-implementations.
+### 2.1.1 Correction: the runtime path has no dry run
+
+**An earlier draft of this section was wrong on a load-bearing point**, and the correction is
+recorded rather than quietly edited, because a plan was written against it.
+
+That draft read `MigrationOptions.DryRun` as "already a member" and called it *"the load-bearing
+find — one mechanism with three consumers"*. The member exists; the runtime path **refuses** it.
+`RuntimeSchemaService` calls `RejectDryRun` first thing in both `ApplyAsync` and `RollbackAsync`,
+and its own doc comment gives the reason:
+
+> *"The runtime path has no dry-run: `IRuntimeSchemaWriter` applies and appends in one atomic step,
+> so there is no seam to preview from without mutating. It is refused rather than ignored, so a
+> caller expecting a no-op preview does not get a real apply."*
+
+That is a good design, not a gap to route around — and the refusal message already points callers
+at *"a plan-only operation"* that does not exist.
+
+**So it has to be built.** `RuntimeSchemaService` gains a `PreviewAsync` that produces the
+migration plan and the guardrail verdict without touching the database, and `?dryRun=true` is built
+on that rather than on `MigrationOptions.DryRun`, which stays refused on the applying path. The
+claim the draft made survives the correction — the schema editor's diff, the rollback preview and
+the later AI proposal card are **one mechanism with three consumers** — but the mechanism is new
+work in #212, not a member already sitting there.
+
+The cost is stated where it lands: the apply path plans twice, once through `PreviewAsync` for the
+response's diff and once inside `ApplyAsync`, because `ApplyAsync` does not return its plan and
+widening its public return type for a rendering convenience is a breaking change.
 
 ### 2.2 Surface
 
@@ -163,7 +187,7 @@ Default-deny applies exactly as it does to the Data API: unreachable without an 
 |---|---|
 | `GET {m}/projects` | project list |
 | `GET {m}/projects/{p}/descriptor` | current descriptor JSON + `revision`. **This is the export** — `DescriptorVersion.DescriptorJson`, not a new serialiser |
-| `PUT {m}/projects/{p}/descriptor` | apply. `If-Match` carries `revision` (D3); `?dryRun=true` returns the migration plan and guardrail verdict without touching the database; `Idempotency-Key` honoured |
+| `PUT {m}/projects/{p}/descriptor` | apply. `If-Match` carries `revision` (D3) and is **required** — an absent precondition is `428`, on the Data API's own rule that a precondition this API cannot evaluate is refused rather than ignored. `?dryRun=true` returns the migration plan and guardrail verdict without touching the database, through the new `PreviewAsync` of §2.1.1. `Idempotency-Key` honoured |
 | `GET {m}/projects/{p}/revisions` | append-only history |
 | `GET {m}/projects/{p}/revisions/{n}` | one revision — the export of a past state |
 | `POST {m}/projects/{p}/revisions/{n}/rollback` | reverse migration; `allowDestructive` explicit, never implied |
@@ -199,8 +223,7 @@ comparing the simulator's verdict against the Data API's actual response for the
   "honoured": ["entities", "rules", "hooks", "tenancy", "auth"],
   "warned": [
     { "block": "automation",
-      "consequence": "no rule is ever evaluated, so no declared action runs — which looks exactly like a condition that never matched",
-      "issue": 28 }
+      "consequence": "no rule is ever evaluated, so no declared action runs — which looks exactly like a condition that never matched" }
   ],
   "refused": [
     { "slot": "field.default",
@@ -210,7 +233,17 @@ comparing the simulator's verdict against the Data API's actual response for the
 }
 ```
 
-`warned` is projected from `UnhonouredSubsystems.All`; `refused` from `UnhonouredFeatures`.
+`warned` is projected from `UnhonouredSubsystems.All`; `refused` from `UnhonouredFeatures`, which
+gains an `EveryRefusal` enumeration — today the refused slots are reachable only one by one, as
+named static members.
+
+**Two corrections to the sketch above, both found while planning #212.** There is **no `issue`
+field**: `UnhonouredSubsystem` carries no issue number, and some consequences name one in prose
+while others do not, so minting one would be inventing data. And **`honoured` is a written list,
+not a derivation** — nothing in the build enumerates what it *does* honour. It is held honest by a
+test asserting it is disjoint from `UnhonouredSubsystems.All`, which is weaker than derivation and
+is the strongest thing available; the badge the dashboard actually draws comes from `warned` and
+`refused`, which *are* derived.
 
 **The prose is served verbatim and never rewritten in the UI.** Those sentences are deliberate,
 already covered by tests, and already asserted against the frozen schema. A second wording inside
