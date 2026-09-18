@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Identity;
 using System.Net;
@@ -277,6 +279,124 @@ public class AlvoHostBootTests
                 "the image must never ship a preset administrator (§2.14), and the bootstrap "
                 + $"{Path.GetFileName(file)} declares is one every deployment of the image would "
                 + "inherit — the SDK's default Content glob publishes every appsettings*.json");
+        }
+    }
+
+    /// <summary>
+    /// <b><c>Alvo__Admin__BootstrapEmail</c> reaches a running container.</b> The registration, the section
+    /// binding and the identity store's database are one claim here, because they are one mechanism: the
+    /// administrator only exists if all three are right.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Written against the started host, never against a hand-assembled <c>ServiceCollection</c>.</b> A
+    /// fact that builds its own collection and calls <c>AddAlvoIdentity</c> itself measures the extension
+    /// method — which has its own suite — and would stay green with the three lines in
+    /// <see cref="AlvoHost.CreateBuilder"/> deleted. That is the shape #142 recorded: a check that passes
+    /// against an empty implementation.
+    /// </para>
+    /// <para>
+    /// <b>The seeded identifier is read off the database file, not off the container.</b> Asking the host for
+    /// the administrator it published and then asking the same host whether that is the administrator is a
+    /// tautology; reading it out of the very SQLite file <c>Alvo__Database__SqliteConnectionString</c> names
+    /// is the only thing that can say <c>AlvoDatabaseSelector.IdentityStore</c> pointed the identity store at
+    /// the database the rest of Alvo uses rather than at one of its own.
+    /// </para>
+    /// <para>
+    /// And the answer is asserted <em>true</em>, which the core's default cannot produce: <c>NoBootstrapAdmin</c>
+    /// answers <see langword="false"/> for everyone, so a host that never registered the subsystem, or bound the
+    /// wrong section onto it, fails here rather than passing quietly.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_configured_bootstrap_administrator_reaches_the_running_container()
+    {
+        var databasePath = AlvoHostWorld.TempDatabasePath();
+        var secret = WriteSecret();
+
+        try
+        {
+            await using var world = await AlvoHostWorld.StartAsync(
+                overrides: Bootstrap(secret), databasePath: databasePath);
+
+            var seeded = SeededAdministratorIn(databasePath);
+
+            seeded.ShouldNotBeNull(
+                $"no row for {BootstrapEmail} exists in the host's own database, so either the identity "
+                + "subsystem was never registered or its store was pointed at a different database");
+            world.Services.GetRequiredService<IAlvoBootstrapAdmin>()
+                .IsBootstrapAdmin(new UserId(seeded.Value)).ShouldBeTrue(
+                    "the container's IAlvoBootstrapAdmin must be the identity package's, holding the "
+                    + "administrator Alvo:Admin:BootstrapEmail named — the core's default answers false "
+                    + "for everyone");
+        }
+        finally
+        {
+            AlvoHostWorld.TryDeleteDatabase(databasePath);
+            File.Delete(secret);
+        }
+    }
+
+    /// <summary>The address the bootstrap administrator is seeded under.</summary>
+    private const string BootstrapEmail = "bootstrap-admin@example.test";
+
+    /// <summary>The bootstrap the host would read out of a container's environment and a mounted secret.</summary>
+    /// <param name="secret">The mounted password file.</param>
+    private static Dictionary<string, string?> Bootstrap(string secret) =>
+        new(StringComparer.Ordinal)
+        {
+            ["Alvo:Admin:BootstrapEmail"] = BootstrapEmail,
+            ["Alvo:Admin:BootstrapPasswordFile"] = secret,
+        };
+
+    /// <summary>Writes a password strong enough for Identity's default policy into a temporary file.</summary>
+    private static string WriteSecret()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"alvo-bootstrap-{Guid.NewGuid():N}.txt");
+        File.WriteAllText(path, "Str0ng!Passw0rd");
+
+        return path;
+    }
+
+    /// <summary>
+    /// The identifier of the administrator seeded into <paramref name="databasePath"/>, or
+    /// <see langword="null"/> when nothing seeded one there.
+    /// </summary>
+    /// <remarks>
+    /// The table name is spelled here rather than read from <c>AlvoFrameworkTables</c> on purpose: it is a
+    /// reserved wire-level name, and a fact that took it from the same constant the mapping does would go on
+    /// passing after a rename that stranded every existing operator account.
+    /// </remarks>
+    /// <param name="databasePath">The database the host was configured with.</param>
+    private static Guid? SeededAdministratorIn(string databasePath)
+    {
+        if (!File.Exists(databasePath))
+        {
+            return null;
+        }
+
+        using var connection = new SqliteConnection(
+            new SqliteConnectionStringBuilder($"Data Source={databasePath}") { Pooling = false }.ToString());
+        connection.Open();
+
+        return AdministratorId(connection);
+    }
+
+    /// <summary>Reads the one seeded administrator's identifier, tolerating a database with no such table.</summary>
+    /// <param name="connection">An open connection to the host's database.</param>
+    private static Guid? AdministratorId(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Id FROM alvo_identity_users WHERE Email = $email;";
+        command.Parameters.AddWithValue("$email", BootstrapEmail);
+
+        try
+        {
+            return command.ExecuteScalar() is string id ? Guid.Parse(id) : null;
+        }
+        catch (SqliteException)
+        {
+            return null;
         }
     }
 
