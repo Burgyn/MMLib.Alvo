@@ -43,6 +43,16 @@
          surface itself arrives through <FrameworkReference Include="Microsoft.AspNetCore.App" />, whose
          version is the shared framework's and therefore not pinned here. -->
     <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
+    <!-- ASP.NET Core Identity's EF stores — the heavy dependency that earns MMLib.Alvo.Identity its own
+         package (package-boundary.md rule (a)): an embedded host that wants only the Data API must not
+         acquire it. MIT and first-party, so no licensing question arises.
+
+         It sits here, beside the ASP.NET Core pins, but its version tracks the EF pins below rather
+         than this block's 10.0.11. It depends on Microsoft.EntityFrameworkCore.Relational, so taking
+         10.0.11 demands Relational >= 10.0.11 and NuGet refuses the whole build with NU1109 against
+         this repository's 10.0.10. Bumping EF instead would move the data layer's dependency floor for
+         a package the data layer does not use. -->
+    <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.10" />
     <!-- Microsoft.AspNetCore.OpenApi 10.0.10 transitively drags in Microsoft.OpenApi 2.0.0, which carries
          a known-high NuGet audit advisory (GHSA-v5pm-xwqc-g5wc — a circular schema reference terminates
          parsing, fixed upstream in 2.7.5). Same central transitive-pinning trick as SQLitePCLRaw and
