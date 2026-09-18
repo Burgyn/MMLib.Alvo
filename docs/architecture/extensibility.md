@@ -110,11 +110,22 @@ generated route a CSRF target and is refused at startup.
    Options carry infrastructure only. Upholds the invariant "descriptor ≠ infra
    config".
 7. **Idempotent registration** — `TryAdd*` everywhere; a provider selected twice is
-   not a duplicate. **This covers hosted services too:** PR5a's outbox dispatcher is
-   registered with `TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, …>())`
-   rather than `AddHostedService<T>()`, which appends unconditionally — a host that
-   called `AddAlvo` twice would otherwise run two dispatchers over one queue and
-   break per-entity-key ordering exactly as two replicas do.
+   not a duplicate. **This covers hosted services too:** every hosted service here is
+   registered with `TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, …>())`,
+   so a host that called `AddAlvo` twice cannot run two outbox dispatchers over one
+   queue and break per-entity-key ordering exactly as two replicas do.
+
+   **Correction (2026-09-18).** This rule used to say `AddHostedService<T>()` "appends
+   unconditionally". That has not been true since .NET Core 3.0 — the type-parameter
+   overload *is* `TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, T>())`,
+   and a fact written to catch the double registration passes against either spelling.
+   The wording is corrected rather than deleted because it had already cost something: a
+   review of the identity package raised it as an Important finding and this document was
+   the evidence, so the next reader would have re-derived a bug that is not there. **The
+   explicit spelling stays the house style** — it states the intent at the call site
+   rather than relying on a framework detail a reader has to know — but it is a
+   consistency rule now, not a defect guard. The factory overload is the one to watch:
+   its descriptor carries no implementation type, so its de-duplication is weaker.
 8. **Fail-fast on a missing/ambiguous provider** — a startup `IValidateOptions`
    asserts required ports have a provider and rejects invalid combinations, with a
    structured error ("register a database provider: call UseSqlite() or
