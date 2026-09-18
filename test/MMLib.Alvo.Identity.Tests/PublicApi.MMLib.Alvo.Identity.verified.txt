@@ -8,4 +8,17 @@ namespace MMLib.Alvo.Identity
         public const string ConfigurationSection = "Alvo:Admin";
         public const string ResolverKey = "alvo-identity";
     }
+    public sealed class AlvoIdentityOptions
+    {
+        public AlvoIdentityOptions() { }
+        public string? BootstrapEmail { get; set; }
+        public string? BootstrapPasswordFile { get; set; }
+    }
+}
+namespace Microsoft.Extensions.DependencyInjection
+{
+    public static class AlvoIdentityServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddAlvoIdentity(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Action<Microsoft.EntityFrameworkCore.DbContextOptionsBuilder> configureStore, System.Action<MMLib.Alvo.Identity.AlvoIdentityOptions>? configure = null) { }
+    }
 }
