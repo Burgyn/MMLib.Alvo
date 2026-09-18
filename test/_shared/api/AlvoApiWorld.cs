@@ -504,6 +504,12 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             endpoint => endpoint.Metadata.GetMetadata<MMLib.Alvo.Management.Internal.ManagementRoute>()!);
 
     /// <summary>
+    /// The header this world's callers present a credential in, for the facts that have to send it
+    /// themselves — a repeated header cannot be written through <see cref="SendAsync"/>'s single key.
+    /// </summary>
+    internal string CredentialHeaderName => _authOptions.HeaderName;
+
+    /// <summary>
     /// Every endpoint this world's route table carries management metadata on, so a fact can address each
     /// one over HTTP rather than assert against the single path it happens to remember.
     /// </summary>

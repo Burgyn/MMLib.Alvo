@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Auth;
+using MMLib.Alvo.Auth.Internal;
 using MMLib.Alvo.Rules;
 
 namespace MMLib.Alvo.Api.Internal;
@@ -91,77 +92,39 @@ internal sealed class AlvoContextFilter : IEndpointFilter
         ArgumentNullException.ThrowIfNull(next);
 
         var options = _authOptions.Value;
-        var presentedKey = Presented(context.HttpContext.Request, options.HeaderName);
+        var request = context.HttpContext.Request;
+        var presentedKey = CallerResolution.Presented(request, options.HeaderName);
         if (presentedKey is null)
         {
             // No credential, so no principal: there is no key to describe. The endpoint reads
             // AlvoContext.Anonymous from the accessor's absence, and the policy decides.
-            return await Invoke(principal: null, context, next).ConfigureAwait(false);
+            return await Publishing(principal: null, context, next).ConfigureAwait(false);
         }
 
-        var principal = await Resolve(presentedKey, context, options).ConfigureAwait(false);
+        var principal = await CallerResolution.ResolveAsync(_resolver, presentedKey, request, options)
+            .ConfigureAwait(false);
         if (principal is null)
         {
             return ProblemResultFactory.Unauthenticated(options.HeaderName);
         }
 
         return _scopeGate.Allows(principal, _entity, _operation)
-            ? await Invoke(principal, context, next).ConfigureAwait(false)
+            ? await Publishing(principal, context, next).ConfigureAwait(false)
             : ProblemResultFactory.ScopeRefused();
     }
 
-    private ValueTask<AlvoPrincipal?> Resolve(
-        string presentedKey, EndpointFilterInvocationContext context, AlvoAuthOptions options) =>
-        _resolver.ResolveAsync(
-            presentedKey,
-            Presented(context.HttpContext.Request, options.TenantHeaderName),
-            context.HttpContext.RequestAborted);
-
-    /// <summary>
-    /// Publishes the caller for the duration of the endpoint delegate and takes it away again.
-    /// </summary>
+    /// <summary>Publishes the caller for the endpoint delegate and takes it away again.</summary>
     /// <remarks>
-    /// <paramref name="principal"/> is <see langword="null"/> for an anonymous caller and that is
-    /// published as-is: an anonymous caller <em>has</em> no principal, so there is nothing to invent and
-    /// no reader has to know a sentinel convention to spot one. The clear is a <c>finally</c> rather than
-    /// a trailing statement so a throwing endpoint cannot leave a caller published on the ambient context
-    /// this request's thread later reuses.
+    /// The mechanics are <see cref="CallerResolution.PublishingAsync"/>'s, which is also what the Management
+    /// API's own filter calls: a caller left published on a thread that is later reused is one defect, so it
+    /// has one implementation.
     /// </remarks>
-    private async ValueTask<object?> Invoke(
-        AlvoPrincipal? principal, EndpointFilterInvocationContext context, EndpointFilterDelegate next)
-    {
-        _accessor.Principal = principal;
-        try
-        {
-            return await next(context).ConfigureAwait(false);
-        }
-        finally
-        {
-            _accessor.Principal = null;
-        }
-    }
-
-    /// <summary>
-    /// The value a caller presented in <paramref name="header"/>, or <see langword="null"/> when they
-    /// presented none.
-    /// </summary>
-    /// <remarks>
-    /// An absent header and one sent with an empty value are the same thing — no credential — so both
-    /// yield <see langword="null"/> and the request is served as anonymous, which default-deny already
-    /// handles. Repeated headers are joined rather than resolved one at a time: an ambiguous credential
-    /// must not be answered by picking whichever copy came first, and the joined text cannot be a
-    /// usable key, so it lands on the 401 path.
-    /// </remarks>
-    private static string? Presented(HttpRequest request, string header)
-    {
-        if (!request.Headers.TryGetValue(header, out var values))
-        {
-            return null;
-        }
-
-        var value = values.Count == 1 ? values[0] : string.Join(',', values.ToArray());
-        return string.IsNullOrWhiteSpace(value) ? null : value;
-    }
+    /// <param name="principal">The resolved caller, or <see langword="null"/> for an anonymous one.</param>
+    /// <param name="context">The invocation being filtered.</param>
+    /// <param name="next">The rest of the pipeline.</param>
+    private ValueTask<object?> Publishing(
+        AlvoPrincipal? principal, EndpointFilterInvocationContext context, EndpointFilterDelegate next) =>
+        CallerResolution.PublishingAsync(_accessor, principal, context, next);
 }
 
 /// <summary>

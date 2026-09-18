@@ -94,6 +94,35 @@ public class ManagementAccessTests
             "this key would have been admitted, so the 401 can only come from the credential itself");
     }
 
+    /// <summary>
+    /// Two credential headers are an ambiguous credential, and an ambiguous credential is refused rather
+    /// than disambiguated by taking whichever copy arrived first.
+    /// </summary>
+    /// <remarks>
+    /// The rule is the Data API's, and it is a security rule rather than a parsing convenience — so it is
+    /// measured on a management route too, not inherited by assertion. The key presented here would be
+    /// admitted if it arrived once.
+    /// </remarks>
+    [Fact]
+    public async Task An_ambiguous_credential_is_refused_rather_than_disambiguated()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "managed-notes.alvo.json", [_ops], new AlvoApiWorldSetup(MapManagementApi: true));
+
+        var header = world.CredentialHeaderName;
+        var response = await world.SendRawAsync(
+            HttpMethod.Get,
+            "/management/info",
+            headers:
+            [
+                new(header, _ops.Presented),
+                new(header, "someone-elses-key.and-its-secret-long-enough"),
+            ]);
+
+        response.StatusCode.ShouldBe(
+            HttpStatusCode.Unauthorized, "picking the first copy would admit whoever sends their header first");
+    }
+
     [Fact]
     public async Task A_caller_the_access_block_names_reaches_info()
     {
