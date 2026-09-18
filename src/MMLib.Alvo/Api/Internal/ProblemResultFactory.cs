@@ -80,6 +80,23 @@ internal static class ProblemResultFactory
         "The presented API key's scopes do not permit this operation. Grant the key the scope it needs.");
 
     /// <summary>
+    /// The 403 for a caller the descriptor's <c>access</c> block does not admit to this operation.
+    /// </summary>
+    /// <remarks>
+    /// <b>The wording names neither the level the caller holds nor the level the operation needs</b>,
+    /// for <see cref="ScopeRefused"/>'s reason one subsystem over: a message naming the gap would let a
+    /// caller map the project's whole access block one request at a time, which is a fingerprint of the
+    /// configuration rather than of the data. The fix is the one an operator can act on — ask whoever
+    /// administers the project. The slug is <see cref="AlvoProblemTypes.Forbidden"/>, the one every policy
+    /// refusal already carries, rather than a management-only spelling an agent would have to learn.
+    /// </remarks>
+    internal static IResult ManagementForbidden() => Problem(
+        StatusCodes.Status403Forbidden,
+        AlvoProblemTypes.Forbidden,
+        "This caller is not admitted to the project's management surface. The project's access block "
+            + "decides who is; ask whoever administers it.");
+
+    /// <summary>
     /// The 404 for a row that does not exist <em>or</em> that the caller's policy excludes — one
     /// wording and one type, because <c>IAlvoData</c>'s contract makes the two indistinguishable and the
     /// HTTP layer must not undo that.
