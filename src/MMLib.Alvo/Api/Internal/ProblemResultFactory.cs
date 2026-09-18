@@ -97,6 +97,20 @@ internal static class ProblemResultFactory
             + "decides who is; ask whoever administers it.");
 
     /// <summary>
+    /// The 422 for a Management API request this instance read and refused — an unknown operation, an
+    /// undeclared role, a caller production could not produce.
+    /// </summary>
+    /// <remarks>
+    /// The detail is the refusal's own message, which names what was sent <em>and</em> what is accepted.
+    /// <c>UnknownRoleException</c> already lists the declared roles, and a simulator that hid them would
+    /// send its caller to the descriptor for something this endpoint knows — which is the opposite of the
+    /// agent-first standard the surface is held to.
+    /// </remarks>
+    /// <param name="detail">The refusal's message.</param>
+    internal static IResult ManagementValidation(string detail) => Problem(
+        StatusCodes.Status422UnprocessableEntity, AlvoProblemTypes.Validation, detail);
+
+    /// <summary>
     /// The 404 for something the Management API does not have — a project this instance does not serve, a
     /// revision nothing ever appended.
     /// </summary>

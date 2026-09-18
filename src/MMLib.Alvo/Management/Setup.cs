@@ -47,6 +47,8 @@ internal static class ManagementSetup
             provider.GetRequiredService<IOptions<Migrations.AlvoSchemaOptions>>(),
             provider.GetRequiredService<Migrations.AlvoBootState>(),
             provider.GetRequiredService<Schema.ISchemaRegistry>(),
+            provider.GetRequiredService<Rules.IPolicyEngine>(),
+            provider.GetRequiredService<IRoleCatalogProvider>(),
             provider.GetService<Data.IAlvoData>(),
             provider.GetService<Migrations.IDescriptorVersionStore>()));
 

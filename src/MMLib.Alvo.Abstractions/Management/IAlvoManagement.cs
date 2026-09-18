@@ -89,4 +89,24 @@ public interface IAlvoManagement
     /// <returns>The capability report.</returns>
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
     Task<ManagementCapabilities> GetCapabilitiesAsync(string project, CancellationToken ct = default);
+
+    /// <summary>
+    /// Answers what a named caller may do to an entity — <b>by calling the same <c>IPolicyEngine</c>
+    /// production calls</b>, never a copy of it.
+    /// </summary>
+    /// <remarks>
+    /// That is the whole of the implementation: bind a context, call <c>Resolve</c>, render the decision.
+    /// It is also the only reading under which "answers identically to production" is a property rather
+    /// than a promise — a second evaluator would agree until the day one of them was edited.
+    /// </remarks>
+    /// <param name="project">The project name.</param>
+    /// <param name="simulation">The entity, the operation and the caller to simulate.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The verdict and the predicates the engine resolved.</returns>
+    /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
+    /// <exception cref="ManagementSimulationException">
+    /// The simulation names an entity, an operation, a role or a caller the framework cannot resolve.
+    /// </exception>
+    Task<ManagementPolicyVerdict> SimulatePolicyAsync(
+        string project, ManagementPolicySimulation simulation, CancellationToken ct = default);
 }

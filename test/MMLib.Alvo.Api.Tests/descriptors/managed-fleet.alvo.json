@@ -11,6 +11,16 @@
     "viewer": "'ops' in @user.roles"
   },
   "entities": {
+    "audits": {
+      "description": "Readable by a dispatcher and writable by nobody: it declares no create, update or delete rule at all, so default-deny is what answers those. It is the entity a policy simulation can be genuinely denied for, and the only shape in this project where the engine refuses rather than handing back a predicate.",
+      "fields": {
+        "note": { "type": "string", "required": true, "maxLength": 200 }
+      },
+      "rules": {
+        "list": "'dispatcher' in @user.roles",
+        "get": "'dispatcher' in @user.roles"
+      }
+    },
     "depots": {
       "description": "Where a vehicle is kept.",
       "fields": {

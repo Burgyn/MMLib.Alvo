@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Options;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 using System.Reflection;
 
@@ -25,6 +26,12 @@ namespace MMLib.Alvo.Management.Internal;
 /// instance serves one project, which is the same constraint <c>GET projects</c> reports — so
 /// <see cref="EnsureServed"/> is what keeps an unknown name a refusal rather than this project's answer.
 /// </param>
+/// <param name="policies">
+/// <b>The engine the request path calls, resolved from DI rather than re-implemented.</b> It is what makes
+/// the simulator's answer identical to production's by construction; a second evaluator would agree until
+/// the day one of them was edited.
+/// </param>
+/// <param name="roles">The declared role catalog a simulated caller's role names are resolved through.</param>
 /// <param name="data">The registered data port, or <see langword="null"/> when the host registered none.</param>
 /// <param name="versions">
 /// The descriptor history, or <see langword="null"/> when no provider registered one.
@@ -35,6 +42,8 @@ internal sealed class AlvoManagementService(
     IOptions<AlvoSchemaOptions> schema,
     AlvoBootState boot,
     ISchemaRegistry schemaRegistry,
+    IPolicyEngine policies,
+    IRoleCatalogProvider roles,
     IAlvoData? data,
     IDescriptorVersionStore? versions) : IAlvoManagement
 {
@@ -96,6 +105,114 @@ internal sealed class AlvoManagementService(
 
         return Task.FromResult(CapabilityReport.Project());
     }
+
+    /// <inheritdoc/>
+    public Task<ManagementPolicyVerdict> SimulatePolicyAsync(
+        string project, ManagementPolicySimulation simulation, CancellationToken ct = default)
+    {
+        EnsureServed(project);
+        EnsureAnswerable(simulation);
+
+        var decision = policies.Resolve(
+            simulation.Entity, Operation(simulation.Operation), Caller(simulation.Caller));
+
+        return Task.FromResult(Verdict(decision));
+    }
+
+    /// <summary>Refuses a simulation the engine could only answer by guessing at what was meant.</summary>
+    /// <remarks>
+    /// An absent entity would reach <c>IPolicyEngine.Resolve</c> as a blank name and come back as a deny,
+    /// which reads as a policy answer to a request that never asked a policy question.
+    /// </remarks>
+    /// <param name="simulation">The simulation as it was bound from the request.</param>
+    /// <exception cref="ManagementSimulationException">It names no entity or no caller.</exception>
+    private static void EnsureAnswerable(ManagementPolicySimulation? simulation)
+    {
+        if (simulation?.Caller is null || string.IsNullOrWhiteSpace(simulation.Entity))
+        {
+            throw new ManagementSimulationException(
+                "A simulation needs an 'entity', an 'operation' and a 'caller'. Send all three: the engine "
+                + "answers a triple, and a missing part would be answered as a denial rather than refused.");
+        }
+    }
+
+    /// <summary>One operation's wire name, as the framework's own single mapping spells it.</summary>
+    /// <remarks>
+    /// Ordinal, like every other name in the framework — <c>List</c> is not <c>list</c>, it is a different
+    /// name — and read through <c>ToWireName</c> rather than through <c>Enum.Parse</c>, so this and the
+    /// descriptor's <c>rules.&lt;operation&gt;</c> keys cannot drift apart.
+    /// </remarks>
+    /// <param name="wireName">The operation name as the caller sent it.</param>
+    /// <exception cref="ManagementSimulationException">It is not an operation this framework has.</exception>
+    private static DataOperation Operation(string wireName) =>
+        Enum.GetValues<DataOperation>()
+            .Cast<DataOperation?>()
+            .FirstOrDefault(operation =>
+                string.Equals(operation!.Value.ToWireName(), wireName, StringComparison.Ordinal))
+        ?? throw new ManagementSimulationException(
+            $"'{wireName}' is not an operation. Use one of: "
+            + $"{string.Join(", ", Enum.GetValues<DataOperation>().Select(operation => operation.ToWireName()))}.");
+
+    /// <summary>The <see cref="AlvoContext"/> a simulated caller resolves to, exactly as a credential would.</summary>
+    /// <param name="caller">The caller to simulate.</param>
+    /// <exception cref="ManagementSimulationException">A role is undeclared, or the caller is not one production can produce.</exception>
+    private AlvoContext Caller(ManagementSimulatedCaller caller)
+    {
+        if (caller.User is not { } user)
+        {
+            return Anonymous(caller.Roles);
+        }
+
+        try
+        {
+            return new AlvoContext
+            {
+                User = new UserId(user),
+                Roles = (roles.DeclaredRoles ?? RoleCatalog.BuiltInOnly).Resolve(caller.Roles ?? []),
+                Tenant = caller.Tenant is { } tenant ? new TenantId(tenant) : null,
+            };
+        }
+        catch (UnknownRoleException refusal)
+        {
+            throw new ManagementSimulationException(refusal.Message, refusal);
+        }
+        catch (ArgumentException refusal)
+        {
+            throw new ManagementSimulationException(
+                $"{refusal.Message} Send at least one role, or omit 'user' to simulate the anonymous caller.",
+                refusal);
+        }
+    }
+
+    /// <summary>The anonymous caller, refusing a request that gave them roles they could not hold.</summary>
+    /// <remarks>
+    /// Silently dropping the roles would answer the anonymous caller's question under the sender's own role
+    /// names — a verdict that looks like an answer and is about somebody else.
+    /// </remarks>
+    /// <param name="named">The role names the request sent beside no identity.</param>
+    private static AlvoContext Anonymous(IReadOnlyList<string>? named) =>
+        named is null or { Count: 0 } || (named.Count == 1 && named[0] == Role.Anon.Name)
+            ? AlvoContext.Anonymous
+            : throw new ManagementSimulationException(
+                "A simulation with no 'user' is the anonymous caller, who holds only 'anon'. Send a 'user' "
+                + "for a caller that holds roles: no credential resolves to roles without an identity, so "
+                + "this is not a caller production can produce.");
+
+    /// <summary>The engine's decision, rendered.</summary>
+    /// <remarks>
+    /// Each predicate is published as its <b>CEL source</b>, which is the descriptor's own rule text — the
+    /// same text this caller already reads from <c>GET projects/{p}/descriptor</c>, so nothing is disclosed
+    /// here that the management gate has not already admitted them to.
+    /// </remarks>
+    /// <param name="decision">What the engine resolved.</param>
+    private static ManagementPolicyVerdict Verdict(PolicyDecision decision) => new(
+        !decision.IsDenied,
+        decision.DenyReason,
+        decision.Using?.Source,
+        decision.WithCheck?.Source,
+        decision.TenantScope?.Source,
+        [.. decision.HiddenFields.Order(StringComparer.Ordinal)],
+        [.. decision.ReadOnlyFields.Order(StringComparer.Ordinal)]);
 
     /// <summary>One stored revision's provenance, without the descriptor body a list has no use for.</summary>
     /// <param name="version">The stored revision.</param>

@@ -47,6 +47,7 @@ internal static class ManagementEndpoints
         MapRevision(group);
         MapSchema(group);
         MapCapabilities(group);
+        MapPolicySimulation(group);
 
         return group;
     }
@@ -135,6 +136,35 @@ internal static class ManagementEndpoints
             new ManagementRoute(nameof(IAlvoManagement.GetCapabilitiesAsync), ManagementOperation.GetCapabilities));
 
     /// <summary>
+    /// <c>POST {prefix}/projects/{project}/policy/simulate</c> —
+    /// <see cref="IAlvoManagement.SimulatePolicyAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b><c>POST</c> and not <c>GET</c>, and it writes nothing.</b> The question carries a caller with
+    /// roles, which is a body rather than a query string; the verb describes the request's shape, and the
+    /// level it needs is <c>Viewer</c> precisely because nothing is written.
+    /// </para>
+    /// <para>
+    /// <b>The body is optional at binding.</b> A required one would be refused by the framework with a 400
+    /// <em>before</em> either filter ran, so a caller the access block admits nobody from could tell a
+    /// mapped route from an unmapped one by the status they got. Nullable, the gate decides first and the
+    /// service answers 422 for a body it cannot use.
+    /// </para>
+    /// </remarks>
+    /// <param name="group">The group to map into.</param>
+    private static void MapPolicySimulation(RouteGroupBuilder group) =>
+        Gate(
+            group.MapPost(
+                "/projects/{project}/policy/simulate",
+                (string project,
+                    ManagementPolicySimulation? simulation,
+                    IAlvoManagement management,
+                    CancellationToken ct) =>
+                    Answer(() => management.SimulatePolicyAsync(project, simulation!, ct))),
+            new ManagementRoute(nameof(IAlvoManagement.SimulatePolicyAsync), ManagementOperation.SimulatePolicy));
+
+    /// <summary>
     /// Runs one contract member and turns its refusals into problem documents.
     /// </summary>
     /// <remarks>
@@ -156,6 +186,10 @@ internal static class ManagementEndpoints
         catch (ManagementRevisionNotFoundException refusal)
         {
             return ProblemResultFactory.ManagementNotFound(refusal.Message);
+        }
+        catch (ManagementSimulationException refusal)
+        {
+            return ProblemResultFactory.ManagementValidation(refusal.Message);
         }
     }
 

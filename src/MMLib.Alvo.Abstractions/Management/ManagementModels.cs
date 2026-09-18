@@ -65,3 +65,53 @@ public sealed record ManagementWarnedBlock(string Block, string Consequence);
 /// <param name="Consequence">What would silently happen instead — <b>served verbatim.</b></param>
 /// <param name="Fix">What to do instead, and where it is tracked — <b>served verbatim.</b></param>
 public sealed record ManagementRefusedFeature(string Slot, string Consequence, string Fix);
+
+/// <summary>One policy question.</summary>
+/// <remarks>
+/// There is deliberately no record id. Evaluating a predicate against a <em>stored row</em> needs a read,
+/// and a read through the Management API is the data surface deviation D4 refuses to create — a caller who
+/// wants to know whether one row passes fetches it through the Data API under the simulated caller's own
+/// credential, which is the production answer by construction.
+/// </remarks>
+/// <param name="Entity">The entity name, matched ordinally against the descriptor's own.</param>
+/// <param name="Operation">
+/// The operation's wire name: <c>list</c>, <c>get</c>, <c>create</c>, <c>update</c> or <c>delete</c>.
+/// </param>
+/// <param name="Caller">The caller to answer for.</param>
+public sealed record ManagementPolicySimulation(string Entity, string Operation, ManagementSimulatedCaller Caller);
+
+/// <summary>A caller to answer a policy question for.</summary>
+/// <param name="User">
+/// The caller's id, or <see langword="null"/> to simulate the anonymous caller — who holds only <c>anon</c>,
+/// so <paramref name="Roles"/> must then be empty. Production has no credential that resolves to roles
+/// without an identity, and answering for one would be answering a question production cannot be asked.
+/// </param>
+/// <param name="Roles">The role names the caller holds; each must be declared in <c>auth.roles</c> or built in.</param>
+/// <param name="Tenant">
+/// The tenant the caller acts in; <see langword="null"/> denies on a tenant-scoped entity, as production
+/// does.
+/// </param>
+public sealed record ManagementSimulatedCaller(Guid? User, IReadOnlyList<string> Roles, Guid? Tenant = null);
+
+/// <summary>What the policy engine answered, and the predicates it resolved.</summary>
+/// <param name="Allowed">
+/// Whether the engine resolved a policy at all, rather than refusing outright. <b>It is not "this caller
+/// will see rows".</b> A rule over <c>@user.roles</c> is a predicate the engine hands back rather than
+/// evaluates, so a caller no rule admits still earns <see langword="true"/> here together with a
+/// <paramref name="Using"/> none of their rows satisfies. A client that rendered this alone as "permitted"
+/// would be wrong exactly where it matters.
+/// </param>
+/// <param name="DenyReason">The engine's own reason when it refused outright; null when it did not.</param>
+/// <param name="Using">The read predicate's CEL source, when one applies.</param>
+/// <param name="WithCheck">The write predicate's CEL source, when one applies.</param>
+/// <param name="TenantScope">The tenant-scope predicate's CEL source, when the entity is tenant-scoped.</param>
+/// <param name="HiddenFields">Fields this caller may not read.</param>
+/// <param name="ReadOnlyFields">Fields this caller may read and not write.</param>
+public sealed record ManagementPolicyVerdict(
+    bool Allowed,
+    string? DenyReason,
+    string? Using,
+    string? WithCheck,
+    string? TenantScope,
+    IReadOnlyList<string> HiddenFields,
+    IReadOnlyList<string> ReadOnlyFields);

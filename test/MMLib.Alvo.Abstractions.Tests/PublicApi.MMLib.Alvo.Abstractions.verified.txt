@@ -1101,6 +1101,7 @@ namespace MMLib.Alvo.Management
         System.Threading.Tasks.Task<MMLib.Alvo.Schema.SchemaModel> GetSchemaAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementProject>> ListProjectsAsync(System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRevision>> ListRevisionsAsync(string project, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementPolicyVerdict> SimulatePolicyAsync(string project, MMLib.Alvo.Management.ManagementPolicySimulation simulation, System.Threading.CancellationToken ct = default);
     }
     public sealed class ManagementCapabilities : System.IEquatable<MMLib.Alvo.Management.ManagementCapabilities>
     {
@@ -1123,6 +1124,24 @@ namespace MMLib.Alvo.Management
         public string Mode { get; init; }
         public string StartupMode { get; init; }
         public string Version { get; init; }
+    }
+    public sealed class ManagementPolicySimulation : System.IEquatable<MMLib.Alvo.Management.ManagementPolicySimulation>
+    {
+        public ManagementPolicySimulation(string Entity, string Operation, MMLib.Alvo.Management.ManagementSimulatedCaller Caller) { }
+        public MMLib.Alvo.Management.ManagementSimulatedCaller Caller { get; init; }
+        public string Entity { get; init; }
+        public string Operation { get; init; }
+    }
+    public sealed class ManagementPolicyVerdict : System.IEquatable<MMLib.Alvo.Management.ManagementPolicyVerdict>
+    {
+        public ManagementPolicyVerdict(bool Allowed, string? DenyReason, string? Using, string? WithCheck, string? TenantScope, System.Collections.Generic.IReadOnlyList<string> HiddenFields, System.Collections.Generic.IReadOnlyList<string> ReadOnlyFields) { }
+        public bool Allowed { get; init; }
+        public string? DenyReason { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> HiddenFields { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> ReadOnlyFields { get; init; }
+        public string? TenantScope { get; init; }
+        public string? Using { get; init; }
+        public string? WithCheck { get; init; }
     }
     public sealed class ManagementProject : System.IEquatable<MMLib.Alvo.Management.ManagementProject>
     {
@@ -1169,6 +1188,19 @@ namespace MMLib.Alvo.Management
         public ManagementRevisionNotFoundException(string project, int revision) { }
         public string Project { get; }
         public int Revision { get; }
+    }
+    public sealed class ManagementSimulatedCaller : System.IEquatable<MMLib.Alvo.Management.ManagementSimulatedCaller>
+    {
+        public ManagementSimulatedCaller(System.Guid? User, System.Collections.Generic.IReadOnlyList<string> Roles, System.Guid? Tenant = default) { }
+        public System.Collections.Generic.IReadOnlyList<string> Roles { get; init; }
+        public System.Guid? Tenant { get; init; }
+        public System.Guid? User { get; init; }
+    }
+    public sealed class ManagementSimulationException : System.Exception
+    {
+        public ManagementSimulationException() { }
+        public ManagementSimulationException(string message) { }
+        public ManagementSimulationException(string message, System.Exception innerException) { }
     }
     public sealed class ManagementWarnedBlock : System.IEquatable<MMLib.Alvo.Management.ManagementWarnedBlock>
     {
