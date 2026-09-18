@@ -41,6 +41,8 @@ internal static class ManagementEndpoints
         group.ExcludeFromDescription();
 
         MapInfo(group);
+        MapProjects(group);
+        MapDescriptorRead(group);
 
         return group;
     }
@@ -51,6 +53,48 @@ internal static class ManagementEndpoints
         Gate(
             group.MapGet("/info", (IAlvoManagement management, CancellationToken ct) => management.GetInfoAsync(ct)),
             new ManagementRoute(nameof(IAlvoManagement.GetInfoAsync), ManagementOperation.GetInfo));
+
+    /// <summary><c>GET {prefix}/projects</c> — <see cref="IAlvoManagement.ListProjectsAsync"/>.</summary>
+    /// <param name="group">The group to map into.</param>
+    private static void MapProjects(RouteGroupBuilder group) =>
+        Gate(
+            group.MapGet(
+                "/projects",
+                (IAlvoManagement management, CancellationToken ct) => management.ListProjectsAsync(ct)),
+            new ManagementRoute(nameof(IAlvoManagement.ListProjectsAsync), ManagementOperation.ListProjects));
+
+    /// <summary>
+    /// <c>GET {prefix}/projects/{project}/descriptor</c> — <see cref="IAlvoManagement.GetDescriptorAsync"/>.
+    /// </summary>
+    /// <param name="group">The group to map into.</param>
+    private static void MapDescriptorRead(RouteGroupBuilder group) =>
+        Gate(
+            group.MapGet(
+                "/projects/{project}/descriptor",
+                (string project, IAlvoManagement management, CancellationToken ct) =>
+                    Answer(() => management.GetDescriptorAsync(project, ct))),
+            new ManagementRoute(nameof(IAlvoManagement.GetDescriptorAsync), ManagementOperation.GetDescriptor));
+
+    /// <summary>
+    /// Runs one contract member and turns its refusals into problem documents.
+    /// </summary>
+    /// <remarks>
+    /// Every delegate that can be refused goes through here, so no endpoint decides a status of its own and
+    /// every management refusal is minted through <see cref="ProblemResultFactory"/>'s one catalogue.
+    /// </remarks>
+    /// <typeparam name="T">What the member answers with.</typeparam>
+    /// <param name="operation">The member to run.</param>
+    private static async Task<IResult> Answer<T>(Func<Task<T>> operation)
+    {
+        try
+        {
+            return Results.Ok(await operation().ConfigureAwait(false));
+        }
+        catch (ManagementProjectNotFoundException refusal)
+        {
+            return ProblemResultFactory.ManagementNotFound(refusal.Message);
+        }
+    }
 
     /// <summary>Attaches the caller filter, the access gate and the metadata the contract test reads.</summary>
     /// <param name="route">The route being built.</param>

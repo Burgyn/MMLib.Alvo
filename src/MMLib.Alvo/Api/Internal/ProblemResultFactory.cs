@@ -97,6 +97,22 @@ internal static class ProblemResultFactory
             + "decides who is; ask whoever administers it.");
 
     /// <summary>
+    /// The 404 for something the Management API does not have — a project this instance does not serve, a
+    /// revision nothing ever appended.
+    /// </summary>
+    /// <remarks>
+    /// <b>The detail is the refusal's own message, and unlike <see cref="NotFound"/> it names what was asked
+    /// for and what exists.</b> The Data API's 404 is deliberately silent because it also answers for a row
+    /// the caller's policy hides, and a wording that told the two apart would be a data oracle. Nothing
+    /// equivalent is at stake here: which projects an instance serves and how many revisions one has are
+    /// configuration, the caller has already passed the management gate, and the same facts come back from
+    /// <c>GET projects</c> anyway. A silent 404 would only make an agent guess at a name it could have read.
+    /// </remarks>
+    /// <param name="detail">The refusal's message, naming what was asked for and what exists.</param>
+    internal static IResult ManagementNotFound(string detail) => Problem(
+        StatusCodes.Status404NotFound, AlvoProblemTypes.NotFound, detail);
+
+    /// <summary>
     /// The 404 for a row that does not exist <em>or</em> that the caller's policy excludes — one
     /// wording and one type, because <c>IAlvoData</c>'s contract makes the two indistinguishable and the
     /// HTTP layer must not undo that.

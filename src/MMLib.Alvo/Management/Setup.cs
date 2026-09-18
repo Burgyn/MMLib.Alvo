@@ -29,13 +29,15 @@ internal static class ManagementSetup
     }
 
     /// <summary>
-    /// Registers the one <see cref="IAlvoManagement"/> implementation, with its data port resolved
-    /// <b>optionally</b>.
+    /// Registers the one <see cref="IAlvoManagement"/> implementation, with its data port and its descriptor
+    /// history resolved <b>optionally</b>.
     /// </summary>
     /// <remarks>
     /// Through a factory, for <see cref="AddManagementOptions"/>'s reason: a nullable constructor parameter
     /// is not an optional dependency to the container, and <c>AddAlvo</c> without a driver is a supported
     /// composition — so taking <c>IAlvoData</c> the ordinary way would make <c>info</c> unresolvable in it.
+    /// <c>IDescriptorVersionStore</c> is registered by a database provider and by nothing else, so it is
+    /// resolved the same way for the same reason.
     /// </remarks>
     /// <param name="services">The service collection to add the service to.</param>
     private static void AddManagementService(IServiceCollection services) =>
@@ -43,7 +45,9 @@ internal static class ManagementSetup
             provider.GetRequiredService<IOptions<AlvoOptions>>(),
             provider.GetRequiredService<IOptions<AlvoManagementOptions>>(),
             provider.GetRequiredService<IOptions<Migrations.AlvoSchemaOptions>>(),
-            provider.GetService<Data.IAlvoData>()));
+            provider.GetRequiredService<Migrations.AlvoBootState>(),
+            provider.GetService<Data.IAlvoData>(),
+            provider.GetService<Migrations.IDescriptorVersionStore>()));
 
     /// <summary>
     /// Registers <see cref="AlvoManagementOptions"/>, bound from its configuration section and validated at

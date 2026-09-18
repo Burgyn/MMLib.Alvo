@@ -110,6 +110,29 @@ public sealed class AlvoBootState
     /// </remarks>
     public string? Failure => Current.Failure;
 
+    /// <summary>
+    /// Gets every project this process has booted, with the phase it reached — the Management API's project
+    /// list.
+    /// </summary>
+    /// <remarks>
+    /// <b><see langword="internal"/>, and read by one caller.</b> The boot is already the one authority on
+    /// which projects this instance serves — it is what keys <c>IDescriptorVersionStore</c> and the policy
+    /// catalog — so a second source would be a second answer. It is not public because nothing outside this
+    /// assembly has been shown to need it, and the Management API publishes the same fact through its own
+    /// <c>ManagementProject</c>, whose shape #141 is free to keep while this one changes.
+    /// </remarks>
+    internal IReadOnlyDictionary<string, AlvoBootPhase> Projects =>
+        Current.Projects.ToDictionary(entry => entry.Key, entry => entry.Value.Phase, StringComparer.Ordinal);
+
+    /// <summary>The revision <paramref name="project"/> booted at, or null when it has not booted.</summary>
+    /// <param name="project">The project to report on.</param>
+    /// <remarks>
+    /// Per project rather than <see cref="AppliedRevision"/>, which publishes nothing once more than one
+    /// project is booted (#141) — a list that went blank the moment a second project appeared would be the
+    /// wrong answer for the surface that exists to show them side by side.
+    /// </remarks>
+    internal int? RevisionOf(string project) => Current.RevisionOf(project);
+
     /// <summary>Publishes a project as booted, primed and servable.</summary>
     /// <param name="project">The project that booted.</param>
     /// <param name="appliedRevision">The applied revision it primed from, or <see langword="null"/> when it read none.</param>
@@ -228,6 +251,9 @@ public sealed class AlvoBootState
 
         internal int? AppliedRevision =>
             Projects.Count == 1 ? Projects.Values.First().AppliedRevision : null;
+
+        internal int? RevisionOf(string project) =>
+            Projects.TryGetValue(project, out var state) ? state.AppliedRevision : null;
 
         internal BootSnapshot With(string project, ProjectBootState state) =>
             this with { Projects = Projects.SetItem(project, state) };

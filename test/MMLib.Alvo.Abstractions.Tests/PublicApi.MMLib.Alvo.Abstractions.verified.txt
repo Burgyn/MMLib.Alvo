@@ -1094,7 +1094,16 @@ namespace MMLib.Alvo.Management
 {
     public interface IAlvoManagement
     {
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDescriptor> GetDescriptorAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementInfo> GetInfoAsync(System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementProject>> ListProjectsAsync(System.Threading.CancellationToken ct = default);
+    }
+    public sealed class ManagementDescriptor : System.IEquatable<MMLib.Alvo.Management.ManagementDescriptor>
+    {
+        public ManagementDescriptor(string Project, int Revision, string DescriptorJson) { }
+        public string DescriptorJson { get; init; }
+        public string Project { get; init; }
+        public int Revision { get; init; }
     }
     public sealed class ManagementInfo : System.IEquatable<MMLib.Alvo.Management.ManagementInfo>
     {
@@ -1103,6 +1112,21 @@ namespace MMLib.Alvo.Management
         public string Mode { get; init; }
         public string StartupMode { get; init; }
         public string Version { get; init; }
+    }
+    public sealed class ManagementProject : System.IEquatable<MMLib.Alvo.Management.ManagementProject>
+    {
+        public ManagementProject(string Name, int? Revision, string Phase) { }
+        public string Name { get; init; }
+        public string Phase { get; init; }
+        public int? Revision { get; init; }
+    }
+    public sealed class ManagementProjectNotFoundException : System.Exception
+    {
+        public ManagementProjectNotFoundException() { }
+        public ManagementProjectNotFoundException(string message) { }
+        public ManagementProjectNotFoundException(string message, System.Exception innerException) { }
+        public ManagementProjectNotFoundException(string project, System.Collections.Generic.IReadOnlyList<string> served) { }
+        public string Project { get; }
     }
 }
 namespace MMLib.Alvo.Migrations

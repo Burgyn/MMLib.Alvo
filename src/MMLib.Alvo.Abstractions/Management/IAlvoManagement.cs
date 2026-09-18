@@ -35,4 +35,19 @@ public interface IAlvoManagement
     /// <param name="ct">Cancellation token.</param>
     /// <returns>What this instance is.</returns>
     Task<ManagementInfo> GetInfoAsync(CancellationToken ct = default);
+
+    /// <summary>Lists the projects this instance serves.</summary>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>One entry per booted project; in this build, exactly one.</returns>
+    Task<IReadOnlyList<ManagementProject>> ListProjectsAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// The project's current descriptor, exactly as it was applied, with the revision an apply must echo in
+    /// <c>If-Match</c>. <b>This is the export</b> — no re-serialisation happens.
+    /// </summary>
+    /// <param name="project">The project name.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The stored descriptor text and its revision.</returns>
+    /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
+    Task<ManagementDescriptor> GetDescriptorAsync(string project, CancellationToken ct = default);
 }

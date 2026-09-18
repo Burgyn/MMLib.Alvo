@@ -18,12 +18,18 @@ namespace MMLib.Alvo.Management.Internal;
 /// <param name="alvo">The deployment options the mode is read from.</param>
 /// <param name="management">The management options a host's own mode label is read from.</param>
 /// <param name="schema">The schema options the startup mode is read from.</param>
+/// <param name="boot">What the boot published about which projects this instance serves.</param>
 /// <param name="data">The registered data port, or <see langword="null"/> when the host registered none.</param>
+/// <param name="versions">
+/// The descriptor history, or <see langword="null"/> when no provider registered one.
+/// </param>
 internal sealed class AlvoManagementService(
     IOptions<AlvoOptions> alvo,
     IOptions<AlvoManagementOptions> management,
     IOptions<AlvoSchemaOptions> schema,
-    IAlvoData? data) : IAlvoManagement
+    AlvoBootState boot,
+    IAlvoData? data,
+    IDescriptorVersionStore? versions) : IAlvoManagement
 {
     /// <summary>What <see cref="ManagementInfo.DataProvider"/> reports when no driver is registered.</summary>
     private const string NoDriverRegistered = "none";
@@ -31,6 +37,60 @@ internal sealed class AlvoManagementService(
     /// <inheritdoc/>
     public Task<ManagementInfo> GetInfoAsync(CancellationToken ct = default) =>
         Task.FromResult(new ManagementInfo(Version, Mode, DataProvider, StartupMode));
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<ManagementProject>> ListProjectsAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<ManagementProject>>(
+            [.. boot.Projects.Select(entry =>
+                new ManagementProject(entry.Key, boot.RevisionOf(entry.Key), Lower(entry.Value)))]);
+
+    /// <inheritdoc/>
+    public async Task<ManagementDescriptor> GetDescriptorAsync(string project, CancellationToken ct = default)
+    {
+        EnsureServed(project);
+        var current = await History.GetCurrentAsync(project, ct).ConfigureAwait(false);
+
+        return new ManagementDescriptor(project, current?.Revision ?? 0, current?.DescriptorJson ?? string.Empty);
+    }
+
+    /// <summary>Refuses a project name this instance did not boot, before anything reads a store for it.</summary>
+    /// <remarks>
+    /// The boot is the one authority on which projects exist here, so this is the only check any member
+    /// needs — and it is what keeps an unknown name a 404 rather than another project's answer, on a surface
+    /// whose collaborators (<c>ISchemaRegistry</c>, <c>IPolicyEngine</c>) still carry no project parameter at
+    /// all.
+    /// </remarks>
+    /// <param name="project">The project name the caller asked for.</param>
+    /// <exception cref="ManagementProjectNotFoundException">This instance serves no such project.</exception>
+    private void EnsureServed(string project)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(project);
+        if (!boot.Projects.ContainsKey(project))
+        {
+            throw new ManagementProjectNotFoundException(project, [.. boot.Projects.Keys]);
+        }
+    }
+
+    /// <summary>
+    /// The descriptor history, or a refusal naming what is missing.
+    /// </summary>
+    /// <remarks>
+    /// <b>Unreachable behind <see cref="EnsureServed"/>, and stated rather than assumed.</b> Only a database
+    /// provider registers an <see cref="IDescriptorVersionStore"/>, and only a boot that read one publishes a
+    /// project — so a container with no store serves no project and every member here has already answered
+    /// 404. It is resolved optionally anyway, because <c>AddAlvo</c> with no driver is a supported
+    /// composition and <see cref="IAlvoManagement"/> has to activate in it.
+    /// </remarks>
+    private IDescriptorVersionStore History =>
+        versions ?? throw new InvalidOperationException(
+            "No IDescriptorVersionStore is registered, so this instance has no descriptor history to read. "
+            + "Register a database provider inside AddAlvo(...).");
+
+    /// <summary>One enum value as the wire spells it.</summary>
+    /// <typeparam name="T">The enum type.</typeparam>
+    /// <param name="value">The value to name.</param>
+    private static string Lower<T>(T value)
+        where T : struct, Enum => value.ToString().ToLowerInvariant();
 
     /// <summary>The running build, as the assembly itself records it.</summary>
     private static string Version =>

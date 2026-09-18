@@ -524,28 +524,52 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     /// the table carries.
     /// </summary>
     /// <remarks>
-    /// <b>A pattern carrying a route parameter is refused rather than skipped.</b> Every management route is
-    /// literal path text today, so substituting a value is a problem this helper does not have — and the
-    /// first route that takes a parameter must grow the fact that calls it instead of quietly dropping out
-    /// of a sweep that claims to cover every route.
+    /// <para>
+    /// <b>A route parameter is filled in from <see cref="_routeParameterValues"/>, and one with no entry
+    /// there is refused rather than skipped.</b> A sweep that silently dropped the routes it could not
+    /// address would shrink as the surface grew, which is the opposite of what it claims to do — so a new
+    /// parameter name has to be given a value here, deliberately, before the fact will run again.
+    /// </para>
+    /// <para>
+    /// <b>The values name things the world does not have</b> — a project it does not serve, a revision
+    /// nothing appended. That is what makes a 403 from this sweep mean something: a route that looked the
+    /// project up before consulting its gate would answer 404 instead, and disclose which projects exist to
+    /// a caller the gate never admitted.
+    /// </para>
     /// </remarks>
     /// <param name="endpoint">The endpoint to address.</param>
     internal static (HttpMethod Method, string Path) AddressOf(RouteEndpoint endpoint)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
         var pattern = endpoint.RoutePattern.RawText ?? string.Empty;
-        if (pattern.Contains('{', StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"'{pattern}' takes a route parameter. A sweep over every management route has to be taught "
-                + "how to fill it in, rather than leaving the route unmeasured.");
-        }
+        var path = string.Join('/', pattern.Split('/').Select(Addressable));
 
         var method = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Single()
             ?? throw new InvalidOperationException($"'{pattern}' declares no HTTP method.");
 
-        return (new HttpMethod(method), "/" + pattern.TrimStart('/'));
+        return (new HttpMethod(method), "/" + path.TrimStart('/'));
     }
+
+    /// <summary>What a sweep sends for each route parameter the management surface declares.</summary>
+    private static readonly Dictionary<string, string> _routeParameterValues =
+        new(StringComparer.Ordinal) { ["project"] = "no-such-project", ["revision"] = "0" };
+
+    /// <summary>One path segment, with a route parameter replaced by a value a request can carry.</summary>
+    /// <param name="segment">The raw segment, which may be a <c>{name}</c> or <c>{name:constraint}</c> token.</param>
+    private static string Addressable(string segment) =>
+        segment.StartsWith('{') && segment.EndsWith('}')
+            ? ValueFor(segment[1..^1].Split(':')[0].TrimEnd('?'))
+            : segment;
+
+    /// <summary>The value a sweep sends for one route parameter, or a refusal naming the one it lacks.</summary>
+    /// <param name="parameter">The route parameter's name.</param>
+    private static string ValueFor(string parameter) =>
+        _routeParameterValues.TryGetValue(parameter, out var value)
+            ? value
+            : throw new InvalidOperationException(
+                $"Route parameter '{parameter}' has no value here, so a sweep over every management route "
+                + "cannot address the route that declares it. Add one rather than leaving the route "
+                + "unmeasured.");
 
     /// <summary>Sends a request, presenting <paramref name="key"/> and <paramref name="tenant"/> the way an HTTP caller would.</summary>
     /// <param name="method">The HTTP method.</param>
