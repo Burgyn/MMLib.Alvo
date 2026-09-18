@@ -42,3 +42,26 @@ public sealed record ManagementRevision(
 /// <param name="Version">The revision's provenance.</param>
 /// <param name="DescriptorJson">The descriptor exactly as it was applied at that revision.</param>
 public sealed record ManagementRevisionDetail(ManagementRevision Version, string DescriptorJson);
+
+/// <summary>What this build honours, warns about, and refuses — one source of truth for "not yet".</summary>
+/// <param name="Honoured">The top-level blocks this build honours.</param>
+/// <param name="Warned">Blocks that apply and then do nothing. The section exists; nothing runs.</param>
+/// <param name="Refused">Features an apply rejects. A control for one of these must not exist.</param>
+public sealed record ManagementCapabilities(
+    IReadOnlyList<string> Honoured,
+    IReadOnlyList<ManagementWarnedBlock> Warned,
+    IReadOnlyList<ManagementRefusedFeature> Refused);
+
+/// <summary>A declared block this build parses and then honours nowhere.</summary>
+/// <param name="Block">The descriptor's top-level block name.</param>
+/// <param name="Consequence">
+/// What does not happen, concretely — <b>served verbatim.</b> Never rewrite it in a client: it is the
+/// framework's own sentence, and a second wording is a third spelling of one truth.
+/// </param>
+public sealed record ManagementWarnedBlock(string Block, string Consequence);
+
+/// <summary>A declared feature this build refuses at apply.</summary>
+/// <param name="Slot">The feature's qualified name, e.g. <c>field.default</c>.</param>
+/// <param name="Consequence">What would silently happen instead — <b>served verbatim.</b></param>
+/// <param name="Fix">What to do instead, and where it is tracked — <b>served verbatim.</b></param>
+public sealed record ManagementRefusedFeature(string Slot, string Consequence, string Fix);

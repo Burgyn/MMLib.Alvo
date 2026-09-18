@@ -77,4 +77,16 @@ public interface IAlvoManagement
     /// <returns>The applied <see cref="Schema.SchemaModel"/>.</returns>
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
     Task<Schema.SchemaModel> GetSchemaAsync(string project, CancellationToken ct = default);
+
+    /// <summary>What this build honours, warns about and refuses for this project.</summary>
+    /// <remarks>
+    /// <b>The prose is served verbatim.</b> Every consequence and every fix is the framework's own sentence,
+    /// already covered by tests and already asserted against the frozen schema; a client that reworded one
+    /// would be a third spelling of one truth.
+    /// </remarks>
+    /// <param name="project">The project name.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The capability report.</returns>
+    /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
+    Task<ManagementCapabilities> GetCapabilitiesAsync(string project, CancellationToken ct = default);
 }

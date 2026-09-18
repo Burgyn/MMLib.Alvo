@@ -1094,12 +1094,20 @@ namespace MMLib.Alvo.Management
 {
     public interface IAlvoManagement
     {
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementCapabilities> GetCapabilitiesAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDescriptor> GetDescriptorAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementInfo> GetInfoAsync(System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementRevisionDetail> GetRevisionAsync(string project, int revision, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Schema.SchemaModel> GetSchemaAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementProject>> ListProjectsAsync(System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRevision>> ListRevisionsAsync(string project, System.Threading.CancellationToken ct = default);
+    }
+    public sealed class ManagementCapabilities : System.IEquatable<MMLib.Alvo.Management.ManagementCapabilities>
+    {
+        public ManagementCapabilities(System.Collections.Generic.IReadOnlyList<string> Honoured, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementWarnedBlock> Warned, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRefusedFeature> Refused) { }
+        public System.Collections.Generic.IReadOnlyList<string> Honoured { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRefusedFeature> Refused { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementWarnedBlock> Warned { get; init; }
     }
     public sealed class ManagementDescriptor : System.IEquatable<MMLib.Alvo.Management.ManagementDescriptor>
     {
@@ -1131,6 +1139,13 @@ namespace MMLib.Alvo.Management
         public ManagementProjectNotFoundException(string project, System.Collections.Generic.IReadOnlyList<string> served) { }
         public string Project { get; }
     }
+    public sealed class ManagementRefusedFeature : System.IEquatable<MMLib.Alvo.Management.ManagementRefusedFeature>
+    {
+        public ManagementRefusedFeature(string Slot, string Consequence, string Fix) { }
+        public string Consequence { get; init; }
+        public string Fix { get; init; }
+        public string Slot { get; init; }
+    }
     public sealed class ManagementRevision : System.IEquatable<MMLib.Alvo.Management.ManagementRevision>
     {
         public ManagementRevision(int Revision, System.DateTimeOffset CreatedAt, string? Author, string? Reason, int? RolledBackFrom) { }
@@ -1154,6 +1169,12 @@ namespace MMLib.Alvo.Management
         public ManagementRevisionNotFoundException(string project, int revision) { }
         public string Project { get; }
         public int Revision { get; }
+    }
+    public sealed class ManagementWarnedBlock : System.IEquatable<MMLib.Alvo.Management.ManagementWarnedBlock>
+    {
+        public ManagementWarnedBlock(string Block, string Consequence) { }
+        public string Block { get; init; }
+        public string Consequence { get; init; }
     }
 }
 namespace MMLib.Alvo.Migrations

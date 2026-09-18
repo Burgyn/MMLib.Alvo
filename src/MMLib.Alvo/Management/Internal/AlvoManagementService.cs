@@ -89,6 +89,14 @@ internal sealed class AlvoManagementService(
         return Task.FromResult(schemaRegistry.GetSchema());
     }
 
+    /// <inheritdoc/>
+    public Task<ManagementCapabilities> GetCapabilitiesAsync(string project, CancellationToken ct = default)
+    {
+        EnsureServed(project);
+
+        return Task.FromResult(CapabilityReport.Project());
+    }
+
     /// <summary>One stored revision's provenance, without the descriptor body a list has no use for.</summary>
     /// <param name="version">The stored revision.</param>
     private static ManagementRevision Provenance(DescriptorVersion version) => new(
