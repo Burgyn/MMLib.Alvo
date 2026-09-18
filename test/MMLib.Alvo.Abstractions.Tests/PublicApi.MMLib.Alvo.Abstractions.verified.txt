@@ -1000,6 +1000,7 @@ namespace MMLib.Alvo.Expressions
         Computed = 1,
         Condition = 2,
         Mutate = 3,
+        Access = 4,
     }
     public enum CelRecordState
     {
