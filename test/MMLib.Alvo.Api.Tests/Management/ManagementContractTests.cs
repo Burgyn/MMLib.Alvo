@@ -43,8 +43,17 @@ public class ManagementContractTests
             .ShouldBe(routes.Count, "two routes for one member is two paths wearing one name");
     }
 
+    /// <summary>
+    /// Every route names an operation the level table has a decision for.
+    /// </summary>
+    /// <remarks>
+    /// <b>This audits the table, not the filter chain.</b> It cannot see whether the route actually carries
+    /// the gate — metadata and the filter are attached by different calls, so removing the gate leaves this
+    /// green. <c>ManagementAccessTests.Every_mapped_management_route_refuses_a_caller_the_project_names_nowhere</c>
+    /// is the fact that answers that, over HTTP.
+    /// </remarks>
     [Fact]
-    public async Task Every_route_is_gated_on_an_operation_the_access_table_admits_nobody_to_by_default()
+    public async Task Every_route_names_an_operation_the_level_table_requires_a_level_for()
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync(
             setup: new AlvoApiWorldSetup(MapManagementApi: true));

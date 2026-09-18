@@ -184,17 +184,17 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
         // decision (ApiSetup.AddAlvoApi says so) — and because every route-table fact in this suite counts
         // the endpoints it finds. A world that always mapped one would silently add a sixteenth endpoint to
         // facts asserting there are fifteen, which is the kind of drift those counts exist to catch.
+        if (setup.MapOpenApiDocument)
+        {
+            app.MapOpenApi();
+        }
+
         // Opt-in for the same reason, and one more: the management surface is mounted by its own seam, never
         // by MapAlvo(), so a world that always mapped it would measure a composition no host is obliged to
         // write.
         if (setup.MapManagementApi)
         {
             app.MapAlvoManagementApi();
-        }
-
-        if (setup.MapOpenApiDocument)
-        {
-            app.MapOpenApi();
         }
 
         var capture = new SqlCapture(database.Marker);
@@ -500,9 +500,46 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     /// metadata rather than off a table a test could copy.
     /// </summary>
     internal IEnumerable<MMLib.Alvo.Management.Internal.ManagementRoute> ManagementRoutes() =>
+        ManagementRouteEndpoints().Select(
+            endpoint => endpoint.Metadata.GetMetadata<MMLib.Alvo.Management.Internal.ManagementRoute>()!);
+
+    /// <summary>
+    /// Every endpoint this world's route table carries management metadata on, so a fact can address each
+    /// one over HTTP rather than assert against the single path it happens to remember.
+    /// </summary>
+    internal IEnumerable<RouteEndpoint> ManagementRouteEndpoints() =>
         _app.Services.GetRequiredService<EndpointDataSource>().Endpoints
-            .Select(endpoint => endpoint.Metadata.GetMetadata<MMLib.Alvo.Management.Internal.ManagementRoute>())
-            .OfType<MMLib.Alvo.Management.Internal.ManagementRoute>();
+            .OfType<RouteEndpoint>()
+            .Where(endpoint =>
+                endpoint.Metadata.GetMetadata<MMLib.Alvo.Management.Internal.ManagementRoute>() is not null);
+
+    /// <summary>
+    /// The method and path one mapped endpoint answers on, for a fact that sends a request to every route
+    /// the table carries.
+    /// </summary>
+    /// <remarks>
+    /// <b>A pattern carrying a route parameter is refused rather than skipped.</b> Every management route is
+    /// literal path text today, so substituting a value is a problem this helper does not have — and the
+    /// first route that takes a parameter must grow the fact that calls it instead of quietly dropping out
+    /// of a sweep that claims to cover every route.
+    /// </remarks>
+    /// <param name="endpoint">The endpoint to address.</param>
+    internal static (HttpMethod Method, string Path) AddressOf(RouteEndpoint endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        var pattern = endpoint.RoutePattern.RawText ?? string.Empty;
+        if (pattern.Contains('{', StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"'{pattern}' takes a route parameter. A sweep over every management route has to be taught "
+                + "how to fill it in, rather than leaving the route unmeasured.");
+        }
+
+        var method = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Single()
+            ?? throw new InvalidOperationException($"'{pattern}' declares no HTTP method.");
+
+        return (new HttpMethod(method), "/" + pattern.TrimStart('/'));
+    }
 
     /// <summary>Sends a request, presenting <paramref name="key"/> and <paramref name="tenant"/> the way an HTTP caller would.</summary>
     /// <param name="method">The HTTP method.</param>

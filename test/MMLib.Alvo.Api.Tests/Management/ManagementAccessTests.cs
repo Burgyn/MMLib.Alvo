@@ -19,8 +19,35 @@ public class ManagementAccessTests
 
     private static readonly TestApiKey _ops = new("mgmt-ops", ["ops"], ["*:read"]);
 
+    /// <summary>
+    /// <b>Every route the table carries, not the one path this suite remembers.</b> This is the half
+    /// <c>ManagementAccessRouteBuilderExtensions</c> names as owed to the issue that adds the routes: a
+    /// route mapped without <c>RequireAlvoManagementAccess</c> is ungated, and the contract facts cannot
+    /// see that — they read metadata, and metadata is attached by a different call.
+    /// </summary>
+    /// <remarks>
+    /// Measured, not argued: removing the gate from the one mapped route turns this red and leaves every
+    /// other fact in the management suites green.
+    /// </remarks>
     [Fact]
-    public async Task A_project_that_names_nobody_refuses_every_management_route_even_to_an_admin_key()
+    public async Task Every_mapped_management_route_refuses_a_caller_the_project_names_nowhere()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync(
+            [_admin], new AlvoApiWorldSetup(MapManagementApi: true));
+
+        var addresses = world.ManagementRouteEndpoints().Select(AlvoApiWorld.AddressOf).ToList();
+
+        addresses.ShouldNotBeEmpty("a sweep over an empty route table proves nothing about any route");
+        foreach (var (method, path) in addresses)
+        {
+            var response = await world.SendAsync(method, path, _admin);
+
+            response.StatusCode.ShouldBe(HttpStatusCode.Forbidden, $"{method} {path} is not gated");
+        }
+    }
+
+    [Fact]
+    public async Task A_project_that_names_nobody_refuses_an_admin_key_through_the_one_catalogue()
     {
         await using var world = await AlvoApiWorld.VehicleRegistryAsync(
             [_admin], new AlvoApiWorldSetup(MapManagementApi: true));
