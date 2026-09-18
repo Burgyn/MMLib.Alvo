@@ -31,9 +31,28 @@ namespace MMLib.Alvo
         [System.ComponentModel.DataAnnotations.RegularExpression("^[a-z][a-z0-9_]{0,15}$", ErrorMessage="SchemaPrefix must be lower snake_case, 1–16 chars.")]
         public string SchemaPrefix { get; set; }
     }
+    public sealed class AlvoUser : System.IEquatable<MMLib.Alvo.AlvoUser>
+    {
+        public AlvoUser() { }
+        public required string Email { get; init; }
+        public required MMLib.Alvo.UserId Id { get; init; }
+        public bool IsDisabled { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<string> RoleNames { get; init; }
+    }
+    public interface IAlvoBootstrapAdmin
+    {
+        bool IsBootstrapAdmin(MMLib.Alvo.UserId user);
+    }
     public interface IAlvoBuilder
     {
         Microsoft.Extensions.DependencyInjection.IServiceCollection Services { get; }
+    }
+    public interface IAlvoUserStore
+    {
+        System.Threading.Tasks.ValueTask<MMLib.Alvo.AlvoUser?> FindAsync(MMLib.Alvo.UserId user, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.ValueTask<MMLib.Alvo.AlvoUser?> FindByEmailAsync(string email, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.AlvoUser>> ListAsync(System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.ValueTask SetRolesAsync(MMLib.Alvo.UserId user, System.Collections.Generic.IReadOnlyList<string> roleNames, System.Threading.CancellationToken cancellationToken);
     }
     public interface IRoleCatalogProvider
     {
