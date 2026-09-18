@@ -141,6 +141,27 @@ public class AccessCatalogBuilderTests
         errors.ShouldContain(error => error.Path == "/entities/deals/rules/list");
     }
 
+    /// <summary>
+    /// <b>The format showcase's <c>access</c> block declares no level that is dead by construction.</b>
+    /// Levels resolve highest-match-wins, so a level whose predicate is identical to a higher one can
+    /// never be the highest match for anybody — it is configuration the descriptor declares and no
+    /// caller can ever hold, in the one file whose job is to show the schema's shape correctly.
+    /// </summary>
+    [Fact]
+    public void The_showcase_declares_no_unreachable_access_level()
+    {
+        var path = Path.Combine(RepositoryRoot.Find(), "examples", "complex-crm", "crm.alvo.json");
+        var access = AlvoDescriptor.Parse(File.ReadAllText(path)).Access.ShouldNotBeNull();
+
+        var declared = new[] { access.Admin, access.Developer, access.Viewer }
+            .Where(level => level is not null)
+            .ToList();
+
+        declared.Distinct(StringComparer.Ordinal).Count().ShouldBe(
+            declared.Count,
+            "two levels with the same predicate mean the lower one can never be the highest match");
+    }
+
     private static Access AccessBlock(string? admin = null, string? developer = null, string? viewer = null) =>
         new() { Admin = admin, Developer = developer, Viewer = viewer };
 
