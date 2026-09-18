@@ -20,6 +20,12 @@ public class ManagementAccessTests
     private static readonly TestApiKey _ops = new("mgmt-ops", ["ops"], ["*:read"]);
 
     /// <summary>
+    /// The same roles as <see cref="_ops"/>, and a scope grant on one entity this project does not even
+    /// declare — the narrowest credential that can still be issued.
+    /// </summary>
+    private static readonly TestApiKey _narrow = new("mgmt-narrow", ["ops"], ["orders:read"]);
+
+    /// <summary>
     /// <b>Every route the table carries, not the one path this suite remembers.</b> This is the half
     /// <c>ManagementAccessRouteBuilderExtensions</c> names as owed to the issue that adds the routes: a
     /// route mapped without <c>RequireAlvoManagementAccess</c> is ungated, and the contract facts cannot
@@ -98,6 +104,40 @@ public class ManagementAccessTests
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         (await response.ReadJsonObjectAsync())["mode"]!.GetValue<string>().ShouldBe("standalone");
+    }
+
+    /// <summary>
+    /// <b>A key's scopes do not govern configuration, and that is a decision rather than an oversight</b>
+    /// (the F5 design's D7).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An <c>ApiKeyScope</c> is <c>&lt;entity|*&gt;:&lt;read|write&gt;</c>, so there is no spelling for "may
+    /// manage this project" — and rather than invent one, the Management API leaves the whole question to
+    /// the descriptor's <c>access</c> block, which is the surface an administrator already edits. The
+    /// consequence is what this fact states plainly: a credential narrow enough to be refused by the Data
+    /// API still reaches management on its <em>roles</em>.
+    /// </para>
+    /// <para>
+    /// <b>Both halves are asserted, because either alone is satisfiable by an accident.</b> A 200 on
+    /// management says nothing unless the same key is genuinely narrow, and the Data API's <c>out-of-scope</c>
+    /// is what establishes that.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_key_scoped_to_one_entity_still_reaches_management_because_scopes_do_not_govern_configuration()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "managed-notes.alvo.json", [_narrow], new AlvoApiWorldSetup(MapManagementApi: true));
+
+        var refused = await world.SendAsync(HttpMethod.Get, "/api/notes", _narrow);
+        var admitted = await world.SendAsync(HttpMethod.Get, "/management/info", _narrow);
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await refused.ReadProblemTypeAsync()).ShouldBe(
+            AlvoProblemTypes.OutOfScope, "this key's scopes really do exclude every entity this project has");
+        admitted.StatusCode.ShouldBe(
+            HttpStatusCode.OK, "management admission is decided by the access block, never by a key's scopes");
     }
 
     [Fact]
