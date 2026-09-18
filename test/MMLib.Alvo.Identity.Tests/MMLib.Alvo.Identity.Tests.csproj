@@ -11,6 +11,10 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <!-- The resolver's facts substitute IAlvoUserStore and IRoleCatalogProvider: each is one method,
+         and a real store would make "a role the descriptor does not declare" a database-seeding
+         exercise rather than a statement about the intersection. -->
+    <PackageReference Include="NSubstitute" />
   </ItemGroup>
 
   <ItemGroup>
