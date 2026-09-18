@@ -118,16 +118,39 @@ internal sealed class AlvoHostOptionsValidation(IConfiguration configuration, IO
             ? value
             : null;
 
-    /// <summary>Whether a mounted password file exists and holds nothing but whitespace.</summary>
+    /// <summary>Whether a mounted password file exists and says nothing the host can use.</summary>
     private string? EmptyBootstrapPasswordFailure()
     {
         var path = configuration[$"{AlvoIdentity.ConfigurationSection}:BootstrapPasswordFile"];
 
-        return path is { Length: > 0 }
-            && File.Exists(path)
-            && string.IsNullOrWhiteSpace(File.ReadAllText(path))
+        return path is { Length: > 0 } && File.Exists(path) ? ContentsFailure(path) : null;
+    }
+
+    /// <summary>
+    /// The refusal a mounted secret has earned, for a file that exists — empty, or unopenable.
+    /// </summary>
+    /// <remarks>
+    /// <b>The read is guarded because this is the one check that performs one.</b> The identity package
+    /// declines to open the secret at all; the host opens it to catch an empty mount, and an
+    /// <see cref="IOException"/> or an <see cref="UnauthorizedAccessException"/> escaping here leaves
+    /// <see cref="AlvoHostExit.IsConfigurationFailure"/> — which recognises neither — to hand the
+    /// operator a stack trace and a crash-shaped exit for a misconfigured mount. That is exactly the
+    /// #132 failure this class exists to remove, and a root-owned <c>0400</c> secret under the image's
+    /// non-root user is the ordinary way to reach it.
+    /// </remarks>
+    /// <param name="path">The mounted file, known to exist.</param>
+    private static string? ContentsFailure(string path)
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(File.ReadAllText(path))
                 ? AlvoHostConfiguration.EmptyBootstrapPassword(path)
                 : null;
+        }
+        catch (Exception unreadable) when (unreadable is IOException or UnauthorizedAccessException)
+        {
+            return AlvoHostConfiguration.UnreadableBootstrapPassword(path, unreadable.Message);
+        }
     }
 
     /// <summary>

@@ -92,6 +92,25 @@ internal static class AlvoHostConfiguration
         $"Alvo cannot start: the bootstrap password file {path} is empty.",
         "  Write the administrator's password into it, with no surrounding quotes.");
 
+    /// <summary>The refusal for a mounted secret this process is not allowed to open.</summary>
+    /// <remarks>
+    /// <b>A refusal rather than the stack trace #132 is about.</b> The image runs as
+    /// <c>USER $APP_UID</c>, so the ordinary hardening choice — a root-owned <c>0400</c> secret, which is
+    /// also what Kubernetes' <c>defaultMode</c> produces without an <c>fsGroup</c> — makes
+    /// <see cref="File.Exists(string)"/> true and the read throw. That is a misconfiguration an operator
+    /// can fix, so it is owed the same sentence and the same exit code as every other one.
+    /// </remarks>
+    /// <param name="path">The mounted file, quoted so the operator knows which mount to check.</param>
+    /// <param name="reason">
+    /// What the operating system said. Never the file's contents: only the two failures raised by
+    /// <em>opening</em> it are reported this way, and neither has read anything.
+    /// </param>
+    internal static string UnreadableBootstrapPassword(string path, string reason) => Sentence(
+        $"Alvo cannot start: the bootstrap password file {path} cannot be read ({reason}).",
+        "  The image runs as a non-root user, so a root-owned 0400 secret is unreadable inside it.",
+        "  Mount it readable by the container's user (Kubernetes: fsGroup; docker: --user), or set",
+        $"              {BootstrapPasswordFileVariable} to a path the container can read.");
+
     /// <summary>
     /// The refusal for a password supplied as configuration rather than as a mounted file.
     /// </summary>

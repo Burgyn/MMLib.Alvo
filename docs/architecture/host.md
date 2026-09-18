@@ -81,6 +81,16 @@ the process, including the refusal an operator reads and the code they get.
   rather than through `Message`, which joins them with `"; "` and runs two multi-line
   refusals into one unreadable line: a container with two things wrong is fixable in one
   restart.
+- **And an `AggregateException` over nothing but those two.** The host has two
+  `ValidateOnStart` registrations — its own `AlvoHostOptions` and `MMLib.Alvo.Identity`'s
+  `AlvoIdentityOptions` — and `StartupValidator.Validate()` throws one aggregate when more
+  than one of them fails. Today `BuildAsync` reads `IOptions<AlvoHostOptions>` before
+  anything starts, so the plain refusal always arrives first and the aggregate is
+  unreachable through the shipped composition; that ordering is an implementation detail of
+  `Compose`, not a guarantee, and the exit code must not be lost the day it changes. The
+  inner exceptions must *all* be recognised shapes — an aggregate carrying a genuine defect
+  beside a refusal is a defect — and an empty one is rejected, because "all of nothing" is
+  vacuously true.
 - **78 is `EX_CONFIG` from `sysexits.h`**, the established code for "something was found in
   an unconfigured or misconfigured state". A bare `1` would be indistinguishable from every
   other failure, which is exactly the information #132 says was lost; 78 lets a deployment
@@ -180,6 +190,17 @@ wordings of the same refusal. The package validates itself for the same reason t
 package's own remarks give: an embedded host that calls `AddAlvoIdentity` directly never
 goes through the standalone host's validation at all, so a check that lived only there would
 leave that distribution's malformed credential silent.
+
+A secret the container **cannot read** is refused the same way, and that is the one place
+where reading the file at all has a cost worth naming. The identity package deliberately
+never opens it; the host does, only to catch an empty mount — and the image runs as
+`USER $APP_UID`, so the ordinary hardening choice (a root-owned `0400` secret, which is also
+what Kubernetes' `defaultMode` produces without an `fsGroup`) makes the file exist and the
+read throw. An `IOException` or an `UnauthorizedAccessException` escaping the validation is
+not one of the shapes `AlvoHostExit.IsConfigurationFailure` recognises, so the operator would
+have got a stack trace and a crash-shaped exit for a mount that is merely mounted wrong —
+the #132 failure this subsystem exists to remove. Both are caught and turned into a refusal
+naming the mount and the fix.
 
 A descriptor with no `access` block means only the bootstrap administrator can manage the
 project — default-deny, and still a usable deployment, because the bootstrap is exactly the
