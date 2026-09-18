@@ -665,19 +665,26 @@ It is blocked by #146, which is blocked by the identity issue.
 
 ## 8. Documents this design will change
 
-- `docs/architecture/cel.md` — the fifth profile, `Access`, as a column in `_allowedProfiles`.
+- ✅ `docs/architecture/cel.md` — the fifth profile, `Access`, as a column in `_allowedProfiles`.
+  **Done** by `.superpowers/sdd/2026-09-18-f5-access-enforcement` (task 7): the column, the split
+  `@user`/`@tenant` rows, the `Access` bullet, the `@user.id` gap, the role-literal walk on
+  `/access/<level>`, and deviation 1's enforcement claim.
 - `docs/architecture/package-boundary.md` — §Current projects gains `MMLib.Alvo.Admin` and
   `MMLib.Alvo.Identity`; the file's own instruction is *"Keep this list current."*
 - `docs/architecture/host.md` — the admin and management route prefixes, and the bootstrap
   configuration.
 - A new `docs/architecture/management-api.md` — the surface, the conventions it adopts, and D3.
-- `src/MMLib.Alvo/Descriptor/Internal/UnhonouredSubsystems.cs` — the `access` entry leaves (§3.6).
-- **`schema/project.schema.json` — the `access` block's own description.** Added after a
-  security-core review found it unowned. The frozen schema currently says *"nothing reads or compiles
+- ✅ `src/MMLib.Alvo/Descriptor/Internal/UnhonouredSubsystems.cs` — the `access` entry leaves (§3.6).
+  **Done** by `.superpowers/sdd/2026-09-18-f5-access-enforcement` (task 5): the entry, the three
+  paragraphs that argued from it, and the runtime-apply remark that named it.
+- ✅ **`schema/project.schema.json` — the `access` block's own description.** Added after a
+  security-core review found it unowned. The frozen schema said *"nothing reads or compiles
   this block yet — applying a descriptor that declares it earns a warning naming it, and a level
   referring to a role that `auth.roles` does not declare is therefore not reported today either."*
-  Both halves stop being true the moment the levels compile at apply. The under-promise is harmless
-  at runtime and that is exactly why it is dangerous: **the frozen schema is the artifact an agent
-  reads first**, nothing pins its prose, and no test will ever catch the contradiction. It belongs to
-  the task that flips warn into honour.
+  Both halves stopped being true the moment the levels compiled at apply. The under-promise is
+  harmless at runtime and that is exactly why it was dangerous: **the frozen schema is the artifact
+  an agent reads first**, nothing pins its prose, and no test would ever catch the contradiction.
+  **Done** by the same plan (task 5), which is the task that flipped warn into honour; the
+  description now records apply-time compilation, highest-match-wins, the bootstrap-admin bypass and
+  the `@user.id` gap. Description string only — no structural change.
 - `docs/PLAN.md` — §3 once F5 begins to close.
