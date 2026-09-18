@@ -221,16 +221,34 @@ internal sealed class AlvoManagementService(
 
     /// <summary>Refuses a project name this instance did not boot, before anything reads a store for it.</summary>
     /// <remarks>
+    /// <para>
     /// The boot is the one authority on which projects exist here, so this is the only check any member
     /// needs — and it is what keeps an unknown name a 404 rather than another project's answer, on a surface
     /// whose collaborators (<c>ISchemaRegistry</c>, <c>IPolicyEngine</c>) still carry no project parameter at
     /// all.
+    /// </para>
+    /// <para>
+    /// <b>A blank name is refused by the lookup, not by an argument guard, and the difference is a status
+    /// code.</b> <c>ThrowIfNullOrWhiteSpace</c> stood here and made <c>projects/%20/descriptor</c> an
+    /// <see cref="System.ArgumentException"/> — family 5, which nothing in
+    /// <c>ManagementEndpoints.Answer</c> catches, so a shipped host rendered it as a <b>500</b>. That is the
+    /// exact outcome <see cref="ManagementProjectNotFoundException"/>'s own remarks say that type exists to
+    /// prevent, and it reached every route carrying a <c>{project}</c> segment. A blank name is not a broken
+    /// invariant; it is a caller naming a project that cannot exist, which is the same question a merely
+    /// wrong name asks. The dictionary is ordinal and answers a blank key perfectly well, so the miss below
+    /// is the whole check.
+    /// </para>
+    /// <para>
+    /// <see langword="null"/> is still family 5, and deliberately so: it cannot arrive over HTTP — a matched
+    /// route segment is never null — so it means an in-process caller passed one, which is the caller's own
+    /// broken invariant rather than a question about a project.
+    /// </para>
     /// </remarks>
     /// <param name="project">The project name the caller asked for.</param>
     /// <exception cref="ManagementProjectNotFoundException">This instance serves no such project.</exception>
     private void EnsureServed(string project)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(project);
+        ArgumentNullException.ThrowIfNull(project);
         if (!boot.Projects.ContainsKey(project))
         {
             throw new ManagementProjectNotFoundException(project, [.. boot.Projects.Keys]);
