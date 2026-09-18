@@ -1,6 +1,10 @@
-﻿using Microsoft.Extensions.Configuration;
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Host.Internal;
+using MMLib.Alvo.Identity;
 using MMLib.Alvo.Migrations;
 
 namespace MMLib.Alvo.Host.Tests;
@@ -235,12 +239,149 @@ public class AlvoHostConfigurationRefusalTests
         $"--Alvo:DescriptorPath={AlvoHostWorld.DescriptorPath(AlvoHostWorld.DefaultDescriptorFileName)}";
 
     /// <summary>
-    /// The validation over a configuration with no <c>ConnectionStrings</c> entry — the shape a container that
-    /// named a provider and nothing else has.
+    /// The validation over a configuration with no <c>ConnectionStrings</c> entry and no bootstrap
+    /// administrator configured — the shape a container that named a provider and nothing else has.
     /// </summary>
     private static AlvoHostOptionsValidation Validation() =>
-        new(new ConfigurationBuilder().Build());
+        new(new ConfigurationBuilder().Build(), Microsoft.Extensions.Options.Options.Create(new AlvoIdentityOptions()));
 
     private static Dictionary<string, string?> Provider(string provider) =>
         new(StringComparer.Ordinal) { ["Alvo:Database:Provider"] = provider };
+
+    /// <summary>
+    /// <b>Every refusal, not the first.</b> A container with three things wrong is three restarts if
+    /// only the first is reported, and an operator reading a crash loop cannot tell a second failure
+    /// from the same failure again — the reason <c>Failures</c> is an iterator in the first place.
+    /// </summary>
+    [Fact]
+    public void A_bootstrap_configured_three_ways_wrong_reports_all_three()
+    {
+        var failure = Should.Throw<OptionsValidationException>(
+            () => Validate(settings =>
+            {
+                settings["Alvo:Admin:BootstrapEmail"] = "not-an-address";
+                settings["Alvo:Admin:BootstrapPasswordFile"] = "/nowhere/secret.txt";
+                settings["Alvo:Admin:BootstrapPassword"] = "hunter2";
+            }));
+
+        var reported = string.Join("\n", failure.Failures);
+        reported.ShouldContain("not-an-address");
+        reported.ShouldContain("/nowhere/secret.txt");
+        reported.ShouldContain("Alvo__Admin__BootstrapPasswordFile");
+        failure.Failures.Count().ShouldBe(3);
+    }
+
+    [Fact]
+    public void An_email_without_a_password_file_is_refused_naming_the_variable()
+    {
+        var failure = Should.Throw<OptionsValidationException>(
+            () => Validate(settings => settings["Alvo:Admin:BootstrapEmail"] = "admin@example.test"));
+
+        string.Join("\n", failure.Failures).ShouldContain("Alvo__Admin__BootstrapPasswordFile");
+    }
+
+    [Fact]
+    public void A_password_file_without_an_email_is_refused_naming_the_variable()
+    {
+        var secret = WriteSecret("Str0ng!Passw0rd");
+
+        var failure = Should.Throw<OptionsValidationException>(
+            () => Validate(settings => settings["Alvo:Admin:BootstrapPasswordFile"] = secret));
+
+        string.Join("\n", failure.Failures).ShouldContain("Alvo__Admin__BootstrapEmail");
+    }
+
+    /// <summary>
+    /// A password in configuration is refused outright, and the fix names the file key. An environment
+    /// variable is readable from a process listing, a crash dump and <c>docker inspect</c>; a mounted
+    /// secret file is not, which is the whole reason the option is a path.
+    /// </summary>
+    [Fact]
+    public void An_empty_password_file_is_refused_rather_than_seeding_an_empty_password()
+    {
+        var secret = WriteSecret("   \n");
+
+        var failure = Should.Throw<OptionsValidationException>(
+            () => Validate(settings =>
+            {
+                settings["Alvo:Admin:BootstrapEmail"] = "admin@example.test";
+                settings["Alvo:Admin:BootstrapPasswordFile"] = secret;
+            }));
+
+        string.Join("\n", failure.Failures).ShouldContain(secret);
+    }
+
+    [Fact]
+    public void A_password_set_directly_in_configuration_is_refused()
+    {
+        var secret = WriteSecret("Str0ng!Passw0rd");
+
+        var failure = Should.Throw<OptionsValidationException>(
+            () => Validate(settings =>
+            {
+                settings["Alvo:Admin:BootstrapEmail"] = "admin@example.test";
+                settings["Alvo:Admin:BootstrapPasswordFile"] = secret;
+                settings["Alvo:Admin:BootstrapPassword"] = "hunter2";
+            }));
+
+        string.Join("\n", failure.Failures).ShouldContain("Alvo__Admin__BootstrapPasswordFile");
+    }
+
+    [Fact]
+    public void No_bootstrap_configured_at_all_starts_cleanly()
+    {
+        Should.NotThrow(() => Validate(_ => { }));
+    }
+
+    [Fact]
+    public void A_correctly_configured_bootstrap_starts_cleanly()
+    {
+        var secret = WriteSecret("Str0ng!Passw0rd");
+
+        Should.NotThrow(() => Validate(settings =>
+        {
+            settings["Alvo:Admin:BootstrapEmail"] = "admin@example.test";
+            settings["Alvo:Admin:BootstrapPasswordFile"] = secret;
+        }));
+    }
+
+    /// <summary>
+    /// Resolves a real <see cref="AlvoHostOptions"/> through the same container shape
+    /// <see cref="AlvoHost.CreateBuilder"/> composes — <c>AddOptions</c> bound to <c>Alvo</c>,
+    /// <see cref="AlvoHostOptionsValidation"/> registered against it, and <c>AddAlvoIdentity</c> beside
+    /// it, so <see cref="AlvoIdentityOptionsValidation"/>'s own refusals are reachable through
+    /// <see cref="IOptions{TOptions}.Value"/> exactly as they are in the running host. A descriptor path
+    /// and a provider are preset so only the bootstrap settings a fact adds can be at fault.
+    /// </summary>
+    /// <param name="configure">Adds or overrides the bootstrap settings under test.</param>
+    private static AlvoHostOptions Validate(Action<IDictionary<string, string?>> configure)
+    {
+        var settings = new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["Alvo:DescriptorPath"] = AlvoHostWorld.DescriptorPath(AlvoHostWorld.DefaultDescriptorFileName),
+            ["Alvo:Database:Provider"] = AlvoHostDatabaseOptions.Sqlite,
+        };
+        configure(settings);
+
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddOptions<AlvoHostOptions>().Bind(configuration.GetSection("Alvo"));
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<AlvoHostOptions>, AlvoHostOptionsValidation>());
+        services.AddAlvoIdentity(
+            store => store.UseSqlite("Data Source=:memory:"),
+            identity => configuration.GetSection(AlvoIdentity.ConfigurationSection).Bind(identity));
+
+        using var provider = services.BuildServiceProvider();
+        return provider.GetRequiredService<IOptions<AlvoHostOptions>>().Value;
+    }
+
+    private static string WriteSecret(string contents)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"alvo-secret-{Guid.NewGuid():N}.txt");
+        File.WriteAllText(path, contents);
+        return path;
+    }
 }

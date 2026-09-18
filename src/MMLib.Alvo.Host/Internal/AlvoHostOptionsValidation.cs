@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Identity;
 
 namespace MMLib.Alvo.Host.Internal;
 
@@ -30,8 +31,18 @@ namespace MMLib.Alvo.Host.Internal;
 /// one thing about the host's database that is spelled the way every other .NET application spells it.
 /// </para>
 /// </remarks>
-/// <param name="configuration">The host's configuration, for the <c>ConnectionStrings</c> entry.</param>
-internal sealed class AlvoHostOptionsValidation(IConfiguration configuration) : IValidateOptions<AlvoHostOptions>
+/// <param name="configuration">The host's configuration, for the <c>ConnectionStrings</c> entry and the one
+/// bootstrap key the identity package never binds.</param>
+/// <param name="identity">
+/// The identity package's own bound-and-validated options. Reading <see cref="IOptions{TOptions}.Value"/>
+/// runs <c>AlvoIdentityOptionsValidation</c>, which is <see langword="internal"/> to
+/// <c>MMLib.Alvo.Identity</c> and therefore unreachable from here directly — going through the public
+/// <see cref="IOptions{TOptions}"/> seam is what lets this class report the package's own refusals
+/// alongside its own, rather than re-deriving them from the pairing and address rules the package already
+/// owns.
+/// </param>
+internal sealed class AlvoHostOptionsValidation(IConfiguration configuration, IOptions<AlvoIdentityOptions> identity)
+    : IValidateOptions<AlvoHostOptions>
 {
     /// <inheritdoc/>
     public ValidateOptionsResult Validate(string? name, AlvoHostOptions options)
@@ -61,6 +72,78 @@ internal sealed class AlvoHostOptionsValidation(IConfiguration configuration) : 
         if (Database(options.Database) is { } database)
         {
             yield return database;
+        }
+
+        foreach (var bootstrap in BootstrapFailures())
+        {
+            yield return bootstrap;
+        }
+    }
+
+    /// <summary>
+    /// Every way the bootstrap administrator is misconfigured, rather than the first — the same rule
+    /// <see cref="Failures"/> states, applied within one subsystem.
+    /// </summary>
+    /// <remarks>
+    /// <b>Two checks here, one delegated.</b> Only <see cref="BootstrapPasswordSetting"/> and
+    /// <see cref="EmptyBootstrapPasswordFailure"/> are this class's own: <c>Alvo:Admin:BootstrapPassword</c>
+    /// is a key <see cref="AlvoIdentityOptions"/> has no property for, and reading the mounted file to
+    /// judge emptiness is a check the package deliberately declines to make (it never reads the secret's
+    /// contents at all). Pairing, existence and address plausibility all belong to
+    /// <c>AlvoIdentityOptionsValidation</c> already, and duplicating them here would give an operator two
+    /// wordings of the same refusal to reconcile the day one of them is edited.
+    /// </remarks>
+    private IEnumerable<string> BootstrapFailures()
+    {
+        if (BootstrapPasswordSetting() is not null)
+        {
+            yield return AlvoHostConfiguration.BootstrapPasswordInConfiguration();
+        }
+
+        if (EmptyBootstrapPasswordFailure() is { } empty)
+        {
+            yield return empty;
+        }
+
+        foreach (var failure in IdentityFailures())
+        {
+            yield return failure;
+        }
+    }
+
+    /// <summary>Whether an operator set the one bootstrap key the identity package never binds.</summary>
+    private string? BootstrapPasswordSetting() =>
+        configuration[$"{AlvoIdentity.ConfigurationSection}:BootstrapPassword"] is { Length: > 0 } value
+        && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : null;
+
+    /// <summary>Whether a mounted password file exists and holds nothing but whitespace.</summary>
+    private string? EmptyBootstrapPasswordFailure()
+    {
+        var path = configuration[$"{AlvoIdentity.ConfigurationSection}:BootstrapPasswordFile"];
+
+        return path is { Length: > 0 }
+            && File.Exists(path)
+            && string.IsNullOrWhiteSpace(File.ReadAllText(path))
+                ? AlvoHostConfiguration.EmptyBootstrapPassword(path)
+                : null;
+    }
+
+    /// <summary>
+    /// The identity package's own refusals, read through <see cref="IOptions{TOptions}.Value"/> rather than
+    /// re-derived — see the constructor's remarks on <c>identity</c> above.
+    /// </summary>
+    private IReadOnlyList<string> IdentityFailures()
+    {
+        try
+        {
+            _ = identity.Value;
+            return [];
+        }
+        catch (OptionsValidationException failure)
+        {
+            return [.. failure.Failures];
         }
     }
 

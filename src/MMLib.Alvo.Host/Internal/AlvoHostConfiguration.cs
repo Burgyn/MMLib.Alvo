@@ -37,6 +37,12 @@ internal static class AlvoHostConfiguration
     /// <summary>The <c>ConnectionStrings</c> entry the host resolves its database from.</summary>
     internal const string ConnectionName = "Alvo";
 
+    /// <summary>The environment variable naming the file holding the bootstrap administrator's password.</summary>
+    internal const string BootstrapPasswordFileVariable = "Alvo__Admin__BootstrapPasswordFile";
+
+    /// <summary>The variable an operator reaches for instead, and which this host refuses.</summary>
+    internal const string BootstrapPasswordVariable = "Alvo__Admin__BootstrapPassword";
+
     /// <summary>Whether a configured provider name is the known one, however it was capitalized.</summary>
     /// <param name="configured">What configuration said.</param>
     /// <param name="known">The driver name to compare against.</param>
@@ -71,6 +77,38 @@ internal static class AlvoHostConfiguration
             + "string is configured.",
         $"  Set:        {ConnectionStringVariable}=Host=db;Database=alvo;Username=alvo;Password=...",
         $"  Or:         {ProviderVariable}={AlvoHostDatabaseOptions.Sqlite} to use the container-local file.");
+
+    /// <summary>The refusal for a mounted secret that is present and says nothing.</summary>
+    /// <remarks>
+    /// The one bootstrap check that is genuinely host-specific rather than a duplicate of
+    /// <c>AlvoIdentityOptionsValidation</c>'s own: the package deliberately never reads the secret
+    /// file's contents (a credential in a validator's reach, and in a failure message, is the wrong
+    /// trade for what existence already catches), but a container that mounted an empty file would
+    /// otherwise seed an administrator nobody could ever sign in as, and fail-fast is the whole point
+    /// of #132.
+    /// </remarks>
+    /// <param name="path">The mounted file, quoted so the operator knows which mount to check.</param>
+    internal static string EmptyBootstrapPassword(string path) => Sentence(
+        $"Alvo cannot start: the bootstrap password file {path} is empty.",
+        "  Write the administrator's password into it, with no surrounding quotes.");
+
+    /// <summary>
+    /// The refusal for a password supplied as configuration rather than as a mounted file.
+    /// </summary>
+    /// <remarks>
+    /// An environment variable is readable from a process listing, a crash dump and
+    /// <c>docker inspect</c>; a mounted secret file is not. That is the entire reason the option is a
+    /// path, so accepting the value would quietly undo it.
+    /// <see cref="MMLib.Alvo.Identity.AlvoIdentityOptions"/> has no property for this key at all — the
+    /// package cannot refuse a setting it never binds — so this refusal is the host's alone, over the
+    /// raw <see cref="Microsoft.Extensions.Configuration.IConfiguration"/> entry.
+    /// </remarks>
+    internal static string BootstrapPasswordInConfiguration() => Sentence(
+        $"Alvo cannot start: {BootstrapPasswordVariable} is set. Alvo never reads a password from "
+            + "configuration, because an environment variable is readable from a process listing and a "
+            + "crash dump.",
+        $"  Unset:      {BootstrapPasswordVariable}",
+        $"  And set:    {BootstrapPasswordFileVariable}=/run/secrets/alvo-admin-password");
 
     /// <summary>
     /// Turns one refusal into the exception the host raises for <em>every</em> bad option value, whichever
