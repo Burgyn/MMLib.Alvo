@@ -103,6 +103,16 @@ namespace MMLib.Alvo.Events
         public System.TimeSpan PollInterval { get; set; }
     }
 }
+namespace MMLib.Alvo.Management
+{
+    public sealed class AlvoManagementOptions
+    {
+        public const string SectionName = "Alvo:Management";
+        public AlvoManagementOptions() { }
+        public string? ModeLabel { get; set; }
+        public string RoutePrefix { get; set; }
+    }
+}
 namespace MMLib.Alvo.Migrations
 {
     public enum AlvoBootPhase
