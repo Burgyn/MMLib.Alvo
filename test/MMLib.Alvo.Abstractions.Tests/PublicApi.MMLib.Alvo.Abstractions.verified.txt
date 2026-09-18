@@ -1096,7 +1096,9 @@ namespace MMLib.Alvo.Management
     {
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDescriptor> GetDescriptorAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementInfo> GetInfoAsync(System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementRevisionDetail> GetRevisionAsync(string project, int revision, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementProject>> ListProjectsAsync(System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRevision>> ListRevisionsAsync(string project, System.Threading.CancellationToken ct = default);
     }
     public sealed class ManagementDescriptor : System.IEquatable<MMLib.Alvo.Management.ManagementDescriptor>
     {
@@ -1127,6 +1129,30 @@ namespace MMLib.Alvo.Management
         public ManagementProjectNotFoundException(string message, System.Exception innerException) { }
         public ManagementProjectNotFoundException(string project, System.Collections.Generic.IReadOnlyList<string> served) { }
         public string Project { get; }
+    }
+    public sealed class ManagementRevision : System.IEquatable<MMLib.Alvo.Management.ManagementRevision>
+    {
+        public ManagementRevision(int Revision, System.DateTimeOffset CreatedAt, string? Author, string? Reason, int? RolledBackFrom) { }
+        public string? Author { get; init; }
+        public System.DateTimeOffset CreatedAt { get; init; }
+        public string? Reason { get; init; }
+        public int Revision { get; init; }
+        public int? RolledBackFrom { get; init; }
+    }
+    public sealed class ManagementRevisionDetail : System.IEquatable<MMLib.Alvo.Management.ManagementRevisionDetail>
+    {
+        public ManagementRevisionDetail(MMLib.Alvo.Management.ManagementRevision Version, string DescriptorJson) { }
+        public string DescriptorJson { get; init; }
+        public MMLib.Alvo.Management.ManagementRevision Version { get; init; }
+    }
+    public sealed class ManagementRevisionNotFoundException : System.Exception
+    {
+        public ManagementRevisionNotFoundException() { }
+        public ManagementRevisionNotFoundException(string message) { }
+        public ManagementRevisionNotFoundException(string message, System.Exception innerException) { }
+        public ManagementRevisionNotFoundException(string project, int revision) { }
+        public string Project { get; }
+        public int Revision { get; }
     }
 }
 namespace MMLib.Alvo.Migrations

@@ -43,6 +43,8 @@ internal static class ManagementEndpoints
         MapInfo(group);
         MapProjects(group);
         MapDescriptorRead(group);
+        MapRevisions(group);
+        MapRevision(group);
 
         return group;
     }
@@ -76,6 +78,36 @@ internal static class ManagementEndpoints
             new ManagementRoute(nameof(IAlvoManagement.GetDescriptorAsync), ManagementOperation.GetDescriptor));
 
     /// <summary>
+    /// <c>GET {prefix}/projects/{project}/revisions</c> — <see cref="IAlvoManagement.ListRevisionsAsync"/>.
+    /// </summary>
+    /// <param name="group">The group to map into.</param>
+    private static void MapRevisions(RouteGroupBuilder group) =>
+        Gate(
+            group.MapGet(
+                "/projects/{project}/revisions",
+                (string project, IAlvoManagement management, CancellationToken ct) =>
+                    Answer(() => management.ListRevisionsAsync(project, ct))),
+            new ManagementRoute(nameof(IAlvoManagement.ListRevisionsAsync), ManagementOperation.ListRevisions));
+
+    /// <summary>
+    /// <c>GET {prefix}/projects/{project}/revisions/{revision}</c> —
+    /// <see cref="IAlvoManagement.GetRevisionAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// The <c>:int</c> constraint is what keeps a revision number out of the delegate's hands: a segment that
+    /// is not a number never matches, so nothing here parses one and nothing has to decide what
+    /// <c>revisions/latest</c> would mean.
+    /// </remarks>
+    /// <param name="group">The group to map into.</param>
+    private static void MapRevision(RouteGroupBuilder group) =>
+        Gate(
+            group.MapGet(
+                "/projects/{project}/revisions/{revision:int}",
+                (string project, int revision, IAlvoManagement management, CancellationToken ct) =>
+                    Answer(() => management.GetRevisionAsync(project, revision, ct))),
+            new ManagementRoute(nameof(IAlvoManagement.GetRevisionAsync), ManagementOperation.GetRevision));
+
+    /// <summary>
     /// Runs one contract member and turns its refusals into problem documents.
     /// </summary>
     /// <remarks>
@@ -91,6 +123,10 @@ internal static class ManagementEndpoints
             return Results.Ok(await operation().ConfigureAwait(false));
         }
         catch (ManagementProjectNotFoundException refusal)
+        {
+            return ProblemResultFactory.ManagementNotFound(refusal.Message);
+        }
+        catch (ManagementRevisionNotFoundException refusal)
         {
             return ProblemResultFactory.ManagementNotFound(refusal.Message);
         }

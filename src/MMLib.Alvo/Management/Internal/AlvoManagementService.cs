@@ -53,6 +53,32 @@ internal sealed class AlvoManagementService(
         return new ManagementDescriptor(project, current?.Revision ?? 0, current?.DescriptorJson ?? string.Empty);
     }
 
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<ManagementRevision>> ListRevisionsAsync(
+        string project, CancellationToken ct = default)
+    {
+        EnsureServed(project);
+        var history = await History.ListAsync(project, ct).ConfigureAwait(false);
+
+        return [.. history.Select(Provenance)];
+    }
+
+    /// <inheritdoc/>
+    public async Task<ManagementRevisionDetail> GetRevisionAsync(
+        string project, int revision, CancellationToken ct = default)
+    {
+        EnsureServed(project);
+        var stored = await History.GetAsync(project, revision, ct).ConfigureAwait(false)
+            ?? throw new ManagementRevisionNotFoundException(project, revision);
+
+        return new ManagementRevisionDetail(Provenance(stored), stored.DescriptorJson);
+    }
+
+    /// <summary>One stored revision's provenance, without the descriptor body a list has no use for.</summary>
+    /// <param name="version">The stored revision.</param>
+    private static ManagementRevision Provenance(DescriptorVersion version) => new(
+        version.Revision, version.CreatedAt, version.Author, version.Reason, version.RolledBackFrom);
+
     /// <summary>Refuses a project name this instance did not boot, before anything reads a store for it.</summary>
     /// <remarks>
     /// The boot is the one authority on which projects exist here, so this is the only check any member

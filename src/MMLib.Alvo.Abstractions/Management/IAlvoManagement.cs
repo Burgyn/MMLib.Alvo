@@ -50,4 +50,20 @@ public interface IAlvoManagement
     /// <returns>The stored descriptor text and its revision.</returns>
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
     Task<ManagementDescriptor> GetDescriptorAsync(string project, CancellationToken ct = default);
+
+    /// <summary>The project's append-only configuration history, oldest revision first.</summary>
+    /// <param name="project">The project name.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Every appended revision's provenance, without its descriptor body.</returns>
+    /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
+    Task<IReadOnlyList<ManagementRevision>> ListRevisionsAsync(string project, CancellationToken ct = default);
+
+    /// <summary>One historical revision — the export of a past state.</summary>
+    /// <param name="project">The project name.</param>
+    /// <param name="revision">The revision number.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The revision's provenance and the descriptor it applied.</returns>
+    /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
+    /// <exception cref="ManagementRevisionNotFoundException">That revision was never appended.</exception>
+    Task<ManagementRevisionDetail> GetRevisionAsync(string project, int revision, CancellationToken ct = default);
 }

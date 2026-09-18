@@ -28,3 +28,17 @@ public sealed record ManagementProject(string Name, int? Revision, string Phase)
 /// true without drift.
 /// </param>
 public sealed record ManagementDescriptor(string Project, int Revision, string DescriptorJson);
+
+/// <summary>One entry in a project's append-only configuration history.</summary>
+/// <param name="Revision">The revision number; the first applied revision is 1.</param>
+/// <param name="CreatedAt">When it was appended.</param>
+/// <param name="Author">Who appended it; <see langword="null"/> for code-first or system.</param>
+/// <param name="Reason">The human- or agent-supplied reason, when one was given.</param>
+/// <param name="RolledBackFrom">The revision this one restored, when it was produced by a rollback.</param>
+public sealed record ManagementRevision(
+    int Revision, DateTimeOffset CreatedAt, string? Author, string? Reason, int? RolledBackFrom);
+
+/// <summary>One revision with the descriptor it applied.</summary>
+/// <param name="Version">The revision's provenance.</param>
+/// <param name="DescriptorJson">The descriptor exactly as it was applied at that revision.</param>
+public sealed record ManagementRevisionDetail(ManagementRevision Version, string DescriptorJson);
