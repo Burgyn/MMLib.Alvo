@@ -45,6 +45,7 @@ internal static class ManagementEndpoints
         MapDescriptorRead(group);
         MapRevisions(group);
         MapRevision(group);
+        MapSchema(group);
 
         return group;
     }
@@ -106,6 +107,18 @@ internal static class ManagementEndpoints
                 (string project, int revision, IAlvoManagement management, CancellationToken ct) =>
                     Answer(() => management.GetRevisionAsync(project, revision, ct))),
             new ManagementRoute(nameof(IAlvoManagement.GetRevisionAsync), ManagementOperation.GetRevision));
+
+    /// <summary>
+    /// <c>GET {prefix}/projects/{project}/schema</c> — <see cref="IAlvoManagement.GetSchemaAsync"/>.
+    /// </summary>
+    /// <param name="group">The group to map into.</param>
+    private static void MapSchema(RouteGroupBuilder group) =>
+        Gate(
+            group.MapGet(
+                "/projects/{project}/schema",
+                (string project, IAlvoManagement management, CancellationToken ct) =>
+                    Answer(() => management.GetSchemaAsync(project, ct))),
+            new ManagementRoute(nameof(IAlvoManagement.GetSchemaAsync), ManagementOperation.GetSchema));
 
     /// <summary>
     /// Runs one contract member and turns its refusals into problem documents.

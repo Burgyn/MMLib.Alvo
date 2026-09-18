@@ -1097,6 +1097,7 @@ namespace MMLib.Alvo.Management
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDescriptor> GetDescriptorAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementInfo> GetInfoAsync(System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementRevisionDetail> GetRevisionAsync(string project, int revision, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Schema.SchemaModel> GetSchemaAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementProject>> ListProjectsAsync(System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRevision>> ListRevisionsAsync(string project, System.Threading.CancellationToken ct = default);
     }

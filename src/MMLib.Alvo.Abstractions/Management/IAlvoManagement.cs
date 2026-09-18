@@ -66,4 +66,15 @@ public interface IAlvoManagement
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
     /// <exception cref="ManagementRevisionNotFoundException">That revision was never appended.</exception>
     Task<ManagementRevisionDetail> GetRevisionAsync(string project, int revision, CancellationToken ct = default);
+
+    /// <summary>The resolved schema — what the Data API actually serves for this project.</summary>
+    /// <remarks>
+    /// The descriptor is what the author wrote; this is what survived. Where the two differ is where
+    /// "declared but not honoured" lives, which is what the capability report enumerates.
+    /// </remarks>
+    /// <param name="project">The project name.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The applied <see cref="Schema.SchemaModel"/>.</returns>
+    /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
+    Task<Schema.SchemaModel> GetSchemaAsync(string project, CancellationToken ct = default);
 }

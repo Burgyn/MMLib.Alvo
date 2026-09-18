@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Options;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Migrations;
+using MMLib.Alvo.Schema;
 using System.Reflection;
 
 namespace MMLib.Alvo.Management.Internal;
@@ -19,6 +20,11 @@ namespace MMLib.Alvo.Management.Internal;
 /// <param name="management">The management options a host's own mode label is read from.</param>
 /// <param name="schema">The schema options the startup mode is read from.</param>
 /// <param name="boot">What the boot published about which projects this instance serves.</param>
+/// <param name="schemaRegistry">
+/// The resolved schema the Data API's routes were generated from. It carries no project parameter — one
+/// instance serves one project, which is the same constraint <c>GET projects</c> reports — so
+/// <see cref="EnsureServed"/> is what keeps an unknown name a refusal rather than this project's answer.
+/// </param>
 /// <param name="data">The registered data port, or <see langword="null"/> when the host registered none.</param>
 /// <param name="versions">
 /// The descriptor history, or <see langword="null"/> when no provider registered one.
@@ -28,6 +34,7 @@ internal sealed class AlvoManagementService(
     IOptions<AlvoManagementOptions> management,
     IOptions<AlvoSchemaOptions> schema,
     AlvoBootState boot,
+    ISchemaRegistry schemaRegistry,
     IAlvoData? data,
     IDescriptorVersionStore? versions) : IAlvoManagement
 {
@@ -72,6 +79,14 @@ internal sealed class AlvoManagementService(
             ?? throw new ManagementRevisionNotFoundException(project, revision);
 
         return new ManagementRevisionDetail(Provenance(stored), stored.DescriptorJson);
+    }
+
+    /// <inheritdoc/>
+    public Task<SchemaModel> GetSchemaAsync(string project, CancellationToken ct = default)
+    {
+        EnsureServed(project);
+
+        return Task.FromResult(schemaRegistry.GetSchema());
     }
 
     /// <summary>One stored revision's provenance, without the descriptor body a list has no use for.</summary>
