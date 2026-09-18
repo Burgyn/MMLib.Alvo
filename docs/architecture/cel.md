@@ -77,7 +77,8 @@ is legal.
 
   **What `@user.id` can and cannot do here, stated so it is not read as an oversight.** The column
   admits it, because the frozen schema names it as one of the two members a level may read — but
-  Alvo's grammar has no `uuid` literal (deviation 13) and an access level sees no row, so there is
+  Alvo's grammar has no `uuid` literal — no deviation records that, correctly, since conformant CEL
+  has none either, so it is not a narrowing — and an access level sees no row, so there is
   no `Uuid`-typed operand in scope for it to meet. A level written as `@user.id == '…'` is
   therefore refused by the *comparison* rule ("Cannot compare Uuid to String"), not by the profile
   table. Both the member and the comparison operator stay admitted deliberately: widening `@user`
@@ -401,7 +402,9 @@ of a standard:
    `RoleCatalog`, so a level naming a role `auth.roles` does not declare is refused at apply with the
    same "did you mean" suggestion a rule's typo gets. `UnhonouredSubsystems` no longer carries an
    `access` entry — the file's own doc comment demanded that transition — and a caller who matches no
-   level is refused `403` on every management operation.
+   level is refused `403` on every **gated** management operation. "Gated" is load-bearing: the gate
+   is attached per route by `RequireAlvoManagementAccess(<operation>)`, and the routes that will
+   carry it are #212's, not this work's. A route without the gate is not refused by anything.
 2. **`changed(field)`** — not a CEL macro; an Alvo addition for the Condition profile only, parsed
    with the same one-bare-identifier-argument shape as `has(...)`.
 3. **`old.field`/`new.field` state-qualified row references** — Alvo's own way of expressing a

@@ -70,7 +70,8 @@ The block this file was born with (commit `c84e1ab`, before `@user.role` was ret
 }
 ```
 
-**Only `admin` carried the domain gate, and only `admin` lost anything.** `developer` and `viewer` were
+**Only `admin` carried the domain gate, so only `admin` lost anything *to the narrowing*** — `developer`
+left later, and for a different reason (enforcement, below). `developer` and `viewer` were
 already rendered into the membership idiom the compiler mandates (`@user.role` is not a member `@user` has;
 `CelParser` answers it with *"a caller holds a set of roles — test membership instead"*), and this change
 leaves both untouched. That rendering is not quite an identity — membership *widens* the original equality
@@ -98,8 +99,9 @@ finance can look. The third key stays covered by the schema suite's own sample
 (`MMLib.Alvo.Schema.Tests.AccessLevelsTests`), which is where a key's coverage belongs.
 
 Attribute-based rules — typed claims, `@user.teams` — are #37's scope, and widening `@user` is additive, so
-these expressions keep compiling on the day they land, and `developer` can come back with the
-distinguishing half it originally had.
+these expressions keep compiling on the day they land. On that day `admin` can be given back the
+distinguishing half it originally had — the domain gate — and `developer` can return as the level it
+always was, distinct from `admin` again because `admin` is narrower than it rather than equal to it.
 
 **`entity.realtime` is unhonoured too and is deliberately *not* in that warning.** The schema declares it per
 entity with a default of `true`, so it is unhonoured for every entity of every descriptor — warning only on an
