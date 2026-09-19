@@ -41,6 +41,34 @@ internal static class DescriptorEdits
         return Write(root);
     }
 
+    /// <summary>
+    /// Rewrites the <c>access</c> block so the named role administers the project and the existing
+    /// <c>viewer</c> level names nobody — the escalation C-1 reproduced.
+    /// </summary>
+    /// <param name="descriptorJson">The descriptor to edit.</param>
+    /// <param name="role">The role to hand administration to.</param>
+    internal static string GrantAdminTo(string descriptorJson, string role)
+    {
+        var root = JsonNode.Parse(descriptorJson)!.AsObject();
+        var access = root["access"]!.AsObject();
+        access["admin"] = $"'{role}' in @user.roles";
+        access.Remove("viewer");
+
+        return Write(root);
+    }
+
+    /// <summary>
+    /// Re-emits the descriptor with different whitespace and nothing else.
+    /// </summary>
+    /// <remarks>
+    /// It is what holds the escalation guard to "compare the parsed blocks": a reformatted
+    /// <c>access</c> block is the same block, so a guard that compared raw text would refuse a developer
+    /// for changing nothing.
+    /// </remarks>
+    /// <param name="descriptorJson">The descriptor to re-emit.</param>
+    internal static string Reformat(string descriptorJson) =>
+        Write(JsonNode.Parse(descriptorJson)!.AsObject());
+
     private static string Write(JsonObject root) =>
         root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
 }

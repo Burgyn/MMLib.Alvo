@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Net.Http.Headers;
 using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Auth;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Migrations;
 using System.Globalization;
@@ -193,7 +194,10 @@ internal static class ManagementEndpoints
                     ManagementApplyBody? body,
                     HttpRequest request,
                     IAlvoManagement management,
-                    CancellationToken ct) => ApplyAsync(project, body, request, management, ct)),
+                    ManagementAccessEvaluator access,
+                    IAlvoContextAccessor callers,
+                    CancellationToken ct) =>
+                    ApplyAsync(project, body, request, management, access, callers, ct)),
             new ManagementRoute(
                 nameof(IAlvoManagement.ApplyDescriptorAsync), ManagementOperation.ApplyDescriptor));
 
@@ -211,12 +215,16 @@ internal static class ManagementEndpoints
     /// <param name="body">The request body, or <see langword="null"/> when none was sent.</param>
     /// <param name="request">The request, read for <c>If-Match</c> and <c>?dryRun=</c>.</param>
     /// <param name="management">The contract member's implementation.</param>
+    /// <param name="access">The gate that resolves the caller's management level.</param>
+    /// <param name="callers">Where the caller resolved for this request is published.</param>
     /// <param name="ct">Cancellation token.</param>
     private static Task<IResult> ApplyAsync(
         string project,
         ManagementApplyBody? body,
         HttpRequest request,
         IAlvoManagement management,
+        ManagementAccessEvaluator access,
+        IAlvoContextAccessor callers,
         CancellationToken ct)
     {
         var expected = Revision(request);
@@ -235,9 +243,60 @@ internal static class ManagementEndpoints
             return Refused(ProblemResultFactory.ManagementValidation(DryRunUnreadable));
         }
 
-        return body?.DescriptorJson is null
+        return string.IsNullOrWhiteSpace(body?.DescriptorJson)
             ? Refused(ProblemResultFactory.ManagementValidation(BodyRequired))
-            : Answer(() => management.ApplyDescriptorAsync(project, body.ToRequest(revision, planOnly), ct));
+            : Answer(() => AdmittedApplyAsync(
+                project, body.ToRequest(revision, planOnly), management, access, callers, ct));
+    }
+
+    /// <summary>
+    /// Applies, after refusing a caller who may not change <b>who reaches the project</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Spec §3.3:</b> <i>"<c>developer</c> edits what the backend is, <c>admin</c> also decides who may
+    /// reach it."</i> The route's own gate is <c>ApplyDescriptor</c> at <c>Developer</c>, which is right for
+    /// every block but one: <c>access</c> is inside the descriptor and every accepted apply re-primes the
+    /// catalog the gate reads, so without this a <c>developer</c> promotes itself to <c>admin</c> by editing
+    /// three lines of JSON. The level is re-resolved here rather than read off the route, because the
+    /// requirement depends on what was sent.
+    /// </para>
+    /// <para>
+    /// <b>A dry run is refused identically.</b> A preview writes nothing and cannot escalate on its own, but
+    /// a preview whose plan the apply would then refuse tells an editor its change is ready when it is not —
+    /// the same reason the destructive guardrail runs on both branches.
+    /// </para>
+    /// <para>
+    /// It reads the applied descriptor through the contract, so an unknown project is
+    /// <see cref="ManagementProjectNotFoundException"/> — the named 404 — before any level is resolved, and
+    /// this route cannot answer a question about a project the others would refuse.
+    /// </para>
+    /// </remarks>
+    /// <param name="project">The project to apply to.</param>
+    /// <param name="apply">What the caller asked for.</param>
+    /// <param name="management">The contract member's implementation.</param>
+    /// <param name="access">The gate that resolves the caller's management level.</param>
+    /// <param name="callers">Where the caller resolved for this request is published.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <exception cref="ManagementEscalationException">
+    /// The apply would change the <c>access</c> block and the caller is not an administrator.
+    /// </exception>
+    private static async Task<ManagementApplyResult> AdmittedApplyAsync(
+        string project,
+        ManagementApplyRequest apply,
+        IAlvoManagement management,
+        ManagementAccessEvaluator access,
+        IAlvoContextAccessor callers,
+        CancellationToken ct)
+    {
+        var applied = await management.GetDescriptorAsync(project, ct).ConfigureAwait(false);
+        if (ManagementAccessChange.Differs(applied.DescriptorJson, apply.DescriptorJson)
+            && !access.Allows(ManagementLevel.Admin, callers.Principal?.Context ?? AlvoContext.Anonymous))
+        {
+            throw new ManagementEscalationException();
+        }
+
+        return await management.ApplyDescriptorAsync(project, apply, ct).ConfigureAwait(false);
     }
 
     /// <summary>One already-decided refusal, as the completed task a route handler answers with.</summary>
@@ -339,6 +398,10 @@ internal static class ManagementEndpoints
         catch (ManagementSimulationException refusal)
         {
             return ProblemResultFactory.ManagementValidation(refusal.Message);
+        }
+        catch (ManagementEscalationException)
+        {
+            return ProblemResultFactory.ManagementAccessChangeForbidden();
         }
         catch (DescriptorValidationException refusal)
         {

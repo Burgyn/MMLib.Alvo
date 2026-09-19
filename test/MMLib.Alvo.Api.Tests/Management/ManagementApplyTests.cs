@@ -26,6 +26,9 @@ public class ManagementApplyTests
     /// <summary>A caller the same block admits at <c>viewer</c> only.</summary>
     private static readonly TestApiKey _ops = new("mgmt-ops", ["ops"], ["*:read"]);
 
+    /// <summary>A caller the same block admits at <c>admin</c>.</summary>
+    private static readonly TestApiKey _owner = new("mgmt-owner", ["owner"], ["*:write"]);
+
     private const string Path = ManagedFleet.Routes + "/descriptor";
 
     [Fact]
@@ -194,6 +197,97 @@ public class ManagementApplyTests
         (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
     }
 
+    /// <summary>
+    /// A <c>developer</c> may not rewrite the <c>access</c> block, because that is deciding who may reach
+    /// the backend rather than what the backend is.
+    /// </summary>
+    /// <remarks>
+    /// <b>Spec §3.3:</b> <i>"<c>developer</c> edits what the backend is, <c>admin</c> also decides who may
+    /// reach it."</i> <c>access</c> lives inside the descriptor and every accepted apply re-primes the
+    /// catalog the management gate reads, so without this guard the one write route turns
+    /// <c>ApplyDescriptor</c>'s <c>Developer</c> level into <c>Admin</c> for anyone who edits three lines of
+    /// JSON. The last assertion is the half that matters: the caller the old block named is still admitted,
+    /// so nothing was escalated rather than merely not reported.
+    /// </remarks>
+    [Fact]
+    public async Task A_developer_may_not_change_who_may_reach_the_project()
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev, _ops]);
+
+        var response = await ApplyAsync(world, Escalated(await CurrentAsync(world)), ifMatch: "\"1\"");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
+        (await RevisionAsync(world)).ShouldBe(1);
+        (await world.SendAsync(HttpMethod.Get, Path, _ops)).StatusCode.ShouldBe(
+            HttpStatusCode.OK, "the viewer the old access block named is still admitted, so nothing escalated");
+    }
+
+    /// <summary>The same refusal on a dry run, so a preview cannot report a plan the apply would refuse.</summary>
+    [Fact]
+    public async Task A_developer_may_not_preview_a_change_to_who_may_reach_the_project()
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+
+        var response = await ApplyAsync(
+            world, Escalated(await CurrentAsync(world)), ifMatch: "\"1\"", query: "?dryRun=true");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    }
+
+    /// <summary>The other direction: a <c>developer</c> still edits everything that is not <c>access</c>.</summary>
+    [Fact]
+    public async Task A_developer_may_apply_a_change_that_leaves_the_access_block_alone()
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+
+        var response = await ApplyAsync(world, WithExtraField(await CurrentAsync(world)), ifMatch: "\"1\"");
+
+        response.StatusCode.ShouldBe(
+            HttpStatusCode.OK, "the guard is about the access block, not about applying at all");
+        (await RevisionAsync(world)).ShouldBe(2);
+    }
+
+    /// <summary>An administrator may make exactly the change the developer was refused.</summary>
+    /// <remarks>
+    /// Without this, the guard would be indistinguishable from a blanket ban on editing <c>access</c> over
+    /// the API, which is not what §3.3 says.
+    /// </remarks>
+    [Fact]
+    public async Task An_administrator_may_change_who_may_reach_the_project()
+    {
+        await using var world = await ManagedFleet.StartAsync([_owner]);
+
+        var response = await world.SendAsync(
+            HttpMethod.Put,
+            Path,
+            _owner,
+            body: Body(Escalated(await CurrentAsync(world, _owner))),
+            headers: [new KeyValuePair<string, string>("If-Match", "\"1\"")]);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+    }
+
+    /// <summary>
+    /// Re-emitting the same <c>access</c> block with different whitespace is not a change.
+    /// </summary>
+    /// <remarks>
+    /// This is what holds the guard to comparing the <em>parsed</em> blocks. A guard written over raw text
+    /// would refuse a developer here for changing nothing, and an editor that pretty-prints on save would
+    /// need an administrator for every apply.
+    /// </remarks>
+    [Fact]
+    public async Task A_reformatted_access_block_is_not_a_change()
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+
+        var response = await ApplyAsync(
+            world, DescriptorEdits.Reformat(await CurrentAsync(world)), ifMatch: "\"1\"");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, "the same block, spelled differently, is the same block");
+        (await RevisionAsync(world)).ShouldBe(1, "an unchanged re-apply appends nothing");
+    }
+
     [Fact]
     public async Task What_the_editor_sent_is_what_the_export_returns()
     {
@@ -223,8 +317,8 @@ public class ManagementApplyTests
         ["reason"] = "a fact",
     };
 
-    private static async Task<string> CurrentAsync(AlvoApiWorld world) =>
-        (await (await world.SendAsync(HttpMethod.Get, Path, _dev)).ReadJsonObjectAsync())
+    private static async Task<string> CurrentAsync(AlvoApiWorld world, TestApiKey? key = null) =>
+        (await (await world.SendAsync(HttpMethod.Get, Path, key ?? _dev)).ReadJsonObjectAsync())
             ["descriptorJson"]!.GetValue<string>();
 
     private static async Task<int> RevisionAsync(AlvoApiWorld world) =>
@@ -236,4 +330,8 @@ public class ManagementApplyTests
 
     private static string WithoutAnEntity(string descriptorJson) =>
         DescriptorEdits.RemoveEntity(descriptorJson, entity: "audits");
+
+    /// <summary>The descriptor with the developer's own role handed administration and the viewer dropped.</summary>
+    private static string Escalated(string descriptorJson) =>
+        DescriptorEdits.GrantAdminTo(descriptorJson, role: "dispatcher");
 }

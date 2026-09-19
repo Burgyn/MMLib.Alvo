@@ -97,6 +97,31 @@ internal static class ProblemResultFactory
             + "decides who is; ask whoever administers it.");
 
     /// <summary>
+    /// The 403 for an apply that would change <b>who may reach the project</b>, from a caller the project
+    /// does not admit as an administrator.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It names the rule and not the caller.</b> <see cref="ManagementForbidden"/> deliberately names
+    /// neither the level held nor the level needed, because it answers for <em>every</em> operation and a
+    /// message that named the requirement would let a caller map the whole level table one request at a
+    /// time. This one answers for exactly one rule — spec §3.3's <c>access</c> reservation, which the
+    /// descriptor schema publishes — so saying it discloses nothing a reader of the schema does not have,
+    /// and withholding it would leave an agent no fix at all. <b>Nothing about the caller is echoed</b>: the
+    /// wording is identical for every caller and every project.
+    /// </para>
+    /// <para>
+    /// The slug is <see cref="AlvoProblemTypes.Forbidden"/>, the one every policy refusal already carries.
+    /// </para>
+    /// </remarks>
+    internal static IResult ManagementAccessChangeForbidden() => Problem(
+        StatusCodes.Status403Forbidden,
+        AlvoProblemTypes.Forbidden,
+        "Changing a project's 'access' block decides who may reach this backend, which is reserved to an "
+            + "administrator. Apply this descriptor with its 'access' block unchanged, or ask whoever "
+            + "administers the project to apply it.");
+
+    /// <summary>
     /// The 422 for a Management API request this instance read and refused — an unknown operation, an
     /// undeclared role, a caller production could not produce.
     /// </summary>

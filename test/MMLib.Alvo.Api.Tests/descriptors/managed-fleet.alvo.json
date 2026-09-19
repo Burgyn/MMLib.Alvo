@@ -2,14 +2,15 @@
   "$schema": "https://alvo.dev/schema/v1/project.json",
   "apiVersion": "alvo.dev/v1",
   "name": "managed-fleet",
-  "description": "The project the Management API is measured over. It declares an access block, so a caller can reach the surface at all; two management levels, so the write path's 'developer, not viewer' rule is measurable against one project rather than against a second fixture; two entities, so 'what is served' is a set rather than a single name; and rules that admit one declared role and refuse another, so a policy simulation has two different answers to give and can be compared against what the Data API actually answers.",
+  "description": "The project the Management API is measured over. It declares an access block naming all three levels, so the write path's 'developer, not viewer' rule and spec 3.3's 'only an admin decides who may reach the backend' are both measurable against one project rather than against a second fixture; two entities, so 'what is served' is a set rather than a single name; and rules that admit one declared role and refuse another, so a policy simulation has two different answers to give and can be compared against what the Data API actually answers.",
   "auth": {
     "providers": ["local"],
-    "roles": ["ops", "dispatcher"]
+    "roles": ["ops", "dispatcher", "owner"]
   },
   "access": {
     "viewer": "'ops' in @user.roles",
-    "developer": "'dispatcher' in @user.roles"
+    "developer": "'dispatcher' in @user.roles",
+    "admin": "'owner' in @user.roles"
   },
   "entities": {
     "audits": {
