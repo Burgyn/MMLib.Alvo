@@ -34,27 +34,41 @@ internal static class ManagementAccessChange
     /// apply either. A stored descriptor that will not parse is the other way round: that is an invariant
     /// this instance relies on, so it fails closed.
     /// </remarks>
-    /// <param name="appliedDescriptorJson">The descriptor currently applied, or empty when none is.</param>
+    /// <param name="appliedDescriptorJson">The descriptor currently applied, or blank when none is.</param>
     /// <param name="candidateDescriptorJson">The descriptor the caller is applying.</param>
     internal static bool Differs(string appliedDescriptorJson, string candidateDescriptorJson) =>
         TryReadAccess(candidateDescriptorJson, out var candidate)
-        && (!TryReadAccess(appliedDescriptorJson, out var applied) || applied != candidate);
+        && (!TryReadApplied(appliedDescriptorJson, out var applied) || applied != candidate);
 
-    /// <summary>The descriptor's <c>access</c> block, when it can be read at all.</summary>
+    /// <summary>
+    /// The <c>access</c> block of the descriptor currently applied, where <b>blank is a known answer</b>.
+    /// </summary>
     /// <remarks>
-    /// Blank is a <em>known</em> answer rather than a failure: a project with nothing applied has no
-    /// <c>access</c> block, so a first descriptor that declares none changes nothing and a first descriptor
-    /// that declares one does.
+    /// <b>The two sides read blank differently, and the asymmetry is the point.</b> Here it means nothing
+    /// has been applied yet, so there is genuinely no <c>access</c> block and a first descriptor declaring
+    /// one is a change. On the candidate side it means the caller sent no descriptor at all, which is a
+    /// malformed request for the validator to refuse — never a block to compare against.
     /// </remarks>
-    /// <param name="descriptorJson">The descriptor text to read.</param>
+    /// <param name="descriptorJson">The applied descriptor text, or blank when none is applied.</param>
     /// <param name="access">The block it declares, or <see langword="null"/> when it declares none.</param>
     /// <returns><see langword="false"/> when the text is not a descriptor this build can parse.</returns>
+    private static bool TryReadApplied(string descriptorJson, out Access? access)
+    {
+        access = null;
+
+        return string.IsNullOrWhiteSpace(descriptorJson) || TryReadAccess(descriptorJson, out access);
+    }
+
+    /// <summary>The descriptor's <c>access</c> block, when the text is a descriptor at all.</summary>
+    /// <param name="descriptorJson">The descriptor text to read.</param>
+    /// <param name="access">The block it declares, or <see langword="null"/> when it declares none.</param>
+    /// <returns><see langword="false"/> when the text is blank, or not a descriptor this build can parse.</returns>
     private static bool TryReadAccess(string descriptorJson, out Access? access)
     {
         access = null;
         if (string.IsNullOrWhiteSpace(descriptorJson))
         {
-            return true;
+            return false;
         }
 
         try

@@ -167,6 +167,35 @@ public class ManagementApplyTests
         (await RevisionAsync(world)).ShouldBe(1, "an unreadable dryRun must not commit a schema change");
     }
 
+    /// <summary>
+    /// A query parameter this route does not read is refused, rather than ignored into a real apply.
+    /// </summary>
+    /// <remarks>
+    /// <b>The misspelling that matters is the one in the <em>name</em>.</b> Every <c>?dryRun=</c> value is
+    /// already safe, but an ignored unknown key means <c>?dry_run=true</c> and <c>?dry-run=true</c> commit
+    /// the change the caller asked to preview — the same outcome, reached one character earlier. The
+    /// argument the dry-run refusal makes from caller intent is exactly as true here, so this route reads
+    /// one query parameter and refuses every other.
+    /// </remarks>
+    /// <param name="query">A query string naming something this route does not read.</param>
+    [Theory]
+    [InlineData("?dry_run=true")]
+    [InlineData("?dry-run=true")]
+    [InlineData("?dryrun=true")]
+    [InlineData("?DryRun=true")]
+    [InlineData("?dryRun=true&force=true")]
+    public async Task A_query_parameter_this_route_does_not_read_is_refused(string query)
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+
+        var response = await ApplyAsync(
+            world, WithExtraField(await CurrentAsync(world)), ifMatch: "\"1\"", query: query);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await RevisionAsync(world)).ShouldBe(
+            1, "an ignored misspelling would apply the change the caller asked to preview");
+    }
+
     [Fact]
     public async Task An_invalid_descriptor_is_422_with_the_validator_s_own_violations()
     {
@@ -177,6 +206,78 @@ public class ManagementApplyTests
         response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
         (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Validation);
         (await response.ReadJsonObjectAsync())["violations"]!.AsArray().ShouldNotBeEmpty();
+        (await RevisionAsync(world)).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// A blank <c>descriptorJson</c> is the named 422, not a 500.
+    /// </summary>
+    /// <remarks>
+    /// <b>Blank is not null on this surface, and that is the whole point.</b>
+    /// <c>DescriptorValidator.Validate</c> opens with <c>ArgumentException.ThrowIfNullOrWhiteSpace</c>, and
+    /// <c>Answer</c> catches named refusals only — so a guard written as "null" let a whitespace descriptor
+    /// through to family 5, which a shipped host renders as a <b>500</b>. It is the same defect
+    /// <c>6c69c63</c> fixed one segment over for a blank project name, and
+    /// <c>ManagementApplyBody.ToRequest</c> maps an absent descriptor onto exactly this value, so the two
+    /// shapes have to answer alike.
+    /// </remarks>
+    /// <param name="descriptorJson">A descriptor that is present and says nothing.</param>
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("\t\n")]
+    public async Task A_blank_descriptor_is_refused_rather_than_thrown(string descriptorJson)
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+
+        var response = await ApplyAsync(world, descriptorJson, ifMatch: "\"1\"");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Validation);
+        (await RevisionAsync(world)).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// An administrator sending a blank descriptor gets the same 422, and this is the case the escalation
+    /// guard would otherwise have hidden.
+    /// </summary>
+    /// <remarks>
+    /// <b>Written because a fix can be masked by an unrelated guard.</b> With the blank check still written
+    /// as "null", a <em>developer</em>'s blank descriptor was answered 403 — the access-change guard read
+    /// blank as "declares no access block", saw that differ from the applied one, and refused first. The
+    /// 500 was still there for anyone the guard did not stop. A refusal that only holds for callers some
+    /// other rule already refuses is not a refusal.
+    /// </remarks>
+    [Fact]
+    public async Task An_administrator_sending_a_blank_descriptor_is_refused_rather_than_thrown()
+    {
+        await using var world = await ManagedFleet.StartAsync([_owner]);
+
+        var response = await world.SendAsync(
+            HttpMethod.Put,
+            Path,
+            _owner,
+            body: Body("   "),
+            headers: [new KeyValuePair<string, string>("If-Match", "\"1\"")]);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Validation);
+    }
+
+    /// <summary>A body that names no descriptor at all takes the same path as a blank one.</summary>
+    [Fact]
+    public async Task An_apply_naming_no_descriptor_is_refused_rather_than_thrown()
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+
+        var response = await world.SendAsync(
+            HttpMethod.Put,
+            Path,
+            _dev,
+            body: new JsonObject { ["author"] = "the-suite" },
+            headers: [new KeyValuePair<string, string>("If-Match", "\"1\"")]);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
         (await RevisionAsync(world)).ShouldBe(1);
     }
 

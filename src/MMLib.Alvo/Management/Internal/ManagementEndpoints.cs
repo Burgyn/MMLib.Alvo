@@ -238,6 +238,11 @@ internal static class ManagementEndpoints
             return Refused(ProblemResultFactory.PreconditionFailed(IfMatchUncomparable));
         }
 
+        if (!OnlyDryRunAsked(request))
+        {
+            return Refused(ProblemResultFactory.ManagementValidation(UnknownQueryParameter));
+        }
+
         if (DryRunAsked(request) is not { } planOnly)
         {
             return Refused(ProblemResultFactory.ManagementValidation(DryRunUnreadable));
@@ -313,9 +318,8 @@ internal static class ManagementEndpoints
     /// <see cref="IfMatchRevision.Uncomparable"/> rather than ignored.
     /// </remarks>
     /// <param name="request">The request to read the header from.</param>
-    internal static IfMatchRevision Revision(HttpRequest request)
+    private static IfMatchRevision Revision(HttpRequest request)
     {
-        ArgumentNullException.ThrowIfNull(request);
         if (!request.Headers.TryGetValue(HeaderNames.IfMatch, out var values) || values.Count == 0)
         {
             return IfMatchRevision.Absent;
@@ -328,6 +332,21 @@ internal static class ManagementEndpoints
             ? IfMatchRevision.Of(revision)
             : IfMatchRevision.Uncomparable;
     }
+
+    /// <summary>
+    /// Whether the query string names nothing but <c>dryRun</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>An unknown key is refused, not ignored, and the reason is the same one <see cref="DryRunAsked"/>
+    /// gives.</b> Every <c>?dryRun=</c> <em>value</em> this route cannot read is already refused; leaving an
+    /// unknown <em>name</em> ignored would put the identical outcome one character away, because
+    /// <c>?dry_run=true</c> asks for a preview and would commit the change instead. Ordinal, so
+    /// <c>?DryRun=</c> is a different name — every other name in this framework is compared the same way,
+    /// and a route that guessed at capitalisation here would have to guess everywhere.
+    /// </remarks>
+    /// <param name="request">The request to read the query string from.</param>
+    private static bool OnlyDryRunAsked(HttpRequest request) =>
+        request.Query.Keys.All(key => string.Equals(key, DryRunKey, StringComparison.Ordinal));
 
     /// <summary>
     /// Whether <c>?dryRun=</c> asked for a plan-only pass, or <see langword="null"/> when it carried a value
@@ -361,6 +380,16 @@ internal static class ManagementEndpoints
     private const string IfMatchUncomparable =
         "'If-Match' must carry the descriptor's revision as a single strong tag, e.g. If-Match: \"3\". "
         + "A weak tag, a list of tags and '*' name no revision this API can compare.";
+
+    /// <summary>What a caller who named a query parameter this route does not read has to do.</summary>
+    /// <remarks>
+    /// It does not echo the key the caller sent, for the reason <c>ProblemResultFactory.MalformedQuery</c>
+    /// records: a <c>detail</c> is built from constants and server-owned values only, so no caller-supplied
+    /// text comes back out. Naming the one parameter that <em>is</em> read says the same thing safely.
+    /// </remarks>
+    private const string UnknownQueryParameter =
+        "This endpoint reads one query parameter, 'dryRun'. Send no others: a misspelled name would "
+        + "otherwise be ignored and the change applied for real.";
 
     /// <summary>What a caller whose dry-run flag could not be read has to do.</summary>
     private const string DryRunUnreadable =
