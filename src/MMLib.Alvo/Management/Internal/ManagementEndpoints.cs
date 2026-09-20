@@ -379,7 +379,10 @@ internal static class ManagementEndpoints
     {
         var applied = await management.GetDescriptorAsync(project, ct).ConfigureAwait(false);
         var target = await management.GetRevisionAsync(project, targetRevision, ct).ConfigureAwait(false);
-        EnsureAccessBlockMayChange(applied.DescriptorJson, target.DescriptorJson, access, callers);
+        EnsureAccessBlockMayChange(
+            ManagementAccessChange.DiffersFromStored(applied.DescriptorJson, target.DescriptorJson),
+            access,
+            callers);
 
         return await management.RollbackAsync(project, targetRevision, rollback, ct).ConfigureAwait(false);
     }
@@ -393,18 +396,21 @@ internal static class ManagementEndpoints
     /// reach it."</i> Both write routes go through this one expression, so neither can enforce the rule the
     /// other does not — which is the whole failure mode C-1 was.
     /// </remarks>
-    /// <param name="appliedDescriptorJson">The descriptor currently applied.</param>
-    /// <param name="candidateDescriptorJson">The descriptor about to become current.</param>
+    /// <param name="changesAccess">
+    /// Whether the descriptor about to become current declares a different <c>access</c> block. Each route
+    /// answers that with the reading its own candidate deserves — <c>ManagementAccessChange.Differs</c> for a
+    /// descriptor the caller sent and a validator will refuse, <c>DiffersFromStored</c> for a revision this
+    /// instance already appended and nothing stands behind.
+    /// </param>
     /// <param name="access">The gate that resolves the caller's management level.</param>
     /// <param name="callers">Where the caller resolved for this request is published.</param>
     /// <exception cref="ManagementEscalationException">The block differs and the caller is no administrator.</exception>
     private static void EnsureAccessBlockMayChange(
-        string appliedDescriptorJson,
-        string candidateDescriptorJson,
+        bool changesAccess,
         ManagementAccessEvaluator access,
         IAlvoContextAccessor callers)
     {
-        if (ManagementAccessChange.Differs(appliedDescriptorJson, candidateDescriptorJson)
+        if (changesAccess
             && !access.Allows(ManagementLevel.Admin, callers.Principal?.Context ?? AlvoContext.Anonymous))
         {
             throw new ManagementEscalationException();
@@ -473,7 +479,8 @@ internal static class ManagementEndpoints
         CancellationToken ct)
     {
         var applied = await management.GetDescriptorAsync(project, ct).ConfigureAwait(false);
-        EnsureAccessBlockMayChange(applied.DescriptorJson, apply.DescriptorJson, access, callers);
+        EnsureAccessBlockMayChange(
+            ManagementAccessChange.Differs(applied.DescriptorJson, apply.DescriptorJson), access, callers);
 
         return await management.ApplyDescriptorAsync(project, apply, ct).ConfigureAwait(false);
     }

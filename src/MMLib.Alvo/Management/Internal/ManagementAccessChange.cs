@@ -41,6 +41,27 @@ internal static class ManagementAccessChange
         && (!TryReadApplied(appliedDescriptorJson, out var applied) || applied != candidate);
 
     /// <summary>
+    /// Whether restoring <paramref name="storedDescriptorJson"/> would leave a different <c>access</c> block
+    /// than <paramref name="appliedDescriptorJson"/> declares — the rollback route's reading.
+    /// </summary>
+    /// <remarks>
+    /// <b>A stored descriptor that will not parse fails <em>closed</em>, the opposite of
+    /// <see cref="Differs"/>.</b> That member's open failure is justified by a validator standing behind it:
+    /// a caller's candidate is refused before it can be applied, so calling it an escalation would only send
+    /// an editor to find an administrator for a descriptor no administrator could apply either. Nothing
+    /// stands behind a revision this instance already appended — it is an invariant of this instance, which
+    /// the type's own remarks already said must fail closed, and reading it as "no access change" would hand
+    /// a <c>developer</c> a restore whose block nobody could compare.
+    /// </remarks>
+    /// <param name="appliedDescriptorJson">The descriptor currently applied, or blank when none is.</param>
+    /// <param name="storedDescriptorJson">The stored revision the caller is restoring.</param>
+    /// <returns><see langword="true"/> when the restore changes who may reach the project, or cannot be read.</returns>
+    internal static bool DiffersFromStored(string appliedDescriptorJson, string storedDescriptorJson) =>
+        !TryReadAccess(storedDescriptorJson, out var stored)
+        || !TryReadApplied(appliedDescriptorJson, out var applied)
+        || applied != stored;
+
+    /// <summary>
     /// The <c>access</c> block of the descriptor currently applied, where <b>blank is a known answer</b>.
     /// </summary>
     /// <remarks>
