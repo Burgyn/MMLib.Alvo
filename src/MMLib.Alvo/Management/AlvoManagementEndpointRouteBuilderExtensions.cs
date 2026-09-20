@@ -24,9 +24,12 @@ public static class AlvoManagementEndpointRouteBuilderExtensions
     /// nobody but the deployment's bootstrap administrator, which is what default-deny means here.
     /// </para>
     /// <para>
-    /// <b>It is not part of <c>MapAlvo()</c>.</b> That call is the HTTP surface every host gets from the
-    /// framework — the probes and the generated Data API — and mounting an administration surface as a side
-    /// effect of mapping a data one is a decision an embedded host has to make for itself.
+    /// <b><c>MapAlvo()</c> calls this, and calling it directly is what a host does for a convention.</b> The
+    /// umbrella discards the builder returned here, so a host that wants <c>RequireRateLimiting</c>, a CORS
+    /// policy or an authorization convention over the management routes <em>alone</em> maps the pieces
+    /// itself — <c>MapAlvoHealth()</c>, <c>MapAlvoDataApi()</c> and this — and keeps what this returns.
+    /// Throttling in particular is deliberately a host decision: this package ships no rate limiter and
+    /// applies none.
     /// </para>
     /// </remarks>
     /// <param name="endpoints">The endpoint route builder to map onto.</param>

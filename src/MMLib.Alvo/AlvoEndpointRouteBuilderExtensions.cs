@@ -13,22 +13,39 @@ namespace Microsoft.AspNetCore.Builder;
 public static class AlvoEndpointRouteBuilderExtensions
 {
     /// <summary>
-    /// Maps Alvo's probe endpoints and the generated Data API — the whole HTTP surface a host gets from the
-    /// framework, in one call.
+    /// Maps Alvo's probe endpoints, the generated Data API and the Management API — the whole HTTP surface a
+    /// host gets from the framework, in one call.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>It is a composition, not a replacement.</b> <c>MapAlvoHealth()</c> and <c>MapAlvoDataApi()</c> stay
-    /// public for a host that wants the pieces — mounted under different route groups, say, or with only one
-    /// of them — exactly as <c>MapControllers</c> coexists with the finer-grained controller mappings. This
-    /// method is defined as those two calls and nothing else, and a test asserts the two mappings produce the
-    /// same endpoint data sources, so the umbrella cannot drift from its parts.
+    /// <b>It is a composition, not a replacement.</b> <c>MapAlvoHealth()</c>, <c>MapAlvoDataApi()</c> and
+    /// <c>MapAlvoManagementApi()</c> stay public for a host that wants the pieces — mounted under different
+    /// route groups, say, or with only some of them — exactly as <c>MapControllers</c> coexists with the
+    /// finer-grained controller mappings. This method is defined as those three calls and nothing else, and a
+    /// test asserts the mappings produce the same endpoint data sources, so the umbrella cannot drift from
+    /// its parts.
+    /// </para>
+    /// <para>
+    /// <b>The management surface is mounted here, and it is closed.</b> Every management route carries the
+    /// gate the descriptor's <c>access</c> block compiles, and a caller that block does not name is refused —
+    /// so a host that calls this method and honours no <c>access</c> block has an administration surface that
+    /// answers 403 to everyone, including itself. That is the correct resting state, and it is why mounting
+    /// it by default is safe: reaching it takes an explicit grant in the descriptor, or the deployment's
+    /// bootstrap administrator.
     /// </para>
     /// <para>
     /// <b>Health maps first, and the order is load-bearing.</b> <c>MapAlvoDataApi()</c> refuses a host whose
     /// Data API services are absent, and an operator facing that refusal needs a container that can still be
     /// probed: mapping health second would leave one that answers nothing at all, which an orchestrator
     /// cannot tell from a process that is merely slow to start.
+    /// </para>
+    /// <para>
+    /// <b>It returns the route builder, so the management surface's convention builder is discarded here.</b>
+    /// A host that wants a convention over the management routes alone — <c>RequireRateLimiting</c>, most
+    /// obviously, which this package never applies on a host's behalf — calls
+    /// <c>MapAlvoManagementApi()</c> itself and keeps what it returns. Widening this method's return type to
+    /// carry one builder out of three would privilege one part of the composition over the others, and
+    /// <c>MapAlvo</c>'s value is that it chains like every other <c>Map*</c> a host writes.
     /// </para>
     /// <para>
     /// <b>Calling it stays mandatory, deliberately.</b> Nothing Alvo registers is reachable over HTTP until a
@@ -54,6 +71,7 @@ public static class AlvoEndpointRouteBuilderExtensions
 
         endpoints.MapAlvoHealth();
         endpoints.MapAlvoDataApi();
+        endpoints.MapAlvoManagementApi();
 
         return endpoints;
     }

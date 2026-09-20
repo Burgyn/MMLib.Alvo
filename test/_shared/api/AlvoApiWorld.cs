@@ -189,9 +189,9 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             app.MapOpenApi();
         }
 
-        // Opt-in for the same reason, and one more: the management surface is mounted by its own seam, never
-        // by MapAlvo(), so a world that always mapped it would measure a composition no host is obliged to
-        // write.
+        // Opt-in for the same reason, and one more: this world mounts the Data API through MapAlvoDataApi
+        // rather than through the umbrella MapAlvo(), so the management surface only exists here when a fact
+        // asks for it — and every route-table fact in this suite keeps counting the endpoints it expects.
         if (setup.MapManagementApi)
         {
             app.MapAlvoManagementApi();
