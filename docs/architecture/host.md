@@ -244,6 +244,18 @@ prefix's context. `AlvoIdentityModelCacheKeyFactory` is what closes that, and
 `AlvoIdentitySchemaPrefixTests.Two_prefixes_in_one_process_get_two_models` is the fact that
 fails without it.
 
+**Upgrading a deployment that already set a non-default prefix takes one manual step.** A host
+that has been running `UseSchemaPrefix("acme")` with identity holds `alvo_identity_*` tables
+created under the old constant. On the first start after this fix,
+`AlvoIdentityBootstrap.TablesExistAsync` probes `acme_identity_users`, finds nothing, creates
+the seven tables empty and re-seeds the configured bootstrap administrator — so the old
+accounts, roles and key records stay behind in tables nothing reads, *and* those tables are
+outside `AlvoFrameworkTables.NamesFor("acme")`, so the next re-apply plans a `DROP` over them.
+Copy the rows across (or export them) before the upgrade, then drop the `alvo_identity_*`
+tables deliberately. Nothing in this repository sets a non-default prefix, and the fix creates
+neither problem — the tables were already misplaced — but an operator crossing this version
+deserves the sentence rather than the surprise.
+
 **Identity's request path is a seam with no consumer yet, and that is deliberate.** The host
 calls `AddAlvoIdentity` unconditionally, so every standalone deployment creates the seven
 `<prefix>_identity_*` tables and seeds the configured bootstrap administrator. What that

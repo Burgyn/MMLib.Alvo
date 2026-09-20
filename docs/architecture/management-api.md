@@ -62,19 +62,26 @@ refusal — are all *transport* concerns: they translate an HTTP request into th
 takes. `ManagementApplyRequest` carries its expected revision and its idempotency key as **fields**, not as
 headers, which is what makes an MCP adapter a mapping rather than a second implementation.
 
-The escalation guard above **used to** sit in the endpoint layer, and it does not any more. It is the one
-authorization decision that is not pre-decidable at composition — whether a *particular* descriptor changes
-the `access` block depends on what was sent — so it belongs where both transports meet it, which is
-`AlvoManagementService`. Leaving it in `ManagementEndpoints` made it an HTTP-only rule: a dashboard resolves
-one registered `IAlvoManagement` and serves many humans through it, so "whatever composed this reference
-already admitted the caller" admits the *process*, not the person, and the in-process path escalated freely.
-`ManagementInProcessAccessTests` measures the closed version over the in-process transport; every other
-access fact in the repo goes over HTTP, which is why nothing saw it.
+**Authorization used to sit in the endpoint layer, and none of it does any more.** Both halves — the level
+table (`ManagementOperations`) and the §3.3 `access`-block comparison — are read by `AlvoManagementService`,
+at the head of every contract member, so both transports meet the same gate. Leaving either in
+`ManagementEndpoints` made it an HTTP-only rule: a dashboard resolves one registered `IAlvoManagement` and
+serves many humans through it, so "whatever composed this reference already admitted the caller" admits the
+*process*, not the person, and the in-process path escalated freely. `ManagementInProcessAccessTests`
+measures the closed version over the in-process transport; every other access fact in the repo goes over
+HTTP, which is why nothing saw it.
 
-What stays in the endpoint layer is the route **level** gate (`RequireAlvoManagementAccess`), and that
-asymmetry is the point: which level an operation needs is a property of the operation, decidable before any
-request exists, and an in-process caller reached the interface because whatever composed it made that same
-decision earlier.
+`RequireAlvoManagementAccess` stays on every route, and is now an **early rejection rather than the only
+one**. It reads the same table through the same evaluator as the service, so it cannot answer differently;
+what it adds is the moment — it refuses before model binding, so a caller with no level never costs a
+descriptor parse. `ManagementEndpoints.Answer` renders `ManagementForbiddenException` as the same 403 the
+filter returns, which is what makes the filter a cost optimisation rather than a load-bearing gate.
+
+The consequence is worth stating plainly: **every in-process management call needs a published principal.**
+An embedded host that holds `IAlvoManagement` and publishes nobody is the anonymous caller, and the
+anonymous caller reaches no level — so it is refused, on reads as well as on writes. That is default-deny
+applied to the surface that admits it does not know who is calling. A host that wants an unattended apply
+publishes a caller the project's own `access` block admits, or applies through the boot.
 
 ## D3: `If-Match` carries `revision`, not an `ETag`
 

@@ -402,9 +402,12 @@ of a standard:
    `RoleCatalog`, so a level naming a role `auth.roles` does not declare is refused at apply with the
    same "did you mean" suggestion a rule's typo gets. `UnhonouredSubsystems` no longer carries an
    `access` entry — the file's own doc comment demanded that transition — and a caller who matches no
-   level is refused `403` on every **gated** management operation. "Gated" is load-bearing: the gate
-   is attached per route by `RequireAlvoManagementAccess(<operation>)`, and the routes that will
-   carry it are #212's, not this work's. A route without the gate is not refused by anything.
+   level is refused `403` on every management operation. "Gated" was load-bearing when this was
+   written — the gate was attached per route by `RequireAlvoManagementAccess(<operation>)`, and a
+   route without it was refused by nothing. It is not any more: `AlvoManagementService` reads the
+   same table at the head of every `IAlvoManagement` member, so the route filter is an early
+   rejection and the surface is closed whether or not a route carries it. See
+   `management-api.md`, *One path, two transports*.
 2. **`changed(field)`** — not a CEL macro; an Alvo addition for the Condition profile only, parsed
    with the same one-bare-identifier-argument shape as `has(...)`.
 3. **`old.field`/`new.field` state-qualified row references** — Alvo's own way of expressing a
