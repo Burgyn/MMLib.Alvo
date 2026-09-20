@@ -175,6 +175,16 @@ ships a dev key. Both configuration assertions read the files **through
 and a `JsonNode` indexer is not, so a lowercase `"alvo"` or `"auth"`/`"admin"` would
 otherwise bind a working credential past a green fact.
 
+**A key's `scopes` bound what it reaches on the Data API and nothing at all on `/management`.**
+An `ApiKeyScope` is `<entity|*>:<read|write>`, and there is no spelling for "may manage this
+project" — so a key issued as `["notes:read"]` is refused `POST /api/notes` and is *unrestricted*
+on the management surface the moment its **roles** satisfy the descriptor's `access` block:
+reading the whole descriptor, applying a new one, rolling back. That is decision **D7**, argued in
+[`management-api.md`](./management-api.md#an-api-keys-scopes-govern-no-management-request-d7) and
+pinned over the wire — it is repeated here because an operator issuing a narrow key is entitled to
+read it where they issue one, not only where it was decided. Narrow a key's management reach by
+narrowing its **roles**.
+
 ## The bootstrap administrator
 
 `MMLib.Alvo.Identity`'s human identity is optional infrastructure config, never part of the
@@ -220,13 +230,33 @@ container with a rotated password file changes nothing about an account that alr
 exists; rotating a live administrator's credential is a dashboard operation; the bootstrap
 only ever *creates* the account, once.
 
-**The identity tables always use the `alvo` prefix**, never `AlvoOptions.SchemaPrefix` —
-`AlvoIdentityOptions` has deliberately no `SchemaPrefix` of its own. EF's model cache is
-keyed on the `DbContext` type, so a *per-instance* table prefix is not expressible without a
-model-cache-key provider, and no host in this repository sets a non-default
-`AlvoOptions.SchemaPrefix` in the first place. Shipping a setting that could not do anything
-in the one shape that exists today would be a dead option; the narrowing is recorded here
-so a later reader can tell the decision from an oversight.
+**The identity tables follow `AlvoOptions.SchemaPrefix`**, and `AlvoIdentityOptions` has
+deliberately no prefix of its own: one prefix names every table the framework owns, which is
+the same value `AlvoFrameworkTables.NamesFor` builds the introspector's exclusion set and the
+descriptor validator's reserved-name set from. They agreed only by coincidence while the
+identity prefix was a constant — a host calling `UseSchemaPrefix("acme")` reserved
+`acme_identity_*` and created `alvo_identity_*`, which put every operator account inside what
+Alvo reads as the *user's* schema, where the next re-apply plans a `DROP` and a `developer`
+may declare an entity over the users table. The constant was not arbitrary: EF's model cache
+is keyed on the `DbContext` type and lives in a process-wide internal service provider, so
+reading the option without also keying the cache on it serves one prefix's model to another
+prefix's context. `AlvoIdentityModelCacheKeyFactory` is what closes that, and
+`AlvoIdentitySchemaPrefixTests.Two_prefixes_in_one_process_get_two_models` is the fact that
+fails without it.
+
+**Identity's request path is a seam with no consumer yet, and that is deliberate.** The host
+calls `AddAlvoIdentity` unconditionally, so every standalone deployment creates the seven
+`<prefix>_identity_*` tables and seeds the configured bootstrap administrator. What that
+administrator can do today is reached through an **API key** whose record carries their user
+id — `ManagementAccessEvaluator` consults `IAlvoBootstrapAdmin` and admits them at `admin`
+regardless of the `access` block. What they cannot do is *sign in*: nothing in `src/` resolves
+`AlvoIdentity.ResolverKey`, no cookie authentication scheme is added, and there is no sign-in
+endpoint. The cookie `IAlvoContextResolver` is registered keyed precisely so that installing
+the package cannot turn a user's uuid into a working API key, and it stays unreached until the
+dashboard (#227's second half) mounts the sign-in surface that consumes it. Registering the
+seam now keeps the bootstrap account, its tables and its validation on one schedule instead of
+arriving with the dashboard as a migration; it is stated here because "seeds an account nobody
+can sign in as" reads as a defect if you do not know it is the plan.
 
 ## The startup mode, and what production should set
 

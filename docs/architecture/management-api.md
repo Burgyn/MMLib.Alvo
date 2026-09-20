@@ -6,8 +6,9 @@ a policy would admit. It never reads or writes a row of application data. That i
 deviation **D4**, and the whole shape of this document follows from it.
 
 Mounted by `MapAlvo()` under `Alvo:Management:RoutePrefix` (default `/management`), and closed: every route
-carries the gate the descriptor's `access` block compiles, so a build honouring no `access` block answers
-403 to everyone including the deployment that started it.
+carries the gate the descriptor's `access` block compiles, so a build honouring no `access` block admits
+nobody but the deployment's **bootstrap administrator** — the one identity that sits above the descriptor,
+because it is infrastructure configuration rather than a block a locked-out project could edit.
 
 ## The surface
 
@@ -40,8 +41,9 @@ the most restrictive answer, not the most convenient one. Three of the thirteen 
 ### The one place a route's level is not the whole answer
 
 A `developer` may apply a descriptor. A `developer` may **not** apply one whose `access` block differs from
-the applied one, and may not roll back to a revision whose block differs — both write routes re-resolve the
-requirement to `admin` in that case, through one shared expression. Spec §3.3 divides the levels as
+the applied one, and may not roll back to a revision whose block differs — both write **members** re-resolve
+the requirement to `admin` in that case, through one shared expression inside `AlvoManagementService`, which
+is what makes the rule hold on the in-process transport too. Spec §3.3 divides the levels as
 *`developer` edits what the backend is, `admin` also decides who may reach it*, and `access` is the one
 infrastructure-shaped block that lives inside the descriptor. Without the guard a `developer` promotes
 itself by editing three lines of JSON, because every accepted apply re-primes the catalog the gate reads.
@@ -60,10 +62,19 @@ refusal — are all *transport* concerns: they translate an HTTP request into th
 takes. `ManagementApplyRequest` carries its expected revision and its idempotency key as **fields**, not as
 headers, which is what makes an MCP adapter a mapping rather than a second implementation.
 
-The escalation guard above is the one thing that sits in the endpoint layer and is not transport. It is
-recorded here rather than hidden: it needs the resolved caller and the access evaluator, which is where the
-gate already is, and both write routes go through the one expression so neither can enforce a rule the
-other does not.
+The escalation guard above **used to** sit in the endpoint layer, and it does not any more. It is the one
+authorization decision that is not pre-decidable at composition — whether a *particular* descriptor changes
+the `access` block depends on what was sent — so it belongs where both transports meet it, which is
+`AlvoManagementService`. Leaving it in `ManagementEndpoints` made it an HTTP-only rule: a dashboard resolves
+one registered `IAlvoManagement` and serves many humans through it, so "whatever composed this reference
+already admitted the caller" admits the *process*, not the person, and the in-process path escalated freely.
+`ManagementInProcessAccessTests` measures the closed version over the in-process transport; every other
+access fact in the repo goes over HTTP, which is why nothing saw it.
+
+What stays in the endpoint layer is the route **level** gate (`RequireAlvoManagementAccess`), and that
+asymmetry is the point: which level an operation needs is a property of the operation, decidable before any
+request exists, and an in-process caller reached the interface because whatever composed it made that same
+decision earlier.
 
 ## D3: `If-Match` carries `revision`, not an `ETag`
 
@@ -337,3 +348,12 @@ routes are default-deny and harder to reach than the Data API's, so a mounted-bu
 host nothing and saves an embedded host from discovering a second call it has to make. A host that wants it
 truly absent maps `MapAlvoHealth()` and `MapAlvoDataApi()` instead of `MapAlvo()`, which is the same seam
 it already uses to pick route groups.
+
+The decision stands, and the case that argues against it is not the empty `access` block — it is the
+**non-empty** one. `access` was previously parsed and not honoured, and a host could have written a block
+that did nothing but earn a capability warning. Upgrading to this build makes that block live *and* mounts
+`/management` under `MapAlvo()`, so a deployment gains a working configuration surface — read and write —
+with no code change, no configuration change, and nothing in its own repository that moved. We take that
+cost knowingly: the block that comes alive is the one the operator wrote, the capability report warned that
+it was inert, and a surface admitting exactly whom the operator named is the outcome they asked for. It is
+stated here so an upgrade is a decision rather than a discovery.

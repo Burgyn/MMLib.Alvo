@@ -978,9 +978,10 @@ why neither is documented on any operation.
 | 409 | `conflict` | a constraint the database enforces refused the write — a `unique` value another record holds, or a `restrict`-ed reference |
 | 409 | `destructive-change` | **Management API only** — the apply's plan would discard data and the caller did not allow that |
 | 412 | `precondition-failed` | a precondition this API cannot evaluate, or a version that does not match |
-| 428 | `precondition-required` | **Management API only** — the write requires `If-Match` and carried none |
+| 415 | `unsupported-media-type` | the request body was not declared as JSON, so nothing read it — the fix is a header, not the body |
 | 422 | `validation` | schema-derived validation refused the body |
 | 422 | `malformed-query` | the query string or the query body is malformed — the shape is wrong, nothing is hidden |
+| 428 | `precondition-required` | **Management API only** — the write requires `If-Match` and carried none |
 | 413, 408, 400 | `unreadable-request` | the **web server** refused the request before Alvo read it (a body over `MaxRequestBodySize`, one arriving too slowly, one whose framing broke) — same opt-in as `internal`, and likewise documented on no operation |
 | 500 | `internal` | an invariant Alvo relies on is broken — **only** in a host that called `AddAlvoProblemDetails()`; no endpoint produces it and no operation documents it |
 

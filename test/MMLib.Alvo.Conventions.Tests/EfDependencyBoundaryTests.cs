@@ -106,6 +106,29 @@ public class EfDependencyBoundaryTests
         referencing.ShouldBe(["MMLib.Alvo.Host", "MMLib.Alvo.Identity.Tests"]);
     }
 
+    /// <summary>
+    /// <b>The admin package reaches the core through Abstractions and through nothing else.</b>
+    /// </summary>
+    /// <remarks>
+    /// <c>package-boundary.md</c> calls this "what makes spec §0.5 contract 4 (<i>dashboard and CLI are
+    /// clients of the same API</i>) a structural fact rather than a promise" — and nothing asserted it, which
+    /// is the shape of claim this suite exists to convert into a measurement. A project reference from
+    /// <c>MMLib.Alvo.Admin</c> to <c>MMLib.Alvo</c> would let a dashboard component call an internal path the
+    /// HTTP surface does not expose, and the claim would still read true in the document.
+    /// </remarks>
+    [Fact]
+    public void The_admin_package_reaches_the_core_only_through_abstractions()
+    {
+        var reached = ClosureOf(AdminPackage);
+
+        reached.ShouldNotContain(
+            "MMLib.Alvo",
+            "a reference to the core is a second path to a decision the HTTP surface already owns");
+        reached.Where(IsDataPackage).ShouldBeEmpty("a design system needs no database driver");
+    }
+
+    private const string AdminPackage = "MMLib.Alvo.Admin";
+
     private static bool IsEfPackage(string name) =>
         name.StartsWith("Microsoft.EntityFrameworkCore", StringComparison.Ordinal)
         || name.StartsWith("Npgsql", StringComparison.Ordinal);

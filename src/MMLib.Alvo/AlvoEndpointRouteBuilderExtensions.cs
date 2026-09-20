@@ -29,9 +29,11 @@ public static class AlvoEndpointRouteBuilderExtensions
     /// <b>The management surface is mounted here, and it is closed.</b> Every management route carries the
     /// gate the descriptor's <c>access</c> block compiles, and a caller that block does not name is refused —
     /// so a host that calls this method and honours no <c>access</c> block has an administration surface that
-    /// answers 403 to everyone, including itself. That is the correct resting state, and it is why mounting
-    /// it by default is safe: reaching it takes an explicit grant in the descriptor, or the deployment's
-    /// bootstrap administrator.
+    /// admits nobody but the deployment's <b>bootstrap administrator</b>, which is infrastructure
+    /// configuration and deliberately above the descriptor (<c>docs/PLAN.md</c> invariant 4), so a project
+    /// whose block locks everyone out still has exactly one identity that can fix it. That is the correct
+    /// resting state, and it is why mounting it by default is safe: reaching it takes an explicit grant in
+    /// the descriptor, or that one configured identity.
     /// </para>
     /// <para>
     /// <b>Health maps first, and the order is load-bearing.</b> <c>MapAlvoDataApi()</c> refuses a host whose

@@ -49,14 +49,22 @@
   transitively, because a package's build targets do not travel through a
   `ProjectReference`. Details in [`host.md`](./host.md).
 - `src/MMLib.Alvo.Admin` — the admin dashboard's design system and, once #227's
-  second half lands, its Blazor components. **Earned by rule (a)**: Blazor is the
-  clearest heavy dependency in the family, and an embedded host that wants only the
-  Data API must never acquire it. It takes `Microsoft.AspNetCore.App` as a framework
-  reference rather than a `Microsoft.AspNetCore.Components.Web` package, for the same
-  NU1510 reason `MMLib.Alvo` does. **It holds no project reference to `MMLib.Alvo`**
-  — it reaches the core through `IAlvoManagement` in Abstractions, which is what
-  makes spec §0.5 contract 4 ("dashboard and CLI are clients of the same API") a
-  structural fact rather than a promise. Its public surface is deliberately one
+  second half lands, its Blazor components. **Earned by rule (a)**, and today the
+  heavy thing is the **Razor Class Library boundary**, not Blazor: the project holds
+  no components yet, only `wwwroot/alvo.css` and `wwwroot/alvo.js`. An RCL's
+  `wwwroot` ships as static web assets under `_content/MMLib.Alvo.Admin/` and travels
+  to every consumer of the assembly carrying it, so the same files inside the core
+  would hand every embedded host a dashboard stylesheet it never asked for — plus the
+  `Microsoft.NET.Sdk.Razor` build that produces them. Blazor becomes the heavier half
+  of the same argument when the components land; it is not the argument yet. It takes
+  `Microsoft.AspNetCore.App` as a framework reference rather than a
+  `Microsoft.AspNetCore.Components.Web` package, for the same NU1510 reason
+  `MMLib.Alvo` does. **It holds no project reference to `MMLib.Alvo`** — it reaches
+  the core through `IAlvoManagement` in Abstractions, which is what makes spec §0.5
+  contract 4 ("dashboard and CLI are clients of the same API") a structural fact
+  rather than a promise, and
+  `EfDependencyBoundaryTests.The_admin_package_reaches_the_core_only_through_abstractions`
+  is what makes it a *measured* one. Its public surface is deliberately one
   type, `AlvoAdminAssets`: the design system is CSS and the components are Razor,
   and neither is a type a consumer calls. Details in
   [`2026-09-18-f5-admin-dashboard-design.md`](../superpowers/specs/2026-09-18-f5-admin-dashboard-design.md).

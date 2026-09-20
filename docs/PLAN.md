@@ -162,7 +162,7 @@ it is now sorted by one question, applied on 2026-09-06:
   four authorities. This is the whole F3 follow-up set (`#79`–`#93`, `#101`),
   the per-engine data-layer gaps (`#87`, `#88`, `#92`, `#161`, `#162`, `#175`,
   `#178`), the correctness and disclosure items (`#100`, `#118`, `#122`,
-  `#131`, `#134`, `#139`, `#145`, `#146`, `#154`, `#155`, `#183`, `#184`), and
+  `#131`, `#134`, `#139`, `#145`, `#154`, `#155`, `#183`, `#184`), and
   the mutation/CI gate health (`#98`, `#99`, `#129`, `#142`, `#143`, `#181`).
 - **A capability that has to be earned → F7.** Relation embedding, aggregations,
   rate limiting, `field.default`, tenant-resolution strategies, the outbox
