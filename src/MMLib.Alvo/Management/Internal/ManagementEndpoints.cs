@@ -66,7 +66,9 @@ internal static class ManagementEndpoints
     /// <param name="group">The group to map into.</param>
     private static void MapInfo(RouteGroupBuilder group) =>
         Gate(
-            group.MapGet("/info", (IAlvoManagement management, CancellationToken ct) => management.GetInfoAsync(ct)),
+            group.MapGet(
+                "/info",
+                (IAlvoManagement management, CancellationToken ct) => Answer(() => management.GetInfoAsync(ct))),
             new ManagementRoute(nameof(IAlvoManagement.GetInfoAsync), ManagementOperation.GetInfo));
 
     /// <summary><c>GET {prefix}/projects</c> — <see cref="IAlvoManagement.ListProjectsAsync"/>.</summary>
@@ -75,7 +77,8 @@ internal static class ManagementEndpoints
         Gate(
             group.MapGet(
                 "/projects",
-                (IAlvoManagement management, CancellationToken ct) => management.ListProjectsAsync(ct)),
+                (IAlvoManagement management, CancellationToken ct) =>
+                    Answer(() => management.ListProjectsAsync(ct))),
             new ManagementRoute(nameof(IAlvoManagement.ListProjectsAsync), ManagementOperation.ListProjects));
 
     /// <summary>

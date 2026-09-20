@@ -1,4 +1,6 @@
-﻿using System.Net;
+﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Management;
+using System.Net;
 
 namespace MMLib.Alvo.Api.Tests.Management;
 
@@ -26,14 +28,20 @@ public class ManagementAccessTests
     private static readonly TestApiKey _narrow = new("mgmt-narrow", ["ops"], ["orders:read"]);
 
     /// <summary>
-    /// <b>Every route the table carries, not the one path this suite remembers.</b> This is the half
-    /// <c>ManagementAccessRouteBuilderExtensions</c> names as owed to the issue that adds the routes: a
-    /// route mapped without <c>RequireAlvoManagementAccess</c> is ungated, and the contract facts cannot
-    /// see that — they read metadata, and metadata is attached by a different call.
+    /// <b>Every route the table carries, not the one path this suite remembers.</b> The contract facts
+    /// cannot see this — they read metadata, and metadata is attached by a different call — so the live
+    /// endpoint table is swept and every address is asked the one question the surface owes: does it refuse
+    /// a caller the project names nowhere?
     /// </summary>
     /// <remarks>
-    /// Measured, not argued: removing the gate from the one mapped route turns this red and leaves every
-    /// other fact in the management suites green.
+    /// <b>It discriminates admission, not which of the two gates supplies it.</b> Both do: the route filter
+    /// refuses before model binding, and <c>AlvoManagementService</c> refuses at the head of the member it
+    /// calls. So stripping <c>RequireAlvoManagementAccess</c> from a route leaves this green —
+    /// <c>ManagementEndpoints.Answer</c> renders the service's <c>ManagementForbiddenException</c> as the
+    /// identical 403, which is
+    /// <see cref="The_contracts_own_refusal_is_rendered_rather_than_escaping_as_a_fault"/>'s subject. What
+    /// turns it red is a route that reaches neither: one mapped outside <c>ManagementEndpoints.Gate</c>
+    /// onto something that is not a contract member.
     /// </remarks>
     [Fact]
     public async Task Every_mapped_management_route_refuses_a_caller_the_project_names_nowhere()
@@ -163,6 +171,47 @@ public class ManagementAccessTests
     }
 
     /// <summary>
+    /// <b>The contract's own refusal is rendered as the same 403</b>, on the route that used to call the
+    /// member without rendering anything.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is what makes "the route filter is a cost optimisation, not the gate" a measured statement
+    /// rather than a reading of two call sites. A fact cannot strip the filter off a route, so what the
+    /// filter would otherwise hide is injected instead: an <see cref="IAlvoManagement"/> that refuses the
+    /// way the shipped one refuses a caller no level admits, reached by a caller the <c>access</c> block
+    /// <em>does</em> admit. The 403 therefore comes from the delegate's rendering of
+    /// <see cref="ManagementForbiddenException"/> and from nothing else.
+    /// </para>
+    /// <para>
+    /// <b><c>/info</c>, specifically.</b> It and <c>/projects</c> were the two routes that called their
+    /// member outside <c>ManagementEndpoints.Answer</c>, so an exception raised inside them met no
+    /// <c>catch</c> — and <c>AlvoExceptionHandler</c> answers only for endpoints carrying
+    /// <c>DataApiOperationMetadata</c>, which a management route does not carry. The wire answer was a
+    /// fault, not a refusal.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task The_contracts_own_refusal_is_rendered_rather_than_escaping_as_a_fault()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "managed-notes.alvo.json",
+            [_ops],
+            new AlvoApiWorldSetup(
+                MapManagementApi: true,
+                ConfigureServices: services => services.AddSingleton<IAlvoManagement>(new RefusingManagement())));
+
+        var response = await world.SendAsync(HttpMethod.Get, "/management/info", _ops);
+
+        response.StatusCode.ShouldBe(
+            HttpStatusCode.Forbidden,
+            "an unrendered ManagementForbiddenException is a fault on the wire, not a refusal");
+        (await response.ReadProblemTypeAsync()).ShouldBe(
+            AlvoProblemTypes.Forbidden,
+            "the service's refusal is minted through the same catalogue the filter's is");
+    }
+
+    /// <summary>
     /// <b>A key's scopes do not govern configuration, and that is a decision rather than an oversight</b>
     /// (the F5 design's D7).
     /// </summary>
@@ -213,4 +262,63 @@ public class ManagementAccessTests
         (await world.SendAsync(HttpMethod.Get, "/management/info", _ops)).StatusCode.ShouldBe(
             HttpStatusCode.NotFound, "registering Alvo exposes nothing; the endpoint seam is a separate call");
     }
+}
+
+/// <summary>
+/// An <see cref="IAlvoManagement"/> whose every member refuses the way the shipped one refuses a caller no
+/// level admits.
+/// </summary>
+/// <remarks>
+/// It exists because the shipped refusal is, on the HTTP transport, <b>unreachable past the route filter</b>
+/// — the filter and the service read the same table through the same evaluator, so the filter always
+/// answers first. Registered <em>before</em> <c>AddAlvo</c>, so the framework's own
+/// <c>TryAddSingleton&lt;IAlvoManagement&gt;</c> leaves it in place, exactly as <c>FaultingAlvoData</c> is
+/// registered for the failure family no well-formed request can reach.
+/// </remarks>
+internal sealed class RefusingManagement : IAlvoManagement
+{
+    /// <inheritdoc/>
+    public Task<ManagementInfo> GetInfoAsync(CancellationToken ct = default) =>
+        throw new ManagementForbiddenException();
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<ManagementProject>> ListProjectsAsync(CancellationToken ct = default) =>
+        throw new ManagementForbiddenException();
+
+    /// <inheritdoc/>
+    public Task<ManagementDescriptor> GetDescriptorAsync(string project, CancellationToken ct = default) =>
+        throw new ManagementForbiddenException();
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<ManagementRevision>> ListRevisionsAsync(
+        string project, CancellationToken ct = default) =>
+        throw new ManagementForbiddenException();
+
+    /// <inheritdoc/>
+    public Task<ManagementRevisionDetail> GetRevisionAsync(
+        string project, int revision, CancellationToken ct = default) =>
+        throw new ManagementForbiddenException();
+
+    /// <inheritdoc/>
+    public Task<MMLib.Alvo.Schema.SchemaModel> GetSchemaAsync(string project, CancellationToken ct = default) =>
+        throw new ManagementForbiddenException();
+
+    /// <inheritdoc/>
+    public Task<ManagementCapabilities> GetCapabilitiesAsync(string project, CancellationToken ct = default) =>
+        throw new ManagementForbiddenException();
+
+    /// <inheritdoc/>
+    public Task<ManagementPolicyVerdict> SimulatePolicyAsync(
+        string project, ManagementPolicySimulation simulation, CancellationToken ct = default) =>
+        throw new ManagementForbiddenException();
+
+    /// <inheritdoc/>
+    public Task<ManagementApplyResult> ApplyDescriptorAsync(
+        string project, ManagementApplyRequest request, CancellationToken ct = default) =>
+        throw new ManagementForbiddenException();
+
+    /// <inheritdoc/>
+    public Task<ManagementApplyResult> RollbackAsync(
+        string project, int targetRevision, ManagementRollbackRequest request, CancellationToken ct = default) =>
+        throw new ManagementForbiddenException();
 }
