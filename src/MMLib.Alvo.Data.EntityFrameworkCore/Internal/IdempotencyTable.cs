@@ -94,11 +94,35 @@ internal static class IdempotencyTable
     /// The record stored for one key in one scope, or <see langword="null"/> when the key is unused there.
     /// </summary>
     /// <param name="Fingerprint">The fingerprint of the request the key was first used for.</param>
-    /// <param name="RowIds">
-    /// The rows that request wrote, in the order it wrote them — one for every write this API had before
-    /// the batch, and more only for a batch.
+    /// <param name="StoredRowIds">
+    /// What the record points at, <b>as stored and not interpreted</b> — see <see cref="DecodeRowIds"/> for
+    /// why it arrives here uninterpreted.
     /// </param>
-    internal readonly record struct IdempotencyRecord(string Fingerprint, IReadOnlyList<Guid> RowIds);
+    internal readonly record struct IdempotencyRecord(string Fingerprint, string StoredRowIds)
+    {
+        /// <summary>
+        /// The rows this record names, in the order they were written — one for every write this API had
+        /// before the batch, and more only for a batch.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>A method rather than a property, because reading it is a right the caller has to earn.</b>
+        /// <c>row_id</c> means whatever the request that wrote it meant, and the fingerprint is the only
+        /// thing that proves a reader <em>is</em> that request — so a reader that decodes before comparing
+        /// applies an interpretation it has not yet established. This table is shared: the management path
+        /// files a descriptor revision here under the same composite key, so "not a row id" is a state a
+        /// correct deployment reaches.
+        /// </para>
+        /// <para>
+        /// It was a property, decoded eagerly by <see cref="FindAsync"/>, and that is precisely how a
+        /// management record turned an ordinary 409 into a <see cref="FormatException"/> raised inside the
+        /// write transaction — where <see cref="Decode"/>'s own remarks say the contended-write loop retries
+        /// it ten times and surfaces it as an unattributable 5xx.
+        /// </para>
+        /// </remarks>
+        /// <returns>The rows this record names.</returns>
+        internal IReadOnlyList<Guid> DecodeRowIds() => Decode(StoredRowIds);
+    }
 
     /// <summary>The rows a record covers, as the column's text.</summary>
     /// <remarks>
@@ -184,7 +208,7 @@ internal static class IdempotencyTable
         var stored = await FindRecordedAsync(connection, transaction, tableName, key, scope, ct)
             .ConfigureAwait(false);
 
-        return stored is { } record ? new IdempotencyRecord(record.Fingerprint, Decode(record.RowId)) : null;
+        return stored is { } record ? new IdempotencyRecord(record.Fingerprint, record.RowId) : null;
     }
 
     /// <summary>

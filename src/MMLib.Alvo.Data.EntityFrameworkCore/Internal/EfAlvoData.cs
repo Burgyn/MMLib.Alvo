@@ -655,10 +655,10 @@ internal sealed class EfAlvoData : IAlvoData
     /// least one row — so it is raised loudly (family 5, rendered 500) rather than answered as a miss, which
     /// would silently re-execute a write the caller has already been told succeeded.
     /// </remarks>
-    /// <param name="record">The record this replay matched.</param>
+    /// <param name="record">The record this replay matched, after its fingerprint was compared.</param>
     private static Guid RecordedRow(IdempotencyTable.IdempotencyRecord record) =>
-        record.RowIds.Count > 0
-            ? record.RowIds[0]
+        record.DecodeRowIds() is { Count: > 0 } rowIds
+            ? rowIds[0]
             : throw new InvalidOperationException(
                 "An idempotency record names no row. Every write records at least one, so an empty list means "
                 + "the record was written by something other than this port's write paths.");
@@ -2747,19 +2747,20 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoDataContext db, EntitySchema schema, AlvoContext context,
         IdempotencyTable.IdempotencyRecord record, bool producesRows, CancellationToken cancellationToken)
     {
+        var rowIds = record.DecodeRowIds();
         if (!producesRows)
         {
-            return AlvoBatchResult.Wrote([], record.RowIds.Count);
+            return AlvoBatchResult.Wrote([], rowIds.Count);
         }
 
         var read = _policy.Resolve(schema.Name, DataOperation.Get, context);
         if (read.IsDenied)
         {
-            return AlvoBatchResult.Wrote([.. record.RowIds.Select(IdOnly)], record.RowIds.Count);
+            return AlvoBatchResult.Wrote([.. rowIds.Select(IdOnly)], rowIds.Count);
         }
 
-        var rows = new List<AlvoRecord>(record.RowIds.Count);
-        foreach (var id in record.RowIds)
+        var rows = new List<AlvoRecord>(rowIds.Count);
+        foreach (var id in rowIds)
         {
             var row = await SingleAsync(db, schema, read, context, id, lockFor: null, cancellationToken);
             if (row is not null)
@@ -2768,6 +2769,6 @@ internal sealed class EfAlvoData : IAlvoData
             }
         }
 
-        return AlvoBatchResult.Wrote(rows, record.RowIds.Count);
+        return AlvoBatchResult.Wrote(rows, rowIds.Count);
     }
 }

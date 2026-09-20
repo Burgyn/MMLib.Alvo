@@ -53,6 +53,41 @@ public class EfAlvoDataReplayTests
             WritePathFixture.Entity, WritePathFixture.CreatePayload("recorded"), world.Caller, token, Ct));
     }
 
+    /// <summary>
+    /// A record the <b>management</b> path wrote under this caller's key is refused as the conflict it is,
+    /// rather than crashing the reader that cannot interpret its <c>row_id</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>{prefix}_idempotency</c> is shared: <c>EfCoreManagementIdempotencyStore</c> files a descriptor
+    /// apply under the same <c>(idempotency_key, scope)</c> primary key and the same
+    /// <see cref="AlvoIdempotency.IdentityOf"/> scope, with the <b>revision</b> in <c>row_id</c> — the
+    /// literal <c>"2"</c> this fact writes. One caller spending one key on a create and on an apply is
+    /// therefore a key reused for a different request, which is a 409 and nothing else.
+    /// </para>
+    /// <para>
+    /// <b>It was a <see cref="FormatException"/>.</b> The reader decoded <c>row_id</c> into row ids
+    /// <em>before</em> the fingerprint was compared, so <c>Guid.Parse("2")</c> threw inside the write
+    /// transaction — where, per <c>IdempotencyTable.Decode</c>'s own remarks, the contended-write loop
+    /// retries it ten times and surfaces it as an unattributable 5xx. Self-inflicted rather than an
+    /// isolation failure, because the scope carries the acting user; wrong either way, because the
+    /// management store's own contract promises this caller is <em>told</em>.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_record_whose_row_id_is_not_a_row_id_is_the_conflict_it_is_rather_than_a_crash()
+    {
+        await using var world = await StartAsync();
+        var token = Token();
+        await world.Data.CreateAsync(
+            WritePathFixture.Entity, WritePathFixture.CreatePayload("recorded"), world.Caller, token, Ct);
+        await world.ExecuteAsync(
+            "UPDATE alvo_idempotency SET row_id = '2', fingerprint = 'a-descriptor-apply'");
+
+        await Should.ThrowAsync<AlvoIdempotencyConflictException>(() => world.Data.CreateAsync(
+            WritePathFixture.Entity, WritePathFixture.CreatePayload("recorded"), world.Caller, token, Ct));
+    }
+
     private static AlvoIdempotency Token() => new(Guid.NewGuid().ToString(), "fingerprint");
 
     private static Task<WritePathWorld> StartAsync() =>
