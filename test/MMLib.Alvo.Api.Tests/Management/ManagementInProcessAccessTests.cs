@@ -7,22 +7,25 @@ using System.Net;
 namespace MMLib.Alvo.Api.Tests.Management;
 
 /// <summary>
-/// The §3.3 escalation guard, measured on the <b>in-process</b> transport — a caller holding
+/// Management authorization measured on the <b>in-process</b> transport — a caller holding
 /// <see cref="IAlvoManagement"/> directly, with no HTTP request and no endpoint filter anywhere in the call.
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Every other access fact in this repository goes over HTTP, which is exactly why this was invisible.</b>
-/// The guard used to live in <c>ManagementEndpoints</c>, the HTTP adapter. <see cref="IAlvoManagement"/> is
-/// public and <c>docs/architecture/management-api.md</c> says the dashboard calls it in-process — and a
-/// dashboard resolves ONE registered instance and serves MANY humans through it, so "whatever composed this
-/// reference already admitted the caller" admits the <em>process</em>, not the person. A guard on one
-/// transport only is the divergent authorization path spec §0.5 contract 4 forbids.
+/// Both guards used to live in the HTTP adapter. <see cref="IAlvoManagement"/> is public and
+/// <c>docs/architecture/management-api.md</c> says the dashboard calls it in-process — and a dashboard
+/// resolves ONE registered instance and serves MANY humans through it, so "whatever composed this reference
+/// already admitted the caller" admits the <em>process</em>, not the person. A guard on one transport only
+/// is the divergent authorization path spec §0.5 contract 4 forbids.
 /// </para>
 /// <para>
-/// <b>The route LEVEL gate is deliberately not measured here, because it deliberately did not move.</b>
-/// Which level an operation needs is pre-decidable at composition; whether a <em>particular</em> descriptor
-/// changes the <c>access</c> block is not, because it depends on what was sent.
+/// <b>Both halves are measured here, because both are per-request.</b> The level table
+/// (<c>ManagementOperations</c>) answers "may this caller apply at all"; the §3.3 comparison answers "may
+/// this caller change who may reach the project". The first was left in the adapter once, on the reading
+/// that a level is settled at composition — the same premise this suite's existence debunks, and the gap it
+/// left was a <c>viewer</c> applying a descriptor in-process whose <c>rules</c> block granted itself the
+/// whole Data API.
 /// </para>
 /// </remarks>
 public class ManagementInProcessAccessTests
@@ -32,6 +35,9 @@ public class ManagementInProcessAccessTests
 
     /// <summary>A caller the same block admits at <c>admin</c>.</summary>
     private static readonly TestApiKey _owner = new("mgmt-owner", ["owner"], ["*:write"]);
+
+    /// <summary>A caller the same block admits at <c>viewer</c>, the level below every write.</summary>
+    private static readonly TestApiKey _ops = new("mgmt-ops", ["ops"], ["*:read"]);
 
     /// <summary>
     /// A <c>developer</c> calling the contract member directly is refused exactly as one over HTTP is.
@@ -115,20 +121,77 @@ public class ManagementInProcessAccessTests
     }
 
     /// <summary>
-    /// An in-process caller with nothing published is anonymous, and anonymous reaches no level.
+    /// A <c>viewer</c> may not apply a descriptor in-process, even one that leaves <c>access</c> alone.
     /// </summary>
     /// <remarks>
+    /// <b>This is the fact the level gate exists for.</b> <c>ManagementOperations</c> reserves
+    /// <c>ApplyDescriptor</c> to <c>developer</c>, and while that table was enforced by the endpoint filter
+    /// alone, a dashboard serving a <c>viewer</c> could apply in-process as long as it did not touch
+    /// <c>access</c> — and a rewritten <c>rules</c> block is full Data API read and write, which is the same
+    /// escalation by another route. The edit here is the most ordinary one there is, so nothing but the
+    /// level can explain the refusal.
+    /// </remarks>
+    [Fact]
+    public async Task A_viewer_calling_the_contract_in_process_may_not_apply_at_all()
+    {
+        await using var world = await ManagedFleet.StartAsync([_ops]);
+        var reader = Publish(world, "ops");
+        var current = await reader.GetDescriptorAsync(ManagedFleet.Project, Ct);
+
+        await Should.ThrowAsync<ManagementForbiddenException>(() => reader.ApplyDescriptorAsync(
+            ManagedFleet.Project,
+            new ManagementApplyRequest(
+                DescriptorEdits.AddOptionalTextField(current.DescriptorJson, "vehicles", "nickname"),
+                current.Revision),
+            Ct));
+
+        (await reader.GetDescriptorAsync(ManagedFleet.Project, Ct)).Revision.ShouldBe(
+            1, "a refused apply appends nothing");
+    }
+
+    /// <summary>A <c>viewer</c> may not roll back either, and reads the history perfectly well.</summary>
+    /// <remarks>
+    /// The two write members carry the same level, so measuring one would leave the other's gate to be
+    /// assumed. The read in the same fact is what keeps the refusal about the operation rather than about
+    /// the caller: the same reference, the same published principal, one member answers and one refuses.
+    /// </remarks>
+    [Fact]
+    public async Task A_viewer_calling_the_contract_in_process_reads_the_history_and_may_not_restore_it()
+    {
+        await using var world = await ManagedFleet.StartAsync([_ops]);
+        var reader = Publish(world, "ops");
+
+        (await reader.ListRevisionsAsync(ManagedFleet.Project, Ct)).ShouldNotBeEmpty();
+
+        await Should.ThrowAsync<ManagementForbiddenException>(() => reader.RollbackAsync(
+            ManagedFleet.Project, targetRevision: 1, new ManagementRollbackRequest(ExpectedRevision: 1), Ct));
+    }
+
+    /// <summary>
+    /// An in-process caller with nothing published is anonymous, and anonymous reaches no level at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
     /// This is the composition a review would call "the dashboard forgot to publish who it is acting for".
     /// It fails closed, which is the only reading <c>ManagementAccessEvaluator</c> gives anywhere else.
+    /// </para>
+    /// <para>
+    /// <b>The read refuses too, and that is the behaviour change worth stating.</b> Before the level gate
+    /// moved behind the contract, an unattended in-process call could read anything and was refused only
+    /// where it touched <c>access</c>. Now every member needs a published principal — which is what
+    /// default-deny means once the surface admits it does not know who is calling.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task An_in_process_caller_who_published_nobody_is_refused()
     {
         await using var world = await ManagedFleet.StartAsync([_dev]);
-        var management = world.Services.GetRequiredService<IAlvoManagement>();
-        var current = await management.GetDescriptorAsync(ManagedFleet.Project, Ct);
+        var current = await Publish(world, "dispatcher").GetDescriptorAsync(ManagedFleet.Project, Ct);
+        var unattended = Unpublish(world);
 
-        await Should.ThrowAsync<ManagementEscalationException>(() => management.ApplyDescriptorAsync(
+        await Should.ThrowAsync<ManagementForbiddenException>(
+            () => unattended.GetDescriptorAsync(ManagedFleet.Project, Ct));
+        await Should.ThrowAsync<ManagementForbiddenException>(() => unattended.ApplyDescriptorAsync(
             ManagedFleet.Project,
             new ManagementApplyRequest(Escalated(current.DescriptorJson), current.Revision),
             Ct));
@@ -160,6 +223,16 @@ public class ManagementInProcessAccessTests
             Scopes = new HashSet<ApiKeyScope>(),
             KeyId = "in-process",
         };
+
+        return world.Services.GetRequiredService<IAlvoManagement>();
+    }
+
+    /// <summary>Publishes nobody, and hands back the same contract implementation.</summary>
+    /// <param name="world">The running world.</param>
+    /// <returns>The registered <see cref="IAlvoManagement"/>, with no caller published.</returns>
+    private static IAlvoManagement Unpublish(AlvoApiWorld world)
+    {
+        world.Services.GetRequiredService<IAlvoContextAccessor>().Principal = null;
 
         return world.Services.GetRequiredService<IAlvoManagement>();
     }

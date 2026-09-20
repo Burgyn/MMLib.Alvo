@@ -15,17 +15,19 @@ namespace MMLib.Alvo.Management.Internal;
 /// <remarks>
 /// <para>
 /// <b>Every delegate is a thin adapter over the same service the dashboard calls in-process</b> — it binds,
-/// calls one member, and renders. No business rule lives here, which is what keeps the two transports on one
-/// path. The §3.3 escalation guard used to be the exception and is not any more: it lives in
-/// <see cref="AlvoManagementService"/>, and this file only renders the
-/// <see cref="ManagementEscalationException"/> it raises.
+/// calls one member, and renders. No authorization lives here any more: both the level gate and the §3.3
+/// escalation guard are <see cref="AlvoManagementService"/>'s, and this file only renders the
+/// <see cref="ManagementForbiddenException"/> and <see cref="ManagementEscalationException"/> they raise.
 /// </para>
 /// <para>
 /// <b>Every route carries the same two filters, in this order:</b> <see cref="ManagementCallerFilter"/>
 /// resolves the presented credential and publishes the caller, and
 /// <c>RequireAlvoManagementAccess</c> refuses unless the descriptor's <c>access</c> block admits them to the
 /// operation. The order is asserted rather than assumed — the gate reads what the first filter published,
-/// so a reversed pair would judge every caller as anonymous.
+/// so a reversed pair would judge every caller as anonymous. The gate now duplicates an answer the service
+/// reaches anyway, deliberately: it refuses <em>before</em> model binding, so a caller with no level never
+/// costs a descriptor parse. The two <c>catch</c> clauses below are what makes that true rather than
+/// load-bearing — remove the filter and the wire answer is unchanged.
 /// </para>
 /// <para>
 /// <b>The routes are excluded from the OpenAPI document</b> (<c>ExcludeFromDescription</c>), deliberately
@@ -508,6 +510,10 @@ internal static class ManagementEndpoints
         catch (ManagementEscalationException)
         {
             return ProblemResultFactory.ManagementAccessChangeForbidden();
+        }
+        catch (ManagementForbiddenException)
+        {
+            return ProblemResultFactory.ManagementForbidden();
         }
         catch (DescriptorValidationException refusal)
         {

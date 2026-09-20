@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Management;
@@ -13,6 +14,14 @@ namespace MMLib.Alvo.Tests.Management;
 /// <summary>
 /// <c>GetInfoAsync</c>, the first member of <see cref="IAlvoManagement"/> — what this deployment says it is.
 /// </summary>
+/// <remarks>
+/// <b>Every fact here publishes the deployment's bootstrap administrator, because <c>info</c> is a gated
+/// operation.</b> <c>AlvoManagementService</c> reads <c>ManagementOperations</c>' level table at the head of
+/// every contract member, on both transports — so an in-process call with no principal published is the
+/// anonymous caller and reaches no level. This fixture applies no descriptor, so there is no <c>access</c>
+/// block to be admitted by; the bootstrap administrator is the one identity that block does not govern,
+/// which makes it the shortest honest caller for a fact that is about <c>info</c> and not about the gate.
+/// </remarks>
 public class ManagementInfoTests
 {
     [Fact]
@@ -101,12 +110,31 @@ public class ManagementInfoTests
     private static IAlvoManagement Resolve(Action<IAlvoBuilder>? configure)
     {
         var services = new ServiceCollection();
+        services.AddSingleton(ManagementCallers.Bootstrapped(user => user == ManagementCallers.Bootstrap));
         services.AddAlvo(alvo =>
         {
             alvo.Services.AddSingleton<ISchemaMigrator>(new InMemorySchemaMigrator());
             configure?.Invoke(alvo);
         });
 
-        return services.BuildServiceProvider().GetRequiredService<IAlvoManagement>();
+        var provider = services.BuildServiceProvider();
+        Publish(provider);
+
+        return provider.GetRequiredService<IAlvoManagement>();
     }
+
+    /// <summary>Publishes the bootstrap administrator as this call's caller.</summary>
+    /// <remarks>
+    /// Through the same <see cref="IAlvoContextAccessor"/> the Data API's own filter writes to, because that
+    /// is the one seam an embedded host has for "who is this in-process call acting as" — there is no
+    /// second one, and inventing one for tests would measure a path production does not take.
+    /// </remarks>
+    /// <param name="provider">The container the surface was resolved from.</param>
+    private static void Publish(IServiceProvider provider) =>
+        provider.GetRequiredService<IAlvoContextAccessor>().Principal = new AlvoPrincipal
+        {
+            Context = new AlvoContext { User = ManagementCallers.Bootstrap, Roles = new HashSet<Role> { Role.Authenticated } },
+            Scopes = new HashSet<ApiKeyScope>(),
+            KeyId = "in-process",
+        };
 }

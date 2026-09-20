@@ -11,13 +11,14 @@
 /// composition fact rather than two implementations.
 /// </para>
 /// <para>
-/// <b>The two transports are gated at two different moments, deliberately.</b> The <em>level</em> each
-/// operation needs is decided here and enforced by <c>ManagementAccessEndpointFilter</c> on the HTTP
-/// adapter — an in-process caller reached <see cref="IAlvoManagement"/> because whatever composed it
-/// admitted it, which is the same decision made earlier. The one judgment that is <b>not</b> pre-decidable
-/// at composition is whether a particular write changes the descriptor's <c>access</c> block, because it
-/// depends on what was sent; that comparison lives inside <c>AlvoManagementService</c>, so both transports
-/// meet it. See <c>AlvoManagementService.EnsureMayChangeAccess</c>.
+/// <b>Both transports meet the same gate, in the same place.</b> The level an operation needs is
+/// <c>ManagementOperations</c>' one table, and <c>AlvoManagementService</c> reads it at the head of every
+/// member — so an in-process caller is judged exactly as an HTTP one is. That is not a courtesy: a
+/// dashboard resolves one registered <see cref="IAlvoManagement"/> and serves many humans through it, so
+/// "whatever composed this reference admitted the caller" admits the <em>process</em>, not the person.
+/// <c>ManagementAccessEndpointFilter</c> reads the same table through the same evaluator before model
+/// binding — an earlier, cheaper rejection of the same answer, never a second authority. See
+/// <c>AlvoManagementService.EnsureMayPerform</c> and <c>EnsureMayChangeAccess</c>.
 /// </para>
 /// </remarks>
 internal enum ManagementOperation

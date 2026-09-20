@@ -46,12 +46,12 @@ namespace MMLib.Alvo.Management.Internal;
 /// </param>
 /// <param name="callers">
 /// Where the caller resolved for this request is published — read to scope an idempotency key, and to judge
-/// the one admission decision that is <b>not</b> pre-decidable at composition: whether this write may change
-/// the descriptor's <c>access</c> block. The route LEVEL gate stays
-/// <c>ManagementAccessEndpointFilter</c>'s alone; see <see cref="EnsureMayChangeAccess"/>.
+/// both admission decisions: the level this caller reaches (<see cref="EnsureMayPerform"/>) and whether this
+/// write may change the descriptor's <c>access</c> block (<see cref="EnsureMayChangeAccess"/>). Both are
+/// per-request, so both live here rather than in the HTTP adapter.
 /// </param>
 /// <param name="access">
-/// The gate the <c>access</c>-block comparison resolves the caller's management level through.
+/// The gate both admission decisions resolve the caller's management level through.
 /// </param>
 /// <param name="logger">
 /// Where a record that could not be filed for a write that already landed is reported — see
@@ -86,18 +86,27 @@ internal sealed partial class AlvoManagementService(
     private const string NoDriverRegistered = "none";
 
     /// <inheritdoc/>
-    public Task<ManagementInfo> GetInfoAsync(CancellationToken ct = default) =>
-        Task.FromResult(new ManagementInfo(Version, Mode, DataProvider, StartupMode));
+    public Task<ManagementInfo> GetInfoAsync(CancellationToken ct = default)
+    {
+        EnsureMayPerform(ManagementOperation.GetInfo);
+
+        return Task.FromResult(new ManagementInfo(Version, Mode, DataProvider, StartupMode));
+    }
 
     /// <inheritdoc/>
-    public Task<IReadOnlyList<ManagementProject>> ListProjectsAsync(CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<ManagementProject>>(
+    public Task<IReadOnlyList<ManagementProject>> ListProjectsAsync(CancellationToken ct = default)
+    {
+        EnsureMayPerform(ManagementOperation.ListProjects);
+
+        return Task.FromResult<IReadOnlyList<ManagementProject>>(
             [.. boot.Projects.Select(entry =>
                 new ManagementProject(entry.Key, boot.RevisionOf(entry.Key), Lower(entry.Value)))]);
+    }
 
     /// <inheritdoc/>
     public async Task<ManagementDescriptor> GetDescriptorAsync(string project, CancellationToken ct = default)
     {
+        EnsureMayPerform(ManagementOperation.GetDescriptor);
         EnsureServed(project);
         var current = await History.GetCurrentAsync(project, ct).ConfigureAwait(false);
 
@@ -108,6 +117,7 @@ internal sealed partial class AlvoManagementService(
     public async Task<IReadOnlyList<ManagementRevision>> ListRevisionsAsync(
         string project, CancellationToken ct = default)
     {
+        EnsureMayPerform(ManagementOperation.ListRevisions);
         EnsureServed(project);
         var history = await History.ListAsync(project, ct).ConfigureAwait(false);
 
@@ -118,6 +128,7 @@ internal sealed partial class AlvoManagementService(
     public async Task<ManagementRevisionDetail> GetRevisionAsync(
         string project, int revision, CancellationToken ct = default)
     {
+        EnsureMayPerform(ManagementOperation.GetRevision);
         EnsureServed(project);
         var stored = await History.GetAsync(project, revision, ct).ConfigureAwait(false)
             ?? throw new ManagementRevisionNotFoundException(project, revision);
@@ -128,6 +139,7 @@ internal sealed partial class AlvoManagementService(
     /// <inheritdoc/>
     public Task<SchemaModel> GetSchemaAsync(string project, CancellationToken ct = default)
     {
+        EnsureMayPerform(ManagementOperation.GetSchema);
         EnsureServed(project);
 
         return Task.FromResult(schemaRegistry.GetSchema());
@@ -136,6 +148,7 @@ internal sealed partial class AlvoManagementService(
     /// <inheritdoc/>
     public Task<ManagementCapabilities> GetCapabilitiesAsync(string project, CancellationToken ct = default)
     {
+        EnsureMayPerform(ManagementOperation.GetCapabilities);
         EnsureServed(project);
 
         return Task.FromResult(CapabilityReport.Project());
@@ -145,6 +158,7 @@ internal sealed partial class AlvoManagementService(
     public Task<ManagementPolicyVerdict> SimulatePolicyAsync(
         string project, ManagementPolicySimulation simulation, CancellationToken ct = default)
     {
+        EnsureMayPerform(ManagementOperation.SimulatePolicy);
         EnsureServed(project);
         EnsureAnswerable(simulation);
 
@@ -158,6 +172,7 @@ internal sealed partial class AlvoManagementService(
     public async Task<ManagementApplyResult> ApplyDescriptorAsync(
         string project, ManagementApplyRequest request, CancellationToken ct = default)
     {
+        EnsureMayPerform(ManagementOperation.ApplyDescriptor);
         EnsureServed(project);
         ArgumentNullException.ThrowIfNull(request);
         await EnsureApplyMayChangeAccessAsync(project, request, ct).ConfigureAwait(false);
@@ -199,6 +214,7 @@ internal sealed partial class AlvoManagementService(
     public async Task<ManagementApplyResult> RollbackAsync(
         string project, int targetRevision, ManagementRollbackRequest request, CancellationToken ct = default)
     {
+        EnsureMayPerform(ManagementOperation.RollbackRevision);
         EnsureServed(project);
         ArgumentNullException.ThrowIfNull(request);
         await EnsureRestoreMayChangeAccessAsync(project, targetRevision, ct).ConfigureAwait(false);
@@ -274,13 +290,51 @@ internal sealed partial class AlvoManagementService(
             targetRevision.ToString(CultureInfo.InvariantCulture));
 
     /// <summary>
+    /// Refuses a caller whose resolved <see cref="ManagementLevel"/> does not reach the level
+    /// <paramref name="operation"/> needs.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Here rather than in the HTTP adapter alone, for <see cref="EnsureMayChangeAccess"/>'s reason.</b>
+    /// A dashboard resolves <em>one</em> registered <see cref="IAlvoManagement"/> and serves <em>many</em>
+    /// humans through it, so which level <em>this caller</em> holds is a per-request question — the reading
+    /// that it is settled at composition admits the <em>process</em>, not the person. Without this,
+    /// <c>ManagementOperations</c>' table was enforced on HTTP and on nothing else: a viewer could apply a
+    /// descriptor in-process, and a rewritten <c>rules</c> block is full Data API read and write.
+    /// </para>
+    /// <para>
+    /// <b>First in every member, before <see cref="EnsureServed"/>.</b> That is the order the HTTP transport
+    /// already has — <c>ManagementAccessEndpointFilter</c> runs before the handler, so its <c>403</c>
+    /// precedes the handler's <c>404</c> — and reproducing it here is what keeps one refusal ordering for
+    /// both transports rather than two.
+    /// </para>
+    /// <para>
+    /// <b><c>ManagementAccessEndpointFilter</c> stays where it is.</b> It reads the same table through the
+    /// same evaluator, so it can only agree with this; what it adds is rejecting before model binding, which
+    /// makes it defence in depth rather than the only line.
+    /// </para>
+    /// </remarks>
+    /// <param name="operation">The operation the calling member performs.</param>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach the operation's level.</exception>
+    private void EnsureMayPerform(ManagementOperation operation)
+    {
+        if (!access.Allows(operation, callers.Principal?.Context ?? AlvoContext.Anonymous))
+        {
+            throw new ManagementForbiddenException();
+        }
+    }
+
+    /// <summary>
     /// Refuses an apply that would change <b>who may reach the project</b>, from a caller the project does
     /// not admit as an administrator.
     /// </summary>
     /// <remarks>
-    /// <b>Before the idempotency key is read, which is where the HTTP adapter used to run it.</b> A replay
-    /// answers with a revision this instance already appended, so a guard placed after the replay would let
-    /// a refused caller retry their way past it with the first caller's key.
+    /// <b>Before the idempotency key is read, because that reproduces the observable ordering.</b> The HTTP
+    /// adapter used to run this guard before it called <see cref="ApplyDescriptorAsync"/> at all, so
+    /// <c>404</c> → <c>403</c> → key refusal is what the wire has always shown; keeping the guard ahead of
+    /// <see cref="TokenFor"/> keeps it. It is not a replay defence — a record is scoped to
+    /// <c>AlvoIdempotency.IdentityOf(caller)</c> so no caller can present another's key, a refused request
+    /// files no record at all, and a replay writes nothing.
     /// </remarks>
     /// <param name="project">The project being changed.</param>
     /// <param name="request">What the caller asked for.</param>
@@ -336,8 +390,8 @@ internal sealed partial class AlvoManagementService(
     /// a dashboard is one caller serving many humans.</b> An in-process holder of this reference has been
     /// admitted by whatever composed it — which admits the <em>process</em>, not the person — so a guard that
     /// lived in the HTTP adapter alone would be the divergent authorization path spec §0.5 contract 4
-    /// forbids. The route LEVEL gate stays where it is: a level check IS pre-decidable at composition, and
-    /// this per-descriptor comparison is not.
+    /// forbids. <see cref="EnsureMayPerform"/> is the same argument applied to the level table, which the
+    /// first pass at this left behind in the adapter.
     /// </para>
     /// <para>
     /// <b>An in-process caller with nothing published is anonymous, and is refused.</b> That is the same
