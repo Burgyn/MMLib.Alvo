@@ -393,7 +393,7 @@ internal sealed partial class AlvoManagementService(
         var stored = await History.GetAsync(project, revision, ct).ConfigureAwait(false)
             ?? throw new ManagementRevisionNotFoundException(project, revision);
 
-        return new ManagementApplyResult(Applied: true, stored.Revision, NothingRanNow);
+        return new ManagementApplyResult(Applied: true, stored.Revision, NothingRanNow, Replayed: true);
     }
 
     /// <summary>Runs the write and files its revision under the caller's key.</summary>

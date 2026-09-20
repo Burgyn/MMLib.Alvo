@@ -136,7 +136,31 @@ public class ManagementRollbackTests
         first.StatusCode.ShouldBe(HttpStatusCode.OK);
         retry.StatusCode.ShouldBe(HttpStatusCode.OK);
         (await retry.ReadJsonObjectAsync())["revision"]!.GetValue<int>().ShouldBe(3);
+        (await retry.ReadJsonObjectAsync())["replayed"]!.GetValue<bool>().ShouldBeTrue(
+            "the reverse plan it reports is empty because nothing ran, not because nothing would have");
+        (await first.ReadJsonObjectAsync())["replayed"]!.GetValue<bool>().ShouldBeFalse();
         (await RevisionAsync(world)).ShouldBe(3, "a replay rolls nothing back a second time");
+    }
+
+    /// <summary>A key spent on an apply is never answered with a rollback's revision.</summary>
+    /// <remarks>
+    /// The operation name is in the fingerprint, so the two writes are two requests even when the project,
+    /// the base and the allowance all match. Without that, one key would replay across verbs and a caller
+    /// retrying a rollback could be handed the apply's revision instead.
+    /// </remarks>
+    [Fact]
+    public async Task A_key_already_spent_on_an_apply_is_not_replayed_by_a_rollback()
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+        await ManagementApplyWorld.ApplyAsync(
+            world, _dev, WithExtraField(await CurrentAsync(world)), ifMatch: "\"1\"", idempotencyKey: "k1");
+
+        var response = await RollbackAsync(
+            world, target: 1, ifMatch: "\"2\"", allowDestructive: true, key: "k1");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Conflict);
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.IdempotencyConflict);
+        (await RevisionAsync(world)).ShouldBe(2, "a key reused across verbs is refused, never replayed");
     }
 
     [Fact]

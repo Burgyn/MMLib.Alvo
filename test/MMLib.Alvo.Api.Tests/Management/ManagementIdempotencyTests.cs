@@ -49,6 +49,47 @@ public class ManagementIdempotencyTests
         (await RevisionAsync(world)).ShouldBe(2, "a replay appends nothing");
     }
 
+    /// <summary>
+    /// A replay says <b>on the wire</b> that it is one, because that is the only place the HTTP caller reads.
+    /// </summary>
+    /// <remarks>
+    /// Without it the response is indistinguishable from a fresh apply that changed nothing:
+    /// <c>applied: true</c>, <c>revision: 2</c>, and a <c>plan</c> whose <c>isEmpty</c> is <c>true</c> — which
+    /// the published doc defines as "the descriptor changes nothing about the schema", and which is not what
+    /// it means here. A dashboard rendering a diff off that response would show "no changes" for a migration
+    /// that really ran. XML remarks do not reach this caller; a field does.
+    /// </remarks>
+    [Fact]
+    public async Task A_replay_says_on_the_wire_that_it_is_a_replay()
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+        var sent = WithExtraField(await CurrentAsync(world));
+
+        var first = await (await ApplyAsync(world, sent, key: "k1")).ReadJsonObjectAsync();
+        var retry = await (await ApplyAsync(world, sent, key: "k1")).ReadJsonObjectAsync();
+
+        first["replayed"]!.GetValue<bool>().ShouldBeFalse("the first apply really ran the migration");
+        retry["replayed"]!.GetValue<bool>().ShouldBeTrue();
+        retry["plan"]!["isEmpty"]!.GetValue<bool>().ShouldBeTrue(
+            "a replay ran no migration, and 'replayed' is what tells the caller why the plan is empty");
+    }
+
+    /// <summary>An ordinary apply that changed nothing is still not a replay.</summary>
+    /// <remarks>
+    /// The other direction, so `replayed` cannot be a second spelling of `plan.isEmpty`: a re-apply of the
+    /// current descriptor plans empty and is nonetheless a real request this instance served.
+    /// </remarks>
+    [Fact]
+    public async Task An_apply_that_planned_nothing_is_not_reported_as_a_replay()
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+
+        var body = await (await ApplyAsync(world, await CurrentAsync(world), key: null)).ReadJsonObjectAsync();
+
+        body["plan"]!["isEmpty"]!.GetValue<bool>().ShouldBeTrue();
+        body["replayed"]!.GetValue<bool>().ShouldBeFalse();
+    }
+
     /// <summary>The hole the key closes, asserted so the fact above cannot pass vacuously.</summary>
     [Fact]
     public async Task A_retry_without_a_key_is_refused_with_a_412_the_caller_cannot_attribute()

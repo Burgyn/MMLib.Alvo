@@ -1123,9 +1123,10 @@ namespace MMLib.Alvo.Management
     }
     public sealed class ManagementApplyResult : System.IEquatable<MMLib.Alvo.Management.ManagementApplyResult>
     {
-        public ManagementApplyResult(bool Applied, int Revision, MMLib.Alvo.Management.ManagementPlanSummary Plan) { }
+        public ManagementApplyResult(bool Applied, int Revision, MMLib.Alvo.Management.ManagementPlanSummary Plan, bool Replayed = false) { }
         public bool Applied { get; init; }
         public MMLib.Alvo.Management.ManagementPlanSummary Plan { get; init; }
+        public bool Replayed { get; init; }
         public int Revision { get; init; }
     }
     public sealed class ManagementCapabilities : System.IEquatable<MMLib.Alvo.Management.ManagementCapabilities>

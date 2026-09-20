@@ -191,13 +191,39 @@ public sealed record ManagementRollbackRequest(
 /// <summary>What an apply did, or would do.</summary>
 /// <param name="Applied"><see langword="false"/> for a dry run, <see langword="true"/> when a revision was appended.</param>
 /// <param name="Revision">The appended revision — or, for a dry run, the base it planned against.</param>
-/// <param name="Plan">The migration, so the caller can show a diff without asking again.</param>
-public sealed record ManagementApplyResult(bool Applied, int Revision, ManagementPlanSummary Plan);
+/// <param name="Plan">
+/// The migration, so the caller can show a diff without asking again. <b>Read <see cref="Replayed"/>
+/// first</b>: a replay reports no plan because this request ran none, which is not the same claim as
+/// <see cref="ManagementPlanSummary.IsEmpty"/>'s.
+/// </param>
+/// <param name="Replayed">
+/// <see langword="true"/> when this response is a previous identical request's outcome, recalled under the
+/// caller's idempotency key, rather than work this request did.
+/// <para>
+/// <b>It is on the wire because the wire is where it is needed.</b> Without it a replay is
+/// indistinguishable from a fresh apply that changed nothing — <c>applied: true</c>, the same
+/// <c>revision</c>, and a <c>plan</c> whose <c>isEmpty</c> is <see langword="true"/> for an entirely
+/// different reason than the published definition gives. A client rendering a diff off the response would
+/// show "no changes" for a migration that really ran.
+/// </para>
+/// <para>
+/// <b>What it does not mean:</b> that nothing happened. The revision it names was applied — by the request
+/// this one repeats. <c>GET revisions/{n}</c> is where what that revision did is read from, because the
+/// plan is not stored and cannot be re-planned from a base that has since moved.
+/// </para>
+/// </param>
+public sealed record ManagementApplyResult(
+    bool Applied, int Revision, ManagementPlanSummary Plan, bool Replayed = false);
 
 /// <summary>A migration plan, in the shape a diff view needs.</summary>
 /// <param name="IsEmpty">
 /// <see langword="true"/> when the descriptor changes nothing about the schema — which a rules-only edit
 /// does, and which is therefore not the same claim as "nothing was applied".
+/// <para>
+/// <b>It carries that meaning only when <see cref="ManagementApplyResult.Replayed"/> is
+/// <see langword="false"/>.</b> On a replay this whole summary is empty because <em>this request</em> ran
+/// no migration, not because the descriptor changed nothing — read that flag before rendering a diff.
+/// </para>
 /// </param>
 /// <param name="HasDestructiveChanges"><see langword="true"/> when at least one step discards data.</param>
 /// <param name="Steps">
