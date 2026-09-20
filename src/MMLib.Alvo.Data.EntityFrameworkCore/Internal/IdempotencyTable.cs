@@ -181,6 +181,38 @@ internal static class IdempotencyTable
         string scope,
         CancellationToken ct)
     {
+        var stored = await FindRecordedAsync(connection, transaction, tableName, key, scope, ct)
+            .ConfigureAwait(false);
+
+        return stored is { } record ? new IdempotencyRecord(record.Fingerprint, Decode(record.RowId)) : null;
+    }
+
+    /// <summary>
+    /// Reads the record for one key in one scope <b>without interpreting <c>row_id</c></b>, so a caller that
+    /// stores something other than a row list reads its own value back verbatim.
+    /// </summary>
+    /// <remarks>
+    /// <b>The transaction is optional here and required on <see cref="FindAsync"/>, and the difference is the
+    /// caller's.</b> The data path reads inside its own write transaction so the check and the insert are
+    /// atomic; the management path has no transaction to enlist in, because the writer that appends the
+    /// revision owns one and exposes no seam. One statement, two callers, rather than a second copy of the
+    /// SQL that would drift the day a column moved.
+    /// </remarks>
+    /// <param name="connection">An open connection.</param>
+    /// <param name="transaction">The caller's transaction, or <see langword="null"/> to read outside one.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="key">The caller's key, bound as a value.</param>
+    /// <param name="scope">The key's scope, from <see cref="AlvoIdempotency.IdentityOf"/>.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    /// <returns>The stored fingerprint and <c>row_id</c> text, or <see langword="null"/> when the key is unused.</returns>
+    internal static async Task<(string Fingerprint, string RowId)?> FindRecordedAsync(
+        DbConnection connection,
+        DbTransaction? transaction,
+        string tableName,
+        string key,
+        string scope,
+        CancellationToken ct)
+    {
         var command = connection.CreateCommand();
         await using (command.ConfigureAwait(false))
         {
@@ -194,7 +226,7 @@ internal static class IdempotencyTable
             await using (reader.ConfigureAwait(false))
             {
                 return await reader.ReadAsync(ct).ConfigureAwait(false)
-                    ? new IdempotencyRecord(reader.GetString(0), Decode(reader.GetString(1)))
+                    ? (reader.GetString(0), reader.GetString(1))
                     : null;
             }
         }
@@ -224,6 +256,39 @@ internal static class IdempotencyTable
         string scope,
         IReadOnlyList<Guid> rowIds,
         DateTimeOffset createdAt,
+        CancellationToken ct) =>
+        await InsertRecordedAsync(
+            connection, transaction, tableName, token.Key, scope, token.Fingerprint, Encode(rowIds), createdAt,
+            ct).ConfigureAwait(false);
+
+    /// <summary>
+    /// Writes one record with <paramref name="rowId"/> stored <b>verbatim</b>, so a caller that keeps
+    /// something other than a row list is not made to spell it as one.
+    /// </summary>
+    /// <remarks>
+    /// A duplicate primary key here is the whole concurrency control, for every caller: two requests carrying
+    /// one key can both find no record and both insert, and this statement is what makes exactly one of them
+    /// commit.
+    /// </remarks>
+    /// <param name="connection">An open connection.</param>
+    /// <param name="transaction">The caller's transaction, or <see langword="null"/> to write outside one.</param>
+    /// <param name="tableName">The table name.</param>
+    /// <param name="key">The caller's key.</param>
+    /// <param name="scope">The key's scope, from <see cref="AlvoIdempotency.IdentityOf"/>.</param>
+    /// <param name="fingerprint">The fingerprint of the request the key was used for.</param>
+    /// <param name="rowId">What this record points at, in the caller's own spelling.</param>
+    /// <param name="createdAt">The instant the record is written, from the framework's own clock.</param>
+    /// <param name="ct">A token to cancel the operation.</param>
+    /// <returns>A task that completes when the record is written.</returns>
+    internal static async Task InsertRecordedAsync(
+        DbConnection connection,
+        DbTransaction? transaction,
+        string tableName,
+        string key,
+        string scope,
+        string fingerprint,
+        string rowId,
+        DateTimeOffset createdAt,
         CancellationToken ct)
     {
         var command = connection.CreateCommand();
@@ -235,10 +300,10 @@ internal static class IdempotencyTable
                 INSERT INTO {tableName} (idempotency_key, scope, fingerprint, row_id, created_at)
                 VALUES (@key, @scope, @fingerprint, @row_id, @created_at)
                 """;
-            RelationalSqlBatch.AddParameter(command, "@key", token.Key);
+            RelationalSqlBatch.AddParameter(command, "@key", key);
             RelationalSqlBatch.AddParameter(command, "@scope", scope);
-            RelationalSqlBatch.AddParameter(command, "@fingerprint", token.Fingerprint);
-            RelationalSqlBatch.AddParameter(command, "@row_id", Encode(rowIds));
+            RelationalSqlBatch.AddParameter(command, "@fingerprint", fingerprint);
+            RelationalSqlBatch.AddParameter(command, "@row_id", rowId);
             RelationalSqlBatch.AddParameter(command, "@created_at", StoredInstant.Text(createdAt));
 
             await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);

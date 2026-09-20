@@ -1104,6 +1104,11 @@ namespace MMLib.Alvo.Management
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRevision>> ListRevisionsAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementPolicyVerdict> SimulatePolicyAsync(string project, MMLib.Alvo.Management.ManagementPolicySimulation simulation, System.Threading.CancellationToken ct = default);
     }
+    public interface IManagementIdempotencyStore
+    {
+        System.Threading.Tasks.Task<int?> FindAsync(string key, string scope, string fingerprint, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task RecordAsync(string key, string scope, string fingerprint, int revision, System.Threading.CancellationToken ct = default);
+    }
     public sealed class ManagementApplyRequest : System.IEquatable<MMLib.Alvo.Management.ManagementApplyRequest>
     {
         public ManagementApplyRequest(string DescriptorJson, int ExpectedRevision, bool AllowDestructive = false, bool DryRun = false, string? Author = null, string? Reason = null) { }

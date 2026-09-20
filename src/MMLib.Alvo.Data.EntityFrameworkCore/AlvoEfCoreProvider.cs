@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
@@ -73,6 +74,7 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton<IDescriptorVersionStore>(sp => sp.GetRequiredService<EfCoreDescriptorVersionStore>());
         builder.Services.TryAddSingleton<IAppliedSchemaStore>(sp => sp.GetRequiredService<EfCoreDescriptorVersionStore>());
         builder.Services.TryAddSingleton<IRuntimeSchemaWriter>(CreateRuntimeSchemaWriter);
+        builder.Services.TryAddSingleton<IManagementIdempotencyStore>(CreateManagementIdempotencyStore);
         builder.Services.TryAddSingleton(services => new AlvoDataContextFactory(
             services.GetRequiredService<ISchemaRegistry>(),
             options => registration.ConfigureProvider(options, registration.ConnectionString(services))));
@@ -181,6 +183,23 @@ public static class AlvoEfCoreProvider
         var options = services.GetRequiredService<IOptions<AlvoOptions>>().Value;
 
         return new EfCoreDescriptorVersionStore(connections, options);
+    }
+
+    /// <summary>
+    /// The management idempotency store, over the same idempotency table the data path writes.
+    /// </summary>
+    /// <remarks>
+    /// Registered here rather than in the core because the table is this adapter's, exactly as the
+    /// descriptor-version store is — and with <c>TryAdd</c>, so a host may substitute its own.
+    /// </remarks>
+    /// <param name="services">The container the connection factory and options are resolved from.</param>
+    /// <returns>The store.</returns>
+    private static EfCoreManagementIdempotencyStore CreateManagementIdempotencyStore(IServiceProvider services)
+    {
+        var connections = services.GetRequiredService<RelationalConnectionFactory>();
+        var options = services.GetRequiredService<IOptions<AlvoOptions>>().Value;
+
+        return new EfCoreManagementIdempotencyStore(connections, options);
     }
 
     private static EfCoreRuntimeSchemaWriter CreateRuntimeSchemaWriter(IServiceProvider services)

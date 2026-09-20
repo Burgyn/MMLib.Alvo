@@ -625,6 +625,20 @@ namespace MMLib.Alvo.Testing.Events
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Testing.Events.IOutboxStoreWorld> WorldAsync();
     }
 }
+namespace MMLib.Alvo.Testing.Management
+{
+    public abstract class ManagementIdempotencyStoreContractTests
+    {
+        protected ManagementIdempotencyStoreContractTests() { }
+        public System.Threading.Tasks.Task A_key_nobody_has_used_is_not_a_replay() { }
+        public System.Threading.Tasks.Task A_key_reused_for_a_different_request_is_refused_rather_than_replayed() { }
+        public System.Threading.Tasks.Task A_recorded_key_replays_the_revision_it_recorded() { }
+        protected abstract MMLib.Alvo.Management.IManagementIdempotencyStore CreateStore();
+        protected virtual void EnsureEngineAvailable() { }
+        public System.Threading.Tasks.Task One_caller_s_key_never_reaches_another_s_record() { }
+        public System.Threading.Tasks.Task Recording_the_same_key_twice_is_refused_rather_than_silently_overwriting() { }
+    }
+}
 namespace MMLib.Alvo.Testing.Migrations
 {
     public abstract class DescriptorVersionStoreContractTests
