@@ -5,9 +5,20 @@
 /// them.
 /// </summary>
 /// <remarks>
+/// <para>
 /// <b>An operation, not a route.</b> The same operation is reachable in-process (an embedded host calling
-/// the management surface directly) and over HTTP, and both go through the same gate — which is what
-/// makes "one path, two transports" an authorization fact and not only a composition one.
+/// the management surface directly) and over HTTP, which is what makes "one path, two transports" a
+/// composition fact rather than two implementations.
+/// </para>
+/// <para>
+/// <b>The two transports are gated at two different moments, deliberately.</b> The <em>level</em> each
+/// operation needs is decided here and enforced by <c>ManagementAccessEndpointFilter</c> on the HTTP
+/// adapter — an in-process caller reached <see cref="IAlvoManagement"/> because whatever composed it
+/// admitted it, which is the same decision made earlier. The one judgment that is <b>not</b> pre-decidable
+/// at composition is whether a particular write changes the descriptor's <c>access</c> block, because it
+/// depends on what was sent; that comparison lives inside <c>AlvoManagementService</c>, so both transports
+/// meet it. See <c>AlvoManagementService.EnsureMayChangeAccess</c>.
+/// </para>
 /// </remarks>
 internal enum ManagementOperation
 {

@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Net.Http.Headers;
 using MMLib.Alvo.Api.Internal;
-using MMLib.Alvo.Auth;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Migrations;
 using System.Globalization;
@@ -17,7 +16,9 @@ namespace MMLib.Alvo.Management.Internal;
 /// <para>
 /// <b>Every delegate is a thin adapter over the same service the dashboard calls in-process</b> — it binds,
 /// calls one member, and renders. No business rule lives here, which is what keeps the two transports on one
-/// path.
+/// path. The §3.3 escalation guard used to be the exception and is not any more: it lives in
+/// <see cref="AlvoManagementService"/>, and this file only renders the
+/// <see cref="ManagementEscalationException"/> it raises.
 /// </para>
 /// <para>
 /// <b>Every route carries the same two filters, in this order:</b> <see cref="ManagementCallerFilter"/>
@@ -195,10 +196,8 @@ internal static class ManagementEndpoints
                     ManagementApplyBody? body,
                     HttpRequest request,
                     IAlvoManagement management,
-                    ManagementAccessEvaluator access,
-                    IAlvoContextAccessor callers,
                     CancellationToken ct) =>
-                    ApplyAsync(project, body, request, management, access, callers, ct)),
+                    ApplyAsync(project, body, request, management, ct)),
             new ManagementRoute(
                 nameof(IAlvoManagement.ApplyDescriptorAsync), ManagementOperation.ApplyDescriptor));
 
@@ -228,10 +227,8 @@ internal static class ManagementEndpoints
                     ManagementRollbackBody? body,
                     HttpRequest request,
                     IAlvoManagement management,
-                    ManagementAccessEvaluator access,
-                    IAlvoContextAccessor callers,
                     CancellationToken ct) =>
-                    RollbackAsync(project, revision, body, request, management, access, callers, ct)),
+                    RollbackAsync(project, revision, body, request, management, ct)),
             new ManagementRoute(
                 nameof(IAlvoManagement.RollbackAsync), ManagementOperation.RollbackRevision));
 
@@ -249,22 +246,18 @@ internal static class ManagementEndpoints
     /// <param name="body">The request body, or <see langword="null"/> when none was sent.</param>
     /// <param name="request">The request, read for <c>If-Match</c> and <c>?dryRun=</c>.</param>
     /// <param name="management">The contract member's implementation.</param>
-    /// <param name="access">The gate that resolves the caller's management level.</param>
-    /// <param name="callers">Where the caller resolved for this request is published.</param>
     /// <param name="ct">Cancellation token.</param>
     private static Task<IResult> ApplyAsync(
         string project,
         ManagementApplyBody? body,
         HttpRequest request,
         IAlvoManagement management,
-        ManagementAccessEvaluator access,
-        IAlvoContextAccessor callers,
         CancellationToken ct) =>
         WithWritePreconditions(request, (revision, planOnly, key) =>
             string.IsNullOrWhiteSpace(body?.DescriptorJson)
                 ? Refused(ProblemResultFactory.ManagementValidation(BodyRequired))
-                : Answer(() => AdmittedApplyAsync(
-                    project, body.ToRequest(revision, planOnly, key), management, access, callers, ct)));
+                : Answer(() => management.ApplyDescriptorAsync(
+                    project, body.ToRequest(revision, planOnly, key), ct)));
 
     /// <summary>
     /// The four things every management write reads off the request before anything is planned, and the
@@ -323,8 +316,6 @@ internal static class ManagementEndpoints
     /// <param name="body">The request body, or <see langword="null"/> when none was sent.</param>
     /// <param name="request">The request, read for <c>If-Match</c>, <c>?dryRun=</c> and the key.</param>
     /// <param name="management">The contract member's implementation.</param>
-    /// <param name="access">The gate that resolves the caller's management level.</param>
-    /// <param name="callers">Where the caller resolved for this request is published.</param>
     /// <param name="ct">Cancellation token.</param>
     private static Task<IResult> RollbackAsync(
         string project,
@@ -332,90 +323,11 @@ internal static class ManagementEndpoints
         ManagementRollbackBody? body,
         HttpRequest request,
         IAlvoManagement management,
-        ManagementAccessEvaluator access,
-        IAlvoContextAccessor callers,
         CancellationToken ct) =>
         WithWritePreconditions(request, (expected, planOnly, key) =>
-            Answer(() => AdmittedRollbackAsync(
+            Answer(() => management.RollbackAsync(
                 project, revision, (body ?? new ManagementRollbackBody()).ToRequest(expected, planOnly, key),
-                management, access, callers, ct)));
-
-    /// <summary>
-    /// Rolls back, after refusing a caller who may not change <b>who reaches the project</b>.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>C-1 applies here and the brief did not say so.</b> The apply route re-resolves the requirement to
-    /// <c>Admin</c> when the descriptor being applied carries a different <c>access</c> block; a rollback
-    /// restores a <em>stored</em> descriptor, which can carry a different block just as easily — and the
-    /// caller never had to write it. A project whose history ever held a looser block would otherwise be a
-    /// standing escalation any <c>developer</c> could take, at a route gated at <c>Developer</c>.
-    /// </para>
-    /// <para>
-    /// <b>The target is read through the contract first</b>, so a revision that was never appended is
-    /// <see cref="ManagementRevisionNotFoundException"/> — the named 404 — before any level is resolved.
-    /// That is also what keeps this route from answering a question about a revision the read routes would
-    /// refuse, since both are read at the caller's own admission.
-    /// </para>
-    /// </remarks>
-    /// <param name="project">The project to restore.</param>
-    /// <param name="targetRevision">The revision to restore.</param>
-    /// <param name="rollback">What the caller asked for.</param>
-    /// <param name="management">The contract member's implementation.</param>
-    /// <param name="access">The gate that resolves the caller's management level.</param>
-    /// <param name="callers">Where the caller resolved for this request is published.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <exception cref="ManagementEscalationException">
-    /// The target carries a different <c>access</c> block and the caller is not an administrator.
-    /// </exception>
-    private static async Task<ManagementApplyResult> AdmittedRollbackAsync(
-        string project,
-        int targetRevision,
-        ManagementRollbackRequest rollback,
-        IAlvoManagement management,
-        ManagementAccessEvaluator access,
-        IAlvoContextAccessor callers,
-        CancellationToken ct)
-    {
-        var applied = await management.GetDescriptorAsync(project, ct).ConfigureAwait(false);
-        var target = await management.GetRevisionAsync(project, targetRevision, ct).ConfigureAwait(false);
-        EnsureAccessBlockMayChange(
-            ManagementAccessChange.DiffersFromStored(applied.DescriptorJson, target.DescriptorJson),
-            access,
-            callers);
-
-        return await management.RollbackAsync(project, targetRevision, rollback, ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Refuses a caller who is not an administrator when the descriptor about to become current declares a
-    /// different <c>access</c> block.
-    /// </summary>
-    /// <remarks>
-    /// <b>Spec §3.3:</b> <i>"<c>developer</c> edits what the backend is, <c>admin</c> also decides who may
-    /// reach it."</i> Both write routes go through this one expression, so neither can enforce the rule the
-    /// other does not — which is the whole failure mode C-1 was.
-    /// </remarks>
-    /// <param name="changesAccess">
-    /// Whether the descriptor about to become current declares a different <c>access</c> block. Each route
-    /// answers that with the reading its own candidate deserves — <c>ManagementAccessChange.Differs</c> for a
-    /// descriptor the caller sent and a validator will refuse, <c>DiffersFromStored</c> for a revision this
-    /// instance already appended and nothing stands behind.
-    /// </param>
-    /// <param name="access">The gate that resolves the caller's management level.</param>
-    /// <param name="callers">Where the caller resolved for this request is published.</param>
-    /// <exception cref="ManagementEscalationException">The block differs and the caller is no administrator.</exception>
-    private static void EnsureAccessBlockMayChange(
-        bool changesAccess,
-        ManagementAccessEvaluator access,
-        IAlvoContextAccessor callers)
-    {
-        if (changesAccess
-            && !access.Allows(ManagementLevel.Admin, callers.Principal?.Context ?? AlvoContext.Anonymous))
-        {
-            throw new ManagementEscalationException();
-        }
-    }
+                ct)));
 
     /// <summary>
     /// The caller's <c>Idempotency-Key</c>, refusing the one ambiguity the port below cannot see.
@@ -436,53 +348,6 @@ internal static class ManagementEndpoints
         key = header.Count == 1 ? header[0] : null;
 
         return header.Count <= 1;
-    }
-
-    /// <summary>
-    /// Applies, after refusing a caller who may not change <b>who reaches the project</b>.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Spec §3.3:</b> <i>"<c>developer</c> edits what the backend is, <c>admin</c> also decides who may
-    /// reach it."</i> The route's own gate is <c>ApplyDescriptor</c> at <c>Developer</c>, which is right for
-    /// every block but one: <c>access</c> is inside the descriptor and every accepted apply re-primes the
-    /// catalog the gate reads, so without this a <c>developer</c> promotes itself to <c>admin</c> by editing
-    /// three lines of JSON. The level is re-resolved here rather than read off the route, because the
-    /// requirement depends on what was sent.
-    /// </para>
-    /// <para>
-    /// <b>A dry run is refused identically.</b> A preview writes nothing and cannot escalate on its own, but
-    /// a preview whose plan the apply would then refuse tells an editor its change is ready when it is not —
-    /// the same reason the destructive guardrail runs on both branches.
-    /// </para>
-    /// <para>
-    /// It reads the applied descriptor through the contract, so an unknown project is
-    /// <see cref="ManagementProjectNotFoundException"/> — the named 404 — before any level is resolved, and
-    /// this route cannot answer a question about a project the others would refuse.
-    /// </para>
-    /// </remarks>
-    /// <param name="project">The project to apply to.</param>
-    /// <param name="apply">What the caller asked for.</param>
-    /// <param name="management">The contract member's implementation.</param>
-    /// <param name="access">The gate that resolves the caller's management level.</param>
-    /// <param name="callers">Where the caller resolved for this request is published.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <exception cref="ManagementEscalationException">
-    /// The apply would change the <c>access</c> block and the caller is not an administrator.
-    /// </exception>
-    private static async Task<ManagementApplyResult> AdmittedApplyAsync(
-        string project,
-        ManagementApplyRequest apply,
-        IAlvoManagement management,
-        ManagementAccessEvaluator access,
-        IAlvoContextAccessor callers,
-        CancellationToken ct)
-    {
-        var applied = await management.GetDescriptorAsync(project, ct).ConfigureAwait(false);
-        EnsureAccessBlockMayChange(
-            ManagementAccessChange.Differs(applied.DescriptorJson, apply.DescriptorJson), access, callers);
-
-        return await management.ApplyDescriptorAsync(project, apply, ct).ConfigureAwait(false);
     }
 
     /// <summary>One already-decided refusal, as the completed task a route handler answers with.</summary>

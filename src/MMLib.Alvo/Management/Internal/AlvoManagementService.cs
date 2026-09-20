@@ -45,8 +45,13 @@ namespace MMLib.Alvo.Management.Internal;
 /// which refuses loudly rather than ignoring a key it cannot record.
 /// </param>
 /// <param name="callers">
-/// Where the caller resolved for this request is published — read only to scope an idempotency key, never
-/// to decide admission, which is <c>ManagementAccessEndpointFilter</c>'s alone.
+/// Where the caller resolved for this request is published — read to scope an idempotency key, and to judge
+/// the one admission decision that is <b>not</b> pre-decidable at composition: whether this write may change
+/// the descriptor's <c>access</c> block. The route LEVEL gate stays
+/// <c>ManagementAccessEndpointFilter</c>'s alone; see <see cref="EnsureMayChangeAccess"/>.
+/// </param>
+/// <param name="access">
+/// The gate the <c>access</c>-block comparison resolves the caller's management level through.
 /// </param>
 /// <param name="logger">
 /// Where a record that could not be filed for a write that already landed is reported — see
@@ -73,6 +78,7 @@ internal sealed partial class AlvoManagementService(
     IDescriptorVersionStore? versions,
     IManagementIdempotencyStore? idempotency,
     IAlvoContextAccessor callers,
+    ManagementAccessEvaluator access,
     ILogger<AlvoManagementService> logger,
     Func<RuntimeSchemaService> runtime) : IAlvoManagement
 {
@@ -154,6 +160,7 @@ internal sealed partial class AlvoManagementService(
     {
         EnsureServed(project);
         ArgumentNullException.ThrowIfNull(request);
+        await EnsureApplyMayChangeAccessAsync(project, request, ct).ConfigureAwait(false);
 
         var token = TokenFor(request.IdempotencyKey, request.DryRun, () => FingerprintOf(project, request));
         var replayed = await ReplayAsync(project, token, ct).ConfigureAwait(false);
@@ -194,6 +201,7 @@ internal sealed partial class AlvoManagementService(
     {
         EnsureServed(project);
         ArgumentNullException.ThrowIfNull(request);
+        await EnsureRestoreMayChangeAccessAsync(project, targetRevision, ct).ConfigureAwait(false);
 
         var token = TokenFor(
             request.IdempotencyKey, request.DryRun, () => FingerprintOf(project, targetRevision, request));
@@ -264,6 +272,95 @@ internal sealed partial class AlvoManagementService(
         ManagementIdempotency.FingerprintOf(
             nameof(RollbackAsync), project, request.ExpectedRevision, request.AllowDestructive,
             targetRevision.ToString(CultureInfo.InvariantCulture));
+
+    /// <summary>
+    /// Refuses an apply that would change <b>who may reach the project</b>, from a caller the project does
+    /// not admit as an administrator.
+    /// </summary>
+    /// <remarks>
+    /// <b>Before the idempotency key is read, which is where the HTTP adapter used to run it.</b> A replay
+    /// answers with a revision this instance already appended, so a guard placed after the replay would let
+    /// a refused caller retry their way past it with the first caller's key.
+    /// </remarks>
+    /// <param name="project">The project being changed.</param>
+    /// <param name="request">What the caller asked for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <exception cref="ManagementEscalationException">The block differs and the caller is no administrator.</exception>
+    private async Task EnsureApplyMayChangeAccessAsync(
+        string project, ManagementApplyRequest request, CancellationToken ct)
+    {
+        var applied = await History.GetCurrentAsync(project, ct).ConfigureAwait(false);
+
+        EnsureMayChangeAccess(
+            ManagementAccessChange.Differs(applied?.DescriptorJson ?? string.Empty, request.DescriptorJson));
+    }
+
+    /// <summary>
+    /// Refuses a rollback whose target carries a different <c>access</c> block, from a caller the project
+    /// does not admit as an administrator.
+    /// </summary>
+    /// <remarks>
+    /// <b>The target is read here as well as in <see cref="RolledBackAsync"/>, and deliberately.</b> A
+    /// revision that was never appended is <see cref="ManagementRevisionNotFoundException"/> — the named 404
+    /// — before any level is resolved, so this route cannot answer a question about a revision the read
+    /// routes would refuse. The second read is the one the reverse migration plans from, after the key.
+    /// </remarks>
+    /// <param name="project">The project being restored.</param>
+    /// <param name="targetRevision">The revision being restored.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <exception cref="ManagementRevisionNotFoundException">The revision was never appended.</exception>
+    /// <exception cref="ManagementEscalationException">The block differs and the caller is no administrator.</exception>
+    private async Task EnsureRestoreMayChangeAccessAsync(
+        string project, int targetRevision, CancellationToken ct)
+    {
+        var applied = await History.GetCurrentAsync(project, ct).ConfigureAwait(false);
+        var target = await History.GetAsync(project, targetRevision, ct).ConfigureAwait(false)
+            ?? throw new ManagementRevisionNotFoundException(project, targetRevision);
+
+        EnsureMayChangeAccess(ManagementAccessChange.DiffersFromStored(
+            applied?.DescriptorJson ?? string.Empty, target.DescriptorJson));
+    }
+
+    /// <summary>
+    /// Refuses a caller who is not an administrator when the descriptor about to become current declares a
+    /// different <c>access</c> block.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Spec §3.3:</b> <i>"<c>developer</c> edits what the backend is, <c>admin</c> also decides who may
+    /// reach it."</i> Both write members go through this one expression, so neither can enforce the rule the
+    /// other does not — which is the whole failure mode C-1 was.
+    /// </para>
+    /// <para>
+    /// <b>Here rather than in <c>ManagementEndpoints</c>, because <see cref="IAlvoManagement"/> is public and
+    /// a dashboard is one caller serving many humans.</b> An in-process holder of this reference has been
+    /// admitted by whatever composed it — which admits the <em>process</em>, not the person — so a guard that
+    /// lived in the HTTP adapter alone would be the divergent authorization path spec §0.5 contract 4
+    /// forbids. The route LEVEL gate stays where it is: a level check IS pre-decidable at composition, and
+    /// this per-descriptor comparison is not.
+    /// </para>
+    /// <para>
+    /// <b>An in-process caller with nothing published is anonymous, and is refused.</b> That is the same
+    /// fail-closed reading <c>ManagementAccessEvaluator</c> applies everywhere else — a host that wants an
+    /// unattended apply publishes a caller the project's own <c>access</c> block admits at <c>admin</c>, or
+    /// applies through the boot rather than through this surface.
+    /// </para>
+    /// </remarks>
+    /// <param name="changesAccess">
+    /// Whether the descriptor about to become current declares a different <c>access</c> block. Each member
+    /// answers that with the reading its own candidate deserves — <c>ManagementAccessChange.Differs</c> for a
+    /// descriptor the caller sent and a validator will refuse, <c>DiffersFromStored</c> for a revision this
+    /// instance already appended and nothing stands behind.
+    /// </param>
+    /// <exception cref="ManagementEscalationException">The block differs and the caller is no administrator.</exception>
+    private void EnsureMayChangeAccess(bool changesAccess)
+    {
+        if (changesAccess
+            && !access.Allows(ManagementLevel.Admin, callers.Principal?.Context ?? AlvoContext.Anonymous))
+        {
+            throw new ManagementEscalationException();
+        }
+    }
 
     /// <summary>Applies what the preview described, and reports the preview's plan beside the new revision.</summary>
     /// <remarks>
