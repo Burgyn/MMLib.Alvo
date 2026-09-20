@@ -51,11 +51,13 @@ public interface IAlvoManagement
     /// <summary>Describes this deployment: the build, the mode, the data provider and the startup mode.</summary>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>What this instance is.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
     Task<ManagementInfo> GetInfoAsync(CancellationToken ct = default);
 
     /// <summary>Lists the projects this instance serves.</summary>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>One entry per booted project; in this build, exactly one.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
     Task<IReadOnlyList<ManagementProject>> ListProjectsAsync(CancellationToken ct = default);
 
     /// <summary>
@@ -65,6 +67,7 @@ public interface IAlvoManagement
     /// <param name="project">The project name.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The stored descriptor text and its revision.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
     Task<ManagementDescriptor> GetDescriptorAsync(string project, CancellationToken ct = default);
 
@@ -72,6 +75,7 @@ public interface IAlvoManagement
     /// <param name="project">The project name.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Every appended revision's provenance, without its descriptor body.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
     Task<IReadOnlyList<ManagementRevision>> ListRevisionsAsync(string project, CancellationToken ct = default);
 
@@ -80,6 +84,7 @@ public interface IAlvoManagement
     /// <param name="revision">The revision number.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The revision's provenance and the descriptor it applied.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
     /// <exception cref="ManagementRevisionNotFoundException">That revision was never appended.</exception>
     Task<ManagementRevisionDetail> GetRevisionAsync(string project, int revision, CancellationToken ct = default);
@@ -92,6 +97,7 @@ public interface IAlvoManagement
     /// <param name="project">The project name.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The applied <see cref="Schema.SchemaModel"/>.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
     Task<Schema.SchemaModel> GetSchemaAsync(string project, CancellationToken ct = default);
 
@@ -104,6 +110,7 @@ public interface IAlvoManagement
     /// <param name="project">The project name.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The capability report.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
     Task<ManagementCapabilities> GetCapabilitiesAsync(string project, CancellationToken ct = default);
 
@@ -120,6 +127,7 @@ public interface IAlvoManagement
     /// <param name="simulation">The entity, the operation and the caller to simulate.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The verdict and the predicates the engine resolved.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
     /// <exception cref="ManagementSimulationException">
     /// The simulation names an entity, an operation, a role or a caller the framework cannot resolve.
@@ -151,6 +159,7 @@ public interface IAlvoManagement
     /// <param name="request">The descriptor, the expected revision, and the allowances.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>What was applied, what would be, or what a previous identical request already applied.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
     /// <exception cref="ManagementRequestException">
     /// The request carries an <see cref="ManagementApplyRequest.IdempotencyKey"/> this surface cannot honour
@@ -158,6 +167,9 @@ public interface IAlvoManagement
     /// </exception>
     /// <exception cref="Data.AlvoIdempotencyConflictException">
     /// The key was already spent by this caller on a different request.
+    /// </exception>
+    /// <exception cref="ManagementEscalationException">
+    /// The descriptor changes the <c>access</c> block and the caller is not an administrator.
     /// </exception>
     /// <exception cref="Descriptor.DescriptorValidationException">The descriptor is invalid.</exception>
     /// <exception cref="Migrations.DescriptorConcurrencyException">
@@ -186,11 +198,11 @@ public interface IAlvoManagement
     /// data they did not say they could lose.
     /// </para>
     /// <para>
-    /// <b>Restoring a different <c>access</c> block is an authorization change.</b> Over HTTP the route's
-    /// gate is <c>Developer</c> and the transport re-resolves the requirement to <c>Admin</c> when the
-    /// target's block differs from the applied one — the same rule an apply is held to, and for the same
-    /// reason: <c>access</c> lives inside the descriptor, so a history that ever held a looser block would
-    /// otherwise be a standing escalation.
+    /// <b>Restoring a different <c>access</c> block is an authorization change.</b> This member's own level
+    /// is <c>Developer</c>, and it re-resolves the requirement to <c>Admin</c> when the target's block differs
+    /// from the applied one — the same rule an apply is held to, enforced here rather than at a transport, and
+    /// for the same reason: <c>access</c> lives inside the descriptor, so a history that ever held a looser
+    /// block would otherwise be a standing escalation.
     /// </para>
     /// </remarks>
     /// <param name="project">The project name.</param>
@@ -198,6 +210,7 @@ public interface IAlvoManagement
     /// <param name="request">The expected current revision, the allowances, and the provenance.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The appended revision, or — for a dry run — the reverse plan and the base it was planned against.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
     /// <exception cref="ManagementRevisionNotFoundException">That revision was never appended.</exception>
     /// <exception cref="ManagementRequestException">
@@ -206,6 +219,10 @@ public interface IAlvoManagement
     /// </exception>
     /// <exception cref="Data.AlvoIdempotencyConflictException">
     /// The key was already spent by this caller on a different request.
+    /// </exception>
+    /// <exception cref="ManagementEscalationException">
+    /// The target revision's <c>access</c> block differs from the applied one and the caller is not an
+    /// administrator.
     /// </exception>
     /// <exception cref="Migrations.DescriptorConcurrencyException">The expected revision is not the current one.</exception>
     /// <exception cref="Migrations.DestructiveChangeNotAllowedException">
