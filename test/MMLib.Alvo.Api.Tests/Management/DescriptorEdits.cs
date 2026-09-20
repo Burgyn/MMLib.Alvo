@@ -58,6 +58,24 @@ internal static class DescriptorEdits
     }
 
     /// <summary>
+    /// Points the <c>viewer</c> level at a different role, leaving <c>developer</c> and <c>admin</c> alone.
+    /// </summary>
+    /// <remarks>
+    /// The edit a rollback fact needs: it puts a <em>different</em> <c>access</c> block into the history
+    /// without changing which caller is the developer or the administrator, so a later rollback across it is
+    /// measurably an access change and both callers still hold the level the fact addresses them with.
+    /// </remarks>
+    /// <param name="descriptorJson">The descriptor to edit.</param>
+    /// <param name="role">The role that may view after the edit.</param>
+    internal static string GrantViewTo(string descriptorJson, string role)
+    {
+        var root = JsonNode.Parse(descriptorJson)!.AsObject();
+        root["access"]!.AsObject()["viewer"] = $"'{role}' in @user.roles";
+
+        return Write(root);
+    }
+
+    /// <summary>
     /// Re-emits the descriptor with different whitespace and nothing else.
     /// </summary>
     /// <remarks>

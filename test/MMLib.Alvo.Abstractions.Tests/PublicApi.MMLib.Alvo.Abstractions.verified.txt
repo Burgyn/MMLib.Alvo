@@ -1102,6 +1102,7 @@ namespace MMLib.Alvo.Management
         System.Threading.Tasks.Task<MMLib.Alvo.Schema.SchemaModel> GetSchemaAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementProject>> ListProjectsAsync(System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRevision>> ListRevisionsAsync(string project, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementApplyResult> RollbackAsync(string project, int targetRevision, MMLib.Alvo.Management.ManagementRollbackRequest request, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementPolicyVerdict> SimulatePolicyAsync(string project, MMLib.Alvo.Management.ManagementPolicySimulation simulation, System.Threading.CancellationToken ct = default);
     }
     public interface IManagementIdempotencyStore
@@ -1225,6 +1226,16 @@ namespace MMLib.Alvo.Management
         public ManagementRevisionNotFoundException(string project, int revision) { }
         public string Project { get; }
         public int Revision { get; }
+    }
+    public sealed class ManagementRollbackRequest : System.IEquatable<MMLib.Alvo.Management.ManagementRollbackRequest>
+    {
+        public ManagementRollbackRequest(int ExpectedRevision, bool AllowDestructive = false, bool DryRun = false, string? Author = null, string? Reason = null, string? IdempotencyKey = null) { }
+        public bool AllowDestructive { get; init; }
+        public string? Author { get; init; }
+        public bool DryRun { get; init; }
+        public int ExpectedRevision { get; init; }
+        public string? IdempotencyKey { get; init; }
+        public string? Reason { get; init; }
     }
     public sealed class ManagementSimulatedCaller : System.IEquatable<MMLib.Alvo.Management.ManagementSimulatedCaller>
     {

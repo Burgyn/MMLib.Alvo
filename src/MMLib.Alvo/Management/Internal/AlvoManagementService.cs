@@ -4,6 +4,7 @@ using MMLib.Alvo.Data;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using System.Globalization;
 using System.Reflection;
 
 namespace MMLib.Alvo.Management.Internal;
@@ -180,6 +181,83 @@ internal sealed class AlvoManagementService(
         ManagementIdempotency.FingerprintOf(
             nameof(ApplyDescriptorAsync), project, request.ExpectedRevision, request.AllowDestructive,
             request.DescriptorJson);
+
+    /// <inheritdoc/>
+    public async Task<ManagementApplyResult> RollbackAsync(
+        string project, int targetRevision, ManagementRollbackRequest request, CancellationToken ct = default)
+    {
+        EnsureServed(project);
+        ArgumentNullException.ThrowIfNull(request);
+
+        var token = TokenFor(
+            request.IdempotencyKey, request.DryRun, () => FingerprintOf(project, targetRevision, request));
+        var replayed = await ReplayAsync(project, token, ct).ConfigureAwait(false);
+
+        return replayed ?? await RecordingAsync(
+            token, () => RolledBackAsync(project, targetRevision, request, ct), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Previews the reverse migration, guards it, then either reports it or appends it.</summary>
+    /// <remarks>
+    /// <b>The target is looked up here rather than left to the runtime path</b>, because that one answers a
+    /// missing revision with an <see cref="InvalidOperationException"/> — a broken-invariant family, which
+    /// over HTTP is a 500. A caller naming a revision that was never appended is asking an ordinary question
+    /// with a 404 for an answer, which is <see cref="ManagementRevisionNotFoundException"/>'s whole job.
+    /// </remarks>
+    /// <param name="project">The project being restored.</param>
+    /// <param name="targetRevision">The revision to restore.</param>
+    /// <param name="request">What the caller asked for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task<ManagementApplyResult> RolledBackAsync(
+        string project, int targetRevision, ManagementRollbackRequest request, CancellationToken ct)
+    {
+        var target = await History.GetAsync(project, targetRevision, ct).ConfigureAwait(false)
+            ?? throw new ManagementRevisionNotFoundException(project, targetRevision);
+        var options = OptionsFor(request.AllowDestructive, request.Author, request.Reason);
+        var schema = runtime();
+        var preview = await schema.PreviewAsync(
+            project, target.DescriptorJson, request.ExpectedRevision, options, ct).ConfigureAwait(false);
+        Guard(project, preview);
+
+        return request.DryRun
+            ? new ManagementApplyResult(Applied: false, preview.CurrentRevision, Summary(preview.Plan))
+            : await RevertedAsync(schema, project, targetRevision, options, preview, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Appends the reverse migration, and reports the preview's plan beside the new revision.</summary>
+    /// <remarks>
+    /// It plans twice for <see cref="AppendAsync"/>'s reason, and the reverse plan is the one an operator
+    /// most wants to see: it is the list of what a restore is about to drop.
+    /// </remarks>
+    /// <param name="schema">The runtime apply path.</param>
+    /// <param name="project">The project being restored.</param>
+    /// <param name="targetRevision">The revision being restored.</param>
+    /// <param name="options">The migration options the request resolved to.</param>
+    /// <param name="preview">What the plan-only pass reported.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private static async Task<ManagementApplyResult> RevertedAsync(
+        RuntimeSchemaService schema, string project, int targetRevision, MigrationOptions options,
+        DescriptorApplyPreview preview, CancellationToken ct)
+    {
+        var reverted = await schema.RollbackAsync(project, targetRevision, options, ct).ConfigureAwait(false);
+
+        return new ManagementApplyResult(Applied: true, reverted.Revision, Summary(preview.Plan));
+    }
+
+    /// <summary>What makes two rollbacks of this project the same request.</summary>
+    /// <remarks>
+    /// The target revision is the payload, because it is the whole of what this write carries beyond the
+    /// base and the allowance — and the operation name is in the hash too, so one key spent on an apply can
+    /// never be answered with a rollback's revision.
+    /// </remarks>
+    /// <param name="project">The project being restored.</param>
+    /// <param name="targetRevision">The revision to restore.</param>
+    /// <param name="request">What the caller asked for.</param>
+    private static string FingerprintOf(
+        string project, int targetRevision, ManagementRollbackRequest request) =>
+        ManagementIdempotency.FingerprintOf(
+            nameof(RollbackAsync), project, request.ExpectedRevision, request.AllowDestructive,
+            targetRevision.ToString(CultureInfo.InvariantCulture));
 
     /// <summary>Applies what the preview described, and reports the preview's plan beside the new revision.</summary>
     /// <remarks>
@@ -361,13 +439,25 @@ internal sealed class AlvoManagementService(
         }
     }
 
-    /// <summary>The migration options one request resolves to.</summary>
+    /// <summary>The migration options one apply resolves to.</summary>
     /// <param name="request">The request as it was bound.</param>
-    private static MigrationOptions OptionsFor(ManagementApplyRequest request) => new()
+    private static MigrationOptions OptionsFor(ManagementApplyRequest request) =>
+        OptionsFor(request.AllowDestructive, request.Author, request.Reason);
+
+    /// <summary>The migration options one write's three allowances resolve to.</summary>
+    /// <remarks>
+    /// A blank <paramref name="reason"/> is passed through rather than defaulted here, so a rollback gets
+    /// <c>RuntimeSchemaService.RollbackAsync</c>'s own <c>Rollback to revision N</c> — one wording for one
+    /// fact, rather than a second copy of it in this layer.
+    /// </remarks>
+    /// <param name="allowDestructive">Whether a plan that discards data may proceed.</param>
+    /// <param name="author">Who is writing.</param>
+    /// <param name="reason">Why, or <see langword="null"/> to leave the framework's own default.</param>
+    private static MigrationOptions OptionsFor(bool allowDestructive, string? author, string? reason) => new()
     {
-        AllowDestructive = request.AllowDestructive,
-        Author = request.Author,
-        Reason = request.Reason,
+        AllowDestructive = allowDestructive,
+        Author = author,
+        Reason = reason,
     };
 
     /// <summary>One plan, in the shape a diff view needs.</summary>

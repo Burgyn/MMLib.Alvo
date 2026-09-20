@@ -161,4 +161,49 @@ public interface IAlvoManagement
     /// </exception>
     Task<ManagementApplyResult> ApplyDescriptorAsync(
         string project, ManagementApplyRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Restores a past revision by appending the reverse migration as a new revision. <b>History is never
+    /// rewritten.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A rollback is an apply of a past descriptor</b>, so it carries the same two allowances an apply
+    /// does and reports the same result. <paramref name="targetRevision"/> and
+    /// <see cref="ManagementRollbackRequest.ExpectedRevision"/> are two numbers with two jobs: the target
+    /// says what to restore, the expected revision says from where.
+    /// </para>
+    /// <para>
+    /// <b>The destructive guardrail is the point here, not a formality.</b> A reverse migration drops what
+    /// the forward one added, so the refusal a caller most often meets on this member is the one that saves
+    /// data they did not say they could lose.
+    /// </para>
+    /// <para>
+    /// <b>Restoring a different <c>access</c> block is an authorization change.</b> Over HTTP the route's
+    /// gate is <c>Developer</c> and the transport re-resolves the requirement to <c>Admin</c> when the
+    /// target's block differs from the applied one — the same rule an apply is held to, and for the same
+    /// reason: <c>access</c> lives inside the descriptor, so a history that ever held a looser block would
+    /// otherwise be a standing escalation.
+    /// </para>
+    /// </remarks>
+    /// <param name="project">The project name.</param>
+    /// <param name="targetRevision">The revision to restore.</param>
+    /// <param name="request">The expected current revision, the allowances, and the provenance.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The appended revision, or — for a dry run — the reverse plan and the base it was planned against.</returns>
+    /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
+    /// <exception cref="ManagementRevisionNotFoundException">That revision was never appended.</exception>
+    /// <exception cref="ManagementRequestException">
+    /// The request carries an <see cref="ManagementRollbackRequest.IdempotencyKey"/> this surface cannot
+    /// honour.
+    /// </exception>
+    /// <exception cref="Data.AlvoIdempotencyConflictException">
+    /// The key was already spent by this caller on a different request.
+    /// </exception>
+    /// <exception cref="Migrations.DescriptorConcurrencyException">The expected revision is not the current one.</exception>
+    /// <exception cref="Migrations.DestructiveChangeNotAllowedException">
+    /// The reverse plan discards data and it was not allowed.
+    /// </exception>
+    Task<ManagementApplyResult> RollbackAsync(
+        string project, int targetRevision, ManagementRollbackRequest request, CancellationToken ct = default);
 }

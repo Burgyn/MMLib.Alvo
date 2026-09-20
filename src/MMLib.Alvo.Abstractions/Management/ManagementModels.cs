@@ -160,6 +160,34 @@ public sealed record ManagementApplyRequest(
     string? Reason = null,
     string? IdempotencyKey = null);
 
+/// <summary>One rollback.</summary>
+/// <param name="ExpectedRevision">
+/// The revision the caller believes is current — the base, from <c>If-Match</c>. <b>Distinct from the target
+/// revision</b>, which the route carries: the target says <em>what</em> to restore, this says <em>from
+/// where</em>. Conflating them would let a caller roll back from a state they never saw.
+/// </param>
+/// <param name="AllowDestructive">
+/// Whether the reverse migration may discard data. A reverse migration routinely drops what the forward one
+/// added, so this is the case the guardrail exists for — explicit, and never implied.
+/// </param>
+/// <param name="DryRun">Plan the reverse migration and report it without writing anything.</param>
+/// <param name="Author">Who is rolling back, carried into the appended revision.</param>
+/// <param name="Reason">
+/// Why; the framework's own <c>Rollback to revision N</c> stands in when none is given.
+/// </param>
+/// <param name="IdempotencyKey">
+/// A caller-chosen key making a retry a replay rather than a second rollback — with
+/// <see cref="ManagementApplyRequest.IdempotencyKey"/>'s semantics exactly, including that a dry run may not
+/// carry one.
+/// </param>
+public sealed record ManagementRollbackRequest(
+    int ExpectedRevision,
+    bool AllowDestructive = false,
+    bool DryRun = false,
+    string? Author = null,
+    string? Reason = null,
+    string? IdempotencyKey = null);
+
 /// <summary>What an apply did, or would do.</summary>
 /// <param name="Applied"><see langword="false"/> for a dry run, <see langword="true"/> when a revision was appended.</param>
 /// <param name="Revision">The appended revision — or, for a dry run, the base it planned against.</param>
