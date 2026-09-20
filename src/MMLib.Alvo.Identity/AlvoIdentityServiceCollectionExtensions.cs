@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -35,7 +36,7 @@ public static class AlvoIdentityServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configureStore);
 
-        services.AddDbContext<AlvoIdentityDbContext>(configureStore);
+        AddStore(services, configureStore);
         AddIdentityCore(services);
 
         AddValidatedOptions(services, configure);
@@ -49,6 +50,25 @@ public static class AlvoIdentityServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>
+    /// Registers the identity store, with the host's own provider configuration and Alvo's model cache key.
+    /// </summary>
+    /// <remarks>
+    /// <b>The cache key is not optional.</b> <see cref="AlvoIdentityDbContext"/> names its tables from
+    /// <see cref="AlvoOptions.SchemaPrefix"/>, and EF caches a built model under a key that is the context
+    /// type alone — in a cache that lives in EF's process-wide internal service provider. Two containers
+    /// under two prefixes would share whichever model was built first;
+    /// <see cref="AlvoIdentityModelCacheKeyFactory"/> is what makes the prefix part of that key.
+    /// </remarks>
+    /// <param name="services">The service collection to register into.</param>
+    /// <param name="configureStore">Configures the identity store's database — the provider and its connection.</param>
+    private static void AddStore(IServiceCollection services, Action<DbContextOptionsBuilder> configureStore) =>
+        services.AddDbContext<AlvoIdentityDbContext>(store =>
+        {
+            configureStore(store);
+            store.ReplaceService<IModelCacheKeyFactory, AlvoIdentityModelCacheKeyFactory>();
+        });
 
     /// <summary>
     /// Binds <see cref="AlvoIdentityOptions"/> and refuses a misconfigured bootstrap administrator at

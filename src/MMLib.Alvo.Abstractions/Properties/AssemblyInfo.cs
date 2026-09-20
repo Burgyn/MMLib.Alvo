@@ -26,6 +26,12 @@
 // on the next re-apply rather than an error anyone sees.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Identity")]
 
+// And to that package's own suite, for the fact nothing held: that the tables AlvoIdentityDbContext maps
+// are the names AlvoFrameworkTables.NamesFor(prefix) reserves, under a NON-default prefix. Asserting it
+// against a list the identity package projects from AlvoFrameworkTables would only re-measure the
+// projection; the suite has to read the reserved set itself for the two sides to be independent.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Identity.Tests")]
+
 // IAlvoDataReachability and AlvoReachability (#133) are internal for the reason the port's own remarks give:
 // the shared EF path implements the probe once, so no driver and no host has been shown to need the type.
 // The assemblies that DO need it are all in this family — the core consumes the port from its readiness
