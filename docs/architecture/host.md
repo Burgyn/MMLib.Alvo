@@ -119,10 +119,19 @@ on the built container.
 
 ## Configuration
 
-The framework's options (`AlvoOptions`, `AlvoApiOptions`, `AlvoAuthOptions`) are bound from
-`Alvo:*`, `Alvo:Api:*` and `Alvo:Auth:*`; the host's own decisions live in
+The framework's options (`AlvoOptions`, `AlvoApiOptions`, `AlvoAuthOptions`,
+`AlvoManagementOptions`) are bound from `Alvo:*`, `Alvo:Api:*`, `Alvo:Auth:*` and
+`Alvo:Management:*`; the host's own decisions live in
 `AlvoHostOptions` (`Alvo:DescriptorPath`, `Alvo:Database:*`, `Alvo:PathBase`,
 `Alvo:ForwardedHeaders:Enabled`, `Alvo:Docs:*`).
+
+**`Alvo:Management:RoutePrefix`** (`Alvo__Management__RoutePrefix` in the container) moves
+the Management API's mount point; it defaults to `/management` and, unlike the Data API's
+prefix, may not reduce to the empty string. The host configures none of it: `MapAlvo()`
+mounts the surface, and it is **closed by default** — every management route carries the
+gate the descriptor's `access` block compiles, so an image whose descriptor declares no
+`access` answers 403 to everyone but the bootstrap administrator. See
+`docs/architecture/management-api.md`.
 The container form is the standard .NET double-underscore spelling
 (`Alvo__Database__Provider`), not the `ALVO_*` names spec §X.1 sketches — see the design's
 *Deviations added by PR4*.

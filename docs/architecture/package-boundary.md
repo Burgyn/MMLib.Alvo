@@ -109,6 +109,13 @@ above applies — roughly **~10 packages for v0.1, not 30+**. Start conservative
 extracting a namespace into a package later is cheap; merging too many packages back
 is a breaking change.
 
+**The Management API landed exactly where this paragraph already named it: inside the core, at
+`src/MMLib.Alvo/Management/`, with no new project.** #212's design §1.1 measures it against the rule above
+and finds none of (a)/(b)/(c) — minimal-API delegates over services the core already holds, no foreign
+dependency, no swap point, no different distribution policy — and cites this list's own mention of
+"Management API" by name as the prior decision it is following. `MMLib.Alvo.Host` gained the surface by
+calling `MapAlvo()`, which is a hosting decision in the one project that is `IsPackable=false`.
+
 ## Illustrative example (non-binding)
 
 - `MMLib.Alvo.Abstractions` (ports, no dependencies) · `MMLib.Alvo` (core + builder)

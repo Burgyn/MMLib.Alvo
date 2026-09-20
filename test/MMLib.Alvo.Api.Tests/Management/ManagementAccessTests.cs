@@ -95,6 +95,31 @@ public class ManagementAccessTests
     }
 
     /// <summary>
+    /// A management 401 carries the same <c>WWW-Authenticate</c> challenge a Data API 401 does.
+    /// </summary>
+    /// <remarks>
+    /// RFC 7235 §3.1 makes the header a <b>MUST</b> on a 401, and the review of the first management batch
+    /// recorded the opposite — "no <c>WWW-Authenticate</c> on the management surface" — which
+    /// <c>docs/architecture/management-api.md</c> would have published as fact. It is measured here instead:
+    /// the refusal comes from the shared <c>ProblemResultFactory.Unauthenticated</c>, so the challenge is
+    /// the Data API's and naming the scheme is what lets an agent discover how to authenticate.
+    /// </remarks>
+    [Fact]
+    public async Task A_management_401_names_the_scheme_and_the_header_to_send()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync(
+            "managed-notes.alvo.json",
+            [_ops],
+            new AlvoApiWorldSetup(RevokedKeyId: _ops.KeyId, MapManagementApi: true));
+
+        var response = await world.SendAsync(HttpMethod.Get, "/management/info", _ops);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        response.Headers.WwwAuthenticate.ToString().ShouldContain(
+            "AlvoApiKey", customMessage: "a 401 that names no scheme leaves an agent guessing");
+    }
+
+    /// <summary>
     /// Two credential headers are an ambiguous credential, and an ambiguous credential is refused rather
     /// than disambiguated by taking whichever copy arrived first.
     /// </summary>
