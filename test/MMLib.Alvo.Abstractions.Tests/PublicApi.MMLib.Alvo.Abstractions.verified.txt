@@ -1144,6 +1144,18 @@ namespace MMLib.Alvo.Management
         public string Project { get; init; }
         public int Revision { get; init; }
     }
+    public sealed class ManagementEscalationException : System.Exception
+    {
+        public ManagementEscalationException() { }
+        public ManagementEscalationException(string message) { }
+        public ManagementEscalationException(string message, System.Exception innerException) { }
+    }
+    public sealed class ManagementForbiddenException : System.Exception
+    {
+        public ManagementForbiddenException() { }
+        public ManagementForbiddenException(string message) { }
+        public ManagementForbiddenException(string message, System.Exception innerException) { }
+    }
     public sealed class ManagementInfo : System.IEquatable<MMLib.Alvo.Management.ManagementInfo>
     {
         public ManagementInfo(string Version, string Mode, string DataProvider, string StartupMode) { }
