@@ -1,4 +1,6 @@
-﻿using System.Net;
+﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Management;
+using System.Net;
 using System.Text;
 
 namespace MMLib.Alvo.Api.Tests.Management;
@@ -176,6 +178,47 @@ public class ManagementIdempotencyTests
         (await RevisionAsync(world)).ShouldBe(1, "two values are two keys and one record can hold one");
     }
 
+    /// <summary>
+    /// A record this deployment cannot write does not turn an apply that <b>landed</b> into a failure.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The record is filed after the migration and the revision have already committed, so a failure there
+    /// is a failure of bookkeeping for a write that is done. Reporting it to the caller tells them their
+    /// apply failed when it succeeded — which is the exact confusion this feature exists to remove,
+    /// inverted, and strictly worse than the 412 they would have got with no key at all.
+    /// </para>
+    /// <para>
+    /// The documented crash window covers a process that <em>dies</em> there. It does not cover a store that
+    /// answers, and this is that case.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_record_that_cannot_be_written_does_not_fail_an_apply_that_landed()
+    {
+        await using var world = await StartWithAsync(new FaultingIdempotencyStore());
+
+        var response = await ApplyAsync(world, WithExtraField(await CurrentAsync(world)), key: "k1");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, "the migration and the revision both committed");
+        (await response.ReadJsonObjectAsync())["revision"]!.GetValue<int>().ShouldBe(2);
+        (await RevisionAsync(world)).ShouldBe(2);
+    }
+
+    /// <summary>The unrecorded write's retry is the pre-batch 412, which is the documented fallback.</summary>
+    [Fact]
+    public async Task An_apply_whose_record_was_lost_falls_back_to_the_412_it_had_before()
+    {
+        await using var world = await StartWithAsync(new FaultingIdempotencyStore());
+        var sent = WithExtraField(await CurrentAsync(world));
+        await ApplyAsync(world, sent, key: "k1");
+
+        var retry = await ApplyAsync(world, sent, key: "k1");
+
+        retry.StatusCode.ShouldBe(HttpStatusCode.PreconditionFailed);
+        (await RevisionAsync(world)).ShouldBe(2, "the retry appended nothing on top of the write that landed");
+    }
+
     [Fact]
     public async Task Two_callers_may_use_the_same_key_without_colliding()
     {
@@ -209,4 +252,38 @@ public class ManagementIdempotencyTests
     /// <summary>One byte past <c>AlvoIdempotency.MaxKeyBytes</c>, in ASCII so bytes and characters agree.</summary>
     private static string OverLongKey() =>
         new('k', Encoding.UTF8.GetByteCount(new string('k', Data.AlvoIdempotency.MaxKeyBytes)) + 1);
+
+    /// <summary>The <c>managed-fleet</c> world with <paramref name="store"/> in place of the registered one.</summary>
+    /// <remarks>
+    /// Registered after <c>AddAlvo</c>, so it wins the single-service resolve the provider's own
+    /// <c>TryAddSingleton</c> left open — which is also the substitution the port documents as supported.
+    /// </remarks>
+    /// <param name="store">The store this world's management surface writes through.</param>
+    private static Task<AlvoApiWorld> StartWithAsync(IManagementIdempotencyStore store) =>
+        AlvoApiWorld.FromDescriptorAsync(
+            ManagedFleet.Descriptor,
+            [_dev],
+            new AlvoApiWorldSetup(
+                MapBeforePriming: true,
+                MapManagementApi: true,
+                ConfigureServicesAfterAlvo: services => services.AddSingleton(store)));
+
+    /// <summary>A store that finds nothing and refuses every record, standing in for a broken one.</summary>
+    /// <remarks>
+    /// <see cref="FindAsync"/> answers rather than throws, because a store that could not be read at all
+    /// would refuse the request <em>before</em> the write and is a different fact: this one exists to put
+    /// the failure strictly after the commit, which is the window nothing covered.
+    /// </remarks>
+    private sealed class FaultingIdempotencyStore : IManagementIdempotencyStore
+    {
+        /// <inheritdoc/>
+        public Task<int?> FindAsync(
+            string key, string scope, string fingerprint, CancellationToken ct = default) =>
+            Task.FromResult<int?>(null);
+
+        /// <inheritdoc/>
+        public Task RecordAsync(
+            string key, string scope, string fingerprint, int revision, CancellationToken ct = default) =>
+            throw new InvalidOperationException("This store cannot write.");
+    }
 }

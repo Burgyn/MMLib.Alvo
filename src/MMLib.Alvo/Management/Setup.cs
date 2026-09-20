@@ -59,6 +59,7 @@ internal static class ManagementSetup
             provider.GetService<Migrations.IDescriptorVersionStore>(),
             provider.GetService<IManagementIdempotencyStore>(),
             provider.GetRequiredService<Auth.IAlvoContextAccessor>(),
+            provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AlvoManagementService>>(),
             provider.GetRequiredService<Migrations.RuntimeSchemaService>));
 
     /// <summary>

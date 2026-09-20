@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Options;
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Migrations;
@@ -47,6 +48,10 @@ namespace MMLib.Alvo.Management.Internal;
 /// Where the caller resolved for this request is published — read only to scope an idempotency key, never
 /// to decide admission, which is <c>ManagementAccessEndpointFilter</c>'s alone.
 /// </param>
+/// <param name="logger">
+/// Where a record that could not be filed for a write that already landed is reported — see
+/// <see cref="FiledAsync"/> for why that is a warning rather than the caller's problem.
+/// </param>
 /// <param name="runtime">
 /// <b>The apply path, resolved lazily.</b> <see cref="RuntimeSchemaService"/> needs
 /// <see cref="IRuntimeSchemaWriter"/> and <see cref="IDescriptorVersionStore"/>, which only a database
@@ -56,7 +61,7 @@ namespace MMLib.Alvo.Management.Internal;
 /// driver-less container for <see cref="History"/>'s reason: no store, no boot, no project, so
 /// <see cref="EnsureServed"/> has already answered 404.
 /// </param>
-internal sealed class AlvoManagementService(
+internal sealed partial class AlvoManagementService(
     IOptions<AlvoOptions> alvo,
     IOptions<AlvoManagementOptions> management,
     IOptions<AlvoSchemaOptions> schema,
@@ -68,6 +73,7 @@ internal sealed class AlvoManagementService(
     IDescriptorVersionStore? versions,
     IManagementIdempotencyStore? idempotency,
     IAlvoContextAccessor callers,
+    ILogger<AlvoManagementService> logger,
     Func<RuntimeSchemaService> runtime) : IAlvoManagement
 {
     /// <summary>What <see cref="ManagementInfo.DataProvider"/> reports when no driver is registered.</summary>
@@ -407,12 +413,62 @@ internal sealed class AlvoManagementService(
         var result = await write().ConfigureAwait(false);
         if (token is { } spent && result.Applied)
         {
-            await Keys.RecordAsync(spent.Key, spent.Scope, spent.Fingerprint, result.Revision, ct)
-                .ConfigureAwait(false);
+            await FiledAsync(spent, result.Revision, ct).ConfigureAwait(false);
         }
 
         return result;
     }
+
+    /// <summary>
+    /// Files the record, and <b>refuses to fail the write because of it</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The migration and the revision are already committed when this runs</b>, so a failure here is a
+    /// failure of bookkeeping for a write that is done. Letting it out would tell the caller their apply
+    /// failed when it landed — the exact confusion the key exists to remove, inverted, and strictly worse
+    /// than the 412 they would have had with no key at all. The consequence of swallowing it is the
+    /// documented one and nothing more: the retry is unrecorded, so it is that same 412.
+    /// </para>
+    /// <para>
+    /// <b>The catch is broad on purpose.</b> A store is a provider, and what a provider fails with is its
+    /// own business — narrowing this to the exception types today's driver happens to raise would let the
+    /// next one reintroduce the defect. Cancellation is excluded, because a cancelled request is the caller
+    /// leaving rather than the store failing, and it is the one case that must still propagate.
+    /// </para>
+    /// </remarks>
+    /// <param name="token">The caller's resolved key.</param>
+    /// <param name="revision">The revision that was appended.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task FiledAsync(ManagementIdempotencyToken token, int revision, CancellationToken ct)
+    {
+        try
+        {
+            await Keys.RecordAsync(token.Key, token.Scope, token.Fingerprint, revision, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            RecordWasNotFiled(logger, revision, failure);
+        }
+    }
+
+    /// <summary>The one record of a write that landed and whose key could not be filed.</summary>
+    /// <remarks>
+    /// <b>A warning and not an error</b>, because nothing is wrong with the data: the revision is applied and
+    /// readable. What is lost is the caller's ability to attribute a retry, so the message says exactly that
+    /// and names the revision an operator would otherwise have to go looking for.
+    /// </remarks>
+    /// <param name="logger">The logger to write through.</param>
+    /// <param name="revision">The revision that was appended and not recorded.</param>
+    /// <param name="failure">What the store answered with.</param>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Alvo applied revision {Revision} and could not record the caller's idempotency key for "
+            + "it. The write landed and is not at risk. What is lost is only the retry's attribution: a "
+            + "caller who repeats that request now gets 412 rather than a replay, which is the behaviour "
+            + "they would have had without a key at all.")]
+    private static partial void RecordWasNotFiled(ILogger logger, int revision, Exception failure);
 
     /// <summary>The plan a replay reports: none, because this request ran no migration.</summary>
     /// <remarks>
