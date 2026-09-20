@@ -121,8 +121,9 @@ public sealed record ManagementPolicyVerdict(
 /// <param name="ExpectedRevision">
 /// The revision the caller believes is current — over HTTP this is <c>If-Match</c> (the F5 design's
 /// deviation D3), and it is the same integer <c>schema/project.schema.json</c> froze as the
-/// optimistic-concurrency token. It is also what makes a retry safe without a separate idempotency key: a
-/// replayed apply names a revision that is no longer current and is refused.
+/// optimistic-concurrency token. It is what makes a retry <em>safe</em> without any key: a replayed apply
+/// names a revision that is no longer current and is refused. What it does not make a retry is
+/// <em>attributable</em> — see <see cref="IdempotencyKey"/>.
 /// </param>
 /// <param name="AllowDestructive">
 /// Whether a plan that discards data may proceed. <b>Never implied</b> — not by a dry run that reported the
@@ -134,13 +135,30 @@ public sealed record ManagementPolicyVerdict(
 /// </param>
 /// <param name="Author">Who is applying, carried into the appended revision.</param>
 /// <param name="Reason">Why, carried into the appended revision.</param>
+/// <param name="IdempotencyKey">
+/// A caller-chosen key that makes a retry a <b>replay</b> rather than an answer the caller cannot attribute.
+/// <para>
+/// <b>It buys attribution, not safety.</b> <see cref="ExpectedRevision"/> already makes the apply
+/// at-most-once; what it cannot do is tell a retried caller <em>which</em> of the two things a refusal
+/// means, because "my own write landed and the response was lost" and "somebody else changed the
+/// descriptor" are the same 412 and need opposite recoveries. With a key the first of them answers the
+/// revision the first attempt appended.
+/// </para>
+/// <para>
+/// <b>It is refused rather than ignored where it cannot be honoured</b>: on a <see cref="DryRun"/>, which
+/// appends nothing to replay; for a caller with no identity to scope it by; and past
+/// <c>AlvoIdempotency.MaxKeyBytes</c> UTF-8 bytes. Reusing one key for a different request is a conflict,
+/// never a replay.
+/// </para>
+/// </param>
 public sealed record ManagementApplyRequest(
     string DescriptorJson,
     int ExpectedRevision,
     bool AllowDestructive = false,
     bool DryRun = false,
     string? Author = null,
-    string? Reason = null);
+    string? Reason = null,
+    string? IdempotencyKey = null);
 
 /// <summary>What an apply did, or would do.</summary>
 /// <param name="Applied"><see langword="false"/> for a dry run, <see langword="true"/> when a revision was appended.</param>

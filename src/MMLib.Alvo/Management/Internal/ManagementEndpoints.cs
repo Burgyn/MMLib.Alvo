@@ -248,10 +248,36 @@ internal static class ManagementEndpoints
             return Refused(ProblemResultFactory.ManagementValidation(DryRunUnreadable));
         }
 
+        if (!TryReadIdempotencyKey(request, out var key))
+        {
+            return Refused(ProblemResultFactory.ManagementValidation(RepeatedIdempotencyKey));
+        }
+
         return string.IsNullOrWhiteSpace(body?.DescriptorJson)
             ? Refused(ProblemResultFactory.ManagementValidation(BodyRequired))
             : Answer(() => AdmittedApplyAsync(
-                project, body.ToRequest(revision, planOnly), management, access, callers, ct));
+                project, body.ToRequest(revision, planOnly, key), management, access, callers, ct));
+    }
+
+    /// <summary>
+    /// The caller's <c>Idempotency-Key</c>, refusing the one ambiguity the port below cannot see.
+    /// </summary>
+    /// <remarks>
+    /// <b>A repeated header field is refused rather than resolved</b>, exactly as the Data API refuses it:
+    /// two field values are two keys and this write can be recorded under one, so picking either would
+    /// answer a question the caller did not ask — the same reason a multi-tag <c>If-Match</c> is refused.
+    /// Every <em>other</em> rule about the key is the port's and is applied where an embedded host meets it
+    /// too, so nothing here restates a bound or a blank check.
+    /// </remarks>
+    /// <param name="request">The request to read the header from.</param>
+    /// <param name="key">The single key presented, or <see langword="null"/> when none was.</param>
+    /// <returns><see langword="false"/> when the header was sent more than once.</returns>
+    private static bool TryReadIdempotencyKey(HttpRequest request, out string? key)
+    {
+        var header = request.Headers[IdempotencyKeyHeader];
+        key = header.Count == 1 ? header[0] : null;
+
+        return header.Count <= 1;
     }
 
     /// <summary>
@@ -367,6 +393,14 @@ internal static class ManagementEndpoints
     /// <summary>The query-string key that asks for a plan-only pass.</summary>
     private const string DryRunKey = "dryRun";
 
+    /// <summary>The header a caller's idempotency key arrives on — the Data API's own spelling.</summary>
+    private const string IdempotencyKeyHeader = "Idempotency-Key";
+
+    /// <summary>What a caller who sent the key header twice has to do.</summary>
+    private const string RepeatedIdempotencyKey =
+        "The 'Idempotency-Key' header must be sent at most once. Two values are two keys and a write is "
+        + "recorded under one, so picking either would answer a question the caller did not ask.";
+
     /// <summary>How a weak entity tag is introduced (RFC 9110 §8.8.3).</summary>
     private const string WeakTagPrefix = "W/";
 
@@ -427,6 +461,15 @@ internal static class ManagementEndpoints
         catch (ManagementSimulationException refusal)
         {
             return ProblemResultFactory.ManagementValidation(refusal.Message);
+        }
+        catch (ManagementRequestException refusal)
+        {
+            return ProblemResultFactory.ManagementValidation(
+                ProblemResultFactory.WithoutArgumentDetail(refusal.Message));
+        }
+        catch (Data.AlvoIdempotencyConflictException)
+        {
+            return ProblemResultFactory.ManagementIdempotencyConflict();
         }
         catch (ManagementEscalationException)
         {

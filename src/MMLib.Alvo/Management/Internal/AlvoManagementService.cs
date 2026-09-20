@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.Options;
+using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
@@ -36,6 +37,15 @@ namespace MMLib.Alvo.Management.Internal;
 /// <param name="versions">
 /// The descriptor history, or <see langword="null"/> when no provider registered one.
 /// </param>
+/// <param name="idempotency">
+/// Where a write's outcome is filed under the caller's key, or <see langword="null"/> when no provider
+/// registered one. Optional for <paramref name="versions"/>' reason, and read through <see cref="Keys"/>,
+/// which refuses loudly rather than ignoring a key it cannot record.
+/// </param>
+/// <param name="callers">
+/// Where the caller resolved for this request is published — read only to scope an idempotency key, never
+/// to decide admission, which is <c>ManagementAccessEndpointFilter</c>'s alone.
+/// </param>
 /// <param name="runtime">
 /// <b>The apply path, resolved lazily.</b> <see cref="RuntimeSchemaService"/> needs
 /// <see cref="IRuntimeSchemaWriter"/> and <see cref="IDescriptorVersionStore"/>, which only a database
@@ -55,6 +65,8 @@ internal sealed class AlvoManagementService(
     IRoleCatalogProvider roles,
     IAlvoData? data,
     IDescriptorVersionStore? versions,
+    IManagementIdempotencyStore? idempotency,
+    IAlvoContextAccessor callers,
     Func<RuntimeSchemaService> runtime) : IAlvoManagement
 {
     /// <summary>What <see cref="ManagementInfo.DataProvider"/> reports when no driver is registered.</summary>
@@ -136,6 +148,20 @@ internal sealed class AlvoManagementService(
         EnsureServed(project);
         ArgumentNullException.ThrowIfNull(request);
 
+        var token = TokenFor(request.IdempotencyKey, request.DryRun, () => FingerprintOf(project, request));
+        var replayed = await ReplayAsync(project, token, ct).ConfigureAwait(false);
+
+        return replayed
+            ?? await RecordingAsync(token, () => AppliedAsync(project, request, ct), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Previews, guards, then either reports the plan or appends the revision.</summary>
+    /// <param name="project">The project being changed.</param>
+    /// <param name="request">What the caller asked for.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task<ManagementApplyResult> AppliedAsync(
+        string project, ManagementApplyRequest request, CancellationToken ct)
+    {
         var options = OptionsFor(request);
         var schema = runtime();
         var preview = await schema.PreviewAsync(
@@ -146,6 +172,14 @@ internal sealed class AlvoManagementService(
             ? new ManagementApplyResult(Applied: false, preview.CurrentRevision, Summary(preview.Plan))
             : await AppendAsync(schema, project, request, options, preview, ct).ConfigureAwait(false);
     }
+
+    /// <summary>What makes two applies of this project the same request.</summary>
+    /// <param name="project">The project being changed.</param>
+    /// <param name="request">What the caller asked for.</param>
+    private static string FingerprintOf(string project, ManagementApplyRequest request) =>
+        ManagementIdempotency.FingerprintOf(
+            nameof(ApplyDescriptorAsync), project, request.ExpectedRevision, request.AllowDestructive,
+            request.DescriptorJson);
 
     /// <summary>Applies what the preview described, and reports the preview's plan beside the new revision.</summary>
     /// <remarks>
@@ -171,6 +205,144 @@ internal sealed class AlvoManagementService(
 
         return new ManagementApplyResult(Applied: true, applied.Revision, Summary(preview.Plan));
     }
+
+    /// <summary>
+    /// The key this request carries, resolved into a record's identity — or <see langword="null"/> when it
+    /// carries none.
+    /// </summary>
+    /// <remarks>
+    /// <b>Every rule about the key itself is the port's</b>: a blank key, one past
+    /// <c>AlvoIdempotency.MaxKeyBytes</c> UTF-8 bytes, and a holder with no identity to scope by are all
+    /// refused by <c>AlvoIdempotency.EnsureUsableKey</c>, with the wordings the Data API already publishes.
+    /// Restating any of the three here would be a second spelling of one rule — and the embedded host that
+    /// calls this member directly has to meet the same three.
+    /// </remarks>
+    /// <param name="key">The key the request carries, if any.</param>
+    /// <param name="dryRun">Whether this request writes nothing.</param>
+    /// <param name="fingerprint">
+    /// What makes this the same request on a retry, computed only once a key is actually present.
+    /// </param>
+    /// <exception cref="ManagementRequestException">The key is one this surface cannot honour.</exception>
+    private ManagementIdempotencyToken? TokenFor(string? key, bool dryRun, Func<string> fingerprint)
+    {
+        if (key is null)
+        {
+            return null;
+        }
+
+        RefuseAKeyOnADryRun(dryRun);
+        var caller = callers.Principal?.Context ?? AlvoContext.Anonymous;
+        EnsureUsable(key, caller);
+
+        return new ManagementIdempotencyToken(key, AlvoIdempotency.IdentityOf(caller), fingerprint());
+    }
+
+    /// <summary>Refuses a key on a request that appends nothing.</summary>
+    /// <remarks>
+    /// A dry run has no revision to replay and none to record. Accepting the key would file a record for a
+    /// request that changed nothing, and turn the caller's later <em>real</em> apply into a replay of a
+    /// preview — reporting a revision nobody appended.
+    /// </remarks>
+    /// <param name="dryRun">Whether this request writes nothing.</param>
+    /// <exception cref="ManagementRequestException">It is a dry run.</exception>
+    private static void RefuseAKeyOnADryRun(bool dryRun)
+    {
+        if (dryRun)
+        {
+            throw new ManagementRequestException(
+                "A dry run may not carry an 'Idempotency-Key'. It appends no revision, so there is nothing "
+                + "to replay and nothing to record — and a record filed here would turn your later real "
+                + "write into a replay of a preview. Send the key with the write itself.");
+        }
+    }
+
+    /// <summary>Applies the port's own key rules, restating the refusal as this surface's own type.</summary>
+    /// <remarks>
+    /// The message is carried verbatim, including the <c>(Parameter '…')</c> suffix
+    /// <see cref="ArgumentException"/> itself appends: an in-process caller is reading a .NET exception and
+    /// that suffix is information. The HTTP layer strips it before it becomes a <c>detail</c>, through
+    /// <c>ProblemResultFactory.WithoutArgumentDetail</c>, because an internal argument name is not part of
+    /// the contract an agent reads.
+    /// </remarks>
+    /// <param name="key">The key the caller sent.</param>
+    /// <param name="caller">The caller the write is performed as.</param>
+    /// <exception cref="ManagementRequestException">The key cannot be recorded for this caller.</exception>
+    private static void EnsureUsable(string key, AlvoContext caller)
+    {
+        try
+        {
+            AlvoIdempotency.EnsureUsableKey(key, caller);
+        }
+        catch (ArgumentException refusal)
+        {
+            throw new ManagementRequestException(refusal.Message, refusal);
+        }
+    }
+
+    /// <summary>
+    /// What a previous identical request already appended, or <see langword="null"/> when this is not a
+    /// replay.
+    /// </summary>
+    /// <remarks>
+    /// <b>The recorded revision is re-read rather than trusted.</b> The record holds a number; the answer
+    /// owes the caller a revision that still exists, and a record pointing at one that does not is a broken
+    /// invariant rather than a replay.
+    /// </remarks>
+    /// <param name="project">The project the key was spent on.</param>
+    /// <param name="token">The caller's resolved key, if any.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <exception cref="AlvoIdempotencyConflictException">The key was spent on a different request.</exception>
+    private async Task<ManagementApplyResult?> ReplayAsync(
+        string project, ManagementIdempotencyToken? token, CancellationToken ct)
+    {
+        if (token is not { } spent)
+        {
+            return null;
+        }
+
+        var recorded = await Keys.FindAsync(spent.Key, spent.Scope, spent.Fingerprint, ct).ConfigureAwait(false);
+        if (recorded is not { } revision)
+        {
+            return null;
+        }
+
+        var stored = await History.GetAsync(project, revision, ct).ConfigureAwait(false)
+            ?? throw new ManagementRevisionNotFoundException(project, revision);
+
+        return new ManagementApplyResult(Applied: true, stored.Revision, NothingRanNow);
+    }
+
+    /// <summary>Runs the write and files its revision under the caller's key.</summary>
+    /// <remarks>
+    /// <b>The record is written after the write commits, and the window is real.</b>
+    /// <see cref="IRuntimeSchemaWriter.ApplyAndAppendAsync"/> owns its transaction and exposes no seam to
+    /// enlist in, so a crash between that commit and this record leaves the attempt unrecorded — and the
+    /// retry is refused with the unattributable 412 again. That narrows the window rather than closing it;
+    /// closing it needs a widened writer, and the cost is stated rather than discovered.
+    /// </remarks>
+    /// <param name="token">The caller's resolved key, if any.</param>
+    /// <param name="write">The write to perform.</param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task<ManagementApplyResult> RecordingAsync(
+        ManagementIdempotencyToken? token, Func<Task<ManagementApplyResult>> write, CancellationToken ct)
+    {
+        var result = await write().ConfigureAwait(false);
+        if (token is { } spent && result.Applied)
+        {
+            await Keys.RecordAsync(spent.Key, spent.Scope, spent.Fingerprint, result.Revision, ct)
+                .ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
+    /// <summary>The plan a replay reports: none, because this request ran no migration.</summary>
+    /// <remarks>
+    /// The original apply's plan was not stored — the response owed a diff, not the history did — and it
+    /// cannot be re-planned from a base that has moved. <c>GET revisions/{n}</c> is where what a revision
+    /// applied is read from; this field says what <em>this</em> request did, which is nothing.
+    /// </remarks>
+    private static ManagementPlanSummary NothingRanNow => new(IsEmpty: true, HasDestructiveChanges: false, []);
 
     /// <summary>Refuses a plan that discards data the caller never asked to lose.</summary>
     /// <remarks>
@@ -361,6 +533,22 @@ internal sealed class AlvoManagementService(
         versions ?? throw new InvalidOperationException(
             "No IDescriptorVersionStore is registered, so this instance has no descriptor history to read. "
             + "Register a database provider inside AddAlvo(...).");
+
+    /// <summary>
+    /// Where a write's outcome is filed under the caller's key, or a refusal naming what is missing.
+    /// </summary>
+    /// <remarks>
+    /// <b>A host with a key and no store fails loudly rather than serving the write without it.</b> Ignoring
+    /// a key is exactly the lost retry the key exists to prevent, so a deployment that cannot honour one has
+    /// to say so — the same reading <c>GET capabilities</c> applies to every "declared but not honoured"
+    /// affordance. It is unreachable behind <see cref="EnsureServed"/> for <see cref="History"/>'s reason:
+    /// only a database provider registers one, and only a boot that read one publishes a project.
+    /// </remarks>
+    private IManagementIdempotencyStore Keys =>
+        idempotency ?? throw new InvalidOperationException(
+            "No IManagementIdempotencyStore is registered, so an idempotency key cannot be recorded — and "
+            + "ignoring one would be the lost retry the key exists to prevent. Register a database provider "
+            + "inside AddAlvo(...), or send this write without a key.");
 
     /// <summary>One enum value as the wire spells it.</summary>
     /// <typeparam name="T">The enum type.</typeparam>

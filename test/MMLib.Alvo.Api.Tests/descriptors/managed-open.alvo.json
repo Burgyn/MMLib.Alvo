@@ -1,0 +1,28 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "managed-open",
+  "description": "The one fixture whose access block admits a caller who presented no credential at all: 'developer' is the constant true, which is a configuration a dev-mode deployment genuinely has and the only arrangement in which an anonymous caller reaches the write path rather than its gate. It exists so 'a key needs an identity to scope by' can be measured as the 422 it is, instead of being hidden behind the 403 every other management fixture answers an anonymous caller with. Nothing else is measured here: one entity, no rules anybody passes.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["ops"]
+  },
+  "access": {
+    "developer": "true"
+  },
+  "entities": {
+    "notes": {
+      "description": "A note. It exists because a descriptor declares at least one entity; no fact here reads it.",
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 }
+      },
+      "rules": {
+        "list": "false",
+        "get": "false",
+        "create": "false",
+        "update": "false",
+        "delete": "false"
+      }
+    }
+  }
+}

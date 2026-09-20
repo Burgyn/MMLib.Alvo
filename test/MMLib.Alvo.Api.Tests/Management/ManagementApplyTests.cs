@@ -403,28 +403,16 @@ public class ManagementApplyTests
     private static Task<HttpResponseMessage> ApplyAsync(
         AlvoApiWorld world, string descriptorJson, string ifMatch, bool allowDestructive = false,
         string query = "") =>
-        world.SendAsync(
-            HttpMethod.Put,
-            Path + query,
-            _dev,
-            body: Body(descriptorJson, allowDestructive),
-            headers: [new KeyValuePair<string, string>("If-Match", ifMatch)]);
+        ManagementApplyWorld.ApplyAsync(world, _dev, descriptorJson, ifMatch, allowDestructive, query);
 
-    private static JsonObject Body(string descriptorJson, bool allowDestructive = false) => new()
-    {
-        ["descriptorJson"] = descriptorJson,
-        ["allowDestructive"] = allowDestructive,
-        ["author"] = "the-suite",
-        ["reason"] = "a fact",
-    };
+    private static JsonObject Body(string descriptorJson, bool allowDestructive = false) =>
+        ManagementApplyWorld.Body(descriptorJson, allowDestructive);
 
-    private static async Task<string> CurrentAsync(AlvoApiWorld world, TestApiKey? key = null) =>
-        (await (await world.SendAsync(HttpMethod.Get, Path, key ?? _dev)).ReadJsonObjectAsync())
-            ["descriptorJson"]!.GetValue<string>();
+    private static Task<string> CurrentAsync(AlvoApiWorld world, TestApiKey? key = null) =>
+        ManagementApplyWorld.CurrentAsync(world, key ?? _dev);
 
-    private static async Task<int> RevisionAsync(AlvoApiWorld world) =>
-        (await (await world.SendAsync(HttpMethod.Get, Path, _dev)).ReadJsonObjectAsync())
-            ["revision"]!.GetValue<int>();
+    private static Task<int> RevisionAsync(AlvoApiWorld world) =>
+        ManagementApplyWorld.RevisionAsync(world, _dev);
 
     private static string WithExtraField(string descriptorJson) =>
         DescriptorEdits.AddOptionalTextField(descriptorJson, entity: "vehicles", field: "nickname");

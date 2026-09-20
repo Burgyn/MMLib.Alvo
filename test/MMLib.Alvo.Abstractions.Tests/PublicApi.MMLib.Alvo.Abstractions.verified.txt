@@ -1111,12 +1111,13 @@ namespace MMLib.Alvo.Management
     }
     public sealed class ManagementApplyRequest : System.IEquatable<MMLib.Alvo.Management.ManagementApplyRequest>
     {
-        public ManagementApplyRequest(string DescriptorJson, int ExpectedRevision, bool AllowDestructive = false, bool DryRun = false, string? Author = null, string? Reason = null) { }
+        public ManagementApplyRequest(string DescriptorJson, int ExpectedRevision, bool AllowDestructive = false, bool DryRun = false, string? Author = null, string? Reason = null, string? IdempotencyKey = null) { }
         public bool AllowDestructive { get; init; }
         public string? Author { get; init; }
         public string DescriptorJson { get; init; }
         public bool DryRun { get; init; }
         public int ExpectedRevision { get; init; }
+        public string? IdempotencyKey { get; init; }
         public string? Reason { get; init; }
     }
     public sealed class ManagementApplyResult : System.IEquatable<MMLib.Alvo.Management.ManagementApplyResult>
@@ -1194,6 +1195,12 @@ namespace MMLib.Alvo.Management
         public string Consequence { get; init; }
         public string Fix { get; init; }
         public string Slot { get; init; }
+    }
+    public sealed class ManagementRequestException : System.Exception
+    {
+        public ManagementRequestException() { }
+        public ManagementRequestException(string message) { }
+        public ManagementRequestException(string message, System.Exception innerException) { }
     }
     public sealed class ManagementRevision : System.IEquatable<MMLib.Alvo.Management.ManagementRevision>
     {

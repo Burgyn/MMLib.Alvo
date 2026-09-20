@@ -175,6 +175,21 @@ internal static class ProblemResultFactory
         StatusCodes.Status409Conflict, AlvoProblemTypes.DestructiveChange, detail);
 
     /// <summary>
+    /// The 409 for a management key reused for a different request.
+    /// </summary>
+    /// <remarks>
+    /// <b>The slug is <see cref="AlvoProblemTypes.IdempotencyConflict"/>, the one the data path already
+    /// emits</b> — one exception type, one classification, and an agent that learned to branch on it for a
+    /// create does not have to learn a management-only spelling. The detail is this surface's own, because
+    /// the two ways out are: the data path names a row, this one names a descriptor.
+    /// </remarks>
+    internal static IResult ManagementIdempotencyConflict() => Problem(
+        StatusCodes.Status409Conflict,
+        AlvoProblemTypes.IdempotencyConflict,
+        "This 'Idempotency-Key' was already spent on a different request. Send a fresh key with this body, "
+        + "or resend the original body to replay the write it recorded.");
+
+    /// <summary>
     /// The 422 for a descriptor the validator refused, carrying its per-pointer findings.
     /// </summary>
     /// <remarks>

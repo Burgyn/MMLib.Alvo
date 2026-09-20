@@ -57,6 +57,8 @@ internal static class ManagementSetup
             provider.GetRequiredService<IRoleCatalogProvider>(),
             provider.GetService<Data.IAlvoData>(),
             provider.GetService<Migrations.IDescriptorVersionStore>(),
+            provider.GetService<IManagementIdempotencyStore>(),
+            provider.GetRequiredService<Auth.IAlvoContextAccessor>(),
             provider.GetRequiredService<Migrations.RuntimeSchemaService>));
 
     /// <summary>

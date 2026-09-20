@@ -14,11 +14,14 @@
 /// caller's semantics identical to the HTTP caller's.
 /// </para>
 /// <para>
-/// <b>A write is idempotent through that revision, and carries no separate idempotency key.</b> A retried
-/// apply names the revision it was written against, so the second attempt loses the optimistic-lock race
-/// and is refused — which is a stronger guarantee than a caller-chosen key, and one nothing has to store.
-/// A key parameter beside it would be a second token for one decision, and, until something honoured it,
-/// exactly the "declared but not honoured" defect the capability report exists to enumerate.
+/// <b>A write is at-most-once through that revision, and attributable through an optional key.</b> A
+/// retried write names the revision it was written against, so the second attempt loses the optimistic-lock
+/// race and is refused — nothing has to be stored for that to hold. What the revision cannot do is tell the
+/// retrying caller <em>why</em> they were refused: "my own write landed and the response was lost" and
+/// "somebody else changed the descriptor" are the same 412 and need opposite recoveries. An
+/// <c>IdempotencyKey</c> on the request converts the first of them into a replay carrying the revision the
+/// first attempt appended. It is optional, and honoured rather than declared — a request that carries one a
+/// deployment cannot record is refused, never quietly served without it.
 /// </para>
 /// <para>
 /// <b>Data is deliberately absent.</b> Rows are read and written through the Data API under the caller's own
@@ -131,12 +134,24 @@ public interface IAlvoManagement
     /// by the same destructive guardrail a real apply is: a preview that reported a plan the apply would
     /// then refuse would tell an editor its change is ready when it is not.
     /// </para>
+    /// <para>
+    /// <b>A replay reports the revision it replays and an empty plan</b>, because this request performed no
+    /// migration — the plan the original apply ran is <see cref="GetRevisionAsync"/>'s business, and
+    /// re-planning it is impossible from a base that has moved.
+    /// </para>
     /// </remarks>
     /// <param name="project">The project name.</param>
     /// <param name="request">The descriptor, the expected revision, and the allowances.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>What was applied, or what would be.</returns>
+    /// <returns>What was applied, what would be, or what a previous identical request already applied.</returns>
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
+    /// <exception cref="ManagementRequestException">
+    /// The request carries an <see cref="ManagementApplyRequest.IdempotencyKey"/> this surface cannot honour
+    /// — on a dry run, for a caller with no identity, or past the port's byte bound.
+    /// </exception>
+    /// <exception cref="Data.AlvoIdempotencyConflictException">
+    /// The key was already spent by this caller on a different request.
+    /// </exception>
     /// <exception cref="Descriptor.DescriptorValidationException">The descriptor is invalid.</exception>
     /// <exception cref="Migrations.DescriptorConcurrencyException">
     /// <see cref="ManagementApplyRequest.ExpectedRevision"/> is not the current one.
