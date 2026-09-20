@@ -21,4 +21,14 @@ jobs:
         with:
           fail-on-severity: moderate
           allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC
-          allow-dependencies-licenses: "pkg:githubactions/actions/checkout, pkg:githubactions/actions/dependency-review-action"
+          # Npgsql ships under the PostgreSQL License — OSI-approved, permissive, and
+          # Apache-2.0-compatible, but not one of the five above. It is named here rather
+          # than added to `allow-licenses` deliberately: the exception is this package, not
+          # the licence family, so a future dependency under the same licence still stops
+          # a PR and gets read.
+          #
+          # The package is not new. `MMLib.Alvo.Data.PostgreSql` has referenced it since
+          # the engine landed; the host's reference became DIRECT in the PR that added the
+          # database selector, and dependency-review inspects changed edges, so an existing
+          # licence surfaced as a new finding.
+          allow-dependencies-licenses: "pkg:githubactions/actions/checkout, pkg:githubactions/actions/dependency-review-action, pkg:nuget/Npgsql.EntityFrameworkCore.PostgreSQL"
