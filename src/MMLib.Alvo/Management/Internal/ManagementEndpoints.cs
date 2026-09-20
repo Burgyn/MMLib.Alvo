@@ -437,9 +437,23 @@ internal static class ManagementEndpoints
 
     /// <summary>What a caller who named a query parameter this route does not read has to do.</summary>
     /// <remarks>
+    /// <para>
     /// It does not echo the key the caller sent, for the reason <c>ProblemResultFactory.MalformedQuery</c>
-    /// records: a <c>detail</c> is built from constants and server-owned values only, so no caller-supplied
-    /// text comes back out. Naming the one parameter that <em>is</em> read says the same thing safely.
+    /// records: <b>that</b> factory's <c>detail</c> is built from constants and server-owned values only, so
+    /// it is not the place a NUL, an RTL override or a quote comes back out. Naming the one parameter that
+    /// <em>is</em> read says the same thing safely, and costs nothing — the fix does not need the misspelling
+    /// repeated.
+    /// </para>
+    /// <para>
+    /// <b>It is this refusal's rule, not the surface's, and the difference is worth stating because the
+    /// surface does echo elsewhere.</b> <c>AlvoManagementService</c>'s simulation refusals name the operation
+    /// and the role the caller sent, because there the token <em>is</em> the fix: "'lst' is not an operation"
+    /// tells an agent what to change, and "one of the six names" does not. The line is that a refusal echoes
+    /// caller text only when the text is what the caller must correct — never as decoration, never into a
+    /// stored record, and never past the gate, since every management response is
+    /// <c>application/problem+json</c> returned synchronously to the caller who sent the string, at a route
+    /// no unadmitted caller reaches.
+    /// </para>
     /// </remarks>
     private const string UnknownQueryParameter =
         "This endpoint reads one query parameter, 'dryRun'. Send no others: a misspelled name would "

@@ -30,10 +30,4 @@ internal sealed record ManagementAccessCatalog(
 {
     /// <summary>Gets the catalogue of a descriptor that declares no <c>access</c> block.</summary>
     internal static ManagementAccessCatalog Empty { get; } = new(null, null, null);
-
-    /// <summary>
-    /// Gets a value indicating whether this descriptor grants management access to nobody but the
-    /// bootstrap administrator.
-    /// </summary>
-    internal bool IsEmpty => Admin is null && Developer is null && Viewer is null;
 }

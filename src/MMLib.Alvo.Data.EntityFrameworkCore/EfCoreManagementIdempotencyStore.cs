@@ -93,15 +93,29 @@ internal sealed class EfCoreManagementIdempotencyStore : IManagementIdempotencyS
 
     /// <summary>The revision a stored record names, refusing one filed for a different request.</summary>
     /// <remarks>
+    /// <para>
     /// The comparison is ordinal over a hex digest, like every other name in the framework — a fingerprint
     /// that matched case-insensitively would accept a spelling this build never produces.
+    /// </para>
+    /// <para>
+    /// <b>The row id is parsed with <c>TryParse</c>, and an unreadable one is a refusal rather than a
+    /// throw.</b> This store shares one table with the Data API's own idempotency records, whose row id is a
+    /// row key rather than a revision — so a row written by anything but a management write is reachable
+    /// here, and <c>int.Parse</c> answered it with a <see cref="FormatException"/>, which over HTTP is a 500.
+    /// A record this surface cannot read is a key it cannot honour, which is exactly what the conflict
+    /// refusal already means; the caller's fix (send a different key) is the same either way, and they get a
+    /// 409 instead of an incident.
+    /// </para>
     /// </remarks>
     /// <param name="record">The stored fingerprint and revision text.</param>
     /// <param name="fingerprint">The fingerprint of the request being served.</param>
-    /// <exception cref="AlvoIdempotencyConflictException">The key was spent on a different request.</exception>
+    /// <exception cref="AlvoIdempotencyConflictException">
+    /// The key was spent on a different request, or on a record this surface cannot read.
+    /// </exception>
     private static int RevisionOf((string Fingerprint, string RowId) record, string fingerprint) =>
         string.Equals(record.Fingerprint, fingerprint, StringComparison.Ordinal)
-            ? int.Parse(record.RowId, NumberStyles.None, CultureInfo.InvariantCulture)
+        && int.TryParse(record.RowId, NumberStyles.None, CultureInfo.InvariantCulture, out var revision)
+            ? revision
             : throw new AlvoIdempotencyConflictException();
 
     /// <summary>Opens the connection and creates the table if this database has none yet.</summary>

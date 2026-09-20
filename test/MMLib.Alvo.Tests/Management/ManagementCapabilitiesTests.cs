@@ -5,22 +5,37 @@ using System.Text.Json.Nodes;
 namespace MMLib.Alvo.Tests.Management;
 
 /// <summary>
-/// <b>Capabilities may not lie.</b> The payload is compared against the two tables themselves, in the same
-/// shape that already guards those tables against the frozen schema — so a subsystem that lands, and leaves
-/// <see cref="UnhonouredSubsystems"/>, changes this endpoint with nobody editing it.
+/// <b>Capabilities may not lie.</b> A subsystem that lands, and leaves <see cref="UnhonouredSubsystems"/>,
+/// changes this endpoint with nobody editing it — and nothing the endpoint serves is reworded, reordered or
+/// invented on the way out.
 /// </summary>
+/// <remarks>
+/// <b>The two halves are held to different standards, deliberately.</b> <c>Refused</c> is counted against
+/// <see cref="UnhonouredFeatures.EveryFixSuggestion"/>, an <em>independent</em> enumeration built from the
+/// same four sources by different code — so that fact really does say "every refusal reaches the report".
+/// <c>Warned</c> has no second source: <see cref="UnhonouredSubsystems.All"/> is both what
+/// <c>CapabilityReport.Project</c> reads and the only in-repo statement of which subsystems are unhonoured,
+/// so a fact comparing the payload to it can only pin the <em>projection</em> — which is what the two
+/// <c>warned</c> facts below are named for. What holds that table itself honest is elsewhere:
+/// <c>UnhonouredSubsystemsTests</c> pins every entry to a block the frozen schema declares, and
+/// <see cref="Honoured_and_warned_never_name_the_same_block"/> pins the two lists disjoint. The gap they
+/// leave — <c>honoured ∪ warned</c> is not the whole schema, and the uncovered block is exactly
+/// <c>branding</c> — is argued in <c>CapabilityReport</c>'s own remarks and filed rather than fixed.
+/// </remarks>
 public class ManagementCapabilitiesTests
 {
+    /// <summary>The projection copies every block name, in the table's order, adding and dropping none.</summary>
     [Fact]
-    public void Warned_is_every_unhonoured_subsystem_and_nothing_else()
+    public void The_warned_projection_copies_every_block_name_in_order()
     {
         var warned = CapabilityReport.Project().Warned;
 
         warned.Select(block => block.Block).ShouldBe(UnhonouredSubsystems.All.Select(block => block.Block));
     }
 
+    /// <summary>The projection copies every consequence verbatim rather than restating it.</summary>
     [Fact]
-    public void Every_warned_consequence_is_the_table_s_own_sentence_character_for_character()
+    public void The_warned_projection_copies_every_consequence_character_for_character()
     {
         foreach (var (served, declared) in CapabilityReport.Project().Warned.Zip(UnhonouredSubsystems.All))
         {

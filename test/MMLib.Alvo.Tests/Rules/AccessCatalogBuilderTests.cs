@@ -34,7 +34,8 @@ public class AccessCatalogBuilderTests
     {
         var catalog = Build(access: null);
 
-        catalog.ManagementAccess.IsEmpty.ShouldBeTrue(
+        catalog.ManagementAccess.ShouldBe(
+            ManagementAccessCatalog.Empty,
             "no access block means only the bootstrap admin can manage the project — default-deny, "
             + "and usable: the first-run wizard works and nobody else gets in until the descriptor says so");
     }
@@ -47,7 +48,8 @@ public class AccessCatalogBuilderTests
         catalog.ManagementAccess.Admin.ShouldNotBeNull();
         catalog.ManagementAccess.Developer.ShouldBeNull();
         catalog.ManagementAccess.Viewer.ShouldBeNull();
-        catalog.ManagementAccess.IsEmpty.ShouldBeFalse();
+        catalog.ManagementAccess.ShouldNotBe(
+            ManagementAccessCatalog.Empty, "one level declared is not 'the descriptor names nobody'");
     }
 
     /// <summary>

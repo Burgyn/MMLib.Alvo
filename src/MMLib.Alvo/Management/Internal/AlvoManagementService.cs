@@ -645,9 +645,21 @@ internal sealed partial class AlvoManagementService(
 
     /// <summary>One operation's wire name, as the framework's own single mapping spells it.</summary>
     /// <remarks>
+    /// <para>
     /// Ordinal, like every other name in the framework — <c>List</c> is not <c>list</c>, it is a different
     /// name — and read through <c>ToWireName</c> rather than through <c>Enum.Parse</c>, so this and the
     /// descriptor's <c>rules.&lt;operation&gt;</c> keys cannot drift apart.
+    /// </para>
+    /// <para>
+    /// <b>The refusal echoes what the caller sent, deliberately, and that is a narrower rule than
+    /// <c>ProblemResultFactory.MalformedQuery</c>'s.</b> That factory builds its <c>detail</c> from constants
+    /// only; here the token <em>is</em> the fix — "'lst' is not an operation" tells an agent what to change
+    /// and a constant listing the six names does not. <c>UnknownRoleException</c> echoes a role name for the
+    /// same reason. What makes it safe is not the wording but the channel: an
+    /// <c>application/problem+json</c> body returned synchronously to the caller who sent the string, at a
+    /// surface no unadmitted caller reaches, never stored and never rendered as markup.
+    /// <c>ManagementEndpoints</c>' <c>UnknownQueryParameter</c> records the same line from the other side.
+    /// </para>
     /// </remarks>
     /// <param name="wireName">The operation name as the caller sent it.</param>
     /// <exception cref="ManagementSimulationException">It is not an operation this framework has.</exception>

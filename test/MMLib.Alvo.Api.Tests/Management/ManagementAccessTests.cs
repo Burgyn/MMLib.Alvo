@@ -115,8 +115,10 @@ public class ManagementAccessTests
         var response = await world.SendAsync(HttpMethod.Get, "/management/info", _ops);
 
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
-        response.Headers.WwwAuthenticate.ToString().ShouldContain(
-            "AlvoApiKey", customMessage: "a 401 that names no scheme leaves an agent guessing");
+        response.Headers.WwwAuthenticate.ToString().ShouldBe(
+            $"AlvoApiKey header=\"{world.CredentialHeaderName}\"",
+            "the name says both halves: a scheme with no auth-param leaves an agent knowing it needs a key "
+            + "and not where to put it, and a host that moved the header would advertise the wrong one");
     }
 
     /// <summary>
