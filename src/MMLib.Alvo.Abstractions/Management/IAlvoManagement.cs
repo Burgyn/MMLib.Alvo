@@ -33,10 +33,17 @@
 /// adding a member here without adding a route fails a build.
 /// </para>
 /// <para>
-/// <b>Authorization is not this interface's job.</b> Over HTTP every route carries the gate
-/// <c>access</c> compiles (<c>RequireAlvoManagementAccess</c>); an in-process caller holding this reference
-/// has already been admitted by whatever composed it. Publishing two answers here and there is exactly the
-/// divergence contract 4 exists to prevent.
+/// <b>Every member gates itself, and holding this reference admits nothing.</b> The implementation reads
+/// the caller from <c>IAlvoContextAccessor</c> — the same accessor the Data API publishes into — and raises
+/// <see cref="ManagementForbiddenException"/> unless the level the project's <c>access</c> block resolves
+/// them to reaches the level the operation needs. So <b>an in-process caller that publishes no principal is
+/// refused</b>, on reads as well as on writes: it is the anonymous caller, and the anonymous caller reaches
+/// no level. A host embedding the dashboard publishes the human it is acting for; "whatever composed this
+/// reference already admitted the caller" would admit the <em>process</em>, not the person. Over HTTP the
+/// route filter (<c>RequireAlvoManagementAccess</c>) asks the same question earlier — before model binding,
+/// so an unadmitted caller costs no descriptor parse — and cannot answer differently, because it reads the
+/// same table through the same evaluator. One answer, reachable from two transports, which is what contract
+/// 4 asks for.
 /// </para>
 /// </remarks>
 public interface IAlvoManagement

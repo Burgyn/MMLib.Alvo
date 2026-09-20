@@ -13,8 +13,11 @@ namespace MMLib.Alvo.Management.Internal;
 /// <remarks>
 /// <para>
 /// <b>It authenticates; it authorizes nothing.</b> <see cref="ManagementAccessEndpointFilter"/> reads
-/// <see cref="IAlvoContextAccessor.Principal"/> and answers the 403, and it is the only thing that does —
-/// two filters deciding admission would be the divergence the one-path contract exists to prevent.
+/// <see cref="IAlvoContextAccessor.Principal"/> and answers the 403 — and so does
+/// <see cref="AlvoManagementService"/>, at the head of every contract member, off the same accessor and the
+/// same table, because <see cref="IAlvoManagement"/> is public and an in-process caller passes no filter.
+/// Two places ask; one answer comes back, and this filter must not become a third asker: a second
+/// admission rule here is exactly the divergence the one-path contract exists to prevent.
 /// </para>
 /// <para>
 /// <b>The credential mechanics are <see cref="CallerResolution"/>'s, not a second copy.</b> Reading the

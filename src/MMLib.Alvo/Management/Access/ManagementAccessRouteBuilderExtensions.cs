@@ -15,9 +15,12 @@ internal static class ManagementAccessRouteBuilderExtensions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Every management route carries this. A route without the gate and an operation without a route are
-    /// the two ways this surface can quietly open; the Management API owes the second half — a fact that
-    /// answers <c>403</c> over <em>every</em> management route — on the issue that adds the routes.
+    /// Every management route carries this, and no route depends on it alone: <c>AlvoManagementService</c>
+    /// asks the same question through the same evaluator at the head of every contract member, so a route
+    /// mapped without the gate is still refused — it merely pays for model binding first. What would open
+    /// this surface quietly is a route that reaches no contract member at all, which is what
+    /// <c>ManagementAccessTests.Every_mapped_management_route_refuses_a_caller_the_project_names_nowhere</c>
+    /// sweeps the live route table for.
     /// </para>
     /// <para>
     /// A filter <em>factory</em> rather than a constructed instance, so the evaluator and the caller

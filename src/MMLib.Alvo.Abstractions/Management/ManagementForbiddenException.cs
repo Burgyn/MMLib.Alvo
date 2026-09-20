@@ -1,8 +1,9 @@
 ﻿namespace MMLib.Alvo.Management;
 
 /// <summary>
-/// The caller is not admitted to this operation: the level the project's <c>access</c> block resolves them
-/// to does not reach the level the operation needs.
+/// The caller is not admitted to this operation: the level they resolve to does not reach the level the
+/// operation needs. The project's <c>access</c> block decides that level for everyone but the deployment's
+/// bootstrap administrator, who is resolved above the descriptor and reaches every operation.
 /// </summary>
 /// <remarks>
 /// <para>

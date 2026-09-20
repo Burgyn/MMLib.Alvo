@@ -80,7 +80,9 @@ internal static class ProblemResultFactory
         "The presented API key's scopes do not permit this operation. Grant the key the scope it needs.");
 
     /// <summary>
-    /// The 403 for a caller the descriptor's <c>access</c> block does not admit to this operation.
+    /// The 403 for a caller who reaches no level this operation admits — which the descriptor's
+    /// <c>access</c> block decides for everyone but the deployment's bootstrap administrator, resolved
+    /// above the descriptor.
     /// </summary>
     /// <remarks>
     /// <b>The wording names neither the level the caller holds nor the level the operation needs</b>,
