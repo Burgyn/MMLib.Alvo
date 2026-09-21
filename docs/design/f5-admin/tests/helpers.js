@@ -74,12 +74,21 @@ export async function expectNothingClipped(page) {
   const spills = await page.evaluate(() => {
     const width = document.documentElement.clientWidth;
     const out = [];
+    /* An element inside a scroll container is not clipped — it is scrollable, which is a
+       different thing and a legitimate one for a grid or a code pane. */
+    const inScroller = (el) => {
+      for (let node = el.parentElement; node; node = node.parentElement) {
+        const overflow = getComputedStyle(node).overflowX;
+        if (overflow === 'auto' || overflow === 'scroll') return true;
+      }
+      return false;
+    };
     for (const el of document.querySelectorAll('#app *')) {
       const style = getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden' || style.overflowX !== 'visible') continue;
       const box = el.getBoundingClientRect();
       if (box.width === 0 && box.height === 0) continue;
-      if (box.right > width + 1) {
+      if (box.right > width + 1 && !inScroller(el)) {
         out.push(`${el.tagName.toLowerCase()}.${el.className}`.slice(0, 120));
       }
     }
@@ -130,4 +139,41 @@ export async function deadControls(page) {
     }
     return out;
   });
+}
+
+/** Puts the prototype back to the field-service example at revision 7. */
+export async function reset(page) {
+  await page.evaluate(() => window.__alvoPrototype.reset());
+}
+
+/** The shell's one unapplied count. */
+export async function unapplied(page) {
+  return page.evaluate(() => window.__alvoPrototype.count());
+}
+
+/** Every change the working copy holds, with its kind. */
+export async function changeList(page) {
+  return page.evaluate(() => window.__alvoPrototype.changes().map((c) => ({ kind: c.kind, pointer: c.pointer, label: c.label })));
+}
+
+/** The applied revision number. */
+export async function revision(page) {
+  return page.evaluate(() => window.__alvoPrototype.wc.revision);
+}
+
+/** The working copy, as JSON. */
+export async function working(page) {
+  return page.evaluate(() => JSON.parse(JSON.stringify(window.__alvoPrototype.wc.working)));
+}
+
+/** Counts the moves a scenario costs, so "how many clicks" is measured rather than felt. */
+export function moves(page) {
+  let n = 0;
+  const wrapped = {
+    async click(selector, options) { n += 1; await page.click(selector, options); },
+    async fill(selector, value) { n += 1; await page.fill(selector, value); },
+    async press(selector, key) { n += 1; await page.press(selector, key); },
+    get count() { return n; },
+  };
+  return wrapped;
 }

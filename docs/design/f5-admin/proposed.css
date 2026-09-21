@@ -32,10 +32,14 @@
   flex-direction: column;
   gap: var(--space-3);
   max-height: calc(100vh - 140px);
+  /* The column scrolls as one. It used to clip whatever ran past its height with no scroll at
+     all, which put the field editor's own buttons somewhere unreachable. */
+  overflow-y: auto;
+  padding-right: var(--space-1);
 }
 
 .a-json {
-  flex: 1;
+  flex: 0 0 auto;
   min-height: 0;
   margin: 0;
   padding: var(--space-4);
@@ -46,8 +50,11 @@
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   line-height: 1.65;
-  white-space: pre;
-  overflow: auto;
+  /* Wrapping rather than scrolling sideways: a long description hidden behind a horizontal
+     scrollbar nobody notices is the same defect as a clipped column. The gutter keeps the
+     wrapped continuation indented under its own line. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   tab-size: 2;
 }
 
@@ -64,15 +71,52 @@
   color: var(--warn-fg);
 }
 
-/* The line the selected field owns. Selecting a field on the left scrolls the
-   descriptor here and marks it, which is what makes the two panes one object
-   rather than two views. */
-.a-json__hit {
+/* Every line carries a gutter, so a changed line can be marked without the text
+   moving. The pane renders the WORKING copy, so these marks are the diff against
+   the applied revision — the pane and the preview cannot disagree. */
+.a-json__line {
   display: block;
   margin: 0 calc(var(--space-4) * -1);
-  padding: 0 var(--space-4);
+  padding: 0 var(--space-4) 0 calc(var(--space-4) + 2.4em);
+  text-indent: -2.4em;
+}
+
+.a-json__g {
+  display: inline-block;
+  width: var(--space-4);
+  padding-left: calc(var(--space-4) - 10px);
+  color: var(--faint);
+  user-select: none;
+}
+
+.a-json__hit--added {
+  background: var(--ok-soft, var(--accentSoft));
+  box-shadow: inset 2px 0 0 var(--ok-fg, var(--accent));
+}
+
+.a-json__hit--added .a-json__g { color: var(--ok-fg, var(--accent)); }
+
+.a-json__hit--changed {
   background: var(--accentSoft);
   box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.a-json__hit--changed .a-json__g { color: var(--accent); }
+
+.a-json__hit--removed {
+  background: var(--danger-soft, var(--accentSoft));
+  box-shadow: inset 2px 0 0 var(--danger-fg);
+  opacity: .72;
+}
+
+.a-json__hit--removed .a-json__g { color: var(--danger-fg); }
+
+/* The lines the selected field owns. Selecting a field on the left marks them
+   here, which is what makes the two panes one object rather than two views —
+   and the editor sits ABOVE this pane rather than on top of it. */
+.a-json__sel {
+  outline: 1px solid var(--accentBorder);
+  outline-offset: -1px;
 }
 
 @media (max-width: 1100px) {
@@ -1709,4 +1753,83 @@
 .a-split__aside .a-section,
 .a-split > .a-stack .a-section {
   flex-wrap: wrap;
+}
+
+
+/* ---------------------------------------------------------------------------
+   The rules screen's matrix is full width.
+
+   Six columns over a 560 px column clipped the last one behind a scrollbar
+   nobody saw. The matrix is the overview, so it gets the width; the sentences
+   and the simulator share the split beneath it. */
+.a-matrix-panel {
+  width: 100%;
+}
+
+/* Under 720 px the matrix transposes: operations become rows, and each one
+   carries the roles that hold it as chips. Five columns of ticks on a phone is
+   one column and four off-screen, which is not a table anybody can read. */
+@media (max-width: 720px) {
+  .a-matrix thead,
+  .a-matrix .a-matrix__opcol {
+    display: none;
+  }
+
+  .a-matrix,
+  .a-matrix tbody,
+  .a-matrix tr,
+  .a-matrix td {
+    display: block;
+    width: 100%;
+  }
+
+  .a-matrix tr {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .a-matrix tr.a-matrix__group {
+    padding: var(--space-2) var(--space-4);
+  }
+
+  .a-matrix td {
+    display: inline-flex;
+    width: auto;
+    margin: var(--space-1) var(--space-2) 0 0;
+  }
+
+  .a-matrix td:first-child {
+    display: block;
+    margin-bottom: var(--space-2);
+  }
+
+  /* Each cell names its own operation, because the header row is gone. */
+  .a-matrix tbody td:nth-child(2) .a-cell::before { content: 'read many'; }
+  .a-matrix tbody td:nth-child(3) .a-cell::before { content: 'read one'; }
+  .a-matrix tbody td:nth-child(4) .a-cell::before { content: 'create'; }
+  .a-matrix tbody td:nth-child(5) .a-cell::before { content: 'change'; }
+  .a-matrix tbody td:nth-child(6) .a-cell::before { content: 'delete'; }
+
+  .a-matrix .a-cell::before {
+    font-size: var(--text-2xs);
+    color: var(--dim);
+    margin-right: var(--space-2);
+  }
+
+  .a-matrix .a-cell {
+    width: auto;
+    min-width: 0;
+    padding: var(--space-2) var(--space-3);
+  }
+}
+
+/* A field row's "edited, not applied" dot. */
+.a-fieldrow [data-changed] {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: var(--space-2);
+  border-radius: 999px;
+  background: var(--accent);
+  vertical-align: middle;
 }
