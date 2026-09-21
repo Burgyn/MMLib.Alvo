@@ -167,7 +167,7 @@ public sealed class RuntimeSchemaService
     /// <exception cref="DescriptorConcurrencyException">
     /// <paramref name="expectedRevision"/> is not the latest revision.
     /// </exception>
-    public async Task<DescriptorApplyPreview> PreviewAsync(
+    internal async Task<DescriptorApplyPreview> PreviewAsync(
         string project, string descriptorJson, int expectedRevision, MigrationOptions options,
         CancellationToken ct = default)
     {

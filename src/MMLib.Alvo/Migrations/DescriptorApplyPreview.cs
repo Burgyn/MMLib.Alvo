@@ -17,4 +17,4 @@
 /// Whether <see cref="RuntimeSchemaService.ApplyAsync"/> would proceed: <see langword="false"/> exactly when
 /// the plan is destructive and <see cref="MigrationOptions.AllowDestructive"/> is not set.
 /// </param>
-public sealed record DescriptorApplyPreview(MigrationPlan Plan, int CurrentRevision, bool AllowedByGuardrail);
+internal sealed record DescriptorApplyPreview(MigrationPlan Plan, int CurrentRevision, bool AllowedByGuardrail);
