@@ -1,0 +1,8 @@
+# ManagementIdempotencyStoreContractTests is xUnit test code even though it lives in src/: it is
+# inherited by each provider's test project, so its [Fact] methods follow the same descriptive
+# snake_case convention as test/.editorconfig, for the same reason. Scoped to the file rather than
+# the folder, so any helper code added beside it still gets the normal naming rule — the
+# arrangement src/MMLib.Alvo.Testing/Migrations/.editorconfig already established.
+
+[{ManagementIdempotencyStoreContractTests.cs}]
+dotnet_diagnostic.CA1707.severity = none

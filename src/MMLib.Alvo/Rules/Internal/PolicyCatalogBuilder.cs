@@ -45,6 +45,8 @@ internal static class PolicyCatalogBuilder
             entities[entitySchema.Name] = BuildEntity(entityDescriptor, build);
         }
 
+        var managementAccess = AccessCatalogBuilder.Build(descriptor.Access, compiler, roles, errorList);
+
         if (errorList.Count > 0)
         {
             catalog = null;
@@ -52,7 +54,7 @@ internal static class PolicyCatalogBuilder
             return false;
         }
 
-        catalog = new PolicyCatalog(entities, roles, schema);
+        catalog = new PolicyCatalog(entities, roles, schema, managementAccess);
         errors = [];
         return true;
     }
@@ -256,7 +258,9 @@ internal static class PolicyCatalogBuilder
     /// membership test whose left operand is a row field names no role and yields nothing —
     /// <see cref="RoleMembership"/> already guarantees the right operand is the role set.
     /// </summary>
-    private static IEnumerable<string> RoleLiterals(CelNode root)
+    /// <param name="root">The compiled tree to walk.</param>
+    /// <returns>Every role name tested for membership in <c>@user.roles</c>.</returns>
+    internal static IEnumerable<string> RoleLiterals(CelNode root)
     {
         var pending = new Stack<CelNode>();
         pending.Push(root);
@@ -280,7 +284,11 @@ internal static class PolicyCatalogBuilder
     /// Builds the "undeclared role" rejection, reusing the same "did you mean" shape an unknown field or
     /// enum value gets — a typo is by far the likeliest cause, so the fix names the nearest declared role.
     /// </summary>
-    private static DescriptorValidationError UndeclaredRoleError(string path, string role, RoleCatalog roles)
+    /// <param name="path">The JSON pointer the problem is reported under.</param>
+    /// <param name="role">The undeclared role literal.</param>
+    /// <param name="roles">The project's declared roles, for the "did you mean" suggestion.</param>
+    /// <returns>The rejection, with a fix naming the nearest declared role.</returns>
+    internal static DescriptorValidationError UndeclaredRoleError(string path, string role, RoleCatalog roles)
     {
         var declared = roles.All.Select(candidate => candidate.Name).OrderBy(name => name, StringComparer.Ordinal).ToList();
         var closest = NameSuggestion.Closest(role, declared);

@@ -87,13 +87,13 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     }
 
     /// <summary>
-    /// Refuses everything this entry point can never render: <see cref="CelProfile.Mutate"/> outright (see
-    /// <see cref="RefuseMutate"/>), and <see cref="CelProfile.Computed"/> as a caller mistake — that one
-    /// renders perfectly, at the other entry point, so its message names the one to use.
+    /// Refuses everything this entry point can never render: the interpreter-only profiles outright (see
+    /// <see cref="RefuseInterpreterOnlyProfile"/>), and <see cref="CelProfile.Computed"/> as a caller
+    /// mistake — that one renders perfectly, at the other entry point, so its message names the one to use.
     /// </summary>
     private static void RequirePredicateProfile(CompiledExpression expression)
     {
-        RefuseMutate(expression);
+        RefuseInterpreterOnlyProfile(expression);
 
         if (expression.Profile == CelProfile.Computed)
         {
@@ -105,7 +105,7 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
 
     private static void RequireScalarProfile(CompiledExpression expression)
     {
-        RefuseMutate(expression);
+        RefuseInterpreterOnlyProfile(expression);
 
         if (expression.Profile != CelProfile.Computed)
         {
@@ -116,8 +116,9 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     }
 
     /// <summary>
-    /// <b><see cref="CelProfile.Mutate"/> is refused by <em>both</em> entry points, before either walks a
-    /// tree.</b> No entry point will ever render it, which is what makes this a
+    /// <b>The interpreter-only profiles — <see cref="CelProfile.Mutate"/> and
+    /// <see cref="CelProfile.Access"/> — are refused by <em>both</em> entry points, before either walks a
+    /// tree.</b> No entry point will ever render either of them, which is what makes this a
     /// <see cref="NotSupportedException"/> rather than the profile-mismatch
     /// <see cref="InvalidOperationException"/> below it: those two say "you used the wrong one of the two",
     /// and this one says "neither". Shared rather than written twice so the two entry points cannot drift
@@ -134,20 +135,28 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     /// structural, and it is also why the per-node arms are gone: with this in place nothing could reach
     /// them, and an unreachable refusal is one no test can hold to its claim.
     /// </remarks>
-    private static void RefuseMutate(CompiledExpression expression)
+    private static void RefuseInterpreterOnlyProfile(CompiledExpression expression)
     {
-        if (expression.Profile != CelProfile.Mutate)
+        if (expression.Profile == CelProfile.Mutate)
+        {
+            throw new NotSupportedException(
+                $"'{expression.Source}' was compiled for the {CelProfile.Mutate} profile, which is evaluated "
+                + "by the in-memory interpreter inside the write transaction and is never rendered to SQL. "
+                + "Rendering it would bring the two-valued null fold and the string-collation caveat back "
+                + $"into scope, and '{CelCall.Now}()' would answer with the engine's own clock — "
+                + "PostgreSQL's transaction-start time, SQLite's second-precision text — instead of the "
+                + "instant the write bound once.");
+        }
+
+        if (expression.Profile != CelProfile.Access)
         {
             return;
         }
 
         throw new NotSupportedException(
-            $"'{expression.Source}' was compiled for the {CelProfile.Mutate} profile, which is evaluated "
-            + "by the in-memory interpreter inside the write transaction and is never rendered to SQL. "
-            + "Rendering it would bring the two-valued null fold and the string-collation caveat back "
-            + $"into scope, and '{CelCall.Now}()' would answer with the engine's own clock — "
-            + "PostgreSQL's transaction-start time, SQLite's second-precision text — instead of the "
-            + "instant the write bound once.");
+            $"'{expression.Source}' was compiled for the {CelProfile.Access} profile, which is a predicate "
+            + "over the caller alone and is evaluated in memory. There is no row to push it into, so "
+            + "rendering it would produce a WHERE clause over a table an access level never names.");
     }
 
     private const string DefaultParameterPrefix = "p";

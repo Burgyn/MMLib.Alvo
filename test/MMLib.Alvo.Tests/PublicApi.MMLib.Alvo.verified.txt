@@ -32,6 +32,7 @@ namespace MMLib.Alvo.Api
     {
         public const string BaseUri = "https://alvo.dev/errors/";
         public const string Conflict = "conflict";
+        public const string DestructiveChange = "destructive-change";
         public const string Forbidden = "forbidden";
         public const string IdempotencyConflict = "idempotency-conflict";
         public const string Internal = "internal";
@@ -39,6 +40,7 @@ namespace MMLib.Alvo.Api
         public const string NotFound = "not-found";
         public const string OutOfScope = "out-of-scope";
         public const string PreconditionFailed = "precondition-failed";
+        public const string PreconditionRequired = "precondition-required";
         public const string Unauthenticated = "unauthenticated";
         public const string UnreadableRequest = "unreadable-request";
         public const string UnsupportedMediaType = "unsupported-media-type";
@@ -101,6 +103,15 @@ namespace MMLib.Alvo.Events
         public bool Enabled { get; set; }
         public int MaxAttempts { get; set; }
         public System.TimeSpan PollInterval { get; set; }
+    }
+}
+namespace MMLib.Alvo.Management
+{
+    public sealed class AlvoManagementOptions
+    {
+        public const string SectionName = "Alvo:Management";
+        public AlvoManagementOptions() { }
+        public string RoutePrefix { get; set; }
     }
 }
 namespace MMLib.Alvo.Migrations
@@ -167,6 +178,10 @@ namespace Microsoft.AspNetCore.Builder
     public static class AlvoHealthEndpointRouteBuilderExtensions
     {
         public static Microsoft.AspNetCore.Routing.IEndpointRouteBuilder MapAlvoHealth(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
+    }
+    public static class AlvoManagementEndpointRouteBuilderExtensions
+    {
+        public static Microsoft.AspNetCore.Builder.IEndpointConventionBuilder MapAlvoManagementApi(this Microsoft.AspNetCore.Routing.IEndpointRouteBuilder endpoints) { }
     }
 }
 namespace Microsoft.Extensions.DependencyInjection

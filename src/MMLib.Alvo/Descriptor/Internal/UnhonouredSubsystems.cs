@@ -12,10 +12,10 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// <b>"Once, at apply" means the BOOT apply, and that is a gap rather than a wording nicety.</b> The only
 /// caller of <see cref="Warn"/> is <c>DescriptorBootPlan.LoadAsync</c>; <c>RuntimeSchemaService.ApplyAsync</c>
 /// — the dashboard-first / Management-API path — calls it nowhere, so a descriptor applied at runtime earns
-/// no line at all. That is pre-existing and true of every entry here, and it matters most for the newest
-/// one: an operator applying through a dashboard is the reader least likely to be watching boot logs, and
-/// <c>access</c> is the entry whose absence they cannot otherwise notice. Tracked on #83, whose scope is
-/// exactly "nothing primes, and nothing warns, at startup in runtime-apply mode".
+/// no line at all. That is true of every entry here, and the reader it costs most is the operator applying
+/// through a dashboard: they are the least likely to be watching boot logs, and every entry below describes
+/// an absence that is easy to misattribute to the layer above it. Tracked on #83, whose scope is exactly
+/// "nothing primes, and nothing warns, at startup in runtime-apply mode".
 /// </para>
 /// </remarks>
 /// <remarks>
@@ -61,24 +61,26 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// specifically.
 /// </para>
 /// <para>
-/// <b><c>access</c> is on the table under limb two; <c>branding</c> is on neither and stays out.</b> An
-/// earlier version of this paragraph excluded the pair together, on limb one alone: both are parsed and
-/// consumed by no product code, both describe an admin-dashboard surface this build has no trace of, so
-/// neither absence could be observed and neither warning could name a disappointment the author can yet
-/// have. That reasoning holds for <c>branding</c> — an author who writes it and sees no logo has looked and
-/// found out, and it is harmless — and fails for <c>access</c> (#146), whose author has a false belief that
-/// administration is restricted. Nothing happening is precisely what a working restriction looks like, so
-/// there is no looking that finds it out.
+/// <b>Both <c>access</c> and <c>branding</c> are off the table, for two different reasons, and the
+/// difference is worth keeping.</b> An earlier version of this file carried <c>access</c> under limb two
+/// — its <em>name</em> promised a restriction it did not enforce, and nothing happening is exactly what
+/// a working restriction looks like, so there was no looking that found it out. #146 ended that: the
+/// three levels are compiled at apply against the <see cref="Expressions.CelProfile.Access"/> profile, their role
+/// literals are validated against <c>auth.roles</c> exactly as a rule's are, and a caller who matches no
+/// level is refused. The entry left with the warning, which is the transition this file demanded of
+/// itself. <c>branding</c> is off the table on the original argument and stays there: an author who
+/// writes it and sees no logo has looked and found out, so it qualifies under neither limb — and the day
+/// the dashboard renders it, nothing changes here either.
 /// </para>
 /// <para>
-/// <b>Why <c>access</c> is warned about rather than refused, since the argument above is
-/// <see cref="UnhonouredFeatures"/>' criterion word for word.</b> A false belief the author cannot check
-/// is exactly what that table refuses — the three <c>before*</c> hooks are refused because "a write the
-/// author believes is vetted is neither". The difference is that a before-hook sits on a live write path,
-/// so ignoring it permits something <em>now</em>; <c>access</c> governs an administration surface that does
-/// not exist in this build at all, so today nothing is wrongly permitted and refusing the descriptor would
-/// refuse it for being ahead of the implementation. That is also what ties this entry to #146's ordering:
-/// the day the surface lands, <c>access</c> is either honoured or refused — never warned about.
+/// <b>Where the line between this table and <see cref="UnhonouredFeatures"/> falls, now that its
+/// sharpest case has left.</b> That table refuses what silently produces wrong data on a live write
+/// path — the three <c>before*</c> hooks are refused because "a write the author believes is vetted is
+/// neither". This one warns about a subsystem whose absence permits nothing <em>now</em>: refusing it
+/// would refuse a descriptor whose only defect is being ahead of the implementation, and the descriptor
+/// is meant to outlive any one build. <c>access</c> was the case where the two arguments nearly met, and
+/// it was resolved the way the rule predicts: it stayed warned about while the administration surface
+/// did not exist, and it left the table the moment enforcement landed rather than being refused.
 /// </para>
 /// <para>
 /// <b><c>realtime</c> is absent for a different and sharper reason: it is not a top-level block at all.</b>
@@ -121,13 +123,6 @@ internal static partial class UnhonouredSubsystems
             descriptor => descriptor.DynamicEntities?.Enabled == true,
             "no runtime entity can be created and the whole dynamic schema-registry driver is absent, so "
             + "every governance limit declared here bounds nothing (F7)"),
-        new(
-            "access",
-            descriptor => descriptor.Access is { } access
-                && (access.Admin is not null || access.Developer is not null || access.Viewer is not null),
-            "no management level is enforced anywhere, so a project an author believes only an admin may "
-            + "administer is administrable by whoever the host lets in — and the CEL is not compiled either, "
-            + "so a rule that could never evaluate is not reported as one (#146)"),
         new(
             "automation",
             descriptor => descriptor.Automation is { Count: > 0 },
@@ -213,11 +208,12 @@ internal static partial class UnhonouredSubsystems
     /// <param name="unhonouredBlocks">Their names, comma-separated — the part a reader acts on.</param>
     /// <param name="unhonouredConsequences">What does not happen, per block.</param>
     /// <remarks>
-    /// <b>The preamble no longer offers "because their absence is observable" as the blanket reason.</b>
-    /// That was true when every entry was on limb one, and it is false for <c>access</c> — which is on the
-    /// table precisely because its absence is <em>not</em> observable. It was therefore the one sentence in
-    /// the one line an operator reads that pointed the reassuring way about the one security-relevant block
-    /// it names. What replaced it holds for both limbs and says nothing about observability.
+    /// <b>The preamble still does not offer "because their absence is observable" as the reason</b>, even
+    /// though every remaining entry is once again on limb one. It was removed when <c>access</c> joined,
+    /// because it pointed the reassuring way about the one security-relevant block the line named; putting
+    /// it back would re-create a sentence that is true only for as long as no limb-two entry is added, and
+    /// the next one would have to remember to remove it again. What is there instead holds for both limbs
+    /// and says nothing about observability.
     /// </remarks>
     [LoggerMessage(
         Level = LogLevel.Warning,

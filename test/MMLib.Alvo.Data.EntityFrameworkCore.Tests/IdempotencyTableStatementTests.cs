@@ -108,7 +108,7 @@ public sealed class IdempotencyTableStatementTests : IDisposable
 
         record.ShouldNotBeNull();
         record.Value.Fingerprint.ShouldBe("fp-1");
-        record.Value.RowIds.ShouldBe([rowId]);
+        record.Value.DecodeRowIds().ShouldBe([rowId]);
     }
 
     /// <summary>
@@ -125,7 +125,7 @@ public sealed class IdempotencyTableStatementTests : IDisposable
         var record = await FindRecordAsync("key-1", Scope);
 
         record.ShouldNotBeNull();
-        record.Value.RowIds.ShouldBe(rowIds, ignoreOrder: false);
+        record.Value.DecodeRowIds().ShouldBe(rowIds, ignoreOrder: false);
     }
 
     /// <summary>

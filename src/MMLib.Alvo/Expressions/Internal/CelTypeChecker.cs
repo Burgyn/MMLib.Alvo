@@ -44,7 +44,8 @@ internal static class CelTypeChecker
         Literal,
         FieldRefCurrent,
         FieldRefPastFuture,
-        ContextRef,
+        ContextRefUser,
+        ContextRefTenant,
         Logical,
         Comparison,
         In,
@@ -64,8 +65,33 @@ internal static class CelTypeChecker
     private static readonly IReadOnlySet<CelProfile> _ruleComputedCondition =
         new HashSet<CelProfile> { CelProfile.Rule, CelProfile.Computed, CelProfile.Condition };
 
+    /// <summary>
+    /// Rule, Computed, Condition <em>and</em> <see cref="CelProfile.Access"/> — the profiles that may hold a
+    /// whole predicate's worth of operators. <see cref="CelProfile.Mutate"/> is deliberately absent, exactly
+    /// as it is from <see cref="_ruleComputedCondition"/>.
+    /// </summary>
+    private static readonly IReadOnlySet<CelProfile> _ruleComputedConditionAndAccess =
+        new HashSet<CelProfile>
+        {
+            CelProfile.Rule, CelProfile.Computed, CelProfile.Condition, CelProfile.Access,
+        };
+
     private static readonly IReadOnlySet<CelProfile> _everyProfile =
-        new HashSet<CelProfile> { CelProfile.Rule, CelProfile.Computed, CelProfile.Condition, CelProfile.Mutate };
+        new HashSet<CelProfile>
+        {
+            CelProfile.Rule, CelProfile.Computed, CelProfile.Condition, CelProfile.Mutate, CelProfile.Access,
+        };
+
+    /// <summary>
+    /// The four profiles evaluated against a row. <see cref="CelProfile.Access"/> is deliberately absent:
+    /// an access level is a predicate over the caller alone, so a field reference there would compile and
+    /// then have nothing to read.
+    /// </summary>
+    private static readonly IReadOnlySet<CelProfile> _rowProfiles =
+        new HashSet<CelProfile>
+        {
+            CelProfile.Rule, CelProfile.Computed, CelProfile.Condition, CelProfile.Mutate,
+        };
 
     private static readonly IReadOnlySet<CelProfile> _computedOnly = new HashSet<CelProfile> { CelProfile.Computed };
 
@@ -75,6 +101,14 @@ internal static class CelTypeChecker
 
     private static readonly IReadOnlySet<CelProfile> _ruleAndCondition =
         new HashSet<CelProfile> { CelProfile.Rule, CelProfile.Condition };
+
+    /// <summary>
+    /// The two caller-aware profiles plus <see cref="CelProfile.Access"/>. It carries <c>@user</c> and
+    /// <c>in</c> (role membership), which are the whole of what an access level reads; <c>@tenant</c> has
+    /// its own row and stays on <see cref="_ruleAndCondition"/>.
+    /// </summary>
+    private static readonly IReadOnlySet<CelProfile> _ruleConditionAndAccess =
+        new HashSet<CelProfile> { CelProfile.Rule, CelProfile.Condition, CelProfile.Access };
 
     /// <summary>
     /// A hook <c>condition</c> and a before-hook <c>mutate</c> are the two slots evaluated against a
@@ -97,12 +131,13 @@ internal static class CelTypeChecker
         new()
         {
             [CelConstructKind.Literal] = _everyProfile,
-            [CelConstructKind.FieldRefCurrent] = _everyProfile,
+            [CelConstructKind.FieldRefCurrent] = _rowProfiles,
             [CelConstructKind.FieldRefPastFuture] = _conditionAndMutate,
-            [CelConstructKind.ContextRef] = _ruleAndCondition,
-            [CelConstructKind.Logical] = _ruleComputedCondition,
-            [CelConstructKind.Comparison] = _ruleComputedCondition,
-            [CelConstructKind.In] = _ruleAndCondition,
+            [CelConstructKind.ContextRefUser] = _ruleConditionAndAccess,
+            [CelConstructKind.ContextRefTenant] = _ruleAndCondition,
+            [CelConstructKind.Logical] = _ruleComputedConditionAndAccess,
+            [CelConstructKind.Comparison] = _ruleComputedConditionAndAccess,
+            [CelConstructKind.In] = _ruleConditionAndAccess,
             [CelConstructKind.Has] = _ruleComputedCondition,
             [CelConstructKind.Arithmetic] = _computedOnly,
             [CelConstructKind.Conditional] = _computedOnly,
@@ -123,6 +158,12 @@ internal static class CelTypeChecker
 
         private const string NullPresenceFixSuggestion =
             "Use has(field) to test presence, or !has(field) to test absence.";
+
+        private const string AccessNoRowMessage =
+            "An access level is a predicate over the caller alone; a field reference has no row to read here.";
+
+        private const string AccessProjectScopedMessage =
+            "'@tenant.id' is not legal in an access level: an access level is project-scoped, not tenant-scoped.";
 
         private int _cursor;
 
@@ -157,19 +198,29 @@ internal static class CelTypeChecker
             return (literal, literal.Type, profileBad, _cursor);
         }
 
+        /// <summary>
+        /// Whether this profile admits a field reference in <em>any</em> state. Only
+        /// <see cref="CelProfile.Access"/> admits none, and that is what lets the field-reference and
+        /// <c>changed(...)</c> arms stop before resolving a name against an entity there is none of —
+        /// which would otherwise add a second, misleading "not a field of entity '&lt;project&gt;'" error
+        /// to every access level that names a column.
+        /// </summary>
+        private bool ProfileReadsARow =>
+            IsAllowed(profile, CelConstructKind.FieldRefCurrent)
+            || IsAllowed(profile, CelConstructKind.FieldRefPastFuture);
+
         private (CelNode, CelValueType, bool, int) CheckFieldRef(CelFieldRef fieldRef)
         {
             var position = FindPosition(fieldRef.FieldName);
             var kind = fieldRef.State == CelRecordState.Current
                 ? CelConstructKind.FieldRefCurrent
                 : CelConstructKind.FieldRefPastFuture;
-            var stateBad = CheckConstruct(
-                kind,
-                $"'{StatePrefix(fieldRef.State)}{fieldRef.FieldName}' is legal only in the {CelProfile.Condition} and "
-                + $"{CelProfile.Mutate} profiles (a hook condition and a before-hook mutate value) — the two slots "
-                + "evaluated against a candidate row.",
-                "Reference the current row instead, or move this into a hook condition or a before-hook mutate.",
-                position);
+            var stateBad = CheckConstruct(kind, FieldRefRefusal(fieldRef), FieldRefFix(), position);
+
+            if (!ProfileReadsARow)
+            {
+                return (fieldRef, CelValueType.Null, true, position);
+            }
 
             var field = ResolveField(fieldRef.FieldName);
             if (field is null)
@@ -194,17 +245,57 @@ internal static class CelTypeChecker
             return (fieldRef with { Type = type }, type, stateBad, position);
         }
 
+        private string FieldRefRefusal(CelFieldRef fieldRef) =>
+            ProfileReadsARow
+                ? $"'{StatePrefix(fieldRef.State)}{fieldRef.FieldName}' is legal only in the "
+                    + $"{CelProfile.Condition} and {CelProfile.Mutate} profiles (a hook condition and a "
+                    + "before-hook mutate value) — the two slots evaluated against a candidate row."
+                : AccessNoRowMessage;
+
+        private string FieldRefFix() =>
+            ProfileReadsARow
+                ? "Reference the current row instead, or move this into a hook condition or a before-hook mutate."
+                : "Test the caller instead, e.g. 'manager' in @user.roles.";
+
         private (CelNode, CelValueType, bool, int) CheckContextRef(CelContextRef contextRef)
         {
+            if (ContextRefKind(contextRef.Value) is not { } kind)
+            {
+                return UnrecognizedNode(contextRef);
+            }
+
             var position = FindPosition(ContextRefText(contextRef));
-            var profileBad = CheckConstruct(
-                CelConstructKind.ContextRef,
-                ComputedNoContextMessage,
-                "Move the caller-dependent check into a rule or a hook condition.",
-                position);
+            var profileBad = CheckConstruct(kind, ContextRefRefusal(), ContextRefFix(), position);
 
             return (contextRef, contextRef.Type, profileBad, position);
         }
+
+        /// <summary>
+        /// Which construct row a context value sits on, or <see langword="null"/> when it sits on none.
+        /// </summary>
+        /// <remarks>
+        /// <b>An unmapped value falls out as unrecognised rather than onto the user row, and the direction
+        /// is the whole point.</b> A two-way test against <see cref="CelContextValue.TenantId"/> would put
+        /// every value added later on <see cref="CelConstructKind.ContextRefUser"/> — which
+        /// <see cref="CelProfile.Access"/> <em>admits</em> — so a tenant-shaped member (<c>@tenant.plan</c>,
+        /// an organisation id) would become silently legal in an access level, making a project-scoped
+        /// predicate answer differently per request by default instead of by decision. Refusing the
+        /// unmapped case in every profile is the deny-by-default this table exists to enforce.
+        /// </remarks>
+        private static CelConstructKind? ContextRefKind(CelContextValue value) => value switch
+        {
+            CelContextValue.UserId or CelContextValue.UserRoles => CelConstructKind.ContextRefUser,
+            CelContextValue.TenantId => CelConstructKind.ContextRefTenant,
+            _ => null,
+        };
+
+        private string ContextRefRefusal() =>
+            profile == CelProfile.Access ? AccessProjectScopedMessage : ComputedNoContextMessage;
+
+        private string ContextRefFix() =>
+            profile == CelProfile.Access
+                ? "Test role membership or the caller's identity instead, e.g. 'manager' in @user.roles."
+                : "Move the caller-dependent check into a rule or a hook condition.";
 
         private (CelNode, CelValueType, bool, int) CheckUnary(CelUnary unary)
         {
@@ -492,7 +583,7 @@ internal static class CelTypeChecker
                 "Move this check into hooks.beforeUpdate/afterUpdate.",
                 position);
 
-            if (ResolveField(changed.FieldName) is not null)
+            if (!ProfileReadsARow || ResolveField(changed.FieldName) is not null)
             {
                 return (changed, CelValueType.Bool, profileBad, position);
             }

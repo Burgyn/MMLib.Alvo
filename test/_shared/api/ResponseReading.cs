@@ -26,6 +26,32 @@ internal static class ResponseReading
     }
 
     /// <summary>
+    /// The elements of a successful response whose <em>whole body</em> is a JSON array — the Management
+    /// API's collection shape, which carries no page envelope because it pages nothing.
+    /// </summary>
+    /// <remarks>
+    /// A 200 is required for <see cref="ReadItemsAsync"/>'s reason: an empty list and a refusal both read as
+    /// "no elements" to a fact that only counted them, and every refusal in this framework answers with a
+    /// problem <em>object</em>, which would otherwise be reported as "not an array" rather than as the
+    /// status it was.
+    /// </remarks>
+    /// <param name="response">The response to read.</param>
+    internal static async Task<IReadOnlyList<JsonObject>> ReadJsonArrayAsync(this HttpResponseMessage response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+        var text = await response.ReadTextAsync();
+        if (response.StatusCode != HttpStatusCode.OK)
+        {
+            throw Unexpected(response, text, "a 200 carrying a JSON array");
+        }
+
+        return Parse(text) is JsonArray elements
+            ? [.. elements.Select(element =>
+                element as JsonObject ?? throw Unexpected(response, text, "an array of JSON objects"))]
+            : throw Unexpected(response, text, "a JSON array");
+    }
+
+    /// <summary>
     /// The rows of a successful list response. Requires a 200 carrying an <c>items</c> array — a fact
     /// about rows must not be satisfiable by a response that carried none because it was refused.
     /// </summary>

@@ -169,15 +169,15 @@ public sealed class MinimalRegistrationTests
     }
 
     /// <summary>
-    /// <c>MapAlvo()</c> is exactly its two parts — the fact that makes the composition a claim rather than a
-    /// coincidence.
+    /// <c>MapAlvo()</c> is exactly its three parts — the fact that makes the composition a claim rather than
+    /// a coincidence.
     /// </summary>
     /// <remarks>
     /// <para>
     /// The comparison is over every data source the mapping produced <em>and</em> the endpoints inside each,
-    /// so it fails in both directions: a third thing added to <c>MapAlvo</c> and not to the parts, and a part
-    /// dropped from <c>MapAlvo</c>. Comparing endpoints alone would not do — the Data API's source publishes
-    /// none until a schema is primed, so its whole presence lives in the source list.
+    /// so it fails in both directions: a fourth thing added to <c>MapAlvo</c> and not to the parts, and a
+    /// part dropped from <c>MapAlvo</c>. Comparing endpoints alone would not do — the Data API's source
+    /// publishes none until a schema is primed, so its whole presence lives in the source list.
     /// </para>
     /// <para>
     /// Non-vacuity is asserted, not assumed: two hosts that mapped nothing at all also agree. The shape must
@@ -185,7 +185,7 @@ public sealed class MinimalRegistrationTests
     /// </para>
     /// </remarks>
     [Fact]
-    public void MapAlvo_maps_exactly_what_the_two_parts_map()
+    public void MapAlvo_maps_exactly_what_the_three_parts_map()
     {
         using var umbrella = Application();
         using var parts = Application();
@@ -193,13 +193,16 @@ public sealed class MinimalRegistrationTests
         umbrella.MapAlvo();
         parts.MapAlvoHealth();
         parts.MapAlvoDataApi();
+        parts.MapAlvoManagementApi();
 
         var mapped = MappedShape(umbrella);
         mapped.ShouldBe(MappedShape(parts));
-        RoutePatterns(umbrella).ShouldBe(
-            [AlvoHealth.LivenessPath, AlvoHealth.ReadinessPath],
-            ignoreOrder: true,
+        RoutePatterns(umbrella).ShouldContain(
+            AlvoHealth.LivenessPath,
             "an umbrella that mapped no probe route would agree with parts that mapped none either");
+        RoutePatterns(umbrella).ShouldContain(
+            "/management/info",
+            "the management surface is part of the umbrella, and a route pattern is how that is visible");
         mapped.ShouldContain(
             shape => shape.StartsWith(nameof(AlvoEndpointDataSource), StringComparison.Ordinal),
             "the Data API publishes no endpoint until a schema is primed, so its source is the only sign of it");

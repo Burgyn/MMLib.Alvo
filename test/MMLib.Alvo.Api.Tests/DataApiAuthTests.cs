@@ -130,6 +130,34 @@ public sealed class DataApiAuthTests
     }
 
     /// <summary>
+    /// Two credential headers are an ambiguous credential, and <see cref="MMLib.Alvo.Auth.Internal.CallerResolution"/>
+    /// refuses it rather than disambiguating it by taking whichever copy arrived first.
+    /// </summary>
+    /// <remarks>
+    /// <b>A security rule with no fact until now.</b> The reading has always joined repeated values, and its
+    /// own doc comment has always said why, but nothing measured it on either surface — so an edit to
+    /// <c>values[0]</c> survived every suite in this repository. The control proves the very same key is
+    /// otherwise accepted, so the 401 is the duplication and not the key.
+    /// </remarks>
+    [Fact]
+    public async Task A_credential_header_sent_twice_is_401_rather_than_resolved_to_its_first_copy()
+    {
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin]);
+        var header = world.CredentialHeaderName;
+
+        using var response = await world.SendRawAsync(
+            HttpMethod.Get,
+            "/api/owners",
+            headers: [new(header, _admin.Presented), new(header, _admin.Presented)]);
+        using var control = await world.SendAsync(HttpMethod.Get, "/api/owners", _admin);
+
+        response.StatusCode.ShouldBe(
+            HttpStatusCode.Unauthorized, "picking the first copy would admit whoever sends their header first");
+        control.StatusCode.ShouldBe(
+            HttpStatusCode.OK, "or the 401 above could be this world refusing every key, duplicated or not");
+    }
+
+    /// <summary>
     /// Revocation is the same 401 as an unknown key, and deliberately indistinguishable from it — but it
     /// travels a different production path (the key authenticates, then
     /// <see cref="MMLib.Alvo.Auth.ApiKeyRecord.IsUsable"/> refuses it), so it is its own fact. The

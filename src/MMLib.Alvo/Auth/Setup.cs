@@ -37,6 +37,7 @@ internal static class AuthSetup
         services.TryAddSingleton<IApiKeyStore, Internal.InMemoryApiKeyStore>();
         services.TryAddSingleton<IAlvoContextResolver, Internal.ApiKeyContextResolver>();
         services.TryAddSingleton<IAlvoContextAccessor, Internal.AlvoContextAccessor>();
+        services.TryAddSingleton<IAlvoBootstrapAdmin, Internal.NoBootstrapAdmin>();
         services.TryAddSingleton<ScopeGate>();
         services.TryAddSingleton<TenantResolver>();
         return services;

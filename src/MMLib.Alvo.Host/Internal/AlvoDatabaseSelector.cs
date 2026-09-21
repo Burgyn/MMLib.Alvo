@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Data.PostgreSql;
 
@@ -37,6 +38,34 @@ internal static class AlvoDatabaseSelector
         {
             builder.UsePostgreSql(options => options.ConnectionString = connectionString);
             return;
+        }
+
+        throw AlvoHostConfiguration.Refuse(AlvoHostConfiguration.UnknownProvider(database.Provider));
+    }
+
+    /// <summary>
+    /// How the identity store reaches the same database the rest of Alvo uses.
+    /// </summary>
+    /// <remarks>
+    /// Here rather than in <see cref="AlvoHost"/> because this is already the one place that branches
+    /// on the provider name, and two places deciding which engine a host runs on is how the identity
+    /// tables would come to live in a different database from the descriptor's.
+    /// </remarks>
+    /// <param name="database">The host's database options.</param>
+    /// <param name="connectionString">The resolved <c>ConnectionStrings:Alvo</c> entry, if there is one.</param>
+    /// <exception cref="OptionsValidationException"><paramref name="database"/> names no driver this host ships.</exception>
+    internal static Action<DbContextOptionsBuilder> IdentityStore(
+        AlvoHostDatabaseOptions database, string? connectionString)
+    {
+        if (AlvoHostConfiguration.Is(database.Provider, AlvoHostDatabaseOptions.Sqlite))
+        {
+            var sqlite = connectionString ?? database.SqliteConnectionString;
+            return store => store.UseSqlite(sqlite);
+        }
+
+        if (AlvoHostConfiguration.Is(database.Provider, AlvoHostDatabaseOptions.PostgreSql))
+        {
+            return store => store.UseNpgsql(connectionString);
         }
 
         throw AlvoHostConfiguration.Refuse(AlvoHostConfiguration.UnknownProvider(database.Provider));

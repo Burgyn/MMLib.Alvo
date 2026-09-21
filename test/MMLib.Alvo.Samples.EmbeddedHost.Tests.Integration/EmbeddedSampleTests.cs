@@ -10,6 +10,7 @@ using MMLib.Alvo.Samples.EmbeddedHost;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Samples.EmbeddedHost.Tests.Integration;
@@ -275,6 +276,66 @@ public class EmbeddedSampleTests
 
         response.StatusCode.ShouldBe(HttpStatusCode.UnsupportedMediaType);
         response.Headers.GetValues("Accept-Post").ShouldHaveSingleItem().ShouldBe("application/json");
+    }
+
+    /// <summary>
+    /// <b>The sample resolves its own callers and takes no identity package with it.</b> #248's DoD
+    /// says so in as many words, and the reason is package-boundary rule (b): identity is a real swap
+    /// point, and this sample is the swap already in the tree — it mints an
+    /// <see cref="MMLib.Alvo.AlvoContext"/> from its own cookie and its own
+    /// <c>IRoleCatalogProvider</c> lookup.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Read from the sample's <c>.deps.json</c>, not from
+    /// <c>Assembly.GetReferencedAssemblies()</c>.</b> That table holds only the assemblies the
+    /// <em>compiler</em> emitted a reference to, which is a subset of what ships: the sample's own table
+    /// has 29 entries and does not name <c>Microsoft.EntityFrameworkCore</c> at all, while the DLL sits
+    /// in its output directory. A version of this fact written against it therefore stayed green while
+    /// the sample acquired a whole package closure — it could not fail for the regression it names.
+    /// </para>
+    /// <para>
+    /// <b>The EF assertion is the control, and it is the one the old reader failed.</b> The sample really
+    /// does carry EF Core, through <c>MMLib.Alvo.Data.Sqlite</c>; a reader that cannot see that cannot
+    /// see an identity closure either, and every "not present" below would pass for the wrong reason.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_sample_ships_no_identity_package()
+    {
+        var shipped = ShippedBySample();
+
+        shipped.ShouldContain(
+            "Microsoft.EntityFrameworkCore",
+            "the sample reaches EF Core through MMLib.Alvo.Data.Sqlite — a reader that cannot see that "
+            + "cannot see an identity closure either, and the two claims below would be vacuous");
+
+        shipped.ShouldNotContain("MMLib.Alvo.Identity");
+        shipped.ShouldNotContain("Microsoft.AspNetCore.Identity.EntityFrameworkCore");
+    }
+
+    /// <summary>
+    /// Every package and project the sample ships, read off the dependency manifest the SDK generates
+    /// for it and copies beside this suite's own output.
+    /// </summary>
+    /// <remarks>
+    /// The manifest is the closure the runtime resolves against, so it is what "the sample carries X"
+    /// actually means. Its <c>libraries</c> keys are <c>Name/Version</c>; only the name is kept, because
+    /// the version is what the central package manifest owns and a fact pinned to it would fail on every
+    /// bump.
+    /// </remarks>
+    private static IReadOnlyList<string> ShippedBySample()
+    {
+        var manifest = Path.Combine(AppContext.BaseDirectory, $"{typeof(SampleHost).Assembly.GetName().Name}.deps.json");
+
+        File.Exists(manifest).ShouldBeTrue(
+            $"the sample's dependency manifest must be beside this suite's output at {manifest}, or this "
+            + "fact asserts nothing about what the sample ships");
+
+        using var document = JsonDocument.Parse(File.ReadAllText(manifest));
+
+        return [.. document.RootElement.GetProperty("libraries").EnumerateObject()
+            .Select(library => library.Name.Split('/')[0])];
     }
 
     /// <summary>Every generated Data API route under <paramref name="prefix"/>, as <c>METHOD path</c>.</summary>

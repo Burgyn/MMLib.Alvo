@@ -19,6 +19,19 @@
 // asymmetry decides it.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Data.EntityFrameworkCore")]
 
+// A third assembly needs the same answer, for the same reason one letter of drift would be expensive:
+// MMLib.Alvo.Identity creates the seven alvo_identity_* tables, and AlvoFrameworkTables is what the
+// introspector excludes and the validator refuses. Spelling them in the package instead would be two
+// lists that must agree, and the day they stop agreeing the symptom is a DROP of every operator account
+// on the next re-apply rather than an error anyone sees.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Identity")]
+
+// And to that package's own suite, for the fact nothing held: that the tables AlvoIdentityDbContext maps
+// are the names AlvoFrameworkTables.NamesFor(prefix) reserves, under a NON-default prefix. Asserting it
+// against a list the identity package projects from AlvoFrameworkTables would only re-measure the
+// projection; the suite has to read the reserved set itself for the two sides to be independent.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Identity.Tests")]
+
 // IAlvoDataReachability and AlvoReachability (#133) are internal for the reason the port's own remarks give:
 // the shared EF path implements the probe once, so no driver and no host has been shown to need the type.
 // The assemblies that DO need it are all in this family — the core consumes the port from its readiness

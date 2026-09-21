@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Host.Internal;
+using MMLib.Alvo.Identity;
 
 namespace MMLib.Alvo.Host;
 
@@ -52,6 +53,7 @@ public static class AlvoHost
 
     private const string AuthSection = $"{ConfigurationSection}:Auth";
     private const string ApiSection = $"{ConfigurationSection}:Api";
+    private const string AdminSection = AlvoIdentity.ConfigurationSection;
 
     /// <summary>
     /// Registers everything the standalone host needs.
@@ -83,6 +85,10 @@ public static class AlvoHost
 
         AddHostOptions(builder);
         builder.Services.Configure<AlvoAuthOptions>(builder.Configuration.GetSection(AuthSection));
+
+        builder.Services.AddAlvoIdentity(
+            AlvoDatabaseSelector.IdentityStore(options.Database, ConnectionString(builder.Configuration)),
+            identity => builder.Configuration.GetSection(AdminSection).Bind(identity));
 
         if (options.ForwardedHeaders.Enabled)
         {

@@ -756,10 +756,23 @@ public class DescriptorValidatorTests
     /// <c>DescriptorModelBuilder</c> maps an entity onto its own name verbatim and the two would share one
     /// table (#156).
     /// </summary>
+    /// <remarks>
+    /// The seven <c>alvo_identity_*</c> rows are reserved before <c>MMLib.Alvo.Identity</c> exists, and
+    /// that ordering is the point: a table the package creates and <see cref="AlvoFrameworkTables"/> does
+    /// not name is one the next re-apply plans to <c>DROP</c> — every operator account, silently, on a
+    /// descriptor edit. Reserving early costs a descriptor seven unavailable entity names and nothing else.
+    /// </remarks>
     [Theory]
     [InlineData("alvo_outbox")]
     [InlineData("alvo_idempotency")]
     [InlineData("alvo_descriptor_versions")]
+    [InlineData("alvo_identity_users")]
+    [InlineData("alvo_identity_roles")]
+    [InlineData("alvo_identity_user_roles")]
+    [InlineData("alvo_identity_user_claims")]
+    [InlineData("alvo_identity_user_logins")]
+    [InlineData("alvo_identity_user_tokens")]
+    [InlineData("alvo_identity_role_claims")]
     public void An_entity_named_after_a_framework_table_is_refused(string name)
     {
         var json = $$"""

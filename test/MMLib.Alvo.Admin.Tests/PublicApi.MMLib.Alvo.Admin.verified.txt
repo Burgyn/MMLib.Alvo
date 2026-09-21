@@ -1,0 +1,10 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Admin
+{
+    public static class AlvoAdminAssets
+    {
+        public static string Script { get; }
+        public static string StyleSheet { get; }
+    }
+}

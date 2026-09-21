@@ -1,13 +1,13 @@
 # CEL — profiles, two-valued rendering, and the storage-driver seam
 
 > How Alvo's one CEL compiler (`ICelCompiler`, `src/MMLib.Alvo/Expressions`) turns authored
-> condition strings into an enforceable predicate: the four profiles and what each allows, the
+> condition strings into an enforceable predicate: the five profiles and what each allows, the
 > `USING`/`WITH CHECK` mapping `PolicyCatalog` compiles rules into, the two-valued rendering rule
 > both backends must agree on, the `IFieldSqlRenderer` seam a new storage driver implements, and
 > every deliberate narrowing of conformant CEL Alvo's grammar makes. Spec §0 principle 6 (CEL for
 > conditions, JSONata for transforms — CEL is safe-by-construction and runs in-transaction).
 
-## The four profiles
+## The five profiles
 
 One CEL grammar, one lexer/parser, one type checker (`CelTypeChecker`) — but a construct's
 legality is deny-by-default and varies by which descriptor slot the source came from
@@ -17,20 +17,33 @@ kind missing from it compiles in **no** profile rather than every profile.
 **This table is the `_allowedProfiles` table as it is written today, not as any design document
 proposes it** — see *`Mutate`, the fourth profile* below for where the two differ and why.
 
-| Construct | Rule | Computed | Condition | Mutate |
-|---|---|---|---|---|
-| Literal | ✓ | ✓ | ✓ | ✓ |
-| Field ref, current row (`owner_id`) | ✓ | ✓ | ✓ | ✓ |
-| Field ref, `old.`/`new.` | ✗ | ✗ | ✓ | ✓ |
-| `@user`/`@tenant` context ref | ✓ | ✗ | ✓ | ✗ |
-| `&&` / `\|\|` / `!` | ✓ | ✓ | ✓ | ✗ |
-| Comparison (`==`, `!=`, `<`, `<=`, `>`, `>=`) | ✓ | ✓ | ✓ | ✗ |
-| `in` (role membership) | ✓ | ✗ | ✓ | ✗ |
-| `has(field)` | ✓ | ✓ | ✓ | ✗ |
-| Arithmetic (`+ - * /`, unary `-`) | ✗ | ✓ | ✗ | ✗ |
-| Ternary conditional | ✗ | ✓ | ✗ | ✗ |
-| `changed(field)` | ✗ | ✗ | ✓ | ✗ |
-| Allow-listed function call (`lowerAscii`, `now`) | ✗ | ✗ | ✗ | ✓ |
+| Construct | Rule | Computed | Condition | Mutate | Access |
+|---|---|---|---|---|---|
+| Literal | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Field ref, current row (`owner_id`) | ✓ | ✓ | ✓ | ✓ | ✗ |
+| Field ref, `old.`/`new.` | ✗ | ✗ | ✓ | ✓ | ✗ |
+| `@user` context ref | ✓ | ✗ | ✓ | ✗ | ✓ |
+| `@tenant` context ref | ✓ | ✗ | ✓ | ✗ | ✗ |
+| `&&` / `\|\|` / `!` | ✓ | ✓ | ✓ | ✗ | ✓ |
+| Comparison (`==`, `!=`, `<`, `<=`, `>`, `>=`) | ✓ | ✓ | ✓ | ✗ | ✓ |
+| `in` (role membership) | ✓ | ✗ | ✓ | ✗ | ✓ |
+| `has(field)` | ✓ | ✓ | ✓ | ✗ | ✗ |
+| Arithmetic (`+ - * /`, unary `-`) | ✗ | ✓ | ✗ | ✗ | ✗ |
+| Ternary conditional | ✗ | ✓ | ✗ | ✗ | ✗ |
+| `changed(field)` | ✗ | ✗ | ✓ | ✗ | ✗ |
+| Allow-listed function call (`lowerAscii`, `now`) | ✗ | ✗ | ✗ | ✓ | ✗ |
+
+**Note the row that split.** `@user` and `@tenant` were one row (`@user`/`@tenant` context ref)
+because no profile had ever wanted one without the other. `Access` does, so the row is two rows and
+`_allowedProfiles` has two construct kinds (`ContextRefUser`, `ContextRefTenant`). A reader
+comparing this file to an older revision should read the split as that change, not as a
+transcription error.
+
+**An unrecognised context value is refused in every profile**, which is the same deny-by-default
+rule one level down from the table. `CelTypeChecker` maps a `CelContextValue` to a construct kind,
+and an unmapped one falls out as an *unrecognised node* rather than onto the `@user` row — so a
+context member added to the enum and forgotten here compiles nowhere instead of everywhere `@user`
+is legal.
 
 - **Rule** — `entities.*.rules.*` (the `USING`/`WITH CHECK` predicates) and `hidden`/`readOnly`
   field flags. Must evaluate to `Bool`. Sees the current row and `@user`/`@tenant`; never `old.`/
@@ -52,6 +65,25 @@ proposes it** — see *`Mutate`, the fourth profile* below for where the two dif
   constraint at all on the result shape — a `boolean` column is a legitimate `mutate` target, and
   that is exactly the case `Computed` has to reject because a generated column cannot hold
   "predicate" as a value. The only profile that admits a function call. See the next section.
+- **Access** — a management-access level (`access.admin` / `access.developer` / `access.viewer`).
+  Must evaluate to `Bool`. Sees `@user` and **nothing else**: no row, so no field reference of
+  either state and no `has()`/`changed()`; and no `@tenant`, because an access level is
+  *project*-scoped by the frozen schema's own description and admitting `@tenant` would make a
+  project-level predicate answer differently per request. **Interpreter-only**, like `Mutate`, and
+  refused at the renderer by *profile* before any tree is walked — which it has to be, because
+  every construct an access level can contain is one the renderer would otherwise render perfectly
+  well, into a `WHERE` clause over a table an access level never names. Role literals are validated
+  at apply against `auth.roles`, by the same walk that validates a rule's.
+
+  **What `@user.id` can and cannot do here, stated so it is not read as an oversight.** The column
+  admits it, because the frozen schema names it as one of the two members a level may read — but
+  Alvo's grammar has no `uuid` literal — no deviation records that, correctly, since conformant CEL
+  has none either, so it is not a narrowing — and an access level sees no row, so there is
+  no `Uuid`-typed operand in scope for it to meet. A level written as `@user.id == '…'` is
+  therefore refused by the *comparison* rule ("Cannot compare Uuid to String"), not by the profile
+  table. Both the member and the comparison operator stay admitted deliberately: widening `@user`
+  is additive, so a level written against a future typed claim compiles without this table
+  changing, and admitting the operator today expresses nothing a role membership could not.
 
 ## `Mutate`, the fourth profile
 
@@ -62,8 +94,10 @@ expression over a *hook* context, which the three-profile design had no cell for
 ### Interpreter-only, and that is a guarantee rather than an accident
 
 A `Mutate` expression is evaluated by `CelInterpreter` and is **never** handed to
-`SqlPredicateRenderer`. Three things follow, and each is an absence a later reader could otherwise
-mistake for an omission:
+`SqlPredicateRenderer`. **This now covers two profiles, not one** — `Access` is interpreter-only on
+its own reasons (a predicate over the caller alone, with no row to push into), and everything in
+this section holds for it unchanged. Three things follow, and each is an absence a later reader
+could otherwise mistake for an omission:
 
 - **No `IFieldSqlRenderer` member.** Nothing in the profile has a SQL rendering, so the seam a
   storage driver implements does not grow for it.
@@ -73,10 +107,16 @@ mistake for an omission:
   on*, and with one backend there is nothing to agree with — so `Mutate` inherits
   `CelInterpreter`'s semantics unchanged and states no separate null rule.
 
-The refusal is enforced rather than merely documented: `SqlPredicateRenderer` refuses a `CelCall`
-node **by name**, with a message that says the profile is interpreter-only, instead of falling
-through to a generic "unsupported node" arm. The moment somebody proposes rendering a `Mutate`
-expression to SQL, the two-valued fold and the `==`/`!=` collation caveat both come back into scope.
+The refusal is enforced rather than merely documented, and it is enforced **per profile, at both
+entry points, before either walks a tree** — not per node. An earlier revision refused a `CelCall`
+node by name inside the walk and admitted the profile itself, so every `Mutate` expression whose
+tree held no call reached the renderer and came back as SQL: a bare `true` is legal in the profile
+and rendered to `TRUE`, which made the guarantee hold for the shapes that arm happened to name
+rather than for the profile. `Access` could not have been guarded that way at all — every construct
+it admits renders perfectly well. The per-node arms are therefore gone: with the profile guard in
+place nothing could reach them, and an unreachable refusal is one no test can hold to its claim. The
+moment somebody proposes rendering a `Mutate` expression to SQL, the two-valued fold and the
+`==`/`!=` collation caveat both come back into scope.
 
 ### The function allow-list has exactly two entries
 
@@ -210,14 +250,21 @@ This is deliberately a **post-compile walk in the catalog builder, not a check i
 catalog, declared roles are a project-level concern, and the compiler is reachable from callers with no
 descriptor at all.
 
+**The three `access` levels go through the same walk**, against the same `RoleCatalog`, in the same
+apply pass — reported at `/access/admin`, `/access/developer` and `/access/viewer`. Not a second
+check written beside the first: a level's typo fails exactly the way a rule's does, with the same
+"did you mean" suggestion, and one apply reports a bad level and a bad rule together rather than
+half-applying the descriptor.
+
 ## Two-valued rendering: the rule both backends must agree on
 
 Alvo has two `CompiledExpression` backends — `CelInterpreter` (in-memory, used for `WITH CHECK`
 when there is a candidate row but no stored row to filter: a `create`, a hook `Condition`, or a
 before-hook `Mutate` value) and `SqlPredicateRenderer` (SQL, used for `USING`) — and a differential
 property test proves they never disagree on any well-typed expression and record **that both can
-hold**, which never includes a `Mutate` expression: the renderer refuses one by name, so the profile
-has one backend and this whole section is inapplicable to it. Both backends follow the **same** null
+hold**, which never includes a `Mutate` or an `Access` expression: the renderer refuses both
+profiles at its entry points, so each has one backend and this whole section is inapplicable to
+them. Both backends follow the **same** null
 rule, which is
 **two-valued, not SQL's native three-valued (`UNKNOWN`) logic**:
 
@@ -341,14 +388,26 @@ of a standard:
 
    **What it costs now is visible in `examples/complex-crm`**, and its `NOT-RUNNABLE.md` records it
    rather than papering over it: the domain gate was the only thing distinguishing that example's
-   `admin` from its `developer`, so under this narrowing the two collapse to one predicate. A
-   two-level distinction resting on an attribute cannot survive a role-only context, and inventing a
-   role to keep them apart would assert an org shape the example never had.
+   `admin` from its `developer`, so under this narrowing the two became one predicate. A two-level
+   distinction resting on an attribute cannot survive a role-only context, and inventing a role to
+   keep them apart would assert an org shape the example never had. Once the levels are *enforced*,
+   two identical predicates are worse than a smaller example — highest-match-wins makes the lower
+   one a level no caller can ever hold — so that file now declares `admin` and `viewer` only, and
+   `NOT-RUNNABLE.md`'s *"`access` is role-based only"* section carries the whole history and the
+   reason `developer` left. The schema key stays covered by the schema suite's own sample
+   (`MMLib.Alvo.Schema.Tests.AccessLevelsTests`).
 
-   **This is a grammar narrowing, not an enforcement one.** Nothing compiles the `access` block yet
-   — `PolicyCatalogBuilder` walks `schema.Entities` only, so a level naming a role `auth.roles` does
-   not declare is not reported today. `UnhonouredSubsystems` warns at apply that the block is inert,
-   which is the whole of what happens to it (`#146`).
+   **It is now an enforcement narrowing too, and that is #146 landing.** `PolicyCatalogBuilder`
+   compiles the three `access` levels in the same pass as every rule, against the same
+   `RoleCatalog`, so a level naming a role `auth.roles` does not declare is refused at apply with the
+   same "did you mean" suggestion a rule's typo gets. `UnhonouredSubsystems` no longer carries an
+   `access` entry — the file's own doc comment demanded that transition — and a caller who matches no
+   level is refused `403` on every management operation. "Gated" was load-bearing when this was
+   written — the gate was attached per route by `RequireAlvoManagementAccess(<operation>)`, and a
+   route without it was refused by nothing. It is not any more: `AlvoManagementService` reads the
+   same table at the head of every `IAlvoManagement` member, so the route filter is an early
+   rejection and the surface is closed whether or not a route carries it. See
+   `management-api.md`, *One path, two transports*.
 2. **`changed(field)`** — not a CEL macro; an Alvo addition for the Condition profile only, parsed
    with the same one-bare-identifier-argument shape as `has(...)`.
 3. **`old.field`/`new.field` state-qualified row references** — Alvo's own way of expressing a
@@ -381,8 +440,9 @@ of a standard:
     the author actually means.
 11. **String relational operators (`<`, `<=`, `>`, `>=`) rejected outside the Computed profile** —
     collation-dependent comparison is only meaningful where the database itself evaluates the
-    expression (a computed column); in the Rule/Condition profiles it is refused with a suggestion to
-    use `==`/`!=` instead, or move the comparison into a computed field.
+    expression (a computed column); in the Rule/Condition/Access profiles it is refused with a
+    suggestion to use `==`/`!=` instead, or move the comparison into a computed field. The check is
+    written as "every profile but `Computed`", so `Access` inherited it without a second rule.
 12. **No modulo (`%`)** — the lexer has no case for it; arithmetic is limited to `+ - * /`.
 13. **Numeric literals are plain decimal digit runs only** — no hex integers (`0x1A`), scientific
     notation (`1e10`), or an unsigned-literal suffix (`123u`) that CEL supports.

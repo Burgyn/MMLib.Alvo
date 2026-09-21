@@ -10,53 +10,14 @@ namespace MMLib.Alvo.Tests.Migrations;
 
 public sealed class RuntimeSchemaServiceTests
 {
-    private const string TasksV1 = """
-        {
-          "apiVersion": "alvo.dev/v1",
-          "name": "demo",
-          "entities": {
-            "tasks": {
-              "fields": {
-                "title": { "type": "string", "required": true }
-              }
-            }
-          }
-        }
-        """;
+    // The descriptors live in RuntimeSchemaWorld, which the preview suite plans against too. Aliased
+    // rather than copied: a second spelling of "one field, two fields" is how two suites come to
+    // disagree about which diff is destructive, and the names below are the ones these facts read best.
+    private const string TasksV1 = RuntimeSchemaWorld.OneField;
 
-    // Adds an optional field relative to TasksV1 — an AddField step, always non-destructive —
-    // so a plan against it is non-empty without tripping the destructive guardrail.
-    private const string TasksV2 = """
-        {
-          "apiVersion": "alvo.dev/v1",
-          "name": "demo",
-          "entities": {
-            "tasks": {
-              "fields": {
-                "title": { "type": "string", "required": true },
-                "notes": { "type": "string" }
-              }
-            }
-          }
-        }
-        """;
+    private const string TasksV2 = RuntimeSchemaWorld.TwoFields;
 
-    // Adds a *required* field relative to TasksV1. Adding it is still non-destructive (AddField),
-    // but rolling back FROM this TO TasksV1 drops that field, which IS destructive.
-    private const string TasksV1WithExtra = """
-        {
-          "apiVersion": "alvo.dev/v1",
-          "name": "demo",
-          "entities": {
-            "tasks": {
-              "fields": {
-                "title": { "type": "string", "required": true },
-                "assignee": { "type": "string", "required": true }
-              }
-            }
-          }
-        }
-        """;
+    private const string TasksV1WithExtra = RuntimeSchemaWorld.OneFieldPlusRequired;
 
     [Fact]
     public async Task Apply_appends_a_new_revision()
@@ -279,16 +240,12 @@ public sealed class RuntimeSchemaServiceTests
         (await store.ListAsync("demo", TestContext.Current.CancellationToken)).Count.ShouldBe(1);
     }
 
-    // IMPORTANT: the same InMemoryDescriptorVersionStore instance is passed both to the writer
-    // fake (which delegates its append there) and to the service (as its version-history read
-    // port) — otherwise the writer's appends would be invisible to the service's own reads.
-    private static RuntimeSchemaService CreateService() => CreateService(new InMemoryDescriptorVersionStore());
+    // IMPORTANT: the same InMemoryDescriptorVersionStore instance reaches both the writer fake (which
+    // delegates its append there) and the service (as its version-history read port) — otherwise the
+    // writer's appends would be invisible to the service's own reads. RuntimeSchemaWorld is what holds
+    // that, for this suite and for the preview suite alike.
+    private static RuntimeSchemaService CreateService() => RuntimeSchemaWorld.Empty().Service;
 
-    private static RuntimeSchemaService CreateService(InMemoryDescriptorVersionStore store)
-    {
-        var writer = new InMemoryRuntimeSchemaWriter(store);
-        var migrator = new InMemorySchemaMigrator();
-        var validator = new DescriptorValidator();
-        return new RuntimeSchemaService(validator, migrator, store, writer, new CelCompiler(), new PolicyCatalogProvider());
-    }
+    private static RuntimeSchemaService CreateService(InMemoryDescriptorVersionStore store) =>
+        RuntimeSchemaWorld.Around(store).Service;
 }

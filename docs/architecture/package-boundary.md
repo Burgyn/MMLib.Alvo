@@ -48,6 +48,31 @@
   them reference. It also takes `Microsoft.AspNetCore.OpenApi` directly rather than
   transitively, because a package's build targets do not travel through a
   `ProjectReference`. Details in [`host.md`](./host.md).
+- `src/MMLib.Alvo.Admin` — the admin dashboard's design system and, once #227's
+  second half lands, its Blazor components. **Earned by rule (a)**, and today the
+  heavy thing is the **Razor Class Library boundary**, not Blazor: the project holds
+  no components yet, only `wwwroot/alvo.css` and `wwwroot/alvo.js`. An RCL's
+  `wwwroot` ships as static web assets under `_content/MMLib.Alvo.Admin/` and travels
+  to every consumer of the assembly carrying it, so the same files inside the core
+  would hand every embedded host a dashboard stylesheet it never asked for — plus the
+  `Microsoft.NET.Sdk.Razor` build that produces them. Blazor becomes the heavier half
+  of the same argument when the components land; it is not the argument yet. It takes
+  `Microsoft.AspNetCore.App` as a framework reference rather than a
+  `Microsoft.AspNetCore.Components.Web` package, for the same NU1510 reason
+  `MMLib.Alvo` does. **It holds no project reference to `MMLib.Alvo`** — it reaches
+  the core through `IAlvoManagement` in Abstractions, which is what makes spec §0.5
+  contract 4 ("dashboard and CLI are clients of the same API") a structural fact
+  rather than a promise, and
+  `EfDependencyBoundaryTests.The_admin_package_reaches_the_core_only_through_abstractions`
+  is what makes it a *measured* one. Its public surface is deliberately one
+  type, `AlvoAdminAssets`: the design system is CSS and the components are Razor,
+  and neither is a type a consumer calls. Details in
+  [`2026-09-18-f5-admin-dashboard-design.md`](../superpowers/specs/2026-09-18-f5-admin-dashboard-design.md).
+- `src/MMLib.Alvo.Identity` — ASP.NET Core Identity + its EF stores: administrator accounts, role
+  membership, the cookie `IAlvoContextResolver`, and the bootstrap administrator. Earned by **(a)**
+  (a heavy dependency an embedded host that wants only the Data API must not acquire) and **(b)**
+  (identity is a real swap point — `samples/MMLib.Alvo.Samples.EmbeddedHost` already replaces it).
+  Referenced by `MMLib.Alvo.Host` only.
 - `samples/MMLib.Alvo.Samples.EmbeddedHost` — the runnable embedded-mode example
   (spec §2.14 mode 2, #24): an ASP.NET Core app that mounts Alvo with
   `AddAlvo`/`MapAlvoDataApi` over `examples/vehicle-registry/vehicles.alvo.json`,
@@ -91,6 +116,13 @@ in-core default providers as vertical slices). Packages exist only where the rul
 above applies — roughly **~10 packages for v0.1, not 30+**. Start conservative:
 extracting a namespace into a package later is cheap; merging too many packages back
 is a breaking change.
+
+**The Management API landed exactly where this paragraph already named it: inside the core, at
+`src/MMLib.Alvo/Management/`, with no new project.** #212's design §1.1 measures it against the rule above
+and finds none of (a)/(b)/(c) — minimal-API delegates over services the core already holds, no foreign
+dependency, no swap point, no different distribution policy — and cites this list's own mention of
+"Management API" by name as the prior decision it is following. `MMLib.Alvo.Host` gained the surface by
+calling `MapAlvo()`, which is a hosting decision in the one project that is `IsPackable=false`.
 
 ## Illustrative example (non-binding)
 

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "host-management",
+  "description": "The same one-entity backend host-boot declares, plus the access block that admits this suite's dev key to the management surface. A second descriptor rather than an access block on host-boot: host-boot is what every other host fact runs over, and the default-deny fact below needs a project the standalone image's own descriptor shape produces — one with no access block at all.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["admin"]
+  },
+  "access": {
+    "viewer": "'admin' in @user.roles"
+  },
+  "entities": {
+    "warehouses": {
+      "description": "A storage location.",
+      "fields": {
+        "code": { "type": "string", "required": true, "unique": true, "maxLength": 20 },
+        "city": { "type": "string", "maxLength": 60 }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      }
+    }
+  }
+}

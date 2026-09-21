@@ -81,6 +81,16 @@ the process, including the refusal an operator reads and the code they get.
   rather than through `Message`, which joins them with `"; "` and runs two multi-line
   refusals into one unreadable line: a container with two things wrong is fixable in one
   restart.
+- **And an `AggregateException` over nothing but those two.** The host has two
+  `ValidateOnStart` registrations — its own `AlvoHostOptions` and `MMLib.Alvo.Identity`'s
+  `AlvoIdentityOptions` — and `StartupValidator.Validate()` throws one aggregate when more
+  than one of them fails. Today `BuildAsync` reads `IOptions<AlvoHostOptions>` before
+  anything starts, so the plain refusal always arrives first and the aggregate is
+  unreachable through the shipped composition; that ordering is an implementation detail of
+  `Compose`, not a guarantee, and the exit code must not be lost the day it changes. The
+  inner exceptions must *all* be recognised shapes — an aggregate carrying a genuine defect
+  beside a refusal is a defect — and an empty one is rejected, because "all of nothing" is
+  vacuously true.
 - **78 is `EX_CONFIG` from `sysexits.h`**, the established code for "something was found in
   an unconfigured or misconfigured state". A bare `1` would be indistinguishable from every
   other failure, which is exactly the information #132 says was lost; 78 lets a deployment
@@ -109,10 +119,19 @@ on the built container.
 
 ## Configuration
 
-The framework's options (`AlvoOptions`, `AlvoApiOptions`, `AlvoAuthOptions`) are bound from
-`Alvo:*`, `Alvo:Api:*` and `Alvo:Auth:*`; the host's own decisions live in
+The framework's options (`AlvoOptions`, `AlvoApiOptions`, `AlvoAuthOptions`,
+`AlvoManagementOptions`) are bound from `Alvo:*`, `Alvo:Api:*`, `Alvo:Auth:*` and
+`Alvo:Management:*`; the host's own decisions live in
 `AlvoHostOptions` (`Alvo:DescriptorPath`, `Alvo:Database:*`, `Alvo:PathBase`,
 `Alvo:ForwardedHeaders:Enabled`, `Alvo:Docs:*`).
+
+**`Alvo:Management:RoutePrefix`** (`Alvo__Management__RoutePrefix` in the container) moves
+the Management API's mount point; it defaults to `/management` and, unlike the Data API's
+prefix, may not reduce to the empty string. The host configures none of it: `MapAlvo()`
+mounts the surface, and it is **closed by default** — every management route carries the
+gate the descriptor's `access` block compiles, so an image whose descriptor declares no
+`access` answers 403 to everyone but the bootstrap administrator. See
+`docs/architecture/management-api.md`.
 The container form is the standard .NET double-underscore spelling
 (`Alvo__Database__Provider`), not the `ALVO_*` names spec §X.1 sketches — see the design's
 *Deviations added by PR4*.
@@ -144,14 +163,112 @@ first `docker run` goes wrong. The refusals name the environment spelling an ope
 **No default credential.** §2.14's acceptance criterion is that the image never ships a
 preset login, so the host seeds no API key. A host with none configured still starts and
 still refuses every operation, because an anonymous caller is judged by the same
-default-deny policy as any other (deviation 23). Two facts hold that line: an anonymous
-*write* is refused (a *read* would be an honest 200 with zero rows and would prove nothing),
-and every `appsettings*.json` the image publishes is asserted to declare no `Alvo:Auth`
-section — the realistic way a preset login reaches an operator is a dev key added there
-for convenience, which no runtime fact can tell apart from one the deployment configured.
-That assertion reads the files **through `ConfigurationBuilder.AddJsonFile`**, not through
-`JsonNode`: the binder is case-insensitive and a `JsonNode` indexer is not, so a lowercase
-`"alvo"` or `"auth"` would otherwise bind a working credential past a green fact.
+default-deny policy as any other (deviation 23). **Three** facts hold that line: an
+anonymous *write* is refused (a *read* would be an honest 200 with zero rows and would
+prove nothing); every `appsettings*.json` the image publishes is asserted to declare no
+`Alvo:Auth` section — the realistic way a preset login reaches an operator is a dev key
+added there for convenience, which no runtime fact can tell apart from one the deployment
+configured; and, the same way, every `appsettings*.json` is asserted to declare no
+`Alvo:Admin` section either, so the image ships no bootstrap credential any more than it
+ships a dev key. Both configuration assertions read the files **through
+`ConfigurationBuilder.AddJsonFile`**, not through `JsonNode`: the binder is case-insensitive
+and a `JsonNode` indexer is not, so a lowercase `"alvo"` or `"auth"`/`"admin"` would
+otherwise bind a working credential past a green fact.
+
+**A key's `scopes` bound what it reaches on the Data API and nothing at all on `/management`.**
+An `ApiKeyScope` is `<entity|*>:<read|write>`, and there is no spelling for "may manage this
+project" — so a key issued as `["notes:read"]` is refused `POST /api/notes` and is *unrestricted*
+on the management surface the moment its **roles** satisfy the descriptor's `access` block:
+reading the whole descriptor, applying a new one, rolling back. That is decision **D7**, argued in
+[`management-api.md`](./management-api.md#an-api-keys-scopes-govern-no-management-request-d7) and
+pinned over the wire — it is repeated here because an operator issuing a narrow key is entitled to
+read it where they issue one, not only where it was decided. Narrow a key's management reach by
+narrowing its **roles**.
+
+## The bootstrap administrator
+
+`MMLib.Alvo.Identity`'s human identity is optional infrastructure config, never part of the
+descriptor (`docs/PLAN.md` invariant 4), so the standalone host binds it the same way it
+binds everything else under `Alvo:*` — from `Alvo:Admin`, which
+`AlvoIdentity.ConfigurationSection` names. Two keys, spelled the container way:
+
+- `Alvo__Admin__BootstrapEmail` — the administrator's sign-in address.
+- `Alvo__Admin__BootstrapPasswordFile` — the path of a *mounted* file holding the password.
+
+`Alvo__Admin__BootstrapPassword` — the value directly, no file — is **refused outright**,
+by `AlvoHostOptionsValidation`, whichever half of the pair is otherwise configured. An
+environment variable is readable from a process listing, a crash dump and
+`docker inspect`; a mounted secret file is not, and that is the entire reason the option is
+a path rather than a value. Every other way the pair is half-set, malformed, or points at a
+file that does not exist (or exists and is empty) is refused too, all at once rather than one
+per restart — `AlvoHostOptionsValidation` reports its own host-specific refusals
+(the rejected `BootstrapPassword` key, an empty mounted file) alongside
+`AlvoIdentityOptionsValidation`'s own (the pairing and the address), read through
+`IOptions<AlvoIdentityOptions>` rather than re-derived, so the two do not drift into two
+wordings of the same refusal. The package validates itself for the same reason the identity
+package's own remarks give: an embedded host that calls `AddAlvoIdentity` directly never
+goes through the standalone host's validation at all, so a check that lived only there would
+leave that distribution's malformed credential silent.
+
+A secret the container **cannot read** is refused the same way, and that is the one place
+where reading the file at all has a cost worth naming. The identity package deliberately
+never opens it; the host does, only to catch an empty mount — and the image runs as
+`USER $APP_UID`, so the ordinary hardening choice (a root-owned `0400` secret, which is also
+what Kubernetes' `defaultMode` produces without an `fsGroup`) makes the file exist and the
+read throw. An `IOException` or an `UnauthorizedAccessException` escaping the validation is
+not one of the shapes `AlvoHostExit.IsConfigurationFailure` recognises, so the operator would
+have got a stack trace and a crash-shaped exit for a mount that is merely mounted wrong —
+the #132 failure this subsystem exists to remove. Both are caught and turned into a refusal
+naming the mount and the fix.
+
+A descriptor with no `access` block means only the bootstrap administrator can manage the
+project — default-deny, and still a usable deployment, because the bootstrap is exactly the
+account a fresh install needs before anyone else exists to grant access.
+
+Seeding is idempotent and **does not reset an existing account's password**. Restarting the
+container with a rotated password file changes nothing about an account that already
+exists; rotating a live administrator's credential is a dashboard operation; the bootstrap
+only ever *creates* the account, once.
+
+**The identity tables follow `AlvoOptions.SchemaPrefix`**, and `AlvoIdentityOptions` has
+deliberately no prefix of its own: one prefix names every table the framework owns, which is
+the same value `AlvoFrameworkTables.NamesFor` builds the introspector's exclusion set and the
+descriptor validator's reserved-name set from. They agreed only by coincidence while the
+identity prefix was a constant — a host calling `UseSchemaPrefix("acme")` reserved
+`acme_identity_*` and created `alvo_identity_*`, which put every operator account inside what
+Alvo reads as the *user's* schema, where the next re-apply plans a `DROP` and a `developer`
+may declare an entity over the users table. The constant was not arbitrary: EF's model cache
+is keyed on the `DbContext` type and lives in a process-wide internal service provider, so
+reading the option without also keying the cache on it serves one prefix's model to another
+prefix's context. `AlvoIdentityModelCacheKeyFactory` is what closes that, and
+`AlvoIdentitySchemaPrefixTests.Two_prefixes_in_one_process_get_two_models` is the fact that
+fails without it.
+
+**Upgrading a deployment that already set a non-default prefix takes one manual step.** A host
+that has been running `UseSchemaPrefix("acme")` with identity holds `alvo_identity_*` tables
+created under the old constant. On the first start after this fix,
+`AlvoIdentityBootstrap.TablesExistAsync` probes `acme_identity_users`, finds nothing, creates
+the seven tables empty and re-seeds the configured bootstrap administrator — so the old
+accounts, roles and key records stay behind in tables nothing reads, *and* those tables are
+outside `AlvoFrameworkTables.NamesFor("acme")`, so the next re-apply plans a `DROP` over them.
+Copy the rows across (or export them) before the upgrade, then drop the `alvo_identity_*`
+tables deliberately. Nothing in this repository sets a non-default prefix, and the fix creates
+neither problem — the tables were already misplaced — but an operator crossing this version
+deserves the sentence rather than the surprise.
+
+**Identity's request path is a seam with no consumer yet, and that is deliberate.** The host
+calls `AddAlvoIdentity` unconditionally, so every standalone deployment creates the seven
+`<prefix>_identity_*` tables and seeds the configured bootstrap administrator. What that
+administrator can do today is reached through an **API key** whose record carries their user
+id — `ManagementAccessEvaluator` consults `IAlvoBootstrapAdmin` and admits them at `admin`
+regardless of the `access` block. What they cannot do is *sign in*: nothing in `src/` resolves
+`AlvoIdentity.ResolverKey`, no cookie authentication scheme is added, and there is no sign-in
+endpoint. The cookie `IAlvoContextResolver` is registered keyed precisely so that installing
+the package cannot turn a user's uuid into a working API key, and it stays unreached until the
+dashboard (#227's second half) mounts the sign-in surface that consumes it. Registering the
+seam now keeps the bootstrap account, its tables and its validation on one schedule instead of
+arriving with the dashboard as a migration; it is stated here because "seeds an account nobody
+can sign in as" reads as a defect if you do not know it is the plan.
 
 ## The startup mode, and what production should set
 

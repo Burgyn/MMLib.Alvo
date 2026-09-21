@@ -80,6 +80,179 @@ internal static class ProblemResultFactory
         "The presented API key's scopes do not permit this operation. Grant the key the scope it needs.");
 
     /// <summary>
+    /// The 403 for a caller who reaches no level this operation admits — which the descriptor's
+    /// <c>access</c> block decides for everyone but the deployment's bootstrap administrator, resolved
+    /// above the descriptor.
+    /// </summary>
+    /// <remarks>
+    /// <b>The wording names neither the level the caller holds nor the level the operation needs</b>,
+    /// for <see cref="ScopeRefused"/>'s reason one subsystem over: a message naming the gap would let a
+    /// caller map the project's whole access block one request at a time, which is a fingerprint of the
+    /// configuration rather than of the data. The fix is the one an operator can act on — ask whoever
+    /// administers the project. The slug is <see cref="AlvoProblemTypes.Forbidden"/>, the one every policy
+    /// refusal already carries, rather than a management-only spelling an agent would have to learn.
+    /// </remarks>
+    internal static IResult ManagementForbidden() => Problem(
+        StatusCodes.Status403Forbidden,
+        AlvoProblemTypes.Forbidden,
+        "This caller is not admitted to the project's management surface. The project's access block "
+            + "decides who is; ask whoever administers it.");
+
+    /// <summary>
+    /// The 403 for an apply that would change <b>who may reach the project</b>, from a caller the project
+    /// does not admit as an administrator.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It names the rule and not the caller.</b> <see cref="ManagementForbidden"/> deliberately names
+    /// neither the level held nor the level needed, because it answers for <em>every</em> operation and a
+    /// message that named the requirement would let a caller map the whole level table one request at a
+    /// time. This one answers for exactly one rule — spec §3.3's <c>access</c> reservation, which the
+    /// descriptor schema publishes — so saying it discloses nothing a reader of the schema does not have,
+    /// and withholding it would leave an agent no fix at all. <b>Nothing about the caller is echoed</b>: the
+    /// wording is identical for every caller and every project.
+    /// </para>
+    /// <para>
+    /// The slug is <see cref="AlvoProblemTypes.Forbidden"/>, the one every policy refusal already carries.
+    /// </para>
+    /// </remarks>
+    internal static IResult ManagementAccessChangeForbidden() => Problem(
+        StatusCodes.Status403Forbidden,
+        AlvoProblemTypes.Forbidden,
+        "Changing a project's 'access' block decides who may reach this backend, which is reserved to an "
+            + "administrator. Apply this descriptor with its 'access' block unchanged, or ask whoever "
+            + "administers the project to apply it.");
+
+    /// <summary>
+    /// The 422 for a Management API request this instance read and refused — an unknown operation, an
+    /// undeclared role, a caller production could not produce.
+    /// </summary>
+    /// <remarks>
+    /// The detail is the refusal's own message, which names what was sent <em>and</em> what is accepted.
+    /// <c>UnknownRoleException</c> already lists the declared roles, and a simulator that hid them would
+    /// send its caller to the descriptor for something this endpoint knows — which is the opposite of the
+    /// agent-first standard the surface is held to.
+    /// </remarks>
+    /// <param name="detail">The refusal's message.</param>
+    internal static IResult ManagementValidation(string detail) => Problem(
+        StatusCodes.Status422UnprocessableEntity, AlvoProblemTypes.Validation, detail);
+
+    /// <summary>
+    /// The 428 for a write that requires a precondition and carried none.
+    /// </summary>
+    /// <remarks>
+    /// <b>RFC 6585 §3, and it is a different refusal from <see cref="AlvoProblemTypes.PreconditionFailed"/>.</b>
+    /// That one is a precondition the caller sent and that did not hold; this one is its <em>absence</em>, and
+    /// the fix is to read the current revision and send it. The detail says which header and where to read
+    /// its value, because an agent that cannot discover the precondition cannot satisfy it.
+    /// </remarks>
+    /// <param name="detail">Which precondition is required, and where to read its value.</param>
+    internal static IResult PreconditionRequired(string detail) => Problem(
+        StatusCodes.Status428PreconditionRequired, AlvoProblemTypes.PreconditionRequired, detail);
+
+    /// <summary>
+    /// The 412 for a precondition that was sent and does not hold — or that names nothing this API can
+    /// compare.
+    /// </summary>
+    /// <remarks>
+    /// The Data API mints the same slug from inside <see cref="GuardAsync"/>, out of the port's own
+    /// <see cref="AlvoPreconditionFailedException"/>. This entry point exists because the Management API's
+    /// precondition is decided <em>before</em> any port is called — the revision is compared against the
+    /// descriptor history, and an uncomparable tag never reaches a store at all.
+    /// </remarks>
+    /// <param name="detail">Which revision was expected and which is current, or why the tag names none.</param>
+    internal static IResult PreconditionFailed(string detail) => Problem(
+        StatusCodes.Status412PreconditionFailed, AlvoProblemTypes.PreconditionFailed, detail);
+
+    /// <summary>
+    /// The 409 for a plan that would discard data without an explicit allowance.
+    /// </summary>
+    /// <remarks>
+    /// The detail is the framework's own refusal, whose message already lists the destructive steps, plus
+    /// the two ways out — ask for it, or change the descriptor. A 409 that named neither would tell an agent
+    /// to stop without telling it what to send instead.
+    /// </remarks>
+    /// <param name="detail">What would be discarded, and how to ask for it.</param>
+    internal static IResult DestructiveChange(string detail) => Problem(
+        StatusCodes.Status409Conflict, AlvoProblemTypes.DestructiveChange, detail);
+
+    /// <summary>
+    /// The 409 for a management key reused for a different request.
+    /// </summary>
+    /// <remarks>
+    /// <b>The slug is <see cref="AlvoProblemTypes.IdempotencyConflict"/>, the one the data path already
+    /// emits</b> — one exception type, one classification, and an agent that learned to branch on it for a
+    /// create does not have to learn a management-only spelling. The detail is this surface's own, because
+    /// the two ways out are: the data path names a row, this one names a descriptor.
+    /// </remarks>
+    internal static IResult ManagementIdempotencyConflict() => Problem(
+        StatusCodes.Status409Conflict,
+        AlvoProblemTypes.IdempotencyConflict,
+        "This 'Idempotency-Key' was already spent on a different request. Send a fresh key with this body, "
+        + "or resend the original body to replay the write it recorded.");
+
+    /// <summary>
+    /// The 422 for a descriptor the validator refused, carrying its per-pointer findings.
+    /// </summary>
+    /// <remarks>
+    /// The slug is <see cref="AlvoProblemTypes.Validation"/>, the one a refused body already carries: the
+    /// kind of refusal is the same — this was read, understood, and measured against a declared shape — and
+    /// a management-only spelling would be a classification an agent has to learn twice.
+    /// </remarks>
+    /// <param name="refusal">The validation failure.</param>
+    internal static IResult ManagementDescriptorRefused(Descriptor.DescriptorValidationException refusal)
+    {
+        ArgumentNullException.ThrowIfNull(refusal);
+
+        return Validation(DescriptorViolations(refusal));
+    }
+
+    /// <summary>One violation per blocking finding, or one for the whole document when it names none.</summary>
+    /// <remarks>
+    /// The fallback is <see cref="ConflictViolations"/>' rule one subsystem over: a refusal that carried no
+    /// per-pointer finding — a rule that failed to compile, say — would otherwise ship an empty
+    /// <c>violations</c> array, which is the shape a caller reads as "no machine-readable reason". RFC
+    /// 6901's empty pointer is the whole document, which is exactly what was refused.
+    /// </remarks>
+    /// <param name="refusal">The validation failure.</param>
+    private static List<AlvoViolation> DescriptorViolations(Descriptor.DescriptorValidationException refusal)
+    {
+        var findings = refusal.Result.Errors
+            .Where(error => error.Severity == Descriptor.DescriptorValidationSeverity.Error)
+            .Select(error => new AlvoViolation(
+                error.Path, DescriptorViolationCode, error.Message, error.FixSuggestion))
+            .ToList();
+
+        return findings.Count > 0
+            ? findings
+            : [new AlvoViolation(string.Empty, DescriptorViolationCode, refusal.Message, null)];
+    }
+
+    /// <summary>The stable code every descriptor finding carries.</summary>
+    /// <remarks>
+    /// One code, because a code keys on the <em>kind</em> of refusal and "this descriptor is invalid here"
+    /// is one kind; which rule it broke is the pointer and the message, which is where the descriptor's own
+    /// validator already says it.
+    /// </remarks>
+    private const string DescriptorViolationCode = "descriptor";
+
+    /// <summary>
+    /// The 404 for something the Management API does not have — a project this instance does not serve, a
+    /// revision nothing ever appended.
+    /// </summary>
+    /// <remarks>
+    /// <b>The detail is the refusal's own message, and unlike <see cref="NotFound"/> it names what was asked
+    /// for and what exists.</b> The Data API's 404 is deliberately silent because it also answers for a row
+    /// the caller's policy hides, and a wording that told the two apart would be a data oracle. Nothing
+    /// equivalent is at stake here: which projects an instance serves and how many revisions one has are
+    /// configuration, the caller has already passed the management gate, and the same facts come back from
+    /// <c>GET projects</c> anyway. A silent 404 would only make an agent guess at a name it could have read.
+    /// </remarks>
+    /// <param name="detail">The refusal's message, naming what was asked for and what exists.</param>
+    internal static IResult ManagementNotFound(string detail) => Problem(
+        StatusCodes.Status404NotFound, AlvoProblemTypes.NotFound, detail);
+
+    /// <summary>
     /// The 404 for a row that does not exist <em>or</em> that the caller's policy excludes — one
     /// wording and one type, because <c>IAlvoData</c>'s contract makes the two indistinguishable and the
     /// HTTP layer must not undo that.

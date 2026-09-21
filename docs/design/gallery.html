@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alvo Admin — design system</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<!-- The shipped stylesheet, referenced and never copied. A token that regresses
+     regresses here too, which is the whole point of this page. -->
+<link rel="stylesheet" href="../../src/MMLib.Alvo.Admin/wwwroot/alvo.css">
+<script src="../../src/MMLib.Alvo.Admin/wwwroot/alvo.js"></script>
+</head>
+<body>
+
+<div class="g-bar">
+  <strong class="g-bar__title">Alvo Admin · design system</strong>
+  <span class="g-bar__note">every colour is a token · both themes meet WCAG AA</span>
+  <button class="a-btn a-btn--sm" onclick="window.alvo.toggleTheme()">Theme</button>
+  <button class="a-btn a-btn--sm" onclick="window.alvo.toggleDensity()">Density</button>
+</div>
+
+<div class="g-page">
+
+<!-- ====================================================================== -->
+<h2 class="g-h">Tokens</h2>
+
+<div class="g-swatches">
+  <div class="g-sw"><span class="g-sw__chip" style="background:var(--bg)"></span><code>--bg</code></div>
+  <div class="g-sw"><span class="g-sw__chip" style="background:var(--panel)"></span><code>--panel</code></div>
+  <div class="g-sw"><span class="g-sw__chip" style="background:var(--panel2)"></span><code>--panel2</code></div>
+  <div class="g-sw"><span class="g-sw__chip" style="background:var(--codeBg)"></span><code>--codeBg</code></div>
+  <div class="g-sw"><span class="g-sw__chip" style="background:var(--border)"></span><code>--border</code></div>
+  <div class="g-sw"><span class="g-sw__chip" style="background:var(--border2)"></span><code>--border2</code></div>
+  <div class="g-sw"><span class="g-sw__chip" style="background:var(--accent)"></span><code>--accent</code></div>
+  <div class="g-sw"><span class="g-sw__chip" style="background:var(--ok-fg)"></span><code>--ok-fg</code></div>
+  <div class="g-sw"><span class="g-sw__chip" style="background:var(--warn-fg)"></span><code>--warn-fg</code></div>
+  <div class="g-sw"><span class="g-sw__chip" style="background:var(--danger-fg)"></span><code>--danger-fg</code></div>
+  <div class="g-sw"><span class="g-sw__chip" style="background:var(--neutral-fg)"></span><code>--neutral-fg</code></div>
+</div>
+
+<div class="a-panel g-pad">
+  <div style="font-size:var(--text-2xl);font-weight:var(--weight-bold)">26 — welcome, empty states</div>
+  <div style="font-size:var(--text-xl);font-weight:var(--weight-bold)">20 — page title</div>
+  <div style="font-size:var(--text-lg);font-weight:var(--weight-medium)">16 — section heading</div>
+  <div style="font-size:var(--text-base)">14 — body, card headings</div>
+  <div style="font-size:var(--text-sm)">13 — buttons, navigation, most chrome</div>
+  <div style="font-size:var(--text-xs);color:var(--dim)">12 — table cells, secondary text</div>
+  <div style="font-size:var(--text-2xs);color:var(--faint)">11 — badges, meta</div>
+</div>
+
+<!-- ====================================================================== -->
+<h2 class="g-h">Controls</h2>
+
+<div class="a-panel g-pad">
+  <div class="a-row" style="flex-wrap:wrap">
+    <button class="a-btn a-btn--primary">Apply changes</button>
+    <button class="a-btn">Dry run</button>
+    <button class="a-btn a-btn--ghost">Cancel</button>
+    <button class="a-btn a-btn--danger">Roll back</button>
+    <button class="a-btn a-btn--sm">Small</button>
+    <button class="a-btn" disabled>Disabled</button>
+  </div>
+  <div class="a-row" style="flex-wrap:wrap;margin-top:var(--space-4)">
+    <span class="a-badge a-badge--ok"><i class="a-dot"></i>honoured</span>
+    <span class="a-badge a-badge--warn"><i class="a-dot"></i>warned</span>
+    <span class="a-badge a-badge--danger"><i class="a-dot"></i>refused</span>
+    <span class="a-badge a-badge--accent">revision 14</span>
+    <span class="a-badge">physical</span>
+    <span class="a-notyet">Not yet · #28</span>
+  </div>
+  <div class="a-row" style="flex-wrap:wrap;margin-top:var(--space-4);align-items:flex-end">
+    <label class="a-field" style="width:200px"><span class="a-label">Entity name</span><input class="a-input" value="vehicles"></label>
+    <label class="a-field" style="width:150px"><span class="a-label">Type</span><select class="a-select"><option>string</option><option>uuid</option></select></label>
+    <div class="a-row"><span class="a-check a-check--on">✓</span><span style="font-size:var(--text-sm)">required</span></div>
+    <div class="a-row"><span class="a-check"></span><span style="font-size:var(--text-sm)">unique</span></div>
+    <button class="a-toggle a-toggle--on" aria-label="audit"></button>
+    <button class="a-toggle" aria-label="soft delete"></button>
+  </div>
+  <div style="margin-top:var(--space-4)">
+    <div class="a-code"><span class="a-code-dim">// rules.update — compiled to a USING predicate</span>
+<span class="a-code-key">'admin'</span> in @user.roles || owner_id == @user.id</div>
+  </div>
+  <div class="a-row" style="margin-top:var(--space-4)">
+    <span style="font-size:var(--text-xs);color:var(--dim)">Command palette</span>
+    <span class="a-kbd">⌘</span><span class="a-kbd">K</span>
+    <span style="font-size:var(--text-xs);color:var(--dim);margin-left:var(--space-4)">Rows</span>
+    <span class="a-kbd">j</span><span class="a-kbd">k</span>
+    <span style="font-size:var(--text-xs);color:var(--dim);margin-left:var(--space-4)">Filter</span>
+    <span class="a-kbd">/</span>
+    <span style="font-size:var(--text-xs);color:var(--dim);margin-left:var(--space-4)">Section</span>
+    <span class="a-kbd">g</span><span class="a-kbd">+</span>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<h2 class="g-h">An error is not a toast</h2>
+
+<div class="g-two">
+  <div class="a-panel g-pad">
+    <div class="a-label" style="margin-bottom:var(--space-2)">Inline, at the field, and it stays</div>
+    <label class="a-field"><span class="a-label">default</span><input class="a-input" value="lead"></label>
+    <div class="a-error" style="margin-top:var(--space-2)">
+      <span class="a-error__title">Field 'default' is not honoured yet</span>
+      <span class="a-error__detail">No column default is emitted and the value is dropped before any writer sees it, so the field is simply null.</span>
+      <span class="a-error__fix">Remove 'default' and set the value from the client, or wait for the feature to land.</span>
+      <span class="a-error__type">type: unhonoured-feature/field.default</span>
+    </div>
+  </div>
+  <div class="a-panel g-pad">
+    <div class="a-label" style="margin-bottom:var(--space-2)">A toast carries only what may be lost</div>
+    <div class="a-toast"><span class="a-badge a-badge--ok"><i class="a-dot"></i></span><div><strong style="font-size:var(--text-sm)">Revision 15 applied</strong><div style="color:var(--dim);font-size:var(--text-xs)">3 columns added · 0 destructive</div></div></div>
+    <div class="a-confirm" style="margin-top:var(--space-4)">
+      <strong style="font-size:var(--text-sm);color:var(--danger-fg)">This drops a column and its data</strong>
+      <span style="font-size:var(--text-xs)">Type <code style="font-family:var(--font-mono)">vehicles.notes</code> to confirm.</span>
+      <input class="a-input" placeholder="vehicles.notes">
+      <button class="a-btn a-btn--danger" disabled>Drop column</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<h2 class="g-h">Warned and refused are not the same state</h2>
+
+<div class="g-two">
+  <div class="a-notyet-panel">
+    <span class="a-notyet">Not yet · warned</span>
+    <strong style="font-size:var(--text-lg)">Automations</strong>
+    <p class="a-notyet-panel__body">Your descriptor may declare automation rules today. It will apply, and the section stays here — but nothing runs yet.</p>
+    <div class="a-notyet-panel__consequence">no rule is ever evaluated, so no declared action runs — which looks exactly like a condition that never matched</div>
+    <button class="a-btn a-btn--sm">View the descriptor block ›</button>
+  </div>
+  <div class="a-panel g-pad">
+    <div class="a-label" style="margin-bottom:var(--space-3)">Refused — the control is inert, because its only output is a descriptor the apply rejects</div>
+    <div class="a-refused">
+      <label class="a-field"><span class="a-label">soft delete</span><button class="a-toggle" aria-label="soft delete"></button></label>
+    </div>
+    <div class="a-refused__reason"><span>⌀</span><span>Soft delete is not supported yet: a delete would remove the row outright and reads would not exclude it, which is irrecoverable data loss where the schema promises recoverability.</span></div>
+    <div class="a-refused" style="margin-top:var(--space-4)">
+      <label class="a-field"><span class="a-label">validation</span><input class="a-input" value="value.matches('^[A-Z]{2}')"></label>
+    </div>
+    <div class="a-refused__reason"><span>⌀</span><span>Field 'validation' is not evaluated yet, so a value the expression forbids is accepted — the field is not constrained at all.</span></div>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<h2 class="g-h">Data browser</h2>
+
+<div class="g-frame">
+  <div class="a-shell">
+    <aside class="a-sidebar">
+      <div class="a-brand"><span class="a-brand-mark">A</span>Alvo</div>
+      <button class="a-switcher"><span class="a-brand-mark">F</span><span><span class="a-switcher-name">field-service</span><span class="a-switcher-meta">sqlite · 4 entities · rev 14</span></span></button>
+      <nav class="a-nav">
+        <span class="a-nav-label">Live</span>
+        <a class="a-nav-item">Overview</a>
+        <a class="a-nav-item a-nav-item--active">Data</a>
+        <a class="a-nav-item">Schema</a>
+        <a class="a-nav-item">Rules</a>
+        <a class="a-nav-item">Access</a>
+        <a class="a-nav-item">Configuration history</a>
+        <div class="a-nav-sep"></div>
+        <a class="a-nav-item">Automations<span class="a-notyet a-nav-item__trail">Not yet</span></a>
+        <a class="a-nav-item">Functions<span class="a-notyet a-nav-item__trail">Not yet</span></a>
+        <div class="a-nav-sep"></div>
+        <a class="a-nav-item">Settings</a>
+      </nav>
+    </aside>
+    <div class="a-main">
+      <header class="a-header">
+        <div><div style="font-size:var(--text-sm);font-weight:var(--weight-medium)">work_orders</div><div style="font-size:var(--text-2xs);color:var(--dim)">physical · tenant-scoped · 1 204 records</div></div>
+        <div class="a-row" style="margin-left:auto">
+          <span class="a-kbd">⌘</span><span class="a-kbd">K</span>
+          <button class="a-btn a-btn--sm" onclick="window.alvo.toggleTheme()">Theme</button>
+          <span class="a-brand-mark">MM</span>
+        </div>
+      </header>
+      <div class="a-content">
+        <div class="a-grid-wrap">
+          <div class="a-toolbar">
+            <input class="a-input" placeholder="status=eq.open  ·  order=due_at.asc" style="max-width:340px">
+            <span class="a-badge">keyset</span>
+            <button class="a-btn a-btn--sm" style="margin-left:auto">Columns</button>
+            <button class="a-btn a-btn--primary a-btn--sm">New record</button>
+          </div>
+          <div class="a-bulkbar"><span class="a-check a-check--on">✓</span><strong>2 selected</strong><button class="a-chip">Change status</button><button class="a-chip">Assign</button><button class="a-chip">Export</button></div>
+          <table class="a-grid">
+            <thead><tr><th style="width:36px"></th><th>id</th><th>title</th><th>status</th><th class="a-num">amount</th><th>due</th></tr></thead>
+            <tbody>
+              <tr aria-selected="true"><td><span class="a-check a-check--on">✓</span></td><td class="a-mono">0f3a…9c1</td><td>Boiler service — Nordic Freight</td><td><span class="a-badge a-badge--ok"><i class="a-dot"></i>open</span></td><td class="a-num">24 500.00</td><td>2026-09-22</td></tr>
+              <tr aria-selected="true"><td><span class="a-check a-check--on">✓</span></td><td class="a-mono">7b12…4ff</td><td>Annual inspection</td><td><span class="a-badge a-badge--warn"><i class="a-dot"></i>pending</span></td><td class="a-num">1 980.00</td><td>2026-09-24</td></tr>
+              <tr><td><span class="a-check"></span></td><td class="a-mono">c904…2a7</td><td>Pump replacement</td><td><span class="a-badge"><i class="a-dot"></i>draft</span></td><td class="a-num">120 000.00</td><td>2026-10-01</td></tr>
+              <tr><td><span class="a-check"></span></td><td class="a-mono">e551…0b3</td><td>Emergency callout</td><td><span class="a-badge a-badge--danger"><i class="a-dot"></i>overdue</span></td><td class="a-num">890.00</td><td>2026-09-11</td></tr>
+              <tr><td><span class="a-check"></span></td><td class="a-mono">2d78…6e9</td><td>Filter change — Kavka Labs</td><td><span class="a-badge a-badge--ok"><i class="a-dot"></i>open</span></td><td class="a-num">15 300.00</td><td>2026-10-04</td></tr>
+            </tbody>
+          </table>
+          <div class="a-row-card"><div class="a-row-card__head"><span>Boiler service — Nordic Freight</span><span class="a-badge a-badge--ok"><i class="a-dot"></i>open</span></div><div class="a-row-card__meta"><span class="a-num">24 500.00</span><span>due 2026-09-22</span><span class="a-mono">0f3a…9c1</span></div></div>
+          <div class="a-row-card"><div class="a-row-card__head"><span>Annual inspection</span><span class="a-badge a-badge--warn"><i class="a-dot"></i>pending</span></div><div class="a-row-card__meta"><span class="a-num">1 980.00</span><span>due 2026-09-24</span><span class="a-mono">7b12…4ff</span></div></div>
+          <div class="a-row-card"><div class="a-row-card__head"><span>Pump replacement</span><span class="a-badge"><i class="a-dot"></i>draft</span></div><div class="a-row-card__meta"><span class="a-num">120 000.00</span><span>due 2026-10-01</span><span class="a-mono">c904…2a7</span></div></div>
+        </div>
+      </div>
+      <nav class="a-bottomnav">
+        <button class="a-bottomnav__item a-bottomnav__item--active">Data</button>
+        <button class="a-bottomnav__item">Schema</button>
+        <button class="a-bottomnav__item">Rules</button>
+        <button class="a-bottomnav__item">Access</button>
+        <button class="a-bottomnav__item">More</button>
+      </nav>
+    </div>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<h2 class="g-h">Schema editor — the dry run is the diff</h2>
+
+<div class="g-two">
+  <div class="a-panel">
+    <div class="a-section"><span class="a-section-title">work_orders</span><span class="a-section-sub">6 fields</span><button class="a-btn a-btn--primary a-btn--sm" style="margin-left:auto">Add field</button></div>
+    <table class="a-grid">
+      <thead><tr><th>field</th><th>type</th><th>flags</th></tr></thead>
+      <tbody>
+        <tr><td><strong>title</strong></td><td class="a-mono">string</td><td><span class="a-badge">required</span> <span class="a-badge">max 120</span></td></tr>
+        <tr><td><strong>status</strong></td><td class="a-mono">enum</td><td><span class="a-badge">required</span></td></tr>
+        <tr><td><strong>amount</strong></td><td class="a-mono">decimal</td><td><span class="a-badge">18,2</span></td></tr>
+        <tr><td><strong>owner_id</strong></td><td class="a-mono">ref → users</td><td><span class="a-badge">restrict</span></td></tr>
+        <tr><td><strong>due_at</strong></td><td class="a-mono">datetime</td><td><span class="a-badge">indexed</span></td></tr>
+        <tr><td><strong>total</strong></td><td class="a-mono">decimal</td><td><span class="a-badge a-badge--accent">computed</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="a-panel g-pad">
+    <div class="a-row" style="margin-bottom:var(--space-3)"><span class="a-section-title">Dry run</span><span class="a-badge a-badge--warn">1 destructive</span><button class="a-btn a-btn--primary a-btn--sm" style="margin-left:auto">Apply</button></div>
+    <div class="a-diff">
+      <div class="a-diff__line"><span class="a-diff__gutter">12</span><span>  "due_at": { "type": "datetime", "index": true },</span></div>
+      <div class="a-diff__line a-diff__line--add"><span class="a-diff__gutter">+</span><span>  "priority": { "type": "enum", "values": ["low","high"] },</span></div>
+      <div class="a-diff__line a-diff__line--del"><span class="a-diff__gutter">−</span><span>  "notes": { "type": "string", "maxLength": 400 },</span></div>
+      <div class="a-diff__line a-diff__line--warn"><span class="a-diff__gutter">!</span><span>  DROP COLUMN notes — data is gone and cannot be rolled back</span></div>
+      <div class="a-diff__line"><span class="a-diff__gutter">15</span><span>  "total": { "type": "decimal", "computed": "amount * 1.2" }</span></div>
+    </div>
+    <div style="margin-top:var(--space-3);font-size:var(--text-xs);color:var(--dim)">If-Match: revision 14 · the apply refuses if anyone else has written since.</div>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<h2 class="g-h">Rules, and a simulator that answers as production does</h2>
+
+<div class="g-two">
+  <div class="a-panel">
+    <div class="a-section"><span class="a-section-title">work_orders · rules</span></div>
+    <table class="a-grid">
+      <thead><tr><th>operation</th><th>policy</th></tr></thead>
+      <tbody>
+        <tr><td><strong>list</strong></td><td class="a-mono">'admin' in @user.roles || owner_id == @user.id</td></tr>
+        <tr><td><strong>get</strong></td><td class="a-mono">'admin' in @user.roles || owner_id == @user.id</td></tr>
+        <tr><td><strong>create</strong></td><td class="a-mono">'dispatcher' in @user.roles</td></tr>
+        <tr><td><strong>update</strong></td><td class="a-mono">owner_id == @user.id &amp;&amp; status != 'closed'</td></tr>
+        <tr><td><strong>delete</strong></td><td><span class="a-badge a-badge--danger">default deny</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="a-panel g-pad">
+    <div class="a-section-title" style="margin-bottom:var(--space-3)">Simulator</div>
+    <div class="a-row" style="flex-wrap:wrap;align-items:flex-end">
+      <label class="a-field" style="width:150px"><span class="a-label">roles</span><input class="a-input" value="technician"></label>
+      <label class="a-field" style="width:130px"><span class="a-label">operation</span><select class="a-select"><option>update</option></select></label>
+      <button class="a-btn a-btn--primary">Simulate</button>
+    </div>
+    <div class="a-row" style="margin-top:var(--space-4)"><span class="a-badge a-badge--danger"><i class="a-dot"></i>denied</span><span style="font-size:var(--text-xs);color:var(--dim)">status is 'closed'</span></div>
+    <div class="a-code" style="margin-top:var(--space-3)"><span class="a-code-dim">-- the predicate the database would receive</span>
+WHERE <span class="a-code-key">"owner_id"</span> = @p0 AND <span class="a-code-key">"status"</span> &lt;&gt; <span class="a-code-str">'closed'</span></div>
+    <div style="margin-top:var(--space-3);font-size:var(--text-xs);color:var(--dim)">The simulator calls the same IPolicyEngine the request path does. A test compares its verdict against the Data API's own answer for the same context.</div>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<h2 class="g-h">Configuration history — the audit that exists</h2>
+
+<div class="a-panel">
+  <div class="a-section"><span class="a-section-title">field-service</span><span class="a-section-sub">append-only · 14 revisions</span></div>
+  <table class="a-grid">
+    <thead><tr><th class="a-num">rev</th><th>when</th><th>author</th><th>reason</th><th></th></tr></thead>
+    <tbody>
+      <tr><td class="a-num"><strong>14</strong></td><td>2026-09-18 08:12</td><td>milan@…</td><td>add priority to work orders</td><td><button class="a-btn a-btn--sm">Diff</button></td></tr>
+      <tr><td class="a-num">13</td><td>2026-09-17 16:40</td><td>milan@…</td><td>tighten update rule to open orders</td><td><button class="a-btn a-btn--sm">Diff</button></td></tr>
+      <tr><td class="a-num">12</td><td>2026-09-17 09:05</td><td><span style="color:var(--faint)">system</span></td><td>boot apply from mounted descriptor</td><td><button class="a-btn a-btn--sm">Diff</button></td></tr>
+      <tr><td class="a-num">11</td><td>2026-09-15 11:22</td><td>milan@…</td><td><span class="a-badge a-badge--warn">rolled back from 12</span></td><td><button class="a-btn a-btn--sm">Diff</button></td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ====================================================================== -->
+<h2 class="g-h">Loading, and an empty state that says what to do next</h2>
+
+<div class="g-two">
+  <div class="a-panel g-pad">
+    <div class="a-skeleton" style="height:14px;width:40%"></div>
+    <div class="a-skeleton" style="height:12px;width:70%;margin-top:var(--space-3)"></div>
+    <div class="a-skeleton" style="height:12px;width:55%;margin-top:var(--space-2)"></div>
+    <div class="a-skeleton" style="height:12px;width:62%;margin-top:var(--space-2)"></div>
+  </div>
+  <div class="a-panel">
+    <div class="a-empty">
+      <strong class="a-empty__title">No entities yet</strong>
+      <p class="a-empty__body">This project applied, and its descriptor declares no entities. Add one here and the editor will generate the migration, or mount a descriptor that already has them.</p>
+      <div class="a-row"><button class="a-btn a-btn--primary">Add an entity</button><button class="a-btn">Import a descriptor</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<h2 class="g-h">Command palette</h2>
+
+<div class="a-panel g-pad" style="display:flex;justify-content:center">
+  <div class="a-palette">
+    <input class="a-palette__input" value="work" placeholder="Search entities, rules, revisions…">
+    <div class="a-palette__item a-palette__item--active"><span class="a-badge a-badge--accent">entity</span>work_orders<span style="margin-left:auto;color:var(--faint);font-size:var(--text-2xs)">1 204 records</span></div>
+    <div class="a-palette__item"><span class="a-badge">rule</span>work_orders · update</div>
+    <div class="a-palette__item"><span class="a-badge">revision</span>14 — add priority to work orders</div>
+    <div class="a-palette__item"><span class="a-notyet">Not yet</span>Automations — declared, never evaluated</div>
+  </div>
+</div>
+
+<p class="g-foot">Every colour on this page comes from <code>src/MMLib.Alvo.Admin/wwwroot/alvo.css</code>. Nothing here declares one of its own — <code>ComponentLayerTests</code> and <code>GalleryTests</code> both refuse it.</p>
+
+</div>
+
+<style>
+/* Page furniture for the gallery itself — layout only, no colour of its own.
+   GalleryTests refuses a literal colour here for the same reason it refuses one
+   in the stylesheet: a colour this page invents is a colour no contrast fact
+   measures. */
+.g-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-6);
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+.g-bar__title { font-size: var(--text-sm); }
+.g-bar__note { color: var(--dim); font-size: var(--text-xs); margin-right: auto; }
+.g-page { max-width: 1180px; margin: 0 auto; padding: var(--space-6) var(--space-6) var(--space-8); }
+.g-h {
+  margin: var(--space-8) 0 var(--space-4);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+  color: var(--dim);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.g-pad { padding: var(--space-5); }
+.g-two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); align-items: start; }
+.g-frame { border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+.g-frame .a-shell { min-height: 460px; }
+.g-swatches { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--space-3); margin-bottom: var(--space-4); }
+.g-sw { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-2xs); font-family: var(--font-mono); color: var(--dim); }
+.g-sw__chip { width: 26px; height: 26px; flex: none; border: 1px solid var(--border2); border-radius: var(--radius-xs); }
+.g-foot { margin-top: var(--space-8); color: var(--faint); font-size: var(--text-xs); }
+@media (max-width: 860px) { .g-two { grid-template-columns: 1fr; } }
+</style>
+
+</body>
+</html>

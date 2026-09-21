@@ -51,13 +51,35 @@ internal static class AlvoHostExit
     /// its <see cref="Exception.Message"/> is written for the operator reading a container log, so letting it
     /// print a stack trace instead would defeat the reason it exists.
     /// </para>
+    /// <para>
+    /// <b>And an <see cref="AggregateException"/> over nothing but those, because that is the shape two
+    /// refused option types take.</b> <c>StartupValidator.Validate()</c> collects every failing
+    /// <c>ValidateOnStart</c> registration and throws one aggregate over them, and the host now has two —
+    /// its own <see cref="AlvoHostOptions"/> and the identity package's. Today
+    /// <see cref="AlvoHost.BuildAsync"/> reads <c>IOptions&lt;AlvoHostOptions&gt;</c> before anything
+    /// starts, so the plain refusal always wins; that ordering is an implementation detail of the
+    /// composition, not a guarantee, and a deployment must not lose its exit code the day it changes.
+    /// </para>
+    /// <para>
+    /// <b>All of the inner exceptions, never any.</b> An aggregate carrying a genuine defect beside a
+    /// refusal is a defect, and keeps the runtime's own report and crash dump — otherwise this widening
+    /// would quietly undo the rule the paragraphs above state. An <em>empty</em> aggregate is rejected for
+    /// the same reason: "all of nothing" is vacuously true, and a failure naming nothing is not something
+    /// an operator can fix.
+    /// </para>
     /// </remarks>
     /// <param name="failure">What escaped the start.</param>
     internal static bool IsConfigurationFailure(Exception failure)
     {
         ArgumentNullException.ThrowIfNull(failure);
 
-        return failure is OptionsValidationException or AlvoStartupRefusedException;
+        return failure switch
+        {
+            OptionsValidationException or AlvoStartupRefusedException => true,
+            AggregateException collected => collected.InnerExceptions.Count > 0
+                && collected.InnerExceptions.All(IsConfigurationFailure),
+            _ => false,
+        };
     }
 
     /// <summary>What the operator reads on stderr before the process exits.</summary>
@@ -66,15 +88,24 @@ internal static class AlvoHostExit
     /// <c>"; "</c>, which runs two multi-line refusals into one unreadable line. Reporting
     /// <see cref="OptionsValidationException.Failures"/> separately is what lets a container with two things
     /// wrong be fixed in one restart.
+    /// <para>
+    /// An <see cref="AggregateException"/> is unwrapped for exactly that reason: its own
+    /// <see cref="Exception.Message"/> is "One or more errors occurred", which names neither of the two
+    /// option types that were refused.
+    /// </para>
     /// </remarks>
     /// <param name="failure">A failure <see cref="IsConfigurationFailure"/> accepted.</param>
     internal static string Describe(Exception failure)
     {
         ArgumentNullException.ThrowIfNull(failure);
 
-        return failure is OptionsValidationException validation
-            ? string.Join(ParagraphBreak, validation.Failures)
-            : failure.Message;
+        return failure switch
+        {
+            OptionsValidationException validation => string.Join(ParagraphBreak, validation.Failures),
+            AggregateException collected => string.Join(
+                ParagraphBreak, collected.InnerExceptions.Select(Describe)),
+            _ => failure.Message,
+        };
     }
 
     private static string ParagraphBreak => Environment.NewLine + Environment.NewLine;

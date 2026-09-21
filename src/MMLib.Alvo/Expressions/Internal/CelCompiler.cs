@@ -104,7 +104,7 @@ internal sealed class CelCompiler : ICelCompiler
                 position);
         }
 
-        if ((profile == CelProfile.Rule || profile == CelProfile.Condition) && resultType != CelValueType.Bool)
+        if (IsPredicateProfile(profile) && resultType != CelValueType.Bool)
         {
             return new CelCompilationError(
                 $"A {profile} expression must evaluate to a boolean; this expression evaluates to {resultType}.",
@@ -114,6 +114,14 @@ internal sealed class CelCompiler : ICelCompiler
 
         return null;
     }
+
+    /// <summary>
+    /// The profiles whose whole expression is a verdict rather than a value. <see cref="CelProfile.Access"/>
+    /// joins them: an access level that is not a predicate can never answer "may this caller manage the
+    /// project", and a bare string there would otherwise be accepted and then never match.
+    /// </summary>
+    private static bool IsPredicateProfile(CelProfile profile) => profile is
+        CelProfile.Rule or CelProfile.Condition or CelProfile.Access;
 
     private static bool IsScalar(CelValueType type) => type is
         CelValueType.Int or CelValueType.Decimal or CelValueType.String or CelValueType.Timestamp or CelValueType.Uuid;

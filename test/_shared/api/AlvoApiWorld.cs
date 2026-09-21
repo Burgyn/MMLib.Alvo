@@ -189,6 +189,14 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
             app.MapOpenApi();
         }
 
+        // Opt-in for the same reason, and one more: this world mounts the Data API through MapAlvoDataApi
+        // rather than through the umbrella MapAlvo(), so the management surface only exists here when a fact
+        // asks for it — and every route-table fact in this suite keeps counting the endpoints it expects.
+        if (setup.MapManagementApi)
+        {
+            app.MapAlvoManagementApi();
+        }
+
         var capture = new SqlCapture(database.Marker);
         await app.StartAsync(TestContext.Current.CancellationToken);
 
@@ -487,6 +495,82 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     internal IReadOnlyList<AlvoPrincipal?> PublishedPrincipals =>
         ((RecordingContextAccessor)_app.Services.GetRequiredService<IAlvoContextAccessor>()).Published;
 
+    /// <summary>
+    /// Every management operation this world's route table actually carries, read off the endpoints' own
+    /// metadata rather than off a table a test could copy.
+    /// </summary>
+    internal IEnumerable<MMLib.Alvo.Management.Internal.ManagementRoute> ManagementRoutes() =>
+        ManagementRouteEndpoints().Select(
+            endpoint => endpoint.Metadata.GetMetadata<MMLib.Alvo.Management.Internal.ManagementRoute>()!);
+
+    /// <summary>
+    /// The header this world's callers present a credential in, for the facts that have to send it
+    /// themselves — a repeated header cannot be written through <see cref="SendAsync"/>'s single key.
+    /// </summary>
+    internal string CredentialHeaderName => _authOptions.HeaderName;
+
+    /// <summary>
+    /// Every endpoint this world's route table carries management metadata on, so a fact can address each
+    /// one over HTTP rather than assert against the single path it happens to remember.
+    /// </summary>
+    internal IEnumerable<RouteEndpoint> ManagementRouteEndpoints() =>
+        _app.Services.GetRequiredService<EndpointDataSource>().Endpoints
+            .OfType<RouteEndpoint>()
+            .Where(endpoint =>
+                endpoint.Metadata.GetMetadata<MMLib.Alvo.Management.Internal.ManagementRoute>() is not null);
+
+    /// <summary>
+    /// The method and path one mapped endpoint answers on, for a fact that sends a request to every route
+    /// the table carries.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A route parameter is filled in from <see cref="_routeParameterValues"/>, and one with no entry
+    /// there is refused rather than skipped.</b> A sweep that silently dropped the routes it could not
+    /// address would shrink as the surface grew, which is the opposite of what it claims to do — so a new
+    /// parameter name has to be given a value here, deliberately, before the fact will run again.
+    /// </para>
+    /// <para>
+    /// <b>The values name things the world does not have</b> — a project it does not serve, a revision
+    /// nothing appended. That is what makes a 403 from this sweep mean something: a route that looked the
+    /// project up before consulting its gate would answer 404 instead, and disclose which projects exist to
+    /// a caller the gate never admitted.
+    /// </para>
+    /// </remarks>
+    /// <param name="endpoint">The endpoint to address.</param>
+    internal static (HttpMethod Method, string Path) AddressOf(RouteEndpoint endpoint)
+    {
+        ArgumentNullException.ThrowIfNull(endpoint);
+        var pattern = endpoint.RoutePattern.RawText ?? string.Empty;
+        var path = string.Join('/', pattern.Split('/').Select(Addressable));
+
+        var method = endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Single()
+            ?? throw new InvalidOperationException($"'{pattern}' declares no HTTP method.");
+
+        return (new HttpMethod(method), "/" + path.TrimStart('/'));
+    }
+
+    /// <summary>What a sweep sends for each route parameter the management surface declares.</summary>
+    private static readonly Dictionary<string, string> _routeParameterValues =
+        new(StringComparer.Ordinal) { ["project"] = "no-such-project", ["revision"] = "0" };
+
+    /// <summary>One path segment, with a route parameter replaced by a value a request can carry.</summary>
+    /// <param name="segment">The raw segment, which may be a <c>{name}</c> or <c>{name:constraint}</c> token.</param>
+    private static string Addressable(string segment) =>
+        segment.StartsWith('{') && segment.EndsWith('}')
+            ? ValueFor(segment[1..^1].Split(':')[0].TrimEnd('?'))
+            : segment;
+
+    /// <summary>The value a sweep sends for one route parameter, or a refusal naming the one it lacks.</summary>
+    /// <param name="parameter">The route parameter's name.</param>
+    private static string ValueFor(string parameter) =>
+        _routeParameterValues.TryGetValue(parameter, out var value)
+            ? value
+            : throw new InvalidOperationException(
+                $"Route parameter '{parameter}' has no value here, so a sweep over every management route "
+                + "cannot address the route that declares it. Add one rather than leaving the route "
+                + "unmeasured.");
+
     /// <summary>Sends a request, presenting <paramref name="key"/> and <paramref name="tenant"/> the way an HTTP caller would.</summary>
     /// <param name="method">The HTTP method.</param>
     /// <param name="path">The request path, including the route prefix.</param>
@@ -749,6 +833,16 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
 /// Conventions attached to the builder <c>MapAlvoDataApi()</c> returns — <c>RequireRateLimiting</c>, an
 /// authorization policy, a telemetry tag. The seam itself, which is what the convention facts measure.
 /// </param>
+/// <param name="MapManagementApi">
+/// Whether the world calls <c>app.MapAlvoManagementApi()</c> beside the Data API. Off by default, because
+/// that is a separate seam a host opts into — and because every route-table fact in this suite counts the
+/// endpoints it finds, so a world that always mapped it would add routes to facts asserting there are none.
+/// <para>
+/// No knob grants management access, deliberately. What a caller may do to a project's configuration is the
+/// descriptor's own <c>access</c> block, so a world that needs to reach past the gate applies a descriptor
+/// that declares one — exactly as a deployment does.
+/// </para>
+/// </param>
 internal sealed record AlvoApiWorldSetup(
     Action<AlvoApiOptions>? ConfigureApi = null,
     string? RevokedKeyId = null,
@@ -765,7 +859,8 @@ internal sealed record AlvoApiWorldSetup(
     Action<IServiceCollection>? ConfigureServices = null,
     Action<IServiceCollection>? ConfigureServicesAfterAlvo = null,
     Action<WebApplication>? ConfigureApp = null,
-    Action<IEndpointConventionBuilder>? ConfigureDataApiRoutes = null);
+    Action<IEndpointConventionBuilder>? ConfigureDataApiRoutes = null,
+    bool MapManagementApi = false);
 
 /// <summary>One dev API key a world issues, in the shape a test reads best.</summary>
 /// <param name="KeyId">The key's public identifier.</param>

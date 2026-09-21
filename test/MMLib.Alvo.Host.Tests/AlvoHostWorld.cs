@@ -46,6 +46,17 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
 
     internal CapturingLoggerProvider Logs { get; }
 
+    /// <summary>
+    /// The running host's own container, so a fact can ask what <see cref="AlvoHost.CreateBuilder"/>
+    /// actually registered rather than re-assembling an approximation of it.
+    /// </summary>
+    /// <remarks>
+    /// The whole of this fixture's contract in one property: a fact that builds its own
+    /// <c>ServiceCollection</c> and calls the same extension methods proves the extension methods work
+    /// and says nothing about whether the shipped composition calls them.
+    /// </remarks>
+    internal IServiceProvider Services => _app.Services;
+
     /// <summary>Starts one host over the named descriptor.</summary>
     /// <param name="descriptor">
     /// A bare file name, resolved under this project's <c>descriptors/</c> output directory, or an already

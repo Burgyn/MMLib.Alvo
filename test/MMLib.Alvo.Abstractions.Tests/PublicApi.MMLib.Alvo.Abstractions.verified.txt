@@ -4,6 +4,8 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.EntityFrameworkCore")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.EntityFrameworkCore.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Identity")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Identity.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Testing")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
@@ -31,9 +33,28 @@ namespace MMLib.Alvo
         [System.ComponentModel.DataAnnotations.RegularExpression("^[a-z][a-z0-9_]{0,15}$", ErrorMessage="SchemaPrefix must be lower snake_case, 1–16 chars.")]
         public string SchemaPrefix { get; set; }
     }
+    public sealed class AlvoUser : System.IEquatable<MMLib.Alvo.AlvoUser>
+    {
+        public AlvoUser() { }
+        public required string Email { get; init; }
+        public required MMLib.Alvo.UserId Id { get; init; }
+        public bool IsDisabled { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<string> RoleNames { get; init; }
+    }
+    public interface IAlvoBootstrapAdmin
+    {
+        bool IsBootstrapAdmin(MMLib.Alvo.UserId user);
+    }
     public interface IAlvoBuilder
     {
         Microsoft.Extensions.DependencyInjection.IServiceCollection Services { get; }
+    }
+    public interface IAlvoUserStore
+    {
+        System.Threading.Tasks.ValueTask<MMLib.Alvo.AlvoUser?> FindAsync(MMLib.Alvo.UserId user, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.ValueTask<MMLib.Alvo.AlvoUser?> FindByEmailAsync(string email, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.AlvoUser>> ListAsync(System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.ValueTask SetRolesAsync(MMLib.Alvo.UserId user, System.Collections.Generic.IReadOnlyList<string> roleNames, System.Threading.CancellationToken cancellationToken);
     }
     public interface IRoleCatalogProvider
     {
@@ -980,6 +1001,7 @@ namespace MMLib.Alvo.Expressions
         Computed = 1,
         Condition = 2,
         Mutate = 3,
+        Access = 4,
     }
     public enum CelRecordState
     {
@@ -1067,6 +1089,186 @@ namespace MMLib.Alvo.Expressions
         public System.Collections.Generic.IReadOnlyDictionary<string, object?> Parameters { get; }
         public string Sql { get; }
         public static MMLib.Alvo.Expressions.SqlPredicate AlwaysFalse(MMLib.Alvo.Expressions.IFieldSqlRenderer fields) { }
+    }
+}
+namespace MMLib.Alvo.Management
+{
+    public interface IAlvoManagement
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementApplyResult> ApplyDescriptorAsync(string project, MMLib.Alvo.Management.ManagementApplyRequest request, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementCapabilities> GetCapabilitiesAsync(string project, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDescriptor> GetDescriptorAsync(string project, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementInfo> GetInfoAsync(System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementRevisionDetail> GetRevisionAsync(string project, int revision, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Schema.SchemaModel> GetSchemaAsync(string project, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementProject>> ListProjectsAsync(System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRevision>> ListRevisionsAsync(string project, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementApplyResult> RollbackAsync(string project, int targetRevision, MMLib.Alvo.Management.ManagementRollbackRequest request, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementPolicyVerdict> SimulatePolicyAsync(string project, MMLib.Alvo.Management.ManagementPolicySimulation simulation, System.Threading.CancellationToken ct = default);
+    }
+    public interface IManagementIdempotencyStore
+    {
+        System.Threading.Tasks.Task<int?> FindAsync(string key, string scope, string fingerprint, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task RecordAsync(string key, string scope, string fingerprint, int revision, System.Threading.CancellationToken ct = default);
+    }
+    public sealed class ManagementApplyRequest : System.IEquatable<MMLib.Alvo.Management.ManagementApplyRequest>
+    {
+        public ManagementApplyRequest(string DescriptorJson, int ExpectedRevision, bool AllowDestructive = false, bool DryRun = false, string? Author = null, string? Reason = null, string? IdempotencyKey = null) { }
+        public bool AllowDestructive { get; init; }
+        public string? Author { get; init; }
+        public string DescriptorJson { get; init; }
+        public bool DryRun { get; init; }
+        public int ExpectedRevision { get; init; }
+        public string? IdempotencyKey { get; init; }
+        public string? Reason { get; init; }
+    }
+    public sealed class ManagementApplyResult : System.IEquatable<MMLib.Alvo.Management.ManagementApplyResult>
+    {
+        public ManagementApplyResult(bool Applied, int Revision, MMLib.Alvo.Management.ManagementPlanSummary Plan, bool Replayed = false) { }
+        public bool Applied { get; init; }
+        public MMLib.Alvo.Management.ManagementPlanSummary Plan { get; init; }
+        public bool Replayed { get; init; }
+        public int Revision { get; init; }
+    }
+    public sealed class ManagementCapabilities : System.IEquatable<MMLib.Alvo.Management.ManagementCapabilities>
+    {
+        public ManagementCapabilities(System.Collections.Generic.IReadOnlyList<string> Honoured, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementWarnedBlock> Warned, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRefusedFeature> Refused) { }
+        public System.Collections.Generic.IReadOnlyList<string> Honoured { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRefusedFeature> Refused { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementWarnedBlock> Warned { get; init; }
+    }
+    public sealed class ManagementDescriptor : System.IEquatable<MMLib.Alvo.Management.ManagementDescriptor>
+    {
+        public ManagementDescriptor(string Project, int Revision, string DescriptorJson) { }
+        public string DescriptorJson { get; init; }
+        public string Project { get; init; }
+        public int Revision { get; init; }
+    }
+    public sealed class ManagementEscalationException : System.Exception
+    {
+        public ManagementEscalationException() { }
+        public ManagementEscalationException(string message) { }
+        public ManagementEscalationException(string message, System.Exception innerException) { }
+    }
+    public sealed class ManagementForbiddenException : System.Exception
+    {
+        public ManagementForbiddenException() { }
+        public ManagementForbiddenException(string message) { }
+        public ManagementForbiddenException(string message, System.Exception innerException) { }
+    }
+    public sealed class ManagementInfo : System.IEquatable<MMLib.Alvo.Management.ManagementInfo>
+    {
+        public ManagementInfo(string Version, string Mode, string DataProvider, string StartupMode) { }
+        public string DataProvider { get; init; }
+        public string Mode { get; init; }
+        public string StartupMode { get; init; }
+        public string Version { get; init; }
+    }
+    public sealed class ManagementPlanSummary : System.IEquatable<MMLib.Alvo.Management.ManagementPlanSummary>
+    {
+        public ManagementPlanSummary(bool IsEmpty, bool HasDestructiveChanges, System.Collections.Generic.IReadOnlyList<string> Steps) { }
+        public bool HasDestructiveChanges { get; init; }
+        public bool IsEmpty { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> Steps { get; init; }
+    }
+    public sealed class ManagementPolicySimulation : System.IEquatable<MMLib.Alvo.Management.ManagementPolicySimulation>
+    {
+        public ManagementPolicySimulation(string Entity, string Operation, MMLib.Alvo.Management.ManagementSimulatedCaller Caller) { }
+        public MMLib.Alvo.Management.ManagementSimulatedCaller Caller { get; init; }
+        public string Entity { get; init; }
+        public string Operation { get; init; }
+    }
+    public sealed class ManagementPolicyVerdict : System.IEquatable<MMLib.Alvo.Management.ManagementPolicyVerdict>
+    {
+        public ManagementPolicyVerdict(bool Allowed, string? DenyReason, string? Using, string? WithCheck, string? TenantScope, System.Collections.Generic.IReadOnlyList<string> HiddenFields, System.Collections.Generic.IReadOnlyList<string> ReadOnlyFields) { }
+        public bool Allowed { get; init; }
+        public string? DenyReason { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> HiddenFields { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> ReadOnlyFields { get; init; }
+        public string? TenantScope { get; init; }
+        public string? Using { get; init; }
+        public string? WithCheck { get; init; }
+    }
+    public sealed class ManagementProject : System.IEquatable<MMLib.Alvo.Management.ManagementProject>
+    {
+        public ManagementProject(string Name, int? Revision, string Phase) { }
+        public string Name { get; init; }
+        public string Phase { get; init; }
+        public int? Revision { get; init; }
+    }
+    public sealed class ManagementProjectNotFoundException : System.Exception
+    {
+        public ManagementProjectNotFoundException() { }
+        public ManagementProjectNotFoundException(string message) { }
+        public ManagementProjectNotFoundException(string message, System.Exception innerException) { }
+        public ManagementProjectNotFoundException(string project, System.Collections.Generic.IReadOnlyList<string> served) { }
+        public string Project { get; }
+    }
+    public sealed class ManagementRefusedFeature : System.IEquatable<MMLib.Alvo.Management.ManagementRefusedFeature>
+    {
+        public ManagementRefusedFeature(string Slot, string Consequence, string Fix) { }
+        public string Consequence { get; init; }
+        public string Fix { get; init; }
+        public string Slot { get; init; }
+    }
+    public sealed class ManagementRequestException : System.Exception
+    {
+        public ManagementRequestException() { }
+        public ManagementRequestException(string message) { }
+        public ManagementRequestException(string message, System.Exception innerException) { }
+    }
+    public sealed class ManagementRevision : System.IEquatable<MMLib.Alvo.Management.ManagementRevision>
+    {
+        public ManagementRevision(int Revision, System.DateTimeOffset CreatedAt, string? Author, string? Reason, int? RolledBackFrom) { }
+        public string? Author { get; init; }
+        public System.DateTimeOffset CreatedAt { get; init; }
+        public string? Reason { get; init; }
+        public int Revision { get; init; }
+        public int? RolledBackFrom { get; init; }
+    }
+    public sealed class ManagementRevisionDetail : System.IEquatable<MMLib.Alvo.Management.ManagementRevisionDetail>
+    {
+        public ManagementRevisionDetail(MMLib.Alvo.Management.ManagementRevision Version, string DescriptorJson) { }
+        public string DescriptorJson { get; init; }
+        public MMLib.Alvo.Management.ManagementRevision Version { get; init; }
+    }
+    public sealed class ManagementRevisionNotFoundException : System.Exception
+    {
+        public ManagementRevisionNotFoundException() { }
+        public ManagementRevisionNotFoundException(string message) { }
+        public ManagementRevisionNotFoundException(string message, System.Exception innerException) { }
+        public ManagementRevisionNotFoundException(string project, int revision) { }
+        public string Project { get; }
+        public int Revision { get; }
+    }
+    public sealed class ManagementRollbackRequest : System.IEquatable<MMLib.Alvo.Management.ManagementRollbackRequest>
+    {
+        public ManagementRollbackRequest(int ExpectedRevision, bool AllowDestructive = false, bool DryRun = false, string? Author = null, string? Reason = null, string? IdempotencyKey = null) { }
+        public bool AllowDestructive { get; init; }
+        public string? Author { get; init; }
+        public bool DryRun { get; init; }
+        public int ExpectedRevision { get; init; }
+        public string? IdempotencyKey { get; init; }
+        public string? Reason { get; init; }
+    }
+    public sealed class ManagementSimulatedCaller : System.IEquatable<MMLib.Alvo.Management.ManagementSimulatedCaller>
+    {
+        public ManagementSimulatedCaller(System.Guid? User, System.Collections.Generic.IReadOnlyList<string> Roles, System.Guid? Tenant = default) { }
+        public System.Collections.Generic.IReadOnlyList<string> Roles { get; init; }
+        public System.Guid? Tenant { get; init; }
+        public System.Guid? User { get; init; }
+    }
+    public sealed class ManagementSimulationException : System.Exception
+    {
+        public ManagementSimulationException() { }
+        public ManagementSimulationException(string message) { }
+        public ManagementSimulationException(string message, System.Exception innerException) { }
+    }
+    public sealed class ManagementWarnedBlock : System.IEquatable<MMLib.Alvo.Management.ManagementWarnedBlock>
+    {
+        public ManagementWarnedBlock(string Block, string Consequence) { }
+        public string Block { get; init; }
+        public string Consequence { get; init; }
     }
 }
 namespace MMLib.Alvo.Migrations

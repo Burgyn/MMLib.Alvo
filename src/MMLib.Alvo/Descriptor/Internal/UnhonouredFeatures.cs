@@ -274,6 +274,36 @@ internal static class UnhonouredFeatures
         .. EveryActionType.Select(ActionFix),
     ];
 
+    /// <summary>
+    /// Every refusal this build makes, as one flat list — the shape a reader outside this file needs, and
+    /// the only one of them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The qualification lives here, not at the reader.</b> A field's <c>default</c> and an entity's
+    /// <c>softDelete</c> are both <c>Path</c>s, and a consumer that prefixed them itself would be a second
+    /// authority for how a refusal is named. <see cref="EveryFixSuggestion"/> already proved the shape: one
+    /// enumeration, read by whoever needs it.
+    /// </para>
+    /// <para>
+    /// Declared below <see cref="EveryFixSuggestion"/> is safe — both are built from the same four sources
+    /// and neither reads the other — but it must stay below every <see cref="UnhonouredSlot"/>, for the
+    /// declaration-order reason <see cref="EveryDeclaredSlot"/> states and throws about.
+    /// </para>
+    /// </remarks>
+    internal static IReadOnlyList<UnhonouredRefusal> EveryRefusal { get; } =
+    [
+        .. OnAField.Select(feature => new UnhonouredRefusal($"field.{feature.Path}", feature.Consequence, feature.Fix)),
+        .. OnAnEntity.Select(feature => new UnhonouredRefusal($"entity.{feature.Path}", feature.Consequence, feature.Fix)),
+        .. EveryDeclaredSlot().Select(slot => new UnhonouredRefusal(slot.Feature, slot.Consequence, slot.Fix)),
+        .. EveryActionType.Select(type => Refusal(UnhonouredAction(type))),
+    ];
+
+    /// <summary>One slot's refusal, in the flat shape <see cref="EveryRefusal"/> publishes.</summary>
+    /// <param name="slot">The slot to restate.</param>
+    private static UnhonouredRefusal Refusal(UnhonouredSlot slot) =>
+        new(slot.Feature, slot.Consequence, slot.Fix);
+
     /// <summary>Every <see cref="UnhonouredSlot"/> this type declares, found rather than listed.</summary>
     /// <remarks>
     /// A slot declared <em>below</em> <see cref="EveryFixSuggestion"/> reflects as <see langword="null"/>,
@@ -350,6 +380,14 @@ internal static class UnhonouredFeatures
 /// <param name="Consequence">What silently happens instead, concretely — never the word "unsupported" alone.</param>
 /// <param name="Fix">What to do instead, and where the feature is tracked.</param>
 internal sealed record UnhonouredSlot(string Feature, string Consequence, string Fix);
+
+/// <summary>One refused feature, qualified by where it is declared.</summary>
+/// <param name="Slot">
+/// The feature's qualified name — <c>field.default</c>, <c>entity.softDelete</c>, or the slot's own.
+/// </param>
+/// <param name="Consequence">What silently happens instead, exactly as the table words it.</param>
+/// <param name="Fix">What to do instead, exactly as the table words it.</param>
+internal sealed record UnhonouredRefusal(string Slot, string Consequence, string Fix);
 
 /// <summary>
 /// One feature the frozen schema declares and this build does not honour, stated once for both passes that

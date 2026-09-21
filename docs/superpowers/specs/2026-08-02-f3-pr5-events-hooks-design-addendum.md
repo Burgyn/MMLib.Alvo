@@ -951,6 +951,9 @@ PR's. Entries marked **[unratified]** depend on a recommendation above.
     not fixed: `crm.alvo.json:82`'s `rollup.where` list literal (PR6's), and the three
     `access` expressions (`:16-20`), which are `$defs/cel`-typed, never compiled by anything
     in `src/`, and carry four separate defects for whoever honours `access`.
+    **The `access` half of that is superseded by #146** — the levels are compiled at apply, the
+    example declares two of them rather than three, and there is no trap left to act on; see
+    `docs/architecture/cel.md` deviation 1.
 77. **`UnhonouredFeatures`' `simple-tasks` / `completed_at` justification is corrected.**
     `UnhonouredFeatures.cs:114-119` cites an example that does not exist —
     `examples/simple-tasks/tasks.alvo.json` declares no `hooks` and no `completed_at`, and

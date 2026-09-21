@@ -47,4 +47,33 @@ public enum CelProfile
     /// </para>
     /// </remarks>
     Mutate,
+
+    /// <summary>
+    /// A management-access level: one of the descriptor's <c>access.admin</c> /
+    /// <c>access.developer</c> / <c>access.viewer</c> predicates.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It has no row, and that is why it is a profile of its own rather than
+    /// <see cref="Rule"/>.</b> <see cref="Rule"/> sees the current row <em>and</em> <c>@user</c>, so an
+    /// access level written as <c>owner_id == @user.id</c> would compile under it and then have nothing
+    /// to evaluate against. The table refuses every row-shaped construct here instead: field references
+    /// of either state, <c>has(...)</c> and <c>changed(...)</c>.
+    /// </para>
+    /// <para>
+    /// <b><c>@tenant</c> is excluded deliberately.</b> An access level is <em>project</em>-scoped by the
+    /// frozen schema's own description, so admitting <c>@tenant</c> would make a project-level predicate
+    /// answer differently per request — neither what the block says nor something an operator could
+    /// reason about. <c>@user.id</c> and <c>@user.roles</c> are the whole of the context it sees, which
+    /// is the closed set the schema already promised, and widening <c>@user</c> is additive, so a
+    /// role-based level keeps compiling once typed claims land.
+    /// </para>
+    /// <para>
+    /// <b>Interpreter-only</b>, for <see cref="Mutate"/>'s reason one subsystem over: there is no row,
+    /// so there is nothing to push a predicate into. <c>SqlPredicateRenderer</c> refuses this profile by
+    /// name rather than falling through, because — unlike <see cref="Mutate"/> — every construct an
+    /// access level can contain is one it would otherwise render perfectly well.
+    /// </para>
+    /// </remarks>
+    Access,
 }
