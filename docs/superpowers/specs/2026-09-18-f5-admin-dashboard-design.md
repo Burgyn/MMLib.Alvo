@@ -361,6 +361,21 @@ The sentence those remarks make stays exactly true for the caller they were writ
 operator asking for a tenant their row does not name is still `null`, still refused, and a session
 still cannot *choose* a tenant — it can only confirm the one it was granted.
 
+**The load-bearing half is the case where nothing is requested at all**, and it is
+`TenantResolver.TryResolve`'s own first branch: *no requested tenant → the credential's own tenant,
+and a successful result.* A dashboard browsing `/api/*` under a cookie sends no `X-Alvo-Tenant`
+header and does not have to — the operator's row supplies it, exactly as a key's record does. The
+three refusals stay refusals: a requested tenant the row does not name, a malformed one, and a
+request naming any tenant at all from a row that names none. What changes is only that a row can
+now name one.
+
+**Why the grant is on `AlvoUser` and not a second port.** It is membership, and
+`IAlvoUserStore`'s own remarks already say what that port is for: *"who exists, and which roles
+each of them is a member of"*. A tenant is the same kind of fact as a role name — assigned
+elsewhere, meaningful only where the context is minted — and the alternative, a
+`ITenantMembershipStore`, would be a second store to seed, to keep in step and to fail closed on,
+for one nullable column.
+
 **What this buys, stated plainly:** one line in the identity store makes every scoped entity
 browsable under the ordinary Data API, under the ordinary rules, with no bypass and nothing to
 audit that is not already audited. The operator sees what their rules permit, which is what §2.4
