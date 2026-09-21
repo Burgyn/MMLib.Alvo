@@ -17,6 +17,11 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 7_000 },
   use: {
+    /* The design says `prefers-reduced-motion` is HONOURED — animations disabled, not shortened —
+       and alvo.css does that globally. Running under it is therefore the honest default, and it
+       also makes a layout assertion deterministic instead of racing a 180 ms slide. One spec
+       asserts the preference is really honoured rather than assumed. */
+    reducedMotion: 'reduce',
     baseURL: `http://127.0.0.1:${PORT}/docs/design/f5-admin/`,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',

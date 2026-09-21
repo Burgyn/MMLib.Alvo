@@ -96,8 +96,12 @@ function label(pointer, before, after) {
   if (parts[0] === 'entities' && parts[2] === 'rules') {
     return `${parts[1]} — ${parts[3]}`;
   }
-  if (pointer.startsWith('/auth/roles')) return 'auth.roles';
-  if (pointer.startsWith('/access')) return `access.${parts[1] ?? ''}`;
+  if (pointer === '/auth' || pointer.startsWith('/auth/roles')) return 'auth.roles — the role catalogue';
+  if (pointer === '/access') return after === undefined ? 'Remove the access block' : 'Declare who may manage this project';
+  if (pointer.startsWith('/access/')) return `access.${parts[1]}`;
+  if (pointer === '/webhooks') return 'webhooks.endpoints';
+  if (pointer === '/templates') return 'templates';
+  if (pointer === '/tenancy') return 'tenancy';
   return human(pointer);
 }
 

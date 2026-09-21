@@ -173,8 +173,12 @@ const effectiveLevel = (id) => (isBootstrap(id) ? 'admin' : levelOf(id));
 const myLevel = () => effectiveLevel(state.signedIn);
 const myTenant = () => membershipOf(state.signedIn).tenant;
 
-/** The caller `policy.js` answers for. */
-const callerFor = (id) => ({ user: id, roles: mintedRoles(id), tenant: membershipOf(id).tenant });
+/** The caller `policy.js` answers for. `null` is the anonymous caller, who holds only `anon`
+    and carries no tenant — production has no credential that resolves to roles without an
+    identity, so answering for one would answer a question production cannot be asked. */
+const callerFor = (id) => (id
+  ? { user: id, roles: mintedRoles(id), tenant: membershipOf(id).tenant }
+  : { user: null, roles: ['anon'], tenant: null });
 
 const shortTenant = (id) => (id ? (TENANTS.find((t) => t.id === id)?.short ?? `${id.slice(0, 4)}…${id.slice(-4)}`) : null);
 
@@ -1433,17 +1437,16 @@ function screenRules(name) {
 /* --- The simulator: a verdict, never a row score -------------------------- */
 
 function simulator(e, draftRules) {
-  const who = userById(state.simulate.user);
   const operation = state.simulate.operation;
-  const caller = callerFor(who.id);
+  const caller = callerFor(state.simulate.user);
   /* It answers against the WORKING copy when one exists, and says so. */
   const doc = draftRules ? wc.working : wc.applied;
   const v = verdict(e.name, operation, caller, doc);
   const outcome = outcomeOfFailingUsing(operation);
 
   const callers = [
-    ...USERS.map((u) => ({ id: u.id, label: u.email.split('@')[0], roles: mintedRoles(u.id) })),
-    { id: null, label: 'anon', roles: ['anon'] },
+    ...USERS.map((u) => ({ id: u.id, label: u.email.split('@')[0] })),
+    { id: null, label: 'anon' },
   ];
 
   const line = (label, value, hint) => `<div class="a-field"><span class="a-label">${label}${hint ? `<span class="a-label__hint">${hint}</span>` : ''}</span>
@@ -2104,7 +2107,11 @@ const formatHint = (name) => ({ email: 'someone@example.com', uri: 'https://…'
 
 /* A ref picker that starts collapsed. Three refs used to mean three 200 px lists open at once. */
 function refPicker(e, f, chosen) {
-  const target = ROWS[f.entity] ?? [];
+  /* The picker reads through the Data API under the operator's own context, so it offers exactly
+     the rows they could read — a tenant-scoped target is filtered by their tenant like any other
+     list. Offering a row from another tenant would be a control that produces a write the tenant
+     scope then refuses. */
+  const target = rowsFor(entityView(f.entity) ?? { name: f.entity, tenancy: 'global' });
   const display = displayFieldOf(f.entity);
   const picked = target.find((x) => x.id === chosen);
   const open = state.pickerOpen === f.name;
@@ -2123,7 +2130,7 @@ function refPicker(e, f, chosen) {
   return `<div class="a-picker">
     <div class="a-picker__field">${icon('search')}
       <input class="a-input" style="border:none;padding:0;background:transparent" placeholder="Search ${f.entity}" aria-label="Search ${f.entity}" data-act="pickquery" data-field="${f.name}" value="${esc(state.pickQuery ?? '')}">
-      <span class="p-muted" style="white-space:nowrap">${num(ROW_COUNTS[f.entity] ?? target.length)} records</span></div>
+      <span class="p-muted" style="white-space:nowrap">${target.length} of ${num(ROW_COUNTS[f.entity] ?? target.length)} readable</span></div>
     <div class="a-picker__list" role="listbox">
       ${target.filter((x) => !state.pickQuery || String(x[display] ?? '').toLowerCase().includes(state.pickQuery.toLowerCase())).slice(0, 5).map((x) => `<button class="a-picker__item${x.id === chosen ? ' a-picker__item--on' : ''}" data-act="pick-ref" data-field="${f.name}" data-id="${x.id}" type="button" role="option" aria-selected="${x.id === chosen}">
         ${avatar(String(x[display] ?? '?').slice(0, 1))}
@@ -2237,10 +2244,10 @@ function screenAccess() {
             return `<div class="a-row" style="align-items:flex-start;padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border)">
               <span style="flex:1;min-width:0">
                 <span style="font-size:var(--text-sm);font-weight:var(--weight-medium);font-family:var(--font-mono)">${r}</span>
-                <span class="a-switcher-meta">${held} ${held === 1 ? 'person holds it' : 'people hold it'}${usedByRules.length ? ` · named in rules on ${usedByRules.join(', ')}` : ''}${usedByAccess.length ? ` · names the ${usedByAccess.join(' and ')} level` : ''}${blocked ? '' : ' · named in nothing'}</span></span>
-              <button class="a-btn a-btn--sm a-btn--ghost" ${blocked
-                ? `disabled aria-disabled="true" title="Named in ${usedByRules.length ? 'a rule' : ''}${usedByRules.length && usedByAccess.length ? ' and ' : ''}${usedByAccess.length ? 'an access level' : ''} — both are compiled at apply, so removing it here would make the apply refuse."`
-                : `data-act="delrole" data-role="${r}"`}>Remove</button>
+                <span class="a-switcher-meta">${held} ${held === 1 ? 'person holds it' : 'people hold it'}${usedByRules.length ? ` · named in rules on ${usedByRules.join(', ')}` : ''}${usedByAccess.length ? ` · names the ${usedByAccess.join(' and ')} level` : ''}${blocked ? '' : ' · named in no rule and no level'}${!blocked && held ? ', so removing it refuses nothing and quietly stops minting it' : ''}</span></span>
+              <button class="a-btn a-btn--sm a-btn--ghost" data-act="delrole" data-role="${r}" ${blocked
+                ? `disabled aria-disabled="true" title="Named in ${usedByRules.length ? 'a rule' : ''}${usedByRules.length && usedByAccess.length ? ' and ' : ''}${usedByAccess.length ? 'an access level' : ''} — both are compiled at apply, so removing it here would make the apply refuse the whole descriptor."`
+                : held ? `title="${held} ${held === 1 ? 'person holds' : 'people hold'} it. Nothing refuses this — the role simply stops being minted for them, and any rule that later names it matches nobody. It joins the working copy, so Preview and Discard are the way back."` : ''}>Remove</button>
             </div>`;
           }).join('') : '<div class="a-empty"><span class="a-empty__body">This project declares no roles of its own. A rule can still name the three built-ins.</span></div>'}
           <div style="padding:var(--space-4) var(--space-5)">
@@ -2946,7 +2953,10 @@ function overlay() {
       <div class="a-field"><span class="a-label">${draft.type === 'reject' ? 'Message' : draft.type === 'mutate' ? 'Set which field' : draft.type === 'email' ? 'Template' : 'Endpoint'}</span>
         <input class="a-input" id="hook-arg" value="${esc(state.hookArg ?? '')}" placeholder="${draft.type === 'reject' ? 'An emergency call-out must be priority 1 or 2.' : draft.type === 'mutate' ? 'completed_on' : 'job-scheduled'}"></div>
       <div class="a-field"><span class="a-label">Only when<span class="a-label__hint">The Condition profile: it sees <code class="a-mono">new.</code> and <code class="a-mono">old.</code>, <code class="a-mono">changed()</code>, and the closed context. On a create there is no <code class="a-mono">old.</code> at all. <code class="a-mono">== null</code> is refused — use <code class="a-mono">has()</code>.</span></span>
-        <input class="a-input" style="font-family:var(--font-mono)" id="hook-when" value="${esc(state.hookWhen ?? '')}" placeholder="new.status == 'completed' && !has(old.completed_on)"></div>`,
+        <input class="a-input" style="font-family:var(--font-mono)" id="hook-when" value="${esc(state.hookWhen ?? '')}" placeholder="new.status == 'completed' && !has(old.completed_on)"></div>
+      ${['webhook', 'email'].includes(draft.type)
+        ? refusedControl('JSONata', 'Reshape the payload before it is sent', '{ "id": new.id, "ref": new.reference }')
+        : ''}`,
       `<button class="a-btn a-btn--ghost" data-act="close">Cancel</button>
        <button class="a-btn a-btn--primary" style="margin-left:auto" data-act="addhook" data-entity="${e.name}">Add the hook</button>`));
   }
@@ -3009,7 +3019,7 @@ function palette() {
 
   return `<div class="a-palette" role="dialog" aria-modal="true" aria-label="Command palette">
     <input class="a-palette__input" id="palette-input" placeholder="Jump to a screen" value="${esc(state.paletteQuery)}"
-      role="combobox" aria-expanded="true" aria-controls="palette-list" aria-activedescendant="palette-${index}">
+      data-act="palettequery" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-activedescendant="palette-${index}">
     <div id="palette-list" role="listbox">
       ${items.length ? items.map((p, i) => `<div class="a-palette__item${i === index ? ' a-palette__item--active' : ''}" id="palette-${i}" role="option" aria-selected="${i === index}" data-act="go" data-route="${p.route}">
         ${icon('search')}<span>${esc(p.label)}</span><span class="a-kbd" style="margin-left:auto">${esc(p.hint)}</span></div>`).join('')
@@ -3113,45 +3123,30 @@ function afterRender() {
 }
 
 /* A full re-render replaces the DOM, and a re-render triggered by `change` fires on BLUR — so
-   clicking the next control destroys the node the click was heading for and the click is lost.
-   A person who typed a length and then clicked a format chip lost the chip. So a text edit
-   commits on `input` and refreshes only what it changes outside the control being typed in. */
+   clicking the next control destroys the node the click was heading for, and the click is lost.
+   A person who typed a length and then clicked a format chip lost the chip.
+
+   So every text control commits on `input` instead, and this re-renders and puts the caret back
+   where the typist left it. Nothing commits on blur, so nothing can eat the next click. */
 function softRender() {
-  const pane = $('[data-descriptor]');
-  if (pane) {
-    const scope = state.route.startsWith('#/schema/') ? state.entity : null;
-    const fresh = document.createElement('div');
-    fresh.innerHTML = descriptorPane(scope);
-    pane.replaceWith(fresh.querySelector('[data-descriptor]'));
-    $('[data-pane-header]')?.replaceWith(fresh.querySelector('[data-pane-header]'));
-  }
-
-  const n = count();
-  const badge = $('[data-count="unapplied"]');
-  if (badge) badge.textContent = `${n} unapplied`;
-  else if (n) render();
-
-  const bar = $('[data-pending]');
-  if (bar) {
-    const fresh = document.createElement('div');
-    fresh.innerHTML = pendingBar();
-    const next = fresh.querySelector('[data-pending]');
-    if (next) bar.replaceWith(next);
-    else bar.remove();
-  } else if (n) {
-    render();
-  }
+  rememberCaret(document.activeElement);
+  render();
 }
 
 /* ==========================================================================
    Events
    ========================================================================== */
 
-const rememberCaret = (el) => {
-  if (!el || el.selectionStart == null) return;
-  const selector = el.id ? `#${el.id}` : `[data-act="${el.dataset.act}"][data-field="${el.dataset.field ?? ''}"]`;
+/** Where the caret was, and how to find that control again after the DOM is replaced. */
+function rememberCaret(el) {
+  if (!el || el.selectionStart == null || !el.dataset) return;
+  const parts = ['act', 'field', 'key', 'level', 'op', 'entity']
+    .filter((k) => el.dataset[k] !== undefined)
+    .map((k) => `[data-${k}="${el.dataset[k].replace(/"/g, '\\"')}"]`);
+  const selector = el.id ? `#${el.id}` : parts.join('');
+  if (!selector) return;
   state.caret = { selector, pos: el.selectionStart };
-};
+}
 
 function openOverlay(kind, dataset = {}) {
   state.lastFocus = document.activeElement?.id ? `#${document.activeElement.id}` : null;
@@ -3167,6 +3162,7 @@ document.addEventListener('click', (ev) => {
   const actions = {
     noop: () => ev.preventDefault(),
     'noop-search': () => {},
+    palettequery: () => {},
     go: () => { ev.preventDefault(); state.overlay = null; location.hash = d.route; },
     close: () => { state.overlay = null; state.pendingGrant = null; render(); },
     overlay: () => { openOverlay(d.kind, d); render(); },
@@ -3191,6 +3187,7 @@ document.addEventListener('click', (ev) => {
     compare: () => { state[d.side === 'a' ? 'compareA' : 'compareB'] = Number(d.rev); render(); },
   };
 
+  if (act === 'sim') { state.simulate[d.k] = d.k === 'user' ? (d.v || null) : d.v; render(); return; }
   if (actions[act]) { actions[act](); return; }
   if (schemaActions(act, d, el, ev)) return;
   if (ruleActions(act, d, el, ev)) return;
@@ -3729,8 +3726,9 @@ document.addEventListener('input', (ev) => {
   const act = el.dataset.act;
   const d = el.dataset;
 
-  if (act === 'fieldfilter') { state.filterFields = el.value; rememberCaret(el); render(); return; }
-  if (act === 'pickquery') { state.pickQuery = el.value; rememberCaret(el); render(); return; }
+  if (act === 'fieldfilter') { state.filterFields = el.value; softRender(); return; }
+  if (act === 'palettequery') { state.paletteQuery = el.value; state.paletteIndex = 0; softRender(); return; }
+  if (act === 'pickquery') { state.pickQuery = el.value; softRender(); return; }
   if (act === 'applyreason') { state.applyReason = el.value; return; }
   if (act === 'wizardname') { state.wizardName = el.value; return; }
   if (act === 'wizarddesc') { state.wizardDesc = el.value; return; }

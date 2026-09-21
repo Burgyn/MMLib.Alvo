@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect } from '@playwright/test';
 
 /**
@@ -41,6 +42,14 @@ export function guardConsole(page) {
   };
 }
 
+/** Waits for every running animation to finish. A layout assertion taken mid-slide measures a
+    panel that is still off-screen, which is a race rather than a defect. */
+export async function settle(page) {
+  await page.evaluate(() => Promise.all(
+    document.getAnimations().map((a) => a.finished.catch(() => {})),
+  ));
+}
+
 /** Opens a route in one matrix cell and waits for the shell to have rendered something. */
 export async function open(page, route, cell = DESKTOP) {
   await page.setViewportSize({ width: cell.width, height: cell.height });
@@ -49,19 +58,25 @@ export async function open(page, route, cell = DESKTOP) {
     document.documentElement.setAttribute('data-theme', theme);
   }, cell.theme);
   await expect(page.locator('#app')).not.toBeEmpty();
+  await settle(page);
   return page;
 }
 
-/** Navigates within the already-loaded app, which is hash-routed and re-renders synchronously. */
+/** Navigates within the already-loaded app, which is hash-routed and re-renders synchronously.
+    Setting the hash it already has fires no `hashchange`, so a spec that changed state and then
+    "navigated" to the same route would assert against the screen it was already looking at. */
 export async function go(page, route) {
   await page.evaluate((r) => {
+    if (window.location.hash === r) window.location.hash = '#/__reload';
     window.location.hash = r;
   }, route);
   await page.waitForTimeout(60);
+  await settle(page);
 }
 
 /** Fails when the document scrolls sideways — the 375 px acceptance criterion, measured. */
 export async function expectNoHorizontalScroll(page) {
+  await settle(page);
   const overflow = await page.evaluate(() => {
     const d = document.documentElement;
     return d.scrollWidth - d.clientWidth;
@@ -71,6 +86,7 @@ export async function expectNoHorizontalScroll(page) {
 
 /** Fails when any visible element spills past the viewport's right edge. */
 export async function expectNothingClipped(page) {
+  await settle(page);
   const spills = await page.evaluate(() => {
     const width = document.documentElement.clientWidth;
     const out = [];
@@ -99,6 +115,7 @@ export async function expectNothingClipped(page) {
 
 /** Fails when two elements that should sit side by side actually cover one another. */
 export async function expectNoOverlap(page, a, b) {
+  await settle(page);
   const one = await page.locator(a).boundingBox();
   const two = await page.locator(b).boundingBox();
   expect(one, `${a} is not on screen`).not.toBeNull();
@@ -176,4 +193,27 @@ export function moves(page) {
     get count() { return n; },
   };
   return wrapped;
+}
+
+/** Clicks the visible one. Every grid renders a table AND a card list; the phone layout hides one
+    of them with CSS, so a bare selector matches twice and the hidden one is first. */
+export async function clickVisible(page, selector) {
+  await page.locator(`${selector}:visible`).first().click();
+}
+
+/** Opens the person drawer at any width. */
+export async function openPerson(page, id) {
+  await clickVisible(page, `[data-act="person"][data-id="${id}"]`);
+  await page.waitForTimeout(80);
+  await settle(page);
+}
+
+/** Reads a file from `generated/`. The specs assert against the SAME values the page renders, so
+    a drifted fixture fails the suite rather than quietly changing what "verbatim" means.
+    (It is read rather than imported: this directory is ESM and the prototype's own directory has
+    no package.json, so Node would treat the module as CommonJS.) */
+export function generated(name) {
+  const path = new URL(`../generated/${name}.js`, import.meta.url);
+  const text = readFileSync(path, 'utf8');
+  return JSON.parse(text.slice(text.indexOf('= ') + 2).trim().replace(/;\s*$/, ''));
 }
