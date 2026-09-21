@@ -1311,7 +1311,7 @@ function parseCel(cel) {
 
 /** The model for one operation, parsed from the WORKING copy every time it is asked for. */
 function ruleModel(e, op) {
-  const key = `${esc(e.name)}:${esc(op)}`;
+  const key = `${e.name}:${op}`;
   const cel = e.rules?.[op] ?? '';
   if (state.rawOps?.has(key)) return { branches: [], raw: cel };
   return parseCel(cel);
@@ -2103,7 +2103,7 @@ function recordForm(entityName, editId) {
   const control = (f) => {
     const v = values[f.name] ?? (editing ? editing[f.name] : undefined);
     const err = errorFor(f.name);
-    const id = `rf-${esc(f.name)}`;
+    const id = `rf-${f.name}`;
     const common = `id="${id}" data-act="formfield" data-field="${esc(f.name)}"${err ? ` aria-invalid="true" aria-describedby="err-${esc(f.name)}"` : ''}`;
     if (f.type === 'ref') return refPicker(e, f, v);
     if (f.type === 'enum') return `<div class="p-hstack" role="radiogroup" aria-labelledby="lbl-${esc(f.name)}">${f.values.map((o) => `<button class="a-preset${v === o ? ' a-preset--on' : ''}" type="button" data-act="formpick" data-field="${esc(f.name)}" data-value="${esc(o)}" role="radio" aria-checked="${v === o}">${esc(String(o).replace(/_/g, ' '))}</button>`).join('')}</div>`;
@@ -2519,8 +2519,8 @@ function screenIntegrations() {
   for (const e of entities()) {
     for (const [point, list] of Object.entries(e.hooks ?? {})) {
       for (const h of list ?? []) {
-        if (h.endpoint) (usage.endpoints[h.endpoint] ??= []).push(`${esc(e.name)} ${esc(point)}`);
-        if (h.template) (usage.templates[h.template] ??= []).push(`${esc(e.name)} ${esc(point)}`);
+        if (h.endpoint) (usage.endpoints[h.endpoint] ??= []).push(`${e.name} ${point}`);
+        if (h.template) (usage.templates[h.template] ??= []).push(`${e.name} ${point}`);
       }
     }
   }
