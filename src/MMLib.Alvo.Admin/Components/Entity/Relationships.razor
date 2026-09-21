@@ -1,0 +1,79 @@
+﻿@*
+    What this entity points at, and what points back at it.
+
+    Both directions, because only one of them is visible from the entity's own fields — and the
+    incoming one is what an operator needs before deleting anything.
+*@
+<div class="a-section">
+    <span class="a-section-title">Points at</span>
+    <span class="a-section-sub">A ref field carries another entity's id, and its on-delete rule decides what happens when that row goes.</span>
+</div>
+
+@if (Outgoing.Count == 0)
+{
+    <EmptyState Title="This entity references nothing"
+                Body="No field on it is of type ref, so nothing here depends on another entity's rows." />
+}
+else
+{
+    @foreach (var field in Outgoing)
+    {
+        <div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4)">
+            <span class="a-mono" style="flex:none;min-width:190px;font-size:var(--text-sm)">@field.Name</span>
+            <span style="flex:1">→ <a class="a-mono" href="@($"{AlvoAdmin.BasePath}/schema/{field.Reference!.TargetEntity}")">@field.Reference!.TargetEntity</a></span>
+            <span class="a-badge">on delete @field.Reference!.OnDelete.ToString().ToLowerInvariant()</span>
+            @if (field.Required)
+            {
+                <span class="a-badge">required</span>
+            }
+        </div>
+    }
+}
+
+<div class="a-section" style="margin-top:var(--space-4)">
+    <span class="a-section-title">Pointed at by</span>
+    <span class="a-section-sub">Deleting one of this entity's rows is decided by these rules, not by this entity's own.</span>
+</div>
+
+@if (Incoming.Count == 0)
+{
+    <EmptyState Title="Nothing references this entity"
+                Body="No ref field anywhere in the schema targets it, so its rows have no dependants." />
+}
+else
+{
+    @foreach (var (entity, field) in Incoming)
+    {
+        <div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4)">
+            <span style="flex:1">
+                <a class="a-mono" href="@($"{AlvoAdmin.BasePath}/schema/{entity.Name}")">@entity.Name</a>
+                <span class="a-mono" style="color:var(--dim)">.@field.Name</span>
+            </span>
+            <span class="a-badge">on delete @field.Reference!.OnDelete.ToString().ToLowerInvariant()</span>
+        </div>
+    }
+}
+
+@code {
+    /// <summary>The entity whose relationships these are.</summary>
+    [Parameter, EditorRequired]
+    public EntitySchema Entity { get; set; } = default!;
+
+    /// <summary>The whole schema, because the incoming half cannot be read from one entity.</summary>
+    [Parameter, EditorRequired]
+    public SchemaModel Schema { get; set; } = default!;
+
+    /* `column` rather than `field`: C# 14 makes `field` a contextual keyword inside a property
+       accessor, where it binds to the synthesized backing field. A lambda parameter of that name
+       in an expression-bodied property does not compile. */
+    private List<FieldSchema> Outgoing
+        => Entity.Fields.Where(column => column.Reference is not null).ToList();
+
+    private List<(EntitySchema Entity, FieldSchema Field)> Incoming => Schema.Entities
+        .Where(entity => !string.Equals(entity.Name, Entity.Name, StringComparison.Ordinal))
+        .SelectMany(entity => entity.Fields
+            .Where(column => column.Reference is { } reference
+                && string.Equals(reference.TargetEntity, Entity.Name, StringComparison.Ordinal))
+            .Select(column => (entity, column)))
+        .ToList();
+}

@@ -25,8 +25,43 @@ internal static class ManagementSetup
         AddManagementOptions(services);
         AddManagementService(services);
         services.TryAddSingleton<ManagementAccessEvaluator>();
+        AddUserAdministration(services);
         return services;
     }
+
+    /// <summary>
+    /// Registers the guarded decorator over whatever implements user administration.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Only when an implementation is registered.</b> The package that holds the membership
+    /// store registers itself under <see cref="AlvoUserAdministration.UnguardedKey"/>; a
+    /// deployment without that package has no keyed service, and this registration's factory
+    /// answers <see langword="null"/> — so the routes are simply absent rather than present and
+    /// broken.
+    /// </para>
+    /// <para>
+    /// <b>The public interface resolves to the decorator and to nothing else.</b> That is what
+    /// makes the guards non-optional: there is no registration anywhere that hands an in-process
+    /// caller the raw implementation, which a guard living inside a swappable adapter could never
+    /// claim.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The service collection to register into.</param>
+    private static void AddUserAdministration(IServiceCollection services) =>
+        services.TryAddScoped<IAlvoUserAdministration>(provider =>
+            provider.GetKeyedService<IAlvoUserAdministration>(AlvoUserAdministration.UnguardedKey)
+                is { } implementation
+                ? new GuardedUserAdministration(
+                    implementation,
+                    provider.GetRequiredService<Auth.IAlvoContextAccessor>(),
+                    provider.GetRequiredService<ManagementAccessEvaluator>(),
+                    provider.GetRequiredService<IRoleCatalogProvider>(),
+                    provider.GetRequiredService<IAlvoBootstrapAdmin>())
+                : throw new InvalidOperationException(
+                    "No IAlvoUserAdministration implementation is registered. A package that "
+                    + "administers membership registers itself under "
+                    + $"'{AlvoUserAdministration.UnguardedKey}'; MMLib.Alvo.Identity does."));
 
     /// <summary>
     /// Registers the one <see cref="IAlvoManagement"/> implementation, with its data port and its descriptor

@@ -1,0 +1,217 @@
+﻿@page "/admin/schema"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode InteractiveServer
+@inject ManagementGateway Gateway
+@inject WorkingCopyStore Copies
+@inject DataGateway Caller
+@inject NavigationManager Navigation
+
+<PageTitle>Schema · Alvo</PageTitle>
+
+<div class="a-stack">
+    <div class="a-toolbar">
+        <h1 class="a-page-title">Schema</h1>
+        <span style="margin-left:auto"></span>
+        <button type="button" class="a-btn a-btn--sm" @onclick="() => _adding = !_adding">New entity</button>
+        <a class="@($"a-btn a-btn--sm{(Copy.IsDirty ? " a-btn--primary" : string.Empty)}")"
+           href="@($"{AlvoAdmin.BasePath}/schema/preview")">Preview changes</a>
+        <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/transfer")">Import / export</a>
+    </div>
+
+    @if (_error is not null)
+    {
+        <ErrorPanel Problem="@_error" />
+    }
+
+    @if (_adding)
+    {
+        <div class="a-panel" style="padding:var(--space-5)">
+            <div class="a-section" style="padding:0 0 var(--space-3)">
+                <span class="a-section-title">New entity</span>
+                <span class="a-section-sub">
+                    It arrives with one required <code class="a-mono">name</code> field, which is the
+                    smallest entity the schema admits. Everything else is added on its Fields tab.
+                </span>
+            </div>
+
+            @if (_refusal is { Length: > 0 })
+            {
+                <ErrorPanel Heading="That entity cannot be added" Fix="@_refusal" />
+            }
+
+            <div class="a-field">
+                <label class="a-label" for="new-entity-name">Name</label>
+                <input class="a-input" id="new-entity-name" value="@_name" placeholder="invoices"
+                       @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
+                <span class="a-section-sub">
+                    Lower case, digits and underscores — <code class="a-mono">@DescriptorNames.Member</code>
+                </span>
+            </div>
+
+            <div class="a-row" style="gap:var(--space-4);flex-wrap:wrap">
+                <label class="a-row" style="gap:var(--space-2);cursor:pointer">
+                    <input type="checkbox" checked="@_scoped" @onchange="args => _scoped = args.Value is true" />
+                    <span>tenant-scoped</span>
+                </label>
+                <label class="a-row" style="gap:var(--space-2);cursor:pointer">
+                    <input type="checkbox" checked="@_audited" @onchange="args => _audited = args.Value is true" />
+                    <span>audited</span>
+                </label>
+            </div>
+            <span class="a-section-sub">
+                Scoped means every row belongs to a tenant and a caller with none is refused with 403.
+                Audited adds the four stamp columns and a version, which is what makes a conditional
+                write possible.
+            </span>
+
+            <button type="button" class="a-btn a-btn--primary" style="margin-top:var(--space-4)" @onclick="AddEntity">
+                Add to the working copy
+            </button>
+        </div>
+    }
+    else if (_schema is null)
+    {
+        <div class="a-skeleton" style="height:220px"></div>
+    }
+    else if (_schema.Entities.Count == 0)
+    {
+        <EmptyState Title="This project has no entities yet"
+                    Body="An entity is a table Alvo creates and keeps in step with the descriptor. Import a descriptor, or add the first entity in the editor.">
+            <a class="a-btn a-btn--primary a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/transfer")">Import a descriptor</a>
+        </EmptyState>
+    }
+    else
+    {
+        <div class="a-panel">
+            <div class="a-section">
+                <span class="a-section-title">@_schema.Entities.Count entities</span>
+                <span class="a-section-sub">
+                    What the Data API actually serves — the descriptor after everything that did not
+                    survive it. Where the two differ is where <em>declared but not honoured</em> lives.
+                </span>
+            </div>
+
+            @foreach (var pending in Pending)
+            {
+                <button type="button" class="a-row" style="width:100%;text-align:left;padding:var(--space-4);border:0;border-bottom:1px solid var(--border);background:var(--accentSoft);cursor:pointer;gap:var(--space-4);align-items:flex-start"
+                        @onclick="() => Open(pending)">
+                    <Icon Path="@Icons.Schema" />
+                    <span style="flex:1;min-width:0">
+                        <span class="a-mono" style="font-size:var(--text-sm);font-weight:var(--weight-medium)">@pending</span>
+                        <span class="a-switcher-meta">In the working copy. It does not exist in the database until you apply.</span>
+                    </span>
+                    <span class="a-badge a-badge--warn" style="flex:none">not applied yet</span>
+                </button>
+            }
+
+            @foreach (var entity in _schema.Entities)
+            {
+                <button type="button" class="a-row" style="width:100%;text-align:left;padding:var(--space-4);border:0;border-bottom:1px solid var(--border);background:transparent;cursor:pointer;gap:var(--space-4);align-items:flex-start"
+                        @onclick="() => Open(entity.Name)">
+                    <Icon Path="@Icons.Schema" />
+                    <span style="flex:1;min-width:0">
+                        <span class="a-mono" style="font-size:var(--text-sm);font-weight:var(--weight-medium)">@entity.Name</span>
+                        <span class="a-switcher-meta">@(entity.Description ?? "No description in the descriptor")</span>
+                    </span>
+                    <span class="p-hstack" style="display:flex;gap:var(--space-2);flex:none">
+                        <span class="a-badge">@entity.Fields.Count fields</span>
+                        @if (entity.Tenancy == TenancyMode.Scoped)
+                        {
+                            <span class="a-badge a-badge--accent">scoped</span>
+                        }
+                        @if (entity.Audit)
+                        {
+                            <span class="a-badge">audited</span>
+                        }
+                        @if (entity.SoftDelete)
+                        {
+                            <span class="a-badge">soft delete</span>
+                        }
+                    </span>
+                </button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// This operator's working copy, resolved from the store rather than injected.
+    /// </summary>
+    /// <remarks>
+    /// Empty until the first render has resolved who is signed in — the markup therefore reads it
+    /// through <c>Copy.Loaded</c> rather than assuming a document is there.
+    /// </remarks>
+    private WorkingCopy Copy { get; set; } = new();
+
+    private SchemaModel? _schema;
+    private Exception? _error;
+    private string _name = string.Empty;
+    private string? _refusal;
+    private bool _adding;
+    private bool _scoped;
+    private bool _audited = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        /* Resolve this operator's working copy before anything reads it: the store is shared and
+           keyed by user, so a copy is never another administrator's. */
+        Copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
+        try
+        {
+            _schema = await Gateway.SchemaAsync(CancellationToken.None);
+
+            if (!Copy.Loaded)
+            {
+                var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
+                Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
+            }
+        }
+        catch (Exception exception) when (exception is ManagementForbiddenException
+            or ManagementProjectNotFoundException or ManagementRequestException)
+        {
+            _error = exception;
+        }
+    }
+
+    /// <summary>
+    /// The entities the working copy declares and the applied schema does not.
+    /// </summary>
+    /// <remarks>
+    /// Shown first and tinted, because the whole point of the list is "what is this backend", and
+    /// an entity somebody added ten seconds ago that is nowhere on the screen reads as a control
+    /// that did nothing.
+    /// </remarks>
+    private IEnumerable<string> Pending => Copy.Loaded && _schema is not null
+        ? Copy.Entities.Where(name => !_schema.Entities.Any(
+            entity => string.Equals(entity.Name, name, StringComparison.Ordinal)))
+        : [];
+
+    private void Open(string entity) => Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/{entity}");
+
+    /// <summary>Puts a new entity in the working copy and offers the preview.</summary>
+    /// <remarks>
+    /// The name is checked against the frozen schema's own pattern before anything else, because a
+    /// control must never produce a descriptor the apply would reject — and because an entity name
+    /// is rendered into markup on six screens.
+    /// </remarks>
+    private void AddEntity()
+    {
+        _refusal = null;
+
+        if (!DescriptorNames.IsMember(_name))
+        {
+            _refusal = $"An entity name must match {DescriptorNames.Member}.";
+            return;
+        }
+
+        if (Copy.Entities.Contains(_name, StringComparer.Ordinal))
+        {
+            _refusal = $"This project already declares an entity called {_name}.";
+            return;
+        }
+
+        Copy.AddEntity(_name, _scoped, _audited);
+        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/preview");
+    }
+}

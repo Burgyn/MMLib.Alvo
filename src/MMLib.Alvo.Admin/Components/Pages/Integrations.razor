@@ -1,0 +1,106 @@
+﻿@page "/admin/integrations"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode InteractiveServer
+@inject ManagementGateway Gateway
+
+<PageTitle>Integrations · Alvo</PageTitle>
+
+<div class="a-stack">
+    <h1 class="a-page-title">Integrations</h1>
+    <p class="a-section-sub" style="max-width:76ch">
+        The webhook endpoints and message templates this descriptor declares. Both blocks parse and
+        apply; whether anything is delivered is a different question, answered below by the build
+        itself rather than by this screen.
+    </p>
+
+    @if (_capabilities is null)
+    {
+        <div class="a-skeleton" style="height:200px"></div>
+    }
+    else
+    {
+        @foreach (var block in new[] { "webhooks", "templates" })
+        {
+            <div class="a-panel">
+                <div class="a-section">
+                    <span class="a-section-title">@block</span>
+                    <span class="a-section-sub">
+                        @(Declared(block) is null
+                            ? "Not declared by this descriptor."
+                            : "Declared, and served here exactly as stored.")
+                    </span>
+                </div>
+
+                @if (Warned(block) is { } warning)
+                {
+                    <div class="a-notyet-panel__body">
+                        <span class="a-badge a-badge--warn">not yet</span>
+                        <span class="a-notyet-panel__consequence">@warning.Consequence</span>
+                    </div>
+                }
+
+                @if (Declared(block) is { Length: > 0 } json)
+                {
+                    <div style="padding:var(--space-4)">
+                        <CodeBlock Json="@json" />
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="a-panel">
+            <div class="a-section">
+                <span class="a-section-title">Why there is no "new endpoint" button</span>
+            </div>
+            @if (Refusals.Count == 0)
+            {
+                <div style="padding:var(--space-4)" class="a-section-sub">
+                    This build refuses nothing in these blocks.
+                </div>
+            }
+            else
+            {
+                @foreach (var refusal in Refusals)
+                {
+                    <div class="a-refused">
+                        <code class="a-mono">@refusal.Slot</code>
+                        <span class="a-refused__reason">@refusal.Consequence</span>
+                        <span class="a-refused__reason">@refusal.Fix</span>
+                    </div>
+                }
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private ManagementCapabilities? _capabilities;
+    private string _descriptorJson = "{}";
+
+    /// <summary>
+    /// The refusals that belong to this screen.
+    /// </summary>
+    /// <remarks>
+    /// Served verbatim from <c>capabilities.refused</c>. A control for any of these must not exist
+    /// (§4.1), so the screen shows the framework's own sentence in place of the control rather than
+    /// offering one that can only end in a refusal.
+    /// </remarks>
+    private IReadOnlyList<ManagementRefusedFeature> Refusals => _capabilities is null
+        ? []
+        : [.. _capabilities.Refused.Where(refusal =>
+            refusal.Slot.StartsWith("webhook", StringComparison.OrdinalIgnoreCase)
+            || refusal.Slot.StartsWith("email", StringComparison.OrdinalIgnoreCase)
+            || refusal.Slot.StartsWith("template", StringComparison.OrdinalIgnoreCase)
+            || refusal.Slot.Contains("action", StringComparison.OrdinalIgnoreCase))];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _capabilities = await Gateway.CapabilitiesAsync(CancellationToken.None);
+        _descriptorJson = (await Gateway.DescriptorAsync(CancellationToken.None)).DescriptorJson;
+    }
+
+    private string? Declared(string block) => DescriptorLens.Block(_descriptorJson, block);
+
+    private ManagementWarnedBlock? Warned(string block) => _capabilities?.Warned
+        .FirstOrDefault(warned => string.Equals(warned.Block, block, StringComparison.Ordinal));
+}

@@ -6,7 +6,9 @@
     really is: the project's name, its revision, and the data provider under it. The day the API
     answers with two, this is the one place that changes.
 *@
+@implements IDisposable
 @inject ManagementGateway Gateway
+@inject NavigationManager Navigation
 
 <div class="a-switcher" style="cursor:default">
     <span class="a-brand-mark">@Initial</span>
@@ -39,7 +41,27 @@
     /// nothing must still get a dashboard that says so, which is exactly the failure mode design
     /// §5.5 has in mind when it says an error lands where it happened and stays.
     /// </remarks>
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized() => Navigation.LocationChanged += Reload;
+
+    /// <summary>
+    /// Re-reads on navigation, because this sits in the layout and the layout is not re-initialised.
+    /// </summary>
+    /// <remarks>
+    /// Without it the revision in the sidebar is whatever it was when the session started, and an
+    /// operator who has just applied a change reads a number that contradicts the screen they are
+    /// looking at. The gateway's own cache is what makes this cheap: after an apply it has been
+    /// invalidated, and on every other navigation the read is already in hand.
+    /// </remarks>
+    private void Reload(object? sender, LocationChangedEventArgs args)
+        => _ = InvokeAsync(async () =>
+        {
+            await LoadAsync();
+            StateHasChanged();
+        });
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
     {
         try
         {
@@ -53,4 +75,6 @@
             _refused = true;
         }
     }
+
+    public void Dispose() => Navigation.LocationChanged -= Reload;
 }

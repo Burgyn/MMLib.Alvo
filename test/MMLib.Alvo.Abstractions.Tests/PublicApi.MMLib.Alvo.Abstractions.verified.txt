@@ -21,6 +21,13 @@ namespace MMLib.Alvo
         public bool HasRole(MMLib.Alvo.Role role) { }
         public static MMLib.Alvo.AlvoContext System(MMLib.Alvo.TenantId? tenant) { }
     }
+    public sealed class AlvoCredentialToken : System.IEquatable<MMLib.Alvo.AlvoCredentialToken>
+    {
+        public AlvoCredentialToken(MMLib.Alvo.UserId User, string Token, System.DateTimeOffset ExpiresAt) { }
+        public System.DateTimeOffset ExpiresAt { get; init; }
+        public string Token { get; init; }
+        public MMLib.Alvo.UserId User { get; init; }
+    }
     public enum AlvoMode
     {
         Standalone = 0,
@@ -42,6 +49,31 @@ namespace MMLib.Alvo
         public required System.Collections.Generic.IReadOnlyList<string> RoleNames { get; init; }
         public MMLib.Alvo.TenantId? Tenant { get; init; }
     }
+    public static class AlvoUserAdministration
+    {
+        public const string UnguardedKey = "alvo-user-administration-unguarded";
+    }
+    public sealed class AlvoUserCreation : System.IEquatable<MMLib.Alvo.AlvoUserCreation>
+    {
+        public AlvoUserCreation(string Email, System.Collections.Generic.IReadOnlyList<string> RoleNames, MMLib.Alvo.TenantId? Tenant = default) { }
+        public string Email { get; init; }
+        public System.Collections.Generic.IReadOnlyList<string> RoleNames { get; init; }
+        public MMLib.Alvo.TenantId? Tenant { get; init; }
+    }
+    public sealed class AlvoUserPage : System.IEquatable<MMLib.Alvo.AlvoUserPage>
+    {
+        public AlvoUserPage(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.AlvoUser> Users, string? NextCursor = null, long? TotalCount = default) { }
+        public string? NextCursor { get; init; }
+        public long? TotalCount { get; init; }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.AlvoUser> Users { get; init; }
+    }
+    public sealed class AlvoUserQuery : System.IEquatable<MMLib.Alvo.AlvoUserQuery>
+    {
+        public AlvoUserQuery(string? Search = null, int Limit = 50, string? After = null) { }
+        public string? After { get; init; }
+        public int Limit { get; init; }
+        public string? Search { get; init; }
+    }
     public interface IAlvoBootstrapAdmin
     {
         bool IsBootstrapAdmin(MMLib.Alvo.UserId user);
@@ -49,6 +81,15 @@ namespace MMLib.Alvo
     public interface IAlvoBuilder
     {
         Microsoft.Extensions.DependencyInjection.IServiceCollection Services { get; }
+    }
+    public interface IAlvoUserAdministration
+    {
+        System.Threading.Tasks.Task<MMLib.Alvo.AlvoUser> CreateAsync(MMLib.Alvo.AlvoUserCreation creation, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.AlvoCredentialToken> IssueCredentialTokenAsync(MMLib.Alvo.UserId user, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.AlvoUserPage> ListAsync(MMLib.Alvo.AlvoUserQuery query, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.AlvoUser> SetDisabledAsync(MMLib.Alvo.UserId user, bool disabled, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.AlvoUser> SetRolesAsync(MMLib.Alvo.UserId user, System.Collections.Generic.IReadOnlyList<string> roleNames, System.Threading.CancellationToken cancellationToken = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.AlvoUser> SetTenantAsync(MMLib.Alvo.UserId user, MMLib.Alvo.TenantId? tenant, System.Threading.CancellationToken cancellationToken = default);
     }
     public interface IAlvoUserStore
     {

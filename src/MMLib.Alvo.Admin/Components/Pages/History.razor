@@ -1,0 +1,160 @@
+﻿@page "/admin/history"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode InteractiveServer
+@inject ManagementGateway Gateway
+
+<PageTitle>Configuration history · Alvo</PageTitle>
+
+<div class="a-stack">
+    <h1 class="a-page-title">Configuration history</h1>
+    <p class="a-section-sub" style="max-width:76ch">
+        Every apply appends a revision and none is ever rewritten. This is the audit trail of
+        <em>configuration</em> — who changed what the backend is, when, and why. An audit trail of
+        the <em>data</em> is a different thing and does not exist yet.
+    </p>
+
+    @if (_error is not null)
+    {
+        <ErrorPanel Problem="@_error" Fix="@_fix" />
+    }
+    else if (_revisions is null)
+    {
+        <div class="a-skeleton" style="height:200px"></div>
+    }
+    else if (_revisions.Count == 0)
+    {
+        <EmptyState Title="Nothing has been applied through this API yet"
+                    Body="The descriptor this host booted from was mounted rather than applied. The first change you make here becomes revision 1." />
+    }
+    else
+    {
+        <div class="a-split">
+            <div class="a-panel" style="flex:1;min-width:0">
+                @foreach (var revision in _revisions)
+                {
+                    <button type="button" style="width:100%;text-align:left;border:0;border-bottom:1px solid var(--border);background:@(revision.Revision == _selected?.Version.Revision ? "var(--accentSoft)" : "transparent");cursor:pointer"
+                            @onclick="() => OpenAsync(revision.Revision)">
+                        <RevisionRow Revision="revision" />
+                    </button>
+                }
+            </div>
+
+            <div class="a-split__aside">
+                @if (_selected is null)
+                {
+                    <div class="a-card">
+                        <span class="a-section-title">Pick a revision</span>
+                        <span class="a-section-sub">Its descriptor is shown here, exactly as it was applied.</span>
+                    </div>
+                }
+                else
+                {
+                    <div class="a-card" style="gap:var(--space-4)">
+                        <div class="a-row" style="gap:var(--space-3)">
+                            <span class="a-badge a-badge--accent">r@(_selected.Version.Revision)</span>
+                            <span class="a-section-sub">@(_selected.Version.Reason ?? "no reason recorded")</span>
+                        </div>
+
+                        @if (_selected.Version.Revision != _current)
+                        {
+                            <div>
+                                <p class="a-section-sub">
+                                    Rolling back does not rewrite history — it appends the reverse migration as a
+                                    new revision, which is why the row above stays where it is.
+                                </p>
+                                <ConfirmByName Title="@($"Restore revision {_selected.Version.Revision}")"
+                                               Detail="A reverse migration can discard data that was added after this revision. allowDestructive is never implied."
+                                               Expected="@Gateway.Project"
+                                               OnConfirmedChanged="confirmed => _allowed = confirmed" />
+                                <button type="button" class="a-btn a-btn--danger" style="margin-top:var(--space-3)"
+                                        disabled="@(!_allowed || _busy)" @onclick="RollbackAsync">
+                                    Roll back to r@(_selected.Version.Revision)
+                                </button>
+                            </div>
+                        }
+                        else
+                        {
+                            <span class="a-badge a-badge--ok">this is the current revision</span>
+                        }
+
+                        <CodeBlock Json="@_selected.DescriptorJson" />
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<ManagementRevision>? _revisions;
+    private ManagementRevisionDetail? _selected;
+    private Exception? _error;
+    private string? _fix;
+    private int _current;
+    private bool _allowed;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _revisions = await Gateway.RevisionsAsync(CancellationToken.None);
+            _current = (await Gateway.DescriptorAsync(CancellationToken.None)).Revision;
+        }
+        catch (Exception exception) when (exception is ManagementForbiddenException
+            or ManagementProjectNotFoundException or ManagementRequestException)
+        {
+            _error = exception;
+        }
+    }
+
+    private async Task OpenAsync(int revision)
+    {
+        _allowed = false;
+        try
+        {
+            _selected = await Gateway.RevisionAsync(revision, CancellationToken.None);
+        }
+        catch (ManagementRevisionNotFoundException exception)
+        {
+            _error = exception;
+        }
+    }
+
+    private async Task RollbackAsync()
+    {
+        if (_selected is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        _fix = null;
+
+        try
+        {
+            await Gateway.RollbackAsync(
+                _selected.Version.Revision, _current, allowDestructive: true, dryRun: false,
+                author: null, reason: $"Restored r{_selected.Version.Revision}",
+                CancellationToken.None);
+
+            _selected = null;
+            _allowed = false;
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            _error = exception;
+            _fix = exception is Migrations.DescriptorConcurrencyException
+                ? "Somebody applied a revision while this screen was open. Reload and try again."
+                : null;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

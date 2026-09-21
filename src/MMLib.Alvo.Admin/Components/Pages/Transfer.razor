@@ -1,0 +1,166 @@
+﻿@page "/admin/schema/transfer"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode InteractiveServer
+@inject ManagementGateway Gateway
+@inject WorkingCopyStore Copies
+@inject DataGateway Caller
+@inject NavigationManager Navigation
+@inject IJSRuntime Js
+@implements IAsyncDisposable
+
+<PageTitle>Import and export · Alvo</PageTitle>
+
+<div class="a-stack">
+    <div class="a-toolbar">
+        <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema")">Schema</a>
+        <h1 class="a-page-title">Import and export</h1>
+    </div>
+
+    @if (_error is not null)
+    {
+        <ErrorPanel Problem="@_error" />
+    }
+
+    <div class="a-panel" style="padding:var(--space-5)">
+        <div class="a-section" style="padding:0 0 var(--space-3)">
+            <span class="a-section-title">Export</span>
+            <span class="a-section-sub">
+                <code class="a-mono">GET /management/projects/{project}/descriptor</code> — the stored
+                document, byte for byte. Not a re-serialisation: what you get back is what was applied.
+            </span>
+        </div>
+        <div class="a-row" style="gap:var(--space-3)">
+            <button type="button" class="a-btn a-btn--sm" @onclick="DownloadAsync" disabled="@(_descriptor is null)">
+                Download @(Gateway.Project).alvo.json
+            </button>
+            <span class="a-section-sub">revision @(_descriptor?.Revision.ToString(CultureInfo.InvariantCulture) ?? "…")</span>
+        </div>
+        @if (_descriptor is not null)
+        {
+            <CodeBlock Json="@_descriptor.DescriptorJson" />
+        }
+    </div>
+
+    <div class="a-panel" style="padding:var(--space-5)">
+        <div class="a-section" style="padding:0 0 var(--space-3)">
+            <span class="a-section-title">Import</span>
+            <span class="a-section-sub">
+                Paste a descriptor to work from. This does not apply anything — it loads the working
+                copy, and the next screen is the same dry run every other change goes through.
+            </span>
+        </div>
+
+        @if (_refusal is { Length: > 0 })
+        {
+            <ErrorPanel Heading="The apply would refuse this descriptor"
+                        Slug="descriptor-invalid"
+                        Fix="@_refusal" />
+        }
+
+        <div class="a-field">
+            <label class="a-label" for="import-json">Descriptor JSON</label>
+            <textarea class="a-textarea" id="import-json" rows="12" spellcheck="false"
+                      value="@_pasted"
+                      @oninput="args => _pasted = args.Value?.ToString() ?? string.Empty"></textarea>
+        </div>
+
+        <button type="button" class="a-btn a-btn--primary" @onclick="Import"
+                disabled="@(_pasted.Trim().Length == 0)">
+            Load it into the working copy
+        </button>
+    </div>
+</div>
+
+@code {
+    /// <summary>
+    /// This operator's working copy, resolved from the store rather than injected.
+    /// </summary>
+    /// <remarks>
+    /// Empty until the first render has resolved who is signed in — the markup therefore reads it
+    /// through <c>Copy.Loaded</c> rather than assuming a document is there.
+    /// </remarks>
+    private WorkingCopy Copy { get; set; } = new();
+
+    private IJSObjectReference? _module;
+    private ManagementDescriptor? _descriptor;
+    private Exception? _error;
+    private string _pasted = string.Empty;
+    private string? _refusal;
+
+    protected override async Task OnInitializedAsync()
+    {
+        /* Resolve this operator's working copy before anything reads it: the store is shared and
+           keyed by user, so a copy is never another administrator's. */
+        Copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
+        try
+        {
+            _descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
+            if (!Copy.Loaded)
+            {
+                Copy.Take(_descriptor.DescriptorJson, _descriptor.Revision);
+            }
+        }
+        catch (Exception exception) when (exception is ManagementForbiddenException
+            or ManagementProjectNotFoundException or ManagementRequestException)
+        {
+            _error = exception;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _module = await Js.InvokeAsync<IJSObjectReference>("import", AlvoAdminAssets.Module);
+        }
+    }
+
+    private async Task DownloadAsync()
+    {
+        if (_module is not null && _descriptor is not null)
+        {
+            await _module.InvokeVoidAsync(
+                "download", $"{Gateway.Project}.alvo.json", _descriptor.DescriptorJson);
+        }
+    }
+
+    /// <summary>
+    /// Loads a pasted descriptor, after refusing the names the frozen schema cannot carry.
+    /// </summary>
+    /// <remarks>
+    /// The check is the boundary, not a validation pass: everything else about the descriptor is
+    /// judged by the apply on the next screen, which is the authority. What is refused here is the
+    /// class of input that must never reach a renderer — see <see cref="DescriptorNames"/>.
+    /// </remarks>
+    private void Import()
+    {
+        _refusal = DescriptorNames.FirstRefusal(_pasted);
+        if (_refusal is not null)
+        {
+            return;
+        }
+
+        if (!Copy.Replace(_pasted))
+        {
+            _refusal = "That is not a JSON object.";
+            return;
+        }
+
+        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/preview");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                /* The circuit is gone; the module went with the document. */
+            }
+        }
+    }
+}

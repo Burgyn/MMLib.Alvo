@@ -1,0 +1,27 @@
+﻿@*
+    One labelled fact, with the sentence that stops it being misread.
+*@
+<div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4);align-items:flex-start">
+    <span class="a-label" style="flex:none;min-width:150px">@Label</span>
+    <span style="flex:1;min-width:0">
+        <span class="a-mono" style="font-size:var(--text-sm)">@Value</span>
+        @if (Note is { Length: > 0 })
+        {
+            <span class="a-section-sub">@Note</span>
+        }
+    </span>
+</div>
+
+@code {
+    /// <summary>What the value is.</summary>
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>The value.</summary>
+    [Parameter, EditorRequired]
+    public string Value { get; set; } = string.Empty;
+
+    /// <summary>What it does not mean, when that is the interesting half.</summary>
+    [Parameter]
+    public string? Note { get; set; }
+}

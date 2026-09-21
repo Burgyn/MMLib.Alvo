@@ -999,6 +999,37 @@ button {
   box-shadow: var(--shadow-pop);
 }
 
+.a-chip--on {
+  border-color: var(--accentBorder);
+  background: var(--accentSoft);
+  color: var(--accent);
+  font-weight: var(--weight-medium);
+}
+
+.a-split {
+  display: flex;
+  gap: var(--space-5);
+  align-items: flex-start;
+}
+
+.a-split__aside {
+  flex: none;
+  width: 380px;
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+}
+
+@media (max-width: 1100px) {
+  .a-split {
+    flex-direction: column;
+  }
+
+  .a-split__aside {
+    width: 100%;
+    max-height: none;
+  }
+}
+
 .a-drawer {
   width: min(420px, 100vw);
   height: 100%;

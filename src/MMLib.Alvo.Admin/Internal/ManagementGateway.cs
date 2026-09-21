@@ -30,11 +30,13 @@ namespace MMLib.Alvo.Admin.Internal;
 /// </para>
 /// </remarks>
 /// <param name="management">The one management contract, resolved in-process (design §1.2).</param>
+/// <param name="people">Administers membership, when a deployment has a membership store.</param>
 /// <param name="callers">Turns the signed-in operator into the caller Alvo authorizes.</param>
 /// <param name="authentication">Who is signed in on this circuit.</param>
 /// <param name="ambient">Where a call publishes its caller for the core to read.</param>
 internal sealed class ManagementGateway(
     IAlvoManagement management,
+    IAlvoUserAdministration? people,
     IAlvoAdminCallerResolver callers,
     AuthenticationStateProvider authentication,
     IAlvoContextAccessor ambient)
@@ -165,6 +167,43 @@ internal sealed class ManagementGateway(
 
         return result;
     }
+
+    /// <summary>Whether this deployment can administer people at all.</summary>
+    /// <remarks>
+    /// <see langword="false"/> when no package registered a membership store. The Access screen
+    /// then says so rather than offering controls that would throw — the same rule as a refused
+    /// feature: a control whose only possible outcome is a refusal is worse than its absence.
+    /// </remarks>
+    public bool CanAdministerPeople => people is not null;
+
+    /// <summary>One page of the people on this project.</summary>
+    public Task<AlvoUserPage> PeopleAsync(AlvoUserQuery query, CancellationToken ct)
+        => AsOperatorAsync(() => Administration.ListAsync(query, ct));
+
+    /// <summary>Creates a person who can sign in, once somebody sets their password.</summary>
+    public Task<AlvoUser> CreatePersonAsync(AlvoUserCreation creation, CancellationToken ct)
+        => AsOperatorAsync(() => Administration.CreateAsync(creation, ct));
+
+    /// <summary>Replaces a person's roles.</summary>
+    public Task<AlvoUser> SetRolesAsync(UserId user, IReadOnlyList<string> roleNames, CancellationToken ct)
+        => AsOperatorAsync(() => Administration.SetRolesAsync(user, roleNames, ct));
+
+    /// <summary>Grants, changes or removes the one tenant a person acts in.</summary>
+    public Task<AlvoUser> SetTenantAsync(UserId user, TenantId? tenant, CancellationToken ct)
+        => AsOperatorAsync(() => Administration.SetTenantAsync(user, tenant, ct));
+
+    /// <summary>Bars a person from signing in, or lets them back.</summary>
+    public Task<AlvoUser> SetDisabledAsync(UserId user, bool disabled, CancellationToken ct)
+        => AsOperatorAsync(() => Administration.SetDisabledAsync(user, disabled, ct));
+
+    /// <summary>Mints the single-use token with which somebody sets their own password.</summary>
+    public Task<AlvoCredentialToken> IssueCredentialTokenAsync(UserId user, CancellationToken ct)
+        => AsOperatorAsync(() => Administration.IssueCredentialTokenAsync(user, ct));
+
+    private IAlvoUserAdministration Administration => people
+        ?? throw new InvalidOperationException(
+            "This deployment registered no membership store, so there is nobody to administer. "
+            + "CanAdministerPeople says so before a screen offers a control.");
 
     /// <summary>Drops every cached read.</summary>
     public void Invalidate()

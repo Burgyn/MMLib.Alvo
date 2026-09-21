@@ -46,6 +46,14 @@ public static class AlvoIdentityServiceCollectionExtensions
         services.Replace(ServiceDescriptor.Singleton<IAlvoBootstrapAdmin>(
             provider => provider.GetRequiredService<AlvoBootstrapAdmin>()));
         services.AddKeyedScoped<IAlvoContextResolver, AlvoIdentityContextResolver>(AlvoIdentity.ResolverKey);
+
+        /* Keyed, and the key is the guard. The core registers a guarded decorator under the plain
+           IAlvoUserAdministration and resolves this one through the key — so there is no
+           registration anywhere that hands an in-process caller the unguarded implementation. A
+           guard living inside this adapter would be optional by construction: the next
+           implementation simply would not have it. */
+        services.AddKeyedScoped<IAlvoUserAdministration, AlvoIdentityUserAdministration>(
+            AlvoUserAdministration.UnguardedKey);
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AlvoIdentityBootstrap>());
 
         return services;

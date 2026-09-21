@@ -57,6 +57,89 @@ namespace MMLib.Alvo.Admin.Components
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
 }
+namespace MMLib.Alvo.Admin.Components.Entity
+{
+    public class ApiTab : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public ApiTab() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MMLib.Alvo.Schema.EntitySchema Entity { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class FieldEditor : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public FieldEditor() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Entity { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.FieldEditor.NewField> OnAdded { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<string> Targets { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public sealed class NewField : System.IEquatable<MMLib.Alvo.Admin.Components.Entity.FieldEditor.NewField>
+        {
+            public NewField(string Name, System.Text.Json.Nodes.JsonObject Facets) { }
+            public System.Text.Json.Nodes.JsonObject Facets { get; init; }
+            public string Name { get; init; }
+        }
+    }
+    public class Fields : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Fields() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MMLib.Alvo.Schema.EntitySchema Entity { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class HooksTab : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public HooksTab() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, string>> Hooks { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class Indexes : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Indexes() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MMLib.Alvo.Schema.EntitySchema Entity { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class Relationships : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Relationships() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MMLib.Alvo.Schema.EntitySchema Entity { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MMLib.Alvo.Schema.SchemaModel Schema { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class RulesTab : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public RulesTab() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Editable { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Entity { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        [System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Operation",
+                "Cel"})]
+        public Microsoft.AspNetCore.Components.EventCallback<System.ValueTuple<string, string>> OnChanged { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, string>> Rules { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+}
 namespace MMLib.Alvo.Admin.Components.Layout
 {
     public class AdminLayout : Microsoft.AspNetCore.Components.LayoutComponentBase
@@ -88,10 +171,12 @@ namespace MMLib.Alvo.Admin.Components.Layout
         public int Size { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
-    public class ProjectSwitcher : Microsoft.AspNetCore.Components.ComponentBase
+    public class ProjectSwitcher : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public ProjectSwitcher() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override void OnInitialized() { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
     public class SignInLayout : Microsoft.AspNetCore.Components.LayoutComponentBase
@@ -115,10 +200,106 @@ namespace MMLib.Alvo.Admin.Components.Layout
 namespace MMLib.Alvo.Admin.Components.Pages
 {
     [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/access")]
+    public class Access : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Access() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/data")]
+    public class DataList : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public DataList() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/schema/{EntityName}")]
+    public class Entity : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Entity() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string EntityName { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/data/{EntityName}")]
+    public class EntityData : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public EntityData() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string EntityName { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/history")]
+    public class History : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public History() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/integrations")]
+    public class Integrations : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Integrations() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/automations")]
+    [Microsoft.AspNetCore.Components.Route("/admin/functions")]
+    public class NotYet : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public NotYet() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
     [Microsoft.AspNetCore.Components.Route("/admin")]
     public class Overview : Microsoft.AspNetCore.Components.ComponentBase
     {
         public Overview() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/schema/preview")]
+    public class Preview : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Preview() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/rules")]
+    [Microsoft.AspNetCore.Components.Route("/admin/rules/{EntityName}")]
+    public class Rules : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Rules() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? EntityName { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/schema")]
+    public class SchemaList : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public SchemaList() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/settings")]
+    public class Settings : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Settings() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
@@ -133,9 +314,69 @@ namespace MMLib.Alvo.Admin.Components.Pages
         public string? ReturnUrl { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/schema/transfer")]
+    public class Transfer : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
+    {
+        public Transfer() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
 }
 namespace MMLib.Alvo.Admin.Components.Shared
 {
+    public class CodeBlock : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public CodeBlock() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Json { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class ConfirmByName : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public ConfirmByName() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Detail { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Expected { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<bool> OnConfirmedChanged { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Title { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class Detail : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Detail() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Label { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Note { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Value { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class EmptyState : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public EmptyState() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Body { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? ChildContent { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Title { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
     public class ErrorPanel : Microsoft.AspNetCore.Components.ComponentBase
     {
         public ErrorPanel() { }
@@ -147,6 +388,39 @@ namespace MMLib.Alvo.Admin.Components.Shared
         public System.Exception? Problem { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Slug { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class PolicyVerdictView : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public PolicyVerdictView() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Entity { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Operation { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MMLib.Alvo.Management.ManagementPolicyVerdict Verdict { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class RecordForm : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public RecordForm() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MMLib.Alvo.Schema.EntitySchema Entity { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnCancel { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnDeleted { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnSaved { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Guid? RecordId { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.Dictionary<string, object?> Values { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     public class RevisionRow : Microsoft.AspNetCore.Components.ComponentBase

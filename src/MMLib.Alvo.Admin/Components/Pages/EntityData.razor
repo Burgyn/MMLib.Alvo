@@ -1,0 +1,282 @@
+﻿@page "/admin/data/{EntityName}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode InteractiveServer
+@inject ManagementGateway Gateway
+@inject DataGateway Records
+
+<PageTitle>@EntityName · Data · Alvo</PageTitle>
+
+<div class="a-stack">
+    <div class="a-toolbar">
+        <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/data")">Data</a>
+        <h1 class="a-page-title a-mono">@EntityName</h1>
+        <span style="margin-left:auto"></span>
+        <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/{EntityName}")">Schema</a>
+        @if (_entity is not null)
+        {
+            <button type="button" class="a-btn a-btn--primary a-btn--sm" @onclick="NewRecord">New record</button>
+        }
+    </div>
+
+    @if (_error is not null)
+    {
+        <ErrorPanel Problem="@_error" Fix="@_fix" />
+    }
+
+    @if (_entity is null)
+    {
+        @if (_loading)
+        {
+            <div class="a-skeleton" style="height:240px"></div>
+        }
+        else if (_error is null)
+        {
+            <EmptyState Title="@($"There is no entity called {EntityName}")"
+                        Body="The schema this project serves does not declare it." />
+        }
+    }
+    else
+    {
+        <p class="a-section-sub">
+            Reading as <strong>@_who</strong>@(_context?.Tenant is { } tenant
+                ? $", tenant {tenant.Value}" : ", with no tenant").
+            You see exactly the rows this credential sees through <code class="a-mono">/api/@EntityName</code>.
+        </p>
+
+        @if (_page is null)
+        {
+            <div class="a-skeleton" style="height:200px"></div>
+        }
+        else if (_page.Items.Count == 0)
+        {
+            <EmptyState Title="No rows came back"
+                        Body="@EmptyExplanation" />
+        }
+        else
+        {
+            <div class="a-grid-wrap">
+                <table class="a-grid">
+                    <thead>
+                        <tr>
+                            @foreach (var column in Columns)
+                            {
+                                <th class="a-mono">@column.Name</th>
+                            }
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _page.Items)
+                        {
+                            <tr>
+                                @foreach (var column in Columns)
+                                {
+                                    <td class="@(IsNumeric(column) ? "a-num" : null)">@Display(row[column.Name])</td>
+                                }
+                                <td style="text-align:right;white-space:nowrap">
+                                    <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                                            @onclick="() => Edit(row)">Edit</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="a-row" style="gap:var(--space-3);align-items:center">
+                <span class="a-section-sub">
+                    showing @_page.Items.Count@(_page.TotalCount is { } total ? $" of {total}" : string.Empty) ·
+                    keyset paging over an opaque cursor, stable under concurrent writes
+                </span>
+                <span style="margin-left:auto"></span>
+                @if (_cursors.Count > 0)
+                {
+                    <button type="button" class="a-btn a-btn--sm" @onclick="Previous">Previous</button>
+                }
+                @if (_page.NextCursor is { Length: > 0 })
+                {
+                    <button type="button" class="a-btn a-btn--sm" @onclick="Next">Next</button>
+                }
+            </div>
+        }
+    }
+</div>
+
+@if (_form is not null && _entity is not null)
+{
+    <RecordForm Entity="_entity" Values="_form" RecordId="_editing"
+                OnCancel="CloseForm" OnSaved="Saved" OnDeleted="Saved" />
+}
+
+@code {
+    private const int PageSize = 25;
+
+    private readonly List<string> _cursors = [];
+    private SchemaModel? _schema;
+    private EntitySchema? _entity;
+    private AlvoPage? _page;
+    private AlvoContext? _context;
+    private Dictionary<string, object?>? _form;
+    private Guid? _editing;
+    private Exception? _error;
+    private string? _fix;
+    private string? _cursor;
+    private string _who = string.Empty;
+    private bool _loading = true;
+
+    /// <summary>The entity being browsed, from the route.</summary>
+    [Parameter]
+    public string EntityName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The columns the grid shows.
+    /// </summary>
+    /// <remarks>
+    /// Computed and rollup fields are shown because they are real values a reader wants;
+    /// <c>json</c> and <c>text</c> are not, because one row of either fills the viewport. The
+    /// managed columns are left out for a different reason: a grid whose first column is a uuid
+    /// nobody reads pushes the fields somebody opened the screen for off the right-hand edge.
+    /// </remarks>
+    private IEnumerable<FieldSchema> Columns => _entity!.Fields
+        .Where(column => !AlvoManagedColumns.For(_entity).Contains(column.Name))
+        .Where(column => column.Type is not (FieldType.Json or FieldType.Text))
+        .Take(7);
+
+    /// <summary>
+    /// Why a page can be empty, said rather than left to be guessed.
+    /// </summary>
+    /// <remarks>
+    /// This is the RLS surprise, and it is the single most confusing thing about a rule-guarded
+    /// API: a rule that excludes you produces <b>200 with an empty page</b> on a list, and
+    /// <b>404</b> on a get — never a 403. An operator staring at an empty grid has no way to tell
+    /// that from "there are no rows" unless the screen says so.
+    /// </remarks>
+    private string EmptyExplanation => _entity!.Tenancy == TenancyMode.Scoped && _context?.Tenant is null
+        ? "This entity is tenant-scoped and you hold no tenant. An administrator grants one in Access."
+        : "Either nothing has been created yet, or the read rule on this entity does not admit you — a rule that excludes you returns an empty page rather than a refusal. The Rules screen shows the predicate it applied.";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _cursors.Clear();
+        _cursor = null;
+        try
+        {
+            _schema = await Gateway.SchemaAsync(CancellationToken.None);
+            _entity = _schema.Entities.FirstOrDefault(
+                entity => string.Equals(entity.Name, EntityName, StringComparison.Ordinal));
+            _context = await Records.ContextAsync(CancellationToken.None);
+            _who = _context.User == default ? "an unauthenticated caller" : _context.User.ToString();
+
+            if (_entity is not null)
+            {
+                await LoadAsync();
+            }
+        }
+        catch (Exception exception)
+        {
+            Refused(exception);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _page = await Records.PageAsync(EntityName, PageSize, _cursor, total: true, CancellationToken.None);
+            _error = null;
+            _fix = null;
+        }
+        catch (Exception exception)
+        {
+            Refused(exception);
+        }
+    }
+
+    /// <summary>
+    /// Turns a refusal into the panel, with the fix when the framework supplied one.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AlvoAuthorizationException"/> is the tenant guard and the unconfigured-operation
+    /// case — the two that really are a 403 rather than an empty page — and the distinction is
+    /// worth carrying into the wording, because "you are refused" and "you match nothing" send an
+    /// operator to two different screens.
+    /// </remarks>
+    private void Refused(Exception exception)
+    {
+        _error = exception;
+        _fix = exception switch
+        {
+            AlvoAuthorizationException when _entity?.Tenancy == TenancyMode.Scoped && _context?.Tenant is null
+                => "This entity is tenant-scoped and your account holds no tenant. An administrator grants one in Access.",
+            AlvoAuthorizationException
+                => "The descriptor configures no rule for this operation, or the tenant guard refused before any rule ran. The entity's Rules tab shows which operations are configured.",
+            AlvoConstraintViolationException violation
+                => $"A constraint refused the value: {violation.Kind}. The field's facets are on the entity's Fields tab.",
+            _ => null,
+        };
+    }
+
+    private async Task Next()
+    {
+        if (_page?.NextCursor is { Length: > 0 } next)
+        {
+            _cursors.Add(_cursor ?? string.Empty);
+            _cursor = next;
+            await LoadAsync();
+        }
+    }
+
+    private async Task Previous()
+    {
+        if (_cursors.Count > 0)
+        {
+            _cursor = _cursors[^1] is { Length: > 0 } previous ? previous : null;
+            _cursors.RemoveAt(_cursors.Count - 1);
+            await LoadAsync();
+        }
+    }
+
+    private void NewRecord()
+    {
+        _editing = null;
+        _form = new Dictionary<string, object?>(StringComparer.Ordinal);
+    }
+
+    private void Edit(AlvoRecord row)
+    {
+        _editing = row["id"] is Guid id ? id : Guid.TryParse(row["id"]?.ToString(), out var parsed) ? parsed : null;
+        _form = _entity!.Fields.ToDictionary(
+            column => column.Name, column => row[column.Name], StringComparer.Ordinal);
+    }
+
+    private void CloseForm()
+    {
+        _form = null;
+        _editing = null;
+    }
+
+    private async Task Saved()
+    {
+        CloseForm();
+        await LoadAsync();
+    }
+
+    private static bool IsNumeric(FieldSchema column)
+        => column.Type is FieldType.Integer or FieldType.Decimal;
+
+    private static string Display(object? value) => value switch
+    {
+        null => "—",
+        bool flag => flag ? "yes" : "no",
+        DateTimeOffset moment => moment.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+        DateTime moment => moment.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture),
+        DateOnly day => day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        decimal number => number.ToString("0.##", CultureInfo.InvariantCulture),
+        _ => value.ToString() ?? "—",
+    };
+}

@@ -1,0 +1,67 @@
+﻿@page "/admin/settings"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode InteractiveServer
+@inject ManagementGateway Gateway
+
+<PageTitle>Settings · Alvo</PageTitle>
+
+<div class="a-stack">
+    <h1 class="a-page-title">Settings</h1>
+
+    @if (_info is null)
+    {
+        <div class="a-skeleton" style="height:180px"></div>
+    }
+    else
+    {
+        <div class="a-panel">
+            <div class="a-section">
+                <span class="a-section-title">This build</span>
+                <span class="a-section-sub"><code class="a-mono">GET /management/info</code></span>
+            </div>
+            <Detail Label="Version" Value="@_info.Version" />
+            <Detail Label="Mode" Value="@_info.Mode"
+                    Note="Standalone is the container; embedded is Alvo inside your own host." />
+            <Detail Label="Data provider" Value="@_info.DataProvider"
+                    Note="The IAlvoData implementation that is registered — not the database engine. The core does not know one, so a badge reading &quot;PostgreSQL 16&quot; would have no source." />
+            <Detail Label="Startup mode" Value="@_info.StartupMode" />
+        </div>
+
+        <div class="a-panel">
+            <div class="a-section">
+                <span class="a-section-title">API keys</span>
+                <span class="a-section-sub">Read-only, and that is a capability rather than a choice.</span>
+            </div>
+            <div class="a-refused">
+                <span class="a-refused__reason">
+                    <code class="a-mono">IApiKeyStore</code> is <code class="a-mono">FindAsync</code> plus
+                    <code class="a-mono">TouchAsync</code>, and the management surface has no route for
+                    issuing or revoking one. So there is no control here: a button whose only possible
+                    outcome is a refusal is worse than its absence. Keys are issued by whatever created
+                    them — configuration, or a host that registered its own store.
+                </span>
+            </div>
+        </div>
+
+        <div class="a-panel">
+            <div class="a-section">
+                <span class="a-section-title">Danger zone</span>
+                <span class="a-section-sub">There isn't one.</span>
+            </div>
+            <div class="a-refused">
+                <span class="a-refused__reason">
+                    Deleting a project has no route on the management surface. Removing a backend is
+                    done by removing its descriptor and its database, deliberately — an irreversible
+                    action with a one-click path is a footgun with a handle.
+                </span>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private ManagementInfo? _info;
+
+    protected override async Task OnInitializedAsync()
+        => _info = await Gateway.InfoAsync(CancellationToken.None);
+}

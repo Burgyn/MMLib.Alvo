@@ -1,6 +1,9 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using MMLib.Alvo.Admin.Internal;
+using MMLib.Alvo.Auth;
+using MMLib.Alvo.Management;
 
 namespace MMLib.Alvo.Admin;
 
@@ -48,7 +51,24 @@ public static class AlvoAdminServiceCollectionExtensions
         /* Scoped: in Blazor Server a scope is a circuit, so one operator's session holds one
            gateway and its cache never crosses to another's. Its remarks argue why that cache is a
            correctness property rather than a speed one. */
-        services.TryAddScoped<ManagementGateway>();
+        /* Through a factory: IAlvoUserAdministration is registered only by a deployment that has
+           a membership store, and a nullable constructor parameter is not an optional dependency
+           to the container. The same shape the core already uses for an optional data port. */
+        services.TryAddScoped(provider => new ManagementGateway(
+            provider.GetRequiredService<IAlvoManagement>(),
+            provider.GetService<IAlvoUserAdministration>(),
+            provider.GetRequiredService<IAlvoAdminCallerResolver>(),
+            provider.GetRequiredService<AuthenticationStateProvider>(),
+            provider.GetRequiredService<IAlvoContextAccessor>()));
+        services.TryAddScoped<DataGateway>();
+
+        /* One working copy per circuit: there is one descriptor and one apply, so three screens
+           editing three things are still editing one document (§4.5). */
+        /* A singleton store, not a scoped copy: a Blazor Server scope is a circuit and a circuit
+           ends on a browser reload, so a copy held there would discard unapplied edits on F5. One
+           descriptor and one apply means one copy per operator (§4.5) — not one per screen, and
+           never one shared between operators. */
+        services.TryAddSingleton<WorkingCopyStore>();
 
         return services;
     }

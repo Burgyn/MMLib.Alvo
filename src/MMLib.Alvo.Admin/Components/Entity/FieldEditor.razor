@@ -1,0 +1,209 @@
+﻿@*
+    Adding a field.
+
+    The controls change with the type, because the frozen schema's if/then rules decide which
+    facets a type may carry — `decimal` needs precision and scale, `enum` needs values, `ref` needs
+    an entity, and `string` may have a maxLength that `boolean` may not. Offering every facet for
+    every type would be offering a descriptor the apply refuses.
+
+    Nothing here writes to the database. The field lands in the working copy and goes through the
+    same dry run as every other change.
+*@
+<div class="a-panel" style="padding:var(--space-5);margin-top:var(--space-4)">
+    <div class="a-section" style="padding:0 0 var(--space-3)">
+        <span class="a-section-title">Add a field</span>
+        <span class="a-section-sub">
+            It joins the working copy. Preview shows what it does to the table before anything runs.
+        </span>
+    </div>
+
+    @if (_refusal is { Length: > 0 })
+    {
+        <ErrorPanel Heading="That field cannot be added" Fix="@_refusal" />
+    }
+
+    <div class="a-field">
+        <label class="a-label" for="new-field-name">Name</label>
+        <input class="a-input" id="new-field-name" value="@_name" placeholder="scheduled_for"
+               @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
+        <span class="a-section-sub">Lower case, digits and underscores — <code class="a-mono">@DescriptorNames.Member</code></span>
+    </div>
+
+    <div class="a-field">
+        <span class="a-label">Type</span>
+        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            @foreach (var type in Enum.GetValues<FieldType>())
+            {
+                <button type="button" class="@($"a-chip{(type == _type ? " a-chip--on" : string.Empty)}")"
+                        @onclick="() => _type = type">@type.ToString().ToLowerInvariant()</button>
+            }
+        </div>
+    </div>
+
+    <div class="a-row" style="gap:var(--space-4);flex-wrap:wrap">
+        <label class="a-row" style="gap:var(--space-2);cursor:pointer">
+            <input type="checkbox" checked="@_required" @onchange="args => _required = args.Value is true" />
+            <span>required</span>
+        </label>
+        @if (_type is FieldType.String or FieldType.Integer or FieldType.Uuid or FieldType.Date or FieldType.DateTime)
+        {
+            <label class="a-row" style="gap:var(--space-2);cursor:pointer">
+                <input type="checkbox" checked="@_unique" @onchange="args => _unique = args.Value is true" />
+                <span>unique</span>
+            </label>
+        }
+    </div>
+
+    @switch (_type)
+    {
+        case FieldType.String:
+            <div class="a-field">
+                <label class="a-label" for="new-field-max">Max length</label>
+                <input class="a-input" id="new-field-max" type="number" value="@_maxLength"
+                       @oninput="args => _maxLength = Number(args.Value, 120)" />
+            </div>
+            break;
+        case FieldType.Decimal:
+            <div class="a-row" style="gap:var(--space-4)">
+                <div class="a-field" style="flex:1">
+                    <label class="a-label" for="new-field-precision">Precision</label>
+                    <input class="a-input" id="new-field-precision" type="number" value="@_precision"
+                           @oninput="args => _precision = Number(args.Value, 10)" />
+                    <span class="a-section-sub">Total digits, not the ones before the point.</span>
+                </div>
+                <div class="a-field" style="flex:1">
+                    <label class="a-label" for="new-field-scale">Scale</label>
+                    <input class="a-input" id="new-field-scale" type="number" value="@_scale"
+                           @oninput="args => _scale = Number(args.Value, 2)" />
+                </div>
+            </div>
+            break;
+        case FieldType.Enum:
+            <div class="a-field">
+                <label class="a-label" for="new-field-values">Values</label>
+                <input class="a-input" id="new-field-values" value="@_values" placeholder="scheduled, in_progress, completed"
+                       @oninput="args => _values = args.Value?.ToString() ?? string.Empty" />
+                <span class="a-section-sub">Comma separated. An enum with no values is refused by the schema.</span>
+            </div>
+            break;
+        case FieldType.Ref:
+            <div class="a-field">
+                <span class="a-label">Points at</span>
+                <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+                    @foreach (var target in Targets)
+                    {
+                        <button type="button" class="@($"a-chip{(target == _target ? " a-chip--on" : string.Empty)}")"
+                                @onclick="() => _target = target">@target</button>
+                    }
+                </div>
+            </div>
+            break;
+    }
+
+    <button type="button" class="a-btn a-btn--primary" style="margin-top:var(--space-4)" @onclick="Add">
+        Add to the working copy
+    </button>
+</div>
+
+@code {
+    private string _name = string.Empty;
+    private string _values = string.Empty;
+    private string _target = string.Empty;
+    private string? _refusal;
+    private FieldType _type = FieldType.String;
+    private bool _required;
+    private bool _unique;
+    private int _maxLength = 120;
+    private int _precision = 10;
+    private int _scale = 2;
+
+    /// <summary>The entity the field is added to.</summary>
+    [Parameter, EditorRequired]
+    public string Entity { get; set; } = string.Empty;
+
+    /// <summary>The entities a ref may point at.</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<string> Targets { get; set; } = [];
+
+    /// <summary>Raised with the field to add, once it is one the schema can carry.</summary>
+    [Parameter]
+    public EventCallback<NewField> OnAdded { get; set; }
+
+    /// <summary>A field the editor built, in the schema's own shape.</summary>
+    /// <param name="Name">The field's name.</param>
+    /// <param name="Facets">Its type and facets.</param>
+    public sealed record NewField(string Name, System.Text.Json.Nodes.JsonObject Facets);
+
+    private static int Number(object? value, int fallback)
+        => int.TryParse(value?.ToString(), CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
+
+    /// <summary>
+    /// Builds the field in the schema's own shape, or says why it cannot.
+    /// </summary>
+    /// <remarks>
+    /// The refusals here are the frozen schema's own required facets — a <c>decimal</c> with no
+    /// precision, an <c>enum</c> with no values, a <c>ref</c> with no entity. Each is a descriptor
+    /// the apply rejects, so the control refuses it rather than producing one.
+    /// </remarks>
+    private async Task Add()
+    {
+        _refusal = null;
+
+        if (!DescriptorNames.IsMember(_name))
+        {
+            _refusal = $"A field name must match {DescriptorNames.Member}.";
+            return;
+        }
+
+        var facets = new System.Text.Json.Nodes.JsonObject
+        {
+            ["type"] = _type.ToString().ToLowerInvariant(),
+        };
+
+        if (_required)
+        {
+            facets["required"] = true;
+        }
+
+        if (_unique)
+        {
+            facets["unique"] = true;
+        }
+
+        switch (_type)
+        {
+            case FieldType.String:
+                facets["maxLength"] = _maxLength;
+                break;
+            case FieldType.Decimal:
+                facets["precision"] = _precision;
+                facets["scale"] = _scale;
+                break;
+            case FieldType.Enum:
+                var values = _values.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (values.Length == 0)
+                {
+                    _refusal = "An enum needs at least one value — the schema requires it.";
+                    return;
+                }
+
+                facets["values"] = new System.Text.Json.Nodes.JsonArray(
+                    [.. values.Select(value => System.Text.Json.Nodes.JsonValue.Create(value))]);
+                break;
+            case FieldType.Ref:
+                if (_target.Length == 0)
+                {
+                    _refusal = "A ref needs the entity it points at — the schema requires it.";
+                    return;
+                }
+
+                facets["entity"] = _target;
+                facets["onDelete"] = "restrict";
+                break;
+        }
+
+        await OnAdded.InvokeAsync(new NewField(_name, facets));
+        _name = string.Empty;
+        _values = string.Empty;
+    }
+}

@@ -1,0 +1,330 @@
+﻿@page "/admin/access"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode InteractiveServer
+@inject ManagementGateway Gateway
+@inject DataGateway Records
+
+<PageTitle>Access · Alvo</PageTitle>
+
+<div class="a-stack">
+    <h1 class="a-page-title">Access</h1>
+    <p class="a-section-sub" style="max-width:78ch">
+        Two different things live here and they take effect at different times. <strong>Membership</strong>
+        — who exists, what roles they have, which tenant they act in — is the identity store, and a
+        change applies at once. The <strong>role catalogue</strong> and the three <strong>management
+        levels</strong> are the descriptor, and a change to either waits for an apply.
+    </p>
+
+    @if (_error is not null)
+    {
+        <ErrorPanel Problem="@_error" Fix="@_fix" />
+    }
+
+    @if (_token is { } token)
+    {
+        <div class="a-panel" style="padding:var(--space-5);border-color:var(--accentBorder)">
+            <span class="a-section-title">Credential token for @_tokenFor</span>
+            <p class="a-section-sub">
+                Hand this over out of band — nothing in this build delivers it. There is no mail
+                transport, and <code class="a-mono">templates</code> is a warned subsystem whose reach
+                is an after-hook on an entity write, not an identity event. It works once, until
+                @token.ExpiresAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture).
+            </p>
+            <pre class="a-code"><code>@token.Token</code></pre>
+        </div>
+    }
+
+    <div class="a-panel">
+        <div class="a-section">
+            <span class="a-section-title">People</span>
+            <span class="a-section-sub">
+                @(Gateway.CanAdministerPeople
+                    ? "From the identity store. Changes here take effect on the next request."
+                    : "This deployment registered no membership store.")
+            </span>
+        </div>
+
+        @if (!Gateway.CanAdministerPeople)
+        {
+            <div class="a-refused">
+                <span class="a-refused__reason">
+                    No package implements <code class="a-mono">IAlvoUserAdministration</code>, so there
+                    is nobody to administer and no control to offer. An embedded host fills this port
+                    over its own directory; the standalone image fills it with
+                    <code class="a-mono">MMLib.Alvo.Identity</code>.
+                </span>
+            </div>
+        }
+        else if (_people is null)
+        {
+            <div class="a-skeleton" style="height:160px"></div>
+        }
+        else
+        {
+            @foreach (var person in _people.Users)
+            {
+                <div class="a-row" style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4);align-items:flex-start;flex-wrap:wrap">
+                    <span style="flex:1;min-width:220px">
+                        <span style="font-size:var(--text-sm);font-weight:var(--weight-medium)">@person.Email</span>
+                        <span class="a-switcher-meta">
+                            @(person.RoleNames.Count == 0 ? "no roles" : string.Join(", ", person.RoleNames)) ·
+                            @(person.Tenant is { } tenant ? $"tenant {tenant.Value}" : "no tenant")
+                            @if (person.IsDisabled)
+                            {
+                                <text> · disabled</text>
+                            }
+                        </span>
+                    </span>
+
+                    <div class="a-row" style="gap:var(--space-2);flex-wrap:wrap">
+                        <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                                @onclick="() => _editing = _editing == person.Id ? null : person.Id">
+                            @(_editing == person.Id ? "Close" : "Change")
+                        </button>
+                    </div>
+
+                    @if (_editing == person.Id)
+                    {
+                        <div style="flex-basis:100%">
+                            <div class="a-field">
+                                <span class="a-label">Roles</span>
+                                <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+                                    @foreach (var role in _roles)
+                                    {
+                                        <button type="button"
+                                                class="@($"a-chip{(person.RoleNames.Contains(role, StringComparer.Ordinal) ? " a-chip--on" : string.Empty)}")"
+                                                @onclick="() => ToggleRoleAsync(person, role)">@role</button>
+                                    }
+                                </div>
+                                @if (_roles.Count == 0)
+                                {
+                                    <span class="a-section-sub">
+                                        This descriptor declares no roles in <code class="a-mono">auth.roles</code>.
+                                        A role nothing declares is never minted, so assigning one would do nothing.
+                                    </span>
+                                }
+                            </div>
+
+                            <div class="a-field">
+                                <label class="a-label" for="@($"tenant-{person.Id.Value}")">Tenant</label>
+                                <div class="a-row" style="gap:var(--space-2)">
+                                    <input class="a-input" id="@($"tenant-{person.Id.Value}")" style="flex:1"
+                                           value="@(person.Tenant?.Value.ToString() ?? string.Empty)"
+                                           placeholder="00000000-0000-0000-0000-000000000000"
+                                           @oninput="args => _tenantDraft = args.Value?.ToString() ?? string.Empty" />
+                                    <button type="button" class="a-btn a-btn--sm" @onclick="() => SetTenantAsync(person)">Grant</button>
+                                    <button type="button" class="a-btn a-btn--ghost a-btn--sm" @onclick="() => ClearTenantAsync(person)">Remove</button>
+                                </div>
+                                <span class="a-section-sub">
+                                    One tenant, not a set — acting in more than one is a cross-tenant
+                                    capability this build does not have. A tenant-scoped entity refuses a
+                                    caller with none, with 403, before any rule runs.
+                                </span>
+                            </div>
+
+                            <div class="a-row" style="gap:var(--space-2);flex-wrap:wrap">
+                                <button type="button" class="a-btn a-btn--sm" @onclick="() => IssueTokenAsync(person)">
+                                    Issue a credential token
+                                </button>
+                                <button type="button" class="a-btn a-btn--danger a-btn--sm"
+                                        @onclick="() => SetDisabledAsync(person, !person.IsDisabled)">
+                                    @(person.IsDisabled ? "Let them back in" : "Disable")
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+
+            <div style="padding:var(--space-5);border-top:1px solid var(--border)">
+                <span class="a-section-title">Add a person</span>
+                <p class="a-section-sub">
+                    No password field, deliberately: a credential that travels as a value is readable by
+                    whoever handles it. The account is created without one and you hand over a
+                    single-use token.
+                </p>
+                <div class="a-row" style="gap:var(--space-2)">
+                    <input class="a-input" id="new-person-email" style="flex:1" type="email"
+                           placeholder="dispatcher@example.com" value="@_newEmail"
+                           @oninput="args => _newEmail = args.Value?.ToString() ?? string.Empty" />
+                    <button type="button" class="a-btn a-btn--primary a-btn--sm" @onclick="CreateAsync"
+                            disabled="@(_newEmail.Trim().Length == 0)">Create</button>
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="a-panel">
+        <div class="a-section">
+            <span class="a-section-title">Management levels</span>
+            <span class="a-section-sub">
+                From the descriptor's <code class="a-mono">access</code> block. Three independent
+                predicates, not a hierarchy: all three are evaluated and the highest match wins.
+                Changing one is an apply, and an apply that touches this block re-qualifies to admin.
+            </span>
+        </div>
+        @if (_levels.Count == 0)
+        {
+            <EmptyState Title="This descriptor declares no access block"
+                        Body="Only the bootstrap administrator can manage the project — which is default-deny working, and is usable: the first-run flow needs nobody else." />
+        }
+        else
+        {
+            @foreach (var level in _levels)
+            {
+                <div style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border)">
+                    <span class="a-badge a-badge--accent">@level.Key</span>
+                    <pre class="a-code" style="margin-top:var(--space-2)"><code>@level.Value</code></pre>
+                </div>
+            }
+        }
+    </div>
+
+    <div class="a-panel">
+        <div class="a-section">
+            <span class="a-section-title">Role catalogue</span>
+            <span class="a-section-sub">
+                <code class="a-mono">auth.roles</code> — the names a rule may name. A membership row
+                naming a role this list does not declare is never minted into a caller's context.
+            </span>
+        </div>
+        <div style="padding:var(--space-4) var(--space-5);display:flex;gap:var(--space-2);flex-wrap:wrap">
+            @foreach (var role in _roles)
+            {
+                <span class="a-badge a-mono">@role</span>
+            }
+            <span class="a-badge">anon</span>
+            <span class="a-badge">authenticated</span>
+            <span class="a-badge">admin</span>
+        </div>
+        <span class="a-section-sub" style="padding:0 var(--space-5) var(--space-4);display:block">
+            The last three are built in and never declared.
+        </span>
+    </div>
+</div>
+
+@code {
+    private AlvoUserPage? _people;
+    private IReadOnlyList<string> _roles = [];
+    private IReadOnlyList<KeyValuePair<string, string>> _levels = [];
+    private AlvoCredentialToken? _token;
+    private Exception? _error;
+    private string? _fix;
+    private string _tokenFor = string.Empty;
+    private string _tenantDraft = string.Empty;
+    private string _newEmail = string.Empty;
+    private UserId? _editing;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
+            _roles = DescriptorLens.DeclaredRoles(descriptor.DescriptorJson);
+            _levels = DescriptorLens.AccessLevels(descriptor.DescriptorJson);
+
+            if (Gateway.CanAdministerPeople)
+            {
+                _people = await Gateway.PeopleAsync(new AlvoUserQuery(), CancellationToken.None);
+            }
+        }
+        catch (Exception exception)
+        {
+            Refused(exception);
+        }
+    }
+
+    private async Task ToggleRoleAsync(AlvoUser person, string role)
+    {
+        var roles = person.RoleNames.Contains(role, StringComparer.Ordinal)
+            ? person.RoleNames.Where(name => !string.Equals(name, role, StringComparison.Ordinal)).ToList()
+            : [.. person.RoleNames, role];
+
+        await WriteAsync(() => Gateway.SetRolesAsync(person.Id, roles, CancellationToken.None));
+    }
+
+    private async Task SetTenantAsync(AlvoUser person)
+    {
+        if (!TenantId.TryParse(_tenantDraft, null, out var tenant))
+        {
+            _error = new ManagementRequestException("That is not a tenant id.");
+            _fix = "A tenant is a uuid. Copy it from a row's tenant_id, or from the caller you are modelling.";
+            return;
+        }
+
+        await WriteAsync(() => Gateway.SetTenantAsync(person.Id, tenant, CancellationToken.None));
+    }
+
+    private Task ClearTenantAsync(AlvoUser person)
+        => WriteAsync(() => Gateway.SetTenantAsync(person.Id, null, CancellationToken.None));
+
+    private Task SetDisabledAsync(AlvoUser person, bool disabled)
+        => WriteAsync(() => Gateway.SetDisabledAsync(person.Id, disabled, CancellationToken.None));
+
+    private async Task IssueTokenAsync(AlvoUser person)
+    {
+        try
+        {
+            _token = await Gateway.IssueCredentialTokenAsync(person.Id, CancellationToken.None);
+            _tokenFor = person.Email;
+            _error = null;
+            _fix = null;
+        }
+        catch (Exception exception)
+        {
+            Refused(exception);
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        try
+        {
+            await Gateway.CreatePersonAsync(
+                new AlvoUserCreation(_newEmail.Trim(), []), CancellationToken.None);
+            _newEmail = string.Empty;
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            Refused(exception);
+        }
+    }
+
+    private async Task WriteAsync(Func<Task<AlvoUser>> write)
+    {
+        try
+        {
+            await write();
+            _error = null;
+            _fix = null;
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            Refused(exception);
+        }
+    }
+
+    /// <summary>
+    /// Renders the refusal, and says which of the guards produced it.
+    /// </summary>
+    /// <remarks>
+    /// The escalation refusals are the interesting ones and are worth telling apart from a plain
+    /// "forbidden": one of them means <em>you are not an administrator</em> and the other means
+    /// <em>you are, and this is the one thing an administrator may not do to themselves</em>.
+    /// </remarks>
+    private void Refused(Exception exception)
+    {
+        _error = exception;
+        _fix = exception switch
+        {
+            ManagementEscalationException => "Another administrator can make this change, or the access block can, through an apply — which records who made it.",
+            ManagementForbiddenException => "Administering people is an admin operation. Your management level is lower.",
+            NotSupportedException => "This deployment's membership store does not support that operation.",
+            _ => null,
+        };
+    }
+}

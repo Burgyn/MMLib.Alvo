@@ -1,0 +1,120 @@
+﻿@*
+    The fields, with the facets the frozen schema admits for each type.
+
+    Every badge here is a value read off FieldSchema, never a guess: the schema's own if/then rules
+    decide which facets a type may carry, so a renderer that invented one would be showing a
+    descriptor the apply would refuse.
+*@
+@foreach (var field in Declared)
+{
+    <div class="a-row" style="align-items:flex-start;padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4)">
+        <span class="a-mono" style="flex:none;min-width:190px;font-size:var(--text-sm);font-weight:var(--weight-medium)">@field.Name</span>
+        <span class="a-mono" style="flex:none;min-width:110px;color:var(--dim);font-size:var(--text-xs)">@Type(field)</span>
+        <span style="flex:1;display:flex;gap:var(--space-2);flex-wrap:wrap">
+            @foreach (var facet in Facets(field))
+            {
+                <span class="a-badge">@facet</span>
+            }
+        </span>
+    </div>
+}
+
+<div class="a-section" style="margin-top:var(--space-4)">
+    <span class="a-section-title">Maintained by Alvo</span>
+    <span class="a-section-sub">
+        Not declared in the descriptor and not writable by a caller — an audit trail a caller can
+        author is not an audit trail. They are shown because they are real columns a filter can
+        name and a response carries.
+    </span>
+</div>
+
+@foreach (var field in Managed)
+{
+    <div class="a-row" style="align-items:flex-start;padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4);color:var(--dim)">
+        <span class="a-mono" style="flex:none;min-width:190px;font-size:var(--text-sm)">@field.Name</span>
+        <span class="a-mono" style="flex:none;min-width:110px;font-size:var(--text-xs)">@Type(field)</span>
+        <span style="flex:1">
+            <span class="a-badge">@(AlvoManagedColumns.IsCallerWritable(field.Name, isUpdate: false)
+                ? "supplied on create only" : "framework writes it")</span>
+        </span>
+    </div>
+}
+
+@code {
+    /// <summary>The entity whose fields these are.</summary>
+    [Parameter, EditorRequired]
+    public EntitySchema Entity { get; set; } = default!;
+
+    /// <summary>The fields the descriptor declares.</summary>
+    private IEnumerable<FieldSchema> Declared
+        => Entity.Fields.Where(column => !AlvoManagedColumns.For(Entity).Contains(column.Name));
+
+    /// <summary>The columns Alvo adds — id, the tenant, the audit stamps, the soft-delete mark.</summary>
+    private IEnumerable<FieldSchema> Managed
+        => Entity.Fields.Where(column => AlvoManagedColumns.For(Entity).Contains(column.Name));
+
+    private static string Type(FieldSchema field)
+        => field.Type == FieldType.Ref && field.Reference is { } reference
+            ? $"ref → {reference.TargetEntity}"
+            : field.Type.ToString().ToLowerInvariant();
+
+    /// <summary>
+    /// The facets this field actually carries.
+    /// </summary>
+    /// <remarks>
+    /// Ordered so the ones that change what a caller may send come first: a reader scanning the
+    /// column is looking for "what will this reject", not for the storage detail.
+    /// </remarks>
+    private static IEnumerable<string> Facets(FieldSchema field)
+    {
+        if (field.Required)
+        {
+            yield return "required";
+        }
+
+        if (field.Unique)
+        {
+            yield return "unique";
+        }
+
+        if (field.Format is { Length: > 0 } format)
+        {
+            yield return format;
+        }
+
+        if (field.MaxLength is { } max)
+        {
+            yield return $"max {max}";
+        }
+
+        if (field.Precision is { } precision)
+        {
+            yield return field.Scale is { } scale ? $"{precision},{scale}" : $"precision {precision}";
+        }
+
+        if (field.EnumValues is { Count: > 0 } values)
+        {
+            yield return $"{values.Count} values";
+        }
+
+        if (field.Reference is { } reference)
+        {
+            yield return $"on delete {reference.OnDelete.ToString().ToLowerInvariant()}";
+        }
+
+        if (field.ComputedExpression is { Length: > 0 })
+        {
+            yield return "computed";
+        }
+
+        if (field.Rollup is not null)
+        {
+            yield return "rollup";
+        }
+
+        if (field.Indexed)
+        {
+            yield return "indexed";
+        }
+    }
+}
