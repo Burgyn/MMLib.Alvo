@@ -1,0 +1,27 @@
+﻿@*
+    The router.
+
+    `AdminLayout` is the default layout for every routable component in this assembly, and
+    `AppAssembly` is this assembly rather than the host's: the dashboard's routes are its own, and
+    a host that also serves Razor pages of its own does not want them merged into this router's
+    table.
+*@
+<Router AppAssembly="@typeof(AdminRoutes).Assembly">
+    <Found Context="route">
+        <RouteView RouteData="@route" DefaultLayout="@typeof(AdminLayout)" />
+        <FocusOnNavigate RouteData="@route" Selector="h1" />
+    </Found>
+    <NotFound>
+        <LayoutView Layout="@typeof(AdminLayout)">
+            <div class="a-content">
+                <div class="a-empty">
+                    <div class="a-empty__title">There is no screen at this address</div>
+                    <div class="a-empty__body">
+                        The dashboard is served under <code class="a-mono">@AlvoAdmin.BasePath</code>.
+                        <a class="a-btn a-btn--sm" href="@AlvoAdmin.BasePath">Go to Overview</a>
+                    </div>
+                </div>
+            </div>
+        </LayoutView>
+    </NotFound>
+</Router>

@@ -1,0 +1,55 @@
+﻿@*
+    A refusal, rendered where it happened and left there.
+
+    Design §5.5: errors are not toasts. The Data API answers RFC 7807 with `title`, `detail` and a
+    `type` slug, and `UnhonouredFeatures` adds a `fix` — a toast that disappears in three seconds
+    throws all four away, in a tool whose whole job is configuration.
+
+    The exception type is mapped to a sentence here rather than printed, because `Exception.Message`
+    is written for a log and an operator is not reading a log. What is never rewritten is a
+    framework sentence: a refusal's own `Consequence` and `Fix` are served verbatim (§4.1).
+*@
+<div class="a-error" role="alert">
+    <div class="a-error__title">@Title</div>
+    <div class="a-error__detail">@Detail</div>
+    @if (Fix is { Length: > 0 })
+    {
+        <div class="a-error__fix">@Fix</div>
+    }
+    @if (Slug is { Length: > 0 })
+    {
+        <code class="a-error__type">@Slug</code>
+    }
+</div>
+
+@code {
+    /// <summary>The refusal to render, when it arrived as an exception.</summary>
+    [Parameter]
+    public Exception? Problem { get; set; }
+
+    /// <summary>The headline, when the caller has a better one than the exception type gives.</summary>
+    [Parameter]
+    public string? Heading { get; set; }
+
+    /// <summary>What to do about it — served verbatim when it came from the framework.</summary>
+    [Parameter]
+    public string? Fix { get; set; }
+
+    /// <summary>The problem-type slug, when one applies.</summary>
+    [Parameter]
+    public string? Slug { get; set; }
+
+    private string Title => Heading ?? Problem switch
+    {
+        ManagementForbiddenException => "You are not allowed to do this",
+        ManagementProjectNotFoundException => "That project does not exist",
+        ManagementRevisionNotFoundException => "That revision does not exist",
+        ManagementEscalationException => "This change needs a higher management level",
+        ManagementSimulationException => "That policy question cannot be answered",
+        ManagementRequestException => "The request was refused",
+        null => "Something went wrong",
+        _ => "Something went wrong",
+    };
+
+    private string Detail => Problem?.Message ?? string.Empty;
+}

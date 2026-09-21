@@ -20,4 +20,12 @@
     <SupportedPlatform Include="browser" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Abstractions, and deliberately nothing else. Design §1.2: the dashboard holds the one
+         operation contract and no reach into the core, which is what turns "dashboard and CLI are
+         clients of the same API" from a promise into a structural fact. BoundaryArchitectureTests
+         fails if this list ever grows a reference to MMLib.Alvo. -->
+    <ProjectReference Include="../MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
+  </ItemGroup>
+
 </Project>

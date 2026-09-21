@@ -707,6 +707,14 @@ button {
 }
 
 /* A column of amounts is unreadable vertically without this. */
+.a-stat {
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
 .a-num {
   font-variant-numeric: tabular-nums;
   text-align: right;

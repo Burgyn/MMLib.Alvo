@@ -8,11 +8,20 @@ namespace MMLib.Alvo.Identity
         public const string ConfigurationSection = "Alvo:Admin";
         public const string ResolverKey = "alvo-identity";
     }
+    public static class AlvoIdentityAuthenticationExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddAlvoIdentityCookieSignIn(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string signInPath, string? accessDeniedPath = null) { }
+    }
     public sealed class AlvoIdentityOptions
     {
         public AlvoIdentityOptions() { }
         public string? BootstrapEmail { get; set; }
         public string? BootstrapPasswordFile { get; set; }
+    }
+    public sealed class AlvoSignIn
+    {
+        public System.Threading.Tasks.Task<bool> PasswordSignInAsync(string email, string password) { }
+        public System.Threading.Tasks.Task SignOutAsync() { }
     }
 }
 namespace Microsoft.Extensions.DependencyInjection

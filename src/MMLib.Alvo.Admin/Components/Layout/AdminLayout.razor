@@ -1,0 +1,107 @@
+﻿@*
+    The shell: sidebar + header + content on a desktop, bottom bar under 720 px.
+
+    The two layouts are one markup tree and one media query, not two components. A second component
+    would be a second navigation — and §4.3 argues at length that a second navigation is how a
+    navigation starts lying about what works.
+*@
+@inherits LayoutComponentBase
+
+<div class="a-shell">
+    <nav class="a-sidebar" aria-label="Sections">
+        <a class="a-brand" href="@AlvoAdmin.BasePath">
+            <span class="a-brand-mark">A</span>
+            <span>Alvo</span>
+        </a>
+
+        <ProjectSwitcher />
+
+        <div class="a-nav">
+            @foreach (var entry in AdminNavigation.Live)
+            {
+                <NavLink class="a-nav-item" ActiveClass="a-nav-item--active" href="@entry.Path"
+                         Match="@MatchFor(entry)">
+                    <Icon Path="@entry.Icon" />
+                    <span>@entry.Title</span>
+                </NavLink>
+            }
+
+            <div class="a-nav-sep"></div>
+
+            @foreach (var entry in AdminNavigation.NotYet)
+            {
+                <NavLink class="a-nav-item" ActiveClass="a-nav-item--active" href="@entry.Path">
+                    <Icon Path="@entry.Icon" />
+                    <span>@entry.Title</span>
+                    <span class="a-badge a-nav-item__trail">Not yet</span>
+                </NavLink>
+            }
+
+            <div class="a-nav-sep"></div>
+
+            @foreach (var entry in AdminNavigation.Footer)
+            {
+                <NavLink class="a-nav-item" ActiveClass="a-nav-item--active" href="@entry.Path">
+                    <Icon Path="@entry.Icon" />
+                    <span>@entry.Title</span>
+                </NavLink>
+            }
+        </div>
+
+        <div style="margin-top:auto">
+            <SignedInAs />
+        </div>
+    </nav>
+
+    <div class="a-main">
+        <header class="a-header">
+            <button type="button" class="a-btn a-btn--ghost a-btn--sm" @onclick="OpenPalette"
+                    aria-label="Search and jump to a entry">
+                <Icon Path="@Icons.Search" />
+                <span>Search</span>
+                <kbd class="a-kbd">&#8984;K</kbd>
+            </button>
+            <span style="margin-left:auto"></span>
+            <ThemeToggle />
+        </header>
+
+        <main class="a-content" id="a-content">
+            @Body
+        </main>
+    </div>
+
+    <nav class="a-bottomnav" aria-label="Sections">
+        @foreach (var entry in AdminNavigation.Bar)
+        {
+            <NavLink class="a-bottomnav__item" ActiveClass="a-bottomnav__item--active"
+                     href="@entry.Path" Match="@MatchFor(entry)">
+                <Icon Path="@entry.Icon" Size="18" />
+                <span>@Short(entry.Title)</span>
+            </NavLink>
+        }
+    </nav>
+</div>
+
+<CommandPalette @ref="_palette" />
+
+@code {
+    private CommandPalette? _palette;
+
+    private Task OpenPalette() => _palette?.OpenAsync() ?? Task.CompletedTask;
+
+    /// <summary>
+    /// Overview is the dashboard's root, so a prefix match would mark it active on every screen.
+    /// </summary>
+    private static NavLinkMatch MatchFor(AdminSection entry)
+        => entry.Path == AlvoAdmin.BasePath ? NavLinkMatch.All : NavLinkMatch.Prefix;
+
+    /// <summary>
+    /// The bar is five items wide at 375 px, so a label that wraps pushes the bar over the fold.
+    /// Only one live entry has a name longer than its slot, and this is it.
+    /// </summary>
+    private static string Short(string title) => title switch
+    {
+        "Configuration history" => "History",
+        _ => title,
+    };
+}

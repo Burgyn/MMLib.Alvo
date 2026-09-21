@@ -42,4 +42,16 @@ public static class AlvoAdminAssets
     /// lets the component that owns the surface decide what they mean.
     /// </remarks>
     public static string Script { get; } = $"{ContentRoot}/alvo.js";
+
+    /// <summary>
+    /// The interop module the components import — the bridge between <see cref="Script"/>'s
+    /// keyboard map and a Blazor circuit.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Script"/> deliberately. That one runs before hydration and knows
+    /// nothing about Blazor, which is what makes it correct for a theme applied before the first
+    /// paint. This one is an ES module, imported by the component that needs it and released with
+    /// that component, so a session that never opens the palette never loads it.
+    /// </remarks>
+    public static string Module { get; } = $"{ContentRoot}/admin.js";
 }

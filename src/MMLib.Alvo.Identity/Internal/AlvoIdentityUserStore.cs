@@ -97,5 +97,6 @@ internal sealed class AlvoIdentityUserStore(
             Email = stored.Email ?? stored.UserName ?? string.Empty,
             RoleNames = [.. await users.GetRolesAsync(stored).ConfigureAwait(false)],
             IsDisabled = stored.LockoutEnd is { } until && until > DateTimeOffset.UtcNow,
+            Tenant = stored.TenantId is { } tenant ? new TenantId(tenant) : null,
         };
 }

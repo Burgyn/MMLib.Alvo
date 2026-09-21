@@ -1,0 +1,73 @@
+﻿@page "/admin/sign-in"
+@layout SignInLayout
+@*
+    Signing in.
+
+    Statically rendered, and it has to be: signing in writes an authentication cookie, a cookie is
+    written onto a response, and a server-interactive component runs over a WebSocket long after
+    that response completed. So this is an ordinary form posting to an ordinary endpoint — which is
+    how every Blazor application does it, and which also means it works with JavaScript off.
+
+    The endpoint is the host's, because it needs ASP.NET Core Identity's SignInManager and this
+    package holds no reference to it. `AlvoAdmin.SignInEndpoint` is the one spelling of the path.
+*@
+<PageTitle>Sign in · Alvo</PageTitle>
+
+<div class="a-stack" style="max-width:380px;margin:12vh auto 0">
+    <div class="a-brand" style="justify-content:center">
+        <span class="a-brand-mark">A</span>
+        <span>Alvo</span>
+    </div>
+
+    <div class="a-panel" style="padding:var(--space-6)">
+        <div class="a-section" style="padding:0 0 var(--space-4)">
+            <span class="a-section-title">Sign in</span>
+            <span class="a-section-sub">
+                The administrator this host was configured with, or an account they created.
+            </span>
+        </div>
+
+        @if (Failed)
+        {
+            <ErrorPanel Heading="That email and password do not match"
+                        Fix="If this is a new deployment, the account is the one named by Alvo:Admin:BootstrapEmail, with the password in the file Alvo:Admin:BootstrapPasswordFile points at." />
+        }
+
+        <form method="post" action="@AlvoAdmin.SignInEndpoint" class="a-stack">
+            <AntiforgeryToken />
+            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+
+            <div class="a-field">
+                <label class="a-label" for="email">Email</label>
+                <input class="a-input" id="email" name="email" type="email" autocomplete="username"
+                       required autofocus />
+            </div>
+
+            <div class="a-field">
+                <label class="a-label" for="password">Password</label>
+                <input class="a-input" id="password" name="password" type="password"
+                       autocomplete="current-password" required />
+            </div>
+
+            <button class="a-btn a-btn--primary" type="submit">Sign in</button>
+        </form>
+    </div>
+</div>
+
+@code {
+    /// <summary>Set by the endpoint when the credentials did not match.</summary>
+    /// <remarks>
+    /// One message for a wrong email and a wrong password, deliberately: telling them apart tells
+    /// an attacker which addresses have accounts.
+    /// </remarks>
+    [SupplyParameterFromQuery(Name = "failed")]
+    public bool Failed { get; set; }
+
+    /// <summary>Where to go after signing in.</summary>
+    /// <remarks>
+    /// Carried through the form so a deep link survives the sign-in. The endpoint refuses anything
+    /// that is not a local path — an open redirect is how a sign-in page becomes a phishing page.
+    /// </remarks>
+    [SupplyParameterFromQuery(Name = "returnUrl")]
+    public string? ReturnUrl { get; set; }
+}
