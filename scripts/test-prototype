@@ -24,9 +24,12 @@ command -v python3 >/dev/null 2>&1 || { echo "test-prototype: python3 is not on 
 
 cd "$tests"
 
+# `npm ci` rather than `npm install`: the lockfile is committed, so a CI run installs exactly the
+# tree that was reviewed and Dependabot can see it. `npm install` would resolve afresh, which makes
+# a green run unreproducible and a transitive change invisible.
 if [ ! -d node_modules ]; then
-  echo "test-prototype: installing @playwright/test (first run)…"
-  npm install --no-audit --no-fund
+  echo "test-prototype: installing @playwright/test from the lockfile (first run)…"
+  npm ci --no-audit --no-fund
 fi
 
 # `playwright install` is idempotent and quick once the browser is cached.

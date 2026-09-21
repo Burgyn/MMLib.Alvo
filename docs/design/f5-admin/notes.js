@@ -229,6 +229,11 @@ export const REJECTED = [
     why: 'The tags (<code class="a-mono">design</code>, <code class="a-mono">honest</code>, <code class="a-mono">three consequences</code>) are gone, and so is the wizard’s aside about itself. The transaction sentence stays, reworded: <em>where</em> a rule is evaluated is the fact that explains why a technician gets a shorter list rather than an error, and it is the single most misunderstood thing about the API. "Closed context" is what was unclear, and that phrase is what changed.',
   },
   {
+    finding: 'ux taste',
+    claim: 'The field type column is low-contrast at 13 px.',
+    why: 'Measured rather than judged: <code class="a-mono">--dim</code> on <code class="a-mono">--panel</code> is <strong>5.81 : 1</strong> in light and <strong>6.26 : 1</strong> in dark, and the type column sets <code class="a-mono">--text-xs</code> (12 px). WCAG AA asks 4.5 : 1 for normal text, so it passes with margin in both themes — and it is deliberately quieter than the field name, which is the thing being scanned. The suite now measures every foreground token against every surface rather than leaving this to an eye, which is what acceptance criterion §6.3-5 asks for.',
+  },
+  {
     finding: 'product §10, last item',
     claim: 'The sample curl sorts by a nullable column and so teaches the slow path.',
     why: 'Accepted, and generalised past the fix the review proposed. The sample now derives its sort column from the descriptor — the first <em>required</em> sortable field — so it stays correct for an entity this drawing has never seen, rather than being right once for <code class="a-mono">work_orders</code>.',
@@ -236,6 +241,7 @@ export const REJECTED = [
 ];
 
 export const OPEN_QUESTIONS = [
+  'Every sentence here is a hardcoded English string builder, pluralisation included. Fine for a drawing; the Razor version must not inherit the pattern, and nothing yet says how it will not (baas-analyza §2.8 asks for i18n-ready).',
   'A tenant has no name anywhere in the product. Every screen shows a uuid. Is a name worth a descriptor block, an <code class="a-mono">x-</code> hint, or nothing at all?',
   'Reordering fields changes the descriptor and changes nothing in the database. Worth a control, or noise? The drag handle is drawn and inert.',
   'A <code class="a-mono">json</code> field on the record form is a textarea that accepts invalid JSON until submit. Worth a real editor, or is the 422 enough?',

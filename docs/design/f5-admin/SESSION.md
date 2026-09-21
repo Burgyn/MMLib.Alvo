@@ -1,6 +1,6 @@
 # Session — 2026-09-21: the four design gaps, and the prototype rebuilt on them
 
-Branch `f5/admin-prototype-iteration`. Three commits, all on the branch; nothing on `main`.
+Branch `f5/admin-prototype-iteration`. Nothing on `main`.
 
 ## What this session was asked to do
 
@@ -59,13 +59,26 @@ allowed/refused badge is forbidden **by construction** — §6.3 criterion 4 res
 `ManageUsers` is in the level table with no route. So a local-auth project has one account forever,
 and "people arrive by signing in" describes a door nobody can reach.
 
-**Decided:** membership creation joins the **port** (`CreateAsync`, `SetTenantAsync`,
-`SetDisabledAsync` — no credential, so an OIDC host can pre-provision an email with its roles,
-which the current port also cannot do). The credential half stays inside the implementation that
-has one, and the new person sets their **own** password through a single-use token — an
-administrator never types a colleague's password, for the same reason
-`Alvo__Admin__BootstrapPassword` is refused as a *value*. Six routes under
-`IAlvoUserAdministration`, a second contract in Abstractions mapped by the core when DI holds one.
+**Decided:** `IAlvoUserStore` is **not touched** — widening it would break every implementer,
+including a read-only directory mirror with nothing to create into. A **second** contract,
+`IAlvoUserAdministration`, lands in Abstractions with six members and six management routes at
+`admin`; `MMLib.Alvo.Identity` implements it. Every member may **refuse by name**, which is what
+keeps it provider-agnostic: a directory mirror refuses `CreateAsync`, an OIDC-only deployment
+refuses `IssueCredentialTokenAsync`. That is the distinction against `IAlvoUserStore`'s *"no
+credential appears on this port"* — that sentence refuses a contract which *demands* a credential,
+and a member asking *"mint a token if you have such a thing"* is a question an implementation may
+decline. The new person sets their **own** password through the token; an administrator never types
+a colleague's password, for the same reason `Alvo__Admin__BootstrapPassword` is refused as a
+*value*.
+
+**The self-grant guard is in the CORE, not in the implementation**, and it covers the tenant as
+well as roles — a rule enforced only inside a swappable adapter is optional by construction. It is
+pinned as a contract test in `MMLib.Alvo.Testing`, on `PolicyEngineContractTests`' precedent.
+§3.7's U3.1 weighs what a tenant self-grant would cost rather than assuming: it creates no
+authority an `admin` lacks (they hold `ApplyDescriptor` and can rewrite the rules), but it reaches
+it by a path that records **nothing**, where an apply appends a revision with an author. Same
+authority, quieter route — which is why the self-grant is refused and granting somebody else's is
+not.
 
 **Cost stated rather than discovered:** nothing in this build delivers that token. Identity
 configures no mail transport, and `templates`/`webhooks` reach an entity write, not an identity
@@ -202,5 +215,31 @@ were wrong about, and four things did not survive scrutiny —
    whether a name is worth a descriptor block, an `x-` hint, or nothing.
 4. **The display-field heuristic.** The ref picker searches the first required string field and says
    so at the control. An `x-` hint would settle it properly.
-5. **Run `scripts/gen-prototype-fixtures --check` in CI** so a change to `UnhonouredFeatures` that
-   this drawing quotes breaks the build rather than aging quietly.
+5. **File the two issues §7 names, in the first commit after this merges**, and replace "no issue
+   exists" with the numbers. They are deliberately not filed before the merge: an issue citing a
+   section of a design that is not on `main` cites nothing.
+
+## 7. What `alvo-plan-guard` found, and what changed because of it
+
+It returned **ISSUES** with nine findings and `needs-deep-review: yes`. Eight were accepted and
+fixed before the PR opened:
+
+| Finding | What changed |
+|---|---|
+| §3.7 named two different ports for the same members | `IAlvoUserStore` is untouched; a second contract is added, with the table that says why |
+| `IssueCredentialTokenAsync` on the port forecloses OIDC | it stays, and the refusal-by-name rule is written down with the distinction it rests on |
+| a tenant self-grant is unaudited and §2.7 did not weigh it | §3.7 U3.1 weighs it; the self-grant is refused, and the guard now covers the tenant |
+| U3 placed in a provider implementation | moved into the core gate, pinned by a `MMLib.Alvo.Testing` contract test; §6.1's row moved from ring2 to ring0 |
+| Node in the pipeline is an undeclared deviation | recorded as **D8** in §0.2, with what the source sentence was actually protecting |
+| `npm install` with a gitignored lockfile | lockfile committed, `scripts/test-prototype` uses `npm ci` |
+| a required check now points at a docs artifact | the retirement obligation is a table in the prototype's README and a paragraph in the generator's own docstring |
+| the committed plan read as unstarted | ticked, with the two places what shipped differs from what it said |
+
+The ninth is a process note and is answered here: the tree moved under the review because two
+docs commits landed while it read. Its verdict covers `f25a046..76da0c2`; everything after that is
+the eight fixes above, and the PR body says so.
+
+**`needs-deep-review: yes` stands.** No product code changed, but the design this PR amends is the
+security core by area — `AlvoUser.Tenant` changes what a cookie session carries into the tenant
+guard, and six new `admin` routes plus a self-grant guard are proposed. The PR carries the label
+and the `alvo-security-core-review` checklist is owed before merge.

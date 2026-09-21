@@ -26,6 +26,22 @@ and a clean console.
 this plan), `~/alvo-admin-prototype/REVIEW-product.md`, `~/alvo-admin-prototype/REVIEW-ux.md`
 (both copied into `docs/design/f5-admin/reviews/` by Task 6 so the backlog travels with the work).
 
+**Status: executed, 2026-09-21.** Every task ran and every box is ticked. Two places where what
+shipped differs from what this plan said, recorded rather than quietly reconciled:
+
+- **Task 5 said the upheld drawing decisions join §0.2's deviation table. They did not.** §0.2 is
+  *deviations from the sources*; the drawing's own calls are departures from **this design**, which
+  is a different layer, so they landed in a new **§4.6** with that reason stated. §0.2 did gain one
+  genuine row — **D8**, the Node suite against spec §415's *"žiadny Node v pipeline"*.
+- **Phase 5 grew a twelfth spec.** `12-contrast.spec.js` measures acceptance criterion §6.3-5
+  (WCAG AA over the tokens) which this plan did not schedule, and it carries a vacuity guard
+  because a contrast test with a broken ratio function passes everything.
+
+Findings from `alvo-plan-guard` were folded back into Phase 1's output before the PR: the port
+split in §3.7, `IssueCredentialTokenAsync`'s refusal-by-name, the tenant self-grant weighed rather
+than assumed, U3 moved from an adapter into the core with a contract test, D8, the committed
+lockfile with `npm ci`, and the retirement obligation.
+
 ## Global Constraints
 
 - **Never commit to `main`.** All work lands on `f5/admin-prototype-iteration` and reaches `main`
@@ -94,16 +110,16 @@ so a reviewer can reject one gap's answer without rejecting the others.
 - `field-service.alvo.json` sets `tenancy.enabled` and marks `customers`/`work_orders` scoped,
   `regions` global.
 
-- [ ] **Step 1:** Write §2.7 stating the gap as a fact with its consequence: in the example the
+- [x] **Step 1:** Write §2.7 stating the gap as a fact with its consequence: in the example the
       product ships to demonstrate multi-tenancy, a signed-in operator can browse exactly one of
       three entities.
-- [ ] **Step 2:** Write the decision — an explicit per-session tenant the identity resolver
+- [x] **Step 2:** Write the decision — an explicit per-session tenant the identity resolver
       accepts, gated on management level, and a tenant list that comes from the descriptor's own
       declaration rather than from the data. Record the two rejected alternatives with their
       reasons (`SELECT DISTINCT tenant_id`, and an admin bypass) and the deviation it creates.
-- [ ] **Step 3:** State what F5 ships versus what the gap defers, and what the dashboard must do
+- [x] **Step 3:** State what F5 ships versus what the gap defers, and what the dashboard must do
       until then.
-- [ ] **Step 4:** Commit `docs(f5): a signed-in operator acquires a tenant, or the Data screen says so`.
+- [x] **Step 4:** Commit `docs(f5): a signed-in operator acquires a tenant, or the Data screen says so`.
 
 ### Task 2: §2.2 correction — the simulator returns a predicate, not a row decision
 
@@ -114,14 +130,14 @@ that says why; `ManagementPolicyVerdict.Allowed` "is not 'this caller will see r
 `management-api.md` §"The record-id arm of the simulator" is the correction's home and the design
 still carries the superseded sentence *"optionally a record id"*.
 
-- [ ] **Step 1:** Replace *"optionally a record id"* with the shipped shape and mark the change as
+- [x] **Step 1:** Replace *"optionally a record id"* with the shipped shape and mark the change as
       a correction rather than editing it silently, on §2.1.1's own precedent.
-- [ ] **Step 2:** Write what a client may render: `Using` / `WithCheck` / `TenantScope`,
+- [x] **Step 2:** Write what a client may render: `Using` / `WithCheck` / `TenantScope`,
       `HiddenFields`, `ReadOnlyFields`, `DenyReason`, and the four ways a caller actually gets 403.
-- [ ] **Step 3:** State the rule the drawing broke — a client that evaluates a stored row itself is
+- [x] **Step 3:** State the rule the drawing broke — a client that evaluates a stored row itself is
       a second policy evaluator, which §6.3 criterion 4 forbids by construction — and give the
       honest affordance that replaces it.
-- [ ] **Step 4:** Commit.
+- [x] **Step 4:** Commit.
 
 ### Task 3: §3.7 — a second human under `providers: ["local"]`
 
@@ -134,14 +150,14 @@ and never resets a password; `host.md` — *"What they cannot do is sign in: not
 resolves `AlvoIdentity.ResolverKey`, no cookie authentication scheme is added, and there is no
 sign-in endpoint"*; `ManagementOperation.ManageUsers` is in the level table with no route.
 
-- [ ] **Step 1:** State the gap: with local auth nobody can sign in until an account exists, and
+- [x] **Step 1:** State the gap: with local auth nobody can sign in until an account exists, and
       only the bootstrap admin is seeded — so a local-auth project can never have a second
       administrator, and `IAlvoUserStore.ListAsync` returns one row forever.
-- [ ] **Step 2:** Decide where creation lives — on the port, or on the Identity package's own admin
+- [x] **Step 2:** Decide where creation lives — on the port, or on the Identity package's own admin
       surface — and say which, with the reason, and what `ManageUsers` gets as a route.
-- [ ] **Step 3:** Record U3 and U4 from the product review as known misses against the F5
+- [x] **Step 3:** Record U3 and U4 from the product review as known misses against the F5
       acceptance list, with their issues.
-- [ ] **Step 4:** Commit.
+- [x] **Step 4:** Commit.
 
 ### Task 4: §4.5 — three kinds of edit, one descriptor, one apply
 
@@ -152,33 +168,33 @@ sign-in endpoint"*; `ManagementOperation.ManageUsers` is in the level table with
 role *membership* is `IAlvoUserStore`, outside the descriptor; the role *catalogue* is
 `auth.roles`, inside it.
 
-- [ ] **Step 1:** Name the three kinds and where each lives: schema and rules and `auth.roles` are
+- [x] **Step 1:** Name the three kinds and where each lives: schema and rules and `auth.roles` are
       the descriptor; role membership is the identity store and applies at once.
-- [ ] **Step 2:** Decide: one working copy of the descriptor, one preview, one apply — and state
+- [x] **Step 2:** Decide: one working copy of the descriptor, one preview, one apply — and state
       what the preview shows for each kind, including that a rules-only or roles-only apply has an
       empty migration plan and why that is not "nothing happened".
-- [ ] **Step 3:** State the consequence for the UI: one pending count in the shell, one bar, one
+- [x] **Step 3:** State the consequence for the UI: one pending count in the shell, one bar, one
       preview grouped by kind, and membership visibly outside the queue.
-- [ ] **Step 4:** Commit.
+- [x] **Step 4:** Commit.
 
 ### Task 5: §0.2 and §4.2 — the deviations the reviewers upheld, and the routes that were drawn but never recorded
 
 **Files:** Modify: the design doc §0.2 (deviation table) and §4.2 (route map).
 
-- [ ] **Step 1:** Add the upheld deviations to §0.2 with their reasons: Schema above Data;
+- [x] **Step 1:** Add the upheld deviations to §0.2 with their reasons: Schema above Data;
       Access split by speed; no provider picker; the roles×operations matrix (distinguished from
       the rejected teams matrix); branch conditions with a raw fallback; the read-only model map;
       the API tab; the On-write tab; the Integrations page; the wizard creating no entity.
-- [ ] **Step 2:** Correct §4.2's **Access** row: membership lives in the identity store, the role
+- [x] **Step 2:** Correct §4.2's **Access** row: membership lives in the identity store, the role
       catalogue in the descriptor — not "users and roles LIVE".
-- [ ] **Step 3:** Add the three routes the drawing invented to the route map with their F5 status
+- [x] **Step 3:** Add the three routes the drawing invented to the route map with their F5 status
       and data source: Integrations, the entity API tab, Assistant-in-Settings.
-- [ ] **Step 4:** Correct the §4.2 **Settings** row: `ManageApiKeys` and `DeleteProject` have no
+- [x] **Step 4:** Correct the §4.2 **Settings** row: `ManageApiKeys` and `DeleteProject` have no
       route and `IApiKeyStore` is `FindAsync` + `TouchAsync`, so "API keys LIVE" and "danger zone
       LIVE" are both false; say what is actually reachable.
-- [ ] **Step 5:** Record in §6.4 that the assistant is out of F5, and why the drawn shape is kept
+- [x] **Step 5:** Record in §6.4 that the assistant is out of F5, and why the drawn shape is kept
       as a design.
-- [ ] **Step 6:** Commit, then run `scripts/test-ring0` to confirm nothing in the repository
+- [x] **Step 6:** Commit, then run `scripts/test-ring0` to confirm nothing in the repository
       depended on the prose.
 
 ---
@@ -197,24 +213,24 @@ role *membership* is `IAlvoUserStore`, outside the descriptor; the role *catalog
 **Interfaces produced:** `helpers.js` exports `open(page, route, {theme, width})`,
 `guardConsole(page)` and `MATRIX` (`[{theme:'light',width:1400}, …]`), used by every later spec.
 
-- [ ] **Step 1:** Copy `~/alvo-admin-prototype/` into `docs/design/f5-admin/`, dropping `alvo.css`,
+- [x] **Step 1:** Copy `~/alvo-admin-prototype/` into `docs/design/f5-admin/`, dropping `alvo.css`,
       `HANDOFF.md` and `PROMPT.md`; put the two reviews under `reviews/`.
-- [ ] **Step 2:** Point `index.html` at `../../../src/MMLib.Alvo.Admin/wwwroot/alvo.css` so exactly
+- [x] **Step 2:** Point `index.html` at `../../../src/MMLib.Alvo.Admin/wwwroot/alvo.css` so exactly
       one copy of the design system exists, and say so in `README.md` with the run instruction
       (`python3 -m http.server 8099` from the repository root).
-- [ ] **Step 3:** Write `tests/package.json` pinning `@playwright/test`, and
+- [x] **Step 3:** Write `tests/package.json` pinning `@playwright/test`, and
       `playwright.config.js` with a `webServer` running the static server at the repository root
       and `use.baseURL` naming `/docs/design/f5-admin/`.
-- [ ] **Step 4:** Write `helpers.js` with the console guard: collect `console.error`, `pageerror`
+- [x] **Step 4:** Write `helpers.js` with the console guard: collect `console.error`, `pageerror`
       and failed requests, and fail the test if any is non-empty.
-- [ ] **Step 5:** Write `smoke.spec.js` — every route in `NAV` plus `#/notes` opens, renders a
+- [x] **Step 5:** Write `smoke.spec.js` — every route in `NAV` plus `#/notes` opens, renders a
       non-empty `main`, and logs nothing.
-- [ ] **Step 6:** Write `scripts/test-prototype` (install if `node_modules` is absent, then
+- [x] **Step 6:** Write `scripts/test-prototype` (install if `node_modules` is absent, then
       `npx playwright test`), make it executable, and record in `CLAUDE.md`'s ring table that it is
       in no ring, with `scripts/test-load`'s reason.
-- [ ] **Step 7:** Run `scripts/test-prototype`. Expect the smoke spec to fail on whatever the
+- [x] **Step 7:** Run `scripts/test-prototype`. Expect the smoke spec to fail on whatever the
       relocation broke; fix until green.
-- [ ] **Step 8:** Commit.
+- [x] **Step 8:** Commit.
 
 ### Task 7: generate the capability fixtures instead of authoring them
 
@@ -229,20 +245,20 @@ role *membership* is `IAlvoUserStore`, outside the descriptor; the role *catalog
 `src/MMLib.Alvo/Descriptor/Internal/UnhonouredSubsystems.cs`,
 `src/MMLib.Alvo/Management/Internal/CapabilityReport.cs`.
 
-- [ ] **Step 1:** Write the generator so `refused` carries all eleven slots in `EveryRefusal`'s
+- [x] **Step 1:** Write the generator so `refused` carries all eleven slots in `EveryRefusal`'s
       order — `field.validation`, `field.default`, `entity.softDelete`, `rollup.where`,
       `trigger.event`, `JSONata`, `email.data`, `bodyFile`, `function`, `http.call`,
       `entity.update` — each with `consequence` and `fix` byte-for-byte.
-- [ ] **Step 2:** Have it emit `warned` from `UnhonouredSubsystems.All` (five blocks, in order) and
+- [x] **Step 2:** Have it emit `warned` from `UnhonouredSubsystems.All` (five blocks, in order) and
       `honoured` from `CapabilityReport.Honoured`.
-- [ ] **Step 3:** Have it write a header naming the source file and line of every value, and a
+- [x] **Step 3:** Have it write a header naming the source file and line of every value, and a
       `GENERATED — do not edit` line.
-- [ ] **Step 4:** Add a check mode (`--check`) that regenerates into a temp file and diffs, so a
+- [x] **Step 4:** Add a check mode (`--check`) that regenerates into a temp file and diffs, so a
       later drift is a red script rather than a stale drawing.
-- [ ] **Step 5:** Run it; assert in a new `tests/capabilities.spec.js` that the Overview's warned
+- [x] **Step 5:** Run it; assert in a new `tests/capabilities.spec.js` that the Overview's warned
       list is the intersection of `warned` with the descriptor's declared blocks (for
       field-service: empty) and that every refused slot the UI shows matches the fixture exactly.
-- [ ] **Step 6:** Commit.
+- [x] **Step 6:** Commit.
 
 ### Task 8: generate the descriptor, and the facets, from the frozen sources
 
@@ -251,17 +267,17 @@ role *membership* is `IAlvoUserStore`, outside the descriptor; the role *catalog
 - Create: `docs/design/f5-admin/generated/descriptor.js`, `…/generated/schema-facets.js`
 - Modify: `docs/design/f5-admin/data.js` → `sample-rows.js` (records only)
 
-- [ ] **Step 1:** Have the generator copy `examples/field-service/field-service.alvo.json`
+- [x] **Step 1:** Have the generator copy `examples/field-service/field-service.alvo.json`
       verbatim into `descriptor.js` as `export const APPLIED_DESCRIPTOR = { … }`.
-- [ ] **Step 2:** Have it derive `schema-facets.js` from `$defs/field`: the eleven types from
+- [x] **Step 2:** Have it derive `schema-facets.js` from `$defs/field`: the eleven types from
       `$defs/fieldType.enum`, the `needs` list from each `if/then` `required`, the `optional` list
       from each `if not/then properties:false` block, and the built-in formats from
       `field.format.anyOf[0].enum` (`email`, `uri`, `phone`) — never a hand-written `url`.
-- [ ] **Step 3:** Reduce `data.js` to sample rows, users, revisions and palette items, and rename
+- [x] **Step 3:** Reduce `data.js` to sample rows, users, revisions and palette items, and rename
       it `sample-rows.js`; delete the "every value is taken from the repository verbatim" header,
       which was false, and replace it with what the file actually is.
-- [ ] **Step 4:** Rename the tenants so neither shares a name with a customer (UX #15).
-- [ ] **Step 5:** Run the suite; commit.
+- [x] **Step 4:** Rename the tenants so neither shares a name with a customer (UX #15).
+- [x] **Step 5:** Run the suite; commit.
 
 ---
 
@@ -284,70 +300,70 @@ export const wc = {
 };
 ```
 
-- [ ] **Step 1:** Write a failing test `tests/working-copy.spec.js`: edit a field's `precision` on
+- [x] **Step 1:** Write a failing test `tests/working-copy.spec.js`: edit a field's `precision` on
       Schema, then assert the shell's pending count reads 1, the Rules screen's bar reads the same
       1, and Preview lists that one change under **Schema**.
-- [ ] **Step 2:** Run it; expect three separate counters and a preview that lists nothing.
-- [ ] **Step 3:** Implement `working-copy.js` as a JSON-pointer diff over two plain objects,
+- [x] **Step 2:** Run it; expect three separate counters and a preview that lists nothing.
+- [x] **Step 3:** Implement `working-copy.js` as a JSON-pointer diff over two plain objects,
       classifying each pointer: `/entities/*/fields/*` and `/entities/*/indexes` → schema,
       `/entities/*/rules/*` → rules, `/auth/roles` → roles.
-- [ ] **Step 4:** Replace `state.pending`, `ruleChanges()` and `catalogChanged` with `wc`
+- [x] **Step 4:** Replace `state.pending`, `ruleChanges()` and `catalogChanged` with `wc`
       throughout `app.js`; delete the three pending bars and render one.
-- [ ] **Step 5:** Run; commit.
+- [x] **Step 5:** Run; commit.
 
 ### Task 10: the descriptor pane shows the working copy
 
 **Files:** Modify `app.js` (`descriptorJson`, `fieldObject`, the entity screen aside).
 
-- [ ] **Step 1:** Write a failing test: change `quoted_price.precision` from 10 to 12; assert the
+- [x] **Step 1:** Write a failing test: change `quoted_price.precision` from 10 to 12; assert the
       pane's header reads `working copy · 1 change vs r7`, that the line containing `"precision"`
       carries the changed marker, and that the pane text contains `12`.
-- [ ] **Step 2:** Delete `fieldObject()` as the pane's source and render
+- [x] **Step 2:** Delete `fieldObject()` as the pane's source and render
       `JSON.stringify(wc.working, null, 2)` instead, so nothing the descriptor carries is dropped
       — `nullable`, `index`, `renamedFrom`, `default`, `validation`, entity `storage`, `realtime`,
       `renamedFrom`, index `unique`, and any `x-` key all survive by construction (U1).
-- [ ] **Step 3:** Compute the gutter from `wc.markedLines()`, and put a changed dot on each edited
+- [x] **Step 3:** Compute the gutter from `wc.markedLines()`, and put a changed dot on each edited
       field row in the list.
-- [ ] **Step 4:** Make the export modal serve `wc.applied` for "as applied" and `wc.working` for
+- [x] **Step 4:** Make the export modal serve `wc.applied` for "as applied" and `wc.working` for
       "as it will be sent", each labelled, since `DescriptorJson` is the export and not a
       re-serialisation.
-- [ ] **Step 5:** Run; commit.
+- [x] **Step 5:** Run; commit.
 
 ### Task 11: one preview, grouped by kind, with an honest plan
 
 **Files:** Modify `app.js` (`screenPreview`).
 
-- [ ] **Step 1:** Write a failing test: make one schema edit, one rule edit and one role-catalogue
+- [x] **Step 1:** Write a failing test: make one schema edit, one rule edit and one role-catalogue
       edit; assert Preview shows three groups with one row each, and that the migration plan
       section says in so many words that the rules and roles changes produce no migration step.
-- [ ] **Step 2:** Render the three groups from `wc.changes()`, each with its own diff.
-- [ ] **Step 3:** Render the migration plan for the schema group only, and carry
+- [x] **Step 2:** Render the three groups from `wc.changes()`, each with its own diff.
+- [x] **Step 3:** Render the migration plan for the schema group only, and carry
       `ManagementPlanSummary`'s own distinction: `isEmpty` is *the descriptor changes nothing about
       the schema*, which is not *nothing was applied*.
-- [ ] **Step 4:** Add the destructive path: when a step discards data, the confirm requires the
+- [x] **Step 4:** Add the destructive path: when a step discards data, the confirm requires the
       entity name typed and lists what is lost, and `allowDestructive` is never implied by having
       previewed.
-- [ ] **Step 5:** Run; commit.
+- [x] **Step 5:** Run; commit.
 
 ### Task 12: apply, conflict, rollback
 
 **Files:** Modify `app.js` (apply flow, `screenHistory`).
 
-- [ ] **Step 1:** Write a failing test: apply; assert the revision advances, the pending count
+- [x] **Step 1:** Write a failing test: apply; assert the revision advances, the pending count
       falls to 0, the pane's header stops saying "working copy", and History's top row carries the
       typed reason and the signed-in author.
-- [ ] **Step 2:** Add the Reason field to the apply confirm (`ManagementApplyRequest.Author`/
+- [x] **Step 2:** Add the Reason field to the apply confirm (`ManagementApplyRequest.Author`/
       `Reason` are what History renders, U5).
-- [ ] **Step 3:** Add the 412 state: a "somebody else applied revision 8 while you were editing"
+- [x] **Step 3:** Add the 412 state: a "somebody else applied revision 8 while you were editing"
       panel offering re-preview against the new base, rendered as the structured error component
       and not a toast.
-- [ ] **Step 4:** Add the 428 note where `If-Match` is explained, and the `developer`-on-Preview
+- [x] **Step 4:** Add the 428 note where `If-Match` is explained, and the `developer`-on-Preview
       state: Apply disabled with the reason, because a `developer` may not apply a descriptor whose
       `access` block differs from the applied one.
-- [ ] **Step 5:** Make History compare any two revisions, not only against the head, and keep the
+- [x] **Step 5:** Make History compare any two revisions, not only against the head, and keep the
       typed-name confirmation on restore. Fix `rolledBackFrom` to mean *the revision this one
       restored* and render it without arithmetic.
-- [ ] **Step 6:** Run; commit.
+- [x] **Step 6:** Run; commit.
 
 ---
 
@@ -355,118 +371,118 @@ export const wc = {
 
 ### Task 13: the field editor stops covering the pane it annotates
 
-- [ ] **Step 1:** Failing test: open a field at 1400 px; assert the descriptor pane is visible and
+- [x] **Step 1:** Failing test: open a field at 1400 px; assert the descriptor pane is visible and
       not overlapped (bounding boxes do not intersect).
-- [ ] **Step 2:** Move field editing into the right column above the pane, with that field's
+- [x] **Step 2:** Move field editing into the right column above the pane, with that field's
       fragment live beneath it; keep a drawer only below 1100 px, full-width.
-- [ ] **Step 3:** Show the type-change warning on a *changed* type, never permanently.
-- [ ] **Step 4:** Render the refused facets as inert controls carrying the generated refusal text:
+- [x] **Step 3:** Show the type-change warning on a *changed* type, never permanently.
+- [x] **Step 4:** Render the refused facets as inert controls carrying the generated refusal text:
       `field.default`, `field.validation` on a field; `entity.softDelete` on an entity;
       `rollup.where` inside a rollup.
-- [ ] **Step 5:** Add the missing editors the honoured features need: `computed`, `rollup`,
+- [x] **Step 5:** Add the missing editors the honoured features need: `computed`, `rollup`,
       `index`, and state once that `index: true` and an `indexes` entry are the same thing.
-- [ ] **Step 6:** Run; commit.
+- [x] **Step 6:** Run; commit.
 
 ### Task 14: the simulator renders a verdict, and evaluates nothing
 
 **Files:** Create `policy.js`; modify `app.js` (`screenRules`, delete `evaluate()`,
 `holdsCondition()`).
 
-- [ ] **Step 1:** Failing test: pick a technician and `list` on `work_orders`; assert the screen
+- [x] **Step 1:** Failing test: pick a technician and `list` on `work_orders`; assert the screen
       shows the `Using` CEL, says the result is *a shorter list, not an error*, and that no
       per-record allowed/refused badge exists anywhere on the screen.
-- [ ] **Step 2:** Write `policy.js` to produce `ManagementPolicyVerdict`'s shape from the working
+- [x] **Step 2:** Write `policy.js` to produce `ManagementPolicyVerdict`'s shape from the working
       copy's rules: `Allowed`, `DenyReason`, `Using`, `WithCheck`, `TenantScope`, `HiddenFields`,
       `ReadOnlyFields` — and the four 403 causes, in `PolicyEngine.Resolve`'s order.
-- [ ] **Step 3:** Delete `evaluate()` and `holdsCondition()`; replace "Try it on someone" with
+- [x] **Step 3:** Delete `evaluate()` and `holdsCondition()`; replace "Try it on someone" with
       "open a row as yourself and compare", which is the only honest affordance a client holds.
-- [ ] **Step 4:** Say, where the simulator runs against unapplied rules, that callers still get the
+- [x] **Step 4:** Say, where the simulator runs against unapplied rules, that callers still get the
       applied revision.
-- [ ] **Step 5:** State per operation what "the record" means, and that hooks say `new.`/`old.`
+- [x] **Step 5:** State per operation what "the record" means, and that hooks say `new.`/`old.`
       while rules say the bare field.
-- [ ] **Step 6:** Run; commit.
+- [x] **Step 6:** Run; commit.
 
 ### Task 15: Data is honest about the tenant, and about paging
 
-- [ ] **Step 1:** Failing test: open `#/data/customers` as a signed-in operator with no tenant;
+- [x] **Step 1:** Failing test: open `#/data/customers` as a signed-in operator with no tenant;
       assert the screen refuses with the tenant-guard reason rather than showing rows, and that the
       route to acquiring one (§2.7) is on the screen.
-- [ ] **Step 2:** Implement §2.7's decision as drawn; make `regions` (global) browsable throughout.
-- [ ] **Step 3:** Replace *"page 900 costs what page 1 costs"* with the measured claim —
+- [x] **Step 2:** Implement §2.7's decision as drawn; make `regions` (global) browsable throughout.
+- [x] **Step 3:** Replace *"page 900 costs what page 1 costs"* with the measured claim —
       stable under concurrent writes — and remove **Previous** or mark it client-side history.
-- [ ] **Step 4:** Make the filter-over-a-hidden-field error indistinguishable from an unknown key,
+- [x] **Step 4:** Make the filter-over-a-hidden-field error indistinguishable from an unknown key,
       and use only slugs in `AlvoProblemTypes.All`; a unique collision is `409 conflict` with
       violation code `unique`.
-- [ ] **Step 5:** Sort the sample curl by a required column and say why.
-- [ ] **Step 6:** Add a column chooser mapped to `select=`, and the loading and empty states.
-- [ ] **Step 7:** Run; commit.
+- [x] **Step 5:** Sort the sample curl by a required column and say why.
+- [x] **Step 6:** Add a column chooser mapped to `select=`, and the loading and empty states.
+- [x] **Step 7:** Run; commit.
 
 ### Task 16: the record form
 
-- [ ] **Step 1:** Failing test: open New record on `work_orders`; assert no error is visible before
+- [x] **Step 1:** Failing test: open New record on `work_orders`; assert no error is visible before
       typing, that `access_code` (required + hidden) is on the form with its explanation, that
       `internal_notes` (hidden, optional) is on the form too, that `assigned_to` (uuid) is a plain
       input and not a person picker, and that both ref pickers start collapsed.
-- [ ] **Step 2:** Rebuild `recordForm()` from the working copy's fields, excluding only
+- [x] **Step 2:** Rebuild `recordForm()` from the working copy's fields, excluding only
       `readOnly` / `computed` / `rollup`.
-- [ ] **Step 3:** Put each error inline at its field, from an RFC 9457 `violations` entry, and keep
+- [x] **Step 3:** Put each error inline at its field, from an RFC 9457 `violations` entry, and keep
       it until fixed.
-- [ ] **Step 4:** Make the ref picker say what it searches, and stop naming a `displayField` the
+- [x] **Step 4:** Make the ref picker say what it searches, and stop naming a `displayField` the
       schema does not have.
-- [ ] **Step 5:** Run; commit.
+- [x] **Step 5:** Run; commit.
 
 ### Task 17: nothing is drawn live that is not live
 
-- [ ] **Step 1:** Failing test: walk every `button` and `[data-act]` on every route; assert each is
+- [x] **Step 1:** Failing test: walk every `button` and `[data-act]` on every route; assert each is
       either wired (clicking changes the DOM or the route) or carries `disabled` plus a reason.
-- [ ] **Step 2:** Wire or disable: Hooks Edit / Add a hook, Indexes Add / Remove, API Open
+- [x] **Step 2:** Wire or disable: Hooks Edit / Add a hook, Indexes Add / Remove, API Open
       reference / Download OpenAPI, the reorder handle, the Filter fields input.
-- [ ] **Step 3:** Integrations: serve `WARNED.webhooks` and `WARNED.templates` verbatim, once, and
+- [x] **Step 3:** Integrations: serve `WARNED.webhooks` and `WARNED.templates` verbatim, once, and
       make New endpoint / New template inert carrying the refusals they would produce.
-- [ ] **Step 4:** Settings: remove the engine badge in all three places and show `dataProvider`;
+- [x] **Step 4:** Settings: remove the engine badge in all three places and show `dataProvider`;
       remove key issuance and revocation, which no store supports, and show what
       `ApiKeyRecord` actually carries — `User`, `RoleNames`, `Tenant`, `ExpiresAt`, `RevokedAt` —
       with the note that **roles**, not scopes, decide management reach.
-- [ ] **Step 5:** Fix the sample hooks: `!has(old.completed_on)` rather than `== null`, and a
+- [x] **Step 5:** Fix the sample hooks: `!has(old.completed_on)` rather than `== null`, and a
       mutate the `Mutate` profile admits.
-- [ ] **Step 6:** Run; commit.
+- [x] **Step 6:** Run; commit.
 
 ### Task 18: Access
 
-- [ ] **Step 1:** Failing test: declare a role, assert it sits unapplied in the same one pending
+- [x] **Step 1:** Failing test: declare a role, assert it sits unapplied in the same one pending
       count, apply it, assign it, and assert the person's level changes.
-- [ ] **Step 2:** Give "Who may use this dashboard" an editor over `access.admin`/`developer`/
+- [x] **Step 2:** Give "Who may use this dashboard" an editor over `access.admin`/`developer`/
       `viewer`, compiled against the `Access` profile's closed construct set.
-- [ ] **Step 3:** Stop offering `authenticated` as assignable; confirm before granting `admin`;
+- [x] **Step 3:** Stop offering `authenticated` as assignable; confirm before granting `admin`;
       offer "Declare <name>" from the inert-role warning.
-- [ ] **Step 4:** Show `IsDisabled`; drop "Last seen" and display names no port supplies; add
+- [x] **Step 4:** Show `IsDisabled`; drop "Last seen" and display names no port supplies; add
       search and paging over people, and say the port has neither yet.
-- [ ] **Step 5:** Compute the ladder from applied rules, or badge a draft-derived fact.
-- [ ] **Step 6:** Say on the sign-in screen, and on Access, what happens to a caller who matches no
+- [x] **Step 5:** Compute the ladder from applied rules, or badge a draft-derived fact.
+- [x] **Step 6:** Say on the sign-in screen, and on Access, what happens to a caller who matches no
       level — listing the three predicates.
-- [ ] **Step 7:** Run; commit.
+- [x] **Step 7:** Run; commit.
 
 ### Task 19: keyboard and focus
 
-- [ ] **Step 1:** Failing test: ⌘K, type, ArrowDown, Enter — the route changes; Esc returns focus
+- [x] **Step 1:** Failing test: ⌘K, type, ArrowDown, Enter — the route changes; Esc returns focus
       to the trigger; Tab from the drawer's first control never leaves it.
-- [ ] **Step 2:** Focus the palette input on open (after insertion, not via `autofocus`); wire
+- [x] **Step 2:** Focus the palette input on open (after insertion, not via `autofocus`); wire
       Up/Down/Enter and filter.
-- [ ] **Step 3:** Give every drawer `role="dialog"` + `aria-modal`, a focus trap and focus return.
-- [ ] **Step 4:** Make `role="switch"`/`role="checkbox"` spans focusable and Space/Enter operable;
+- [x] **Step 3:** Give every drawer `role="dialog"` + `aria-modal`, a focus trap and focus return.
+- [x] **Step 4:** Make `role="switch"`/`role="checkbox"` spans focusable and Space/Enter operable;
       make `tr[data-act]` rows reachable.
-- [ ] **Step 5:** Add `j`/`k`, `/`, `g`+letter, and Enter-to-open.
-- [ ] **Step 6:** Run; commit.
+- [x] **Step 5:** Add `j`/`k`, `/`, `g`+letter, and Enter-to-open.
+- [x] **Step 6:** Run; commit.
 
 ### Task 20: the missing states
 
-- [ ] **Step 1:** Failing test at `#/schema` with no entities: an empty state that says what to do
+- [x] **Step 1:** Failing test at `#/schema` with no entities: an empty state that says what to do
       next, and a New entity control.
-- [ ] **Step 2:** Entity with no rules: a callout saying default-deny refuses everyone.
-- [ ] **Step 3:** Entity bar past eight entities: typeahead; model map: selected entity ± 1 hop.
-- [ ] **Step 4:** Apply failure and dry-run refusal states, rendered as the structured error block.
-- [ ] **Step 5:** Long CEL, long enum lists, a 12-role sentence collapsing past four.
-- [ ] **Step 6:** Run; commit.
+- [x] **Step 2:** Entity with no rules: a callout saying default-deny refuses everyone.
+- [x] **Step 3:** Entity bar past eight entities: typeahead; model map: selected entity ± 1 hop.
+- [x] **Step 4:** Apply failure and dry-run refusal states, rendered as the structured error block.
+- [x] **Step 5:** Long CEL, long enum lists, a 12-role sentence collapsing past four.
+- [x] **Step 6:** Run; commit.
 
 ---
 
@@ -477,33 +493,33 @@ separately: **works** (no dead control, no thrown error, the state changed), **l
 (nothing clipped or overlapping, no visible placeholder, both themes), **usable** (the move count
 is asserted against a stated budget, and the copy that explains what happened is asserted by text).
 
-- [ ] **Task 21:** `01-first-run.spec.js` — empty instance, sign in as the bootstrap administrator,
+- [x] **Task 21:** `01-first-run.spec.js` — empty instance, sign in as the bootstrap administrator,
       name the project, land somewhere useful with no entities.
-- [ ] **Task 22:** `02-model-a-domain.spec.js` — create `invoices`; a string with a format, a
+- [x] **Task 22:** `02-model-a-domain.spec.js` — create `invoices`; a string with a format, a
       decimal, an enum, a date, a `ref` to `customers`; preview; apply; then a `count` rollup on
       `customers`.
-- [ ] **Task 23:** `03-safe-then-unsafe.spec.js` — widen a decimal; then change a field's type on
+- [x] **Task 23:** `03-safe-then-unsafe.spec.js` — widen a decimal; then change a field's type on
       an entity with rows and confirm the destructive path asks for the entity name and says what
       is lost.
-- [ ] **Task 24:** `04-publish-one-endpoint.spec.js` — `anon` on `regions` read, the warning, the
+- [x] **Task 24:** `04-publish-one-endpoint.spec.js` — `anon` on `regions` read, the warning, the
       preview, the apply, and the revert.
-- [ ] **Task 25:** `05-layered-permission.spec.js` — dispatchers may change any work order; the
+- [x] **Task 25:** `05-layered-permission.spec.js` — dispatchers may change any work order; the
       assigned technician may change theirs while it is not completed. Build it, read it in the
       simulator, then open the technician in Access and assert the ladder says the same thing.
-- [ ] **Task 26:** `06-diagnose-a-refusal.spec.js` — "why can Peter not see WO-100419" — reach the
+- [x] **Task 26:** `06-diagnose-a-refusal.spec.js` — "why can Peter not see WO-100419" — reach the
       answer and assert the answer is the true one (a row-level exclusion on `get` is a 404, and on
       `list` it is a shorter page).
-- [ ] **Task 27:** `07-declare-and-use-a-role.spec.js` — new role, unapplied, applied, assigned,
+- [x] **Task 27:** `07-declare-and-use-a-role.spec.js` — new role, unapplied, applied, assigned,
       level changes.
-- [ ] **Task 28:** `08-record-crud.spec.js` — create a work order through the ref picker and the
+- [x] **Task 28:** `08-record-crud.spec.js` — create a work order through the ref picker and the
       required hidden field; hit a unique violation; fix it; open the detail; follow the reverse
       relation.
-- [ ] **Task 29:** `09-roll-back.spec.js` — compare two revisions, restore the older one with the
+- [x] **Task 29:** `09-roll-back.spec.js` — compare two revisions, restore the older one with the
       typed confirmation.
-- [ ] **Task 30:** `10-honest-edges.spec.js` — Integrations' unsigned deliveries and unused
+- [x] **Task 30:** `10-honest-edges.spec.js` — Integrations' unsigned deliveries and unused
       template, Automations and Functions as *not yet*, a refused facet in the field editor, and
       the capability panel intersected with the descriptor.
-- [ ] **Task 31:** `11-responsive.spec.js` — every route at 375 px: no horizontal scroll, the
+- [x] **Task 31:** `11-responsive.spec.js` — every route at 375 px: no horizontal scroll, the
       matrix reachable, the bottom bar holding only live entries.
 
 Each task: write the spec, run it, fix the prototype until it passes at all four matrix cells,
@@ -513,10 +529,10 @@ screenshot the states worth seeing into `docs/design/f5-admin/tests/screenshots/
 
 # Phase 6 — close
 
-- [ ] **Task 32:** Rewrite `#/notes` from `notes.js` so it records the decisions actually made,
+- [x] **Task 32:** Rewrite `#/notes` from `notes.js` so it records the decisions actually made,
       including every reviewer finding rejected and why.
-- [ ] **Task 33:** Write `~/alvo-admin-prototype/SESSION.md` (and a copy at
+- [x] **Task 33:** Write `~/alvo-admin-prototype/SESSION.md` (and a copy at
       `docs/design/f5-admin/SESSION.md`): what changed, what was decided and on what grounds, what
       could not be done and why, what the next session takes.
-- [ ] **Task 34:** Run `scripts/test-ring0`, `scripts/test-ring1`, `scripts/test-prototype`; freeze
+- [x] **Task 34:** Run `scripts/test-ring0`, `scripts/test-ring1`, `scripts/test-prototype`; freeze
       the tree; dispatch `alvo-plan-guard`; build the PR report via `alvo-pr-report`; open the PR.

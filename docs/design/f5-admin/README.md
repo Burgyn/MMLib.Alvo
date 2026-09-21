@@ -65,3 +65,21 @@ existed that the frozen schema refuses, and the engine was named in three places
 cannot report one. That is why `generated/` exists and why nothing in it is hand-written.
 
 Run `scripts/gen-prototype-fixtures --check` to prove it has not drifted.
+
+## What has to be deleted with it
+
+This prototype **retires when the Razor dashboard lands**, and three things retire with it. They
+are listed here because two of them are wired into CI, and a generator for a directory that no
+longer exists blocks a PR that has nothing to do with any of this:
+
+| What | Where | Why it cannot be left behind |
+|---|---|---|
+| `scripts/gen-prototype-fixtures` | `scripts/` | it reads `src/` and writes `docs/design/f5-admin/generated/` |
+| the `Prototype fixtures are not stale` step | `.github/workflows/ci.yml`, the `scripts` job | it is inside the **required** `Build & test` gate, so it fails a PR that never touched the prototype |
+| the `Design prototype scenarios` job | `.github/workflows/ci.yml` | paths-filtered and not required, so it would simply stop running — but it would also stop being read |
+| `scripts/test-prototype` and this directory | — | the suite and the drawing themselves |
+
+The required step is deliberate while the prototype lives: rewording a refusal in
+`UnhonouredFeatures.cs` **should** fail a required check, because a drawing that quotes it verbatim
+has gone stale, and the fix is one command. It is exactly that property that makes it a thing to
+remove on purpose rather than a thing to discover.

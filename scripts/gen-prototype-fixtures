@@ -17,6 +17,12 @@ Sources, and nothing else:
   schema/project.schema.json                                   -> field types, facets, formats
   examples/field-service/field-service.alvo.json               -> the applied descriptor
 
+RETIRES WITH THE PROTOTYPE. `--check` runs inside the REQUIRED "Build & test" gate, so rewording a
+refusal in UnhonouredFeatures.cs fails a required check on a PR that never touched the drawing —
+which is the intent while the drawing exists, and a PR blocker the day it does not. When the Razor
+dashboard lands, this script, its CI step, scripts/test-prototype and docs/design/f5-admin all go
+together; docs/design/f5-admin/README.md carries the same list.
+
 Usage:
   scripts/gen-prototype-fixtures            write the files
   scripts/gen-prototype-fixtures --check    fail (exit 1) if what is on disk is stale

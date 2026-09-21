@@ -52,6 +52,7 @@ Stated here so a later reader can tell a decision from an oversight.
 | D5 | The drawn `Activity` screen is a system-wide event feed. This design ships it as **`Configuration history`** — the descriptor's append-only revisions. | Data-level audit is #42. `DescriptorVersion` (`Revision`/`CreatedAt`/`Author`/`Reason`/`RolledBackFrom`) is a real, complete audit trail of configuration, and it currently has no consumer anywhere in the product. §4.4. |
 | D6 | The drawing's light accent is `#128a52` on white text. This design uses `#0f7a48`. | Measured: `#128a52`/`#ffffff` is **4.39 : 1**, below WCAG AA's 4.5 : 1 for normal text, and the drawn primary buttons set 12.5–13 px — normal text, not large. `#0f7a48` is **5.39 : 1** and is already in the drawing's own palette as `--won-fg`, so the palette does not widen. §5.3. |
 | D7 | An API key's `scopes` gate every Data API request. They gate **no** Management API request: management admission is decided by the descriptor's `access` block and the bootstrap admin, on **roles alone**. | An `ApiKeyScope` is `<entity\|*>:<read\|write>`, so there is no spelling for "may manage this project" — the surface is not an entity and has no read/write pair. Inventing one would put a second authorization answer for configuration beside `access`, which is the divergence contract 4 exists to prevent, and it would mean a project's administrator could be locked out by a credential setting they do not edit. The consequence is stated rather than left implicit: **a key narrow enough to be refused by the Data API still reaches management if its roles match a level** — `ManagementAccessTests.A_key_scoped_to_one_entity_still_reaches_management_because_scopes_do_not_govern_configuration` pins it over the wire. #146's review recorded this as #212's question; this is the answer. Revisit if a management-shaped scope is ever wanted, and note it would then need a default for every key already issued. |
+| D8 | Spec §308 and §415 say the contract lint is *"Go binárka v CI (**žiadny Node**)"* / *"žiadny Node v pipeline"*, and `docs/PLAN.md` §3a repeats it. The F5 design prototype's scenario suite **is** Node. | Those sentences are about the **contract lint** — they exist so `vacuum` is a pinned Go binary rather than Spectral-on-npm, and that stays true: `scripts/ensure-vacuum` still resolves a checksum-verified Go binary and `scripts/lint-api` still runs it. What is added is a second thing in a second job: a browser-driven suite over a **drawing** (`docs/design/f5-admin`), which contains no .NET, produces no artifact anything ships, and cannot be written in the Go binary's language or in xUnit without standing up a browser from .NET anyway. It is paths-filtered, it is **outside** the required `Build & test` gate, and it retires with the prototype it drives. The sentence the sources were protecting — *the API contract lint does not depend on the npm ecosystem* — is untouched. Recorded here rather than left as a silent widening, because "no Node in the pipeline" is the kind of line a later reader will hold the repository to. |
 
 ---
 
@@ -564,20 +565,49 @@ The split follows the port's own line, which is worth keeping rather than crossi
 > external provider is the implementation's business — an OIDC-backed implementation has no
 > password to verify at all, and a port that demanded one would foreclose it."*
 
-**`IAlvoUserStore` gains creation of a membership row, and no credential.**
+**`IAlvoUserStore` is not touched. A second contract is added.**
+
+The two are different surfaces with different consumers, and conflating them was this section's
+first draft:
+
+| | `IAlvoUserStore` | `IAlvoUserAdministration` |
+|---|---|---|
+| consumer | `AlvoIdentityContextResolver`, on the **request path** | the dashboard and the CLI, on the **management path** |
+| gate | none — it is below the gate | `ManagementOperation.ManageUsers`, at `admin` |
+| shape | four read-shaped members | create, and the three writes below |
+| cost of widening | **every** implementer, including a read-only directory mirror that has nothing to create into | none — a deployment without the package simply has no routes |
+
+So the port every host already implements keeps its four members and its public surface, and the
+new contract lands beside `IAlvoManagement` in Abstractions:
 
 ```
+ValueTask<IReadOnlyList<AlvoUser>> ListAsync(UserQuery query, CancellationToken ct);
 ValueTask<AlvoUser> CreateAsync(string email, IReadOnlyList<string> roleNames, TenantId? tenant, CancellationToken ct);
-ValueTask SetDisabledAsync(UserId user, bool disabled, CancellationToken ct);
+ValueTask SetRolesAsync(UserId user, IReadOnlyList<string> roleNames, CancellationToken ct);
 ValueTask SetTenantAsync(UserId user, TenantId? tenant, CancellationToken ct);
+ValueTask SetDisabledAsync(UserId user, bool disabled, CancellationToken ct);
+ValueTask<CredentialSetToken> IssueCredentialTokenAsync(UserId user, CancellationToken ct);
 ```
 
-That is the same shape `SetRolesAsync` already has and it carries §2.7's grant, because a tenant is
-membership for the same reason a role name is. It is **not** an invitation and it is not a sign-up:
-it is the row an OIDC host wants to pre-provision so a colleague's first sign-in already carries
-their roles — which is the thing the current port cannot express either, and the half of D8 that
-was always missing rather than deliberate. A store that cannot create (a read-only directory
-mirror) refuses by name rather than returning `null`, on the port's fail-closed precedent.
+`CreateAsync` carries §2.7's tenant grant, because a tenant is membership for the same reason a
+role name is. It is **not** an invitation and it is not a sign-up: it is the row an OIDC host wants
+to pre-provision so a colleague's first sign-in already carries their roles — which is the thing
+the current port cannot express either, and the half of *no Invite* that was always missing rather
+than deliberate.
+
+**Every member may refuse by name, and that is what keeps the contract provider-agnostic.** A
+read-only directory mirror refuses `CreateAsync`; an OIDC-only deployment refuses
+`IssueCredentialTokenAsync`. Refusing by name rather than returning `null` is the port family's own
+fail-closed precedent, and it is the distinction that matters against `IAlvoUserStore`'s remark that
+*"no credential appears on this port"*: that sentence refuses a contract which **demands** a
+credential — verify this password, rotate that one — because an implementation with no passwords
+could not answer at all. A member that asks *"mint a set-password token if you have such a thing"*
+is a question an implementation may decline, and a deployment already knows which it is from
+`auth.providers`. The distinction is written here because it is the one an implementer will get
+wrong.
+
+**§6.1's contract test therefore reads "every member of `IAlvoUserAdministration` has a route",**
+and it holds unconditionally — a refused member still has a route, and the refusal is its answer.
 
 **The credential half belongs to `MMLib.Alvo.Identity`, and only `local` has one.** The package
 already holds `UserManager` — `AlvoIdentityBootstrap.CreateAsync` uses it — so the capability
@@ -623,25 +653,51 @@ is cheaper to widen a port nobody implements twice yet.
 
 #### Two rules that must be server-side, because the UI refusing them is decoration
 
-**U3 — nobody raises their own management level.** `SetRolesAsync` today has no such rule, and the
-dashboard drawing refuses it in JavaScript. It belongs in `IAlvoUserAdministration`'s
-implementation, beside the one that already exists: `AlvoManagementService` re-resolves a write to
-`admin` when the `access` block differs, and raises `ManagementEscalationException` — the same
-exception, the same rendering, for the same reason. A caller may not add themselves a role that
-raises the level `access` resolves for them.
+**U3 — nobody grants themselves anything, and the guard is in the CORE, not in an
+implementation.** The dashboard drawing refuses it in JavaScript, which is decoration; putting it
+inside `IAlvoUserAdministration`'s implementation would be barely better, because a rule enforced
+only inside a swappable adapter is **optional by construction** — the second implementation simply
+does not have it, and principles 2 and 5 both fail quietly. It goes exactly where the guard it
+resembles already is: at the head of the contract member in the **core's** management service,
+beside `EnsureMayChangeAccess`, raising the same `ManagementEscalationException`. And it is pinned
+the way the engine is pinned — a contract test in `MMLib.Alvo.Testing`, on
+`PolicyEngineContractTests`' precedent, that **every** implementation runs. A ring2 integration test
+against the one implementation that exists would measure the implementation, not the rule.
 
-**U4 — a role change is not recorded anywhere, and F5 ships it that way.** #42 is F7; there is no
-audit table and a half-audit here would be a second, thinner answer to the question #42 owns
-(`management-api.md` §"No log line, and no throttle"). Refusing role administration until #42 would
-make the product unusable, so the change ships and the **screen says plainly that nothing records
-it**. Filed against the F5 acceptance list as a known miss rather than left to be found.
+**It covers two grants, not one.** A caller may not add themselves a role that raises the level
+`access` resolves for them — and may not change their **own tenant**, which is the half with
+data-path consequence and the half an earlier draft of this section left out.
+
+**U3.1 — what a tenant grant actually costs, weighed rather than assumed.** `SetTenantAsync` is an
+`admin` operation, and an `admin` may grant one to themselves. Two facts settle whether that is a
+bypass:
+
+- **It creates no authority they did not already have.** An `admin` holds `ApplyDescriptor`, so
+  they can rewrite `entities.*.rules` to admit themselves to every row of every entity. The reach
+  is identical; only the route differs.
+- **The two routes are not equally visible, and the tenant grant is the quieter one.** An apply
+  appends a `DescriptorVersion` carrying `Author` and `Reason`, which Configuration history renders
+  forever. A membership change records nothing at all (U4). So the honest statement is not *"no new
+  authority, therefore fine"* — it is **the same authority by an unrecorded path**, and that is a
+  real cost that #42 closes and nothing before it does.
+
+Which is why the self-grant is refused rather than merely noted: it is the one case where refusing
+costs an administrator a second account and buys the difference between "they used the recorded
+route" and "nobody can tell". Granting a tenant to **somebody else** stays available and stays
+unrecorded, like every other membership change, and the screen says so.
+
+**U4 — a membership change is not recorded anywhere, and F5 ships it that way.** #42 is F7; there
+is no audit table and a half-audit here would be a second, thinner answer to the question #42 owns
+(`management-api.md` §"No log line, and no throttle"). Refusing membership administration until #42
+would make the product unusable, so the change ships and the **screen says plainly that nothing
+records it**. Filed against the F5 acceptance list as a known miss rather than left to be found.
 
 ### 3.8 What the drawing's "no Invite" decision becomes
 
 It said: *no Invite; people arrive by signing in.* Amended: **people arrive by signing in where an
-external identity provider can mint them, and are created here where none can.** The port gains
-membership creation for both cases; only `local` additionally needs a credential, and that stays
-inside the implementation that has one. The drawn Access screen therefore does gain a "New person"
+external identity provider can mint them, and are created here where none can.** A second contract
+carries membership creation for both cases; only `local` additionally needs a credential, and that
+member is one an OIDC implementation refuses by name. The drawn Access screen therefore does gain a "New person"
 control — and it is not the Invite defect the notes were right to catch, because it produces a real
 row through a real port member rather than a button with no output.
 
@@ -953,7 +1009,7 @@ mutants).
 | One path, two transports | contract: **every `IAlvoManagement` member has an HTTP route** | ring1 |
 | …and the same for user administration | contract: **every `IAlvoUserAdministration` member has an HTTP route** (§3.7) | ring1 |
 | An operator cannot choose a tenant they were not granted | integration: a session requesting a tenant the user's row does not name resolves to `null`, exactly as an API key does (§2.7) | ring2 |
-| Nobody raises their own management level | integration: `SetRolesAsync` adding a role that lifts the caller's own `access` level raises `ManagementEscalationException` (§3.7, U3) | ring2 |
+| Nobody grants themselves a role or a tenant | **contract test in `MMLib.Alvo.Testing`**, run by every `IAlvoUserAdministration` implementation — a guard living in one adapter is optional by construction (§3.7, U3) | ring0 |
 | No client evaluates a stored row | Playwright: the rules screen renders no per-record allowed/refused verdict at any width (§2.2.1) | prototype suite |
 | The simulator answers as production does | property: simulator verdict vs the Data API's actual response for the same `AlvoContext` | ring2 |
 | `access` is actually enforced | integration: a caller matching no level gets `403` on every management route | ring2 |
@@ -1015,7 +1071,12 @@ Deferred with their reason, so a later reader does not read absence as oversight
 
 ## 7. What this design requires of the milestone
 
-Three items are missing from F5 today and the plan does not hold without them.
+Five items are missing from F5 today and the plan does not hold without them. **Four of the five
+have no issue**, and a list nobody is accountable for is how debt accumulates — so the accountable
+sentence goes here rather than in a PR description that scrolls away: **filing them is the first
+task after the PR that adds this section merges**, and the row's "no issue exists" is replaced with
+the number in the same commit. They are deliberately not filed before the merge, because an issue
+citing a section of a design that is not on `main` cites nothing.
 
 | Item | Action |
 |---|---|
@@ -1023,7 +1084,7 @@ Three items are missing from F5 today and the plan does not hold without them.
 | **Identity + `IAlvoUserStore` + bootstrap admin** | **no issue exists** — must be filed, and blocks #146 and #227 |
 | **#146** (`access` enforcement + the fifth CEL profile) | currently F6; **move to F5**, ordered before #227 |
 | **An operator's tenant** (§2.7) | `AlvoUser.Tenant`, honoured by `AlvoIdentityContextResolver` on `TenantResolver`'s confirmation rule. **No issue exists** — must be filed. Blocks the Data screen for every scoped entity, which is two of the three in the example the product ships |
-| **`IAlvoUserAdministration`** (§3.7) | membership creation, tenant and disabled on the port; the credential half and the single-use set-password token in `MMLib.Alvo.Identity`; six routes; the self-promotion guard. **No issue exists** — must be filed. Blocks a `providers: ["local"]` project ever having a second person |
+| **`IAlvoUserAdministration`** (§3.7) | a **second** contract in Abstractions — `IAlvoUserStore` is untouched — implemented by `MMLib.Alvo.Identity`, six management routes at `admin`, the credential-set token, and the self-grant guard **in the core** with a `MMLib.Alvo.Testing` contract test. **No issue exists** — must be filed. Blocks a `providers: ["local"]` project ever having a second person |
 
 `#227`'s body must also be corrected: *"Blocked by: nothing. Can start today."* is no longer true.
 It is blocked by #146, which is blocked by the identity issue.
