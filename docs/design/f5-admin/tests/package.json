@@ -1,0 +1,13 @@
+{
+  "name": "alvo-f5-admin-prototype-tests",
+  "private": true,
+  "version": "0.0.0",
+  "description": "End-to-end scenarios over the F5 admin design prototype. Not shipped; not a package.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}

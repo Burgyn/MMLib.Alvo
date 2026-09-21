@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# The end-to-end scenarios over the F5 admin design prototype (docs/design/f5-admin).
+#
+# IN NO RING, for scripts/test-load's reason: the rings are `dotnet test` tiers, and this stands up
+# a browser and a static server over a design artifact that contains no .NET at all. It is a gate on
+# the drawing, not on the library — when the Razor dashboard lands, its suite is the
+# Microsoft.Playwright + xUnit one the F5 design §6.2 commits to, and this one retires with the
+# prototype it drives.
+#
+# Usage:
+#   scripts/test-prototype                 run every scenario in every matrix cell
+#   scripts/test-prototype 05-layered      run the specs whose filename matches
+#   scripts/test-prototype --ui            the Playwright inspector
+#
+# Requires node (>= 20) and python3. The first run downloads a headless Chromium into
+# ~/Library/Caches/ms-playwright (or ~/.cache/ms-playwright).
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+tests="$root/docs/design/f5-admin/tests"
+
+command -v node >/dev/null 2>&1 || { echo "test-prototype: node is not on PATH." >&2; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "test-prototype: python3 is not on PATH (it serves the files)." >&2; exit 1; }
+
+cd "$tests"
+
+if [ ! -d node_modules ]; then
+  echo "test-prototype: installing @playwright/test (first run)…"
+  npm install --no-audit --no-fund
+fi
+
+# `playwright install` is idempotent and quick once the browser is cached.
+npx --no-install playwright install chromium
+
+exec npx --no-install playwright test "$@"

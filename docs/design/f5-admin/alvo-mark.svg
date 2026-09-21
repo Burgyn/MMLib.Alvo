@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40" role="img" aria-label="Alvo">
+  <rect width="40" height="40" rx="9" fill="#262833"/>
+  <g stroke="#39E991" fill="none" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="13,13 20,20 13,27"/>
+    <line x1="22.5" y1="27" x2="30" y2="27"/>
+  </g>
+</svg>
