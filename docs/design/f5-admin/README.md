@@ -27,6 +27,14 @@ drift from the thing it claims to be.
 Routes are hash-based. `#/notes` is the decision log — every deliberate choice with its reason,
 including the review findings that were rejected and why.
 
+**The static server publishes the whole checkout, `.git` included**, because that is what serving
+one `alvo.css` from `src/` costs. It binds `127.0.0.1` and `http.server` sends no CORS header, so
+it is not reachable from another machine or readable from another origin — but it is what would
+make an XSS in this page serious rather than cosmetic, which is why the page treats an imported
+descriptor as untrusted input and why `14-hostile-descriptor.spec.js` exists. Do not bind it to
+`0.0.0.0`, and note that `reuseExistingServer` means a local run attaches to whatever already
+holds port 8099.
+
 ## Test it
 
 ```bash

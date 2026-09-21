@@ -24,6 +24,7 @@ import {
   renderLines, plan as planBetween, apply as applyWorking, restore as restoreRevision,
   discard as discardWorking, reset as resetWorking, startEmpty, KINDS,
 } from './working-copy.js';
+import { safeName, isValidName, INVALID_NAME } from './working-copy.js';
 import { verdict, OPERATIONS, CAUSES, outcomeOfFailingUsing, ALLOWED_MEANS } from './policy.js';
 import { TENANTS, USERS, BOOTSTRAP, BUILTIN_ROLES, ROWS, ROW_COUNTS, INFO, PALETTE_ITEMS, GOTO } from './sample-rows.js';
 import { DECISIONS, REJECTED, OPEN_QUESTIONS, COMPONENTS } from './notes.js';
@@ -66,7 +67,11 @@ const state = {
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+/* `'` and a backtick are escaped too. Nothing today puts an interpolated value inside a
+   single-quoted attribute, so they are not exploitable — and a sanitiser whose safety depends on
+   the next author knowing that is not a sanitiser. */
+const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;' };
+const esc = (s) => String(s ?? '').replace(/[&<>"'`]/g, (c) => ESCAPES[c]);
 const num = (n) => Number(n).toLocaleString('en-US');
 const eur = (n) => Number(n).toLocaleString('en-US', { style: 'currency', currency: 'EUR' });
 const titleCase = (s) => String(s).replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
@@ -110,7 +115,7 @@ const warning = (block) => CAPABILITIES.warned.find((w) => w.block === block)?.c
 function refusedControl(slot, label, placeholder = '') {
   const r = refusal(slot);
   if (!r) return '';
-  return `<div data-refused="${slot}">
+  return `<div data-refused="${esc(slot)}">
     <div class="a-refused">
       <span class="a-label">${esc(label)}</span>
       <input class="a-input" placeholder="${esc(placeholder)}" disabled aria-describedby="why-${slot.replace(/\W/g, '-')}"></div>
@@ -155,7 +160,7 @@ const inertRolesOf = (id) => {
   return membershipOf(id).roleNames.filter((r) => !declared.has(r));
 };
 
-const namesRole = (cel, role) => typeof cel === 'string' && cel.includes(`'${role}'`);
+const namesRole = (cel, role) => typeof cel === 'string' && cel.includes(`'${esc(role)}'`);
 
 /** The highest level whose predicate any minted role satisfies, or null. Bootstrap is separate. */
 function levelOf(id) {
@@ -255,13 +260,13 @@ function entityBar(active, base, trailing = '') {
   if (all.length > 8) {
     return `<div class="a-entitybar">
       <input class="a-input" style="max-width:240px" placeholder="Jump to an entity…" data-act="entityfind" list="entity-names" value="${esc(active)}" aria-label="Jump to an entity">
-      <datalist id="entity-names">${all.map((e) => `<option value="${e.name}">`).join('')}</datalist>
+      <datalist id="entity-names">${all.map((e) => `<option value="${esc(e.name)}">`).join('')}</datalist>
       <span class="p-muted">${all.length} entities</span>
       <span class="a-entitybar__add">${trailing}</span></div>`;
   }
   return `<div class="a-entitybar">
-    ${all.map((e) => `<button class="a-entitybar__item${e.name === active ? ' a-entitybar__item--on' : ''}" data-act="go" data-route="${base}/${e.name}">
-      ${e.name}<span class="a-entitybar__count">${e.fields.length}</span></button>`).join('')}
+    ${all.map((e) => `<button class="a-entitybar__item${e.name === active ? ' a-entitybar__item--on' : ''}" data-act="go" data-route="${base}/${esc(e.name)}">
+      ${esc(e.name)}<span class="a-entitybar__count">${e.fields.length}</span></button>`).join('')}
     <span class="a-entitybar__add">${trailing}</span>
   </div>`;
 }
@@ -369,11 +374,11 @@ function screenOverview() {
             <a class="a-btn a-btn--sm a-btn--ghost" style="margin-left:auto" href="#/schema">Open schema</a></div>
           ${list.map((e) => `<div class="a-row" style="align-items:flex-start;padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border)">
             <span style="flex:1;min-width:0">
-              <a style="font-family:var(--font-mono);font-size:var(--text-sm);font-weight:var(--weight-medium)" href="#/schema/${e.name}">${e.name}</a>
+              <a style="font-family:var(--font-mono);font-size:var(--text-sm);font-weight:var(--weight-medium)" href="#/schema/${esc(e.name)}">${esc(e.name)}</a>
               <span class="a-switcher-meta">${e.fields.length} fields · ${num(ROW_COUNTS[e.name] ?? 0)} records · ${e.tenancy}</span></span>
             <span class="p-hstack" style="flex:none">
-              <a class="a-btn a-btn--sm a-btn--ghost" href="#/data/${e.name}">Browse</a>
-              <a class="a-btn a-btn--sm a-btn--ghost" href="#/schema/${e.name}">Edit</a></span>
+              <a class="a-btn a-btn--sm a-btn--ghost" href="#/data/${esc(e.name)}">Browse</a>
+              <a class="a-btn a-btn--sm a-btn--ghost" href="#/schema/${esc(e.name)}">Edit</a></span>
           </div>`).join('')}
         </div>
 
@@ -448,14 +453,14 @@ function screenSchemaList() {
     </div></div>`;
   }
 
-  const rows = list.map((e) => `<tr data-act="go" data-route="#/schema/${e.name}" tabindex="0" style="cursor:pointer">
-      <td><span style="font-family:var(--font-mono);font-size:var(--text-sm);font-weight:var(--weight-medium)">${e.name}</span>
+  const rows = list.map((e) => `<tr data-act="go" data-route="#/schema/${esc(e.name)}" tabindex="0" style="cursor:pointer">
+      <td><span style="font-family:var(--font-mono);font-size:var(--text-sm);font-weight:var(--weight-medium)">${esc(e.name)}</span>
         <div class="p-muted" style="max-width:52ch">${esc(e.description.slice(0, 92))}${e.description.length > 92 ? '…' : ''}</div></td>
       <td><span class="a-badge${e.tenancy === 'global' ? '' : ' a-badge--accent'}">${e.tenancy}</span></td>
       <td class="a-num">${e.fields.length}</td>
       <td class="a-num">${num(ROW_COUNTS[e.name] ?? 0)}</td>
       <td>${hookCount(e) ? `<span class="a-badge">${hookCount(e)} hooks</span>` : '<span class="p-muted">—</span>'}</td>
-      <td>${e.fields.filter((f) => f.type === 'ref').map((f) => `<span class="a-badge">→ ${f.entity}</span>`).join(' ') || '<span class="p-muted">—</span>'}</td>
+      <td>${e.fields.filter((f) => f.type === 'ref').map((f) => `<span class="a-badge">→ ${esc(f.entity)}</span>`).join(' ') || '<span class="p-muted">—</span>'}</td>
     </tr>`).join('');
 
   return `${header([{ label: 'Schema' }], `
@@ -469,8 +474,8 @@ function screenSchemaList() {
       <table class="a-grid">
         <thead><tr><th>Entity</th><th>Tenancy</th><th class="a-num">Fields</th><th class="a-num">Records</th><th>On write</th><th>Points at</th></tr></thead>
         <tbody>${rows}</tbody></table>
-      ${list.map((e) => `<div class="a-row-card" data-act="go" data-route="#/schema/${e.name}" tabindex="0">
-        <div class="a-row-card__head"><span style="font-family:var(--font-mono)">${e.name}</span><span class="a-badge">${e.tenancy}</span></div>
+      ${list.map((e) => `<div class="a-row-card" data-act="go" data-route="#/schema/${esc(e.name)}" tabindex="0">
+        <div class="a-row-card__head"><span style="font-family:var(--font-mono)">${esc(e.name)}</span><span class="a-badge">${e.tenancy}</span></div>
         <div class="a-row-card__meta"><span>${e.fields.length} fields</span><span>${num(ROW_COUNTS[e.name] ?? 0)} records</span></div></div>`).join('')}
     </div>
 
@@ -543,15 +548,15 @@ function entityMap(focus = null) {
 
   const boxes = list.map((e) => {
     const b = box[e.name];
-    return `<g class="a-map__box" data-act="go" data-route="#/schema/${e.name}">
+    return `<g class="a-map__box" data-act="go" data-route="#/schema/${esc(e.name)}">
       <rect class="a-map__plate" x="${b.x}" y="${b.y}" width="${W}" height="${b.h}" rx="10"/>
       <path class="a-map__head" d="M${b.x} ${b.y + 10}a10 10 0 0 1 10-10h${W - 20}a10 10 0 0 1 10 10v${HEAD - 10}h-${W}z"/>
-      <text class="a-map__name" x="${b.x + 12}" y="${b.y + 17}">${e.name}</text>
+      <text class="a-map__name" x="${b.x + 12}" y="${b.y + 17}">${esc(e.name)}</text>
       <text class="a-map__meta" x="${b.x + 12}" y="${b.y + 30}">${e.tenancy} · ${e.fields.length} fields · ${num(ROW_COUNTS[e.name] ?? 0)} records</text>
       ${b.shown.map((f, i) => {
         const ty = b.y + HEAD + i * ROW + 12;
         const isRef = f.type === 'ref';
-        return `<text class="a-map__field${isRef ? ' a-map__field--ref' : ''}" x="${b.x + 12}" y="${ty}">${f.name}</text>
+        return `<text class="a-map__field${isRef ? ' a-map__field--ref' : ''}" x="${b.x + 12}" y="${ty}">${esc(f.name)}</text>
           <text class="a-map__type" x="${b.x + W - 12}" y="${ty}" text-anchor="end">${isRef ? '→ ' + f.entity + (f.onDelete ? ' · ' + f.onDelete : '') : f.type}</text>`;
       }).join('')}
       ${b.more > 0 ? `<text class="a-map__type" x="${b.x + 12}" y="${b.y + HEAD + b.shown.length * ROW + 8}">+${b.more} more</text>` : ''}
@@ -578,7 +583,7 @@ function entityMap(focus = null) {
 
   return `${scoped}<div class="a-map">
     <svg viewBox="-6 -6 ${width + 12} ${height + 12}" width="${width}" height="${height}" role="img"
-      aria-label="Entity relationship map. ${list.map((e) => `${e.name} points at ${e.fields.filter((f) => f.type === 'ref').map((f) => f.entity).join(' and ') || 'nothing'}`).join('; ')}.">
+      aria-label="Entity relationship map. ${list.map((e) => `${esc(e.name)} points at ${e.fields.filter((f) => f.type === 'ref').map((f) => f.entity).join(' and ') || 'nothing'}`).join('; ')}.">
       ${wires}${boxes}
     </svg>
   </div>`;
@@ -628,12 +633,12 @@ function screenEntity(name) {
     ${entityBar(name, '#/schema', `<button class="a-btn a-btn--sm" data-act="overlay" data-kind="new-entity">${icon('plus')} Entity</button>`)}
 
     <div class="p-between">
-      <div><h1 class="a-page-title" style="font-family:var(--font-mono)">${name}</h1>
+      <div><h1 class="a-page-title" style="font-family:var(--font-mono)">${esc(name)}</h1>
         <p class="p-muted p-tight" style="max-width:66ch">${esc(e.description)}</p></div>
       <div class="p-hstack">
         <span class="a-badge${e.tenancy === 'global' ? '' : ' a-badge--accent'}">${e.tenancy}</span>
         ${e.audit ? '<span class="a-badge a-badge--ok" title="audit: true — created_at, created_by, updated_at, updated_by, and a version every write can be made conditional on">audited</span>' : ''}
-        <a class="a-btn a-btn--sm" href="#/data/${name}">Browse ${num(ROW_COUNTS[name] ?? 0)} records</a></div>
+        <a class="a-btn a-btn--sm" href="#/data/${esc(name)}">Browse ${num(ROW_COUNTS[name] ?? 0)} records</a></div>
     </div>
 
     ${wide ? `${panel}${pendingBar()}`
@@ -652,8 +657,8 @@ function fieldsTab(e) {
     .filter((m) => m && m[1] === e.name)
     .map((m) => m[2]));
 
-  const rows = shown.map((f) => `<button class="a-fieldrow${state.selectedField === f.name ? ' a-fieldrow--active' : ''}" data-act="field" data-field="${f.name}">
-      <span class="a-fieldrow__name">${f.name}${changedFields.has(f.name) ? ' <span class="a-dot" data-changed title="Edited, not applied"></span>' : ''}</span>
+  const rows = shown.map((f) => `<button class="a-fieldrow${state.selectedField === f.name ? ' a-fieldrow--active' : ''}" data-act="field" data-field="${esc(f.name)}">
+      <span class="a-fieldrow__name">${esc(f.name)}${changedFields.has(f.name) ? ' <span class="a-dot" data-changed title="Edited, not applied"></span>' : ''}</span>
       <span class="a-fieldrow__type">${typeLabel(f)}</span>
       <span class="a-fieldrow__flags">${flagBadges(f)}</span>
       <span class="a-fieldrow__drag" aria-hidden="true">⋮⋮</span></button>`).join('');
@@ -674,12 +679,12 @@ function fieldsTab(e) {
     </div>`;
 }
 
-const typeLabel = (f) => (f.type === 'ref' ? `ref → ${f.entity}` : f.type);
+const typeLabel = (f) => (f.type === 'ref' ? `ref → ${esc(f.entity)}` : f.type);
 
 function flagBadges(f) {
   const out = [];
   if (f.computed) out.push('<span class="a-badge a-badge--accent">computed</span>');
-  if (f.rollup) out.push(`<span class="a-badge a-badge--accent">${f.rollup.op} of ${f.rollup.from}</span>`);
+  if (f.rollup) out.push(`<span class="a-badge a-badge--accent">${esc(f.rollup.op)} of ${esc(f.rollup.from)}</span>`);
   if (f.required) out.push('<span class="a-badge">required</span>');
   if (f.unique) out.push('<span class="a-badge">unique</span>');
   if (f.hidden) out.push('<span class="a-badge a-badge--warn">hidden</span>');
@@ -713,7 +718,7 @@ function fieldEditor(e, name) {
     ? [...(facets.needs[appliedField.type] ?? []), ...(facets.optional[appliedField.type] ?? [])].filter((k) => appliedField[k] !== undefined)
     : [];
   const typeWarn = typeChanged
-    ? `<div class="a-typewarn" data-typewarn>⚠ <span>Changed from <code class="a-mono">${appliedField.type}</code>. The schema allows ${lost.length ? `<code class="a-mono">${lost.join('</code>, <code class="a-mono">')}</code> only on <code class="a-mono">${appliedField.type}</code>, so ${lost.length > 1 ? 'those are' : 'that is'} dropped, and ` : ''}the column is rewritten over ${num(ROW_COUNTS[e.name] ?? 0)} rows. Preview will ask you to type <code class="a-mono">${e.name}</code> before it runs.</span></div>`
+    ? `<div class="a-typewarn" data-typewarn>⚠ <span>Changed from <code class="a-mono">${appliedField.type}</code>. The schema allows ${lost.length ? `<code class="a-mono">${lost.join('</code>, <code class="a-mono">')}</code> only on <code class="a-mono">${appliedField.type}</code>, so ${lost.length > 1 ? 'those are' : 'that is'} dropped, and ` : ''}the column is rewritten over ${num(ROW_COUNTS[e.name] ?? 0)} rows. Preview will ask you to type <code class="a-mono">${esc(e.name)}</code> before it runs.</span></div>`
     : '';
 
   const needed = (body) => `<div class="a-needed">
@@ -743,7 +748,7 @@ function fieldEditor(e, name) {
 
     if (f.type === 'ref') return needed(`
       <div class="a-field"><span class="a-label">Points at</span>
-        <div class="p-hstack">${entities().filter((x) => x.name !== e.name).map((x) => `<button class="a-preset${x.name === f.entity ? ' a-preset--on' : ''}" type="button" data-act="setfacet" data-field="${esc(f.name)}" data-key="entity" data-value="${x.name}">${x.name}</button>`).join('')}</div></div>
+        <div class="p-hstack">${entities().filter((x) => x.name !== e.name).map((x) => `<button class="a-preset${x.name === f.entity ? ' a-preset--on' : ''}" type="button" data-act="setfacet" data-field="${esc(f.name)}" data-key="entity" data-value="${esc(x.name)}">${esc(x.name)}</button>`).join('')}</div></div>
       <div class="a-field"><span class="a-label">When that record is deleted<span class="a-label__hint">Optional. Without it the delete is refused, which is the safe default.</span></span>
         <div class="p-hstack">${facets.onDelete.map((o) => `<button class="a-preset${f.onDelete === o ? ' a-preset--on' : ''}" type="button" data-act="setfacet" data-field="${esc(f.name)}" data-key="onDelete" data-value="${o}">${ON_DELETE_WORDS[o]}</button>`).join('')}</div></div>`);
 
@@ -762,7 +767,7 @@ function fieldEditor(e, name) {
   return `<div class="a-panel a-form" data-field-editor style="padding:var(--space-4);gap:var(--space-4);margin-bottom:var(--space-4)">
     <div class="p-between">
       <div><span class="a-section-title">${isNew ? 'New field' : esc(f.name)}</span>
-        <p class="p-muted p-tight">on <code class="a-mono">${e.name}</code></p></div>
+        <p class="p-muted p-tight">on <code class="a-mono">${esc(e.name)}</code></p></div>
       <button class="a-btn a-btn--sm a-btn--ghost" data-act="closefield">Close</button>
     </div>
 
@@ -783,12 +788,12 @@ function fieldEditor(e, name) {
           : `<div class="a-field"><span class="a-label">Count over which entity<span class="a-label__hint">A child entity that points at this one with a <code class="a-mono">ref</code> field. A rollup naming an entity with no ref back is refused at apply.</span></span>
               <div class="p-hstack">${entities().filter((x) => x.name !== e.name).map((x) => {
                 const points = x.fields.some((ff) => ff.type === 'ref' && ff.entity === e.name);
-                return `<button class="a-preset${f.rollup.from === x.name ? ' a-preset--on' : ''}" type="button" data-act="rollupfrom" data-field="${esc(f.name)}" data-value="${x.name}"${points ? '' : ` disabled aria-disabled="true" title="${x.name} has no ref field pointing at ${e.name}, so a rollup over it is refused at apply"`}>${x.name}</button>`;
+                return `<button class="a-preset${f.rollup.from === x.name ? ' a-preset--on' : ''}" type="button" data-act="rollupfrom" data-field="${esc(f.name)}" data-value="${esc(x.name)}"${points ? '' : ` disabled aria-disabled="true" title="${esc(x.name)} has no ref field pointing at ${esc(e.name)}, so a rollup over it is refused at apply"`}>${esc(x.name)}</button>`;
               }).join('')}</div></div>
              <div class="a-field"><span class="a-label">Aggregate</span>
-              <div class="p-hstack">${SCHEMA_FACETS.rollupOps.map((op) => `<button class="a-preset${f.rollup.op === op ? ' a-preset--on' : ''}" type="button" data-act="rollupop" data-field="${esc(f.name)}" data-value="${op}">${op}</button>`).join('')}</div>
+              <div class="p-hstack">${SCHEMA_FACETS.rollupOps.map((op) => `<button class="a-preset${f.rollup.op === op ? ' a-preset--on' : ''}" type="button" data-act="rollupop" data-field="${esc(f.name)}" data-value="${esc(op)}">${esc(op)}</button>`).join('')}</div>
               <span class="a-label__hint">${f.rollup.op === 'count' ? 'Counts the child records. The only operation that needs no field.' : `Over <code class="a-mono">${esc(f.rollup.field ?? '—')}</code> on <code class="a-mono">${esc(f.rollup.from)}</code>. Every operation but <code class="a-mono">count</code> requires one.`}</span></div>
-             <div class="a-readout"><span class="a-readout__tag">descriptor</span><span>${f.rollup.op}(${f.rollup.from}${f.rollup.field ? '.' + f.rollup.field : ''})</span></div>
+             <div class="a-readout"><span class="a-readout__tag">descriptor</span><span>${esc(f.rollup.op)}(${esc(f.rollup.from)}${f.rollup.field ? '.' + f.rollup.field : ''})</span></div>
              ${refusedControl('rollup.where', 'Only count some child records', "status != 'cancelled'")}`}
         <button class="a-btn a-btn--sm a-btn--ghost" data-act="underive" data-field="${esc(f.name)}">Make it an ordinary field</button>
       </div>`
@@ -848,27 +853,27 @@ function relationshipsTab(e) {
   entities().forEach((o) => o.fields.filter((f) => f.type === 'ref' && f.entity === e.name)
     .forEach((f) => incoming.push({ from: o.name, field: f.name, onDelete: f.onDelete })));
 
-  const rollups = entities().flatMap((o) => o.fields.filter((f) => f.rollup?.from === e.name).map((f) => `${o.name}.${f.name}`));
+  const rollups = entities().flatMap((o) => o.fields.filter((f) => f.rollup?.from === e.name).map((f) => `${esc(o.name)}.${esc(f.name)}`));
 
   const outHtml = out.length ? out.map((f) => `<div class="a-rel">
-      <div class="a-rel__side"><span class="a-rel__entity">${e.name}</span><span class="a-rel__field">${f.name}</span></div>
+      <div class="a-rel__side"><span class="a-rel__entity">${esc(e.name)}</span><span class="a-rel__field">${esc(f.name)}</span></div>
       <div class="a-rel__link"><span>many to one</span><span class="a-rel__wire"></span><span class="a-badge">on delete ${f.onDelete ?? 'restrict (default)'}</span></div>
-      <div class="a-rel__side"><span class="a-rel__entity">${f.entity}</span><span class="a-rel__field">id</span></div>
-    </div>`).join('') : `<div class="a-empty"><span class="a-empty__title">Nothing points out of ${e.name}</span>
+      <div class="a-rel__side"><span class="a-rel__entity">${esc(f.entity)}</span><span class="a-rel__field">id</span></div>
+    </div>`).join('') : `<div class="a-empty"><span class="a-empty__title">Nothing points out of ${esc(e.name)}</span>
       <span class="a-empty__body">Add a field of type <code class="a-mono">ref</code> to connect this entity to another one. That field is the relationship — Alvo has no separate object for it.</span>
       <button class="a-btn a-btn--primary" data-act="field" data-field="__new">Add a ref field</button></div>`;
 
   const inHtml = incoming.length ? incoming.map((r) => `<div class="a-rel">
-      <div class="a-rel__side"><span class="a-rel__entity">${r.from}</span><span class="a-rel__field">${r.field}</span></div>
+      <div class="a-rel__side"><span class="a-rel__entity">${esc(r.from)}</span><span class="a-rel__field">${esc(r.field)}</span></div>
       <div class="a-rel__link"><span>points here</span><span class="a-rel__wire"></span><span class="a-badge">on delete ${r.onDelete ?? 'restrict (default)'}</span></div>
-      <div class="a-rel__side"><span class="a-rel__entity">${e.name}</span><span class="a-rel__field">id</span></div>
+      <div class="a-rel__side"><span class="a-rel__entity">${esc(e.name)}</span><span class="a-rel__field">id</span></div>
     </div>`).join('') + `<div class="p-note" style="margin:var(--space-4)"><span class="p-note__tag">why it matters</span>
-      <span>Because something points here, a record's detail page can list what refers to it, and a field on ${e.name} can aggregate over them with a <code class="a-mono">rollup</code>. ${rollups.length ? `<code class="a-mono">${rollups.join('</code>, <code class="a-mono">')}</code> already ${rollups.length > 1 ? 'do' : 'does'}.` : 'None does yet.'}</span></div>`
+      <span>Because something points here, a record's detail page can list what refers to it, and a field on ${esc(e.name)} can aggregate over them with a <code class="a-mono">rollup</code>. ${rollups.length ? `<code class="a-mono">${rollups.join('</code>, <code class="a-mono">')}</code> already ${rollups.length > 1 ? 'do' : 'does'}.` : 'None does yet.'}</span></div>`
     : '<div class="a-empty"><span class="a-empty__body">No other entity points at this one yet.</span></div>';
 
-  return `<div class="a-section" style="border-top:none"><span class="a-section-title">Out of ${e.name}</span>
+  return `<div class="a-section" style="border-top:none"><span class="a-section-title">Out of ${esc(e.name)}</span>
       <span class="a-section-sub">One row per <code class="a-mono">ref</code> field.</span></div>${outHtml}
-    <div class="a-section"><span class="a-section-title">Into ${e.name}</span>
+    <div class="a-section"><span class="a-section-title">Into ${esc(e.name)}</span>
       <span class="a-section-sub"><code class="a-mono">restrict</code> means a record here cannot be deleted while one of these points at it.</span></div>${inHtml}`;
 }
 
@@ -919,14 +924,14 @@ function hooksTab(e) {
     const kind = actionKind(h);
     return `<div class="a-hook">
       <span class="a-hook__point">
-        <code class="a-mono" style="color:var(--text);font-size:var(--text-sm)">${point}</code>
+        <code class="a-mono" style="color:var(--text);font-size:var(--text-sm)">${esc(point)}</code>
         <span class="a-hook__when">${when}</span></span>
       <span style="min-width:0;display:flex;flex-direction:column;gap:var(--space-2)">
         ${h.condition ? `<span class="p-muted">only when <code class="a-mono" style="color:var(--text)">${esc(h.condition)}</code></span>` : '<span class="p-muted">on every write</span>'}
         <span class="a-row">
           <span class="a-badge${kind === 'reject' ? ' a-badge--danger' : kind === 'mutate' ? '' : ' a-badge--accent'}">${esc(kind)}</span>
           <span style="font-size:var(--text-sm)">${esc(hookSummary(h))}</span></span></span>
-      <button class="a-btn a-btn--sm a-btn--ghost" data-act="removehook" data-point="${point}" data-i="${index}">Remove</button></div>`;
+      <button class="a-btn a-btn--sm a-btn--ghost" data-act="removehook" data-point="${esc(point)}" data-i="${index}">Remove</button></div>`;
   };
 
   const section = (kind) => HOOK_POINTS.filter(([p]) => p.startsWith(kind))
@@ -937,10 +942,10 @@ function hooksTab(e) {
 
   return `<div class="a-toolbar">
       <span class="p-muted">A hook is a condition and an action, at one point of one write. The two kinds are never one list.</span>
-      <button class="a-btn a-btn--sm a-btn--primary" style="margin-left:auto" data-act="overlay" data-kind="new-hook" data-id="${e.name}">${icon('plus')} Add a hook</button></div>
-    ${total === 0 ? `<div class="a-empty"><span class="a-empty__title">Nothing happens on a write to ${e.name}</span>
+      <button class="a-btn a-btn--sm a-btn--primary" style="margin-left:auto" data-act="overlay" data-kind="new-hook" data-id="${esc(e.name)}">${icon('plus')} Add a hook</button></div>
+    ${total === 0 ? `<div class="a-empty"><span class="a-empty__title">Nothing happens on a write to ${esc(e.name)}</span>
       <span class="a-empty__body">A hook can refuse a write before it commits, fill a field in, or — once committed — send an email or call a webhook. Both kinds run today; three of the seven action types do not, and this editor says which.</span>
-      <button class="a-btn a-btn--primary" data-act="overlay" data-kind="new-hook" data-id="${e.name}">${icon('plus')} Add a hook</button></div>` : `
+      <button class="a-btn a-btn--primary" data-act="overlay" data-kind="new-hook" data-id="${esc(e.name)}">${icon('plus')} Add a hook</button></div>` : `
     <div class="a-section"><span class="a-section-title">Before the write commits</span>
       <span class="a-section-sub">In the same transaction. May refuse the write or change the values, and reaches no network.</span></div>
     ${before || '<div class="a-empty"><span class="a-empty__body">No before-hook on this entity.</span></div>'}
@@ -983,18 +988,18 @@ function indexesTab(e) {
 
   const body = e.indexes.length || single.length
     ? `${single.length ? `<div class="a-row" style="padding:var(--space-4);border-bottom:1px solid var(--border)">
-        <span class="p-muted">From a field's own <code class="a-mono">index: true</code>: <code class="a-mono">${single.join('</code>, <code class="a-mono">')}</code></span></div>` : ''}
+        <span class="p-muted">From a field's own <code class="a-mono">index: true</code>: <code class="a-mono">${single.map(esc).join('</code>, <code class="a-mono">')}</code></span></div>` : ''}
       ${e.indexes.map((ix, i) => `<div class="a-row" style="padding:var(--space-4);border-bottom:1px solid var(--border)">
-        <code class="a-mono" style="font-size:var(--text-sm);color:var(--text)">${ix.fields.join(', ')}</code>
+        <code class="a-mono" style="font-size:var(--text-sm);color:var(--text)">${ix.fields.map(esc).join(', ')}</code>
         ${ix.unique ? '<span class="a-badge a-badge--warn">unique</span>' : ''}
-        <span class="p-muted">covers a filter on ${ix.fields[0]}${ix.fields.length > 1 ? `, then ${ix.fields.slice(1).join(', ')}` : ''}</span>
+        <span class="p-muted">covers a filter on ${esc(ix.fields[0])}${ix.fields.length > 1 ? `, then ${ix.fields.slice(1).map(esc).join(', ')}` : ''}</span>
         <button class="a-btn a-btn--sm a-btn--ghost" style="margin-left:auto" data-act="removeindex" data-i="${i}">Remove</button></div>`).join('')}`
     : `<div class="a-empty"><span class="a-empty__title">No index beyond the primary key</span>
-        <span class="a-empty__body">Add one when a column shows up in a filter or a sort you run often. ${e.name} is at ${num(ROW_COUNTS[e.name] ?? 0)} records.</span></div>`;
+        <span class="a-empty__body">Add one when a column shows up in a filter or a sort you run often. ${esc(e.name)} is at ${num(ROW_COUNTS[e.name] ?? 0)} records.</span></div>`;
 
   return `<div class="a-toolbar">
       <span class="p-muted">A composite index is ordered — the first column is the one a filter must name.</span>
-      <button class="a-btn a-btn--sm a-btn--primary" style="margin-left:auto" data-act="overlay" data-kind="new-index" data-id="${e.name}">${icon('plus')} Add index</button></div>
+      <button class="a-btn a-btn--sm a-btn--primary" style="margin-left:auto" data-act="overlay" data-kind="new-index" data-id="${esc(e.name)}">${icon('plus')} Add index</button></div>
     ${body}
     <div class="a-row" style="padding:var(--space-4);color:var(--faint);font-size:var(--text-xs)">
       <span><code class="a-mono">index: true</code> on a field and a one-column entry in <code class="a-mono">indexes</code> are the same index. Use the field toggle for one column and this tab when the order of two or more matters.</span></div>`;
@@ -1015,14 +1020,14 @@ function apiTab(e) {
     ?? e.fields.find((f) => f.type === 'enum' && f.hidden !== true);
 
   const routes = [
-    ['GET', `/api/${e.name}`, 'List, filtered and sorted. Keyset paging.', 'list'],
-    ['GET', `/api/${e.name}/{id}`, 'One record.', 'get'],
-    ['POST', `/api/${e.name}`, 'Create. Idempotent with an Idempotency-Key header.', 'create'],
-    ['PATCH', `/api/${e.name}/{id}`, 'Change some fields.', 'update'],
-    ['PUT', `/api/${e.name}/{id}`, 'Create or replace at an id you choose.', 'update'],
-    ['DELETE', `/api/${e.name}/{id}`, 'Remove.', 'delete'],
-    ['POST', `/api/${e.name}/query`, 'The same read as GET, for filters too long for a URL.', 'list'],
-    ['POST', `/api/${e.name}/batch`, 'Create, update and delete in one transaction, by id.', 'update'],
+    ['GET', `/api/${esc(e.name)}`, 'List, filtered and sorted. Keyset paging.', 'list'],
+    ['GET', `/api/${esc(e.name)}/{id}`, 'One record.', 'get'],
+    ['POST', `/api/${esc(e.name)}`, 'Create. Idempotent with an Idempotency-Key header.', 'create'],
+    ['PATCH', `/api/${esc(e.name)}/{id}`, 'Change some fields.', 'update'],
+    ['PUT', `/api/${esc(e.name)}/{id}`, 'Create or replace at an id you choose.', 'update'],
+    ['DELETE', `/api/${esc(e.name)}/{id}`, 'Remove.', 'delete'],
+    ['POST', `/api/${esc(e.name)}/query`, 'The same read as GET, for filters too long for a URL.', 'list'],
+    ['POST', `/api/${esc(e.name)}/batch`, 'Create, update and delete in one transaction, by id.', 'update'],
   ];
 
   return `<div class="a-toolbar"><span class="p-muted">Generated from this entity. Change a field and these change with it — there is no second place to update.</span>
@@ -1046,7 +1051,7 @@ function apiTab(e) {
       <div class="a-stack" style="gap:var(--space-2)">
         <span class="a-label">A filtered page, newest first by a required column</span>
         <pre class="a-code">curl -H "X-Alvo-Api-Key: $ALVO_KEY" \\
-  "$HOST/api/${e.name}?${filterable ? `${filterable.name}=eq.${filterable.type === 'boolean' ? 'true' : filterable.values[0]}&` : ''}\\
+  "$HOST/api/${esc(e.name)}?${filterable ? `${filterable.name}=eq.${filterable.type === 'boolean' ? 'true' : filterable.values[0]}&` : ''}\\
 order=${sortable ? sortable.name : 'id'}.desc&limit=20"</pre>
         <span class="p-muted">${sortable
           ? `Sorted by <code class="a-mono">${sortable.name}</code> because it is <strong>required</strong>. Sorting by a nullable column is legal and slower — the keyset predicate has to order the nulls too.`
@@ -1132,7 +1137,7 @@ function valueOptions(e, f) {
   if (f.type === 'boolean') out.push(['true', 'true'], ['false', 'false']);
   if (f.type === 'uuid' || f.type === 'ref') out.push(['@user.id', 'the caller'], ['@tenant.id', "the caller's tenant"]);
   e.fields.filter((x) => x.type === f.type && x.name !== f.name && x.hidden !== true)
-    .forEach((x) => out.push([`:${x.name}`, `the ${x.name} of this record`]));
+    .forEach((x) => out.push([`:${esc(x.name)}`, `the ${esc(x.name)} of this record`]));
   return out;
 }
 
@@ -1176,7 +1181,7 @@ function celOf(m, e) {
 const roleWord = (r) => (r === 'authenticated'
   ? 'Anyone signed in'
   : { admin: 'Admins', dispatcher: 'Dispatchers', technician: 'Technicians', anon: 'Anyone at all' }[r]
-    || `Anyone holding ${r}`);
+    || `Anyone holding ${esc(r)}`);
 
 const opWord = (f, op) => ((OPERATORS[f ? f.type : 'string'] || OPERATORS.string).find(([o]) => o === op) || [op, op])[1];
 
@@ -1306,7 +1311,7 @@ function parseCel(cel) {
 
 /** The model for one operation, parsed from the WORKING copy every time it is asked for. */
 function ruleModel(e, op) {
-  const key = `${e.name}:${op}`;
+  const key = `${esc(e.name)}:${esc(op)}`;
   const cel = e.rules?.[op] ?? '';
   if (state.rawOps?.has(key)) return { branches: [], raw: cel };
   return parseCel(cel);
@@ -1345,10 +1350,10 @@ function permissionMatrix(e, roles) {
       <span class="a-cell__mark">${on ? icon('check') : via ? 'own' : ''}</span>
       ${when ? `<span class="a-cell__when">${when}</span>` : ''}</button>`;
 
-  const roleRow = (r) => `<tr data-role-row="${r}">
+  const roleRow = (r) => `<tr data-role-row="${esc(r)}">
       <td><span class="a-matrix__who">
-        <span class="a-matrix__name">${r}</span>
-        <span class="a-matrix__sub">${WORDS[r] ? esc(WORDS[r]) : `'${r}' in @user.roles`}</span></span></td>
+        <span class="a-matrix__name">${esc(r)}</span>
+        <span class="a-matrix__sub">${WORDS[r] ? esc(WORDS[r]) : `'${esc(r)}' in @user.roles`}</span></span></td>
       ${OPS.map(([op]) => {
         const m = ruleModel(e, op);
         const b = branchFor(m, { kind: 'role', role: r });
@@ -1358,7 +1363,7 @@ function permissionMatrix(e, roles) {
           via: !b && !!owner && r !== 'anon',
           when: b && (b.conds || []).length ? `${b.conds.length} condition${b.conds.length > 1 ? 's' : ''}` : (!b && owner && r !== 'anon' ? `via ${owner.field}` : ''),
           act: 'rulerole',
-          data: `data-op="${op}" data-entity="${e.name}" data-role="${r}"`,
+          data: `data-op="${esc(op)}" data-entity="${esc(e.name)}" data-role="${esc(r)}"`,
           fixed: m.raw !== null,
           pub: !!b && r === 'anon',
         })}</td>`;
@@ -1367,8 +1372,8 @@ function permissionMatrix(e, roles) {
 
   const ownerRow = (f) => `<tr>
       <td><span class="a-matrix__who">
-        <span class="a-matrix__name">The user in ${f.name}</span>
-        <span class="a-matrix__sub">${f.name} == @user.id · any signed-in caller</span></span></td>
+        <span class="a-matrix__name">The user in ${esc(f.name)}</span>
+        <span class="a-matrix__sub">${esc(f.name)} == @user.id · any signed-in caller</span></span></td>
       ${OPS.map(([op]) => {
         const m = ruleModel(e, op);
         const b = branchFor(m, { kind: 'owner', field: f.name });
@@ -1376,7 +1381,7 @@ function permissionMatrix(e, roles) {
           on: !!b,
           when: b && (b.conds || []).length ? `${b.conds.length} condition${b.conds.length > 1 ? 's' : ''}` : '',
           act: 'ruleowner',
-          data: `data-op="${op}" data-entity="${e.name}" data-field="${f.name}"`,
+          data: `data-op="${esc(op)}" data-entity="${esc(e.name)}" data-field="${esc(f.name)}"`,
           fixed: m.raw !== null,
         })}</td>`;
       }).join('')}
@@ -1407,11 +1412,11 @@ function permissionMatrix(e, roles) {
 function rulesList(e) {
   return `<div class="a-toolbar">
       <span class="p-muted">Who may do each thing to these records, and when. An operation with no rule is refused for everyone — there is no implicit allow.</span>
-      <a class="a-btn a-btn--sm" style="margin-left:auto" href="#/rules/${e.name}">Edit, and read the predicate</a></div>
+      <a class="a-btn a-btn--sm" style="margin-left:auto" href="#/rules/${esc(e.name)}">Edit, and read the predicate</a></div>
     ${OPS.every(([op]) => !celOf(ruleModel(e, op), e)) ? `<div class="a-empty">
       <span class="a-empty__title">No rule at all — refused for everyone</span>
-      <span class="a-empty__body">Default-deny: with no rule, every operation on ${e.name} answers 403 for every caller, an administrator included. Nothing is implicitly allowed.</span>
-      <a class="a-btn a-btn--primary" href="#/rules/${e.name}">Write the first rule</a></div>` : ''}
+      <span class="a-empty__body">Default-deny: with no rule, every operation on ${esc(e.name)} answers 403 for every caller, an administrator included. Nothing is implicitly allowed.</span>
+      <a class="a-btn a-btn--primary" href="#/rules/${esc(e.name)}">Write the first rule</a></div>` : ''}
     ${OPS.map(([op, verb, api]) => {
       const m = ruleModel(e, op);
       return `<div class="a-perm">
@@ -1427,16 +1432,16 @@ function screenRules(name) {
   const e = entityView(name) || entities()[0];
   if (!e) return screenSchemaList();
 
-  const ruleEdits = changes().filter((c) => c.kind === 'rules' && c.pointer.startsWith(`/entities/${e.name}/`));
+  const ruleEdits = changes().filter((c) => c.kind === 'rules' && c.pointer.startsWith(`/entities/${esc(e.name)}/`));
 
   const rows = OPS.map(([op, verb, api]) => {
     const m = ruleModel(e, op);
     const open = state.ruleOpen === op;
-    return `<div class="a-perm${open ? ' a-perm--open' : ''}" id="rule-${op}">
+    return `<div class="a-perm${open ? ' a-perm--open' : ''}" id="rule-${esc(op)}">
       <span class="a-perm__op"><span class="a-perm__verb">${verb}</span><span class="a-perm__api">${esc(api(e.name))}</span></span>
       <span><span class="a-perm__who">${sentenceOf(m, e)}</span>
         <span class="a-perm__cel">${esc(celOf(m, e)) || '// no rule — refused for everyone'}</span></span>
-      <button class="a-btn a-btn--sm${open ? ' a-btn--primary' : ''}" data-act="ruleopen" data-op="${op}">${open ? 'Done' : 'Change'}</button>
+      <button class="a-btn a-btn--sm${open ? ' a-btn--primary' : ''}" data-act="ruleopen" data-op="${esc(op)}">${open ? 'Done' : 'Change'}</button>
       ${open ? ruleEditor(e, op, m) : ''}
     </div>`;
   }).join('');
@@ -1445,7 +1450,7 @@ function screenRules(name) {
   <div class="a-content"><div class="a-stack">
     ${entityBar(e.name, '#/rules', '<span class="p-muted">who may read and write each one</span>')}
 
-    <div><h1 class="a-page-title">Who can do what to <span style="font-family:var(--font-mono)">${e.name}</span></h1>
+    <div><h1 class="a-page-title">Who can do what to <span style="font-family:var(--font-mono)">${esc(e.name)}</span></h1>
       <p class="p-muted p-tight" style="max-width:74ch">A rule is a set of ways in, joined by <em>or</em>: a role, or the user the record names. Each way in can be narrowed by tests on the record that must all hold. It is checked inside the same transaction as the query, and it can read the caller's id, their roles, their tenant, and this record's own fields — nothing else.</p></div>
 
     <div class="a-panel a-matrix-panel">
@@ -1498,7 +1503,7 @@ function simulator(e, draftRules) {
     ${line('Signed in as', `<div class="p-hstack">${callers.map((c) => `<button class="a-preset${(state.simulate.user ?? null) === c.id ? ' a-preset--on' : ''}" data-act="sim" data-k="user" data-v="${c.id ?? ''}">${esc(c.label)}</button>`).join('')}</div>`,
       caller.roles.length ? `roles: <code class="a-mono">${caller.roles.join(', ')}</code> · tenant: <code class="a-mono">${caller.tenant ? esc(shortTenant(caller.tenant)) : 'none'}</code>` : 'the anonymous caller holds only <code class="a-mono">anon</code> and carries no tenant')}
 
-    ${line('Operation', `<div class="p-hstack">${OPERATIONS.map((op) => `<button class="a-preset${operation === op ? ' a-preset--on' : ''}" data-act="sim" data-k="operation" data-v="${op}">${op}</button>`).join('')}</div>`)}
+    ${line('Operation', `<div class="p-hstack">${OPERATIONS.map((op) => `<button class="a-preset${operation === op ? ' a-preset--on' : ''}" data-act="sim" data-k="operation" data-v="${esc(op)}">${esc(op)}</button>`).join('')}</div>`)}
 
     <div class="a-verdict a-verdict--${v.allowed ? 'allow' : 'deny'}" data-verdict="${v.allowed ? 'resolved' : v.cause}">
       <span class="a-verdict__head">${v.allowed ? 'A policy resolved' : '403 — refused outright'}</span>
@@ -1532,7 +1537,7 @@ function simulator(e, draftRules) {
 
     <div class="p-note"><span class="p-note__tag">why there is no record picker</span>
       <span><code class="a-mono">ManagementPolicySimulation</code> takes no record id, deliberately: evaluating a predicate against a stored row needs a read, and the Management API has no data surface. A client that scored a row here would be a second policy evaluator — and the first time it disagreed with the engine, this screen would teach the wrong thing with total confidence. To check one row, open it in Data under your own credential and compare.</span></div>
-    <div class="a-row"><a class="a-btn a-btn--sm" href="#/data/${e.name}">Open ${e.name} in Data</a></div>
+    <div class="a-row"><a class="a-btn a-btn--sm" href="#/data/${esc(e.name)}">Open ${esc(e.name)} in Data</a></div>
   </div>`;
 }
 
@@ -1550,15 +1555,15 @@ function ruleEditor(e, op, m) {
     const trap = c.op === '!=' && !f.required;
     return `<div class="a-cond">
       <span class="a-cond__join">${i ? 'and' : 'only if'}</span>
-      <select class="a-cond__part" data-act="condfield" data-op="${op}" data-entity="${e.name}" data-b="${bi}" data-i="${i}" aria-label="Field">
-        ${fields.map((x) => `<option${x.name === c.field ? ' selected' : ''}>${x.name}</option>`).join('')}</select>
-      <select class="a-cond__part" data-act="condop" data-op="${op}" data-entity="${e.name}" data-b="${bi}" data-i="${i}" aria-label="Test">
+      <select class="a-cond__part" data-act="condfield" data-op="${esc(op)}" data-entity="${esc(e.name)}" data-b="${bi}" data-i="${i}" aria-label="Field">
+        ${fields.map((x) => `<option${x.name === c.field ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select>
+      <select class="a-cond__part" data-act="condop" data-op="${esc(op)}" data-entity="${esc(e.name)}" data-b="${bi}" data-i="${i}" aria-label="Test">
         ${ops.map(([o, w]) => `<option value="${o}"${o === c.op ? ' selected' : ''}>${w}</option>`).join('')}</select>
       ${needsValue ? (values.length
-        ? `<select class="a-cond__part" data-act="condvalue" data-op="${op}" data-entity="${e.name}" data-b="${bi}" data-i="${i}" aria-label="Value">
+        ? `<select class="a-cond__part" data-act="condvalue" data-op="${esc(op)}" data-entity="${esc(e.name)}" data-b="${bi}" data-i="${i}" aria-label="Value">
             ${values.map(([v, w]) => `<option value="${esc(v)}"${String(v) === String(c.value) ? ' selected' : ''}>${esc(w)}</option>`).join('')}</select>`
-        : `<input class="a-cond__part" style="width:92px" value="${esc(c.value)}" data-act="condvalue" data-op="${op}" data-entity="${e.name}" data-b="${bi}" data-i="${i}" aria-label="Value">`) : ''}
-      <button class="a-btn a-btn--sm a-btn--ghost" data-act="condremove" data-op="${op}" data-entity="${e.name}" data-b="${bi}" data-i="${i}" type="button" aria-label="Remove this condition">✕</button>
+        : `<input class="a-cond__part" style="width:92px" value="${esc(c.value)}" data-act="condvalue" data-op="${esc(op)}" data-entity="${esc(e.name)}" data-b="${bi}" data-i="${i}" aria-label="Value">`) : ''}
+      <button class="a-btn a-btn--sm a-btn--ghost" data-act="condremove" data-op="${esc(op)}" data-entity="${esc(e.name)}" data-b="${bi}" data-i="${i}" type="button" aria-label="Remove this condition">✕</button>
       ${trap ? `<div class="a-nulltrap" style="width:100%">⚠ <span>A record whose <code class="a-mono">${c.field}</code> is empty also passes this. A comparison against an empty value is <code class="a-mono">false</code>, and "is not" negates that to true. Writing <code class="a-mono">${c.field} != null</code> instead is refused outright by the compiler — use <em>is set</em>.</span></div>` : ''}
     </div>`;
   };
@@ -1569,11 +1574,11 @@ function ruleEditor(e, op, m) {
         <span class="a-badge a-badge--accent">${b.kind === 'role' ? b.role : `the record's ${b.field}`}</span>
         <span class="p-muted">${b.kind === 'role' ? 'anyone holding this role' : 'the signed-in caller it names'}</span>
         <button class="a-btn a-btn--sm a-btn--ghost" style="margin-left:auto"
-          data-act="${b.kind === 'role' ? 'rulerole' : 'ruleowner'}" data-op="${op}" data-entity="${e.name}"
+          data-act="${b.kind === 'role' ? 'rulerole' : 'ruleowner'}" data-op="${esc(op)}" data-entity="${esc(e.name)}"
           ${b.kind === 'role' ? `data-role="${b.role}"` : `data-field="${b.field}"`}>Remove</button>
       </div>
       ${(b.conds || []).map((c, i) => condRow(b, bi, c, i)).join('')}
-      ${fields.length ? `<div><button class="a-preset" style="border-style:dashed" data-act="condadd" data-op="${op}" data-entity="${e.name}" data-b="${bi}" type="button">
+      ${fields.length ? `<div><button class="a-preset" style="border-style:dashed" data-act="condadd" data-op="${esc(op)}" data-entity="${esc(e.name)}" data-b="${bi}" type="button">
         ${(b.conds || []).length ? '+ another condition' : '+ narrow this'}</button></div>` : ''}
     </div>`;
 
@@ -1589,10 +1594,10 @@ function ruleEditor(e, op, m) {
 
     <div class="a-row">
       <span class="p-muted">${raw ? 'Hand-written. The controls cannot represent it.' : 'The controls above produce this expression exactly.'}</span>
-      <button class="a-btn a-btn--sm a-btn--ghost" style="margin-left:auto" data-act="ruleraw" data-op="${op}" data-entity="${e.name}">${raw ? 'Back to the controls' : 'Write the expression myself'}</button>
+      <button class="a-btn a-btn--sm a-btn--ghost" style="margin-left:auto" data-act="ruleraw" data-op="${esc(op)}" data-entity="${esc(e.name)}">${raw ? 'Back to the controls' : 'Write the expression myself'}</button>
     </div>
 
-    ${raw ? `<textarea class="a-cel__input" rows="3" aria-label="CEL expression" data-act="rawcel" data-op="${op}" data-entity="${e.name}">${esc(m.raw)}</textarea>
+    ${raw ? `<textarea class="a-cel__input" rows="3" aria-label="CEL expression" data-act="rawcel" data-op="${esc(op)}" data-entity="${esc(e.name)}">${esc(m.raw)}</textarea>
       <div class="a-cel__context">it may read
         <span class="a-cel__token">@user.id</span><span class="a-cel__token">@user.roles</span><span class="a-cel__token">@tenant.id</span>
         <span>and these fields of this record:</span>
@@ -1628,7 +1633,7 @@ function rawDiagnostics(cel, e) {
   }
   const names = new Set(e.fields.map((f) => f.name));
   for (const m of cel.matchAll(/\bhas\(([a-z][a-z0-9_]*)\)/g)) {
-    if (!names.has(m[1])) problems.push([`${m[1]} is not a field of ${e.name}`, 'A rule sees this entity’s own fields and the closed @user / @tenant context. Nothing else is in scope.']);
+    if (!names.has(m[1])) problems.push([`${m[1]} is not a field of ${esc(e.name)}`, 'A rule sees this entity’s own fields and the closed @user / @tenant context. Nothing else is in scope.']);
   }
 
   if (!problems.length) {
@@ -1838,8 +1843,8 @@ function screenDataList() {
     <div class="a-cards">
       ${list.map((e) => {
         const blocked = e.tenancy === 'scoped' && !tenant;
-        return `<div class="a-card${blocked ? '' : ' a-card--action'}" ${blocked ? '' : `data-act="go" data-route="#/data/${e.name}"`}>
-        <span class="a-row"><span class="a-section-title" style="font-family:var(--font-mono)">${e.name}</span>
+        return `<div class="a-card${blocked ? '' : ' a-card--action'}" ${blocked ? '' : `data-act="go" data-route="#/data/${esc(e.name)}"`}>
+        <span class="a-row"><span class="a-section-title" style="font-family:var(--font-mono)">${esc(e.name)}</span>
           <span class="a-badge" style="margin-left:auto">${e.tenancy}</span></span>
         <span style="font-size:var(--text-xl);font-weight:var(--weight-bold);font-variant-numeric:tabular-nums">${blocked ? '—' : num(ROW_COUNTS[e.name] ?? 0)}</span>
         <span class="p-muted">${blocked ? 'tenant-scoped, and you carry no tenant' : `${e.fields.length} fields${e.fields.filter((f) => f.hidden === true).length ? ` · ${e.fields.filter((f) => f.hidden === true).length} never returned` : ''}`}</span>
@@ -1891,7 +1896,7 @@ function screenData(name) {
     return `${header([{ label: 'Data', route: '#/data' }, { label: e.name }])}
     <div class="a-content"><div class="a-stack">
       ${entityBar(e.name, '#/data')}
-      <div><h1 class="a-page-title" style="font-family:var(--font-mono)">${e.name}</h1></div>
+      <div><h1 class="a-page-title" style="font-family:var(--font-mono)">${esc(e.name)}</h1></div>
       ${tenantlessBanner()}
       <div class="p-note"><span class="p-note__tag">the distinction that matters</span>
         <span>403 here means <em>you carry no tenant</em>. 200 with an empty page means <em>your rules admit no row</em>. They look identical in a spinner and they need opposite fixes, which is why this screen never renders one as the other.</span></div>
@@ -1906,7 +1911,7 @@ function screenData(name) {
         <span class="a-empty__title">No ${titleCase(e.name).toLowerCase()} match these filters</span>
         <span class="a-empty__body">One filter is active. Clear it to widen the search, or create the first record.</span>
         <span class="p-hstack"><button class="a-btn" data-act="state" data-state="ready">Clear filters</button>
-        <button class="a-btn a-btn--primary" data-act="overlay" data-kind="record-new" data-id="${e.name}">New record</button></span></div>`
+        <button class="a-btn a-btn--primary" data-act="overlay" data-kind="record-new" data-id="${esc(e.name)}">New record</button></span></div>`
     : state.screenState === 'error' ? `<div style="padding:var(--space-5)"><div class="a-error" data-filter-error>
         <span class="a-error__title">The query names a field this entity does not expose</span>
         <span class="a-error__detail">Nothing about the shape of the request is guessable from this answer, and that is deliberate: a field the descriptor marks <code class="a-mono">hidden</code> and a field that was never declared are refused with <strong>one identical answer</strong>, because a hidden field's name is not public on the read surface.</span>
@@ -1914,8 +1919,8 @@ function screenData(name) {
         <span class="a-error__type">https://alvo.dev/errors/malformed-query</span></div></div>`
     : rows.length === 0 ? `<div class="a-empty">
         <span class="a-empty__title">No records yet</span>
-        <span class="a-empty__body">Nothing has been written to ${e.name}. Create the first one, or point an application at <code class="a-mono">POST /api/${e.name}</code>.</span>
-        <button class="a-btn a-btn--primary" data-act="overlay" data-kind="record-new" data-id="${e.name}">New record</button></div>`
+        <span class="a-empty__body">Nothing has been written to ${esc(e.name)}. Create the first one, or point an application at <code class="a-mono">POST /api/${esc(e.name)}</code>.</span>
+        <button class="a-btn a-btn--primary" data-act="overlay" data-kind="record-new" data-id="${esc(e.name)}">New record</button></div>`
     : gridFor(e, rows, cols);
 
   const bulk = state.selectedRows.size ? `<div class="a-bulkbar">
@@ -1926,24 +1931,24 @@ function screenData(name) {
       <span class="p-muted" style="width:100%">The batch endpoint takes ids, so this covers the rows you selected on this page and no others. There is no delete-by-filter.</span></div>` : '';
 
   return `${header([{ label: 'Data', route: '#/data' }, { label: e.name }], `
-      <button class="a-btn a-btn--primary" data-act="overlay" data-kind="record-new" data-id="${e.name}">${icon('plus')} New record</button>`)}
+      <button class="a-btn a-btn--primary" data-act="overlay" data-kind="record-new" data-id="${esc(e.name)}">${icon('plus')} New record</button>`)}
   <div class="a-content"><div class="a-stack">
-    ${entityBar(e.name, '#/data', `<a class="a-btn a-btn--sm" href="#/schema/${e.name}">Edit fields</a>`)}
+    ${entityBar(e.name, '#/data', `<a class="a-btn a-btn--sm" href="#/schema/${esc(e.name)}">Edit fields</a>`)}
 
     <div class="p-between">
-      <div><h1 class="a-page-title" style="font-family:var(--font-mono)">${e.name}</h1>
+      <div><h1 class="a-page-title" style="font-family:var(--font-mono)">${esc(e.name)}</h1>
         <p class="p-muted p-tight">Reading as <strong>${esc(me().email)}</strong>, roles <code class="a-mono">${mintedRoles(me().id).join(', ')}</code>. A technician would see a shorter list, not an error.</p></div>
       <div class="p-hstack">
         ${e.tenancy === 'scoped'
           ? `<span class="a-badge a-badge--accent" title="The tenant discriminator this operator acts in. Alvo stores no name for a tenant — there is no tenant registry.">tenant ${esc(shortTenant(tenant))}</span>`
           : '<span class="a-badge">global — every tenant reads these rows</span>'}
-        <button class="a-btn a-btn--sm" data-act="overlay" data-kind="columns" data-id="${e.name}">Columns (${cols.length}/${visibleFields(e).length})</button>
+        <button class="a-btn a-btn--sm" data-act="overlay" data-kind="columns" data-id="${esc(e.name)}">Columns (${cols.length}/${visibleFields(e).length})</button>
       </div>
     </div>
 
     <div class="a-grid-wrap">
       <div class="a-toolbar">
-        <input class="a-input" style="max-width:200px" placeholder="Search ${e.name}" aria-label="Search" data-act="noop-search">
+        <input class="a-input" style="max-width:200px" placeholder="Search ${esc(e.name)}" aria-label="Search" data-act="noop-search">
         <span class="a-chip" style="border-style:dashed;color:var(--dim)">+ Add filter</span>
         <span style="margin-left:auto" class="p-hstack">
           <span class="p-bar__label">state</span>
@@ -1971,7 +1976,7 @@ function gridFor(e, rows, cols) {
     if (f.type === 'boolean') return v ? 'yes' : 'no';
     if (f.type === 'ref') {
       const target = ROWS[f.entity]?.find((x) => x.id === v);
-      return `<a style="color:var(--accent)" href="#/data/${f.entity}">${esc(target?.name ?? target?.code ?? v)}</a>`;
+      return `<a style="color:var(--accent)" href="#/data/${esc(f.entity)}">${esc(target?.name ?? target?.code ?? v)}</a>`;
     }
     if (f.type === 'uuid') {
       const u = USERS.find((x) => x.id === v);
@@ -1984,17 +1989,17 @@ function gridFor(e, rows, cols) {
   const numeric = (f) => ['integer', 'decimal'].includes(f.type);
 
   return `<table class="a-grid">
-      <thead><tr><th style="width:44px"></th>${cols.map((f) => `<th${numeric(f) ? ' class="a-num"' : ''}>${f.name}</th>`).join('')}</tr></thead>
+      <thead><tr><th style="width:44px"></th>${cols.map((f) => `<th${numeric(f) ? ' class="a-num"' : ''}>${esc(f.name)}</th>`).join('')}</tr></thead>
       <tbody>${rows.map((r) => {
         const on = state.selectedRows.has(r.id);
         return `<tr aria-selected="${on}">
           <td><span class="a-check${on ? ' a-check--on' : ''}" role="checkbox" tabindex="0" aria-checked="${on}" data-act="pick" data-id="${r.id}" aria-label="Select this row">${on ? icon('check') : ''}</span></td>
-          ${cols.map((f, i) => `<td${numeric(f) ? ' class="a-num"' : ''}${i === 0 ? ` data-act="overlay" data-kind="record" data-id="${r.id}" data-entity="${e.name}" style="cursor:pointer"` : ''}>${cell(r, f)}</td>`).join('')}
+          ${cols.map((f, i) => `<td${numeric(f) ? ' class="a-num"' : ''}${i === 0 ? ` data-act="overlay" data-kind="record" data-id="${r.id}" data-entity="${esc(e.name)}" style="cursor:pointer"` : ''}>${cell(r, f)}</td>`).join('')}
         </tr>`;
       }).join('')}</tbody></table>
-    ${rows.map((r) => `<div class="a-row-card" data-act="overlay" data-kind="record" data-id="${r.id}" data-entity="${e.name}" tabindex="0">
+    ${rows.map((r) => `<div class="a-row-card" data-act="overlay" data-kind="record" data-id="${r.id}" data-entity="${esc(e.name)}" tabindex="0">
       <div class="a-row-card__head"><span>${esc(r[cols[0]?.name] ?? r.id)}</span>${r.status ? statusBadge(r.status) : ''}</div>
-      <div class="a-row-card__meta">${cols.slice(1, 4).map((f) => `<span>${String(r[f.name] ?? '—').slice(0, 24)}</span>`).join('')}</div>
+      <div class="a-row-card__meta">${cols.slice(1, 4).map((f) => `<span>${esc(String(r[f.name] ?? '—').slice(0, 24))}</span>`).join('')}</div>
     </div>`).join('')}`;
 }
 
@@ -2032,7 +2037,7 @@ function recordDrawer(entityName, id) {
     }
     if (f.type === 'ref') {
       const target = ROWS[f.entity]?.find((x) => x.id === v);
-      return `<a style="color:var(--accent)" href="#/data/${f.entity}">${esc(target?.name ?? target?.code ?? v)}</a>`;
+      return `<a style="color:var(--accent)" href="#/data/${esc(f.entity)}">${esc(target?.name ?? target?.code ?? v)}</a>`;
     }
     if (f.type === 'enum') return statusBadge(v);
     return esc(String(v));
@@ -2055,15 +2060,15 @@ function recordDrawer(entityName, id) {
         : '<span class="a-badge" title="This entity is not audited, so its rows carry no version: no ETag is minted and an If-Match naming one is refused rather than ignored.">no version</span>'}</div>
 
     <dl class="p-kv">
-      ${shown.map((f) => `<dt>${f.name}</dt><dd>${value(f)}${f.readOnly === true ? ' <span class="a-badge">read only</span>' : ''}${f.computed ? ' <span class="a-badge a-badge--accent">computed</span>' : ''}${f.rollup ? ' <span class="a-badge a-badge--accent">rollup</span>' : ''}</dd>`).join('')}
+      ${shown.map((f) => `<dt>${esc(f.name)}</dt><dd>${value(f)}${f.readOnly === true ? ' <span class="a-badge">read only</span>' : ''}${f.computed ? ' <span class="a-badge a-badge--accent">computed</span>' : ''}${f.rollup ? ' <span class="a-badge a-badge--accent">rollup</span>' : ''}</dd>`).join('')}
     </dl>
 
     ${reverse.filter((x) => x.rows.length).map((x) => `<div class="a-field">
-      <span class="a-label">${x.entity.name} pointing here<span class="a-label__hint">The reverse of <code class="a-mono">${x.entity.name}.${x.field.name}</code>. Nothing extra is declared to get this list — and it is what makes a <code class="a-mono">rollup</code> over them possible.</span></span>
+      <span class="a-label">${esc(x.entity.name)} pointing here<span class="a-label__hint">The reverse of <code class="a-mono">${esc(x.entity.name)}.${esc(x.field.name)}</code>. Nothing extra is declared to get this list — and it is what makes a <code class="a-mono">rollup</code> over them possible.</span></span>
       <div class="a-subgrid">
-        <div class="a-subgrid__head"><span>${x.rows.length} ${x.entity.name}</span>
-          <a class="a-btn a-btn--sm a-btn--ghost" style="margin-left:auto" href="#/data/${x.entity.name}">Open in Data</a></div>
-        ${x.rows.map((s) => `<div class="a-subgrid__row" data-act="overlay" data-kind="record" data-id="${s.id}" data-entity="${x.entity.name}" tabindex="0">
+        <div class="a-subgrid__head"><span>${x.rows.length} ${esc(x.entity.name)}</span>
+          <a class="a-btn a-btn--sm a-btn--ghost" style="margin-left:auto" href="#/data/${esc(x.entity.name)}">Open in Data</a></div>
+        ${x.rows.map((s) => `<div class="a-subgrid__row" data-act="overlay" data-kind="record" data-id="${s.id}" data-entity="${esc(x.entity.name)}" tabindex="0">
           <span class="a-mono">${esc(s.reference ?? s.code ?? s.id)}</span>
           <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.title ?? s.name ?? '')}</span>
           ${s.status ? statusBadge(s.status) : ''}</div>`).join('')}
@@ -2074,9 +2079,9 @@ function recordDrawer(entityName, id) {
       <p class="p-muted p-tight" style="margin-top:var(--space-2)"><code class="a-mono">${hidden.map((f) => f.name).join('</code>, <code class="a-mono">')}</code> ${hidden.length > 1 ? 'are' : 'is'} hidden. Not withheld from you in particular — in no response Alvo sends, to anyone.</p></div>` : ''}
 
     <div class="a-row">
-      <button class="a-btn a-btn--danger a-btn--sm" data-act="overlay" data-kind="delete-record" data-id="${r.id}" data-entity="${e.name}">Delete</button>
+      <button class="a-btn a-btn--danger a-btn--sm" data-act="overlay" data-kind="delete-record" data-id="${r.id}" data-entity="${esc(e.name)}">Delete</button>
       <span style="margin-left:auto" class="p-hstack">
-        <button class="a-btn a-btn--primary a-btn--sm" data-act="overlay" data-kind="record-new" data-id="${e.name}" data-edit="${r.id}">Edit</button></span>
+        <button class="a-btn a-btn--primary a-btn--sm" data-act="overlay" data-kind="record-new" data-id="${esc(e.name)}" data-edit="${r.id}">Edit</button></span>
     </div>
   </div></div>`;
 }
@@ -2098,12 +2103,12 @@ function recordForm(entityName, editId) {
   const control = (f) => {
     const v = values[f.name] ?? (editing ? editing[f.name] : undefined);
     const err = errorFor(f.name);
-    const id = `rf-${f.name}`;
-    const common = `id="${id}" data-act="formfield" data-field="${f.name}"${err ? ` aria-invalid="true" aria-describedby="err-${f.name}"` : ''}`;
+    const id = `rf-${esc(f.name)}`;
+    const common = `id="${id}" data-act="formfield" data-field="${esc(f.name)}"${err ? ` aria-invalid="true" aria-describedby="err-${esc(f.name)}"` : ''}`;
     if (f.type === 'ref') return refPicker(e, f, v);
-    if (f.type === 'enum') return `<div class="p-hstack" role="radiogroup" aria-labelledby="lbl-${f.name}">${f.values.map((o) => `<button class="a-preset${v === o ? ' a-preset--on' : ''}" type="button" data-act="formpick" data-field="${f.name}" data-value="${esc(o)}" role="radio" aria-checked="${v === o}">${esc(String(o).replace(/_/g, ' '))}</button>`).join('')}</div>`;
+    if (f.type === 'enum') return `<div class="p-hstack" role="radiogroup" aria-labelledby="lbl-${esc(f.name)}">${f.values.map((o) => `<button class="a-preset${v === o ? ' a-preset--on' : ''}" type="button" data-act="formpick" data-field="${esc(f.name)}" data-value="${esc(o)}" role="radio" aria-checked="${v === o}">${esc(String(o).replace(/_/g, ' '))}</button>`).join('')}</div>`;
     if (f.type === 'text') return `<textarea class="a-textarea" ${common}>${esc(v ?? '')}</textarea>`;
-    if (f.type === 'boolean') return `<span class="a-toggle${v ? ' a-toggle--on' : ''}" role="switch" tabindex="0" aria-checked="${!!v}" data-act="formtoggle" data-field="${f.name}"></span>`;
+    if (f.type === 'boolean') return `<span class="a-toggle${v ? ' a-toggle--on' : ''}" role="switch" tabindex="0" aria-checked="${!!v}" data-act="formtoggle" data-field="${esc(f.name)}"></span>`;
     if (f.type === 'json') return `<textarea class="a-textarea" style="font-family:var(--font-mono);font-size:var(--text-xs)" placeholder="{ }" ${common}>${esc(v ? JSON.stringify(v) : '')}</textarea>`;
     if (f.type === 'date') return `<input class="a-input" type="date" value="${esc(v ?? '')}" ${common}>`;
     if (f.type === 'datetime') return `<input class="a-input" type="datetime-local" value="${esc(String(v ?? '').replace(' ', 'T'))}" ${common}>`;
@@ -2128,13 +2133,13 @@ function recordForm(entityName, editId) {
     ${writable.map((f) => {
       const err = errorFor(f.name);
       return `<div class="a-field">
-      <span class="a-label" id="lbl-${f.name}">${f.name}${f.required ? ' <span style="color:var(--accent)" aria-label="required">∗</span>' : ''}
+      <span class="a-label" id="lbl-${esc(f.name)}">${esc(f.name)}${f.required ? ' <span style="color:var(--accent)" aria-label="required">∗</span>' : ''}
         <span style="font-weight:var(--weight-normal);color:var(--faint)"> · ${typeLabel(f)}</span>
         ${f.hidden === true ? `<span class="a-label__hint">Write only — you supply it and can never read it back. ${f.required ? 'It is required <em>and</em> hidden, which is the one case Alvo publishes a hidden field’s name: in the write schemas, so a create is possible at all.' : 'Optional and hidden, so its name is in no published schema — the document understates what a create will take, which is the safe direction.'}</span>` : ''}
         ${f.format ? `<span class="a-label__hint">must match <code class="a-mono">${esc(f.format)}</code>${declaredFormats().includes(f.format) ? ` — <code class="a-mono">${esc(wc.working.formats?.[f.format]?.pattern ?? '')}</code>, anchored over the whole value` : ''}</span>` : ''}
         ${f.type === 'uuid' ? '<span class="a-label__hint">A plain uuid. The descriptor does not say what it points at — only a <code class="a-mono">ref</code> does — so there is nothing to offer a picker over.</span>' : ''}</span>
       ${control(f)}
-      ${err ? `<div class="a-error" id="err-${f.name}" style="margin-top:var(--space-2)">
+      ${err ? `<div class="a-error" id="err-${esc(f.name)}" style="margin-top:var(--space-2)">
         <span class="a-error__title">${esc(err.title)}</span>
         <span class="a-error__detail">${esc(err.detail)}</span>
         ${err.fix ? `<span class="a-error__fix">${esc(err.fix)}</span>` : ''}
@@ -2145,8 +2150,8 @@ function recordForm(entityName, editId) {
     <div class="a-row" style="position:sticky;bottom:0;background:var(--panel);padding-top:var(--space-3)">
       <button class="a-btn a-btn--ghost" data-act="close">Cancel</button>
       <span style="margin-left:auto" class="p-hstack">
-        <span class="p-muted">${editing ? 'PATCH' : 'POST'} /api/${e.name}${editing ? '/{id}' : ''}</span>
-        <button class="a-btn a-btn--primary" data-act="submitrecord" data-entity="${e.name}"${editing ? ` data-edit="${editing.id}"` : ''}>${editing ? 'Save' : `Create ${titleCase(e.name).replace(/s$/, '').toLowerCase()}`}</button></span>
+        <span class="p-muted">${editing ? 'PATCH' : 'POST'} /api/${esc(e.name)}${editing ? '/{id}' : ''}</span>
+        <button class="a-btn a-btn--primary" data-act="submitrecord" data-entity="${esc(e.name)}"${editing ? ` data-edit="${editing.id}"` : ''}>${editing ? 'Save' : `Create ${titleCase(e.name).replace(/s$/, '').toLowerCase()}`}</button></span>
     </div>
   </div></div>`;
 }
@@ -2168,19 +2173,19 @@ function refPicker(e, f, chosen) {
     return `<div class="a-picker__chosen">${avatar(String(picked[display] ?? '?').slice(0, 1))}
       <span style="flex:1"><span style="font-weight:var(--weight-medium)">${esc(picked[display] ?? picked.id)}</span>
         <span class="a-switcher-meta">${esc(picked.id)}</span></span>
-      <button class="a-btn a-btn--sm a-btn--ghost" data-act="pickopen" data-field="${f.name}">Change</button></div>`;
+      <button class="a-btn a-btn--sm a-btn--ghost" data-act="pickopen" data-field="${esc(f.name)}">Change</button></div>`;
   }
 
   if (!open) {
-    return `<button class="a-btn" data-act="pickopen" data-field="${f.name}" style="justify-content:flex-start">${icon('search')} Choose ${f.entity}…</button>`;
+    return `<button class="a-btn" data-act="pickopen" data-field="${esc(f.name)}" style="justify-content:flex-start">${icon('search')} Choose ${esc(f.entity)}…</button>`;
   }
 
   return `<div class="a-picker">
     <div class="a-picker__field">${icon('search')}
-      <input class="a-input" style="border:none;padding:0;background:transparent" placeholder="Search ${f.entity}" aria-label="Search ${f.entity}" data-act="pickquery" data-field="${f.name}" value="${esc(state.pickQuery ?? '')}">
+      <input class="a-input" style="border:none;padding:0;background:transparent" placeholder="Search ${esc(f.entity)}" aria-label="Search ${esc(f.entity)}" data-act="pickquery" data-field="${esc(f.name)}" value="${esc(state.pickQuery ?? '')}">
       <span class="p-muted" style="white-space:nowrap">${target.length} of ${num(ROW_COUNTS[f.entity] ?? target.length)} readable</span></div>
     <div class="a-picker__list" role="listbox">
-      ${target.filter((x) => !state.pickQuery || String(x[display] ?? '').toLowerCase().includes(state.pickQuery.toLowerCase())).slice(0, 5).map((x) => `<button class="a-picker__item${x.id === chosen ? ' a-picker__item--on' : ''}" data-act="pick-ref" data-field="${f.name}" data-id="${x.id}" type="button" role="option" aria-selected="${x.id === chosen}">
+      ${target.filter((x) => !state.pickQuery || String(x[display] ?? '').toLowerCase().includes(state.pickQuery.toLowerCase())).slice(0, 5).map((x) => `<button class="a-picker__item${x.id === chosen ? ' a-picker__item--on' : ''}" data-act="pick-ref" data-field="${esc(f.name)}" data-id="${x.id}" type="button" role="option" aria-selected="${x.id === chosen}">
         ${avatar(String(x[display] ?? '?').slice(0, 1))}
         <span><span style="font-weight:var(--weight-medium)">${esc(x[display] ?? x.id)}</span>
           <span class="a-switcher-meta">${esc(x.id)}</span></span></button>`).join('') || '<div class="p-muted" style="padding:var(--space-3)">Nothing matches.</div>'}
@@ -2226,8 +2231,8 @@ function screenAccess() {
         <span class="a-switcher-meta">${m.isDisabled ? 'disabled — resolves to no caller at all' : 'can sign in'}</span></td>
       <td>
         ${m.roleNames.map((r) => `<button class="a-badge${inertList.includes(r) ? ' a-role--inert' : ' a-badge--accent'}"
-            ${self ? 'disabled aria-disabled="true" title="You cannot change your own roles"' : `data-act="unassign" data-id="${u.id}" data-role="${r}" title="Remove"`}
-            type="button">${r}${self ? '' : ' ✕'}</button>`).join(' ')
+            ${self ? 'disabled aria-disabled="true" title="You cannot change your own roles"' : `data-act="unassign" data-id="${u.id}" data-role="${esc(r)}" title="Remove"`}
+            type="button">${esc(r)}${self ? '' : ' ✕'}</button>`).join(' ')
           || '<span class="p-muted">no roles</span>'}
         ${self ? '' : `<button class="a-badge" style="border:1px dashed var(--border2);background:transparent" data-act="overlay" data-kind="assign" data-id="${u.id}" type="button" aria-label="Give a role">+</button>`}
         ${inertList.length ? `<div class="a-refused__reason" style="margin-top:var(--space-2)">⚠ <span><code class="a-mono">${inertList.join('</code>, <code class="a-mono">')}</code> ${inertList.length > 1 ? 'are' : 'is'} assigned and not declared, so ${inertList.length > 1 ? 'they match' : 'it matches'} nothing — anywhere, silently.
@@ -2266,7 +2271,7 @@ function screenAccess() {
           <tbody>${people}</tbody></table>
         ${USERS.map((u) => `<div class="a-row-card" data-act="person" data-id="${u.id}" tabindex="0">
           <div class="a-row-card__head"><span class="a-mono">${esc(u.email)}</span><span class="a-badge">${effectiveLevel(u.id) ?? 'no level'}</span></div>
-          <div class="a-row-card__meta">${membershipOf(u.id).roleNames.map((r) => `<span>${r}</span>`).join('') || '<span>no roles</span>'}</div></div>`).join('')}
+          <div class="a-row-card__meta">${membershipOf(u.id).roleNames.map((r) => `<span>${esc(r)}</span>`).join('') || '<span>no roles</span>'}</div></div>`).join('')}
         <div class="a-row" style="padding:var(--space-4) var(--space-5);color:var(--faint);font-size:var(--text-xs)">
           <span>Creating a person writes a membership row and, for <code class="a-mono">local</code> auth, mints a single-use token they set their own password with. You never type a colleague's password: the deployment refuses a bootstrap password as a <em>value</em> for the same reason. <strong>Nothing in this build delivers the token</strong> — no mail transport is configured for identity — so it is handed over out of band. Changing your own roles is refused server-side, not only here.</span>
         </div>
@@ -2291,16 +2296,16 @@ function screenAccess() {
             const blocked = usedByRules.length || usedByAccess.length;
             return `<div class="a-row" style="align-items:flex-start;padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border)">
               <span style="flex:1;min-width:0">
-                <span style="font-size:var(--text-sm);font-weight:var(--weight-medium);font-family:var(--font-mono)">${r}</span>
+                <span style="font-size:var(--text-sm);font-weight:var(--weight-medium);font-family:var(--font-mono)">${esc(r)}</span>
                 <span class="a-switcher-meta">${held} ${held === 1 ? 'person holds it' : 'people hold it'}${usedByRules.length ? ` · named in rules on ${usedByRules.join(', ')}` : ''}${usedByAccess.length ? ` · names the ${usedByAccess.join(' and ')} level` : ''}${blocked ? '' : ' · named in no rule and no level'}${!blocked && held ? ', so removing it refuses nothing and quietly stops minting it' : ''}</span></span>
-              <button class="a-btn a-btn--sm a-btn--ghost" data-act="delrole" data-role="${r}" ${blocked
+              <button class="a-btn a-btn--sm a-btn--ghost" data-act="delrole" data-role="${esc(r)}" ${blocked
                 ? `disabled aria-disabled="true" title="Named in ${usedByRules.length ? 'a rule' : ''}${usedByRules.length && usedByAccess.length ? ' and ' : ''}${usedByAccess.length ? 'an access level' : ''} — both are compiled at apply, so removing it here would make the apply refuse the whole descriptor."`
                 : held ? `title="${held} ${held === 1 ? 'person holds' : 'people hold'} it. Nothing refuses this — the role simply stops being minted for them, and any rule that later names it matches nobody. It joins the working copy, so Preview and Discard are the way back."` : ''}>Remove</button>
             </div>`;
           }).join('') : '<div class="a-empty"><span class="a-empty__body">This project declares no roles of its own. A rule can still name the three built-ins.</span></div>'}
           <div style="padding:var(--space-4) var(--space-5)">
             <span class="a-label">Always present, never declared</span>
-            <div class="p-hstack" style="margin-top:var(--space-2)">${BUILTIN_ROLES.map(([r, what]) => `<span class="a-badge" title="${esc(what)}">${r}</span>`).join('')}</div>
+            <div class="p-hstack" style="margin-top:var(--space-2)">${BUILTIN_ROLES.map(([r, what]) => `<span class="a-badge" title="${esc(what)}">${esc(r)}</span>`).join('')}</div>
             <p class="p-muted p-tight" style="margin-top:var(--space-2)"><code class="a-mono">anon</code> is every caller with no identity at all — naming it in a rule is how something becomes public. It cannot be assigned to anybody, and <code class="a-mono">authenticated</code> is appended to every signed-in caller automatically, so assigning that is a no-op the UI would be calling a grant.</p>
           </div>
         </div>
@@ -2312,12 +2317,12 @@ function screenAccess() {
             ${LEVELS.map(([level, grants]) => {
               const predicate = block[level];
               return `<div style="padding:var(--space-4);border-bottom:1px solid var(--border)">
-              <div class="a-row" style="margin-bottom:var(--space-2)"><span class="a-badge a-badge--accent">${level}</span>
+              <div class="a-row" style="margin-bottom:var(--space-2)"><span class="a-badge a-badge--accent">${esc(level)}</span>
                 <span class="p-muted">${grants}</span></div>
               <div class="a-row">
                 <input class="a-input" style="font-family:var(--font-mono);flex:1" value="${esc(predicate ?? '')}"
-                  placeholder="'${catalogue[0] ?? 'admin'}' in @user.roles" data-act="setaccess" data-level="${level}" aria-label="${level} predicate">
-                ${predicate ? `<button class="a-btn a-btn--sm a-btn--ghost" data-act="setaccess" data-level="${level}" data-value="">Clear</button>` : ''}</div>
+                  placeholder="'${catalogue[0] ?? 'admin'}' in @user.roles" data-act="setaccess" data-level="${esc(level)}" aria-label="${esc(level)} predicate">
+                ${predicate ? `<button class="a-btn a-btn--sm a-btn--ghost" data-act="setaccess" data-level="${esc(level)}" data-value="">Clear</button>` : ''}</div>
               ${predicate ? accessDiagnostics(predicate) : ''}</div>`;
             }).join('')}
             <div style="padding:var(--space-4);color:var(--faint);font-size:var(--text-xs)">
@@ -2388,8 +2393,8 @@ function personDrawer(id) {
 
       <div class="a-rung${minted.length > 1 ? ' a-rung--on' : ''}">
         <span class="a-rung__label">What they are</span>
-        <span class="a-rung__value">${minted.map((r) => `<span class="a-badge a-badge--accent">${r}</span>`).join(' ')}
-          ${inertList.map((r) => `<span class="a-badge a-role--inert">${r}</span>`).join(' ')}</span>
+        <span class="a-rung__value">${minted.map((r) => `<span class="a-badge a-badge--accent">${esc(r)}</span>`).join(' ')}
+          ${inertList.map((r) => `<span class="a-badge a-role--inert">${esc(r)}</span>`).join(' ')}</span>
         <span class="a-rung__why">Assigned ∩ declared, plus <code class="a-mono">authenticated</code>, which every signed-in caller carries.
           ${inertList.length ? `<strong>${inertList.join(', ')}</strong> is assigned and the descriptor does not declare it, so it is never minted and matches nothing — neither here nor in any rule. Nothing refuses it anywhere; it is simply quiet.` : ''}</span>
       </div>
@@ -2429,7 +2434,7 @@ function personDrawer(id) {
           });
           const notes = cells.filter((c) => c.note).map((c) => `${c.verb.toLowerCase()}: ${c.note}`);
           return `<div style="margin-top:var(--space-3)">
-            <div class="a-can a-can--head"><span>${e.name}</span>${cells.map((c) => `<span class="a-can__v">${c.verb.split(' ')[0]}</span>`).join('')}</div>
+            <div class="a-can a-can--head"><span>${esc(e.name)}</span>${cells.map((c) => `<span class="a-can__v">${c.verb.split(' ')[0]}</span>`).join('')}</div>
             <div class="a-can"><span class="p-muted">${num(ROW_COUNTS[e.name] ?? 0)} records</span>
               ${cells.map((c) => `<span class="a-can__v a-can__v--${c.v}">${c.v === 'yes' ? '✓' : c.v === 'own' ? 'own' : '—'}</span>`).join('')}
               ${notes.length ? `<span class="a-can__note">${esc(notes.join(' · '))}</span>` : ''}</div>
@@ -2506,16 +2511,16 @@ function revisionDiff(before, after) {
 }
 
 function screenIntegrations() {
-  const endpoints = wc.working.webhooks?.endpoints ?? [];
-  const templates = Object.entries(wc.working.templates ?? {});
+  const endpoints = (wc.working.webhooks?.endpoints ?? []).map((x) => ({ ...x, name: safeName(x.name) }));
+  const templates = Object.entries(wc.working.templates ?? {}).map(([name, t]) => [safeName(name), t]);
 
   /* Every action type that names an endpoint or a template, across every entity's hooks. */
   const usage = { endpoints: {}, templates: {} };
   for (const e of entities()) {
     for (const [point, list] of Object.entries(e.hooks ?? {})) {
       for (const h of list ?? []) {
-        if (h.endpoint) (usage.endpoints[h.endpoint] ??= []).push(`${e.name} ${point}`);
-        if (h.template) (usage.templates[h.template] ??= []).push(`${e.name} ${point}`);
+        if (h.endpoint) (usage.endpoints[h.endpoint] ??= []).push(`${esc(e.name)} ${esc(point)}`);
+        if (h.template) (usage.templates[h.template] ??= []).push(`${esc(e.name)} ${esc(point)}`);
       }
     }
   }
@@ -2573,7 +2578,7 @@ function screenIntegrations() {
         <p class="p-muted p-tight" style="margin-top:var(--space-2)">Its own sentence: <em>"Before-actions run in-transaction: reject or mutate only. <strong>No network, no external calls.</strong>"</em> That is structural, not advisory — a before-hook has no spelling for a network call, so there is nothing to discourage. An editor that offered <code class="a-mono">webhook</code> here would be a control whose only possible output is a descriptor the apply rejects.</p>
       </div>
       ${BEFORE_ACTIONS.map((a) => `<div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border)">
-        <code class="a-mono" style="color:var(--text);font-size:var(--text-sm);width:120px;flex:none">${a.kind}</code>
+        <code class="a-mono" style="color:var(--text);font-size:var(--text-sm);width:120px;flex:none">${esc(a.kind)}</code>
         <span class="p-muted" style="flex:1">${a.what}</span>
         <span class="a-badge a-badge--ok">runs</span></div>`).join('')}
 
@@ -2582,7 +2587,7 @@ function screenIntegrations() {
         <p class="p-muted p-tight" style="margin-top:var(--space-2)">Five discriminated types, from the outbox, after the transaction. Three of them this build refuses at apply, so no control offers them and each says why.</p>
       </div>
       ${AFTER_ACTIONS.map((a) => `<div style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border)">
-        <div class="a-row"><code class="a-mono" style="color:var(--text);font-size:var(--text-sm);width:120px;flex:none">${a.kind}</code>
+        <div class="a-row"><code class="a-mono" style="color:var(--text);font-size:var(--text-sm);width:120px;flex:none">${esc(a.kind)}</code>
           <span class="p-muted" style="flex:1">${a.what}</span>
           <span class="a-badge${a.honoured ? ' a-badge--ok' : ' a-badge--danger'}">${a.honoured ? 'runs' : 'refused at apply'}</span></div>
         ${a.honoured ? '' : `<div class="a-refused__reason" style="margin-top:var(--space-2)">⚠ <span>${esc(refusal(a.kind)?.consequence ?? '')}</span></div>
@@ -2593,9 +2598,9 @@ function screenIntegrations() {
     <div class="a-panel">
       <div class="a-section"><span class="a-section-title">Events this project publishes</span>
         <span class="a-section-sub">One per entity and operation, in CloudEvents v1.0.2 shape.</span></div>
-      ${entities().flatMap((e) => ['created', 'updated', 'deleted'].map((op) => `entity.${e.name}.${op}`)).slice(0, 6)
+      ${entities().flatMap((e) => ['created', 'updated', 'deleted'].map((op) => `entity.${esc(e.name)}.${esc(op)}`)).slice(0, 6)
         .map((ev) => `<div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border)">
-          <code class="a-mono" style="color:var(--text);font-size:var(--text-sm)">${ev}</code>
+          <code class="a-mono" style="color:var(--text);font-size:var(--text-sm)">${esc(ev)}</code>
           <span class="p-muted" style="margin-left:auto">in-process subscribers only</span></div>`).join('')}
       <div class="p-note" style="margin:var(--space-4)"><span class="p-note__tag">not yet</span>
         <span>There is no delivery log to show: a subscriber receives an event in process and nothing records that it did. A wildcard subscription is <strong>refused</strong> rather than accepted — ${esc(refusal('trigger.event').consequence)}</span></div>
@@ -2844,7 +2849,7 @@ function screenNotes() {
 function overlay() {
   if (!state.overlay) return '';
   const { kind, id, entity: ent, edit } = state.overlay;
-  const wrap = (pos, panel) => `<div class="p-overlay p-overlay--${pos}" data-overlay="${kind}"><div class="a-scrim" data-act="close"></div><div class="p-overlay__panel">${panel}</div></div>`;
+  const wrap = (pos, panel) => `<div class="p-overlay p-overlay--${pos}" data-overlay="${esc(kind)}"><div class="a-scrim" data-act="close"></div><div class="p-overlay__panel">${panel}</div></div>`;
 
   if (kind === 'palette') return wrap('top', palette());
   if (kind === 'person') return wrap('right', personDrawer(id));
@@ -2858,7 +2863,7 @@ function overlay() {
         <dt>email</dt><dd class="a-mono">${esc(me().email)}</dd>
         <dt>roles minted</dt><dd><code class="a-mono">${mintedRoles(me().id).join(', ')}</code></dd>
         <dt>tenant</dt><dd>${myTenant() ? `<code class="a-mono">${esc(myTenant())}</code>` : '<span class="a-badge a-badge--warn">none — every scoped entity is 403</span>'}</dd>
-        <dt>management level</dt><dd>${level ? `<span class="a-badge a-badge--ok">${level}</span>` : '<span class="a-badge">none</span>'}${isBootstrap(me().id) ? ' <span class="a-badge a-badge--ok">bootstrap — admin whatever the descriptor says</span>' : ''}</dd>
+        <dt>management level</dt><dd>${level ? `<span class="a-badge a-badge--ok">${esc(level)}</span>` : '<span class="a-badge">none</span>'}${isBootstrap(me().id) ? ' <span class="a-badge a-badge--ok">bootstrap — admin whatever the descriptor says</span>' : ''}</dd>
       </dl>
       <div class="a-field"><span class="a-label">Act as somebody else<span class="a-label__hint">A prototype affordance. In the product you are whoever the cookie says.</span></span>
         <div class="p-hstack">${USERS.map((u) => `<button class="a-preset${u.id === state.signedIn ? ' a-preset--on' : ''}" data-act="signin" data-id="${u.id}">${esc(u.email.split('@')[0])}</button>`).join('')}</div></div>`,
@@ -2868,10 +2873,10 @@ function overlay() {
   if (kind === 'columns') {
     const e = entityView(id);
     const chosen = new Set(columnsFor(e).map((f) => f.name));
-    return wrap('center', modal(`Columns on ${e.name}`, `
+    return wrap('center', modal(`Columns on ${esc(e.name)}`, `
       <p class="p-muted p-tight">Becomes <code class="a-mono">?select=</code> on the read. Fewer columns is less to serialise, which is the point at ${e.fields.length} fields.</p>
-      <div class="p-hstack">${visibleFields(e).map((f) => `<button class="a-preset${chosen.has(f.name) ? ' a-preset--on' : ''}" data-act="togglecolumn" data-entity="${e.name}" data-field="${f.name}">${f.name}</button>`).join('')}</div>
-      <code class="a-code">GET /api/${e.name}?select=${[...chosen].join(',')}</code>`,
+      <div class="p-hstack">${visibleFields(e).map((f) => `<button class="a-preset${chosen.has(f.name) ? ' a-preset--on' : ''}" data-act="togglecolumn" data-entity="${esc(e.name)}" data-field="${esc(f.name)}">${esc(f.name)}</button>`).join('')}</div>
+      <code class="a-code">GET /api/${esc(e.name)}?select=${[...chosen].join(',')}</code>`,
       '<button class="a-btn a-btn--primary" style="margin-left:auto" data-act="close">Done</button>'));
   }
 
@@ -2927,7 +2932,7 @@ function overlay() {
     const available = [...declaredRoles(), 'admin'].filter((r) => !held.includes(r));
     return wrap('center', modal(`Give ${esc(u.email)} a role`, `
       <p class="p-muted p-tight">Takes effect on their next request. It does not change the descriptor and <strong>nothing records it</strong> — audit is #42.</p>
-      ${available.length ? `<div class="p-hstack">${available.map((r) => `<button class="a-preset" data-act="assign" data-id="${u.id}" data-role="${r}" ${r === 'admin' ? 'data-confirm="admin"' : ''} type="button">${r}${r === 'admin' ? ' ⚠' : ''}</button>`).join('')}</div>`
+      ${available.length ? `<div class="p-hstack">${available.map((r) => `<button class="a-preset" data-act="assign" data-id="${u.id}" data-role="${esc(r)}" ${r === 'admin' ? 'data-confirm="admin"' : ''} type="button">${esc(r)}${r === 'admin' ? ' ⚠' : ''}</button>`).join('')}</div>`
         : '<span class="p-muted">They already hold every role this project declares.</span>'}
       ${state.pendingGrant === 'admin' ? `<div class="a-error"><span class="a-error__title">Granting <code class="a-mono">admin</code></span>
         <span class="a-error__detail">The built-in administrator role. Every rule that names it admits them, and if a level names it they gain that level on their next request.</span>
@@ -2991,12 +2996,12 @@ function overlay() {
   if (kind === 'new-index') {
     const e = entityView(id);
     const chosen = state.indexDraft ?? [];
-    return wrap('center', modal(`Index on ${e.name}`, `
+    return wrap('center', modal(`Index on ${esc(e.name)}`, `
       <p class="p-muted p-tight">A composite index is ordered — the first column is the one a filter must name for it to be used.</p>
-      <div class="p-hstack">${visibleFields(e).map((f) => `<button class="a-preset${chosen.includes(f.name) ? ' a-preset--on' : ''}" data-act="indexpick" data-field="${f.name}">${f.name}</button>`).join('')}</div>
+      <div class="p-hstack">${visibleFields(e).map((f) => `<button class="a-preset${chosen.includes(f.name) ? ' a-preset--on' : ''}" data-act="indexpick" data-field="${esc(f.name)}">${esc(f.name)}</button>`).join('')}</div>
       ${chosen.length ? `<code class="a-code">{ "fields": [${chosen.map((c) => `"${c}"`).join(', ')}] }</code>` : '<span class="p-muted">Pick at least one column.</span>'}`,
       `<button class="a-btn a-btn--ghost" data-act="close">Cancel</button>
-       <button class="a-btn a-btn--primary" style="margin-left:auto" data-act="addindex" data-entity="${e.name}"${chosen.length ? '' : ' disabled aria-disabled="true"'}>Add it</button>`));
+       <button class="a-btn a-btn--primary" style="margin-left:auto" data-act="addindex" data-entity="${esc(e.name)}"${chosen.length ? '' : ' disabled aria-disabled="true"'}>Add it</button>`));
   }
 
   if (kind === 'new-hook') {
@@ -3009,8 +3014,8 @@ function overlay() {
     /* The argument a hook's action takes is the schema's own property, not a free-text box: a
        reject carries a string, a mutate carries field → value, an email carries a template AND a
        recipient, a webhook carries an endpoint name that `webhooks.endpoints` must declare. */
-    const endpoints = (wc.working.webhooks?.endpoints ?? []).map((x) => x.name);
-    const templates = Object.keys(wc.working.templates ?? {});
+    const endpoints = (wc.working.webhooks?.endpoints ?? []).map((x) => safeName(x.name));
+    const templates = Object.keys(wc.working.templates ?? {}).map((t) => safeName(t));
     const writable = e.fields.filter((f) => f.readOnly !== true && !f.computed && !f.rollup);
 
     const argument = () => {
@@ -3018,19 +3023,19 @@ function overlay() {
         <input class="a-input" id="hook-arg" maxlength="500" value="${esc(state.hookArg ?? '')}" placeholder="An emergency call-out must be priority 1 or 2."></div>`;
       if (chosen.kind === 'mutate') return `<div class="a-field"><span class="a-label">Set which field<span class="a-label__hint">A patch applied to the payload before it is written: field → a literal, or a tagged <code class="a-mono">{"$cel": "…"}</code> expression.</span></span>
         <div class="a-row">
-          <select class="a-select" id="hook-arg" aria-label="Field">${writable.map((f) => `<option${state.hookArg === f.name ? ' selected' : ''}>${f.name}</option>`).join('')}</select>
+          <select class="a-select" id="hook-arg" aria-label="Field">${writable.map((f) => `<option${state.hookArg === f.name ? ' selected' : ''}>${esc(f.name)}</option>`).join('')}</select>
           <input class="a-input" id="hook-arg2" style="flex:1" value="${esc(state.hookArg2 ?? '')}" placeholder="a literal, or {&quot;$cel&quot;: &quot;now()&quot;}"></div></div>`;
       if (chosen.kind === 'email') return `<div class="a-field"><span class="a-label">Template<span class="a-label__hint">Declared under <code class="a-mono">templates</code>. ${templates.length ? '' : '<strong>This descriptor declares none</strong>, so an email action has nothing to render — declare one in Integrations first.'}</span></span>
-          <select class="a-select" id="hook-arg" aria-label="Template"${templates.length ? '' : ' disabled'}>${templates.map((t) => `<option>${t}</option>`).join('') || '<option>— none declared —</option>'}</select></div>
+          <select class="a-select" id="hook-arg" aria-label="Template"${templates.length ? '' : ' disabled'}>${templates.map((t) => `<option>${esc(t)}</option>`).join('') || '<option>— none declared —</option>'}</select></div>
         <div class="a-field"><span class="a-label">To<span class="a-label__hint">A <code class="a-mono">{{…}}</code> placeholder over <code class="a-mono">new</code>/<code class="a-mono">old</code>, or a literal address.</span></span>
           <input class="a-input" id="hook-arg2" value="${esc(state.hookArg2 ?? '')}" placeholder="{{new.contact_email}}"></div>`;
       return `<div class="a-field"><span class="a-label">Endpoint<span class="a-label__hint">Declared under <code class="a-mono">webhooks.endpoints</code>. ${endpoints.length ? '' : '<strong>This descriptor declares none</strong> — declare one in Integrations first.'}</span></span>
-        <select class="a-select" id="hook-arg" aria-label="Endpoint"${endpoints.length ? '' : ' disabled'}>${endpoints.map((x) => `<option>${x}</option>`).join('') || '<option>— none declared —</option>'}</select></div>`;
+        <select class="a-select" id="hook-arg" aria-label="Endpoint"${endpoints.length ? '' : ' disabled'}>${endpoints.map((x) => `<option>${esc(x)}</option>`).join('') || '<option>— none declared —</option>'}</select></div>`;
     };
 
-    return wrap('center', modal(`A hook on ${e.name}`, `
+    return wrap('center', modal(`A hook on ${esc(e.name)}`, `
       <div class="a-field"><span class="a-label">When</span>
-        <div class="p-hstack">${HOOK_POINTS.map(([point]) => `<button class="a-preset${draft.point === point ? ' a-preset--on' : ''}" data-act="hookpoint" data-value="${point}">${point}</button>`).join('')}</div>
+        <div class="p-hstack">${HOOK_POINTS.map(([point]) => `<button class="a-preset${draft.point === point ? ' a-preset--on' : ''}" data-act="hookpoint" data-value="${esc(point)}">${esc(point)}</button>`).join('')}</div>
         <span class="a-label__hint">${before
           ? 'In the same transaction as the write it guards. It may refuse the write or patch the payload, and it <strong>cannot</strong> reach the network — the schema gives a before-action no spelling for one.'
           : 'After the commit, from the outbox, with retries. A failure here never rolls back the write that caused it.'}</span></div>
@@ -3038,10 +3043,10 @@ function overlay() {
       <div class="a-field"><span class="a-label">Do what<span class="a-label__hint">${before
         ? '<code class="a-mono">$defs/beforeHookList</code> admits these two and nothing else.'
         : '<code class="a-mono">$defs/action</code>\u2019s five types. Three are refused at apply.'}</span></span>
-        <div class="p-hstack">${available.map((a) => `<button class="a-preset${chosen.kind === a.kind ? ' a-preset--on' : ''}" data-act="hookkind" data-value="${a.kind}" data-honoured="${a.honoured}"${a.honoured ? '' : ' disabled aria-disabled="true" title="Refused at apply"'}>${a.kind}${a.honoured ? '' : ' ⚠'}</button>`).join('')}</div>
+        <div class="p-hstack">${available.map((a) => `<button class="a-preset${chosen.kind === a.kind ? ' a-preset--on' : ''}" data-act="hookkind" data-value="${esc(a.kind)}" data-honoured="${a.honoured}"${a.honoured ? '' : ' disabled aria-disabled="true" title="Refused at apply"'}>${esc(a.kind)}${a.honoured ? '' : ' ⚠'}</button>`).join('')}</div>
         <span class="a-label__hint">${chosen.what}</span></div>
 
-      ${available.filter((a) => !a.honoured).map((a) => `<div class="a-refused__reason" style="color:var(--dim)"><code class="a-mono">${a.kind}</code> — ${esc(refusal(a.kind)?.fix ?? '')}</div>`).join('')}
+      ${available.filter((a) => !a.honoured).map((a) => `<div class="a-refused__reason" style="color:var(--dim)"><code class="a-mono">${esc(a.kind)}</code> — ${esc(refusal(a.kind)?.fix ?? '')}</div>`).join('')}
 
       ${argument()}
 
@@ -3050,9 +3055,11 @@ function overlay() {
 
       ${['webhook', 'email'].includes(chosen.kind)
         ? refusedControl('JSONata', 'Reshape the payload before it is sent', '{ "id": new.id, "ref": new.reference }')
-        : ''}`,
+        : ''}
+      ${state.hookError ? `<div class="a-error" data-hook-error><span class="a-error__title">Not added</span>
+        <span class="a-error__detail">${esc(state.hookError)}</span></div>` : ''}`,
       `<button class="a-btn a-btn--ghost" data-act="close">Cancel</button>
-       <button class="a-btn a-btn--primary" style="margin-left:auto" data-act="addhook" data-entity="${e.name}">Add the hook</button>`));
+       <button class="a-btn a-btn--primary" style="margin-left:auto" data-act="addhook" data-entity="${esc(e.name)}">Add the hook</button>`));
   }
 
   if (kind === 'new-endpoint') {
@@ -3102,9 +3109,9 @@ const workingPlanFor = (before, after) => planBetween(before, after);
 function palette() {
   const q = state.paletteQuery.trim().toLowerCase();
   const generated = entities().flatMap((e) => [
-    { label: `Edit ${e.name}`, hint: 'schema', route: `#/schema/${e.name}` },
-    { label: `Browse ${e.name}`, hint: 'data', route: `#/data/${e.name}` },
-    { label: `Who can do what to ${e.name}`, hint: 'rules', route: `#/rules/${e.name}` },
+    { label: `Edit ${esc(e.name)}`, hint: 'schema', route: `#/schema/${esc(e.name)}` },
+    { label: `Browse ${esc(e.name)}`, hint: 'data', route: `#/data/${esc(e.name)}` },
+    { label: `Who can do what to ${esc(e.name)}`, hint: 'rules', route: `#/rules/${esc(e.name)}` },
   ]);
   const items = [...PALETTE_ITEMS, ...generated]
     .filter((p) => !q || p.label.toLowerCase().includes(q) || p.hint.includes(q))
@@ -3447,7 +3454,7 @@ function schemaActions(act, d, el, ev) {
       state.newEntityName = null;
       state.newEntityAudit = false;
       state.overlay = null;
-      location.hash = `#/schema/${name}`;
+      location.hash = `#/schema/${esc(name)}`;
       return true;
     }
     case 'removehook': {
@@ -3487,6 +3494,18 @@ function schemaActions(act, d, el, ev) {
       /* The schema's own two shapes: a before-action keys on its property, an after-action carries
          a `type` discriminator. Emitting one where the other belongs is a descriptor the apply
          refuses, which is the whole class of defect this editor exists not to produce. */
+      /* The guard is HERE, at the write, and not only in the point/kind transition that keeps
+         the two in step. A `default:` arm that fell through to a webhook would emit a network
+         action from a control whose reason to exist is that a before-hook cannot express one —
+         fail-open in the one place the whole editor is about. Refuse instead. */
+      if (!actionsFor(draft.point).some((a) => a.kind === draft.kind && a.honoured)) {
+        state.hookError = `A ${draft.point} hook cannot do "${draft.kind}". ${draft.point.startsWith('before')
+          ? '$defs/beforeHookList admits reject or mutate only — no network, no external calls.'
+          : 'That action type is refused at apply.'}`;
+        render();
+        return true;
+      }
+
       let action;
       switch (draft.kind) {
         case 'reject': action = { reject: arg }; break;
@@ -3497,7 +3516,8 @@ function schemaActions(act, d, el, ev) {
           break;
         }
         case 'email': action = { type: 'email', template: arg, to: arg2 }; break;
-        default: action = { type: 'webhook', endpoint: arg }; break;
+        case 'webhook': action = { type: 'webhook', endpoint: arg }; break;
+        default: return true;   // unreachable: the check above refused it
       }
 
       const hook = condition ? { condition, action } : { action };
@@ -3508,6 +3528,7 @@ function schemaActions(act, d, el, ev) {
       state.hookArg = null;
       state.hookArg2 = null;
       state.hookWhen = null;
+      state.hookError = null;
       state.overlay = null;
       render();
       return true;
@@ -3585,7 +3606,7 @@ function ruleActions(act, d, el, ev) {
 
   if (act === 'ruleraw') {
     state.rawOps ??= new Set();
-    const key = `${e.name}:${d.op}`;
+    const key = `${esc(e.name)}:${d.op}`;
     if (state.rawOps.has(key)) state.rawOps.delete(key);
     else state.rawOps.add(key);
     render();
@@ -3736,19 +3757,19 @@ function submitRecord(entityName, editId) {
     const v = values[f.name];
     const empty = v === undefined || v === null || v === '';
     if (f.required && empty && !editId) {
-      errors.push({ field: f.name, slug: 'validation', code: 'required', title: `${f.name} is required`, detail: `The descriptor marks ${f.name} required, so a create without it is refused before it reaches the database.`, fix: f.hidden === true ? 'It is hidden as well as required — which is exactly why it is on this form at all.' : 'Give it a value.' });
+      errors.push({ field: f.name, slug: 'validation', code: 'required', title: `${esc(f.name)} is required`, detail: `The descriptor marks ${esc(f.name)} required, so a create without it is refused before it reaches the database.`, fix: f.hidden === true ? 'It is hidden as well as required — which is exactly why it is on this form at all.' : 'Give it a value.' });
       continue;
     }
     if (empty) continue;
     if (f.maxLength && String(v).length > f.maxLength) {
-      errors.push({ field: f.name, slug: 'validation', code: 'max-length', title: `${f.name} is too long`, detail: `The column holds ${f.maxLength} characters and this is ${String(v).length}.`, fix: `Shorten it, or widen maxLength in Schema — widening is safe, narrowing is not.` });
+      errors.push({ field: f.name, slug: 'validation', code: 'max-length', title: `${esc(f.name)} is too long`, detail: `The column holds ${f.maxLength} characters and this is ${String(v).length}.`, fix: `Shorten it, or widen maxLength in Schema — widening is safe, narrowing is not.` });
     }
     if (f.format && !matchesFormat(f.format, String(v))) {
       const pattern = wc.working.formats?.[f.format]?.pattern;
-      errors.push({ field: f.name, slug: 'validation', code: 'format', title: `${f.name} does not match ${f.format}`, detail: pattern ? `The format is /${pattern}/, and Alvo anchors it over the whole value — a value with trailing text is refused by the framework's anchoring rather than by the author's regex.` : `A built-in format.`, fix: 'Correct the value.' });
+      errors.push({ field: f.name, slug: 'validation', code: 'format', title: `${esc(f.name)} does not match ${f.format}`, detail: pattern ? `The format is /${pattern}/, and Alvo anchors it over the whole value — a value with trailing text is refused by the framework's anchoring rather than by the author's regex.` : `A built-in format.`, fix: 'Correct the value.' });
     }
     if (f.unique && (ROWS[e.name] ?? []).some((r) => r.id !== editId && String(r[f.name]) === String(v))) {
-      errors.push({ field: f.name, slug: 'conflict', code: 'unique', title: `${f.name} is already taken`, detail: `Another record holds ${v}, and ${f.name} is unique. The database refused the write — this is 409, not a validation failure: the request is well formed and collides with what is stored.`, fix: 'Use a different value. There is no unique-violation slug: one `conflict` covers a unique collision and a restricted reference, and the violation code tells them apart.' });
+      errors.push({ field: f.name, slug: 'conflict', code: 'unique', title: `${esc(f.name)} is already taken`, detail: `Another record holds ${v}, and ${esc(f.name)} is unique. The database refused the write — this is 409, not a validation failure: the request is well formed and collides with what is stored.`, fix: 'Use a different value. There is no unique-violation slug: one `conflict` covers a unique collision and a restricted reference, and the violation code tells them apart.' });
     }
   }
 
@@ -3772,9 +3793,69 @@ function submitRecord(entityName, editId) {
 function matchesFormat(name, value) {
   const builtIn = { email: /^[^@\s]+@[^@\s]+\.[^@\s]+$/, uri: /^[a-z][a-z0-9+.-]*:\/\/\S+$/i, phone: /^[+0-9 ()-]{5,}$/ };
   if (builtIn[name]) return builtIn[name].test(value);
-  const pattern = wc.working.formats?.[name]?.pattern;
-  if (!pattern) return true;
-  return new RegExp(`^(?:${pattern})$`).test(value);   // Alvo anchors a format over the whole value
+  const compiled = compileFormat(wc.working.formats?.[name]?.pattern);
+  return compiled ? compiled.test(value) : true;
+}
+
+/* A `formats[*].pattern` is author-supplied and, after an Import, attacker-supplied. Two things
+   go wrong with `new RegExp(pattern)` on that: a pattern that does not compile throws out of the
+   form instead of producing a validation error, and a catastrophically backtracking one
+   (`(a+)+`) hangs the tab on the first keystroke. The real framework compiles these server-side
+   and the same input class is worth a look there; here the drawing bounds what it will accept.
+
+   Alvo anchors a format over the WHOLE value, which is why the author writes `WO-[0-9]{4,8}`
+   rather than `^WO-[0-9]{4,8}$` — so the anchoring is added here rather than expected. */
+const FORMAT_CACHE = new Map();
+
+function compileFormat(pattern) {
+  if (typeof pattern !== 'string' || !pattern) return null;
+  if (FORMAT_CACHE.has(pattern)) return FORMAT_CACHE.get(pattern);
+  const compiled = pattern.length <= 200 && linearSafe(pattern) ? safeRegExp(`^(?:${pattern})$`) : null;
+  FORMAT_CACHE.set(pattern, compiled);
+  return compiled;
+}
+
+function safeRegExp(source) {
+  try {
+    return new RegExp(source);
+  } catch {
+    return null;
+  }
+}
+
+/* A quantifier applied to a group that itself contains one — `(a+)+`, `(a*)*`, `(\\d{1,3})+` — is
+   the catastrophic-backtracking signature: matching fails in exponential time on an input a few
+   dozen characters long, and the tab stops responding.
+
+   There is no cheap way to *decide* that a regular expression is linear, so this refuses the
+   shape rather than pretending to judge the language. It is conservative in the safe direction —
+   it will turn away a nested-quantifier pattern that happens to be harmless — and a drawing
+   refusing an input it cannot check, and saying so, is the honest version of this. The framework
+   compiles `formats[*].pattern` server-side, where the same input class is worth its own look;
+   that is outside what this prototype can speak to. */
+function linearSafe(pattern) {
+  let depth = 0;
+  const quantifiedAt = [];
+  for (let i = 0; i < pattern.length; i += 1) {
+    const c = pattern[i];
+    if (c === '\\') { i += 1; continue; }
+    if (c === '[') {                       // a character class quantifies as one unit
+      while (i < pattern.length && pattern[i] !== ']') i += pattern[i] === '\\' ? 2 : 1;
+      continue;
+    }
+    if (c === '(') { depth += 1; quantifiedAt[depth] = false; continue; }
+    if (c === ')') {
+      const inner = quantifiedAt[depth];
+      depth -= 1;
+      const next = pattern[i + 1];
+      const quantified = next === '+' || next === '*' || next === '{';
+      if (inner && quantified) return false;            // (…+…)+  — the exponential shape
+      if (quantified && depth > 0) quantifiedAt[depth] = true;
+      continue;
+    }
+    if ((c === '+' || c === '*' || c === '{') && depth > 0) quantifiedAt[depth] = true;
+  }
+  return true;
 }
 
 /* --- Apply, rollback, import --------------------------------------------- */
@@ -3818,16 +3899,26 @@ function applyActions(act, d, el, ev) {
     }
     case 'import': {
       const text = $('#import-json')?.value ?? '';
+      let parsed;
       try {
-        const parsed = JSON.parse(text);
-        if (!parsed.apiVersion || !parsed.name || !parsed.entities) throw new Error('A descriptor needs apiVersion, name and entities.');
-        wc.working = parsed;
-        state.importError = null;
-        location.hash = '#/schema/preview';
+        parsed = JSON.parse(text);
       } catch (error) {
-        state.importError = { title: 'That is not a descriptor this API can read', detail: error.message };
+        state.importError = { title: 'That is not JSON', detail: error.message };
         render();
+        return true;
       }
+      const problems = validateDescriptor(parsed);
+      if (problems.length) {
+        state.importError = {
+          title: `The apply would refuse this descriptor — ${problems.length} problem${problems.length > 1 ? 's' : ''}`,
+          detail: problems.slice(0, 6).join(' · ') + (problems.length > 6 ? ` · and ${problems.length - 6} more` : ''),
+        };
+        render();
+        return true;
+      }
+      wc.working = parsed;
+      state.importError = null;
+      location.hash = '#/schema/preview';
       return true;
     }
     case 'finishwizard': {
@@ -3843,6 +3934,83 @@ function applyActions(act, d, el, ev) {
     case 'wizardtenancy': { state.wizardTenancy = !state.wizardTenancy; render(); return true; }
     default: return false;
   }
+}
+
+/* An imported descriptor is the one input to this screen that somebody else wrote, so it is
+   checked before anything renders it — which is the product behaviour anyway: the apply validates
+   every name against `schema/project.schema.json`'s own `propertyNames` patterns, and the design's
+   own rule is that a control must never produce a descriptor the apply would refuse.
+
+   It is also what keeps a name out of the markup. Every screen builds HTML from these names, and
+   `^[a-z][a-z0-9_]{0,62}$` admits no `<`, no `"`, no `'` and no `&` — so a validated descriptor
+   cannot carry a name that means anything in HTML. `esc()` at the sinks is the second layer; this
+   is the first, and it is the one that is also correct for its own sake. */
+function validateDescriptor(doc) {
+  const problems = [];
+  const patterns = SCHEMA_FACETS.namePatterns;
+  const matches = (pattern, value) => typeof value === 'string' && new RegExp(pattern).test(value);
+
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return ['A descriptor is a JSON object.'];
+  if (doc.apiVersion !== 'alvo.dev/v1') problems.push(`apiVersion must be "alvo.dev/v1"`);
+  if (!matches(patterns.project, doc.name)) problems.push(`name must match ${patterns.project}`);
+  if (!doc.entities || typeof doc.entities !== 'object' || Array.isArray(doc.entities)) {
+    problems.push('entities must be an object with at least one entity');
+    return problems;
+  }
+
+  for (const [entityName, entity] of Object.entries(doc.entities)) {
+    if (!matches(patterns.entity, entityName)) problems.push(`entity name must match ${patterns.entity}`);
+    if (!entity || typeof entity !== 'object') { problems.push(`${esc(entityName)} is not an object`); continue; }
+    const fields = entity.fields;
+    if (!fields || typeof fields !== 'object' || !Object.keys(fields).length) {
+      problems.push(`${esc(entityName)} needs at least one field`);
+      continue;
+    }
+    for (const index of entity.indexes ?? []) {
+      for (const column of index?.fields ?? []) {
+        if (!matches(patterns.field, column)) problems.push(`an index column must match ${patterns.field}`);
+        else if (!(column in fields)) problems.push(`${entityName} has no field called ${column} to index`);
+      }
+    }
+    for (const [fieldName, field] of Object.entries(fields)) {
+      if (!matches(patterns.field, fieldName)) problems.push(`field name must match ${patterns.field}`);
+      if (!field || typeof field !== 'object') { problems.push(`${esc(entityName)}.${fieldName} is not an object`); continue; }
+      if (!SCHEMA_FACETS.types.includes(field.type)) {
+        problems.push(`${esc(entityName)}.${fieldName} type must be one of ${SCHEMA_FACETS.types.join(', ')}`);
+        continue;
+      }
+      for (const needed of SCHEMA_FACETS.needs[field.type] ?? []) {
+        const value = field[needed];
+        if (value === undefined || (Array.isArray(value) && !value.length)) {
+          problems.push(`${esc(entityName)}.${fieldName} is ${field.type}, so it needs ${needed}`);
+        }
+      }
+      if (field.type === 'ref' && !matches(patterns.entity, field.entity)) {
+        problems.push(`${esc(entityName)}.${fieldName} points at a name that is not an entity name`);
+      }
+      if (field.format !== undefined
+        && !SCHEMA_FACETS.builtInFormats.includes(field.format)
+        && !matches(patterns.identifier, field.format)) {
+        problems.push(`${esc(entityName)}.${fieldName} format must be a built-in or a declared format name`);
+      }
+    }
+  }
+
+  for (const role of doc.auth?.roles ?? []) {
+    if (!matches(patterns.identifier, role)) problems.push(`a role name must match ${patterns.identifier}`);
+  }
+  for (const [name, format] of Object.entries(doc.formats ?? {})) {
+    if (!matches(patterns.identifier, name)) problems.push(`a format name must match ${patterns.identifier}`);
+    if (typeof format?.pattern !== 'string') problems.push(`format ${esc(name)} needs a pattern`);
+    else if (format.pattern.length > 200) problems.push(`format ${esc(name)}'s pattern is over 200 characters`);
+    else if (!safeRegExp(format.pattern)) problems.push(`format ${esc(name)}'s pattern is not a valid regular expression`);
+    else if (!linearSafe(format.pattern)) problems.push(`format ${esc(name)}'s pattern nests a quantifier inside a quantified group, which backtracks exponentially — this drawing refuses what it cannot check cheaply`);
+  }
+  for (const level of Object.keys(doc.access ?? {})) {
+    if (!['admin', 'developer', 'viewer'].includes(level)) problems.push(`access has no level called ${esc(level)}`);
+  }
+
+  return [...new Set(problems)];
 }
 
 /* --- Typing --------------------------------------------------------------- */

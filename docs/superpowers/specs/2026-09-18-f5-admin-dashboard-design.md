@@ -370,6 +370,24 @@ three refusals stay refusals: a requested tenant the row does not name, a malfor
 request naming any tenant at all from a row that names none. What changes is only that a row can
 now name one.
 
+**`TenantId` must reserve its all-zero value, and today it does not.** `UserId` refuses
+`Guid.Empty` in two places, and `ManagementAccessEvaluator`'s remark calls that *"the gate making
+that structural rather than conventional"*. `TenantId` has no equivalent: `Guid.TryParse` accepts
+`00000000-0000-0000-0000-000000000000`, the result is not `null`, and `PolicyEngine`'s tenant guard
+therefore treats it as a real tenant. That is an internal detail while a tenant only ever arrives
+from an API key record an operator does not type. §2.7 ends that: the grant becomes a **form
+field**, and a store that materialises `default(TenantId)` for a NULL column, or a form that posts
+the all-zero string, would produce an operator who reads every row written under the all-zero
+tenant instead of one who reads nothing — failing **open**, where every other refusal on this path
+fails closed. The guard belongs in the type, on `UserId`'s own precedent, and §7 carries it.
+
+**One implementation trap, written down because it is a one-character mistake.**
+`TenantResolver.TryResolve` returns `true` with `tenant = null` on the no-request/no-grant path and
+`false` on denial. Code that ignores the bool turns *"you asked for a tenant you were not granted"*
+into *"you act with no tenant"* — which still denies every `scoped` entity, so it is a weakened
+refusal rather than an escalation, but it **admits a session on `global` entities** where the
+resolver today mints no caller at all. §6.1 pins it.
+
 **Why the grant is on `AlvoUser` and not a second port.** It is membership, and
 `IAlvoUserStore`'s own remarks already say what that port is for: *"who exists, and which roles
 each of them is a member of"*. A tenant is the same kind of fact as a role name — assigned
@@ -645,6 +663,88 @@ package simply has no routes there.
 They are management routes because `ManageUsers` is already a `ManagementOperation` at `admin`, and
 because *"všetko, čo vie dashboard, vie aj API"* binds them as much as it binds the descriptor.
 §6.1's contract test gains a sibling: **every member of `IAlvoUserAdministration` has a route too.**
+
+#### The bootstrap administrator is not a target of this surface, and that is load-bearing
+
+Two of these six members would otherwise remove the one identity the whole default-deny story
+rests on. `ManagementAccessEvaluator`'s own remark states the invariant: *"a project whose `access`
+block locks everyone out still has exactly one person who can fix it."* So both are refused on that
+account **by name**, and the refusal is part of the contract rather than a policy an implementation
+might hold:
+
+- **`IssueCredentialTokenAsync` refuses the bootstrap administrator.** Without the refusal, any
+  `admin` mints a set-password token for the account the descriptor's `access` block does not
+  govern, sets the password, and signs in as it — which is precisely the capability `host.md`
+  refuses when it says *"Seeding is idempotent and does not reset an existing account's password."*
+  The bootstrap credential comes from a **mounted file**, and rotating it is a deployment
+  operation, not a dashboard one.
+  There is a second consequence and it is the sharper one. §3.7's U3.1 argues the self-tenant-grant
+  is worth refusing because an apply *"appends a `DescriptorVersion` carrying `Author` and
+  `Reason`, which Configuration history renders forever."* A credential reset aimed at anybody
+  makes that `Author` **forgeable**: reset a colleague's password, sign in as them, apply, and the
+  permanent record names the colleague. The refusal for the bootstrap admin does not close that —
+  see U3.2 — it closes the case where the forged identity is the one above the descriptor.
+- **`SetDisabledAsync` refuses the bootstrap administrator.** Trace what it would do:
+  `AlvoIdentityContextResolver` returns `null` for a disabled user **before** anything consults
+  `IAlvoBootstrapAdmin`, so no context is minted and the evaluator's bootstrap branch is never
+  reached; `IsDisabled` is a lockout the identity store holds; and a restart does not help, because
+  the seed finds the existing row and returns without touching either password or lockout. A
+  deployment whose `access` block admits nobody else — **which §3.5 says is the default** — would
+  be permanently locked out of its own Management API, recoverable only by editing the identity
+  database by hand.
+
+**No "last administrator" guard is needed, and that is why.** The obvious alternative — refuse
+disabling the last caller any `access` level admits — is both harder (it means resolving every
+user against every predicate on every write) and unnecessary: the bootstrap administrator is
+always there and cannot be disabled, so the invariant holds without counting anybody.
+
+#### U3.2 — what the self-grant guard is, and what it is not
+
+**It is a mistake-guard, not a malice-guard, and pretending otherwise would be the more dangerous
+claim.** An `admin` who wants the reach can have it in one hop and the guard cannot stop them:
+`CreateAsync(email, ["admin"], tenant)` mints a puppet, `IssueCredentialTokenAsync(puppet)` signs
+them in as it, and `SetTenantAsync(somebody-else)` is explicitly left open. None of it is recorded
+(U4).
+
+That is not a hole to be plugged at this level, because it is the trust boundary itself: `admin`
+is defined by §3.3 as the level that *decides who may reach the project*, and an `admin` already
+holds `ApplyDescriptor` and can therefore rewrite `entities.*.rules` to admit themselves to every
+row of every entity. There is no arrangement of guards that makes an untrusted `admin` safe; what
+makes one accountable is #42, and F5 does not have it.
+
+So the guard earns its place on a narrower claim, stated rather than implied: **it catches the
+honest mistake at zero cost, and it keeps the one clearly-recorded route the clearly-recorded
+one.** A caller who cannot grant themselves a level has to either use the audited route (an apply,
+with an `Author`) or take a deliberate, visible detour through a second account. It is a
+speed bump with a name, and calling it a control would be the thing that misleads.
+
+#### The level is re-resolved, never name-matched
+
+The guard's rule is *"a role that raises the level `access` resolves for them"*, and the obvious
+implementation — *did they add `admin` to themselves?* — is wrong. A level is any CEL predicate
+over declared roles: `access.admin: "'dispatcher' in @user.roles"` is legal, so a self-grant of
+`dispatcher` resolves to `admin` and a name-match waves it through.
+
+The implementation builds the **prospective** `AlvoContext` — the caller's roles after the write,
+intersected with `IRoleCatalogProvider.DeclaredRoles` exactly as `AlvoIdentityContextResolver.Minted`
+does — and compares `ManagementAccessEvaluator.Resolve` before against after. Higher is refused.
+Written down because the shortcut is the obvious thing to write.
+
+#### What DI registers under the public interface
+
+`IAlvoUserAdministration` is public in Abstractions and implemented in `MMLib.Alvo.Identity`, while
+the guards above live in the **core**. `AlvoManagementService`'s own remark names the failure that
+shape invites: a guard living in one adapter *"would be the divergent authorization path spec §0.5
+contract 4 forbids"*.
+
+So the registration is explicit: **the core registers a guarded decorator under
+`IAlvoUserAdministration`**, and the Identity implementation is registered under its own internal
+type that only the decorator resolves. An in-process consumer that resolves the public interface
+gets the gate, the escalation guard and the bootstrap refusals; there is no registration that
+hands out the raw implementation. This is the same shape `AlvoManagementService` already has over
+`IDescriptorVersionStore` and `ISchemaRegistry`, and §6.1 pins it: **resolving
+`IAlvoUserAdministration` from a composed container and calling a member as a caller with no level
+is refused.**
 
 **One operation for six members, including the read — decided, not inherited.** The obvious
 alternative is a second operation, `ReadUsers`, at `viewer`, so a viewer can see who is on the
@@ -1023,7 +1123,12 @@ mutants).
 | One path, two transports | contract: **every `IAlvoManagement` member has an HTTP route** | ring1 |
 | …and the same for user administration | contract: **every `IAlvoUserAdministration` member has an HTTP route** (§3.7) | ring1 |
 | An operator cannot choose a tenant they were not granted | integration: a session requesting a tenant the user's row does not name resolves to `null`, exactly as an API key does (§2.7) | ring2 |
+| …and a denied request is not read as "no tenant" | unit: `TryResolve` returning `false` refuses the caller, rather than minting one with a `null` tenant that reaches `global` entities (§2.7) | ring0 |
 | Nobody grants themselves a role or a tenant | **contract test in `MMLib.Alvo.Testing`**, run by every `IAlvoUserAdministration` implementation — a guard living in one adapter is optional by construction (§3.7, U3) | ring0 |
+| …and the level is re-resolved, not name-matched | unit: `access.admin: "'dispatcher' in @user.roles"`, caller self-grants `dispatcher`, refused (§3.7) | ring0 |
+| The bootstrap administrator cannot be disabled or credential-reset | integration: both members refuse that id by name, so the identity `ManagementAccessEvaluator` calls *"exactly one person who can fix it"* survives every write this surface has (§3.7) | ring2 |
+| Resolving `IAlvoUserAdministration` from a container gets the guard | integration: a composed container's public registration is the guarded decorator, and an unpublished caller is refused in-process (§3.7) | ring2 |
+| A tenant is never the all-zero value | unit: `TenantId.TryParse` refuses the reserved value, as `UserId` already does (§2.7) | ring0 |
 | No client evaluates a stored row | Playwright: the rules screen renders no per-record allowed/refused verdict at any width (§2.2.1) | prototype suite |
 | The simulator answers as production does | property: simulator verdict vs the Data API's actual response for the same `AlvoContext` | ring2 |
 | `access` is actually enforced | integration: a caller matching no level gets `403` on every management route | ring2 |
@@ -1098,7 +1203,7 @@ citing a section of a design that is not on `main` cites nothing.
 | **#212** (Management API) | exists as an issue and already blocks #229/#230; **needs the F5 milestone** |
 | **Identity + `IAlvoUserStore` + bootstrap admin** | **no issue exists** — must be filed, and blocks #146 and #227 |
 | **#146** (`access` enforcement + the fifth CEL profile) | currently F6; **move to F5**, ordered before #227 |
-| **An operator's tenant** (§2.7) | `AlvoUser.Tenant`, honoured by `AlvoIdentityContextResolver` on `TenantResolver`'s confirmation rule. **No issue exists** — must be filed. Blocks the Data screen for every scoped entity, which is two of the three in the example the product ships |
+| **An operator's tenant** (§2.7) | `AlvoUser.Tenant`, honoured by `AlvoIdentityContextResolver` on `TenantResolver`'s confirmation rule — **and `TenantId` reserving its all-zero value**, which `UserId` already does and `TenantId` does not (§2.7). **No issue exists** — must be filed. Blocks the Data screen for every scoped entity, which is two of the three in the example the product ships |
 | **`IAlvoUserAdministration`** (§3.7) | a **second** contract in Abstractions — `IAlvoUserStore` is untouched — implemented by `MMLib.Alvo.Identity`, six management routes at `admin`, the credential-set token, and the self-grant guard **in the core** with a `MMLib.Alvo.Testing` contract test. **No issue exists** — must be filed. Blocks a `providers: ["local"]` project ever having a second person |
 
 `#227`'s body must also be corrected: *"Blocked by: nothing. Can start today."* is no longer true.

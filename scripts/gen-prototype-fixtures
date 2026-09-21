@@ -284,6 +284,15 @@ def facets() -> dict:
 
     return {
         "types": types,
+        # Every pattern a NAME in the descriptor must match. The prototype validates an imported
+        # descriptor against these, because the apply does — and because a name the schema cannot
+        # carry is also the one place hostile text could reach a screen.
+        "namePatterns": {
+            "identifier": schema["$defs"]["identifier"]["pattern"],
+            "entity": schema["properties"]["entities"]["propertyNames"]["pattern"],
+            "field": schema["$defs"]["entity"]["properties"]["fields"]["propertyNames"]["pattern"],
+            "project": schema["properties"]["name"]["pattern"],
+        },
         "identifierPattern": schema["$defs"]["identifier"]["pattern"],
         "entityNamePattern": schema["$defs"]["entity"]["properties"]["fields"]["propertyNames"]["pattern"],
         "needs": needs,

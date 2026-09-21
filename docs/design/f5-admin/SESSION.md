@@ -258,6 +258,42 @@ here, so an adversarial reviewer was dispatched as its substitute; this is the c
 | **Default-deny** | Holds, and one thing was decided rather than inherited: all six new members sit behind the single `ManageUsers` operation at `admin`, **including the read**. §3.7 now argues it — the people list enumerates a project's administrators, and `ManagementOperations`' missing-operation fallback is `admin` anyway, so a seventh member added without a decision fails safe. |
 | **Before-hooks in-transaction, network-forbidden, structurally** | **The sharpest finding, and it was in my own work.** The hook editor offered one list of seven actions on every point and emitted a shape the schema does not have. `$defs/beforeHookList` admits `reject` or `mutate` only — *"No network, no external calls"* — and that is structural. Fixed, and `13-hook-shapes.spec.js` measures both directions. |
 
+## 9. The adversarial pass, and what it changed
+
+`/security-review` is user-only here, so a reviewer was dispatched as its substitute over the whole
+diff. It cleared the two things the brief was most worried about, and both are worth recording
+because they are the ones a reader would otherwise have to re-derive:
+
+- **The GitHub Actions `${{ }}` interpolation is not injectable.** The new job interpolates
+  `github.event.pull_request.base.sha || github.event.before`; both are SHAs GitHub computes, never
+  author text, and both uses are quoted. `on: pull_request` (not `pull_request_target`),
+  `permissions: contents: read`, `persist-credentials: false`.
+- **`gen-prototype-fixtures` cannot be made to emit escaping JS.** `json.dumps` escapes `"` and
+  `\`, and the output is an ES module loaded by `src=`, never an inline `<script>`.
+
+What it found, and what changed:
+
+| Finding | What changed |
+|---|---|
+| **An imported descriptor could reach `innerHTML` as markup** — and the test server is rooted at the repository, so the page's origin covers the whole checkout | **Two layers.** The boundary: an import is validated against the frozen schema's own `propertyNames` patterns and refused with the reason, which is the product behaviour anyway. The view: `entities()`, `declaredRoles()` and the endpoint/template lists **never hand out a name the schema cannot carry** — one place instead of forty `esc()` calls, and the correct behaviour on its own terms, since a descriptor with an impossible name is one the apply refuses |
+| A typed record value rendered raw in the mobile row card | escaped |
+| `new RegExp(pattern)` from a descriptor: ReDoS and an uncaught throw | a pattern is refused unless it compiles, is under 200 characters, and has no quantifier nested inside a quantified group. A drawing refusing what it cannot check cheaply, and saying so |
+| `esc()` omitted `'` and a backtick | added — not exploitable today, and a sanitiser that needs the next author to know that is not one |
+| `IssueCredentialTokenAsync` could target the **bootstrap administrator** | refused by name. Otherwise any `admin` mints a token for the one identity `access` does not govern, sets its password and signs in as it — the capability `host.md` refuses when it says seeding *"does not reset an existing account's password"* |
+| `SetDisabledAsync` could disable the bootstrap administrator → **unrecoverable lockout** | refused by name. The resolver returns `null` for a disabled user *before* consulting `IAlvoBootstrapAdmin`, and a restart does not re-seed an existing row, so the deployment would lose its own Management API permanently. `ManagementAccessEvaluator`'s remark calls that identity *"exactly one person who can fix it"* |
+| U3 is defeated in one hop by a puppet account | **said plainly** rather than plugged: U3.2 records that it is a mistake-guard, not a malice-guard, and why no arrangement of guards makes an untrusted `admin` safe — `admin` already holds `ApplyDescriptor`. What makes one accountable is #42 |
+| The guard could be implemented as a name-match | §3.7 now requires the level to be **re-resolved** before against after, because `access.admin: "'dispatcher' in @user.roles"` is legal and a name-match waves that self-grant through |
+| `IAlvoUserAdministration` public, guard in the core | §3.7 states what DI registers: a guarded decorator under the public interface, the implementation under an internal type only the decorator resolves |
+| `TenantId(Guid.Empty)` is not reserved, and §2.7 turns the grant into a form field | §2.7 and §7 require the type to reserve it, on `UserId`'s precedent — the only refusal on this path that would otherwise fail **open** |
+| `npm ci` runs dependency lifecycle scripts on a fork PR | `--ignore-scripts`; the browser install is a separate explicit step |
+| `upload-artifact@v4` where the file pins `@v7` | pinned to match |
+| The hook editor's `default:` arm fell through to a network action | fails closed, and the compatibility check moved from the transition to the **write** |
+
+`14-hostile-descriptor.spec.js` measures both layers — twelve refused descriptors, a hostile name
+written straight past the boundary and walked through every route and every tab, the backtracking
+pattern, and a check that the patterns it validates against are the schema's own rather than a
+copy.
+
 **This change is marked `needs-deep-review`.** The label goes on the PR — not because the checklist
 failed, but because the design it amends touches the security core by area and a second set of
 human eyes is what the label is for.

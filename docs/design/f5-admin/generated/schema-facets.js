@@ -20,6 +20,12 @@ export const SCHEMA_FACETS = {
     "enum",
     "ref"
   ],
+  "namePatterns": {
+    "identifier": "^[a-z][a-z0-9_-]{0,62}$",
+    "entity": "^[a-z][a-z0-9_]{0,62}$",
+    "field": "^[a-z][a-z0-9_]{0,62}$",
+    "project": "^[a-z][a-z0-9-]{1,62}$"
+  },
   "identifierPattern": "^[a-z][a-z0-9_-]{0,62}$",
   "entityNamePattern": "^[a-z][a-z0-9_]{0,62}$",
   "needs": {

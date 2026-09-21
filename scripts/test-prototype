@@ -29,7 +29,10 @@ cd "$tests"
 # a green run unreproducible and a transitive change invisible.
 if [ ! -d node_modules ]; then
   echo "test-prototype: installing @playwright/test from the lockfile (first run)…"
-  npm ci --no-audit --no-fund
+  # --ignore-scripts: on a fork PR the package.json and lockfile in this directory are
+  # attacker-controlled, and a dependency lifecycle script is arbitrary code in the runner. The
+  # browser is installed by the explicit `playwright install` below, so nothing here needs one.
+  npm ci --no-audit --no-fund --ignore-scripts
 fi
 
 # `playwright install` is idempotent and quick once the browser is cached.

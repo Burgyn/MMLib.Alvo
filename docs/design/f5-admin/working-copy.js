@@ -13,6 +13,7 @@
    Design: docs/superpowers/specs/2026-09-18-f5-admin-dashboard-design.md §4.5. */
 
 import { APPLIED_DESCRIPTOR } from './generated/descriptor.js';
+import { SCHEMA_FACETS } from './generated/schema-facets.js';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -516,33 +517,71 @@ export const editors = {
 /* -------------------------------------------------------------------------- a view for screens
 
    The screens want a flat entity shape. It is DERIVED from the working document on every read, so
-   a screen cannot hold a stale copy and an edit is visible everywhere at once. */
+   a screen cannot hold a stale copy and an edit is visible everywhere at once.
+
+   AND IT NEVER HANDS OUT A NAME THE SCHEMA CANNOT CARRY.
+
+   Every screen builds HTML from these names, and there are upwards of forty places one reaches
+   `innerHTML`. Escaping each of them is a list the next author adds a forty-first entry to; this
+   is one place, and it is also the correct product behaviour rather than a security patch bolted
+   on: `schema/project.schema.json`'s `propertyNames` patterns are what the apply enforces, so a
+   descriptor carrying a name outside them is one the apply refuses — and a drawing that renders it
+   is drawing a state that cannot exist. It is replaced with a visible marker, and the view says
+   `invalidName` so a screen can show the problem rather than the string.
+
+   The descriptor pane is unaffected and deliberately so: it renders the stored JSON through
+   `esc()`, which is where an operator SHOULD see what the document actually says. */
+
+const NAME_PATTERNS = {
+  entity: new RegExp(SCHEMA_FACETS.namePatterns.entity),
+  field: new RegExp(SCHEMA_FACETS.namePatterns.field),
+  identifier: new RegExp(SCHEMA_FACETS.namePatterns.identifier),
+};
+
+export const INVALID_NAME = '\u27e8invalid name\u27e9';
+
+/** A name a screen may render, or a marker. `kind` is entity, field or identifier. */
+export function safeName(value, kind = 'identifier') {
+  return NAME_PATTERNS[kind].test(value) ? value : INVALID_NAME;
+}
+
+export const isValidName = (value, kind = 'identifier') => NAME_PATTERNS[kind].test(value);
 
 export function entities(doc = wc.working) {
-  return Object.entries(doc.entities ?? {}).map(([name, entity]) => ({
-    name,
-    label: name.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()),
-    description: entity.description ?? '',
-    tenancy: entity.tenancy ?? (doc.tenancy?.enabled ? 'scoped' : 'global'),
-    audit: entity.audit === true,
-    softDelete: entity.softDelete === true,
-    realtime: entity.realtime !== false,
-    storage: entity.storage ?? 'physical',
-    indexes: entity.indexes ?? [],
-    hooks: entity.hooks ?? {},
-    rules: entity.rules ?? {},
-    fields: Object.entries(entity.fields ?? {}).map(([fieldName, field]) => ({
-      name: fieldName,
-      ...field,
-    })),
-  }));
+  return Object.entries(doc.entities ?? {}).map(([rawName, entity]) => {
+    const name = safeName(rawName, 'entity');
+    return {
+      name,
+      invalidName: name === INVALID_NAME,
+      label: name.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase()),
+      description: entity.description ?? '',
+      tenancy: entity.tenancy ?? (doc.tenancy?.enabled ? 'scoped' : 'global'),
+      audit: entity.audit === true,
+      softDelete: entity.softDelete === true,
+      realtime: entity.realtime !== false,
+      storage: entity.storage ?? 'physical',
+      indexes: (entity.indexes ?? []).map((index) => ({
+        ...index,
+        fields: (index.fields ?? []).map((f) => safeName(f, 'field')),
+      })),
+      hooks: entity.hooks ?? {},
+      rules: entity.rules ?? {},
+      fields: Object.entries(entity.fields ?? {}).map(([rawField, field]) => ({
+        ...field,
+        name: safeName(rawField, 'field'),
+        invalidName: !isValidName(rawField, 'field'),
+        ...(field.type === 'ref' ? { entity: safeName(field.entity, 'entity') } : {}),
+        ...(field.rollup ? { rollup: { ...field.rollup, from: safeName(field.rollup.from, 'entity'), ...(field.rollup.field ? { field: safeName(field.rollup.field, 'field') } : {}) } } : {}),
+      })),
+    };
+  });
 }
 
 export const entityView = (name, doc = wc.working) => entities(doc).find((e) => e.name === name);
 
-export const declaredRoles = (doc = wc.working) => doc.auth?.roles ?? [];
+export const declaredRoles = (doc = wc.working) => (doc.auth?.roles ?? []).map((r) => safeName(r));
 export const accessBlock = (doc = wc.working) => doc.access ?? {};
-export const declaredFormats = (doc = wc.working) => Object.keys(doc.formats ?? {});
+export const declaredFormats = (doc = wc.working) => Object.keys(doc.formats ?? {}).map((f) => safeName(f));
 export const tenancyEnabled = (doc = wc.working) => doc.tenancy?.enabled === true;
 
 /** The warned blocks this descriptor actually declares — `UnhonouredSubsystems.DeclaredBy`. */
