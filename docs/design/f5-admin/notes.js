@@ -165,6 +165,17 @@ export const DECISIONS = [
     reversal: true,
   },
   {
+    title: 'A before-hook and an after-hook are not one editor with a longer list.',
+    why: '<code class="a-mono">$defs/beforeHookList</code> admits <code class="a-mono">{ action: { reject } }</code> and <code class="a-mono">{ action: { mutate } }</code> and carries its own sentence: <em>"Before-actions run in-transaction: reject or mutate only. No network, no external calls."</em> That is <strong>structural</strong> — a before-action has no spelling for a network call, so there is nothing to discourage. <code class="a-mono">$defs/afterHookList</code> admits <code class="a-mono">$defs/action</code>, which is five discriminated types, three of them refused at apply. The first version of this editor offered one list of seven on every point and emitted <code class="a-mono">{ type: "reject", message }</code>, which is neither shape — a control producing a descriptor the apply refuses, twice over. Found by running the <code class="a-mono">alvo-security-core-review</code> checklist against my own work, on its "before-hooks are network-forbidden, structurally" item.',
+    source: 'schema/project.schema.json $defs/beforeHookList, $defs/action',
+    reversal: true,
+  },
+  {
+    title: 'The prototype filters rows by tenant in JavaScript, and says so in capital letters.',
+    why: 'Isolation belongs in the SQL <code class="a-mono">WHERE</code>, inside the data port — an in-memory post-filter has already leaked whatever a debugger, a cache or a bug in the filter can see. This drawing has no database, so <code class="a-mono">rowsFor()</code> filters an array, which is exactly the shape that rule forbids. It is a picture of the outcome, not an implementation, and the comment above it says so — because an implementer copying this screen into Razor would otherwise build the defect the rule exists to prevent.',
+    source: 'alvo-security-core-review — "authorization goes into the SQL WHERE"',
+  },
+  {
     title: 'The model map draws the focused entity and one hop, past six entities.',
     why: 'Fixed-width boxes stacked per reference depth is a 3,000 px picture with wires crossing boxes at forty entities. One hop in each direction is the neighbourhood anybody is actually reading.',
   },
@@ -252,6 +263,8 @@ export const OPEN_QUESTIONS = [
   'A hook editor exists here in the shape the automation builder will need. Does it land in F5, or wait so the two are designed together?',
 ];
 
+/* `status` is 'new' (proposed.css adds it), 'exists' (alvo.css has it) or 'change' (alvo.css has
+   it and this design asks for one alteration, with the reason in proposed.css). */
 export const COMPONENTS = [
   ['a-split / a-json', 'Model on the left, the working copy on the right, with a gutter mark per changed line.', 'new'],
   ['a-fieldrow', 'One field: name, type, flag strip, changed dot.', 'new'],
@@ -277,5 +290,6 @@ export const COMPONENTS = [
   ['a-diff', 'The preview diff, the revision compare, and the later AI proposal. Three consumers, one component.', 'exists'],
   ['a-notyet / a-notyet-panel / a-refused', 'The two classes of "not yet".', 'exists'],
   ['a-error / a-empty / a-skeleton', 'Feedback. Errors are inline and stay; they are never toasts.', 'exists'],
-  ['a-palette / a-modal / a-drawer / a-confirm', 'Overlays, each a role="dialog" with a focus trap.', 'exists'],
+  ['a-palette / a-drawer / a-confirm', 'Overlays, each a role="dialog" with a focus trap.', 'exists'],
+  ['a-modal', 'Exists — and needs one change in alvo.css: a max-height and overflow. Without them a modal taller than the viewport puts its own primary button off-screen with nothing to scroll, which is every hook editor on a laptop. The drawer already has it.', 'change'],
 ];

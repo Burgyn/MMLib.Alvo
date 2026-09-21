@@ -53,11 +53,14 @@ test.describe('the honest edges', () => {
     text = await page.locator('#app').innerText();
     for (const r of CAPABILITIES.refused) if (text.includes(r.consequence)) seen.add(r.slot);
 
-    // A JSONata transform on an after-hook that leaves the process.
+    // A JSONata transform on an after-hook that leaves the process. (An AFTER point: a before-hook
+    // has no network action to reshape the payload of.)
     await go(page, '#/schema/work_orders');
     await page.click('[data-act="tab"][data-tab="hooks"]');
     await page.click('[data-kind="new-hook"]');
-    await page.click('[data-act="hooktype"][data-value="webhook"]');
+    await page.click('[data-act="hookpoint"][data-value="afterUpdate"]');
+    await page.waitForTimeout(60);
+    await page.click('[data-act="hookkind"][data-value="webhook"]');
     await page.waitForTimeout(60);
     text = await page.locator('#app').innerText();
     for (const r of CAPABILITIES.refused) if (text.includes(r.consequence)) seen.add(r.slot);
@@ -101,17 +104,32 @@ test.describe('the honest edges', () => {
     await expect(page.locator('#app')).toContainText('refused at apply');
     await shot(page, '10-integrations');
 
-    // And the hook editor refuses to offer them.
+    // And the hook editor offers what the point actually admits, which is not one list.
     await go(page, '#/schema/work_orders');
     await page.click('[data-act="tab"][data-tab="hooks"]');
     await page.click('[data-kind="new-hook"]');
     await page.waitForTimeout(60);
-    for (const type of ['function', 'http.call', 'entity.update']) {
-      await expect(page.locator(`[data-act="hooktype"][data-value="${type}"]`)).toBeDisabled();
+
+    // A BEFORE hook runs in the transaction, and $defs/beforeHookList gives it no spelling for a
+    // network call at all. Offering `webhook` here would be a control whose only possible output
+    // is a descriptor the apply rejects.
+    await expect(page.locator('[data-act="hookkind"][data-value="reject"]')).toBeEnabled();
+    await expect(page.locator('[data-act="hookkind"][data-value="mutate"]')).toBeEnabled();
+    for (const kind of ['webhook', 'email', 'function', 'http.call', 'entity.update']) {
+      await expect(page.locator(`[data-act="hookkind"][data-value="${kind}"]`)).toHaveCount(0);
     }
-    for (const type of ['reject', 'mutate', 'email', 'webhook']) {
-      await expect(page.locator(`[data-act="hooktype"][data-value="${type}"]`)).toBeEnabled();
+    await expect(page.locator('.a-modal')).toContainText('cannot</strong> reach the network'.replace(/<[^>]+>/g, ''));
+
+    // An AFTER hook gets $defs/action's five, three of them disabled with their own refusal.
+    await page.click('[data-act="hookpoint"][data-value="afterUpdate"]');
+    await page.waitForTimeout(60);
+    for (const kind of ['webhook', 'email']) {
+      await expect(page.locator(`[data-act="hookkind"][data-value="${kind}"]`)).toBeEnabled();
     }
+    for (const kind of ['function', 'http.call', 'entity.update']) {
+      await expect(page.locator(`[data-act="hookkind"][data-value="${kind}"]`)).toBeDisabled();
+    }
+    await expect(page.locator('[data-act="hookkind"][data-value="reject"]')).toHaveCount(0);
     await shot(page, '10-hook-actions');
 
     console_.assertClean();

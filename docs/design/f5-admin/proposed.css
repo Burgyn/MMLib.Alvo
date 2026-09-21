@@ -1833,3 +1833,20 @@
   background: var(--accent);
   vertical-align: middle;
 }
+
+/* ---------------------------------------------------------------------------
+   A REQUESTED CHANGE TO alvo.css, not a new component.
+
+   `.a-modal` in alvo.css sets a width and no height bound, so a modal taller
+   than the viewport puts its own primary button off-screen with nothing to
+   scroll — which is every hook editor on a laptop, and the record form on a
+   phone. The drawer already solved this (`overflow: auto`); the modal did not.
+
+   Stated here rather than edited into alvo.css because that file is the
+   repository's and this prototype only ever LINKS it. This block is the
+   design asking for the change; the component inventory at #/notes lists it. */
+.a-modal {
+  max-height: calc(100vh - var(--space-8));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}

@@ -883,31 +883,51 @@ const HOOK_POINTS = [
   ['afterDelete', 'after commit, from the outbox'],
 ];
 
-/** The action types `$defs/action` declares. Three are refused by this build, by name. */
-const ACTION_TYPES = [
-  { type: 'reject', honoured: true, what: 'Refuse the write with a message' },
-  { type: 'mutate', honoured: true, what: 'Set a field on the row being written' },
-  { type: 'email', honoured: true, what: 'Render a template and send it' },
-  { type: 'webhook', honoured: true, what: 'Post to a declared endpoint' },
-  { type: 'function', honoured: false, what: 'Invoke a declared function' },
-  { type: 'http.call', honoured: false, what: 'Call a URL directly' },
-  { type: 'entity.update', honoured: false, what: 'Write to another entity' },
+/* The two hook shapes are NOT the same shape, and the schema is emphatic about why.
+
+   `$defs/beforeHookList` admits `{ action: { reject } }` and `{ action: { mutate } }` and nothing
+   else, with its own sentence: *"Before-actions run in-transaction: reject or mutate only. No
+   network, no external calls."* That is structural — a before-hook cannot express a network call,
+   rather than being discouraged from making one — and an editor that offered `webhook` on a
+   `beforeCreate` would be a control whose only possible output is a descriptor the apply rejects.
+
+   `$defs/afterHookList` admits `{ action: $defs/action }`, which is the five discriminated types.
+   Three of them this build refuses. */
+
+/** What a BEFORE hook may do. Two shapes, keyed by their own property, no `type` discriminator. */
+const BEFORE_ACTIONS = [
+  { kind: 'reject', what: 'Refuse the write; the text becomes the RFC 7807 detail', honoured: true },
+  { kind: 'mutate', what: 'Patch the payload before it is written', honoured: true },
 ];
+
+/** What an AFTER hook may do — `$defs/action`'s five, three of them refused at apply. */
+const AFTER_ACTIONS = [
+  { kind: 'webhook', honoured: true, what: 'Post to an endpoint declared under webhooks' },
+  { kind: 'email', honoured: true, what: 'Render a template and send it' },
+  { kind: 'function', honoured: false, what: 'Invoke a function declared under functions' },
+  { kind: 'entity.update', honoured: false, what: 'Write to another entity' },
+  { kind: 'http.call', honoured: false, what: 'Call a URL directly' },
+];
+
+const actionsFor = (point) => (point.startsWith('before') ? BEFORE_ACTIONS : AFTER_ACTIONS);
 
 function hooksTab(e) {
   const hooks = e.hooks ?? {};
   const total = hookCount(e);
 
-  const row = (point, when, h, index) => `<div class="a-hook">
+  const row = (point, when, h, index) => {
+    const kind = actionKind(h);
+    return `<div class="a-hook">
       <span class="a-hook__point">
         <code class="a-mono" style="color:var(--text);font-size:var(--text-sm)">${point}</code>
         <span class="a-hook__when">${when}</span></span>
       <span style="min-width:0;display:flex;flex-direction:column;gap:var(--space-2)">
-        ${h.when ? `<span class="p-muted">only when <code class="a-mono" style="color:var(--text)">${esc(h.when)}</code></span>` : '<span class="p-muted">on every write</span>'}
+        ${h.condition ? `<span class="p-muted">only when <code class="a-mono" style="color:var(--text)">${esc(h.condition)}</code></span>` : '<span class="p-muted">on every write</span>'}
         <span class="a-row">
-          <span class="a-badge${h.type === 'reject' ? ' a-badge--danger' : h.type === 'mutate' ? '' : ' a-badge--accent'}">${esc(h.type)}</span>
+          <span class="a-badge${kind === 'reject' ? ' a-badge--danger' : kind === 'mutate' ? '' : ' a-badge--accent'}">${esc(kind)}</span>
           <span style="font-size:var(--text-sm)">${esc(hookSummary(h))}</span></span></span>
       <button class="a-btn a-btn--sm a-btn--ghost" data-act="removehook" data-point="${point}" data-i="${index}">Remove</button></div>`;
+  };
 
   const section = (kind) => HOOK_POINTS.filter(([p]) => p.startsWith(kind))
     .flatMap(([point, when]) => (hooks[point] ?? []).map((h, i) => row(point, when, h, i))).join('');
@@ -931,12 +951,30 @@ function hooksTab(e) {
       <span>A before-hook reads <code class="a-mono">new.</code> and <code class="a-mono">old.</code>; a rule on the Rules tab reads the bare field name. Two vocabularies, because a rule sees one stored row and a hook sees the write that is changing it. On a create there is no <code class="a-mono">old.</code> at all.</span></div>`;
 }
 
-const hookSummary = (h) => ({
-  reject: h.message ?? '',
-  mutate: `${h.field ?? ''} ← ${h.value ?? ''}`,
-  email: `${h.template ?? ''} → ${h.to ?? ''}`,
-  webhook: h.endpoint ?? '',
-}[h.type] ?? h.type);
+/** Which of the two shapes this hook's action is. A before-action keys on its own property; an
+    after-action carries a `type` discriminator. */
+function actionKind(hook) {
+  const action = hook.action ?? {};
+  if (action.reject !== undefined) return 'reject';
+  if (action.mutate !== undefined) return 'mutate';
+  return action.type ?? 'unknown';
+}
+
+function hookSummary(hook) {
+  const a = hook.action ?? {};
+  switch (actionKind(hook)) {
+    case 'reject': return a.reject ?? '';
+    case 'mutate': return Object.entries(a.mutate ?? {})
+      .map(([field, value]) => `${field} ← ${typeof value === 'object' && value?.$cel ? value.$cel : JSON.stringify(value)}`)
+      .join(', ');
+    case 'email': return `${a.template ?? ''} → ${a.to ?? ''}`;
+    case 'webhook': return a.endpoint ?? '';
+    case 'function': return a.name ?? '';
+    case 'entity.update': return a.entity ?? '';
+    case 'http.call': return a.url ?? '';
+    default: return '';
+  }
+}
 
 /* --- Indexes -------------------------------------------------------------- */
 
@@ -1828,6 +1866,16 @@ function columnsFor(e) {
   return visibleFields(e).slice(0, 6);
 }
 
+/* ⚠ THIS IS A DRAWING OF THE OUTCOME, NOT AN IMPLEMENTATION OF IT. ⚠
+
+   In the product the tenant predicate is compiled to SQL and attached INSIDE the data port, so
+   rows never leave the database unfiltered — `alvo-security-core-review`: *"if a policy is
+   enforced by fetching rows and then filtering them in application code, it is not enforced."*
+   This prototype has no database, so it filters an array, which is precisely the shape that rule
+   forbids.
+
+   Anyone porting this screen to Razor: the grid calls `/api/{entity}` under the operator's own
+   context and renders what comes back. There is no client-side tenant filter to port. */
 function rowsFor(e) {
   const tenant = myTenant();
   const all = ROWS[e.name] ?? [];
@@ -2517,14 +2565,28 @@ function screenIntegrations() {
     </div>
 
     <div class="a-panel">
-      <div class="a-section"><span class="a-section-title">What an action may be</span>
-        <span class="a-section-sub">Seven types in <code class="a-mono">$defs/action</code>. Three are refused at apply, so no control offers them and each says why.</span></div>
-      ${ACTION_TYPES.map((a) => `<div style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border)">
-        <div class="a-row"><code class="a-mono" style="color:var(--text);font-size:var(--text-sm);width:120px;flex:none">${a.type}</code>
+      <div class="a-section"><span class="a-section-title">What an action may be, and where</span>
+        <span class="a-section-sub">The two hook shapes are not the same shape, and the frozen schema is emphatic about why.</span></div>
+
+      <div style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border)">
+        <span class="a-label">Before the write commits — <code class="a-mono">$defs/beforeHookList</code></span>
+        <p class="p-muted p-tight" style="margin-top:var(--space-2)">Its own sentence: <em>"Before-actions run in-transaction: reject or mutate only. <strong>No network, no external calls.</strong>"</em> That is structural, not advisory — a before-hook has no spelling for a network call, so there is nothing to discourage. An editor that offered <code class="a-mono">webhook</code> here would be a control whose only possible output is a descriptor the apply rejects.</p>
+      </div>
+      ${BEFORE_ACTIONS.map((a) => `<div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border)">
+        <code class="a-mono" style="color:var(--text);font-size:var(--text-sm);width:120px;flex:none">${a.kind}</code>
+        <span class="p-muted" style="flex:1">${a.what}</span>
+        <span class="a-badge a-badge--ok">runs</span></div>`).join('')}
+
+      <div style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border)">
+        <span class="a-label">After the write commits — <code class="a-mono">$defs/action</code></span>
+        <p class="p-muted p-tight" style="margin-top:var(--space-2)">Five discriminated types, from the outbox, after the transaction. Three of them this build refuses at apply, so no control offers them and each says why.</p>
+      </div>
+      ${AFTER_ACTIONS.map((a) => `<div style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border)">
+        <div class="a-row"><code class="a-mono" style="color:var(--text);font-size:var(--text-sm);width:120px;flex:none">${a.kind}</code>
           <span class="p-muted" style="flex:1">${a.what}</span>
           <span class="a-badge${a.honoured ? ' a-badge--ok' : ' a-badge--danger'}">${a.honoured ? 'runs' : 'refused at apply'}</span></div>
-        ${a.honoured ? '' : `<div class="a-refused__reason" style="margin-top:var(--space-2)">⚠ <span>${esc(refusal(a.type)?.consequence ?? '')}</span></div>
-          <div class="a-refused__reason" style="color:var(--dim)"><span>→</span> <span>${esc(refusal(a.type)?.fix ?? '')}</span></div>`}
+        ${a.honoured ? '' : `<div class="a-refused__reason" style="margin-top:var(--space-2)">⚠ <span>${esc(refusal(a.kind)?.consequence ?? '')}</span></div>
+          <div class="a-refused__reason" style="color:var(--dim)"><span>→</span> <span>${esc(refusal(a.kind)?.fix ?? '')}</span></div>`}
       </div>`).join('')}
     </div>
 
@@ -2763,7 +2825,7 @@ function screenNotes() {
         <span class="a-section-sub">What <code class="a-mono">proposed.css</code> asks to add to <code class="a-mono">alvo.css</code>.</span></div>
       <table class="a-grid"><thead><tr><th>Class</th><th>What it is</th><th>Status</th></tr></thead>
         <tbody>${COMPONENTS.map(([c, w, s]) => `<tr><td class="a-mono" style="font-size:var(--text-xs)">${c}</td><td>${w}</td>
-          <td><span class="a-badge${s === 'new' ? ' a-badge--accent' : ''}">${s === 'new' ? 'to add' : 'in alvo.css'}</span></td></tr>`).join('')}</tbody></table>
+          <td><span class="a-badge${s === 'new' ? ' a-badge--accent' : s === 'change' ? ' a-badge--warn' : ''}">${s === 'new' ? 'to add' : s === 'change' ? 'change alvo.css' : 'in alvo.css'}</span></td></tr>`).join('')}</tbody></table>
     </div>
 
     <div class="a-panel">
@@ -2939,22 +3001,54 @@ function overlay() {
 
   if (kind === 'new-hook') {
     const e = entityView(id);
-    const draft = state.hookDraft ?? { point: 'beforeCreate', type: 'reject' };
-    const chosen = ACTION_TYPES.find((a) => a.type === draft.type);
+    const draft = state.hookDraft ?? { point: 'beforeCreate', kind: 'reject' };
+    const available = actionsFor(draft.point);
+    const chosen = available.find((a) => a.kind === draft.kind) ?? available[0];
+    const before = draft.point.startsWith('before');
+
+    /* The argument a hook's action takes is the schema's own property, not a free-text box: a
+       reject carries a string, a mutate carries field → value, an email carries a template AND a
+       recipient, a webhook carries an endpoint name that `webhooks.endpoints` must declare. */
+    const endpoints = (wc.working.webhooks?.endpoints ?? []).map((x) => x.name);
+    const templates = Object.keys(wc.working.templates ?? {});
+    const writable = e.fields.filter((f) => f.readOnly !== true && !f.computed && !f.rollup);
+
+    const argument = () => {
+      if (chosen.kind === 'reject') return `<div class="a-field"><span class="a-label">Message<span class="a-label__hint">Becomes the <code class="a-mono">detail</code> of the RFC 7807 problem the caller gets. 500 characters.</span></span>
+        <input class="a-input" id="hook-arg" maxlength="500" value="${esc(state.hookArg ?? '')}" placeholder="An emergency call-out must be priority 1 or 2."></div>`;
+      if (chosen.kind === 'mutate') return `<div class="a-field"><span class="a-label">Set which field<span class="a-label__hint">A patch applied to the payload before it is written: field → a literal, or a tagged <code class="a-mono">{"$cel": "…"}</code> expression.</span></span>
+        <div class="a-row">
+          <select class="a-select" id="hook-arg" aria-label="Field">${writable.map((f) => `<option${state.hookArg === f.name ? ' selected' : ''}>${f.name}</option>`).join('')}</select>
+          <input class="a-input" id="hook-arg2" style="flex:1" value="${esc(state.hookArg2 ?? '')}" placeholder="a literal, or {&quot;$cel&quot;: &quot;now()&quot;}"></div></div>`;
+      if (chosen.kind === 'email') return `<div class="a-field"><span class="a-label">Template<span class="a-label__hint">Declared under <code class="a-mono">templates</code>. ${templates.length ? '' : '<strong>This descriptor declares none</strong>, so an email action has nothing to render — declare one in Integrations first.'}</span></span>
+          <select class="a-select" id="hook-arg" aria-label="Template"${templates.length ? '' : ' disabled'}>${templates.map((t) => `<option>${t}</option>`).join('') || '<option>— none declared —</option>'}</select></div>
+        <div class="a-field"><span class="a-label">To<span class="a-label__hint">A <code class="a-mono">{{…}}</code> placeholder over <code class="a-mono">new</code>/<code class="a-mono">old</code>, or a literal address.</span></span>
+          <input class="a-input" id="hook-arg2" value="${esc(state.hookArg2 ?? '')}" placeholder="{{new.contact_email}}"></div>`;
+      return `<div class="a-field"><span class="a-label">Endpoint<span class="a-label__hint">Declared under <code class="a-mono">webhooks.endpoints</code>. ${endpoints.length ? '' : '<strong>This descriptor declares none</strong> — declare one in Integrations first.'}</span></span>
+        <select class="a-select" id="hook-arg" aria-label="Endpoint"${endpoints.length ? '' : ' disabled'}>${endpoints.map((x) => `<option>${x}</option>`).join('') || '<option>— none declared —</option>'}</select></div>`;
+    };
+
     return wrap('center', modal(`A hook on ${e.name}`, `
       <div class="a-field"><span class="a-label">When</span>
-        <div class="p-hstack">${HOOK_POINTS.map(([p]) => `<button class="a-preset${draft.point === p ? ' a-preset--on' : ''}" data-act="hookpoint" data-value="${p}">${p}</button>`).join('')}</div>
-        <span class="a-label__hint">${draft.point.startsWith('before') ? 'In the same transaction. It may refuse the write or change the values, and it reaches no network.' : 'After the commit, from the outbox, with retries. A failure never rolls back the write that caused it.'}</span></div>
-      <div class="a-field"><span class="a-label">Do what</span>
-        <div class="p-hstack">${ACTION_TYPES.map((a) => `<button class="a-preset${draft.type === a.type ? ' a-preset--on' : ''}" data-act="hooktype" data-value="${a.type}" data-honoured="${a.honoured}"${a.honoured ? '' : ' disabled aria-disabled="true" title="Refused at apply"'}>${a.type}${a.honoured ? '' : ' ⚠'}</button>`).join('')}</div>
-        <span class="a-label__hint">${chosen?.what ?? ''}</span></div>
-      ${chosen && !chosen.honoured ? `<div class="a-refused__reason">⚠ <span>${esc(refusal(draft.type)?.consequence ?? '')}</span></div>` : ''}
-      ${ACTION_TYPES.filter((a) => !a.honoured).map((a) => `<div class="a-refused__reason" style="color:var(--dim)"><code class="a-mono">${a.type}</code> — ${esc(refusal(a.type)?.fix ?? '')}</div>`).join('')}
-      <div class="a-field"><span class="a-label">${draft.type === 'reject' ? 'Message' : draft.type === 'mutate' ? 'Set which field' : draft.type === 'email' ? 'Template' : 'Endpoint'}</span>
-        <input class="a-input" id="hook-arg" value="${esc(state.hookArg ?? '')}" placeholder="${draft.type === 'reject' ? 'An emergency call-out must be priority 1 or 2.' : draft.type === 'mutate' ? 'completed_on' : 'job-scheduled'}"></div>
-      <div class="a-field"><span class="a-label">Only when<span class="a-label__hint">The Condition profile: it sees <code class="a-mono">new.</code> and <code class="a-mono">old.</code>, <code class="a-mono">changed()</code>, and the closed context. On a create there is no <code class="a-mono">old.</code> at all. <code class="a-mono">== null</code> is refused — use <code class="a-mono">has()</code>.</span></span>
+        <div class="p-hstack">${HOOK_POINTS.map(([point]) => `<button class="a-preset${draft.point === point ? ' a-preset--on' : ''}" data-act="hookpoint" data-value="${point}">${point}</button>`).join('')}</div>
+        <span class="a-label__hint">${before
+          ? 'In the same transaction as the write it guards. It may refuse the write or patch the payload, and it <strong>cannot</strong> reach the network — the schema gives a before-action no spelling for one.'
+          : 'After the commit, from the outbox, with retries. A failure here never rolls back the write that caused it.'}</span></div>
+
+      <div class="a-field"><span class="a-label">Do what<span class="a-label__hint">${before
+        ? '<code class="a-mono">$defs/beforeHookList</code> admits these two and nothing else.'
+        : '<code class="a-mono">$defs/action</code>\u2019s five types. Three are refused at apply.'}</span></span>
+        <div class="p-hstack">${available.map((a) => `<button class="a-preset${chosen.kind === a.kind ? ' a-preset--on' : ''}" data-act="hookkind" data-value="${a.kind}" data-honoured="${a.honoured}"${a.honoured ? '' : ' disabled aria-disabled="true" title="Refused at apply"'}>${a.kind}${a.honoured ? '' : ' ⚠'}</button>`).join('')}</div>
+        <span class="a-label__hint">${chosen.what}</span></div>
+
+      ${available.filter((a) => !a.honoured).map((a) => `<div class="a-refused__reason" style="color:var(--dim)"><code class="a-mono">${a.kind}</code> — ${esc(refusal(a.kind)?.fix ?? '')}</div>`).join('')}
+
+      ${argument()}
+
+      <div class="a-field"><span class="a-label">Only when<span class="a-label__hint">The <code class="a-mono">Condition</code> profile: it sees <code class="a-mono">new.</code> and <code class="a-mono">old.</code>, <code class="a-mono">changed()</code>, and the closed context. ${draft.point.endsWith('Create') ? 'On a create there is no <code class="a-mono">old.</code> at all.' : ''} <code class="a-mono">== null</code> is refused — use <code class="a-mono">has()</code>.</span></span>
         <input class="a-input" style="font-family:var(--font-mono)" id="hook-when" value="${esc(state.hookWhen ?? '')}" placeholder="new.status == 'completed' && !has(old.completed_on)"></div>
-      ${['webhook', 'email'].includes(draft.type)
+
+      ${['webhook', 'email'].includes(chosen.kind)
         ? refusedControl('JSONata', 'Reshape the payload before it is sent', '{ "id": new.id, "ref": new.reference }')
         : ''}`,
       `<button class="a-btn a-btn--ghost" data-act="close">Cancel</button>
@@ -3364,23 +3458,56 @@ function schemaActions(act, d, el, ev) {
       render();
       return true;
     }
-    case 'hookpoint': { state.hookDraft = { ...(state.hookDraft ?? { type: 'reject' }), point: d.value }; render(); return true; }
-    case 'hooktype': { state.hookDraft = { ...(state.hookDraft ?? { point: 'beforeCreate' }), type: d.value }; render(); return true; }
+    case 'hookpoint': {
+      const next = { ...(state.hookDraft ?? {}), point: d.value };
+      /* Switching between a before and an after point changes WHICH actions exist, so a kind that
+         does not survive the move is replaced rather than carried into a descriptor the apply
+         would refuse. */
+      if (!actionsFor(d.value).some((a) => a.kind === next.kind)) next.kind = actionsFor(d.value)[0].kind;
+      state.hookDraft = next;
+      state.hookArg = null;
+      state.hookArg2 = null;
+      render();
+      return true;
+    }
+    case 'hookkind': {
+      state.hookDraft = { ...(state.hookDraft ?? { point: 'beforeCreate' }), kind: d.value };
+      state.hookArg = null;
+      state.hookArg2 = null;
+      render();
+      return true;
+    }
     case 'addhook': {
-      const draft = state.hookDraft ?? { point: 'beforeCreate', type: 'reject' };
+      const draft = state.hookDraft ?? { point: 'beforeCreate', kind: 'reject' };
       const arg = $('#hook-arg')?.value ?? '';
-      const when = $('#hook-when')?.value ?? '';
+      const arg2 = $('#hook-arg2')?.value ?? '';
+      const condition = $('#hook-when')?.value ?? '';
       const target = entityView(d.entity);
-      const body = { type: draft.type };
-      if (when) body.when = when;
-      if (draft.type === 'reject') body.message = arg;
-      if (draft.type === 'mutate') { body.field = arg; body.value = ''; }
-      if (draft.type === 'email') body.template = arg;
-      if (draft.type === 'webhook') body.endpoint = arg;
+
+      /* The schema's own two shapes: a before-action keys on its property, an after-action carries
+         a `type` discriminator. Emitting one where the other belongs is a descriptor the apply
+         refuses, which is the whole class of defect this editor exists not to produce. */
+      let action;
+      switch (draft.kind) {
+        case 'reject': action = { reject: arg }; break;
+        case 'mutate': {
+          let value = arg2;
+          try { value = JSON.parse(arg2); } catch { /* a bare literal is a string */ }
+          action = { mutate: { [arg]: value } };
+          break;
+        }
+        case 'email': action = { type: 'email', template: arg, to: arg2 }; break;
+        default: action = { type: 'webhook', endpoint: arg }; break;
+      }
+
+      const hook = condition ? { condition, action } : { action };
       const hooks = { ...(target.hooks ?? {}) };
-      hooks[draft.point] = [...(hooks[draft.point] ?? []), body];
+      hooks[draft.point] = [...(hooks[draft.point] ?? []), hook];
       editors.setHooks(d.entity, hooks);
       state.hookDraft = null;
+      state.hookArg = null;
+      state.hookArg2 = null;
+      state.hookWhen = null;
       state.overlay = null;
       render();
       return true;
