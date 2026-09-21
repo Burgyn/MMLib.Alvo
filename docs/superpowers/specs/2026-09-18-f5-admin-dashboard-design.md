@@ -646,6 +646,20 @@ They are management routes because `ManageUsers` is already a `ManagementOperati
 because *"všetko, čo vie dashboard, vie aj API"* binds them as much as it binds the descriptor.
 §6.1's contract test gains a sibling: **every member of `IAlvoUserAdministration` has a route too.**
 
+**One operation for six members, including the read — decided, not inherited.** The obvious
+alternative is a second operation, `ReadUsers`, at `viewer`, so a viewer can see who is on the
+project without being able to change anything. It is refused: the people list is the one place a
+project's administrators are **enumerated**, and "who is an admin here" is reconnaissance a
+default-deny posture has no reason to hand to every viewer. The cost is real and small — a viewer
+cannot answer *"who else can see this?"* from the dashboard — and the answer they actually need,
+*"what can **this** person do"*, is `policy/simulate`, which they already have at `viewer`. Revisit
+if a viewer is ever expected to administer anything, and note that splitting the operation later is
+additive.
+
+**`ManagementOperations`' fallback makes the failure mode safe either way.** An operation missing
+from that table resolves to `admin`, so a seventh member added without a decision is refused for
+everyone but an administrator rather than opened to every viewer.
+
 **`ListAsync` grows paging and a filter here, not later.** The port's current `ListAsync` returns
 every user in no order, which is the whole table in one render — fine for a build with one row,
 wrong at the 2 000 the analysis sizes for, and a port-level gap rather than a screen-level one. It
@@ -1018,6 +1032,7 @@ mutants).
 | `capabilities` does not lie | reads `UnhonouredSubsystems.All` and compares against the payload — the same shape that already guards that table against the schema | ring0 |
 | Four doors, one result | mount / Management API / `FromDescriptor()` produce an identical `SchemaModel` (the CLI door is absent, #213) | ring2 |
 | The dashboard is not a policy bypass | integration: the same caller sees exactly the same rows through the dashboard as through `/api` | ring2 |
+| A cookie session is isolated across tenants exactly as a key is | adversarial: two operators, two tenants, one otherwise identical descriptor — neither sees the other's rows, neither can infer they exist, through a **session** and not only through an API key. §2.7 gives `AlvoContext.Tenant` a second provenance (a user row an `admin` edits), and every existing cross-tenant fact was written about the first one | ring2 |
 
 ### 6.2 Playwright
 

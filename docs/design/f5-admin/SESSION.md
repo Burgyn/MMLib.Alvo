@@ -241,5 +241,23 @@ the eight fixes above, and the PR body says so.
 
 **`needs-deep-review: yes` stands.** No product code changed, but the design this PR amends is the
 security core by area — `AlvoUser.Tenant` changes what a cookie session carries into the tenant
-guard, and six new `admin` routes plus a self-grant guard are proposed. The PR carries the label
-and the `alvo-security-core-review` checklist is owed before merge.
+guard, and six new `admin` routes plus a self-grant guard are proposed.
+
+## 8. The `alvo-security-core-review` checklist, run
+
+Against the two proposals and against the prototype. `/security-review` is a user-only command
+here, so an adversarial reviewer was dispatched as its substitute; this is the checklist half.
+
+| Item | Result |
+|---|---|
+| **SQL predicate — no interpolation** | **Not affected, and worth saying why.** §2.7 gives `AlvoContext.Tenant` a new *provenance* (a user row rather than a key record) and not a new *path*: the value is still a `TenantId`, still consumed by the already-shipped `tenant_id == @tenant.id`, which `PolicyCatalogBuilder` compiles through `ICelCompiler` and *"never hand-builds"*. |
+| **Authorization in the SQL `WHERE`, never a post-filter** | **One finding, in the prototype.** `rowsFor()` filters an array by tenant. It is a drawing with no database, so it cannot do otherwise — but it is exactly the shape the rule forbids, and an implementer copying the screen would build the defect. The function and `#/notes` now carry the warning in as many words. |
+| **Fail-fast compile** | Not affected. `access` levels already compile at apply; `IAlvoUserAdministration` writes no CEL. |
+| **Cross-tenant isolation** | **One gap in the design, now closed.** Every existing cross-tenant fact was written about an API key. §2.7 gives the same context value a second provenance, so §6.1 gains an adversarial two-operator / two-tenant fact **over a session**. |
+| **Dynamic entities share one table** | Out of scope — `dynamicEntities` is a warned subsystem in F7, and this change proposes nothing over it. |
+| **Default-deny** | Holds, and one thing was decided rather than inherited: all six new members sit behind the single `ManageUsers` operation at `admin`, **including the read**. §3.7 now argues it — the people list enumerates a project's administrators, and `ManagementOperations`' missing-operation fallback is `admin` anyway, so a seventh member added without a decision fails safe. |
+| **Before-hooks in-transaction, network-forbidden, structurally** | **The sharpest finding, and it was in my own work.** The hook editor offered one list of seven actions on every point and emitted a shape the schema does not have. `$defs/beforeHookList` admits `reject` or `mutate` only — *"No network, no external calls"* — and that is structural. Fixed, and `13-hook-shapes.spec.js` measures both directions. |
+
+**This change is marked `needs-deep-review`.** The label goes on the PR — not because the checklist
+failed, but because the design it amends touches the security core by area and a second set of
+human eyes is what the label is for.
