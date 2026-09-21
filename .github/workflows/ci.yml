@@ -244,6 +244,66 @@ jobs:
       - name: Vacuum resolver suite
         run: bash scripts/test-ensure-vacuum
 
+      # The F5 admin prototype quotes UnhonouredFeatures, UnhonouredSubsystems, the management
+      # route table and the frozen schema VERBATIM, and generates all of it rather than holding a
+      # copy — because the first version held copies and nine of them were wrong. This check is
+      # what keeps that true: change a refusal's wording and the drawing that quotes it fails here
+      # rather than ageing quietly into a second spelling. Python only, seconds long.
+      - name: Prototype fixtures are not stale
+        run: python3 scripts/gen-prototype-fixtures --check
+
+  # The design prototype's own scenarios (docs/design/f5-admin). Its own job, paths-filtered, and
+  # deliberately NOT folded into "Build & test": it gates a DRAWING rather than the library, it
+  # downloads a browser, and a PR that touches no prototype file has nothing here to learn. The
+  # claim it makes about the library — that the quoted prose is still the framework's own — is the
+  # fixture check above, which IS required, for the load gate's reason: the guard is required, the
+  # measurement is advisory.
+  prototype:
+    name: Design prototype scenarios
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          # The step below diffs against the merge base, which a depth-1 checkout has not got.
+          fetch-depth: 0
+
+      - name: Are any prototype files in this diff?
+        id: touched
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$base" ] || ! git cat-file -e "$base" 2>/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$base" HEAD | grep -Eq '^(docs/design/f5-admin/|src/MMLib\.Alvo\.Admin/wwwroot/alvo\.css$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node
+        if: steps.touched.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Scenarios
+        if: steps.touched.outputs.run == 'true'
+        run: bash scripts/test-prototype
+
+      - name: Upload the failure trace
+        if: failure() && steps.touched.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: prototype-traces
+          path: docs/design/f5-admin/tests/.artifacts
+          retention-days: 7
+          if-no-files-found: ignore
+
   # Stable required status check: the branch ruleset requires "Build & test",
   # which must not change when matrix legs are added/removed. This gate passes
   # only if every matrix leg AND the e2e job succeeded — folding e2e in here
