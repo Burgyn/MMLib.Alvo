@@ -207,15 +207,58 @@ honoured* lives.
 **Policy**
 
 `POST {m}/projects/{p}/policy/simulate` — entity, operation, a simulated `AlvoContext` (user id,
-roles, tenant), optionally a record id → verdict plus the compiled predicate.
+roles, tenant) → the engine's verdict and the predicates it resolved.
 
 The DoD says the simulator *"answers identically to production"*. The only way that is not a
 promise is that the simulator calls **the same `IPolicyEngine`**, never a copy — and §6 pins it by
 comparing the simulator's verdict against the Data API's actual response for the same context.
 
+#### 2.2.1 Correction: there is no record id, and a client that supplies one is a second evaluator
+
+**An earlier draft of the line above read *"optionally a record id"*, and it was wrong**, the same
+way §2.1.1's draft was wrong about `MigrationOptions.DryRun` — so it is corrected here rather than
+edited away, because a drawing was built against it and got the whole screen's shape from it.
+
+`ManagementPolicySimulation` is `(Entity, Operation, Caller)`, and its own remark says why:
+
+> *"There is deliberately no record id. Evaluating a predicate against a stored row needs a read,
+> and a read through the Management API is the data surface deviation D4 refuses to create — a
+> caller who wants to know whether one row passes fetches it through the Data API under the
+> simulated caller's own credential, which is the production answer by construction."*
+
+`docs/architecture/management-api.md` §"The record-id arm of the simulator" already names this
+document as the place the correction belongs. This is that place.
+
+**What a client may render**, and it is more than it looks: `Using`, `WithCheck` and `TenantScope`
+as CEL source, `HiddenFields`, `ReadOnlyFields`, and `DenyReason` when the engine refused outright.
+Plus one sentence the shape forces and the product badly needs — `ManagementPolicyVerdict.Allowed`
+means *the engine resolved a policy at all*, **not** *this caller will see rows*:
+
+> *"A rule over `@user.roles` is a predicate the engine hands back rather than evaluates, so a
+> caller no rule admits still earns `true` here together with a `Using` none of their rows
+> satisfies. A client that rendered this alone as 'permitted' would be wrong exactly where it
+> matters."*
+
+**So the screen's job is to explain a predicate, not to score a row**, and it has four things to
+say that are true for every caller at once: which of the four 403 causes applies if any
+(`data-api.md` §The decision procedure — unknown entity, the tenant guard, an unconfigured
+operation, a missing required context value), what the `USING` predicate is, that failing it on
+`list` is *200 with a shorter page* and on `get`/`update`/`delete` a *404*, and which fields drop
+out for this caller.
+
+**A per-record allowed/refused badge is forbidden by construction**, and this is §6.3 criterion 4
+restated as a UI rule: a client that decides a stored row's fate is a second policy evaluator, and
+the moment it disagrees with `IPolicyEngine` — over a null comparison, over role-name ordinality,
+over the tenant guard's precedence — the dashboard is teaching the wrong thing with total
+confidence. The honest affordance is *"open this row through the Data API as yourself and compare"*,
+because the operator holds their own credential and holds nobody else's.
+
 **Meta**
 
-`GET {m}/info` — build, mode (standalone/embedded), engine, startup mode.
+`GET {m}/info` — build, mode (standalone/embedded), **the registered data provider**, startup mode.
+Not the database engine: `ManagementInfo.DataProvider` is the `IAlvoData` implementation's type
+name, and `management-api.md` §"`info` reports the data provider, not the engine" argues why the
+core may not know one. A dashboard badge reading *"PostgreSQL 16"* has no source.
 
 ### 2.3 `capabilities`: one source of truth for "not yet"
 
@@ -280,6 +323,84 @@ the caller's own.** Audited reads arrive with #42.
 is not built.** In F5 it returns one. The drawing's project switcher degrades to a single row, and
 that is the right outcome: the alternative is building project management because it was drawn.
 
+
+### 2.7 A signed-in operator has no tenant, so the Data screen is dead for most of the example
+
+**Found by drawing it, and it is a gap in this design rather than in the drawing.** §2.4 says the
+data browser uses the ordinary Data API under the operator's own credentials, and §3.4 says a
+cookie session mints an `AlvoContext` through `IAlvoContextResolver`. Both are right. Put together
+they produce an operator who can browse almost nothing:
+
+- `AlvoIdentityContextResolver.ResolveAsync` returns `null` the moment a tenant is requested —
+  *"a cookie session carries no tenant grant, so honouring the request would let the caller choose
+  the tenant it acts in, which is the one thing `TenantResolver` exists to refuse for an API key"* —
+  and the principal it mints on the success path carries no `Tenant` at all.
+- `PolicyEngine.Resolve` refuses a `tenancy: scoped` entity for a caller with no tenant **before
+  any rule is consulted** (`data-api.md` §The decision procedure, cause 2). Not an empty page: a
+  403.
+- Nothing anywhere in `src/` enumerates tenants. There is no registry, no list route, no column
+  the API will name.
+
+So in `examples/field-service` — the descriptor that exists to demonstrate multi-tenancy — a
+signed-in operator can browse `regions` and neither `customers` nor `work_orders`. The screen the
+analysis calls *"prvý dojem produktu"* answers 403 on two of three entities on day one, and the
+drawing's tenant switcher, its cross-tenant record count and its implicit `tenant_id` on the create
+form all rest on a value the operator does not hold and has no way to ask for.
+
+#### The decision: an operator carries one tenant, exactly as a key does
+
+`AlvoUser` gains a `Tenant` (`TenantId?`), and `AlvoIdentityContextResolver` honours a requested
+tenant **only as a confirmation of it** — byte-for-byte `TenantResolver`'s own rule, reused rather
+than restated:
+
+> *"A requested tenant is only ever honoured as a confirmation of the key's own tenant — it can
+> never grant a tenant the key itself was not issued for."*
+
+A resolver that consults the user's own grant is therefore not the escalation its remarks refuse.
+The sentence those remarks make stays exactly true for the caller they were written about: an
+operator asking for a tenant their row does not name is still `null`, still refused, and a session
+still cannot *choose* a tenant — it can only confirm the one it was granted.
+
+**What this buys, stated plainly:** one line in the identity store makes every scoped entity
+browsable under the ordinary Data API, under the ordinary rules, with no bypass and nothing to
+audit that is not already audited. The operator sees what their rules permit, which is what §2.4
+promised and could not deliver.
+
+**What it deliberately does not buy: there is no tenant switcher, and the drawn one is removed.**
+A set of tenants with a picker is cross-tenant capability, and this repository has already ruled on
+that: `TenantResolver`'s own summary calls it *"a deliberate, audited grant, deferred to #42"*. #42
+is F7. Shipping a switcher in F5 would be shipping the grant without the audit — the same trade D4
+refuses for an admin bypass, one layer down. So the shell shows the tenant the operator acts in,
+never a list, and an operator who must administer two tenants holds two accounts until #42 lands.
+That cost is real and it is the smaller one.
+
+**And it dissolves the registry question rather than answering it.** There is no tenant list to
+build, because nothing is ever listed: a scalar on the caller's own row is not an enumeration.
+`SELECT DISTINCT tenant_id` was the obvious alternative and it is refused on two counts — it is the
+data-surface read D4 forbids the Management API to have, and it is a cross-tenant existence oracle
+of exactly the kind `data-api.md` §"A `unique` field on a tenant-scoped entity was a cross-tenant
+existence oracle (#137, fixed)" closed once already.
+
+#### Where the grant is set, and who may set it
+
+On the same surface §3.7 builds for the same reason: an operator's tenant is *membership*, which
+`IAlvoUserStore` owns, beside their role names and for the same argument. It is an `admin`
+operation (`ManagementOperation.ManageUsers`), never a `developer` one, because it decides who
+reaches which data rather than what the backend is.
+
+**The bootstrap administrator is not exempt, and that is the point.** They are an `admin` whatever
+`access` says, because management admission is infrastructure — but a tenant grant is *data-path*
+authority, and D4 says the dashboard holds none. A bootstrap admin whose row names no tenant sees
+`regions` and nothing else until somebody grants them one, including themselves. A first run
+therefore has one honest extra step, and the wizard owns it (§4.2, Welcome).
+
+#### What the UI owes until an operator has one
+
+A scoped entity for a tenant-less caller is refused, and the screen says so with the tenant guard's
+own reason and the route to fixing it. It is not an empty state and it is not a spinner: the
+distinction between *"your rules exclude every row"* (200, empty page — `data-api.md` §The RLS
+surprise) and *"you carry no tenant"* (403, before any rule runs) is the single most useful thing
+this screen can teach, and it is free to teach it correctly.
 ---
 
 ## 3. Identity, `access`, and the RBAC model
@@ -401,6 +522,114 @@ The PR that delivers §3 **removes the `access` entry from `UnhonouredSubsystems
 test stops expecting that name in the line. The file asked for this itself: *"the day the surface
 lands, `access` is either honoured or refused — never warned about."*
 
+### 3.7 A second human cannot exist, and with `providers: ["local"]` nobody can ever sign in
+
+**The port is right and the product is not.** The prototype's decision log (`#/notes`, entry 8)
+argues *no Invite; people arrive by signing in, and Alvo records what they already are*, and cites
+the port correctly for it. That reasoning is exactly right for an OIDC project and exactly false
+for a local one. Three facts, each verified:
+
+- `IAlvoUserStore` is `FindAsync`, `FindByEmailAsync`, `ListAsync`, `SetRolesAsync`. **No create.**
+- The bootstrap seed *"only ever creates the account, once"* and *"does not reset an existing
+  account's password"* (`host.md` §The bootstrap administrator). It seeds exactly one row.
+- `ManagementOperation.ManageUsers` sits in the level table at `admin` and **has no route**
+  (`management-api.md` §"The three `admin` operations with no route").
+
+So a `providers: ["local"]` project — which is what `examples/field-service` declares — has one
+account forever. `ListAsync` returns one row, the Access screen is a list of one, and the second
+administrator the §3.5 default-deny story assumes ("nobody else gets in until the descriptor says
+so") can never come to exist to be let in. The descriptor can name `dispatcher` and `technician`
+all it likes; there is nobody to assign them to.
+
+#### The decision: membership creation on the port, credential issuance in the implementation
+
+The split follows the port's own line, which is worth keeping rather than crossing:
+
+> *"No credential appears on this port. Verifying a password, rotating it, or federating to an
+> external provider is the implementation's business — an OIDC-backed implementation has no
+> password to verify at all, and a port that demanded one would foreclose it."*
+
+**`IAlvoUserStore` gains creation of a membership row, and no credential.**
+
+```
+ValueTask<AlvoUser> CreateAsync(string email, IReadOnlyList<string> roleNames, TenantId? tenant, CancellationToken ct);
+ValueTask SetDisabledAsync(UserId user, bool disabled, CancellationToken ct);
+ValueTask SetTenantAsync(UserId user, TenantId? tenant, CancellationToken ct);
+```
+
+That is the same shape `SetRolesAsync` already has and it carries §2.7's grant, because a tenant is
+membership for the same reason a role name is. It is **not** an invitation and it is not a sign-up:
+it is the row an OIDC host wants to pre-provision so a colleague's first sign-in already carries
+their roles — which is the thing the current port cannot express either, and the half of D8 that
+was always missing rather than deliberate. A store that cannot create (a read-only directory
+mirror) refuses by name rather than returning `null`, on the port's fail-closed precedent.
+
+**The credential half belongs to `MMLib.Alvo.Identity`, and only `local` has one.** The package
+already holds `UserManager` — `AlvoIdentityBootstrap.CreateAsync` uses it — so the capability
+exists in the package and not on the port, which is precisely the boundary to keep.
+
+**How the second person gets a password, and the cost that answer carries.** An administrator
+creates the row and mints a **single-use credential-set token**; the new operator sets their own
+password with it. The administrator never types a colleague's password, and the reason is the
+repository's own: `Alvo__Admin__BootstrapPassword` — the password as a *value* — is **refused
+outright**, because a credential that travels as a value is readable by whoever handles it. An
+administrator typing a colleague's initial password into a form is the same class one layer up.
+
+The cost, stated rather than discovered: **nothing in this build delivers that token.** The
+identity package configures no mail transport, and `templates`/`webhooks` are warned subsystems
+whose reach is an after-hook on an entity write, not an identity event. So F5 renders the token for
+the administrator to hand over out of band, and says on the screen that it does. Inventing a mailer
+here would be a subsystem arriving because a screen wanted it.
+
+#### The routes, and why they are management routes
+
+`IAlvoUserAdministration` is a **second contract in Abstractions**, implemented by
+`MMLib.Alvo.Identity`, mapped by the core's `ManagementEndpoints` when DI holds one — the same
+shape `IAlvoManagement` already has, so §1.2's boundary is untouched and a deployment without the
+package simply has no routes there.
+
+| Route | Member | Level |
+|---|---|---|
+| `GET {m}/projects/{p}/users` | `ListAsync` | `admin` |
+| `POST {m}/projects/{p}/users` | `CreateAsync` | `admin` |
+| `PUT {m}/projects/{p}/users/{id}/roles` | `SetRolesAsync` | `admin` |
+| `PUT {m}/projects/{p}/users/{id}/tenant` | `SetTenantAsync` | `admin` |
+| `PUT {m}/projects/{p}/users/{id}/disabled` | `SetDisabledAsync` | `admin` |
+| `POST {m}/projects/{p}/users/{id}/credential-reset` | `IssueCredentialTokenAsync` | `admin` |
+
+They are management routes because `ManageUsers` is already a `ManagementOperation` at `admin`, and
+because *"všetko, čo vie dashboard, vie aj API"* binds them as much as it binds the descriptor.
+§6.1's contract test gains a sibling: **every member of `IAlvoUserAdministration` has a route too.**
+
+**`ListAsync` grows paging and a filter here, not later.** The port's current `ListAsync` returns
+every user in no order, which is the whole table in one render — fine for a build with one row,
+wrong at the 2 000 the analysis sizes for, and a port-level gap rather than a screen-level one. It
+is cheaper to widen a port nobody implements twice yet.
+
+#### Two rules that must be server-side, because the UI refusing them is decoration
+
+**U3 — nobody raises their own management level.** `SetRolesAsync` today has no such rule, and the
+dashboard drawing refuses it in JavaScript. It belongs in `IAlvoUserAdministration`'s
+implementation, beside the one that already exists: `AlvoManagementService` re-resolves a write to
+`admin` when the `access` block differs, and raises `ManagementEscalationException` — the same
+exception, the same rendering, for the same reason. A caller may not add themselves a role that
+raises the level `access` resolves for them.
+
+**U4 — a role change is not recorded anywhere, and F5 ships it that way.** #42 is F7; there is no
+audit table and a half-audit here would be a second, thinner answer to the question #42 owns
+(`management-api.md` §"No log line, and no throttle"). Refusing role administration until #42 would
+make the product unusable, so the change ships and the **screen says plainly that nothing records
+it**. Filed against the F5 acceptance list as a known miss rather than left to be found.
+
+### 3.8 What the drawing's "no Invite" decision becomes
+
+It said: *no Invite; people arrive by signing in.* Amended: **people arrive by signing in where an
+external identity provider can mint them, and are created here where none can.** The port gains
+membership creation for both cases; only `local` additionally needs a credential, and that stays
+inside the implementation that has one. The drawn Access screen therefore does gain a "New person"
+control — and it is not the Invite defect the notes were right to catch, because it produces a real
+row through a real port member rather than a button with no output.
+
 ---
 
 ## 4. Information architecture and the capability map
@@ -424,19 +653,26 @@ and `email.data`.
 
 ### 4.2 Route map
 
+Every route is `{m}/projects/{p}/…` except `info` and `projects`, which are unprefixed. The
+drawing wrote `/management/descriptor` and `/management/capabilities` throughout; those routes do
+not exist.
+
 | Route | F5 status | Data source |
 |---|---|---|
-| **Welcome / first-run** | LIVE | bootstrap admin (§3.5), #230 |
-| **Overview** | LIVE, narrowed | `GET schema`, `GET revisions`, `GET capabilities`; counts via `AlvoQuery.IncludeTotalCount` |
-| **Data** | LIVE | the existing Data API `/api/*` (§2.4) |
-| **Schema** | LIVE read (#228), LIVE editor (#229) | `GET schema` + `GET descriptor`; writes via `PUT ?dryRun=true` → diff → `PUT` |
-| **Rules** | LIVE, simulator included | `GET descriptor` + `POST policy/simulate` |
-| **Access** | PARTIAL | users and roles LIVE (`IAlvoUserStore` + `auth.roles`); **teams and the permission matrix are #37 (F7)** |
-| **Configuration history** | LIVE, reframed | `GET revisions` — §4.4 |
+| **Welcome / first-run** | LIVE | bootstrap admin (§3.5), #230. **Does not create an account** — the bootstrap already exists before the dashboard can be reached (§3.5), so step one is signing in, plus the tenant grant §2.7 needs |
+| **Overview** | LIVE, narrowed | `GET …/schema`, `GET …/revisions`, `GET …/capabilities`; counts via `AlvoQuery.IncludeTotalCount`. The *declared and not running yet* panel is `warned` **intersected with the descriptor's own top-level keys** — `CapabilityReport.Project()` projects all five, and `UnhonouredSubsystems.DeclaredBy` is the predicate that narrows them |
+| **Data** | LIVE for global entities; **scoped entities need §2.7's tenant grant** | the existing Data API `/api/*` (§2.4) |
+| **Schema** | LIVE read (#228), LIVE editor (#229) | `GET …/schema` + `GET …/descriptor`; writes via `PUT …/descriptor?dryRun=true` → diff → `PUT` |
+| **Rules** | LIVE; the simulator renders a predicate, never a row verdict (§2.2.1) | `GET …/descriptor` + `POST …/policy/simulate` |
+| **Access** | PARTIAL | **membership** — people, their roles, their tenant — is the identity store through `IAlvoUserAdministration` (§3.7) and takes effect at once; the **role catalogue** (`auth.roles`) and the three **levels** (`access.*`) are the descriptor and wait for an apply (§4.5). **Teams and the permission matrix are #37 (F7)** |
+| **Configuration history** | LIVE, reframed | `GET …/revisions`, `GET …/revisions/{n}` — §4.4 |
 | **Automations** | NOT YET (warned) | `capabilities` |
 | **Functions** | NOT YET (warned) | `capabilities` |
-| **Settings** | PARTIAL | `GET info` LIVE; API keys LIVE (`IApiKeyStore`); danger zone LIVE |
-| **Projects** | LIVE, degraded to one | `GET projects` (§2.6) |
+| **Integrations** | PARTIAL, **added to this map** — the drawing invented it and it was never recorded here | the descriptor's `webhooks` and `templates`, rendered beside `capabilities.warned` for both, served verbatim. Creating either is **refused**: `bodyFile`, `email.data` and the three action types are in `UnhonouredFeatures.EveryRefusal`, so the controls are inert or absent (§4.1) |
+| **Entity → API tab** | LIVE, **added to this map** | `GET …/schema` plus the generated route shape; it is a rendering of what the Data API already publishes, not a second document |
+| **Settings** | PARTIAL, **narrower than the previous row claimed** | `GET {m}/info` LIVE — and it reports `dataProvider`, never an engine. **API keys are not LIVE**: `IApiKeyStore` is `FindAsync` + `TouchAsync`, and `ManageApiKeys` has no route, so issuance and revocation do not exist; what can honestly be shown is a key's `User`, `RoleNames`, `Tenant`, `ExpiresAt` and `RevokedAt`, with D7's consequence stated where an operator reads it. **The danger zone is not LIVE either**: `DeleteProject` has no route |
+| **Assistant** | **NOT IN F5** — the drawing carries it and §6.4 defers it | needs `ISecretStore`; kept as a design (the drawer proposes a diff, exits through the same dry run, never applies), shipped later |
+| **Projects** | LIVE, degraded to one | `GET {m}/projects` (§2.6) |
 
 ### 4.3 Navigation order
 
@@ -444,11 +680,12 @@ Live sections first, `Not yet` separated below:
 
 ```
 Overview
-Data
 Schema
+Data
 Rules
 Access
 Configuration history
+Integrations
 ──────────────────────
 Automations      Not yet
 Functions        Not yet
@@ -457,7 +694,13 @@ Settings
 Projects
 ```
 
-The reason is the 375 px acceptance criterion rather than tidiness. A bottom navigation bar holds
+**Schema sits above Data, and that reverses an earlier draft of this list.** The drawing put it
+there and the reason holds: the dashboard's reason to exist is defining what a backend *is* —
+entities, fields, types, relationships and the rules that guard them. Browsing records proves the
+model works; it is not why the tool is opened. The mobile bar therefore takes Overview, Schema,
+Data, Rules, Access, which is the order of a first session rather than of a CRUD scaffold.
+
+The reason for the separator is the 375 px acceptance criterion rather than tidiness. A bottom navigation bar holds
 about five items and must contain only what works. If `Not yet` sections are interleaved, the
 mobile navigation either lies or has to be decided separately — which is a second navigation. This
 way there is one: the bar takes the first five live entries, the rest goes to the hamburger sheet
@@ -476,6 +719,99 @@ It is less than was drawn and more than an empty state. It is also the only plac
 where `Author` and `Reason` become visible, which finally gives those fields a consumer.
 
 Data-level audit joins as a second tab when #42 lands.
+
+### 4.5 Three kinds of edit, one descriptor, one apply
+
+**The drawing grew three unapplied-change queues, and the product has one document.** Schema edits,
+rule edits and role-catalogue edits each earned their own pending bar, all three linked to one
+preview, and the preview rendered only the schema ones. A person who ticked a cell in the rules
+matrix, read *"1 rule changed"*, opened Preview and saw two unrelated schema rows has no way to
+tell whether Apply will carry their rule or drop it.
+
+That is not a drawing bug to be tidied. It is this document never saying how the kinds of edit
+compose, so the drawing composed them three ways.
+
+#### They do not queue, because there is nothing to queue
+
+`ManagementApplyRequest` takes **one `DescriptorJson`**, one `ExpectedRevision`, and produces one
+appended revision. `entities.*.fields`, `entities.*.rules`, `auth.roles` and `access` are all keys
+of that one document. There is no ordering question between them, no partial apply, and no
+interleaving to design: the server applies the migration and then re-primes the policy catalog and
+the role catalog **from the same accepted descriptor**, which is the property §6.1's *four doors,
+one result* criterion already measures.
+
+So the decision is the one the product's thesis already implies, written down so a UI cannot
+invent a second: **one working copy of the descriptor, one preview, one apply.**
+
+| Kind | Where it lives | When it takes effect |
+|---|---|---|
+| entities, fields, indexes | the descriptor | the apply |
+| `entities.*.rules` | the descriptor | the apply |
+| `auth.roles` (the catalogue) | the descriptor | the apply |
+| `access.*` (the three levels) | the descriptor | the apply, at `admin` — see below |
+| **role membership, a person's tenant, disabled** | **the identity store** (§3.7) | **at once** |
+
+The last row is the only thing legitimately outside the queue, and the drawing's two-speed Access
+split — *takes effect at once* against *reviewed before it applies* — is already the right way to
+draw the line. It is kept; what changes is that the upper half stops having a pending bar of its
+own and joins the one count.
+
+#### What the preview owes, per kind
+
+One preview, grouped by kind, each group with its own diff — and one sentence the shape makes
+mandatory rather than nice:
+
+**A rules-only or roles-only apply has an empty migration plan, and that is not "nothing
+happened".** `ManagementPlanSummary.IsEmpty` is documented as *"the descriptor changes nothing
+about the schema — which a rules-only edit does, and which is therefore not the same claim as
+'nothing was applied'"*. A preview that renders `isEmpty` as *No changes* tells an operator their
+rule edit will be dropped, at the exact moment they are deciding whether to trust the tool. The
+diff is the authority on what is changing; the plan is the authority on what the database will do,
+and for a rules edit the honest plan is *no migration step — this apply changes policy, not
+storage*.
+
+#### One consequence that only appears once the queues are merged
+
+`access` is a key of the same document. `AlvoManagementService` re-resolves **the whole write** to
+`admin` when the descriptor's `access` block differs from the applied one, on both write members
+(`management-api.md` §"The one place a route's level is not the whole answer") — and the rollback
+arm too, because a stored descriptor the caller never wrote is the subtler escalation.
+
+So a `developer` who edits one rule *and* one `access` predicate in one working copy is refused the
+**entire** apply, including the rule change that was within their level. With three queues that
+could never be seen; with one it is the ordinary case, and the UI owes the operator the sentence
+**before** they reach Apply: *this working copy changes who may manage the project, so applying it
+needs `admin`.* Shown at Preview, not discovered at 403.
+
+#### What the shell shows
+
+One count, beside the project name: *3 unapplied*. One pending bar, identical on every screen that
+can change the descriptor, whose primary action is **Preview** and never Apply. Membership changes
+report separately and in the past tense, because they already happened.
+
+### 4.6 What the drawing decided, and which of those decisions this design now carries
+
+The drawing (`docs/design/f5-admin/`) made a number of calls this document never made, recorded in
+its own `#/notes`. They are not deviations *from the sources* — §0.2's table is for those — so they
+are recorded here, in the layer they actually belong to. Each was read against the repository by
+two adversarial reviews; these are the ones that survived.
+
+| Decision | Why it stands |
+|---|---|
+| **Every schema editor is a split: model left, the descriptor it produces right.** | §6.3 criterion 3 is *everything clickable is exportable as code*. Showing the document being built turns an acceptance criterion into something an operator watches happen, and makes the dry-run diff unsurprising rather than a second opinion. Binding: the pane must render the **working copy** (§4.5) with the changed lines marked, and the export must be `DescriptorJson` — a re-serialisation through a typed projection silently narrows any descriptor it touches (`nullable`, `index`, `renamedFrom`, `default`, `storage`, `realtime`, `x-*`, and a CEL-valued `hidden`/`readOnly` flattened to `true`). |
+| **The eleven field types are one uniform grid, and the editor is eleven forms.** | `$defs/field`'s nine `if/then` rules decide what a field of each type may carry; three types (`decimal`, `enum`, `ref`) carry **required** facets and seven carry none. An editor covering four branches and rendering nothing for the other seven is indistinguishable from a finished one, so the schema's own table is the spec. |
+| **Access is split by how fast a change takes effect, not by which store holds it.** | §4.5's table is that line drawn once. On one undifferentiated screen half the controls would lie about when they work. |
+| **An assigned role the descriptor does not declare is shown as inert, not as an error.** | `AlvoIdentityContextResolver.Minted` drops it *silently* — nothing refuses it anywhere, so every rule naming it never matches and the failure has no symptom. The screen is the only place that quiet can be made loud. |
+| **A roles × operations matrix, with built-ins separated and `anon` marked amber.** | The matrix the analysis §2.3 warns against is teams × permissions, which needs #37's typed claims and is not this. Roles × the five operations is exactly what `entities.*.rules` holds, so the grid is a rendering of the descriptor rather than a model beside it. `anon` subsumes every other branch, and an open rule is the failure the sources single out — it must not look like an ordinary tick. |
+| **Conditions live on the branch, not under the column.** | A condition ANDed across a whole column cannot say *technicians only while not completed, dispatchers always* — the commonest real rule — and silently locks out the roles it was not aimed at. Per-branch conditions say it; anything the builder cannot express falls back to a raw CEL editor rather than to a narrower rule. |
+| **The model map is read-only.** | An editable graph is a second schema editor with a second set of affordances and no descriptor pane. Read-only, it is the best onboarding artifact in the build. |
+| **Each entity carries an API tab and an on-write (hooks) tab.** | Both are renderings of what the descriptor already declares — the generated route shape, and `entities.*.hooks` split before/after the commit. Neither invents surface. The sample CEL in them must compile: `==`/`!=` against `null` is **rejected** (`cel.md` deviation 10, use `has()`), arithmetic is ✗ in the `Rule` profile, and `now()` returns a `Timestamp`. |
+| **The first-run wizard creates no entity.** | A wizard step for modelling would be a second, worse copy of the schema editor. It signs in, names the project, and lands on Schema's empty state. |
+| **No provider picker in Settings.** | The driver is composed at boot; a dashboard control that appears to change it would be a control whose only output is a restart it cannot perform. `info` reports what was registered. |
+
+Two of the drawing's decisions do **not** stand, and both are answered above: the simulator over a
+real record (§2.2.1) and *no Invite* (§3.7, §3.8). A third — the assistant inside Settings — is
+deferred by §6.4 rather than refused.
 
 ---
 
@@ -600,6 +936,10 @@ mutants).
 |---|---|---|
 | Admin has no reach into the core | arch: `MMLib.Alvo.Admin` holds no reference to `MMLib.Alvo` | ring1 |
 | One path, two transports | contract: **every `IAlvoManagement` member has an HTTP route** | ring1 |
+| …and the same for user administration | contract: **every `IAlvoUserAdministration` member has an HTTP route** (§3.7) | ring1 |
+| An operator cannot choose a tenant they were not granted | integration: a session requesting a tenant the user's row does not name resolves to `null`, exactly as an API key does (§2.7) | ring2 |
+| Nobody raises their own management level | integration: `SetRolesAsync` adding a role that lifts the caller's own `access` level raises `ManagementEscalationException` (§3.7, U3) | ring2 |
+| No client evaluates a stored row | Playwright: the rules screen renders no per-record allowed/refused verdict at any width (§2.2.1) | prototype suite |
 | The simulator answers as production does | property: simulator verdict vs the Data API's actual response for the same `AlvoContext` | ring2 |
 | `access` is actually enforced | integration: a caller matching no level gets `403` on every management route | ring2 |
 | A role the descriptor does not declare is never minted | unit: `IAlvoUserStore` ∩ `IRoleCatalogProvider`, fail closed | ring0 |
@@ -630,8 +970,12 @@ worked around.
 2. **The visual audit fails if it looks like a default template** — operationalised as: no
    Bootstrap/MudBlazor class in the DOM, tokens present, both themes render.
 3. **Everything clickable is exportable as code** — after any UI schema change, `GET descriptor`
-   equals what the editor sent. No drift.
-4. **The policy simulator answers identically to production** — §6.1.
+   equals what the editor sent. No drift. The editor therefore **mutates the stored JSON document**;
+   it does not project the descriptor into typed objects and serialise them back, which narrows
+   every key the projection does not know about (§4.6, first row).
+4. **The policy simulator answers identically to production** — §6.1, and §2.2.1 restates it as a
+   UI rule: **no client evaluates a stored row.** A per-record allowed/refused badge fails this
+   criterion by construction, whatever it answers.
 5. **WCAG AA contrast** — an automated check over the tokens, not a manual pass.
 6. **Keyboard operability** — every primary flow completes without a mouse, asserted in Playwright.
 
@@ -641,7 +985,10 @@ Deferred with their reason, so a later reader does not read absence as oversight
 
 | Item | Why not now |
 |---|---|
-| AI agent (#29) | needs `ISecretStore` (§7.1), which does not exist |
+| AI agent (#29) | needs `ISecretStore` (§7.1), which does not exist. **The drawing ships a full assistant surface and it is out of F5 anyway** — the drawer's shape is good design and is kept as one (it proposes a diff, exits through the same `?dryRun=true` every other change uses, and never applies), but nothing in the build answers it, `baas-analyza` §2.8's own criterion — *"prepnutie providera je len zmena connection v UI… kľúč je v secret store"* — is unmet by construction without a secret store, and every transcript a drawing writes for it is a claim no code makes. It returns gated on `GET {m}/info` reporting an AI connection |
+| tenant switching (an operator acting in more than one tenant) | cross-tenant capability is *"a deliberate, audited grant, deferred to #42"* (`TenantResolver`). §2.7 ships one tenant per operator instead |
+| API-key issuance and revocation | `IApiKeyStore` is `FindAsync` + `TouchAsync`, and `ManageApiKeys` has no route. §4.2 |
+| project deletion (the danger zone) | `DeleteProject` has no route. §4.2 |
 | csx editor / functions | `functions` are never invoked — warned, not runnable |
 | webhook delivery log + redelivery | deliveries happen only from after-hooks and are unsigned; there is nothing to log yet |
 | teams, permission matrix | #37 (F7) — `@user` exposes no teams |
@@ -660,6 +1007,8 @@ Three items are missing from F5 today and the plan does not hold without them.
 | **#212** (Management API) | exists as an issue and already blocks #229/#230; **needs the F5 milestone** |
 | **Identity + `IAlvoUserStore` + bootstrap admin** | **no issue exists** — must be filed, and blocks #146 and #227 |
 | **#146** (`access` enforcement + the fifth CEL profile) | currently F6; **move to F5**, ordered before #227 |
+| **An operator's tenant** (§2.7) | `AlvoUser.Tenant`, honoured by `AlvoIdentityContextResolver` on `TenantResolver`'s confirmation rule. **No issue exists** — must be filed. Blocks the Data screen for every scoped entity, which is two of the three in the example the product ships |
+| **`IAlvoUserAdministration`** (§3.7) | membership creation, tenant and disabled on the port; the credential half and the single-use set-password token in `MMLib.Alvo.Identity`; six routes; the self-promotion guard. **No issue exists** — must be filed. Blocks a `providers: ["local"]` project ever having a second person |
 
 `#227`'s body must also be corrected: *"Blocked by: nothing. Can start today."* is no longer true.
 It is blocked by #146, which is blocked by the identity issue.
@@ -688,4 +1037,26 @@ It is blocked by #146, which is blocked by the identity issue.
   **Done** by the same plan (task 5), which is the task that flipped warn into honour; the
   description now records apply-time compilation, highest-match-wins, the bootstrap-admin bypass and
   the `@user.id` gap. Description string only — no structural change.
+- `docs/architecture/management-api.md` — §The surface gains `IAlvoUserAdministration`'s six
+  routes; §"The three `admin` operations with no route" loses `ManageUsers` and keeps the other two.
+- `src/MMLib.Alvo.Abstractions/Identity/AlvoUser.cs` — the `Tenant` grant (§2.7), and its remark on
+  why a person carries one tenant and not a set.
 - `docs/PLAN.md` — §3 once F5 begins to close.
+
+## 9. What a second pass found, and where it went
+
+This document was drawn before it was read back. The drawing
+(`docs/design/f5-admin/`) was then reviewed twice, adversarially, against this repository, and the
+reviews are kept beside it at `docs/design/f5-admin/reviews/`. Four of their findings were **not**
+defects in the drawing: they were holes here that only a drawing could expose, because each is a
+question a prose design can leave unasked and a screen cannot.
+
+| What the drawing could not answer | Where it is answered |
+|---|---|
+| A signed-in operator has no tenant, so Data is dead for every scoped entity | §2.7 |
+| The simulator returns a predicate; the drawing evaluated a row | §2.2.1 |
+| A `providers: ["local"]` project can never have a second person | §3.7, §3.8 |
+| Three kinds of edit, three pending queues, one preview showing one of them | §4.5 |
+
+That is the argument for drawing before building, stated once: the four gaps cost a weekend to find
+here and would each have cost an implementation plan and a PR to find later.
