@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alvo Admin</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<!-- This is the repository's OWN stylesheet, loaded from where it lives. The prototype used to
+     carry a copy, which is a file that can drift from the thing it claims to be. Serving it from
+     src/ means there is exactly one alvo.css and no freshness check is needed.
+     Consequence: serve this page from the REPOSITORY ROOT, not from this directory. -->
+<link rel="stylesheet" href="../../../src/MMLib.Alvo.Admin/wwwroot/alvo.css">
+<!-- proposed.css is what this design asks to ADD to alvo.css. Keeping the two apart is the point:
+     the second file is the component inventory. -->
+<link rel="stylesheet" href="proposed.css">
+
+<style>
+  /* The density attribute alvo.css reads, set before first paint. */
+  html { min-height: 100%; }
+</style>
+
+<script>
+  document.documentElement.setAttribute('data-density', 'compact');
+</script>
+
+<div class="p-bar">
+  <span class="p-bar__label">alvo admin &mdash; design prototype</span>
+  <a class="a-btn a-btn--sm" href="#/welcome/1">First run</a>
+  <a class="a-btn a-btn--sm" href="#/overview">Dashboard</a>
+  <a class="a-btn a-btn--sm" href="#/notes">Design notes</a>
+  <span class="p-bar__spacer"></span>
+  <span class="p-bar__label">&#8984;K opens the palette &middot; narrow the window past 720px for the phone layout</span>
+  <button class="a-btn a-btn--sm" id="density" type="button">Compact</button>
+  <button class="a-btn a-btn--sm" id="theme" type="button">Theme</button>
+</div>
+
+<div id="app"></div>
+
+<script type="module" src="app.js"></script>
+</html>

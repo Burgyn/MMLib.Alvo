@@ -266,11 +266,20 @@ The analysis asks for a bypass *"ale každá operácia ide do audit logu"* — a
 bypass that cannot be audited is the thing that sentence exists to prevent. The dashboard browses data
 through the ordinary Data API under the caller's own context, so no privilege exists to audit.
 
-**The record-id arm of the simulator.** Spec §2.2 still says the simulator takes *"optionally a record id"*.
-It does not, and this document is that correction's home. Evaluating `USING` against a **stored row** needs
-a read, and a read through the Management API is the data surface D4 refuses to create. A caller who wants
-to know whether one row passes fetches it through the Data API under the simulated caller's own credential,
-which is the production answer by construction rather than a reimplementation of it.
+**The record-id arm of the simulator.** The F5 design's §2.2 used to say the simulator takes *"optionally
+a record id"*; it does not, this document was that correction's home, and **the design has since taken the
+correction back** — §2.2.1 states it there, because a drawing was built against the old line and took a
+whole screen's shape from it. Evaluating `USING` against a **stored row** needs a read, and a read through
+the Management API is the data surface D4 refuses to create. A caller who wants to know whether one row
+passes fetches it through the Data API under the simulated caller's own credential, which is the production
+answer by construction rather than a reimplementation of it.
+
+The design adds one consequence this document did not draw out, and it belongs here too: **a client that
+scores a stored row is a second policy evaluator**, and it fails the acceptance criterion *"the simulator
+answers identically to production"* by construction — whatever it answers. The moment it disagrees with
+`IPolicyEngine` over a null comparison, over role-name ordinality or over the tenant guard's precedence, it
+is wrong with total confidence. So a per-record allowed/refused verdict is not a feature this surface is
+missing; it is one no client of it may build.
 
 What the simulator does answer is the policy engine's own verdict, from the same `IPolicyEngine` singleton
 the production read path resolves through — never a copy. Two consequences follow and are deliberate:

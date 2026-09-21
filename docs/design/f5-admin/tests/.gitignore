@@ -1,0 +1,8 @@
+node_modules/
+.artifacts/
+playwright-report/
+# Screenshots are regenerated on every run, so they are output rather than source: committing
+# them would put a few megabytes of PNG in the history and show the whole set as modified after
+# every run. The ones worth seeing go into the PR report instead, which is where a maintainer
+# reads them anyway.
+screenshots/

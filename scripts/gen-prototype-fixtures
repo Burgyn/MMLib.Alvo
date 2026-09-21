@@ -1,0 +1,395 @@
+#!/usr/bin/env python3
+"""Regenerate docs/design/f5-admin/generated/*.js from this repository.
+
+The F5 admin prototype's worst defects were all one defect: its content was written from memory
+instead of derived from the files it claimed to quote. Refusal prose was paraphrased, management
+routes lost their `/projects/{project}` segment, an access level existed that the frozen schema
+refuses, and six refusals were simply absent. So the prototype no longer holds any of it — the
+three files this script writes are the only source, and `--check` fails when they drift.
+
+Sources, and nothing else:
+
+  src/MMLib.Alvo/Descriptor/Internal/UnhonouredFeatures.cs     -> capabilities.refused (11 slots)
+  src/MMLib.Alvo/Descriptor/Internal/UnhonouredSubsystems.cs   -> capabilities.warned   (5 blocks)
+  src/MMLib.Alvo/Management/Internal/CapabilityReport.cs       -> capabilities.honoured
+  src/MMLib.Alvo/Management/Internal/ManagementEndpoints.cs    -> the management route table
+  src/MMLib.Alvo/Management/Access/ManagementOperations.cs     -> the level each route needs
+  schema/project.schema.json                                   -> field types, facets, formats
+  examples/field-service/field-service.alvo.json               -> the applied descriptor
+
+RETIRES WITH THE PROTOTYPE. `--check` runs inside the REQUIRED "Build & test" gate, so rewording a
+refusal in UnhonouredFeatures.cs fails a required check on a PR that never touched the drawing —
+which is the intent while the drawing exists, and a PR blocker the day it does not. When the Razor
+dashboard lands, this script, its CI step, scripts/test-prototype and docs/design/f5-admin all go
+together; docs/design/f5-admin/README.md carries the same list.
+
+Usage:
+  scripts/gen-prototype-fixtures            write the files
+  scripts/gen-prototype-fixtures --check    fail (exit 1) if what is on disk is stale
+"""
+
+from __future__ import annotations
+
+import json
+import pathlib
+import re
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+OUT = ROOT / "docs" / "design" / "f5-admin" / "generated"
+
+FEATURES = ROOT / "src/MMLib.Alvo/Descriptor/Internal/UnhonouredFeatures.cs"
+SUBSYSTEMS = ROOT / "src/MMLib.Alvo/Descriptor/Internal/UnhonouredSubsystems.cs"
+REPORT = ROOT / "src/MMLib.Alvo/Management/Internal/CapabilityReport.cs"
+ENDPOINTS = ROOT / "src/MMLib.Alvo/Management/Internal/ManagementEndpoints.cs"
+OPERATIONS = ROOT / "src/MMLib.Alvo/Management/Access/ManagementOperations.cs"
+SCHEMA = ROOT / "schema/project.schema.json"
+DESCRIPTOR = ROOT / "examples/field-service/field-service.alvo.json"
+
+# ---------------------------------------------------------------------------- C# string literals
+
+_STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+
+def unescape(raw: str) -> str:
+    """Turns a C# string literal's body into its value. Only the escapes this repository uses."""
+    return (
+        raw.replace('\\"', '"')
+        .replace("\\\\", "\\")
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+    )
+
+
+def strings_in(text: str) -> list[str]:
+    """Every string literal in `text`, with `+`-concatenated runs already joined."""
+    out: list[str] = []
+    pending: str | None = None
+    position = 0
+    for match in _STRING.finditer(text):
+        between = text[position:match.start()]
+        position = match.end()
+        value = unescape(match.group(1))
+        if pending is not None and between.strip() in ("+", ""):
+            pending += value
+        else:
+            if pending is not None:
+                out.append(pending)
+            pending = value
+    if pending is not None:
+        out.append(pending)
+    return out
+
+
+def block_after(text: str, anchor: str, opener: str, closer: str) -> str:
+    """The balanced `opener`…`closer` run that follows `anchor`."""
+    start = text.index(anchor) + len(anchor)
+    start = text.index(opener, start)
+    depth = 0
+    for index in range(start, len(text)):
+        if text[index] == opener:
+            depth += 1
+        elif text[index] == closer:
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    raise ValueError(f"unbalanced {opener}{closer} after {anchor!r}")
+
+
+def entries_of(block: str) -> list[list[str]]:
+    """One list of strings per top-level `new( … )` in an array initialiser."""
+    return [
+        strings_in(_paren_at(block, match.end() - 1))
+        for match in re.finditer(r"\bnew\(", block)
+    ]
+
+
+def _paren_at(text: str, open_index: int) -> str:
+    depth = 0
+    for index in range(open_index, len(text)):
+        if text[index] == "(":
+            depth += 1
+        elif text[index] == ")":
+            depth -= 1
+            if depth == 0:
+                return text[open_index : index + 1]
+    raise ValueError("unbalanced parentheses")
+
+
+# ---------------------------------------------------------------------------- capabilities
+
+
+def refused() -> list[dict]:
+    """Every slot `UnhonouredFeatures.EveryRefusal` publishes, in its own order, verbatim."""
+    text = FEATURES.read_text(encoding="utf-8")
+    out: list[dict] = []
+
+    for prefix, anchor in (("field", "OnAField { get; } ="), ("entity", "OnAnEntity { get; } =")):
+        block = block_after(text, anchor, "[", "]")
+        for literals in entries_of(block):
+            # new("path", predicate, "consequence", "fix")
+            path, consequence, fix = literals[0], literals[1], literals[2]
+            out.append({"slot": f"{prefix}.{path}", "consequence": consequence, "fix": fix})
+
+    # The named UnhonouredSlot properties, in declaration order — which is the order
+    # `EveryDeclaredSlot()`'s reflection walk produces in practice. Order is not load-bearing:
+    # the prototype keys on `slot`.
+    for match in re.finditer(r"internal static UnhonouredSlot \w+ \{ get; \} = new\(", text):
+        literals = strings_in(_paren_at(text, match.end() - 1))
+        out.append({"slot": literals[0], "consequence": literals[1], "fix": literals[2]})
+
+    # The three action types, assembled exactly as `UnhonouredAction` assembles them.
+    consequences = _switch_arms(text, "private static string ActionConsequence(string type) => type switch")
+    fixes = _switch_arms(text, "private static string ActionFix(string type) => type switch")
+    types = {
+        name: value
+        for name, value in re.findall(r'private const string (\w+) = "([^"]+)";', text)
+    }
+    for arm in ("FunctionType", "HttpCallType", "EntityUpdateType"):
+        wire = types[arm]
+        out.append(
+            {
+                "slot": wire,
+                "consequence": (
+                    f"The '{wire}' action is declared in the schema but not implemented in this "
+                    f"build, so this hook {consequences[arm]}."
+                ),
+                "fix": fixes[arm],
+            }
+        )
+    return out
+
+
+def _switch_arms(text: str, anchor: str) -> dict[str, str]:
+    """`Name => "literal" + "literal",` arms of a switch expression, keyed by the arm's name."""
+    block = block_after(text, anchor, "{", "}")
+    arms: dict[str, str] = {}
+    for match in re.finditer(r"(\w+)\s*=>\s*", block):
+        name = match.group(1)
+        if name == "_":
+            continue
+        tail = block[match.end() :]
+        end = _arm_end(tail)
+        arms[name] = "".join(strings_in(tail[:end]))
+    return arms
+
+
+def _arm_end(tail: str) -> int:
+    """Where one switch arm's expression ends: the first comma outside a string literal."""
+    in_string = False
+    index = 0
+    while index < len(tail):
+        char = tail[index]
+        if in_string:
+            if char == "\\":
+                index += 2
+                continue
+            if char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+        elif char == ",":
+            return index
+        index += 1
+    return len(tail)
+
+
+def warned() -> list[dict]:
+    """`UnhonouredSubsystems.All`, in the schema's own declaration order, verbatim."""
+    text = SUBSYSTEMS.read_text(encoding="utf-8")
+    block = block_after(text, "All { get; } =", "[", "]")
+    out = []
+    for literals in entries_of(block):
+        out.append({"block": literals[0], "consequence": literals[1]})
+    return out
+
+
+def honoured() -> list[str]:
+    text = REPORT.read_text(encoding="utf-8")
+    line = re.search(r"internal static IReadOnlyList<string> Honoured \{ get; \} =\s*(\[[^\]]*\]);", text)
+    return strings_in(line.group(1))
+
+
+# ---------------------------------------------------------------------------- routes
+
+
+def routes() -> list[dict]:
+    """Every mapped management route with the operation it carries and the level that needs."""
+    endpoints = ENDPOINTS.read_text(encoding="utf-8")
+    operations = OPERATIONS.read_text(encoding="utf-8")
+
+    levels = {
+        operation: level
+        for operation, level in re.findall(
+            r"\[ManagementOperation\.(\w+)\]\s*=\s*ManagementLevel\.(\w+)", operations
+        )
+    }
+
+    out = []
+    for match in re.finditer(
+        r'group\.Map(Get|Post|Put|Delete)\(\s*"([^"]+)"', endpoints
+    ):
+        verb, path = match.group(1).upper(), match.group(2)
+        window = endpoints[match.end() : match.end() + 1400]
+        operation = re.search(r"ManagementOperation\.(\w+)", window)
+        name = operation.group(1) if operation else None
+        out.append(
+            {
+                "verb": verb,
+                "path": path,
+                "operation": name,
+                "level": levels.get(name, "Admin").lower(),
+            }
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------- schema facets
+
+
+def facets() -> dict:
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    field = schema["$defs"]["field"]
+    types = schema["$defs"]["fieldType"]["enum"]
+
+    needs = {t: [] for t in types}
+    optional = {t: [] for t in types}
+
+    for rule in field.get("allOf", []):
+        condition, consequent = rule.get("if", {}), rule.get("then", {})
+        # `if type == X then required: [...]`
+        constant = (
+            condition.get("properties", {}).get("type", {}).get("const")
+            if "properties" in condition
+            else None
+        )
+        if constant is not None:
+            for name in consequent.get("required", []):
+                needs[constant].append(name)
+            continue
+        # `if NOT (type == X) then properties: { a: false, b: false }` — so a/b belong to X only
+        negated = (
+            condition.get("not", {}).get("properties", {}).get("type", {}).get("const")
+        )
+        if negated is not None:
+            for name, allowed in consequent.get("properties", {}).items():
+                if allowed is False:
+                    optional[negated].append(name)
+
+    # A facet the schema also *requires* is not optional.
+    for name in types:
+        optional[name] = [f for f in optional[name] if f not in needs[name]]
+
+    built_in_formats = field["properties"]["format"]["anyOf"][0]["enum"]
+
+    return {
+        "types": types,
+        # Every pattern a NAME in the descriptor must match. The prototype validates an imported
+        # descriptor against these, because the apply does — and because a name the schema cannot
+        # carry is also the one place hostile text could reach a screen.
+        "namePatterns": {
+            "identifier": schema["$defs"]["identifier"]["pattern"],
+            "entity": schema["properties"]["entities"]["propertyNames"]["pattern"],
+            "field": schema["$defs"]["entity"]["properties"]["fields"]["propertyNames"]["pattern"],
+            "project": schema["properties"]["name"]["pattern"],
+        },
+        "identifierPattern": schema["$defs"]["identifier"]["pattern"],
+        "entityNamePattern": schema["$defs"]["entity"]["properties"]["fields"]["propertyNames"]["pattern"],
+        "needs": needs,
+        "optional": optional,
+        "builtInFormats": built_in_formats,
+        "universal": [
+            name
+            for name in field["properties"]
+            if name not in {"type"}
+            and not any(name in needs[t] or name in optional[t] for t in types)
+        ],
+        "onDelete": field["properties"]["onDelete"]["enum"],
+        "rollupOps": field["properties"]["rollup"]["properties"]["op"]["enum"],
+        "problemTypes": problem_types(),
+    }
+
+
+def problem_types() -> dict:
+    """The slug catalogue, from AlvoProblemTypes — a copied string literal is how two spellings
+    of one refusal come to exist."""
+    text = (ROOT / "src/MMLib.Alvo/Api/AlvoProblemTypes.cs").read_text(encoding="utf-8")
+    slugs = dict(re.findall(r'public const string (\w+) = "([^"]+)";', text))
+    base = slugs.pop("BaseUri", "https://alvo.dev/errors/")
+    return {"baseUri": base, "slugs": slugs}
+
+
+# ---------------------------------------------------------------------------- emit
+
+HEADER = """/* GENERATED by scripts/gen-prototype-fixtures — do not edit.
+
+   Every value below is copied from the repository, byte for byte. Run
+   `scripts/gen-prototype-fixtures --check` to prove it has not drifted.
+
+   Source: {sources}
+*/
+"""
+
+
+def js(name: str, value, sources: str) -> str:
+    return (
+        HEADER.format(sources=sources)
+        + f"\nexport const {name} = "
+        + json.dumps(value, indent=2, ensure_ascii=False)
+        + ";\n"
+    )
+
+
+def files() -> dict[str, str]:
+    capabilities = {
+        "honoured": honoured(),
+        "warned": warned(),
+        "refused": refused(),
+        "routes": routes(),
+    }
+    descriptor = json.loads(DESCRIPTOR.read_text(encoding="utf-8"))
+    return {
+        "capabilities.js": js(
+            "CAPABILITIES",
+            capabilities,
+            "UnhonouredFeatures.cs, UnhonouredSubsystems.cs, CapabilityReport.cs, "
+            "ManagementEndpoints.cs, ManagementOperations.cs",
+        ),
+        "descriptor.js": js(
+            "APPLIED_DESCRIPTOR",
+            descriptor,
+            "examples/field-service/field-service.alvo.json",
+        ),
+        "schema-facets.js": js("SCHEMA_FACETS", facets(), "schema/project.schema.json"),
+    }
+
+
+def main() -> int:
+    check = "--check" in sys.argv
+    OUT.mkdir(parents=True, exist_ok=True)
+    stale = []
+    for name, content in files().items():
+        target = OUT / name
+        current = target.read_text(encoding="utf-8") if target.exists() else None
+        if current == content:
+            continue
+        if check:
+            stale.append(name)
+        else:
+            target.write_text(content, encoding="utf-8")
+            print(f"wrote {target.relative_to(ROOT)}")
+    if check and stale:
+        print(
+            "gen-prototype-fixtures: stale — "
+            + ", ".join(stale)
+            + "\nRun scripts/gen-prototype-fixtures and commit the result.",
+            file=sys.stderr,
+        )
+        return 1
+    if check:
+        print("gen-prototype-fixtures: up to date.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
