@@ -75,7 +75,7 @@ src/MMLib.Alvo.Host/
   Internal/AlvoAdminSignIn.cs        the sign-in/sign-out endpoints
 
 test/MMLib.Alvo.Admin.Tests/         unit + arch + public-API approval
-test/MMLib.Alvo.Admin.Tests.E2E/     Microsoft.Playwright + xUnit, real host, real database
+test/MMLib.Alvo.Admin.Tests.EndToEnd/     Microsoft.Playwright + xUnit, real host, real database
 ```
 
 ---
@@ -206,7 +206,7 @@ test/MMLib.Alvo.Admin.Tests.E2E/     Microsoft.Playwright + xUnit, real host, re
 **This is the task the whole plan is judged on.** A real host, a real database, a real descriptor,
 driven through the browser.
 
-- [ ] `test/MMLib.Alvo.Admin.Tests.E2E` — `Microsoft.Playwright` + xUnit, starting
+- [ ] `test/MMLib.Alvo.Admin.Tests.EndToEnd` — `Microsoft.Playwright` + xUnit, starting
       `MMLib.Alvo.Host` over SQLite with a temp file, bootstrap administrator configured.
 - [ ] Scenario: **first run** — sign in, land on Overview, see the field-service project.
 - [ ] Scenario: **create a project from nothing** — an empty descriptor, add an entity, add fields

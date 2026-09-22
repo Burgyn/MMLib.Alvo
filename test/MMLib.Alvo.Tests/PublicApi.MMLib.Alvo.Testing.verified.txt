@@ -638,6 +638,21 @@ namespace MMLib.Alvo.Testing.Management
         public System.Threading.Tasks.Task One_caller_s_key_never_reaches_another_s_record() { }
         public System.Threading.Tasks.Task Recording_the_same_key_twice_is_refused_rather_than_silently_overwriting() { }
     }
+    public abstract class UserAdministrationContractTests
+    {
+        protected UserAdministrationContractTests() { }
+        protected abstract MMLib.Alvo.UserId Administrator { get; }
+        protected abstract MMLib.Alvo.UserId BootstrapAdministrator { get; }
+        public System.Threading.Tasks.Task A_caller_cannot_grant_themselves_a_tenant() { }
+        public System.Threading.Tasks.Task A_caller_may_narrow_their_own_membership() { }
+        public System.Threading.Tasks.Task A_caller_may_remove_their_own_tenant() { }
+        public System.Threading.Tasks.Task A_caller_with_no_level_is_refused_every_member() { }
+        protected abstract MMLib.Alvo.IAlvoUserAdministration AsAdministrator();
+        protected abstract MMLib.Alvo.IAlvoUserAdministration AsUnprivilegedCaller();
+        protected virtual void EnsureAvailable() { }
+        public System.Threading.Tasks.Task The_bootstrap_administrator_cannot_be_disabled() { }
+        public System.Threading.Tasks.Task The_bootstrap_administrators_credential_cannot_be_reset() { }
+    }
 }
 namespace MMLib.Alvo.Testing.Migrations
 {

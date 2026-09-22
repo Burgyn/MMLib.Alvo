@@ -116,6 +116,17 @@ internal sealed class GuardedUserAdministration(
     /// against the level after.
     /// </para>
     /// <para>
+    /// <b>No caller can reach this today, and it is kept anyway.</b> The gate above admits only a
+    /// caller the project resolves to <c>admin</c>, and <c>admin</c> is the highest level — so
+    /// <c>Resolve(prospective) &gt; Resolve(caller)</c> is false for everyone who gets this far.
+    /// It is written, and stated as unreachable, because the condition that makes it unreachable is
+    /// one line of the level table: the day <c>ManageUsers</c> moves to <c>developer</c>, or a
+    /// fourth level appears above <c>admin</c>, a self-grant becomes possible and this is already
+    /// in the path. Deleting it would make that change silently dangerous; pretending it is load-
+    /// bearing today would be the other kind of lie. There is deliberately no test asserting an
+    /// outcome no caller can produce.
+    /// </para>
+    /// <para>
     /// <b>It is a mistake-guard, not a malice-guard, and claiming otherwise would be the more
     /// dangerous statement.</b> An administrator who wants the reach has it in one hop: create a
     /// puppet with the role, mint its credential token, sign in as it. That is not a hole at this

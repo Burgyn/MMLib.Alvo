@@ -20,10 +20,12 @@ namespace MMLib.Alvo.Identity.Internal;
 /// </para>
 /// </remarks>
 /// <param name="users">Identity's user manager over the Alvo identity store.</param>
+/// <param name="roles">Identity's role manager, for the rows a membership needs.</param>
 /// <param name="store">The identity store, for the paged read.</param>
 /// <param name="bootstrap">Who the bootstrap administrator is, for the refusals the core applies.</param>
 internal sealed class AlvoIdentityUserAdministration(
     UserManager<AlvoIdentityUser> users,
+    RoleManager<AlvoIdentityRole> roles,
     AlvoIdentityDbContext store,
     IAlvoBootstrapAdmin bootstrap) : IAlvoUserAdministration
 {
@@ -89,6 +91,7 @@ internal sealed class AlvoIdentityUserAdministration(
 
         if (creation.RoleNames.Count > 0)
         {
+            await EnsureRolesExistAsync(creation.RoleNames).ConfigureAwait(false);
             Succeeded(
                 await users.AddToRolesAsync(row, creation.RoleNames).ConfigureAwait(false),
                 creation.Email);
@@ -109,6 +112,7 @@ internal sealed class AlvoIdentityUserAdministration(
         Succeeded(await users.RemoveFromRolesAsync(row, existing).ConfigureAwait(false), user.ToString());
         if (roleNames.Count > 0)
         {
+            await EnsureRolesExistAsync(roleNames).ConfigureAwait(false);
             Succeeded(await users.AddToRolesAsync(row, roleNames).ConfigureAwait(false), user.ToString());
         }
 
@@ -165,6 +169,39 @@ internal sealed class AlvoIdentityUserAdministration(
     /// and which of them is infrastructure is the host's fact, not the contract's.
     /// </remarks>
     public IAlvoBootstrapAdmin Bootstrap => bootstrap;
+
+    /// <summary>
+    /// Creates the identity role rows a membership needs, when they are absent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The catalogue is the descriptor's; these rows are plumbing.</b> ASP.NET Core Identity
+    /// refuses to assign a role whose row does not exist, so without this an administrator
+    /// assigning a role the descriptor declares would be told <i>role does not exist</i> — which is
+    /// true of the identity database and false of the project, and sends them looking for a screen
+    /// that should not exist.
+    /// </para>
+    /// <para>
+    /// <b>Creating a row grants nothing on its own.</b> A membership naming a role the descriptor
+    /// does not declare is never minted into a caller's context — the resolver intersects with
+    /// <c>IRoleCatalogProvider.DeclaredRoles</c> and fails closed. So this is safe by the same fact
+    /// that makes <see cref="AlvoUser.RoleNames"/> a list of names rather than of roles.
+    /// </para>
+    /// </remarks>
+    /// <param name="names">The roles a write is about to assign.</param>
+    private async Task EnsureRolesExistAsync(IReadOnlyList<string> names)
+    {
+        foreach (var name in names)
+        {
+            if (!await roles.RoleExistsAsync(name).ConfigureAwait(false))
+            {
+                Succeeded(
+                    await roles.CreateAsync(new AlvoIdentityRole { Id = Guid.CreateVersion7(), Name = name })
+                        .ConfigureAwait(false),
+                    name);
+            }
+        }
+    }
 
     private async Task<AlvoIdentityUser> RequireAsync(UserId user)
         => await users.FindByIdAsync(user.Value.ToString()).ConfigureAwait(false)

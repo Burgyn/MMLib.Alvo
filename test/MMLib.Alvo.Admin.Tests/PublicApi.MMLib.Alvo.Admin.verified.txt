@@ -303,6 +303,7 @@ namespace MMLib.Alvo.Admin.Components.Pages
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
+    [Microsoft.AspNetCore.Components.ExcludeFromInteractiveRouting]
     [Microsoft.AspNetCore.Components.Layout(typeof(MMLib.Alvo.Admin.Components.Layout.SignInLayout?))]
     [Microsoft.AspNetCore.Components.Route("/admin/sign-in")]
     public class SignIn : Microsoft.AspNetCore.Components.ComponentBase
@@ -322,6 +323,14 @@ namespace MMLib.Alvo.Admin.Components.Pages
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/welcome")]
+    public class Welcome : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Welcome() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
 }
@@ -443,6 +452,18 @@ namespace MMLib.Alvo.Admin.Components.Shared
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public string Value { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class Step : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Step() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? ChildContent { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Done { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Title { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
 }

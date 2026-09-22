@@ -1,6 +1,5 @@
 ﻿@page "/admin/access"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
-@rendermode InteractiveServer
 @inject ManagementGateway Gateway
 @inject DataGateway Records
 
@@ -63,7 +62,10 @@
         {
             @foreach (var person in _people.Users)
             {
-                <div class="a-row" style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4);align-items:flex-start;flex-wrap:wrap">
+                @* A stable id per person, so a row can be addressed by who it is rather than by
+                   where it sits in a list that reorders. *@
+                <div class="a-row" id="@($"person-{person.Id.Value}")"
+                     style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4);align-items:flex-start;flex-wrap:wrap">
                     <span style="flex:1;min-width:220px">
                         <span style="font-size:var(--text-sm);font-weight:var(--weight-medium)">@person.Email</span>
                         <span class="a-switcher-meta">
@@ -78,6 +80,7 @@
 
                     <div class="a-row" style="gap:var(--space-2);flex-wrap:wrap">
                         <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                                id="@($"change-{person.Id.Value}")"
                                 @onclick="() => _editing = _editing == person.Id ? null : person.Id">
                             @(_editing == person.Id ? "Close" : "Change")
                         </button>
@@ -112,8 +115,12 @@
                                            value="@(person.Tenant?.Value.ToString() ?? string.Empty)"
                                            placeholder="00000000-0000-0000-0000-000000000000"
                                            @oninput="args => _tenantDraft = args.Value?.ToString() ?? string.Empty" />
-                                    <button type="button" class="a-btn a-btn--sm" @onclick="() => SetTenantAsync(person)">Grant</button>
-                                    <button type="button" class="a-btn a-btn--ghost a-btn--sm" @onclick="() => ClearTenantAsync(person)">Remove</button>
+                                    <button type="button" class="a-btn a-btn--sm"
+                                            id="@($"grant-tenant-{person.Id.Value}")"
+                                            @onclick="() => SetTenantAsync(person)">Grant</button>
+                                    <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                                            id="@($"clear-tenant-{person.Id.Value}")"
+                                            @onclick="() => ClearTenantAsync(person)">Remove</button>
                                 </div>
                                 <span class="a-section-sub">
                                     One tenant, not a set — acting in more than one is a cross-tenant
@@ -123,10 +130,13 @@
                             </div>
 
                             <div class="a-row" style="gap:var(--space-2);flex-wrap:wrap">
-                                <button type="button" class="a-btn a-btn--sm" @onclick="() => IssueTokenAsync(person)">
+                                <button type="button" class="a-btn a-btn--sm"
+                                        id="@($"issue-token-{person.Id.Value}")"
+                                        @onclick="() => IssueTokenAsync(person)">
                                     Issue a credential token
                                 </button>
                                 <button type="button" class="a-btn a-btn--danger a-btn--sm"
+                                        id="@($"disable-{person.Id.Value}")"
                                         @onclick="() => SetDisabledAsync(person, !person.IsDisabled)">
                                     @(person.IsDisabled ? "Let them back in" : "Disable")
                                 </button>

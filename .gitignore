@@ -124,7 +124,12 @@ ipch/
 *.vspx
 *.sap
 
-# Visual Studio Trace Files
+# Visual Studio Trace Files.
+#
+# NOTE: this pattern is why no directory in this repository is named `*.E2E`. Git's ignore matching
+# is case-insensitive on a case-insensitive filesystem, so `*.e2e` swallows a project directory
+# called `…Tests.E2E` whole — the suite exists locally, `git add -A` says nothing, and CI runs a
+# test project that is not in the repository. Spell it `EndToEnd`.
 *.e2e
 
 # TFS 2012 Local Workspace

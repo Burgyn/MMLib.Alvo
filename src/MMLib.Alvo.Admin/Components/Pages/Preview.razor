@@ -1,6 +1,5 @@
 ﻿@page "/admin/schema/preview"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
-@rendermode InteractiveServer
 @inject ManagementGateway Gateway
 @inject WorkingCopyStore Copies
 @inject DataGateway Caller
@@ -171,7 +170,8 @@
         {
             var result = await Gateway.ApplyAsync(
                 Copy.Json, Copy.Revision, _allowed, dryRun,
-                author: null, reason: _reason.Length > 0 ? _reason : null,
+                author: await Gateway.AuthorAsync(),
+                reason: _reason.Length > 0 ? _reason : null,
                 CancellationToken.None);
 
             if (dryRun)

@@ -13,6 +13,21 @@
 
 const handlers = new Map();
 
+/**
+ * Marks the keyboard as live.
+ *
+ * `window.Blazor` appears as soon as the circuit connects, which is BEFORE a component's
+ * `OnAfterRenderAsync` has imported this module and subscribed. A keystroke in that window is
+ * swallowed — the map is running, nothing is listening. So the palette says when it is actually
+ * wired, and anything waiting on the keyboard waits on this rather than on the framework.
+ *
+ * It is a readiness signal, not a test hook: a person debugging "the shortcut did nothing" asks
+ * exactly this question in the console.
+ */
+export function markKeyboardReady() {
+  document.documentElement.dataset.alvoKeyboard = 'ready';
+}
+
 /** Forwards one `alvo:<name>` document event to a .NET object's method. */
 export function subscribe(name, target, method) {
   const handler = (event) => target.invokeMethodAsync(method, event.detail?.key ?? null);

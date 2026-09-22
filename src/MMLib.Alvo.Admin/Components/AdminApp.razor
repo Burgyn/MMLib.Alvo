@@ -9,6 +9,21 @@
 
     * The stylesheet and the script are named through AlvoAdminAssets rather than spelled here, so
       a rename is a compiler error instead of a blank page.
+
+    * The render mode is decided here, PER REQUEST, and each of the three obvious alternatives is
+      wrong in its own way. Declaring it on each page leaves the LAYOUT static — the sidebar, the
+      theme toggle and the ⌘K palette are rendered outside the page's subtree, so their handlers are
+      never wired and the keyboard silently does nothing. Declaring it on the layout does not
+      compile at runtime: a layout receives `Body` as a `RenderFragment`, and a delegate cannot
+      cross a static-to-interactive boundary. Declaring it unconditionally on the router makes the
+      SIGN-IN page interactive too, and an interactive page cannot reliably post an
+      antiforgery-protected form — the token is rendered over a circuit while the cookie that
+      validates it belongs to an earlier response, so the post is refused, silently, because a
+      refused token redirects back to the same screen.
+
+      So: interactive for every page except the ones that opt out with
+      `[ExcludeFromInteractiveRouting]`, which `AcceptsInteractiveRouting` reports. Today that is
+      the sign-in screen, and it is the screen whose whole job is an ordinary form post.
 *@
 <!DOCTYPE html>
 <html lang="en">
@@ -18,10 +33,27 @@
     <base href="/" />
     <link rel="stylesheet" href="@AlvoAdminAssets.StyleSheet" />
     <script src="@AlvoAdminAssets.Script"></script>
-    <HeadOutlet />
+    <HeadOutlet @rendermode="PageRenderMode" />
 </head>
 <body>
-    <AdminRoutes />
+    <AdminRoutes @rendermode="PageRenderMode" />
     <script src="_framework/blazor.web.js"></script>
 </body>
 </html>
+
+@code {
+    /// <summary>The request being rendered, when one is rendering.</summary>
+    [CascadingParameter]
+    private HttpContext? Http { get; set; }
+
+    /// <summary>
+    /// Server-interactive for every page that has not opted out.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="null"/> means statically rendered. The check is the framework's own, so a
+    /// page opts out by carrying <c>[ExcludeFromInteractiveRouting]</c> rather than by being listed
+    /// here — a list would be a second place to keep in step with the pages.
+    /// </remarks>
+    private IComponentRenderMode? PageRenderMode
+        => Http?.AcceptsInteractiveRouting() is true ? RenderMode.InteractiveServer : null;
+}

@@ -67,6 +67,7 @@
             await _module.InvokeVoidAsync("subscribe", "palette", _self, nameof(OnPaletteRequested));
             await _module.InvokeVoidAsync("subscribe", "goto", _self, nameof(OnGoto));
             await _module.InvokeVoidAsync("subscribe", "dismiss", _self, nameof(OnDismiss));
+            await _module.InvokeVoidAsync("markKeyboardReady");
         }
 
         if (_focusPending && _module is not null)

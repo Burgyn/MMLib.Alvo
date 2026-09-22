@@ -28,7 +28,30 @@ namespace MMLib.Alvo.Admin.Internal;
 /// </remarks>
 internal sealed class WorkingCopy
 {
-    private static readonly JsonSerializerOptions _pretty = new() { WriteIndented = true };
+    /// <summary>
+    /// How the working document is written back out.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The encoder is the load-bearing half.</b> <c>System.Text.Json</c>'s default escapes
+    /// anything that could be dangerous in HTML — including the apostrophe, as <c>\u0027</c>. A CEL
+    /// rule is mostly apostrophes: <c>'dispatcher' in @user.roles</c> comes back as
+    /// <c>\u0027dispatcher\u0027 in @user.roles</c>. The descriptor still round-trips — JSON
+    /// unescapes to the same string, and the apply is unaffected — but the file a person reads,
+    /// commits and diffs has been mangled by a control that was only asked to add a rule. Relaxed
+    /// escaping keeps it readable.
+    /// </para>
+    /// <para>
+    /// <b>Relaxed escaping is safe here because nothing renders this as markup.</b> The descriptor
+    /// reaches a screen through a component that HTML-encodes it first, and it reaches the apply as
+    /// a request body. The name of the option warns about the case where neither is true.
+    /// </para>
+    /// </remarks>
+    private static readonly JsonSerializerOptions _pretty = new()
+    {
+        WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     private JsonNode? _applied;
     private JsonNode? _working;

@@ -1,5 +1,7 @@
 ﻿@page "/admin/sign-in"
 @layout SignInLayout
+@* Statically rendered, and the form post is why — see AdminApp.razor. *@
+@attribute [ExcludeFromInteractiveRouting]
 @*
     Signing in.
 
@@ -33,7 +35,15 @@
                         Fix="If this is a new deployment, the account is the one named by Alvo:Admin:BootstrapEmail, with the password in the file Alvo:Admin:BootstrapPasswordFile points at." />
         }
 
-        <form method="post" action="@AlvoAdmin.SignInEndpoint" class="a-stack">
+        @* data-enhance="false" — a real browser form post, not an enhanced one.
+
+           Blazor's enhanced form handling posts through fetch and patches the DOM with the
+           response. That is right for a form whose answer is a page; it is wrong for this one,
+           whose answer is a Set-Cookie and a redirect: the cookie arrives, the redirect is applied
+           as a DOM patch, and the operator is left looking at the sign-in screen they just
+           completed. Opting out makes the browser navigate, which is what an authentication
+           handshake needs. *@
+        <form method="post" action="@AlvoAdmin.SignInEndpoint" class="a-stack" data-enhance="false">
             <AntiforgeryToken />
             <input type="hidden" name="returnUrl" value="@ReturnUrl" />
 

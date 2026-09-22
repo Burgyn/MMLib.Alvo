@@ -1,6 +1,5 @@
 ﻿@page "/admin"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
-@rendermode InteractiveServer
 @inject ManagementGateway Gateway
 
 <PageTitle>Overview · Alvo</PageTitle>
@@ -22,6 +21,20 @@
     }
     else
     {
+        @if (_schema.Entities.Count == 0 || _revisions.Count == 0)
+        {
+            <div class="a-panel" style="padding:var(--space-5);border-color:var(--accentBorder)">
+                <span class="a-section-title">This project is new</span>
+                <p class="a-section-sub">
+                    Three things make a backend: entities, the rules that guard them, and a tenant if
+                    the data is per-customer. The first run walks through them in that order.
+                </p>
+                <a class="a-btn a-btn--primary a-btn--sm" href="@($"{AlvoAdmin.BasePath}/welcome")">
+                    Open the first run
+                </a>
+            </div>
+        }
+
         <div class="a-row" style="gap:var(--space-2);flex-wrap:wrap">
             <span class="a-badge a-badge--ok">Revision @_descriptor!.Revision applied</span>
             <span class="a-badge">@_info!.DataProvider</span>

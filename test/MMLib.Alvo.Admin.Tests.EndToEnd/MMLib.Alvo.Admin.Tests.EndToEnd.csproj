@@ -1,0 +1,28 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    The admin dashboard's end-to-end suite: a real host over a real SQLite file, driven through a
+    real browser.
+
+    IN NO RING, for scripts/test-load's reason and scripts/test-prototype's: the rings are
+    `dotnet test` tiers over the library, and this downloads a browser, binds a port and applies
+    migrations. It runs on the PR, whole — design §6.2 says the F5 end-to-end suite is not
+    affected-scoped, because the flows it covers cross every screen and a change anywhere can break
+    one of them.
+
+    AlvoSharedArchTests=false: this project maps to no single production assembly, so neither the
+    architecture rules nor the public-API gate has a target here.
+  -->
+  <PropertyGroup>
+    <AlvoSharedArchTests>false</AlvoSharedArchTests>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Playwright" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj" />
+  </ItemGroup>
+
+</Project>

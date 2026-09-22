@@ -78,8 +78,12 @@ compresses out. Violating one of these is a bug, not a style nit.
 - `docs/design/f5-admin/` — the F5 admin **design prototype** (HTML/CSS/vanilla ES, no build) plus
   its scenario suite and the two adversarial reviews it was built against. A design artifact:
   nothing in `src/` may depend on it.
+- `src/MMLib.Alvo.Admin/` — the **admin dashboard**: a Blazor Web App (server-interactive) over
+  `IAlvoManagement` and `IAlvoData`, plus the design system it ships as static web assets. It
+  holds **no** reference to `MMLib.Alvo` — an architecture test keeps it that way.
 - `scripts/` — `test-ring0`/`test-ring1`/`test-ring2` plus `check-brief-freshness`,
-  `test-load` (the load harness) and `test-prototype` (the design prototype's scenarios) — both in
+  `test-load` (the load harness), `test-prototype` (the design prototype's scenarios) and
+  `test-admin-e2e` (the dashboard's scenarios, a real browser over a real host) — all three in
   no ring, see below.
 - `.husky/` — Husky.Net git hooks (`pre-commit`, `commit-msg`) + `task-runner.json`; auto-installed on build.
 - `.github/` — CI workflows; the PR run (everything but mutation) plus
@@ -101,6 +105,7 @@ compresses out. Violating one of these is a bug, not a style nit.
 | mutation | CI post-merge on `main` | never run locally |
 | load | `scripts/test-load` | in no ring — see below |
 | prototype | `scripts/test-prototype` | in no ring — see below |
+| admin e2e | `scripts/test-admin-e2e` | in no ring — see below |
 
 Each ring wraps the previous one and adds a layer: ring1 adds architecture
 tests (already inside `dotnet test`) and, once it lands, public-API
@@ -121,6 +126,13 @@ per PR, A/B against the merge base — **advisory**, not a required check) and
 The gate is judged on `min`, never p95, and the reason is measured — see
 `test/load/README.md`. Design:
 `docs/superpowers/specs/2026-09-02-f4-pr-e-load-test-foundations-design.md`.
+
+**The dashboard's end-to-end suite is in no ring, and runs whole on the PR.**
+`scripts/test-admin-e2e` starts the real `MMLib.Alvo.Host` over a temporary SQLite file and drives
+it with `Microsoft.Playwright` — sign in, add an entity, give it rules, apply, write a record, roll
+back. Not affected-scoped: the F5 design's §6.2 asks for it whole because its flows cross every
+screen, and every defect it has caught so far left a page that still rendered. It is folded into the
+required **Build & test** check the same way the compose e2e is.
 
 **The prototype suite is in no ring for the same reason.** `scripts/test-prototype` drives the F5
 admin design prototype (`docs/design/f5-admin`) with Node + `@playwright/test` over a static server;

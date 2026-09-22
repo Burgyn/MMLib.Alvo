@@ -168,6 +168,32 @@ internal sealed class ManagementGateway(
         return result;
     }
 
+    /// <summary>
+    /// Who to record as the author of a change.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Every apply this dashboard makes carries one.</b> A revision's <c>Author</c> is the only
+    /// place a configuration change is attributed, Configuration history renders it forever, and
+    /// §3.7 leans on exactly that when it argues that the recorded route is the one an
+    /// administrator should prefer. An apply sent with no author reads as <i>code-first or
+    /// system</i> — which is true of a mounted descriptor and false of a person clicking Apply.
+    /// </para>
+    /// <para>
+    /// The address, because that is what another operator recognises; the subject id when the
+    /// host's authentication did not supply one, because an opaque id is still better than nothing.
+    /// </para>
+    /// </remarks>
+    public async ValueTask<string?> AuthorAsync()
+    {
+        var state = await authentication.GetAuthenticationStateAsync().ConfigureAwait(false);
+        var name = state.User.Identity?.Name;
+
+        return name is { Length: > 0 }
+            ? name
+            : state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+    }
+
     /// <summary>Whether this deployment can administer people at all.</summary>
     /// <remarks>
     /// <see langword="false"/> when no package registered a membership store. The Access screen

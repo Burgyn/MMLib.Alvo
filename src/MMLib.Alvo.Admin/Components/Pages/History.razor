@@ -1,6 +1,5 @@
 ﻿@page "/admin/history"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
-@rendermode InteractiveServer
 @inject ManagementGateway Gateway
 
 <PageTitle>Configuration history · Alvo</PageTitle>
@@ -138,7 +137,8 @@
         {
             await Gateway.RollbackAsync(
                 _selected.Version.Revision, _current, allowDestructive: true, dryRun: false,
-                author: null, reason: $"Restored r{_selected.Version.Revision}",
+                author: await Gateway.AuthorAsync(),
+                reason: $"Restored r{_selected.Version.Revision}",
                 CancellationToken.None);
 
             _selected = null;

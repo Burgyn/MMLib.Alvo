@@ -17,7 +17,11 @@
                 <span class="a-switcher-meta">@Roles(context) · @Tenant(context)</span>
             </span>
         </div>
-        <form method="post" action="@AlvoAdmin.SignOutEndpoint" style="margin-top:var(--space-2)">
+        @* data-enhance="false", for the reason the sign-in form carries: the answer to this post
+           is a cleared cookie and a redirect, and an enhanced post would patch the DOM instead of
+           navigating — leaving the operator on a dashboard they are no longer signed into. *@
+        <form method="post" action="@AlvoAdmin.SignOutEndpoint" style="margin-top:var(--space-2)"
+              data-enhance="false">
             <AntiforgeryToken />
             <button type="submit" class="a-btn a-btn--ghost a-btn--sm" style="width:100%">Sign out</button>
         </form>
