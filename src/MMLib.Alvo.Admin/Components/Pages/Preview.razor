@@ -1,0 +1,248 @@
+﻿@page "/admin/schema/preview"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject WorkingCopyStore Copies
+@inject DataGateway Caller
+@inject NavigationManager Navigation
+
+<PageTitle>Preview changes · Alvo</PageTitle>
+
+<div class="a-stack">
+    <div class="a-toolbar">
+        <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema")">Schema</a>
+        <h1 class="a-page-title">Preview changes</h1>
+    </div>
+
+    @if (_error is not null)
+    {
+        <ErrorPanel Problem="@_error" Fix="@_fix" />
+    }
+
+    @if (!Copy.Loaded)
+    {
+        <div class="a-skeleton" style="height:180px"></div>
+    }
+    else if (!Copy.IsDirty)
+    {
+        <EmptyState Title="Nothing to apply"
+                    Body="@($"The working copy is identical to revision {Copy.Revision}. Change something in Schema, or import a descriptor.")">
+            <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema")">Back to Schema</a>
+        </EmptyState>
+    }
+    else
+    {
+        <p class="a-section-sub">
+            This is <code class="a-mono">PUT /management/projects/{project}/descriptor?dryRun=true</code> —
+            the same call the CLI makes, through the same plan. Nothing below has run.
+        </p>
+
+        <div class="a-panel">
+            <div class="a-section">
+                <span class="a-section-title">What changed</span>
+                <span class="a-section-sub">
+                    The descriptor as it would be sent, against revision @Copy.Revision.
+                </span>
+            </div>
+            <DescriptorDiff Before="@Copy.AppliedJson" After="@Copy.Json" Revision="@Copy.Revision" />
+        </div>
+
+        @if (_plan is null)
+        {
+            <div class="a-panel" style="padding:var(--space-5)">
+                <button type="button" class="a-btn a-btn--primary" disabled="@_busy" @onclick="PlanAsync">
+                    Plan this change
+                </button>
+            </div>
+        }
+        else
+        {
+            <div class="a-panel">
+                <div class="a-section">
+                    <span class="a-section-title">
+                        @(_plan.Plan.IsEmpty
+                            ? "No migration — the schema is unchanged"
+                            : $"{_plan.Plan.Steps.Count} step{(_plan.Plan.Steps.Count == 1 ? string.Empty : "s")} against the database")
+                    </span>
+                    <span class="a-section-sub">
+                        @(_plan.Plan.IsEmpty
+                            ? "A rules-only or access-only edit changes no table. It is still an apply, and it still appends a revision."
+                            : "In this order, in one transaction.")
+                    </span>
+                </div>
+
+                @foreach (var step in _plan.Plan.Steps)
+                {
+                    <div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4);align-items:flex-start">
+                        <span class="@($"a-badge {(Destructive(step) ? "a-badge--danger" : "a-badge--ok")}")" style="flex:none">
+                            @(Destructive(step) ? "destroys" : "safe")
+                        </span>
+                        <span class="a-mono" style="flex:1;font-size:var(--text-xs)">@step</span>
+                    </div>
+                }
+            </div>
+
+            @if (_plan.Plan.HasDestructiveChanges)
+            {
+                <ConfirmByName Title="This plan destroys data"
+                               Detail="allowDestructive is never implied — not by this preview, and not by your management level. Confirming here is what sets it."
+                               Expected="@Gateway.Project"
+                               OnConfirmedChanged="confirmed => _allowed = confirmed" />
+            }
+
+            <div class="a-panel" style="padding:var(--space-5)">
+                <div class="a-field">
+                    <label class="a-label" for="apply-reason">Why</label>
+                    <input class="a-input" id="apply-reason" value="@_reason" placeholder="Widen quoted_price so larger quotes fit"
+                           @oninput="args => _reason = args.Value?.ToString() ?? string.Empty" />
+                    <span class="a-section-sub">Configuration history shows this on the revision forever.</span>
+                </div>
+            </div>
+
+            <div class="a-toolbar">
+                <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema")">Back to the editor</a>
+                <span style="margin-left:auto"></span>
+                <span class="a-section-sub">
+                    Applying as yourself, against revision @Copy.Revision — sent as
+                    <code class="a-mono">If-Match: "@Copy.Revision"</code>.
+                </span>
+                <button type="button" class="a-btn a-btn--primary"
+                        disabled="@(_busy || (_plan.Plan.HasDestructiveChanges && !_allowed))"
+                        @onclick="ApplyAsync">
+                    Apply these changes
+                </button>
+            </div>
+        }
+    }
+
+    @if (_applied is { } result)
+    {
+        <div class="a-panel" style="padding:var(--space-5);border-color:var(--accentBorder)">
+            <span class="a-section-title">Applied as revision @result.Revision</span>
+            <p class="a-section-sub">
+                @(result.Replayed
+                    ? "This request repeated one that had already run — the revision it names was applied by the earlier one."
+                    : "The migration ran and the revision was appended.")
+            </p>
+            <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/history")">Open Configuration history</a>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// This operator's working copy, resolved from the store rather than injected.
+    /// </summary>
+    /// <remarks>
+    /// Empty until the first render has resolved who is signed in — the markup therefore reads it
+    /// through <c>Copy.Loaded</c> rather than assuming a document is there.
+    /// </remarks>
+    private WorkingCopy Copy { get; set; } = new();
+
+    private ManagementApplyResult? _plan;
+    private ManagementApplyResult? _applied;
+    private Exception? _error;
+    private string? _fix;
+    private string _reason = string.Empty;
+    private bool _allowed;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        /* Resolve this operator's working copy before anything reads it: the store is shared and
+           keyed by user, so a copy is never another administrator's. */
+        Copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
+        if (!Copy.Loaded)
+        {
+            try
+            {
+                var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
+                Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
+            }
+            catch (Exception exception) when (exception is ManagementForbiddenException
+                or ManagementProjectNotFoundException or ManagementRequestException)
+            {
+                _error = exception;
+            }
+        }
+    }
+
+    private Task PlanAsync() => SendAsync(dryRun: true);
+
+    private Task ApplyAsync() => SendAsync(dryRun: false);
+
+    private async Task SendAsync(bool dryRun)
+    {
+        _busy = true;
+        _error = null;
+        _fix = null;
+
+        try
+        {
+            /* A dry run asks what would happen, so it asks with destruction allowed; the apply asks
+               with what the operator has actually confirmed. Asking the plan under `_allowed` was a
+               deadlock: a drop was refused before a plan existed, the refusal said to type the
+               project's name "above", and that control renders only once there is a plan — so a
+               destructive change could be composed and never reviewed or applied from here. Nothing
+               is destroyed by describing it. */
+            var result = await Gateway.ApplyAsync(
+                Copy.Json, Copy.Revision, allowDestructive: dryRun || _allowed, dryRun,
+                author: await Gateway.AuthorAsync(),
+                reason: _reason.Length > 0 ? _reason : null,
+                CancellationToken.None);
+
+            if (dryRun)
+            {
+                _plan = result;
+            }
+            else
+            {
+                _applied = result;
+                _plan = null;
+                var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
+                Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
+            }
+        }
+        catch (Exception exception)
+        {
+            _error = exception;
+            _fix = Fix(exception);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>
+    /// What to do about the refusal, in the words the API itself uses.
+    /// </summary>
+    /// <remarks>
+    /// The two concurrency answers are worth separating: an <em>absent</em> precondition is a 428
+    /// and a <em>stale</em> one is a 412, and they send an operator to two different places — one
+    /// is a bug in the client, the other is somebody else having applied in between.
+    /// </remarks>
+    private static string? Fix(Exception exception) => exception switch
+    {
+        Migrations.DescriptorConcurrencyException
+            => "Somebody applied a revision while this copy was open. Reload the descriptor, re-check the diff, and apply again — your edits are still here.",
+        Migrations.DestructiveChangeNotAllowedException
+            => "The plan discards data and allowDestructive was not set. Type the project's name above to allow it.",
+        Descriptor.DescriptorValidationException
+            => "The descriptor does not satisfy schema/project.schema.json. The message names the pointer that failed.",
+        ManagementEscalationException
+            => "This change touches the access block, which re-qualifies the whole apply to admin. Your management level is lower.",
+        _ => null,
+    };
+
+    /// <summary>
+    /// Whether a plan step discards data.
+    /// </summary>
+    /// <remarks>
+    /// The step wording is the framework's own — the same sentences a refused boot prints — so this
+    /// reads the marker the planner puts there rather than inventing a classification of its own.
+    /// </remarks>
+    private static bool Destructive(string step)
+        => step.Contains("destructive", StringComparison.OrdinalIgnoreCase)
+            || step.Contains("drop", StringComparison.OrdinalIgnoreCase)
+            || step.Contains("loses", StringComparison.OrdinalIgnoreCase);
+}

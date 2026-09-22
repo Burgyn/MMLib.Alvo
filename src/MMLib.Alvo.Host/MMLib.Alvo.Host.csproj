@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <!--
     The standalone host (spec §2.14 mode 1, §X.1). Not packable: it is distributed as the
@@ -10,6 +10,16 @@
     <IsPackable>false</IsPackable>
     <UserSecretsId>mmlib-alvo-host</UserSecretsId>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- Serves /_framework/blazor.web.js.
+
+         The Web SDK turns this on by itself only for a project that contains .razor files
+         (Microsoft.NET.Sdk.Web.ProjectSystem.targets: `@(Content->AnyHaveMetadataValue(Extension,
+         .razor))`). Every component here lives in MMLib.Alvo.Admin, by design §1.2 — so the host
+         maps Blazor's endpoints while owning no component, the heuristic answers "no Blazor", the
+         framework's script is left out of the static-web-asset manifest, and the dashboard renders
+         once and never becomes interactive. Nothing fails at build time; the symptom is a 404 in
+         the browser. -->
+    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
   </PropertyGroup>
 
   <ItemGroup>
@@ -23,6 +33,11 @@
          therefore hands nothing to a NuGet consumer — the same category that already justifies
          Scalar and both database drivers. -->
     <ProjectReference Include="../MMLib.Alvo.Identity/MMLib.Alvo.Identity.csproj" />
+    <!-- The dashboard. A hosting decision in the same category as the two above: the standalone
+         image ships a console, an embedded host chooses whether to. MMLib.Alvo.Admin itself holds
+         no reference to MMLib.Alvo (design §1.2) and an architecture test keeps it that way, so
+         this reference is the only place the two halves meet. -->
+    <ProjectReference Include="../MMLib.Alvo.Admin/MMLib.Alvo.Admin.csproj" />
   </ItemGroup>
 
   <ItemGroup>

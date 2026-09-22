@@ -25,4 +25,25 @@ public sealed record AlvoUser
 
     /// <summary>Gets a value indicating whether this user is barred from signing in.</summary>
     public bool IsDisabled { get; init; }
+
+    /// <summary>Gets the one tenant this operator acts in, when they have been granted one.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One tenant, not a set, and that is a deliberate narrowing.</b> Acting in more than one
+    /// tenant is a cross-tenant capability, which <c>TenantResolver</c>'s own remarks call
+    /// <i>"a deliberate, audited grant"</i> and defer to #42. Until that exists, a set here would
+    /// be a capability nothing in the framework can audit — so an operator holds at most one, and
+    /// the resolver honours a requested tenant only as a <em>confirmation</em> of this value,
+    /// never as a choice between values.
+    /// </para>
+    /// <para>
+    /// <see langword="null"/> is the ordinary case and is not a defect: an operator with no tenant
+    /// reads and writes <c>global</c> entities normally, and is refused on a tenant-scoped entity
+    /// by the tenant guard — before any rule is consulted, as a <c>403</c> rather than an empty
+    /// page. That refusal is the reason this value is surfaced in the dashboard rather than kept
+    /// inside the resolver: an operator who cannot see that they hold no tenant has no way to
+    /// understand the refusal they are looking at.
+    /// </para>
+    /// </remarks>
+    public TenantId? Tenant { get; init; }
 }

@@ -11,8 +11,11 @@ It is a `WebApplication` over the core's public seams and nothing more: configur
 binding and validation, one driver registration, `MapAlvo` (the two probes plus the
 generated Data API), and a docs UI. **Nothing here applies the descriptor** — that is the
 framework's boot, described below — so the standalone host is now the same shape as an
-embedded one: `AddAlvo(…)`, then `MapAlvo()`. It is **not** the full standalone story — the
-dashboard, the Management API, the CLI and the published image are #24's remainder, in F4.
+embedded one: `AddAlvo(…)`, then `MapAlvo()`. Since F5 it also composes the **admin
+dashboard** (`AddAlvoAdmin` / `MapAlvoAdmin`) and the two sign-in endpoints that dashboard
+posts to, which live here rather than in `MMLib.Alvo.Admin` because signing in needs ASP.NET
+Core Identity and that package references neither the core nor the identity package. What is
+still #24's remainder is the **CLI** and the **published image**.
 
 ## The five boot stages, and why nothing in the host sequences them
 
@@ -132,6 +135,16 @@ mounts the surface, and it is **closed by default** — every management route c
 gate the descriptor's `access` block compiles, so an image whose descriptor declares no
 `access` answers 403 to everyone but the bootstrap administrator. See
 `docs/architecture/management-api.md`.
+**`Alvo:Admin:Dashboard:Enabled`** (`Alvo__Admin__Dashboard__Enabled`) is the whole of the
+dashboard's configuration, and the smallness is deliberate: everything a screen shows comes
+from the descriptor, the schema and `capabilities`, so there is nothing else to configure that
+the descriptor does not already own. **There is no configurable mount point.** A routable Razor
+component's `@page` is a compile-time constant, so the dashboard lives at `/admin`
+(`AlvoAdmin.BasePath`) and a deployment that needs it elsewhere moves the whole application
+with `Alvo:PathBase`, which is ASP.NET Core's own mechanism for exactly this. Turning it off
+takes the sign-in endpoints (`/admin/sign-in/submit`, `/admin/sign-out`) with it: a password
+endpoint answering behind a dashboard nobody can reach is surface with no purpose.
+
 The container form is the standard .NET double-underscore spelling
 (`Alvo__Database__Provider`), not the `ALVO_*` names spec §X.1 sketches — see the design's
 *Deviations added by PR4*.
@@ -771,11 +784,17 @@ warning fires only on the boot path, so a descriptor applied through `RuntimeSch
 closing it needs an `ILogger` on that type's **public** six-parameter constructor, which moves the public-API
 baseline.
 
+**The dashboard and the Management API landed in F5.** The Management API is
+`docs/architecture/management-api.md`; the dashboard is `MMLib.Alvo.Admin`, mounted at `/admin`
+by this host, and with it the dashboard-first source of truth — an operator applies a descriptor
+from a screen and the revision is recorded with their address as its `Author`. The #103 caveat
+above still applies to an entity added that way: the route table is built once, so it is not
+served until the process restarts, and the entity's API tab says so.
+
 Still owed on the standalone side:
 
 - the **published multi-arch image** (`mmlib/alvo`, amd64 + arm64) and the release pipeline that pushes it —
   the Dockerfile's `ARG VERSION` is where that pipeline hands in the real MinVer version;
-- the **dashboard** and the **Management API**, and with them the dashboard-first source of truth;
 - the **`alvo` CLI** (`alvo apply vehicles.alvo.json`) — one of the descriptor's doors that PR4 does not open
   (`PLAN.md` §2: Docker mount = CLI apply = Management API = `FromDescriptor()` = admin UI export);
 - the rest of **§2.12** — OpenTelemetry, rate limiting (**#112**), usage metering. The **database half of

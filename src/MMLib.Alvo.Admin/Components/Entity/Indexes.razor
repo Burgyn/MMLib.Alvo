@@ -1,0 +1,35 @@
+﻿@*
+    The indexes, and why the list is usually shorter than it looks.
+
+    A unique field carries its own index, so listing it again here would double-count what the
+    database actually has.
+*@
+<div class="a-section">
+    <span class="a-section-title">Indexes</span>
+    <span class="a-section-sub">Declared in the descriptor. A unique field already has one and is not repeated here.</span>
+</div>
+
+@if (Entity.Indexes.Count == 0)
+{
+    <EmptyState Title="No indexes are declared"
+                Body="Paging is keyset over the primary key, which is always indexed. Add an index when a filter or a sort runs over a column that is not." />
+}
+else
+{
+    @foreach (var index in Entity.Indexes)
+    {
+        <div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4)">
+            <span class="a-mono" style="flex:1;font-size:var(--text-sm)">@string.Join(", ", index.Fields)</span>
+            @if (index.Unique)
+            {
+                <span class="a-badge a-badge--accent">unique</span>
+            }
+        </div>
+    }
+}
+
+@code {
+    /// <summary>The entity whose indexes these are.</summary>
+    [Parameter, EditorRequired]
+    public EntitySchema Entity { get; set; } = default!;
+}

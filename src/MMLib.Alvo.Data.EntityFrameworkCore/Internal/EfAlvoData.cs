@@ -356,7 +356,9 @@ internal sealed class EfAlvoData : IAlvoData
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         WritePayloadGuard.EnsureWritable(values, schema, decision, isUpdate: false);
 
-        var candidate = Candidate(db.Rows(entity).EntityType, Stamped(schema, values, context, now, isUpdate: false));
+        var candidate = Candidate(
+            db.Rows(entity).EntityType,
+            Stamped(schema, WholeRowValues(schema, values), context, now, isUpdate: false));
         EnsureWriteAllowed(decision, Unmasked(candidate), previous: null, context);
 
         return (schema, candidate);
@@ -1058,6 +1060,42 @@ internal sealed class EfAlvoData : IAlvoData
         bool isUpdate) =>
         AlvoAuditStamp.Applied(schema, values, context, new WriteInstant(now), isUpdate);
 
+    /// <summary>
+    /// The payload of a write that composes a <b>whole row</b> — a create, or either branch of a replace —
+    /// with the declared default of every field it does not carry.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Whole-row, not create.</b> Tying this to the audit stamp's <c>isUpdate</c> is what broke PUT's
+    /// idempotence the first time it was written: the create branch filled the defaults and the replace branch
+    /// did not, so one PUT stored the default and the identical PUT that followed stored <see langword="null"/>
+    /// — two identical replacements producing two different rows, which is the property
+    /// <see cref="WholeRowGuard"/> exists to keep. An <b>update</b> is the one write that does not take them,
+    /// because its absent field means "leave it alone" rather than "it is not there".
+    /// </para>
+    /// <para>
+    /// Applied before the guards, because the filled value is part of the row that will be stored and
+    /// <c>WITH CHECK</c> is asked about that row. The caller's own payload is what
+    /// <see cref="WritePayloadGuard"/> reads, so a default can never launder a field a policy froze.
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyDictionary<string, object?> WholeRowValues(
+        EntitySchema schema, IReadOnlyDictionary<string, object?> values,
+        PolicyDecision? replacing = null) =>
+        FieldDefaults.Applied(schema, values, Frozen(replacing));
+
+    /// <summary>
+    /// The fields a default must not reach, which is the caller's own mask and only when a stored row is
+    /// being replaced.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="null"/> for a create: there is no stored value a default could destroy, and a field
+    /// frozen for this caller still has to start life somewhere.
+    /// </remarks>
+    private static HashSet<string>? Frozen(PolicyDecision? replacing) => replacing is null
+        ? null
+        : [.. replacing.ReadOnlyFields, .. replacing.HiddenFields];
+
     /// <inheritdoc/>
     public async Task<AlvoReplaceResult> ReplaceAsync(
         string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoContext context,
@@ -1267,7 +1305,10 @@ internal sealed class EfAlvoData : IAlvoData
     {
         var (preImage, postImage) = await WriteAsync(
             db, schema, decision, context, id,
-            WholeRowGuard.WholeRow(Stamped(schema, values, context, now, isUpdate: true), schema, decision),
+            WholeRowGuard.WholeRow(
+                Stamped(schema, WholeRowValues(schema, values, decision), context, now, isUpdate: true),
+                schema,
+                decision),
             precondition,
             now, cancellationToken);
         await EmitAsync(
@@ -1365,7 +1406,8 @@ internal sealed class EfAlvoData : IAlvoData
     {
         var candidate = WritePropertyBag.For(
             db.Rows(schema.Name).EntityType,
-            WholeRowGuard.WholeRow(Stamped(schema, values, context, now, isUpdate: false), schema, decision));
+            WholeRowGuard.WholeRow(
+                Stamped(schema, WholeRowValues(schema, values), context, now, isUpdate: false), schema, decision));
         candidate[AlvoDataContext.IdColumn] = id;
         StampTenant(candidate, schema, context);
 
@@ -1419,7 +1461,11 @@ internal sealed class EfAlvoData : IAlvoData
         var schema = Entity(db, entity) ?? throw new AlvoAuthorizationException(UnknownEntityMessage);
         WritePayloadGuard.EnsureWritable(values, schema, branches.Create, isUpdate: true);
         WritePayloadGuard.EnsureWritable(values, schema, branches.Update, isUpdate: true);
-        WholeRowGuard.EnsureWholeRow(values, schema);
+        /* Asked about the row that will be stored, not the one that arrived: a field the caller omitted and
+           the descriptor gives a default is supplied by the time anything writes it. Asking about the raw
+           payload instead would refuse a create the defaults make valid; exempting defaulted fields inside
+           the guard would drop the refusal for an explicit null as well. */
+        WholeRowGuard.EnsureWholeRow(WholeRowValues(schema, values), schema);
         AlvoPrecondition.EnsureSupported(precondition, schema);
 
         return schema;
@@ -2404,7 +2450,8 @@ internal sealed class EfAlvoData : IAlvoData
         }
 
         var candidate = Candidate(
-            db.Rows(schema.Name).EntityType, Stamped(schema, values, context, now, isUpdate: false));
+            db.Rows(schema.Name).EntityType,
+            Stamped(schema, WholeRowValues(schema, values), context, now, isUpdate: false));
 
         return WriteRefusal(decision, Unmasked(candidate), previous: null, context) is { } rejected
             ? (null, Forbidden(index, rejected))

@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -37,6 +38,15 @@ public static class AlvoIdentityServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(configureStore);
 
         AddStore(services, configureStore);
+
+        /* Data protection, because the credential token is a protected payload and the provider it
+           needs is not in a bare container. A web host usually has one already and this call is
+           idempotent — it returns a builder over the same registrations — so a deployment that
+           configures its own key ring keeps it. Registering it here rather than leaving it to the
+           host is what makes `IssueCredentialTokenAsync` work in every composition that has the
+           member, instead of in the ones that happen to be web hosts. */
+        services.AddDataProtection();
+
         AddIdentityCore(services);
 
         AddValidatedOptions(services, configure);
@@ -46,6 +56,14 @@ public static class AlvoIdentityServiceCollectionExtensions
         services.Replace(ServiceDescriptor.Singleton<IAlvoBootstrapAdmin>(
             provider => provider.GetRequiredService<AlvoBootstrapAdmin>()));
         services.AddKeyedScoped<IAlvoContextResolver, AlvoIdentityContextResolver>(AlvoIdentity.ResolverKey);
+
+        /* Keyed, and the key is the guard. The core registers a guarded decorator under the plain
+           IAlvoUserAdministration and resolves this one through the key — so there is no
+           registration anywhere that hands an in-process caller the unguarded implementation. A
+           guard living inside this adapter would be optional by construction: the next
+           implementation simply would not have it. */
+        services.AddKeyedScoped<IAlvoUserAdministration, AlvoIdentityUserAdministration>(
+            AlvoUserAdministration.UnguardedKey);
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AlvoIdentityBootstrap>());
 
         return services;
@@ -99,5 +117,18 @@ public static class AlvoIdentityServiceCollectionExtensions
     private static void AddIdentityCore(IServiceCollection services) =>
         services.AddIdentityCore<AlvoIdentityUser>()
             .AddRoles<AlvoIdentityRole>()
-            .AddEntityFrameworkStores<AlvoIdentityDbContext>();
+            .AddEntityFrameworkStores<AlvoIdentityDbContext>()
+            /* One token provider, named, rather than AddDefaultTokenProviders().
+
+               It is what `IAlvoUserAdministration.IssueCredentialTokenAsync` stands on: without it
+               Identity throws "no IUserTwoFactorTokenProvider named 'Default' is registered" the
+               first time an administrator lets a colleague set a password. AddIdentityCore
+               deliberately registers none — it is the minimal composition.
+
+               The default set would also add the email, phone and authenticator providers, which
+               are three capabilities this package does not have: no mail transport, no SMS, no
+               second factor. Registering them would make `TokenOptions` advertise providers that
+               cannot deliver anything. One provider, for the one operation that exists. */
+            .AddTokenProvider<DataProtectorTokenProvider<AlvoIdentityUser>>(
+                TokenOptions.DefaultProvider);
 }

@@ -101,10 +101,20 @@ public class UnhonouredFeaturesTests
     /// </remarks>
     /// <typeparam name="T">The descriptor the entry's predicate inspects.</typeparam>
     /// <param name="feature">The table entry.</param>
+    /// <summary>
+    /// The entry as the baseline records it.
+    /// </summary>
+    /// <remarks>
+    /// <b><c>Conditional</c> is projected because a partly-honoured feature is invisible otherwise.</b> An
+    /// entry that gains a value predicate stops refusing every declaration of its key and starts refusing
+    /// some of them — the largest change an entry can undergo without its path or its prose moving, and the
+    /// baseline would not have shown it.
+    /// </remarks>
     private static object Describe<T>(UnhonouredFeature<T> feature) => new
     {
         feature.Path,
         feature.Consequence,
         feature.Fix,
+        Conditional = feature.IsRefusedValue is not null,
     };
 }

@@ -23,6 +23,19 @@ public sealed class ComponentLayerTests
     public void The_component_layer_uses_tokens_rather_than_literal_colours()
         => Stylesheet.LiteralColoursOutsideTokens(_css).ShouldBeEmpty();
 
+    /// <summary>
+    /// No class means two things.
+    /// </summary>
+    /// <remarks>
+    /// The failure this prevents is silent by construction: the later definition wins, the page
+    /// still renders, and the control still works — it is simply drawn as something else. It cost a
+    /// checkbox label being rendered as an 18 px box over the field beneath it, and nothing but a
+    /// screenshot could have caught it.
+    /// </remarks>
+    [Fact]
+    public void No_selector_is_defined_twice()
+        => Stylesheet.SelectorsDefinedTwice(_css).ShouldBeEmpty();
+
     [Fact]
     public void The_focus_ring_is_never_removed()
     {

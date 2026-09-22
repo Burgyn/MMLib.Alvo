@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Net.Http.Headers;
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Descriptor;
@@ -58,8 +59,96 @@ internal static class ManagementEndpoints
         MapPolicySimulation(group);
         MapApply(group);
         MapRollback(group);
+        MapUsers(endpoints, group);
 
         return group;
+    }
+
+    /// <summary>
+    /// The six user-administration routes, mapped only when an implementation is registered.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Mapped only when the service exists.</b> <c>IAlvoUserAdministration</c> is filled by the
+    /// package that holds a membership store, and a deployment without one has nobody to
+    /// administer — so the routes are absent rather than present and answering 500. The same shape
+    /// the management surface already uses for a missing driver.
+    /// </para>
+    /// <para>
+    /// <b>All six are management routes at <c>admin</c>.</b> <c>ManageUsers</c> is already a
+    /// management operation at that level, and <i>everything the dashboard can do, the API can
+    /// do</i> binds this surface as much as it binds the descriptor. The read is at <c>admin</c>
+    /// too, deliberately: the people list is the one place a project's administrators are
+    /// enumerated, and that is reconnaissance a default-deny posture has no reason to hand to every
+    /// viewer. A viewer's real question — <i>what can this person do</i> — is
+    /// <c>policy/simulate</c>, which they already have.
+    /// </para>
+    /// </remarks>
+    /// <param name="endpoints">The route builder, for resolving whether an implementation exists.</param>
+    /// <param name="group">The group to map into.</param>
+    private static void MapUsers(IEndpointRouteBuilder endpoints, RouteGroupBuilder group)
+    {
+        /* Asked of the container's *registrations*, not resolved: the implementation is scoped and
+           mapping runs on the root provider, where resolving a scoped service throws. This is the
+           question actually being asked anyway — does a deployment have a membership store — and it
+           is answerable without constructing one. */
+        if (endpoints.ServiceProvider.GetService<IServiceProviderIsKeyedService>()
+            is not { } registrations
+            || !registrations.IsKeyedService(
+                typeof(IAlvoUserAdministration), AlvoUserAdministration.UnguardedKey))
+        {
+            return;
+        }
+
+        Gate(
+            group.MapGet(
+                "/projects/{project}/users",
+                (string project, string? search, int? limit, string? after,
+                    IAlvoUserAdministration users, CancellationToken ct) =>
+                        Answer(() => users.ListAsync(
+                            new AlvoUserQuery(search, limit ?? 50, after), ct))),
+            new ManagementRoute(nameof(IAlvoUserAdministration.ListAsync), ManagementOperation.ManageUsers));
+
+        Gate(
+            group.MapPost(
+                "/projects/{project}/users",
+                (string project, AlvoUserCreation creation,
+                    IAlvoUserAdministration users, CancellationToken ct) =>
+                        Answer(() => users.CreateAsync(creation, ct))),
+            new ManagementRoute(nameof(IAlvoUserAdministration.CreateAsync), ManagementOperation.ManageUsers));
+
+        Gate(
+            group.MapPut(
+                "/projects/{project}/users/{user:guid}/roles",
+                (string project, Guid user, ManagementRoleAssignment body,
+                    IAlvoUserAdministration users, CancellationToken ct) =>
+                        Answer(() => users.SetRolesAsync(new UserId(user), body.RoleNames, ct))),
+            new ManagementRoute(nameof(IAlvoUserAdministration.SetRolesAsync), ManagementOperation.ManageUsers));
+
+        Gate(
+            group.MapPut(
+                "/projects/{project}/users/{user:guid}/tenant",
+                (string project, Guid user, ManagementTenantGrant body,
+                    IAlvoUserAdministration users, CancellationToken ct) =>
+                        Answer(() => users.SetTenantAsync(
+                            new UserId(user), body.Tenant is { } tenant ? new TenantId(tenant) : null, ct))),
+            new ManagementRoute(nameof(IAlvoUserAdministration.SetTenantAsync), ManagementOperation.ManageUsers));
+
+        Gate(
+            group.MapPut(
+                "/projects/{project}/users/{user:guid}/disabled",
+                (string project, Guid user, ManagementDisabledFlag body,
+                    IAlvoUserAdministration users, CancellationToken ct) =>
+                        Answer(() => users.SetDisabledAsync(new UserId(user), body.Disabled, ct))),
+            new ManagementRoute(nameof(IAlvoUserAdministration.SetDisabledAsync), ManagementOperation.ManageUsers));
+
+        Gate(
+            group.MapPost(
+                "/projects/{project}/users/{user:guid}/credential-reset",
+                (string project, Guid user, IAlvoUserAdministration users, CancellationToken ct) =>
+                    Answer(() => users.IssueCredentialTokenAsync(new UserId(user), ct))),
+            new ManagementRoute(
+                nameof(IAlvoUserAdministration.IssueCredentialTokenAsync), ManagementOperation.ManageUsers));
     }
 
     /// <summary><c>GET {prefix}/info</c> — <see cref="IAlvoManagement.GetInfoAsync"/>.</summary>

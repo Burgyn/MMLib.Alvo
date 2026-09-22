@@ -1,0 +1,290 @@
+﻿@*
+    One record, in a form generated from the field types.
+
+    Generated rather than hand-drawn, and that is the point of a descriptor-driven backend: add a
+    field in Schema and it appears here, with the control its type admits and the facets its type
+    allows. A hand-written form would drift from the schema the first time somebody added a column.
+
+    What it refuses to do is validate ahead of the engine. The facets are shown and the obvious
+    input types are used, but the answer to "is this value acceptable" comes from the write — a
+    second validator in the client is a second set of rules to disagree with.
+*@
+@inject DataGateway Data
+
+<div class="a-scrim" style="display:flex;justify-content:flex-end;z-index:30" @onclick="Cancel">
+    <div class="a-drawer" @onclick:stopPropagation="true">
+        <div class="a-toolbar">
+            <span class="a-section-title">@(RecordId is null ? "New" : "Edit") @Entity.Name</span>
+            <span style="margin-left:auto"></span>
+            <button type="button" class="a-btn a-btn--ghost a-btn--sm" @onclick="Cancel">Close</button>
+        </div>
+
+        @if (_error is not null)
+        {
+            <ErrorPanel Problem="@_error" Fix="@_fix" />
+        }
+
+        <div class="a-stack" style="padding:var(--space-4) 0">
+            @foreach (var column in Editable)
+            {
+                <div class="a-field">
+                    <label class="a-label" for="@($"rf-{column.Name}")">
+                        @column.Name
+                        @if (column.Required)
+                        {
+                            <span style="color:var(--accent)"> *</span>
+                        }
+                        <span style="color:var(--faint);font-weight:var(--weight-normal)"> · @column.Type.ToString().ToLowerInvariant()</span>
+                    </label>
+                    @if (Hint(column) is { Length: > 0 } hint)
+                    {
+                        <span class="a-section-sub">@hint</span>
+                    }
+                    @switch (column.Type)
+                    {
+                        case FieldType.Boolean:
+                            <button type="button" id="@($"rf-{column.Name}")"
+                                    class="@($"a-toggle{(Truthy(column.Name) ? " a-toggle--on" : string.Empty)}")"
+                                    @onclick="() => Toggle(column.Name)"
+                                    aria-pressed="@Truthy(column.Name)"></button>
+                            break;
+                        case FieldType.Enum:
+                            <div class="a-choice">
+                                @foreach (var option in column.EnumValues ?? [])
+                                {
+                                    <button type="button"
+                                            class="@($"a-chip{(string.Equals(Text(column.Name), option, StringComparison.Ordinal) ? " a-chip--on" : string.Empty)}")"
+                                            @onclick="() => Set(column.Name, option)">@option</button>
+                                }
+                            </div>
+                            break;
+                        case FieldType.Text:
+                            <textarea class="a-textarea" id="@($"rf-{column.Name}")" rows="4"
+                                      value="@Text(column.Name)"
+                                      @oninput="args => Set(column.Name, args.Value?.ToString())"></textarea>
+                            break;
+                        default:
+                            <input class="a-input" id="@($"rf-{column.Name}")" type="@InputType(column)"
+                                   value="@Text(column.Name)"
+                                   @oninput="args => Set(column.Name, args.Value?.ToString())" />
+                            break;
+                    }
+                </div>
+            }
+        </div>
+
+        <div class="a-toolbar" style="border-top:1px solid var(--border);padding-top:var(--space-4)">
+            @if (RecordId is { } id)
+            {
+                <button type="button" class="a-btn a-btn--danger a-btn--sm" @onclick="Delete">Delete</button>
+            }
+            <span style="margin-left:auto"></span>
+            <code class="a-mono" style="font-size:var(--text-2xs);color:var(--faint)">@Verb</code>
+            <button type="button" class="a-btn a-btn--primary" disabled="@_saving" @onclick="Save">
+                @(RecordId is null ? "Create" : "Save")
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private Exception? _error;
+    private string? _fix;
+    private bool _saving;
+
+    /// <summary>The entity this record belongs to.</summary>
+    [Parameter, EditorRequired]
+    public EntitySchema Entity { get; set; } = default!;
+
+    /// <summary>The values being edited. Mutated in place; the caller owns the dictionary.</summary>
+    [Parameter, EditorRequired]
+    public Dictionary<string, object?> Values { get; set; } = default!;
+
+    /// <summary>The record's id when editing, and nothing when creating.</summary>
+    [Parameter]
+    public Guid? RecordId { get; set; }
+
+    /// <summary>Raised when the operator dismisses the form.</summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    /// <summary>Raised after a successful write.</summary>
+    [Parameter]
+    public EventCallback OnSaved { get; set; }
+
+    /// <summary>Raised after a successful delete.</summary>
+    [Parameter]
+    public EventCallback OnDeleted { get; set; }
+
+    /// <summary>
+    /// The fields an operator may actually send.
+    /// </summary>
+    /// <remarks>
+    /// <c>id</c> and the audit columns are Alvo's own and are refused on a write; a computed field
+    /// or a rollup is derived, so a control for one would produce a value the engine overwrites.
+    /// Showing them as disabled inputs was the alternative, and it loses: a form full of greyed
+    /// boxes reads as broken.
+    /// </remarks>
+    private IEnumerable<FieldSchema> Editable => Entity.Fields.Where(column =>
+        !AlvoManagedColumns.For(Entity).Contains(column.Name)
+        && column.ComputedExpression is null
+        && column.Rollup is null);
+
+    private string Verb => RecordId is null
+        ? $"POST /api/{Entity.Name}"
+        : $"PATCH /api/{Entity.Name}/{RecordId}";
+
+    private string Text(string name)
+        => Values.TryGetValue(name, out var value) && value is not null
+            ? Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty
+            : string.Empty;
+
+    private bool Truthy(string name)
+        => Values.TryGetValue(name, out var value) && value is true;
+
+    private void Set(string name, object? value) => Values[name] = value;
+
+    private void Toggle(string name) => Values[name] = !Truthy(name);
+
+    private static string InputType(FieldSchema column) => column.Type switch
+    {
+        FieldType.Integer or FieldType.Decimal => "number",
+        FieldType.Date => "date",
+        FieldType.DateTime => "datetime-local",
+        _ => "text",
+    };
+
+    /// <summary>What the schema says about this field, in the words an author would recognise.</summary>
+    private static string Hint(FieldSchema column)
+    {
+        var parts = new List<string>();
+
+        if (column.Format is { Length: > 0 } format)
+        {
+            parts.Add(column.FormatPattern is { Length: > 0 } pattern
+                ? $"must match {format} — {pattern}"
+                : $"must match {format}");
+        }
+
+        if (column.MaxLength is { } max)
+        {
+            parts.Add($"at most {max} characters");
+        }
+
+        if (column.Precision is { } precision && column.Scale is { } scale)
+        {
+            parts.Add($"{precision} digits in total, {scale} after the point");
+        }
+
+        if (column.Unique)
+        {
+            parts.Add("unique across the entity");
+        }
+
+        if (column.Reference is { } reference)
+        {
+            parts.Add($"the id of a {reference.TargetEntity} record");
+        }
+
+        return string.Join(" · ", parts);
+    }
+
+    private Task Cancel() => OnCancel.InvokeAsync();
+
+    private async Task Save()
+    {
+        _saving = true;
+        _error = null;
+        _fix = null;
+
+        try
+        {
+            var payload = Editable
+                .Where(column => Values.ContainsKey(column.Name))
+                .ToDictionary(column => column.Name, column => Values[column.Name], StringComparer.Ordinal);
+
+            /* A create into a tenant-scoped entity carries tenant_id, and it is the one managed
+               column a caller may write — `AlvoManagedColumns.IsCallerWritable` says so, because a
+               create legitimately places a row in a tenant and the synthesized tenant scope
+               evaluated over the candidate row is what decides whether that tenant is allowed.
+               Sending the operator's own is therefore not a shortcut past the guard; it is the
+               value the guard is there to check. Omitting it is what fails. */
+            if (RecordId is null && Entity.Tenancy == TenancyMode.Scoped)
+            {
+                var context = await Data.ContextAsync(CancellationToken.None);
+                if (context.Tenant is { } tenant)
+                {
+                    payload[AlvoManagedColumns.TenantId] = tenant.Value;
+                }
+            }
+
+            if (RecordId is { } id)
+            {
+                await Data.UpdateAsync(Entity.Name, id, payload, CancellationToken.None);
+            }
+            else
+            {
+                await Data.CreateAsync(Entity.Name, payload, CancellationToken.None);
+            }
+
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception exception)
+        {
+            Refused(exception);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task Delete()
+    {
+        if (RecordId is not { } id)
+        {
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            await Data.DeleteAsync(Entity.Name, id, CancellationToken.None);
+            await OnDeleted.InvokeAsync();
+        }
+        catch (Exception exception)
+        {
+            Refused(exception);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    /// <summary>
+    /// Renders the refusal where it happened, with the fix.
+    /// </summary>
+    /// <remarks>
+    /// A unique collision is a <c>409</c> with violation code <c>unique</c> — not a validation
+    /// error and not an "unknown field", neither of which the problem-type catalogue contains. The
+    /// wording follows the catalogue rather than inventing a friendlier one, because the operator
+    /// may well be reading the same slug in a log.
+    /// </remarks>
+    private void Refused(Exception exception)
+    {
+        _error = exception;
+        _fix = exception switch
+        {
+            AlvoConstraintViolationException { Kind: AlvoConstraintKind.Unique } violation
+                => $"Another record already has this value for {string.Join(", ", violation.Fields)}. The field is declared unique on the entity's Fields tab.",
+            AlvoConstraintViolationException violation
+                => $"The value does not satisfy {violation.Kind} on {string.Join(", ", violation.Fields)}.",
+            AlvoAuthorizationException
+                => "The write rule on this entity does not admit you, or the entity is tenant-scoped and you hold no tenant.",
+            AlvoRecordNotFoundException
+                => "The record is gone, or the read rule no longer admits it. Both answer 404, deliberately.",
+            _ => null,
+        };
+    }
+}

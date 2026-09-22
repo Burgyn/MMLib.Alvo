@@ -291,6 +291,17 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Deleting_a_row_nothing_references_still_succeeds() { }
         public System.Threading.Tasks.Task One_unique_value_may_be_held_by_two_tenants_at_once() { }
     }
+    public abstract class AlvoDataDefaultTests
+    {
+        protected AlvoDataDefaultTests() { }
+        public System.Threading.Tasks.Task A_caller_who_sends_the_clr_default_value_stores_that_value() { }
+        public System.Threading.Tasks.Task A_create_that_omits_the_field_stores_the_default() { }
+        public System.Threading.Tasks.Task A_create_that_sends_a_value_stores_what_it_sent() { }
+        public System.Threading.Tasks.Task A_replacement_does_not_reset_a_frozen_field_to_its_default() { }
+        public System.Threading.Tasks.Task A_replacement_naming_the_field_as_null_is_still_refused() { }
+        public System.Threading.Tasks.Task A_replacement_takes_the_same_defaults_a_create_does() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+    }
     public abstract class AlvoDataDifferentialTests
     {
         protected AlvoDataDifferentialTests() { }
@@ -638,6 +649,23 @@ namespace MMLib.Alvo.Testing.Management
         public System.Threading.Tasks.Task One_caller_s_key_never_reaches_another_s_record() { }
         public System.Threading.Tasks.Task Recording_the_same_key_twice_is_refused_rather_than_silently_overwriting() { }
     }
+    public abstract class UserAdministrationContractTests
+    {
+        protected UserAdministrationContractTests() { }
+        protected abstract MMLib.Alvo.UserId Administrator { get; }
+        protected abstract MMLib.Alvo.UserId BootstrapAdministrator { get; }
+        public System.Threading.Tasks.Task A_caller_cannot_grant_themselves_a_tenant() { }
+        public System.Threading.Tasks.Task A_caller_may_narrow_their_own_membership() { }
+        public System.Threading.Tasks.Task A_caller_may_remove_their_own_tenant() { }
+        public System.Threading.Tasks.Task A_caller_with_no_level_is_refused_every_member() { }
+        protected abstract MMLib.Alvo.IAlvoUserAdministration AsAdministrator();
+        protected abstract MMLib.Alvo.IAlvoUserAdministration AsUnprivilegedCaller();
+        protected virtual void EnsureAvailable() { }
+        public System.Threading.Tasks.Task The_bootstrap_administrator_cannot_be_disabled() { }
+        public System.Threading.Tasks.Task The_bootstrap_administrators_credential_cannot_be_reset() { }
+        public System.Threading.Tasks.Task The_reserved_tenant_cannot_be_granted() { }
+        public System.Threading.Tasks.Task The_reserved_tenant_cannot_be_granted_at_creation() { }
+    }
 }
 namespace MMLib.Alvo.Testing.Migrations
 {
@@ -702,6 +730,7 @@ namespace MMLib.Alvo.Testing.Migrations
         protected SchemaSqlSnapshotTests() { }
         protected abstract string EngineName { get; }
         public System.Threading.Tasks.Task Add_column_sql_is_stable() { }
+        public System.Threading.Tasks.Task Add_column_with_a_default_sql_is_stable() { }
         public System.Threading.Tasks.Task Add_composite_index_sql_is_stable() { }
         public System.Threading.Tasks.Task Add_ref_foreign_key_sql_is_stable() { }
         protected abstract MMLib.Alvo.Migrations.ISchemaMigrator CreateMigrator();

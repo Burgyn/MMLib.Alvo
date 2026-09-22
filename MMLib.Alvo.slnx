@@ -17,6 +17,7 @@
   <Folder Name="/test/">
     <Project Path="test/MMLib.Alvo.Abstractions.Tests/MMLib.Alvo.Abstractions.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Admin.Tests/MMLib.Alvo.Admin.Tests.csproj" />
+    <Project Path="test/MMLib.Alvo.Admin.Tests.EndToEnd/MMLib.Alvo.Admin.Tests.EndToEnd.csproj" />
     <Project Path="test/MMLib.Alvo.Api.Invariants.Tests.Integration/MMLib.Alvo.Api.Invariants.Tests.Integration.csproj" />
     <Project Path="test/MMLib.Alvo.Api.Tests.Integration/MMLib.Alvo.Api.Tests.Integration.csproj" />
     <Project Path="test/MMLib.Alvo.Api.Tests/MMLib.Alvo.Api.Tests.csproj" />

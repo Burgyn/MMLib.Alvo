@@ -1,0 +1,221 @@
+﻿@page "/admin/schema/{EntityName}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject WorkingCopyStore Copies
+@inject DataGateway Caller
+@inject NavigationManager Navigation
+
+<PageTitle>@EntityName · Schema · Alvo</PageTitle>
+
+<div class="a-stack">
+    <div class="a-toolbar">
+        <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema")">Schema</a>
+        <h1 class="a-page-title a-mono">@EntityName</h1>
+        <span style="margin-left:auto"></span>
+        <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/data/{EntityName}")">Browse records</a>
+        @if (Copy.IsDirty)
+        {
+            <a class="a-btn a-btn--primary a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/preview")">
+                Preview changes
+            </a>
+        }
+    </div>
+
+    @if (_error is not null)
+    {
+        <ErrorPanel Problem="@_error" />
+    }
+    else if (_entity is null)
+    {
+        @if (_schema is null)
+        {
+            <div class="a-skeleton" style="height:240px"></div>
+        }
+        else
+        {
+            <EmptyState Title="@($"There is no entity called {EntityName}")"
+                        Body="The schema this project serves does not declare it. It may have been renamed, or removed by a later revision." />
+        }
+    }
+    else
+    {
+        <div>
+            <p class="a-section-sub" style="max-width:72ch">
+                @(_entity.Description ?? "This entity has no description in the descriptor.")
+            </p>
+            <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3);flex-wrap:wrap">
+                @if (_pending)
+                {
+                    <span class="a-badge a-badge--warn">not applied yet</span>
+                }
+                <span class="a-badge">@(_entity.Tenancy == TenancyMode.Scoped ? "tenancy: scoped" : "tenancy: global")</span>
+                <span class="a-badge">@(_entity.Audit ? "audited" : "not audited")</span>
+                @if (_entity.SoftDelete)
+                {
+                    <span class="a-badge">soft delete</span>
+                }
+                <span class="a-badge">@(_entity.Storage == EntityStorage.Physical ? "physical table" : "dynamic")</span>
+            </div>
+        </div>
+
+        <div class="a-tabs">
+            @foreach (var tab in _tabs)
+            {
+                <button type="button" class="@($"a-tab{(_tab == tab ? " a-tab--active" : string.Empty)}")"
+                        @onclick="() => _tab = tab">@tab</button>
+            }
+        </div>
+
+        <div class="a-panel">
+            @switch (_tab)
+            {
+                case "Fields":
+                    <Fields Entity="@_entity" Editable="Copy.Loaded" OnEdit="EditField" OnRemove="RemoveField" />
+                    break;
+                case "Relationships":
+                    <Relationships Entity="@_entity" Schema="_schema!" />
+                    break;
+                case "Rules":
+                    <RulesTab Rules="_working" Entity="@EntityName" Editable="true" OnChanged="SetRule" />
+                    break;
+                case "On write":
+                    <HooksTab Hooks="@_hooks" />
+                    break;
+                case "Indexes":
+                    <Indexes Entity="@_entity" />
+                    break;
+                default:
+                    <ApiTab Entity="@_entity" />
+                    break;
+            }
+        </div>
+
+        @if (_tab == "Fields")
+        {
+            <FieldEditor Entity="@EntityName" Targets="_entities" OnAdded="AddFieldAsync"
+                         Editing="@_editing" EditingJson="@EditedJson" OnCancelled="() => _editing = null"
+                         Capabilities="_refused" />
+        }
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// This operator's working copy, resolved from the store rather than injected.
+    /// </summary>
+    /// <remarks>
+    /// Empty until the first render has resolved who is signed in — the markup therefore reads it
+    /// through <c>Copy.Loaded</c> rather than assuming a document is there.
+    /// </remarks>
+    private WorkingCopy Copy { get; set; } = new();
+
+    private static readonly string[] _tabs =
+        ["Fields", "Relationships", "Rules", "On write", "Indexes", "API"];
+
+    private SchemaModel? _schema;
+    private EntitySchema? _entity;
+    private IReadOnlyList<KeyValuePair<string, string>> _rules = [];
+    private IReadOnlyList<KeyValuePair<string, string>> _hooks = [];
+    private IReadOnlyList<string> _entities = [];
+    private IReadOnlyList<ManagementRefusedFeature> _refused = [];
+    private IReadOnlyList<KeyValuePair<string, string>> _working = [];
+    private Exception? _error;
+    private string _tab = "Fields";
+    private string? _editing;
+    private bool _pending;
+
+    /// <summary>The entity's name, from the route.</summary>
+    [Parameter]
+    public string EntityName { get; set; } = string.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        /* Resolve this operator's working copy before anything reads it: the store is shared and
+           keyed by user, so a copy is never another administrator's. */
+        Copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
+        try
+        {
+            _schema = await Gateway.SchemaAsync(CancellationToken.None);
+            _entity = _schema.Entities.FirstOrDefault(
+                entity => string.Equals(entity.Name, EntityName, StringComparison.Ordinal));
+
+            _refused = (await Gateway.CapabilitiesAsync(CancellationToken.None)).Refused;
+
+            var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
+            _rules = DescriptorLens.Rules(descriptor.DescriptorJson, EntityName);
+            _hooks = DescriptorLens.Hooks(descriptor.DescriptorJson, EntityName);
+            _entities = [.. _schema.Entities.Select(entity => entity.Name)];
+
+            /* The working copy is taken from the applied descriptor the first time any screen
+               needs one, and never re-taken while it is dirty — re-taking it would discard the
+               operator's unapplied edits the moment they navigated. */
+            if (!Copy.Loaded)
+            {
+                Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
+            }
+
+            /* The Rules tab edits the WORKING copy, so it must render the working copy — showing
+               the applied rules in an editable box would quietly discard an unapplied edit the
+               moment somebody navigated away and back. */
+            _working = DescriptorLens.Rules(Copy.Json, EntityName);
+
+            /* An entity that exists only in the working copy is not in GET schema, because nothing
+               has been applied. Rendering it from the working copy is what lets somebody add an
+               entity and then give it rules — without this, the screen would say "there is no
+               entity called invoices" to the person who just created one. */
+            if (_entity is null)
+            {
+                _entity = PendingSchema.Read(Copy.Json, EntityName);
+                _pending = _entity is not null;
+            }
+        }
+        catch (Exception exception) when (exception is ManagementForbiddenException
+            or ManagementProjectNotFoundException or ManagementRequestException)
+        {
+            _error = exception;
+        }
+    }
+
+    /// <summary>Writes one operation's rule into the working copy.</summary>
+    /// <remarks>
+    /// No navigation: an operator setting five rules would be sent to the preview five times. The
+    /// toolbar's "Preview changes" appears as soon as the copy is dirty, which is the affordance.
+    /// </remarks>
+    private void SetRule((string Operation, string Cel) change)
+    {
+        Copy.SetRule(EntityName, change.Operation, change.Cel);
+        _working = DescriptorLens.Rules(Copy.Json, EntityName);
+    }
+
+    /// <summary>Puts a new field in the working copy and offers the preview.</summary>
+    private void AddFieldAsync(FieldEditor.NewField added)
+    {
+        Copy.AddField(EntityName, added.Name, added.Facets);
+        _editing = null;
+        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/preview");
+    }
+
+    /// <summary>Opens the editor over a field the descriptor already declares.</summary>
+    private void EditField(string field) => _editing = field;
+
+    /// <summary>
+    /// Drops a field from the working copy and offers the preview.
+    /// </summary>
+    /// <remarks>
+    /// No confirmation here, and that is deliberate: nothing has happened to the database yet. The
+    /// change is a line in a document, the preview is where its cost is stated as a plan, and the
+    /// apply is where dropping a column has to be allowed explicitly. A second confirmation in front
+    /// of an edit to a draft trains an operator to click through the one that matters.
+    /// </remarks>
+    private void RemoveField(string field)
+    {
+        Copy.RemoveField(EntityName, field);
+        _editing = null;
+        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/preview");
+    }
+
+    /// <summary>The edited field's declaration, as the working copy currently carries it.</summary>
+    private string? EditedJson => _editing is null
+        ? null
+        : Copy.FieldsOf(EntityName).FirstOrDefault(pair => pair.Key == _editing).Value;
+}

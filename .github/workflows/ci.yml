@@ -304,6 +304,33 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+  admin-e2e:
+    name: Admin dashboard scenarios
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Scenarios
+        run: bash scripts/test-admin-e2e
+
+      - name: Upload the failure trace
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: admin-e2e-traces
+          path: test/MMLib.Alvo.Admin.Tests.EndToEnd/bin/Debug/net10.0/playwright-traces
+          retention-days: 7
+          if-no-files-found: ignore
+
   # Stable required status check: the branch ruleset requires "Build & test",
   # which must not change when matrix legs are added/removed. This gate passes
   # only if every matrix leg AND the e2e job succeeded — folding e2e in here
@@ -312,7 +339,7 @@ jobs:
   # The script suites fold in for the same reason.
   build-and-test:
     name: Build & test
-    needs: [build-test, e2e, scripts]
+    needs: [build-test, e2e, scripts, admin-e2e]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -331,7 +358,14 @@ jobs:
             echo "A shell script suite failed (see the 'Script suites' job for which one)."
             exit 1
           fi
-          echo "All Build & test matrix legs, the e2e and the script suites passed."
+          # Whole, not affected-scoped: the F5 design's §6.2 asks for it, and the reason is that the
+          # flows it covers cross every screen — a change anywhere can break one of them, and each
+          # of the six defects it has already caught left a page that still rendered.
+          if [ "${{ needs.admin-e2e.result }}" != "success" ]; then
+            echo "The admin dashboard scenarios failed."
+            exit 1
+          fi
+          echo "All Build & test matrix legs, both e2e suites and the script suites passed."
 
   brief-freshness:
     name: Brief freshness

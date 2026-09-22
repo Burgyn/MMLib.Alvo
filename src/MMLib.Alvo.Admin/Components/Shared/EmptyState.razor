@@ -1,0 +1,27 @@
+﻿@*
+    An empty state that says what to do next.
+
+    Design §5.5: never "No data". An empty screen is a question — is it broken, is it filtered, is
+    it mine to fill? — and the answer costs one sentence.
+*@
+<div class="a-empty">
+    <div class="a-empty__title">@Title</div>
+    <div class="a-empty__body">
+        @Body
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    /// <summary>What is empty, stated as a fact rather than as an absence.</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>What to do about it.</summary>
+    [Parameter, EditorRequired]
+    public string Body { get; set; } = string.Empty;
+
+    /// <summary>The control that does it, when there is one.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}

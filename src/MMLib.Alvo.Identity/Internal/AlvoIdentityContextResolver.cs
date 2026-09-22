@@ -19,10 +19,16 @@ namespace MMLib.Alvo.Identity.Internal;
 /// <para>
 /// <b>Every refusal is <see langword="null"/>, and there are five of them:</b> a subject that is not
 /// a usable <see cref="UserId"/> (including the reserved all-zero value), an unknown user, a
-/// disabled user, a <see langword="null"/> role catalogue, and a caller asking to act in a tenant.
-/// The last is not an oversight — a cookie session carries no tenant grant, so honouring the request
-/// would let the caller choose the tenant it acts in, which is the one thing <c>TenantResolver</c>
-/// exists to refuse for an API key.
+/// disabled user, a <see langword="null"/> role catalogue, and a caller asking to act in a tenant
+/// that is not the one they hold.
+/// </para>
+/// <para>
+/// <b>An operator does carry a tenant, and a requested one is read as a confirmation of it.</b>
+/// <see cref="AlvoUser.Tenant"/> is the grant an administrator made, so the session's tenant comes
+/// from the stored row and never from the request: naming the tenant you already hold is honoured,
+/// naming any other is refused outright, and naming none simply leaves the grant in place. That is
+/// the same rule <c>TenantResolver</c> applies to an API key — see <see cref="Confirmed"/> for why
+/// the refusal is the whole principal rather than a principal with no tenant.
 /// </para>
 /// </remarks>
 /// <param name="users">The membership store.</param>
@@ -50,7 +56,7 @@ internal sealed class AlvoIdentityContextResolver(
     public async ValueTask<AlvoPrincipal?> ResolveAsync(
         string? presentedKey, string? requestedTenant, CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrEmpty(requestedTenant) || !TrySubject(presentedKey, out var subject))
+        if (!TrySubject(presentedKey, out var subject))
         {
             return null;
         }
@@ -61,8 +67,42 @@ internal sealed class AlvoIdentityContextResolver(
         }
 
         var user = await users.FindAsync(subject, cancellationToken).ConfigureAwait(false);
-        return user is { IsDisabled: false } signedIn ? Principal(signedIn, declared) : null;
+        if (user is not { IsDisabled: false } signedIn)
+        {
+            return null;
+        }
+
+        return Confirmed(requestedTenant, signedIn.Tenant) ? Principal(signedIn, declared) : null;
     }
+
+    /// <summary>
+    /// Decides whether a requested tenant may be honoured for this operator.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A requested tenant is a confirmation, never a choice</b> — the same rule
+    /// <c>TenantResolver</c> applies to an API key, applied to a session. An operator holds at most
+    /// one tenant (<see cref="AlvoUser.Tenant"/>), so the only honest answers to "act in tenant X"
+    /// are <i>yes, that is your tenant</i> and <i>no</i>. Acting in a second one is a cross-tenant
+    /// capability, which is <i>"a deliberate, audited grant"</i> deferred to #42.
+    /// </para>
+    /// <para>
+    /// <b>The refusal is the whole principal, not a null tenant.</b> Returning a principal with no
+    /// tenant would turn "you may not act in tenant X" into "you are a caller with no tenant" —
+    /// which reaches every <c>global</c> entity happily, and is exactly the bool trap this
+    /// resolver's contract exists to avoid.
+    /// </para>
+    /// <para>
+    /// An unparseable requested tenant is refused rather than ignored, on the same rule: a value
+    /// this resolver cannot evaluate is not a value it may drop.
+    /// </para>
+    /// </remarks>
+    /// <param name="requested">The tenant the caller asked to act in, if any.</param>
+    /// <param name="held">The tenant the operator has been granted, if any.</param>
+    /// <returns><see langword="true"/> when the request may proceed.</returns>
+    private static bool Confirmed(string? requested, TenantId? held)
+        => string.IsNullOrEmpty(requested)
+            || (TenantId.TryParse(requested, null, out var asked) && held == asked);
 
     /// <summary>Reads the cookie subject as a usable <see cref="UserId"/>.</summary>
     /// <param name="presented">The already-authenticated subject.</param>
@@ -77,7 +117,12 @@ internal sealed class AlvoIdentityContextResolver(
     /// <returns>The resolved caller.</returns>
     private static AlvoPrincipal Principal(AlvoUser user, RoleCatalog declared) => new()
     {
-        Context = new AlvoContext { User = user.Id, Roles = Minted(user, declared) },
+        Context = new AlvoContext
+        {
+            User = user.Id,
+            Roles = Minted(user, declared),
+            Tenant = user.Tenant,
+        },
         Scopes = _sessionScopes,
         KeyId = SessionKeyId(user.Id),
     };
