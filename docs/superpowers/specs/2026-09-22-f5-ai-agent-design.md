@@ -50,6 +50,7 @@ issue listed in §7.
 | **Anthropic does not ship as a connection kind** | There is no first-party `Microsoft.Extensions.AI` adapter for it. Shipping it means either a community package to license-check against `alvo-dotnet-conventions`, or an `IChatClient` over Anthropic's HTTP API that Alvo then owns. Both are decisions worth their own issue; the OpenAI-compatible kind already covers §2.8's whole *local* list, and `azure-openai` its enterprise one |
 | The agent gets **no data tools** in this PR | §2.8 lists *"dotazy nad dátami"*. Every row read becomes model context, and a record somebody else wrote is untrusted input to a tool-calling loop. The descriptor tools alone satisfy the DoD; data tools are a separate trust argument and a separate issue (§7) |
 | *"Every intervention audited"* is answered by **revision provenance**, not a transcript | The reads travel the operator's own credentials and take no privilege — which is exactly the decision §2.4 of the dashboard design already made for the data browser. The one thing that changes state is the apply, and it is attributable through `Author` and `Reason`, which `ManagementRevision` already documents as *"human- or agent-supplied"*. A transcript table means prompt text at rest, with retention and erasure obligations (§5 of the analysis) this build has no answer for |
+| The dashboard writes the connection through `ISecretStore` rather than a new `IAlvoManagement` member | §3.4: every management member is an HTTP route by contract test, so a secret-write member widens the wire surface for a door F5 does not need |
 | No `key_id` column held in reserve for a future rotation | `AlvoIdentitySchema` proved this repository can reconcile a column onto an existing table in the active provider's own DDL. The cheapest honest thing is to add the column when rotation is built, not to ship a field nothing writes |
 
 ---
@@ -122,12 +123,18 @@ saved, and every request keeps using the old one. It fails closed and it fails v
 ### 2.3 Encryption, and the bootstrap paradox
 
 `EfCoreSecretStore` stores AES-GCM ciphertext: a random 96-bit nonce per write, the ciphertext, and
-the tag, in one `alvo_secrets` row keyed by name. The key-encryption key comes from the
-**environment** — `ALVO_SECRET_KEY`, 32 bytes base64 — which is §7.1's own answer to the bootstrap
-paradox: credentials for the secret store come from the platform (managed identity, a workload
-identity, a mounted K8s secret), never from another secret store.
+the tag, in one `alvo_secrets` row keyed by name. The key-encryption key is read from a **file the
+platform mounts** — `Alvo:Secrets:EncryptionKeyFile`, 32 bytes base64 — which is §7.1's own answer to
+the bootstrap paradox: the credential for the secret store comes from the platform (a mounted K8s
+secret, a workload identity's file, a Docker secret), never from another secret store.
 
-**With no `ALVO_SECRET_KEY`, the writable store is not registered at all.** It does not fall back to
+**A key set in configuration itself — `Alvo:Secrets:EncryptionKey` — is refused at startup**, with
+the message shape `Alvo__Admin__BootstrapPassword` already has. That refusal is this repository's own
+precedent rather than a new opinion: a value in configuration is a value in an environment dump, a
+process listing and a crash report, and §7.1's *"secrets never into logs/env dumps/git"* is exactly
+the sentence it protects.
+
+**With no key file, the writable store is not registered at all.** It does not fall back to
 a derived key, a machine key, or plaintext. `CanWrite` is then false, the settings screen says the
 connection must come from configuration in this deployment, and a default-deny build has refused
 rather than invented a key an operator would believe protects them.
@@ -186,7 +193,21 @@ missing from the deployment. So the drawer and its launcher do not render, and *
 the panel that fixes it. The dashboard keeps working without AI, which is §2.8's explicit
 requirement.
 
-### 3.4 The connection is resolved per turn, never cached in the circuit
+### 3.4 The dashboard writes the connection through the port, not through a management route
+
+`IAlvoManagement` gains **no** member. The dashboard injects `ISecretStore` directly — the shape it
+already uses for `IAlvoUserAdministration`, which `ManagementGateway` takes as an optional
+constructor dependency because only a deployment that has a store registers one.
+
+The reason is blast radius. Every `IAlvoManagement` member has an HTTP route and a contract test that
+holds it there, so a secret-write member would put secret writing on the surface the CLI, an MCP
+adapter and any HTTP caller reach, in exchange for a door nothing in F5 needs: the CLI's answer to
+*"set my model key"* is the deployment's own configuration, which already wins over the store (§3.1).
+A port injected by the one screen that writes it keeps the write in-process and keeps
+`GET {m}/info`'s `ai` block — which reports **whether** a connection exists and never its key — as
+the only thing that crosses the wire.
+
+### 3.5 The connection is resolved per turn, never cached in the circuit
 
 The dashboard design's §10 records the sharpest lesson this repository has learned about Blazor
 Server: *"a caller resolved once per circuit is a caller who cannot be revoked."* The same shape
@@ -356,7 +377,7 @@ design's §7 established, for the same reason: a list nobody owns is how debt ac
 - `docs/architecture/package-boundary.md` — §Current projects gains `MMLib.Alvo.Ai`; the file's own
   instruction is *"Keep this list current."*
 - `docs/architecture/management-api.md` — `GET {m}/info` gains the `ai` block.
-- `docs/architecture/host.md` — `ALVO_SECRET_KEY` and the `Alvo:Ai:*` configuration keys.
+- `docs/architecture/host.md` — `Alvo:Secrets:EncryptionKeyFile` and the `Alvo:Ai:*` configuration keys.
 - `schema/project.schema.json` — **no change.** The connection is infrastructure; if this design
   touched the descriptor it would have got the invariant wrong.
 - `docs/PLAN.md` — §3 when F5 closes.
