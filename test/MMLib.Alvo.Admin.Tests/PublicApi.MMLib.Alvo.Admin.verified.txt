@@ -13,9 +13,11 @@ namespace MMLib.Alvo.Admin
     }
     public static class AlvoAdminAssets
     {
+        public static string Mark { get; }
         public static string Module { get; }
         public static string Script { get; }
         public static string StyleSheet { get; }
+        public static string Wordmark { get; }
     }
     public static class AlvoAdminClaims
     {
@@ -70,15 +72,22 @@ namespace MMLib.Alvo.Admin.Components.Entity
     public class FieldEditor : Microsoft.AspNetCore.Components.ComponentBase
     {
         public FieldEditor() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Editing { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? EditingJson { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public string Entity { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.FieldEditor.NewField> OnAdded { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnCancelled { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<string> Targets { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
         public sealed class NewField : System.IEquatable<MMLib.Alvo.Admin.Components.Entity.FieldEditor.NewField>
         {
             public NewField(string Name, System.Text.Json.Nodes.JsonObject Facets) { }
@@ -89,9 +98,15 @@ namespace MMLib.Alvo.Admin.Components.Entity
     public class Fields : Microsoft.AspNetCore.Components.ComponentBase
     {
         public Fields() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Editable { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public MMLib.Alvo.Schema.EntitySchema Entity { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> OnEdit { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> OnRemove { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     public class HooksTab : Microsoft.AspNetCore.Components.ComponentBase
@@ -359,6 +374,20 @@ namespace MMLib.Alvo.Admin.Components.Shared
         [Microsoft.AspNetCore.Components.Parameter]
         public string Title { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class DescriptorDiff : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public DescriptorDiff() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string After { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Before { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public int Revision { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
     }
     public class Detail : Microsoft.AspNetCore.Components.ComponentBase
     {

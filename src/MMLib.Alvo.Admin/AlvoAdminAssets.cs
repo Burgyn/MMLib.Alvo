@@ -66,4 +66,18 @@ public static class AlvoAdminAssets
     /// </para>
     /// </remarks>
     public static string Module { get; } = $"/{ContentRoot}/admin.js";
+
+    /// <summary>
+    /// The mark on its own — a rounded square carrying the prompt glyph.
+    /// </summary>
+    /// <remarks>
+    /// The same file the reference drawing uses (<c>docs/design/f5-admin</c>), copied rather than
+    /// referenced, because nothing shipped may depend on a design artifact. A letter in a coloured
+    /// box is what the dashboard drew before this, and it was a placeholder that outlived its
+    /// placeholder-ness.
+    /// </remarks>
+    public static string Mark { get; } = $"{ContentRoot}/alvo-mark.svg";
+
+    /// <summary>The mark with the name and the line beneath it, for a screen with room for it.</summary>
+    public static string Wordmark { get; } = $"{ContentRoot}/alvo-wordmark.svg";
 }

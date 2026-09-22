@@ -16,8 +16,12 @@
 <PageTitle>Sign in · Alvo</PageTitle>
 
 <div class="a-stack" style="max-width:380px;margin:12vh auto 0">
-    <div class="a-brand" style="justify-content:center">
-        <span class="a-brand-mark">A</span>
+    @* The mark and the name set in the page's own type, rather than the wordmark SVG: that file
+       draws "Alvo" with `fill="currentColor"`, and an SVG loaded through <img> has no page to take
+       a colour from — it would resolve to black and disappear in the dark theme. The wordmark is
+       still published for a host that wants it on a light surface. *@
+    <div class="a-brand" style="justify-content:center;font-size:var(--text-xl)">
+        <img src="@AlvoAdminAssets.Mark" width="34" height="34" alt="" />
         <span>Alvo</span>
     </div>
 

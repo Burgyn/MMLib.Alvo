@@ -11,7 +11,7 @@
         <h1 class="a-page-title a-mono">@EntityName</h1>
         <span style="margin-left:auto"></span>
         <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/{EntityName}")">Schema</a>
-        @if (_entity is not null)
+        @if (_entity is not null && !OutOfScope)
         {
             <button type="button" class="a-btn a-btn--primary a-btn--sm" @onclick="NewRecord">New record</button>
         }
@@ -42,9 +42,18 @@
             You see exactly the rows this credential sees through <code class="a-mono">/api/@EntityName</code>.
         </p>
 
-        @if (_page is null)
+        @if (OutOfScope)
+        {
+            <EmptyState Title="You hold no tenant, and this entity is scoped to one"
+                        Body="@EmptyExplanation" />
+        }
+        else if (_loading)
         {
             <div class="a-skeleton" style="height:200px"></div>
+        }
+        else if (_page is null)
+        {
+            @* The refusal above is the whole answer; a skeleton that never resolves is not. *@
         }
         else if (_page.Items.Count == 0)
         {
@@ -121,6 +130,27 @@
     private string? _fix;
     private string? _cursor;
     private string _who = string.Empty;
+
+    /// <summary>
+    /// Who the rows are being read as, in the words an operator recognises.
+    /// </summary>
+    /// <remarks>
+    /// The caller's id is a uuid, and a uuid answers a question nobody asked: the operator knows who
+    /// they signed in as, and what they need confirmed is that this screen is reading as <em>them</em>
+    /// rather than as the framework. The id is still what the tenant guard and the rules see, so it
+    /// stays beside the name rather than being replaced by it.
+    /// </remarks>
+    private async Task<string> WhoAsync()
+    {
+        if (_context?.User is not { } user || user == default)
+        {
+            return "an unauthenticated caller";
+        }
+
+        var named = await Gateway.AuthorAsync();
+
+        return named is { Length: > 0 } ? named : user.ToString();
+    }
     private bool _loading = true;
 
     /// <summary>The entity being browsed, from the route.</summary>
@@ -150,6 +180,19 @@
     /// <b>404</b> on a get — never a 403. An operator staring at an empty grid has no way to tell
     /// that from "there are no rows" unless the screen says so.
     /// </remarks>
+    /// <summary>
+    /// Whether this screen's rows are unreachable before any rule is consulted.
+    /// </summary>
+    /// <remarks>
+    /// A scoped entity read by a caller holding no tenant is refused by the tenant guard, which runs
+    /// first (§2.7). That is an expected state of this build rather than a fault, so the screen says
+    /// it once, in the words the Data list already uses, instead of raising a red panel titled
+    /// <em>"Something went wrong"</em> over a skeleton that will never resolve — and it does not
+    /// make the request at all, because the answer is known before it is sent.
+    /// </remarks>
+    private bool OutOfScope
+        => _entity is { Tenancy: TenancyMode.Scoped } && _context?.Tenant is null;
+
     private string EmptyExplanation => _entity!.Tenancy == TenancyMode.Scoped && _context?.Tenant is null
         ? "This entity is tenant-scoped and you hold no tenant. An administrator grants one in Access."
         : "Either nothing has been created yet, or the read rule on this entity does not admit you — a rule that excludes you returns an empty page rather than a refusal. The Rules screen shows the predicate it applied.";
@@ -165,9 +208,9 @@
             _entity = _schema.Entities.FirstOrDefault(
                 entity => string.Equals(entity.Name, EntityName, StringComparison.Ordinal));
             _context = await Records.ContextAsync(CancellationToken.None);
-            _who = _context.User == default ? "an unauthenticated caller" : _context.User.ToString();
+            _who = await WhoAsync();
 
-            if (_entity is not null)
+            if (_entity is not null && !OutOfScope)
             {
                 await LoadAsync();
             }

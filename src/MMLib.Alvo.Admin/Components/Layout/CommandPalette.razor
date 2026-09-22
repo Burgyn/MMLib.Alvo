@@ -20,7 +20,7 @@
              @onclick:stopPropagation="true" @onkeydown="OnKeyDown">
             <input class="a-palette__input" placeholder="Go to a section or an entity…"
                    @ref="_input" @bind="_query" @bind:event="oninput" aria-label="Search" />
-            <div role="listbox">
+            <div role="listbox" class="a-palette__list">
                 @if (Matches.Count == 0)
                 {
                     <div class="a-palette__item" style="color:var(--dim)">

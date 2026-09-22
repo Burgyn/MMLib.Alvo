@@ -70,7 +70,7 @@
             @switch (_tab)
             {
                 case "Fields":
-                    <Fields Entity="@_entity" />
+                    <Fields Entity="@_entity" Editable="Copy.Loaded" OnEdit="EditField" OnRemove="RemoveField" />
                     break;
                 case "Relationships":
                     <Relationships Entity="@_entity" Schema="_schema!" />
@@ -92,7 +92,8 @@
 
         @if (_tab == "Fields")
         {
-            <FieldEditor Entity="@EntityName" Targets="_entities" OnAdded="AddFieldAsync" />
+            <FieldEditor Entity="@EntityName" Targets="_entities" OnAdded="AddFieldAsync"
+                         Editing="@_editing" EditingJson="@EditedJson" OnCancelled="() => _editing = null" />
         }
     }
 </div>
@@ -118,6 +119,7 @@
     private IReadOnlyList<KeyValuePair<string, string>> _working = [];
     private Exception? _error;
     private string _tab = "Fields";
+    private string? _editing;
     private bool _pending;
 
     /// <summary>The entity's name, from the route.</summary>
@@ -185,6 +187,31 @@
     private void AddFieldAsync(FieldEditor.NewField added)
     {
         Copy.AddField(EntityName, added.Name, added.Facets);
+        _editing = null;
         Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/preview");
     }
+
+    /// <summary>Opens the editor over a field the descriptor already declares.</summary>
+    private void EditField(string field) => _editing = field;
+
+    /// <summary>
+    /// Drops a field from the working copy and offers the preview.
+    /// </summary>
+    /// <remarks>
+    /// No confirmation here, and that is deliberate: nothing has happened to the database yet. The
+    /// change is a line in a document, the preview is where its cost is stated as a plan, and the
+    /// apply is where dropping a column has to be allowed explicitly. A second confirmation in front
+    /// of an edit to a draft trains an operator to click through the one that matters.
+    /// </remarks>
+    private void RemoveField(string field)
+    {
+        Copy.RemoveField(EntityName, field);
+        _editing = null;
+        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/preview");
+    }
+
+    /// <summary>The edited field's declaration, as the working copy currently carries it.</summary>
+    private string? EditedJson => _editing is null
+        ? null
+        : Copy.FieldsOf(EntityName).FirstOrDefault(pair => pair.Key == _editing).Value;
 }

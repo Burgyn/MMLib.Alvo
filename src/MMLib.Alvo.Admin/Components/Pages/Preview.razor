@@ -36,6 +36,16 @@
             the same call the CLI makes, through the same plan. Nothing below has run.
         </p>
 
+        <div class="a-panel">
+            <div class="a-section">
+                <span class="a-section-title">What changed</span>
+                <span class="a-section-sub">
+                    The descriptor as it would be sent, against revision @Copy.Revision.
+                </span>
+            </div>
+            <DescriptorDiff Before="@Copy.AppliedJson" After="@Copy.Json" Revision="@Copy.Revision" />
+        </div>
+
         @if (_plan is null)
         {
             <div class="a-panel" style="padding:var(--space-5)">
@@ -168,8 +178,14 @@
 
         try
         {
+            /* A dry run asks what would happen, so it asks with destruction allowed; the apply asks
+               with what the operator has actually confirmed. Asking the plan under `_allowed` was a
+               deadlock: a drop was refused before a plan existed, the refusal said to type the
+               project's name "above", and that control renders only once there is a plan — so a
+               destructive change could be composed and never reviewed or applied from here. Nothing
+               is destroyed by describing it. */
             var result = await Gateway.ApplyAsync(
-                Copy.Json, Copy.Revision, _allowed, dryRun,
+                Copy.Json, Copy.Revision, allowDestructive: dryRun || _allowed, dryRun,
                 author: await Gateway.AuthorAsync(),
                 reason: _reason.Length > 0 ? _reason : null,
                 CancellationToken.None);

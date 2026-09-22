@@ -11,7 +11,7 @@
 *@
 <div class="a-panel" style="padding:var(--space-5);margin-top:var(--space-4)">
     <div class="a-section" style="padding:0 0 var(--space-3)">
-        <span class="a-section-title">Add a field</span>
+        <span class="a-section-title">@(IsEditing ? $"Edit {Editing}" : "Add a field")</span>
         <span class="a-section-sub">
             It joins the working copy. Preview shows what it does to the table before anything runs.
         </span>
@@ -25,8 +25,21 @@
     <div class="a-field">
         <label class="a-label" for="new-field-name">Name</label>
         <input class="a-input" id="new-field-name" value="@_name" placeholder="scheduled_for"
-               @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
-        <span class="a-section-sub">Lower case, digits and underscores — <code class="a-mono">@DescriptorNames.Member</code></span>
+               @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off"
+               disabled="@IsEditing" />
+        @if (IsEditing)
+        {
+            <span class="a-section-sub">
+                A rename is not a facet change: the schema carries it as
+                <code class="a-mono">renamedFrom</code>, so that the migration moves the column instead
+                of dropping one and creating another. Until that control exists, rename by editing the
+                descriptor and importing it.
+            </span>
+        }
+        else
+        {
+            <span class="a-section-sub">Lower case, digits and underscores — <code class="a-mono">@DescriptorNames.Member</code></span>
+        }
     </div>
 
     <div class="a-field">
@@ -100,9 +113,15 @@
             break;
     }
 
-    <button type="button" class="a-btn a-btn--primary" style="margin-top:var(--space-4)" @onclick="Add">
-        Add to the working copy
-    </button>
+    <div class="a-row" style="gap:var(--space-2);margin-top:var(--space-4)">
+        <button type="button" class="a-btn a-btn--primary" @onclick="Add" data-testid="field-save">
+            @(IsEditing ? "Save to the working copy" : "Add to the working copy")
+        </button>
+        @if (IsEditing)
+        {
+            <button type="button" class="a-btn a-btn--ghost" @onclick="Cancel">Cancel</button>
+        }
+    </div>
 </div>
 
 @code {
@@ -128,6 +147,125 @@
     /// <summary>Raised with the field to add, once it is one the schema can carry.</summary>
     [Parameter]
     public EventCallback<NewField> OnAdded { get; set; }
+
+    /// <summary>
+    /// The declared field being edited, or <see langword="null"/> when the panel adds a new one.
+    /// </summary>
+    /// <remarks>
+    /// One control for both, because an edit is the same document change as an addition: the facets
+    /// are written under the field's own key, and a key that already exists is replaced. A second
+    /// component would be a second set of refusals to keep in step with the frozen schema.
+    /// </remarks>
+    [Parameter]
+    public string? Editing { get; set; }
+
+    /// <summary>The edited field's current facets, as they stand in the working copy.</summary>
+    [Parameter]
+    public string? EditingJson { get; set; }
+
+    /// <summary>Raised when an edit is abandoned.</summary>
+    [Parameter]
+    public EventCallback OnCancelled { get; set; }
+
+    private bool IsEditing => Editing is { Length: > 0 };
+
+    private string? _prefilled;
+
+    protected override void OnParametersSet()
+    {
+        if (!IsEditing)
+        {
+            _prefilled = null;
+            return;
+        }
+
+        /* Only when the target changes: re-reading the parameters on every render would overwrite
+           what the operator is in the middle of typing with what the document still says. */
+        if (_prefilled == Editing)
+        {
+            return;
+        }
+
+        _prefilled = Editing;
+        Prefill(EditingJson);
+    }
+
+    private void Prefill(string? json)
+    {
+        _refusal = null;
+        _name = Editing ?? string.Empty;
+        var facets = Parse(json);
+
+        _type = Enum.TryParse<FieldType>(facets["type"]?.GetValue<string>(), ignoreCase: true, out var type)
+            ? type : FieldType.String;
+        _required = facets["required"]?.GetValue<bool>() ?? false;
+        _unique = facets["unique"]?.GetValue<bool>() ?? false;
+        _maxLength = facets["maxLength"]?.GetValue<int>() ?? 120;
+        _precision = facets["precision"]?.GetValue<int>() ?? 10;
+        _scale = facets["scale"]?.GetValue<int>() ?? 2;
+        _target = facets["entity"]?.GetValue<string>() ?? string.Empty;
+        _values = facets["values"] is System.Text.Json.Nodes.JsonArray values
+            ? string.Join(", ", values.Select(value => value?.GetValue<string>()))
+            : string.Empty;
+    }
+
+    /// <summary>
+    /// The facets as an object, or an empty one — a field whose declaration this component cannot
+    /// read is one it must not silently rewrite, so the refusal surfaces when Save builds it.
+    /// </summary>
+    private static System.Text.Json.Nodes.JsonObject Parse(string? json)
+    {
+        try
+        {
+            return json is { Length: > 0 }
+                ? System.Text.Json.Nodes.JsonNode.Parse(json) as System.Text.Json.Nodes.JsonObject ?? []
+                : [];
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return [];
+        }
+    }
+
+    private Task Cancel() => OnCancelled.InvokeAsync();
+
+    private static void Toggle(System.Text.Json.Nodes.JsonObject facets, string facet, bool on)
+    {
+        if (on)
+        {
+            facets[facet] = true;
+            return;
+        }
+
+        facets.Remove(facet);
+    }
+
+    /// <summary>
+    /// Drops the facets that belong to a type this field no longer has.
+    /// </summary>
+    /// <remarks>
+    /// A <c>maxLength</c> left behind on a field retyped to <c>integer</c>, or a <c>format</c> on
+    /// one retyped away from <c>string</c>, is a descriptor the apply refuses — and it would be
+    /// refused for a facet nobody typed, which is the worst kind of refusal to read. The facets the
+    /// current type needs are written back immediately after.
+    /// </remarks>
+    private void ClearFacetsOfOtherTypes(System.Text.Json.Nodes.JsonObject facets)
+    {
+        foreach (var facet in new[] { "maxLength", "precision", "scale", "values", "entity" })
+        {
+            facets.Remove(facet);
+        }
+
+        if (_type is not FieldType.Ref)
+        {
+            facets.Remove("onDelete");
+        }
+
+        if (_type is not FieldType.String)
+        {
+            facets.Remove("format");
+        }
+    }
 
     /// <summary>A field the editor built, in the schema's own shape.</summary>
     /// <param name="Name">The field's name.</param>
@@ -155,20 +293,17 @@
             return;
         }
 
-        var facets = new System.Text.Json.Nodes.JsonObject
-        {
-            ["type"] = _type.ToString().ToLowerInvariant(),
-        };
+        /* An edit starts from the declaration that is there, not from an empty object. The controls
+           here cover the facets they can draw; a field may also carry `description`, `format`,
+           `default`, `nullable`, `index`, `renamedFrom` or an `x-` extension, and rebuilding from
+           scratch would drop every one of them — the same silent narrowing design §4.6 forbids of
+           the export, arriving through the editor instead. */
+        var facets = IsEditing ? Parse(EditingJson) : [];
+        facets["type"] = _type.ToString().ToLowerInvariant();
 
-        if (_required)
-        {
-            facets["required"] = true;
-        }
-
-        if (_unique)
-        {
-            facets["unique"] = true;
-        }
+        Toggle(facets, "required", _required);
+        Toggle(facets, "unique", _unique);
+        ClearFacetsOfOtherTypes(facets);
 
         switch (_type)
         {
@@ -198,12 +333,16 @@
                 }
 
                 facets["entity"] = _target;
-                facets["onDelete"] = "restrict";
+                facets["onDelete"] ??= "restrict";
                 break;
         }
 
         await OnAdded.InvokeAsync(new NewField(_name, facets));
-        _name = string.Empty;
-        _values = string.Empty;
+
+        if (!IsEditing)
+        {
+            _name = string.Empty;
+            _values = string.Empty;
+        }
     }
 }

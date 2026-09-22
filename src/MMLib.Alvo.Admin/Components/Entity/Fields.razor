@@ -15,6 +15,17 @@
             {
                 <span class="a-badge">@facet</span>
             }
+            @if (Editable)
+            {
+                <span style="margin-left:auto;display:flex;gap:var(--space-2)">
+                    <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                            data-testid="@($"edit-field-{field.Name}")"
+                            @onclick="() => OnEdit.InvokeAsync(field.Name)">Edit</button>
+                    <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                            data-testid="@($"remove-field-{field.Name}")"
+                            @onclick="() => OnRemove.InvokeAsync(field.Name)">Remove</button>
+                </span>
+            }
         </span>
     </div>
 }
@@ -44,6 +55,25 @@
     /// <summary>The entity whose fields these are.</summary>
     [Parameter, EditorRequired]
     public EntitySchema Entity { get; set; } = default!;
+
+    /// <summary>
+    /// Whether a declared field can be changed or dropped from here.
+    /// </summary>
+    /// <remarks>
+    /// The managed columns are never editable, whatever this says: an audit stamp a caller can
+    /// author is not an audit stamp, and the rows below the second heading are rendered without
+    /// these controls for that reason rather than by omission.
+    /// </remarks>
+    [Parameter]
+    public bool Editable { get; set; }
+
+    /// <summary>Raised with the field an operator asked to change.</summary>
+    [Parameter]
+    public EventCallback<string> OnEdit { get; set; }
+
+    /// <summary>Raised with the field an operator asked to drop.</summary>
+    [Parameter]
+    public EventCallback<string> OnRemove { get; set; }
 
     /// <summary>The fields the descriptor declares.</summary>
     private IEnumerable<FieldSchema> Declared
