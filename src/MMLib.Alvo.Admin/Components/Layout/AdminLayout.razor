@@ -63,6 +63,10 @@
             </button>
             <span style="margin-left:auto"></span>
             <ThemeToggle />
+            <button type="button" class="a-btn a-btn--ghost a-btn--sm a-only-mobile" @onclick="OpenSheet"
+                    aria-label="More sections" aria-expanded="@_sheetOpen" data-testid="more-sections">
+                <Icon Path="@Icons.More" />
+            </button>
         </header>
 
         <main class="a-content" id="a-content">
@@ -80,14 +84,62 @@
             </NavLink>
         }
     </nav>
+
+    @if (_sheetOpen)
+    {
+        <div class="a-scrim a-sheet" @onclick="CloseSheet" data-testid="sections-sheet">
+            <div class="a-sheet__panel" @onclick:stopPropagation="true">
+                <div class="a-nav">
+                    @foreach (var entry in AdminNavigation.BeyondTheBar)
+                    {
+                        <NavLink class="a-nav-item" ActiveClass="a-nav-item--active" href="@entry.Path"
+                                 @onclick="CloseSheet">
+                            <Icon Path="@entry.Icon" />
+                            <span>@entry.Title</span>
+                        </NavLink>
+                    }
+
+                    <div class="a-nav-sep"></div>
+
+                    @foreach (var entry in AdminNavigation.NotYet)
+                    {
+                        <NavLink class="a-nav-item" ActiveClass="a-nav-item--active" href="@entry.Path"
+                                 @onclick="CloseSheet">
+                            <Icon Path="@entry.Icon" />
+                            <span>@entry.Title</span>
+                            <span class="a-badge a-nav-item__trail">Not yet</span>
+                        </NavLink>
+                    }
+
+                    <div class="a-nav-sep"></div>
+
+                    @foreach (var entry in AdminNavigation.Footer)
+                    {
+                        <NavLink class="a-nav-item" ActiveClass="a-nav-item--active" href="@entry.Path"
+                                 @onclick="CloseSheet">
+                            <Icon Path="@entry.Icon" />
+                            <span>@entry.Title</span>
+                        </NavLink>
+                    }
+                </div>
+
+                <SignedInAs />
+            </div>
+        </div>
+    }
 </div>
 
 <CommandPalette @ref="_palette" />
 
 @code {
     private CommandPalette? _palette;
+    private bool _sheetOpen;
 
     private Task OpenPalette() => _palette?.OpenAsync() ?? Task.CompletedTask;
+
+    private void OpenSheet() => _sheetOpen = true;
+
+    private void CloseSheet() => _sheetOpen = false;
 
     /// <summary>
     /// Overview is the dashboard's root, so a prefix match would mark it active on every screen.

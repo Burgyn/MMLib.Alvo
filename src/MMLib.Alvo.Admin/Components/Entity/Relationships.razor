@@ -18,9 +18,9 @@ else
 {
     @foreach (var field in Outgoing)
     {
-        <div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4)">
-            <span class="a-mono" style="flex:none;min-width:190px;font-size:var(--text-sm)">@field.Name</span>
-            <span style="flex:1">→ <a class="a-mono" href="@($"{AlvoAdmin.BasePath}/schema/{field.Reference!.TargetEntity}")">@field.Reference!.TargetEntity</a></span>
+        <div class="a-listrow">
+            <span class="a-mono a-listrow__key">@field.Name</span>
+            <span class="a-listrow__rest">→ <a class="a-mono" href="@($"{AlvoAdmin.BasePath}/schema/{field.Reference!.TargetEntity}")">@field.Reference!.TargetEntity</a></span>
             <span class="a-badge">on delete @field.Reference!.OnDelete.ToString().ToLowerInvariant()</span>
             @if (field.Required)
             {
@@ -44,8 +44,8 @@ else
 {
     @foreach (var (entity, field) in Incoming)
     {
-        <div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4)">
-            <span style="flex:1">
+        <div class="a-listrow">
+            <span class="a-listrow__rest">
                 <a class="a-mono" href="@($"{AlvoAdmin.BasePath}/schema/{entity.Name}")">@entity.Name</a>
                 <span class="a-mono" style="color:var(--dim)">.@field.Name</span>
             </span>

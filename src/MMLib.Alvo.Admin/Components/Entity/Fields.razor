@@ -7,10 +7,10 @@
 *@
 @foreach (var field in Declared)
 {
-    <div class="a-row" style="align-items:flex-start;padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4)">
-        <span class="a-mono" style="flex:none;min-width:190px;font-size:var(--text-sm);font-weight:var(--weight-medium)">@field.Name</span>
-        <span class="a-mono" style="flex:none;min-width:110px;color:var(--dim);font-size:var(--text-xs)">@Type(field)</span>
-        <span style="flex:1;display:flex;gap:var(--space-2);flex-wrap:wrap">
+    <div class="a-listrow">
+        <span class="a-mono a-listrow__key" style="font-weight:var(--weight-medium)">@field.Name</span>
+        <span class="a-mono a-listrow__type" style="color:var(--dim)">@Type(field)</span>
+        <span class="a-listrow__rest">
             @foreach (var facet in Facets(field))
             {
                 <span class="a-badge">@facet</span>
@@ -30,10 +30,10 @@
 
 @foreach (var field in Managed)
 {
-    <div class="a-row" style="align-items:flex-start;padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4);color:var(--dim)">
-        <span class="a-mono" style="flex:none;min-width:190px;font-size:var(--text-sm)">@field.Name</span>
-        <span class="a-mono" style="flex:none;min-width:110px;font-size:var(--text-xs)">@Type(field)</span>
-        <span style="flex:1">
+    <div class="a-listrow" style="color:var(--dim)">
+        <span class="a-mono a-listrow__key">@field.Name</span>
+        <span class="a-mono a-listrow__type">@Type(field)</span>
+        <span class="a-listrow__rest">
             <span class="a-badge">@(AlvoManagedColumns.IsCallerWritable(field.Name, isUpdate: false)
                 ? "supplied on create only" : "framework writes it")</span>
         </span>

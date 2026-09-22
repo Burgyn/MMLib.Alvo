@@ -56,6 +56,89 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
     }
 
     /// <summary>
+    /// At phone width the bar sits under the content rather than beside it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is the assertion "no horizontal scroll" cannot make.</b> The bar is a sibling of the
+    /// main column inside a row-direction shell, so showing it without stacking the shell laid it
+    /// out as a second column: the content kept to about half the viewport, wrapped one word per
+    /// line, and the page never overflowed — so every existing check passed and the dashboard was
+    /// unusable on a phone.
+    /// </para>
+    /// <para>
+    /// The measurement is therefore geometric rather than visual: the content fills the viewport,
+    /// and the bar begins below where the content ends.
+    /// </para>
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_phone_bar_sits_under_the_content_not_beside_it()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
+        await session.GoAsync("");
+
+        var content = await session.Page.Locator("main.a-content").BoundingBoxAsync();
+        var bar = await session.Page.Locator("nav.a-bottomnav").BoundingBoxAsync();
+
+        content.ShouldNotBeNull();
+        bar.ShouldNotBeNull();
+        content!.Width.ShouldBeGreaterThan(340);
+        bar!.Width.ShouldBeGreaterThan(340);
+        content.X.ShouldBeLessThanOrEqualTo(1);
+        bar.X.ShouldBeLessThanOrEqualTo(1);
+
+        /* Not "the bar begins where the content ends": the bar is sticky, so on a screen whose
+           content scrolls it is pinned to the viewport's bottom edge and sits visually over the
+           content's own box. Starting below the content's top is what distinguishes a row from a
+           column, and it is all this can honestly assert. */
+        bar.Y.ShouldBeGreaterThan(content.Y);
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// Every section the sidebar offers is reachable from a phone, and so is signing out.
+    /// </summary>
+    /// <remarks>
+    /// The bar carries five entries and the sidebar is hidden under 720 px, so without the sheet
+    /// the phone reaches neither Configuration history, Integrations, Settings, the two "not yet"
+    /// sections, nor the way out. <c>AdminNavigation</c>'s own remarks already claimed those live
+    /// <em>"in the sidebar and in the sheet"</em> while the sheet did not exist — which is why the
+    /// claim is now a test rather than a sentence.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Every_section_is_reachable_from_a_phone()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
+        await session.GoAsync("");
+
+        await session.Page.Locator("[data-testid='more-sections']").ClickAsync();
+        var sheet = session.Page.Locator("[data-testid='sections-sheet']");
+        await sheet.WaitForAsync();
+
+        foreach (var route in new[] { "/history", "/integrations", "/automations", "/functions", "/settings" })
+        {
+            (await sheet.Locator($"a[href$='{route}']").CountAsync())
+                .ShouldBe(1, $"the sheet is the only way to reach {route} on a phone");
+        }
+
+        (await sheet.GetByText("Sign out").CountAsync()).ShouldBe(1);
+
+        await sheet.Locator("a[href$='/history']").ClickAsync();
+        await session.Page.WaitForURLAsync("**/admin/history");
+        await session.SettleAsync();
+        await session.AssertRenderedAsync();
+
+        /* Waiting for it to leave rather than counting it: the sheet closes through the circuit, so
+           a count taken the instant the URL changed is a snapshot of a render that has not arrived —
+           the same impatience the goto-shortcut scenario records below. */
+        await session.Page.Locator("[data-testid='sections-sheet']")
+            .WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
     /// The phone's bottom bar carries five sections and every one of them works.
     /// </summary>
     /// <remarks>

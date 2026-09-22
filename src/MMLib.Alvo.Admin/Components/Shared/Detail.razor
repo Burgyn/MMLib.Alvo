@@ -1,9 +1,9 @@
 ﻿@*
     One labelled fact, with the sentence that stops it being misread.
 *@
-<div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4);align-items:flex-start">
-    <span class="a-label" style="flex:none;min-width:150px">@Label</span>
-    <span style="flex:1;min-width:0">
+<div class="a-listrow">
+    <span class="a-label a-detail__label">@Label</span>
+    <span class="a-detail__value">
         <span class="a-mono" style="font-size:var(--text-sm)">@Value</span>
         @if (Note is { Length: > 0 })
         {

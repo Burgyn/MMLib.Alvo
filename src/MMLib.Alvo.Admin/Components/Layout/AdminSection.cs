@@ -72,4 +72,14 @@ internal static class AdminNavigation
 
     /// <summary>The five the phone's bottom bar carries.</summary>
     public static IEnumerable<AdminSection> Bar => Live.Take(5);
+
+    /// <summary>
+    /// The live sections the bar has no room for, which the phone reaches through the sheet.
+    /// </summary>
+    /// <remarks>
+    /// Derived from <see cref="Bar"/> rather than listed again: two lists would disagree the first
+    /// time a section was added, and the one that lost the argument would be the one nobody could
+    /// reach from a phone.
+    /// </remarks>
+    public static IEnumerable<AdminSection> BeyondTheBar => Live.Skip(5);
 }

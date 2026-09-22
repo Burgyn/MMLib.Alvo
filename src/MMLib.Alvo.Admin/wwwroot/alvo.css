@@ -371,11 +371,58 @@ button {
 .a-section-title {
   font-size: var(--text-base);
   font-weight: var(--weight-medium);
+  flex: none;
 }
 
 .a-section-sub {
   color: var(--dim);
   font-size: var(--text-xs);
+}
+
+/* One row of a list of facts: a fixed-width key, an optional fixed-width type, and
+   whatever else the row carries. The widths are here rather than on each component
+   because a width written into a `style` attribute is a width no media query can
+   reach — which is how a label column came to take four lines on a phone. */
+.a-listrow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.a-listrow__key {
+  flex: none;
+  min-width: 190px;
+  font-size: var(--text-sm);
+}
+
+.a-listrow__type {
+  flex: none;
+  min-width: 110px;
+  font-size: var(--text-xs);
+}
+
+.a-listrow__rest {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.a-detail__label {
+  flex: none;
+  min-width: 150px;
+}
+
+.a-detail__value {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
 .a-page-title {
@@ -724,6 +771,10 @@ button {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
   color: var(--dim);
+  /* A route, a table name and a connection string have no spaces to break at, so
+     the default wrapping keeps them on one line and widens the page past the
+     viewport rather than the element past its box. */
+  overflow-wrap: anywhere;
 }
 
 .a-grid-wrap {
@@ -1097,6 +1148,34 @@ button {
   background: var(--panel);
 }
 
+/* The bar carries five sections and the sidebar is gone under 720 px, so everything
+   else — history, integrations, the not-yet sections, settings, and signing out —
+   is reachable only through this sheet. Without it the phone layout is not a
+   narrower dashboard, it is a smaller one. */
+.a-only-mobile {
+  display: none;
+}
+
+.a-sheet {
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.a-sheet__panel {
+  display: flex;
+  max-height: 80vh;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+  overflow-y: auto;
+}
+
 .a-bottomnav__item {
   display: flex;
   flex: 1;
@@ -1117,6 +1196,18 @@ button {
 }
 
 @media (max-width: 720px) {
+  /* The bar is a sibling of .a-main inside a row-direction .a-shell, so making it
+     visible without turning the shell into a column lays it out BESIDE the content
+     — a second column that takes half the viewport and leaves the screen rendered,
+     legible and unusable. The stacking is what makes `bottom: 0` mean anything. */
+  .a-shell {
+    flex-direction: column;
+  }
+
+  .a-main {
+    min-height: 0;
+  }
+
   .a-sidebar {
     display: none;
   }
@@ -1133,6 +1224,10 @@ button {
     display: flex;
   }
 
+  .a-only-mobile {
+    display: inline-flex;
+  }
+
   .a-grid {
     display: none;
   }
@@ -1143,5 +1238,21 @@ button {
 
   .a-cards {
     grid-template-columns: 1fr;
+  }
+
+  /* A key beside its value needs a viewport wide enough for both. At this width the
+     key wins the space and the value wraps to one word per line, so the pair stacks
+     instead — the same answer the row cards give the data grid. */
+  .a-section,
+  .a-listrow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
+
+  .a-listrow__key,
+  .a-listrow__type,
+  .a-detail__label {
+    min-width: 0;
   }
 }

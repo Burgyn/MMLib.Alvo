@@ -21,6 +21,9 @@ internal static class Icons
     /// <summary>A four-pane grid — the overview.</summary>
     public const string Overview = """<path d="M3 3h6v6H3zM11 3h6v6h-6zM3 11h6v6H3zM11 11h6v6h-6z"/>""";
 
+    /// <summary>Three bars — the sections the phone's bottom bar has no room for.</summary>
+    public const string More = """<path d="M4 6h12M4 10h12M4 14h12"/>""";
+
     /// <summary>Boxes joined by edges — entities and their relationships.</summary>
     public const string Schema = """<path d="M4 4h5v4H4zM11 8h5v4h-5zM4 12h5v4H4z"/><path d="M9 6h2v4M9 14h2v-2"/>""";
 

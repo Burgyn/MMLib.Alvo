@@ -94,7 +94,7 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await using var context = await world.Browser.NewContextAsync();
         var page = await context.NewPageAsync();
 
-        var served = new List<string>();
+        var served = new List<(string Asset, int Status, int Length)>();
         foreach (var asset in new[]
         {
             "/_framework/blazor.web.js",
@@ -105,17 +105,19 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
         {
             var response = await page.APIRequest.GetAsync($"{world.BaseAddress}{asset}");
             var body = await response.TextAsync();
-            served.Add($"{asset} -> {response.Status}, {body.Length} bytes");
+            served.Add((asset, response.Status, body.Length));
         }
 
         /* The length matters as much as the status, and that is not belt and braces. A static-asset
            manifest whose file provider cannot resolve the files answers 200 with an EMPTY body — so
            the page loads, renders unstyled and inert, and a suite that only checked the status goes
            green while measuring a broken application. That is exactly what happened here once. */
-        served.ShouldAllBe(
-            entry => entry.Contains("-> 200", StringComparison.Ordinal)
-                && !entry.EndsWith("0 bytes", StringComparison.Ordinal),
-            string.Join("; ", served));
+        /* The length is compared as a number. The first version of this assertion asked whether the
+           entry's text ended with "0 bytes", which is true of an empty body and equally true of a
+           stylesheet that happens to be 28 590 bytes long — so growing the design system by one rule
+           failed a test about a file provider. */
+        var report = string.Join("; ", served.Select(e => $"{e.Asset} -> {e.Status}, {e.Length} bytes"));
+        served.ShouldAllBe(entry => entry.Status == 200 && entry.Length > 0, report);
     }
 
     /// <summary>
