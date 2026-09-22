@@ -9,6 +9,34 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Testing")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Ai
+{
+    public enum AiConnectionKind
+    {
+        OpenAiCompatible = 0,
+        AzureOpenAi = 1,
+    }
+    public enum AiConnectionSource
+    {
+        None = 0,
+        Configuration = 1,
+        Store = 2,
+    }
+    public sealed class AlvoAiConnection : System.IEquatable<MMLib.Alvo.Ai.AlvoAiConnection>
+    {
+        public AlvoAiConnection(MMLib.Alvo.Ai.AiConnectionKind Kind, System.Uri Endpoint, string Model, string? ApiKey) { }
+        public string? ApiKey { get; init; }
+        public System.Uri Endpoint { get; init; }
+        public MMLib.Alvo.Ai.AiConnectionKind Kind { get; init; }
+        public string Model { get; init; }
+        public override string ToString() { }
+    }
+    public interface IAiConnectionResolver
+    {
+        System.Threading.Tasks.ValueTask<MMLib.Alvo.Ai.AiConnectionSource> DescribeSourceAsync(System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.ValueTask<MMLib.Alvo.Ai.AlvoAiConnection?> ResolveAsync(System.Threading.CancellationToken ct = default);
+    }
+}
 namespace MMLib.Alvo
 {
     public sealed class AlvoContext : System.IEquatable<MMLib.Alvo.AlvoContext>
@@ -1153,6 +1181,14 @@ namespace MMLib.Alvo.Management
         System.Threading.Tasks.Task<int?> FindAsync(string key, string scope, string fingerprint, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task RecordAsync(string key, string scope, string fingerprint, int revision, System.Threading.CancellationToken ct = default);
     }
+    public sealed class ManagementAi : System.IEquatable<MMLib.Alvo.Management.ManagementAi>
+    {
+        public ManagementAi(bool Configured, string? Kind, string? Model, string? Source) { }
+        public bool Configured { get; init; }
+        public string? Kind { get; init; }
+        public string? Model { get; init; }
+        public string? Source { get; init; }
+    }
     public sealed class ManagementApplyRequest : System.IEquatable<MMLib.Alvo.Management.ManagementApplyRequest>
     {
         public ManagementApplyRequest(string DescriptorJson, int ExpectedRevision, bool AllowDestructive = false, bool DryRun = false, string? Author = null, string? Reason = null, string? IdempotencyKey = null) { }
@@ -1200,7 +1236,8 @@ namespace MMLib.Alvo.Management
     }
     public sealed class ManagementInfo : System.IEquatable<MMLib.Alvo.Management.ManagementInfo>
     {
-        public ManagementInfo(string Version, string Mode, string DataProvider, string StartupMode) { }
+        public ManagementInfo(string Version, string Mode, string DataProvider, string StartupMode, MMLib.Alvo.Management.ManagementAi Ai) { }
+        public MMLib.Alvo.Management.ManagementAi Ai { get; init; }
         public string DataProvider { get; init; }
         public string Mode { get; init; }
         public string StartupMode { get; init; }

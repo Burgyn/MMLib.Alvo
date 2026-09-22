@@ -79,6 +79,31 @@ public sealed class SqliteSecretStoreTests : SecretStoreContractTests, IDisposab
     }
 
     /// <summary>
+    /// With no key mounted the store exists and cannot write, rather than failing to be built.
+    /// </summary>
+    /// <remarks>
+    /// The composition every GitOps deployment runs. Registering the store conditionally would have made
+    /// <c>AddAlvo</c> itself throw for them — measured, not imagined: it took out 203 tests before the
+    /// decision moved from the registration to the store.
+    /// </remarks>
+    [Fact]
+    public async Task With_no_key_mounted_the_store_cannot_write_and_says_which_file_to_mount()
+    {
+        EnsureTable();
+        var store = new EfCoreSecretStore(
+            new RelationalConnectionFactory(CreateConnection), new AlvoOptions(), cipher: null, TimeProvider.System);
+
+        store.CanWrite.ShouldBeFalse();
+        (await store.GetAsync(SecretName.Parse("k"), TestContext.Current.CancellationToken)).ShouldBeNull();
+        (await store.ListNamesAsync(TestContext.Current.CancellationToken)).ShouldBeEmpty();
+
+        var refusal = await Should.ThrowAsync<InvalidOperationException>(
+            async () => await store.SetAsync(SecretName.Parse("k"), "v", TestContext.Current.CancellationToken));
+
+        refusal.Message.ShouldContain("EncryptionKeyFile");
+    }
+
+    /// <summary>
     /// Pooling is off so that disposing a connection really releases the OS file handle, which is what lets
     /// <see cref="Dispose"/> delete the file instead of leaving one per test behind.
     /// </summary>

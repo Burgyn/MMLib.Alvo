@@ -30,21 +30,23 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 public sealed class EfCoreSecretStore : IWritableSecretStore
 {
     private readonly RelationalConnectionFactory _connections;
-    private readonly SecretCipher _cipher;
+    private readonly SecretCipher? _cipher;
     private readonly TimeProvider _time;
     private readonly string _tableName;
 
     /// <summary>Initializes a new store over one database's secrets table.</summary>
     /// <param name="connections">Creates a fresh connection per call; each is owned and disposed within that call.</param>
     /// <param name="options">Supplies the validated <see cref="AlvoOptions.SchemaPrefix"/> the table is named from.</param>
-    /// <param name="cipher">Encrypts a value on the way in and authenticates it on the way out.</param>
+    /// <param name="cipher">
+    /// Encrypts a value on the way in and authenticates it on the way out, or <see langword="null"/> when
+    /// this deployment mounted no key — in which case the store exists and cannot write.
+    /// </param>
     /// <param name="time">The clock a write stamps <c>updated_at</c> from.</param>
     internal EfCoreSecretStore(
-        RelationalConnectionFactory connections, AlvoOptions options, SecretCipher cipher, TimeProvider time)
+        RelationalConnectionFactory connections, AlvoOptions options, SecretCipher? cipher, TimeProvider time)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(cipher);
         ArgumentNullException.ThrowIfNull(time);
 
         _connections = connections;
@@ -54,16 +56,27 @@ public sealed class EfCoreSecretStore : IWritableSecretStore
     }
 
     /// <inheritdoc/>
-    public bool CanWrite => true;
+    /// <remarks>
+    /// <b>False when no key file is mounted, rather than absent as a service.</b> §7.1's answer to the
+    /// bootstrap paradox is that the credential comes from the platform, so a deployment that mounted
+    /// nothing has a store it cannot write through — and a screen that asks <c>CanWrite</c> before offering
+    /// a save gets the honest answer instead of a save that fails.
+    /// </remarks>
+    public bool CanWrite => _cipher is not null;
 
     /// <inheritdoc/>
     public async ValueTask<string?> GetAsync(SecretName name, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(name);
 
+        if (_cipher is not { } cipher)
+        {
+            return null;
+        }
+
         var stored = await SingleValueAsync(SecretsTable.SelectSql(_tableName), name, ct).ConfigureAwait(false);
 
-        return stored is null ? null : _cipher.Unprotect(stored);
+        return stored is null ? null : cipher.Unprotect(stored);
     }
 
     /// <inheritdoc/>
@@ -71,6 +84,7 @@ public sealed class EfCoreSecretStore : IWritableSecretStore
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(value);
+        var cipher = Writable();
 
         var connection = _connections.Create();
         await using (connection.ConfigureAwait(false))
@@ -82,7 +96,7 @@ public sealed class EfCoreSecretStore : IWritableSecretStore
             {
                 command.CommandText = SecretsTable.UpsertSql(_tableName);
                 RelationalSqlBatch.AddParameter(command, "@name", name.Value);
-                RelationalSqlBatch.AddParameter(command, "@value", _cipher.Protect(value));
+                RelationalSqlBatch.AddParameter(command, "@value", cipher.Protect(value));
                 RelationalSqlBatch.AddParameter(command, "@updated_at", StoredInstant.Text(_time.GetUtcNow()));
 
                 await command.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -94,6 +108,7 @@ public sealed class EfCoreSecretStore : IWritableSecretStore
     public async ValueTask<bool> DeleteAsync(SecretName name, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(name);
+        Writable();
 
         var connection = _connections.Create();
         await using (connection.ConfigureAwait(false))
@@ -114,6 +129,11 @@ public sealed class EfCoreSecretStore : IWritableSecretStore
     /// <inheritdoc/>
     public async ValueTask<IReadOnlyList<SecretName>> ListNamesAsync(CancellationToken ct = default)
     {
+        if (_cipher is null)
+        {
+            return [];
+        }
+
         var names = new List<SecretName>();
 
         var connection = _connections.Create();
@@ -139,6 +159,16 @@ public sealed class EfCoreSecretStore : IWritableSecretStore
 
         return names;
     }
+
+    /// <summary>The cipher, or the refusal naming what this deployment would have to mount.</summary>
+    /// <remarks>
+    /// A refusal rather than a silent no-op: a save the screen reported as saved and the store discarded is
+    /// the one failure mode the whole secret layer is arranged to make impossible.
+    /// </remarks>
+    private SecretCipher Writable() => _cipher ?? throw new InvalidOperationException(
+        "No secret encryption key is mounted, so this deployment cannot save a secret. Point "
+        + $"{AlvoSecretOptions.ConfigurationSection}:EncryptionKeyFile at a file holding 32 bytes of base64, "
+        + $"or supply the value through {AlvoSecretOptions.ConfigurationSection}:Values.");
 
     /// <summary>
     /// Adds a stored name to the listing, skipping one this build could not parse.

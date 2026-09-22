@@ -145,20 +145,17 @@ public static class AlvoEfCoreProvider
                 provider.GetRequiredService<TimeProvider>()));
 
     /// <summary>
-    /// The cipher this deployment's key file yields, or the refusal naming what it would have to mount.
+    /// The cipher this deployment's key file yields, or <see langword="null"/> when it mounted none.
     /// </summary>
     /// <remarks>
-    /// A refusal rather than a <see langword="null"/> registration, because by the time anything resolves
-    /// <see cref="IWritableSecretStore"/> the question has already been answered: nothing resolves it unless
-    /// the layered store found one, and the layered store only asks for one it was given.
+    /// <b>Null rather than a refusal here, and the store carries the consequence.</b> Registering the store
+    /// unconditionally is what keeps <c>AddAlvo</c> resolvable in every composition; the store then answers
+    /// <c>CanWrite == false</c> and refuses a save by naming the file to mount — which is the message an
+    /// operator can act on, raised at the moment they tried to act.
     /// </remarks>
-    private static SecretCipher Cipher(IServiceProvider provider) =>
+    private static SecretCipher? Cipher(IServiceProvider provider) =>
         SecretCipher.FromKeyFile(
-            provider.GetRequiredService<IOptions<AlvoSecretOptions>>().Value.EncryptionKeyFile)
-        ?? throw new InvalidOperationException(
-            "No secret encryption key is mounted, so there is no writable secret store. Point "
-            + $"{AlvoSecretOptions.ConfigurationSection}:EncryptionKeyFile at a file holding 32 bytes of "
-            + $"base64, or supply the value through {AlvoSecretOptions.ConfigurationSection}:Values.");
+            provider.GetRequiredService<IOptions<AlvoSecretOptions>>().Value.EncryptionKeyFile);
 
     private static EfCoreOutboxStore CreateOutboxStore(IServiceProvider services) => new(
         services.GetRequiredService<RelationalConnectionFactory>(),

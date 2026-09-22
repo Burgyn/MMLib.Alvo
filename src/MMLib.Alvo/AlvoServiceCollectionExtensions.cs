@@ -4,6 +4,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo;
+using MMLib.Alvo.Ai;
+using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Descriptor;
@@ -58,6 +60,7 @@ public static class AlvoServiceCollectionExtensions
 
         AddSchemaOptions(services);
         AddSecrets(services);
+        AddAi(services);
 
         services.TryAddSingleton<IDescriptorValidator, MMLib.Alvo.Descriptor.Internal.DescriptorValidator>();
         AddBootPlan(services);
@@ -191,5 +194,24 @@ public static class AlvoServiceCollectionExtensions
         services.TryAddSingleton<ISecretStore>(provider => new LayeredSecretStore(
             provider.GetRequiredService<ConfigurationSecretStore>(),
             provider.GetService<IWritableSecretStore>()));
+    }
+
+    /// <summary>
+    /// Registers the AI connection resolver and the options a deployment pins one in.
+    /// </summary>
+    /// <remarks>
+    /// <b>The resolver, not an agent.</b> The core answers "is an AI configured, and where did that come
+    /// from" because <c>GET {m}/info</c> reports it; dialling the endpoint is <c>MMLib.Alvo.Ai</c>'s, which
+    /// the core does not reference (§0 principle 2).
+    /// </remarks>
+    /// <param name="services">The service collection to register into.</param>
+    private static void AddAi(IServiceCollection services)
+    {
+        services.AddOptions<AlvoAiOptions>()
+            .Configure<IServiceProvider>((options, provider) =>
+                provider.GetService<IConfiguration>()?
+                    .GetSection(AlvoAiOptions.ConfigurationSection).Bind(options));
+
+        services.TryAddSingleton<IAiConnectionResolver, AiConnectionResolver>();
     }
 }

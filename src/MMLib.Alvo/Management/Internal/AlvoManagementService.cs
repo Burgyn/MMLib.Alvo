@@ -1,5 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Ai;
+using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Migrations;
@@ -57,6 +59,10 @@ namespace MMLib.Alvo.Management.Internal;
 /// Where a record that could not be filed for a write that already landed is reported — see
 /// <see cref="FiledAsync"/> for why that is a warning rather than the caller's problem.
 /// </param>
+/// <param name="ai">
+/// Resolves whether this instance has an AI connection, for <see cref="GetInfoAsync"/> to report. Registered
+/// by the core itself, so it is never optional — what is optional is the connection it resolves.
+/// </param>
 /// <param name="runtime">
 /// <b>The apply path, resolved lazily.</b> <see cref="RuntimeSchemaService"/> needs
 /// <see cref="IRuntimeSchemaWriter"/> and <see cref="IDescriptorVersionStore"/>, which only a database
@@ -80,18 +86,46 @@ internal sealed partial class AlvoManagementService(
     IAlvoContextAccessor callers,
     ManagementAccessEvaluator access,
     ILogger<AlvoManagementService> logger,
+    IAiConnectionResolver ai,
     Func<RuntimeSchemaService> runtime) : IAlvoManagement
 {
     /// <summary>What <see cref="ManagementInfo.DataProvider"/> reports when no driver is registered.</summary>
     private const string NoDriverRegistered = "none";
 
     /// <inheritdoc/>
-    public Task<ManagementInfo> GetInfoAsync(CancellationToken ct = default)
+    public async Task<ManagementInfo> GetInfoAsync(CancellationToken ct = default)
     {
         EnsureMayPerform(ManagementOperation.GetInfo);
 
-        return Task.FromResult(new ManagementInfo(Version, Mode, DataProvider, StartupMode));
+        return new ManagementInfo(Version, Mode, DataProvider, StartupMode, await AiAsync(ct).ConfigureAwait(false));
     }
+
+    /// <summary>
+    /// What this instance can say about its AI connection.
+    /// </summary>
+    /// <remarks>
+    /// <b>Resolved here rather than remembered at boot</b>, because both layers the resolver reads change
+    /// without a restart — an operator who saved a connection and watched this keep reporting "not
+    /// configured" would reasonably conclude the save was lost.
+    /// </remarks>
+    private async ValueTask<ManagementAi> AiAsync(CancellationToken ct)
+    {
+        if (await ai.ResolveAsync(ct).ConfigureAwait(false) is not { } connection)
+        {
+            return new ManagementAi(Configured: false, Kind: null, Model: null, Source: null);
+        }
+
+        var source = await ai.DescribeSourceAsync(ct).ConfigureAwait(false);
+
+        return new ManagementAi(Configured: true, KindOf(connection), connection.Model, Lower(source));
+    }
+
+    /// <summary>The wire spelling of a resolved connection's kind — what an operator configured, not the enum.</summary>
+    private static string KindOf(AlvoAiConnection connection) => connection.Kind switch
+    {
+        AiConnectionKind.AzureOpenAi => AiConnectionResolver.AzureOpenAiKind,
+        _ => AiConnectionResolver.OpenAiCompatibleKind,
+    };
 
     /// <inheritdoc/>
     public Task<IReadOnlyList<ManagementProject>> ListProjectsAsync(CancellationToken ct = default)
