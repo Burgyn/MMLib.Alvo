@@ -354,10 +354,11 @@ namespace MMLib.Alvo.Admin.Components.Pages
 }
 namespace MMLib.Alvo.Admin.Components.Shared
 {
-    public class AssistantDrawer : Microsoft.AspNetCore.Components.ComponentBase
+    public class AssistantDrawer : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public AssistantDrawer() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
     }
     public class CodeBlock : Microsoft.AspNetCore.Components.ComponentBase
     {

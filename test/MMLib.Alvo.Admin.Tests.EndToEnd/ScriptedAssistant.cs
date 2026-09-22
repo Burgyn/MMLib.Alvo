@@ -31,12 +31,11 @@ public sealed class AssistantWorld : AdminWorld
 /// </remarks>
 internal sealed class AlwaysConfigured : IAiConnectionResolver
 {
-    public ValueTask<AlvoAiConnection?> ResolveAsync(CancellationToken ct = default) =>
-        new(new AlvoAiConnection(
-            AiConnectionKind.OpenAiCompatible, new Uri("http://127.0.0.1:1/v1"), "scripted", null));
-
-    public ValueTask<AiConnectionSource> DescribeSourceAsync(CancellationToken ct = default) =>
-        new(AiConnectionSource.Store);
+    public ValueTask<AiConnectionResolution> ResolveAsync(CancellationToken ct = default) =>
+        new(new AiConnectionResolution(
+            new AlvoAiConnection(
+                AiConnectionKind.OpenAiCompatible, new Uri("http://127.0.0.1:1/v1"), "scripted", null),
+            AiConnectionSource.Store));
 }
 
 /// <summary>

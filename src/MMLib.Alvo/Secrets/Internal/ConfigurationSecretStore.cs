@@ -1,5 +1,7 @@
 ﻿using Microsoft.Extensions.Options;
 
+using MMLib.Alvo.Secrets;
+
 namespace MMLib.Alvo.Secrets.Internal;
 
 /// <summary>
@@ -44,7 +46,7 @@ internal sealed class ConfigurationSecretStore : ISecretStore
 
     /// <inheritdoc/>
     public ValueTask SetAsync(SecretName name, string value, CancellationToken ct = default) =>
-        throw new InvalidOperationException(
+        throw new SecretStoreReadOnlyException(
             $"This deployment's secrets come from configuration ({AlvoSecretOptions.ConfigurationSection}:Values), "
             + "which Alvo reads and never writes. Set the value where the configuration comes from, or give the "
             + $"deployment a writable store by mounting a key file at {AlvoSecretOptions.ConfigurationSection}"
@@ -52,7 +54,7 @@ internal sealed class ConfigurationSecretStore : ISecretStore
 
     /// <inheritdoc/>
     public ValueTask<bool> DeleteAsync(SecretName name, CancellationToken ct = default) =>
-        throw new InvalidOperationException(
+        throw new SecretStoreReadOnlyException(
             $"This deployment's secrets come from configuration ({AlvoSecretOptions.ConfigurationSection}:Values), "
             + "which Alvo reads and never writes. Remove the value where the configuration comes from.");
 

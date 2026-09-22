@@ -165,7 +165,7 @@ public sealed class EfCoreSecretStore : IWritableSecretStore
     /// A refusal rather than a silent no-op: a save the screen reported as saved and the store discarded is
     /// the one failure mode the whole secret layer is arranged to make impossible.
     /// </remarks>
-    private SecretCipher Writable() => _cipher ?? throw new InvalidOperationException(
+    private SecretCipher Writable() => _cipher ?? throw new SecretStoreReadOnlyException(
         "No secret encryption key is mounted, so this deployment cannot save a secret. Point "
         + $"{AlvoSecretOptions.ConfigurationSection}:EncryptionKeyFile at a file holding 32 bytes of base64, "
         + $"or supply the value through {AlvoSecretOptions.ConfigurationSection}:Values.");

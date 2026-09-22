@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Secrets;
 
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace MMLib.Alvo.Ai.Internal;
@@ -37,22 +38,18 @@ internal sealed partial class AiConnectionResolver(
     internal static SecretName StoredName { get; } = SecretName.Parse(StoredAiConnection.SecretName);
 
     /// <inheritdoc/>
-    public async ValueTask<AlvoAiConnection?> ResolveAsync(CancellationToken ct = default) =>
-        FromConfiguration() is { } configured
-            ? await WithKeyAsync(configured, ct).ConfigureAwait(false)
-            : await FromStoreAsync(ct).ConfigureAwait(false);
-
-    /// <inheritdoc/>
-    public async ValueTask<AiConnectionSource> DescribeSourceAsync(CancellationToken ct = default)
+    public async ValueTask<AiConnectionResolution> ResolveAsync(CancellationToken ct = default)
     {
-        if (FromConfiguration() is not null)
+        if (FromConfiguration() is { } configured)
         {
-            return AiConnectionSource.Configuration;
+            return new AiConnectionResolution(
+                await WithKeyAsync(configured, ct).ConfigureAwait(false), AiConnectionSource.Configuration);
         }
 
-        return await FromStoreAsync(ct).ConfigureAwait(false) is null
-            ? AiConnectionSource.None
-            : AiConnectionSource.Store;
+        var stored = await FromStoreAsync(ct).ConfigureAwait(false);
+
+        return new AiConnectionResolution(
+            stored, stored is null ? AiConnectionSource.None : AiConnectionSource.Store);
     }
 
     /// <summary>The connection this deployment pinned, or <see langword="null"/> when it pinned none.</summary>
@@ -75,15 +72,40 @@ internal sealed partial class AiConnectionResolver(
             return connection;
         }
 
-        return connection with { ApiKey = await secrets.GetAsync(reference!, ct).ConfigureAwait(false) };
+        return connection with { ApiKey = await ReadAsync(reference!, ct).ConfigureAwait(false) };
     }
 
     /// <summary>The saved connection, or <see langword="null"/> when there is none this build can read.</summary>
     private async ValueTask<AlvoAiConnection?> FromStoreAsync(CancellationToken ct)
     {
-        var stored = await secrets.GetAsync(StoredName, ct).ConfigureAwait(false);
+        var stored = await ReadAsync(StoredName, ct).ConfigureAwait(false);
 
         return stored is { Length: > 0 } ? Parse(stored) : null;
+    }
+
+    /// <summary>
+    /// One secret, or <see langword="null"/> when this build cannot read it.
+    /// </summary>
+    /// <remarks>
+    /// <b>A row the cipher refuses is no connection, not a failed page.</b> The store authenticates as it
+    /// decrypts, so a tampered value — or one written under a key that has since been rotated away —
+    /// arrives here as a <see cref="CryptographicException"/>. The screen asking this question is drawing a
+    /// status, and letting the throw through would replace the settings page that exists to fix the row
+    /// with a circuit error. Logged at warning by <em>name</em>; the value is exactly what must not reach a
+    /// log.
+    /// </remarks>
+    private async ValueTask<string?> ReadAsync(SecretName name, CancellationToken ct)
+    {
+        try
+        {
+            return await secrets.GetAsync(name, ct).ConfigureAwait(false);
+        }
+        catch (CryptographicException)
+        {
+            StoredConnectionUnreadable(logger, name.Value);
+
+            return null;
+        }
     }
 
     /// <summary>The stored JSON as a connection, or <see langword="null"/> when it is not one.</summary>
@@ -149,7 +171,8 @@ internal sealed partial class AiConnectionResolver(
     [LoggerMessage(
         EventId = 6101,
         Level = LogLevel.Warning,
-        Message = "The stored AI connection under '{SecretName}' could not be read, so this instance reports "
-            + "no AI connection. Save it again from the dashboard.")]
+        Message = "The secret '{SecretName}' could not be read, so this instance reports no AI connection. "
+            + "Either it was written under a key this deployment no longer mounts, or the stored value was "
+            + "changed. Save the connection again from the dashboard.")]
     private static partial void StoredConnectionUnreadable(ILogger logger, string secretName);
 }

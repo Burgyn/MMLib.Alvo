@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Secrets.Internal;
+﻿using MMLib.Alvo.Secrets;
+
+namespace MMLib.Alvo.Secrets.Internal;
 
 /// <summary>
 /// The store every caller resolves: configuration first, then the writable store a driver registered.
@@ -81,7 +83,7 @@ internal sealed class LayeredSecretStore(ISecretStore configuration, IWritableSe
     }
 
     /// <summary>The writable layer, or the refusal naming what this deployment would have to mount.</summary>
-    private IWritableSecretStore Writable() => writable ?? throw new InvalidOperationException(
+    private IWritableSecretStore Writable() => writable ?? throw new SecretStoreReadOnlyException(
         "This deployment has no writable secret store, so a secret cannot be set from here. Mount a key file "
         + $"and point {AlvoSecretOptions.ConfigurationSection}:EncryptionKeyFile at it, or supply the value "
         + $"through {AlvoSecretOptions.ConfigurationSection}:Values.");

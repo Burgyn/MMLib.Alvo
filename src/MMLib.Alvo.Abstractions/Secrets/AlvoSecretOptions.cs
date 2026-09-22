@@ -42,5 +42,13 @@ public sealed class AlvoSecretOptions
     /// adapter of its own for any of them. A name set here <b>wins</b> over the writable store, and a write
     /// to a name it carries is refused rather than stored and never read.
     /// </remarks>
-    public IDictionary<string, string> Values { get; } = new Dictionary<string, string>(StringComparer.Ordinal);
+    /// <remarks>
+    /// <b>Case-insensitive, because configuration keys are.</b> <c>Alvo__Secrets__Values__AI-Connection</c>
+    /// binds as typed, and an ordinal dictionary would then hold a name <see cref="SecretName"/>'s
+    /// lower-case grammar can never ask for — so the deployment's pinned secret would be invisible to a
+    /// read <em>and</em> un-shadowing to a write, which is a silent version of the one failure the layered
+    /// store exists to prevent.
+    /// </remarks>
+    public IDictionary<string, string> Values { get; } =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 }

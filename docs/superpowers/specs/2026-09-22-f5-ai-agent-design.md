@@ -193,16 +193,35 @@ missing from the deployment. So the drawer and its launcher do not render, and *
 the panel that fixes it. The dashboard keeps working without AI, which is §2.8's explicit
 requirement.
 
-### 3.4 The dashboard writes the connection through the port, not through a management route
+### 3.4 The dashboard writes the connection through a management route ~~through the port~~
 
-`IAlvoManagement` gains **no** member. The dashboard injects `ISecretStore` directly — the shape it
+> **Reversed during implementation, by review.** What is struck through below is what this section
+> decided; what follows it is what shipped, and why the original reasoning was wrong.
+
+~~`IAlvoManagement` gains **no** member. The dashboard injects `ISecretStore` directly — the shape it
 already uses for `IAlvoUserAdministration`, which `ManagementGateway` takes as an optional
-constructor dependency because only a deployment that has a store registers one.
+constructor dependency because only a deployment that has a store registers one. The reason is blast
+radius. Every `IAlvoManagement` member has an HTTP route and a contract test that holds it there, so a
+secret-write member would put secret writing on the surface the CLI, an MCP adapter and any HTTP
+caller reach, in exchange for a door nothing in F5 needs.~~
 
-The reason is blast radius. Every `IAlvoManagement` member has an HTTP route and a contract test that
-holds it there, so a secret-write member would put secret writing on the surface the CLI, an MCP
-adapter and any HTTP caller reach, in exchange for a door nothing in F5 needs: the CLI's answer to
-*"set my model key"* is the deployment's own configuration, which already wins over the store (§3.1).
+**What that missed: the dashboard has no ladder of its own.** Every screen is gated by
+`[Authorize]` — signed in or not — and the *level* a caller reaches is decided per call, inside the
+core, through `ManagementAccessEvaluator`. A write that never enters the core therefore never meets a
+level, so the shape above made saving the AI connection the one write in the product with no policy
+behind it: any authenticated operator, including one the project names only as `viewer`, could
+repoint the endpoint at an address that then receives the descriptor, the resolved schema and their
+colleagues' prompts. That is a default-deny violation (§0 principle 5), not a trade.
+
+Keeping the port-only shape *and* fixing it was not available: the dashboard cannot ask "what level am
+I" without a core member either, so the choice was between one new member and one new member.
+
+**What shipped:** `IAlvoManagement.SetAiConnectionAsync`, `ManagementOperation.SetAiConnection` at
+`Admin`, and `PUT {m}/ai/connection`. The blast radius the section worried about is real and now
+stated plainly: secret writing is on the wire. It is on the wire *at administrator level*, beside
+`ManageApiKeys` — which is the category this already belonged to, since repointing the endpoint is
+handing out a credential's worth of reach. The route answers with what `GET {m}/info` would now
+report, so a caller learns the state it produced without the credential coming back.
 A port injected by the one screen that writes it keeps the write in-process and keeps
 `GET {m}/info`'s `ai` block — which reports **whether** a connection exists and never its key — as
 the only thing that crosses the wire.

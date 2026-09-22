@@ -7,8 +7,10 @@ using MMLib.Alvo.Data;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Secrets;
 using System.Globalization;
 using System.Reflection;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Management.Internal;
 
@@ -63,6 +65,10 @@ namespace MMLib.Alvo.Management.Internal;
 /// Resolves whether this instance has an AI connection, for <see cref="GetInfoAsync"/> to report. Registered
 /// by the core itself, so it is never optional — what is optional is the connection it resolves.
 /// </param>
+/// <param name="secrets">
+/// Where the AI connection is written. Registered by the core itself, so it is never optional — what is
+/// optional is whether the store it layers over can be written at all, which it answers for itself.
+/// </param>
 /// <param name="runtime">
 /// <b>The apply path, resolved lazily.</b> <see cref="RuntimeSchemaService"/> needs
 /// <see cref="IRuntimeSchemaWriter"/> and <see cref="IDescriptorVersionStore"/>, which only a database
@@ -87,6 +93,7 @@ internal sealed partial class AlvoManagementService(
     ManagementAccessEvaluator access,
     ILogger<AlvoManagementService> logger,
     IAiConnectionResolver ai,
+    ISecretStore secrets,
     Func<RuntimeSchemaService> runtime) : IAlvoManagement
 {
     /// <summary>What <see cref="ManagementInfo.DataProvider"/> reports when no driver is registered.</summary>
@@ -110,14 +117,11 @@ internal sealed partial class AlvoManagementService(
     /// </remarks>
     private async ValueTask<ManagementAi> AiAsync(CancellationToken ct)
     {
-        if (await ai.ResolveAsync(ct).ConfigureAwait(false) is not { } connection)
-        {
-            return new ManagementAi(Configured: false, Kind: null, Model: null, Source: null);
-        }
+        var (connection, source) = await ai.ResolveAsync(ct).ConfigureAwait(false);
 
-        var source = await ai.DescribeSourceAsync(ct).ConfigureAwait(false);
-
-        return new ManagementAi(Configured: true, KindOf(connection), connection.Model, Lower(source));
+        return connection is null
+            ? new ManagementAi(Configured: false, Kind: null, Model: null, Source: null)
+            : new ManagementAi(Configured: true, KindOf(connection), connection.Model, Lower(source));
     }
 
     /// <summary>The wire spelling of a resolved connection's kind — what an operator configured, not the enum.</summary>
@@ -243,6 +247,25 @@ internal sealed partial class AlvoManagementService(
         ManagementIdempotency.FingerprintOf(
             nameof(ApplyDescriptorAsync), project, request.ExpectedRevision, request.AllowDestructive,
             request.DescriptorJson);
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <b>The one write on this surface that touches no descriptor.</b> It is here rather than in the
+    /// dashboard's own gateway because it writes a credential, and every other credential-weight operation
+    /// on this instance — issuing an API key, administering users — is admitted by the same ladder. A
+    /// screen writing the secret store directly would be the only write in the product with no policy
+    /// behind it.
+    /// </remarks>
+    public async Task SetAiConnectionAsync(StoredAiConnection connection, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        EnsureMayPerform(ManagementOperation.SetAiConnection);
+
+        var json = JsonSerializer.Serialize(
+            connection, StoredAiConnectionJsonContext.Default.StoredAiConnection);
+
+        await secrets.SetAsync(SecretName.Parse(StoredAiConnection.SecretName), json, ct).ConfigureAwait(false);
+    }
 
     /// <inheritdoc/>
     public async Task<ManagementApplyResult> RollbackAsync(

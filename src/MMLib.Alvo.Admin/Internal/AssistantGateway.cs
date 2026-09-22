@@ -62,12 +62,22 @@ internal sealed class AssistantGateway(
     /// <param name="ct">A token to cancel the turn.</param>
     /// <returns>The updates, in the order they happened.</returns>
     /// <remarks>
+    /// <para>
     /// With no agent installed the answer is a single failure rather than an exception — the caller is
     /// drawing a conversation, and a screen that had to catch to say "there is no assistant here" would
     /// eventually draw a stack trace instead.
+    /// </para>
+    /// <para>
+    /// <b>The whole turn runs with the operator published.</b> The agent reads the project through
+    /// <c>IAlvoManagement</c>, which admits nobody it cannot see — so a turn run without the publication
+    /// would have every tool answer <c>forbidden</c>. It is published around the enumeration rather than
+    /// around a call, because the tools run between one update and the next.
+    /// </para>
     /// </remarks>
     public IAsyncEnumerable<AssistantUpdate> AskAsync(AssistantRequest request, CancellationToken ct) =>
-        assistant is null ? NotInstalled() : assistant.AskAsync(request, ct);
+        assistant is null
+            ? NotInstalled()
+            : management.AsOperatorAsync(() => assistant.AskAsync(request, ct), ct);
 
     /// <summary>
     /// Saves the connection as one secret, replacing whatever was there.
@@ -76,23 +86,31 @@ internal sealed class AssistantGateway(
     /// <param name="ct">A token to cancel the write.</param>
     /// <exception cref="InvalidOperationException">This deployment cannot save a connection.</exception>
     /// <remarks>
+    /// <para>
+    /// <b>Through the Management API, not the store.</b> Writing a credential is an administrator's
+    /// operation, and the core is what decides who is one — a gateway that reached the store directly would
+    /// let any signed-in operator repoint the assistant's endpoint at an address that then receives the
+    /// descriptor, the schema and their colleagues' prompts.
+    /// </para>
+    /// <para>
     /// <b>One name, and no other.</b> The whole record goes under
     /// <see cref="StoredAiConnection.SecretName"/>, so the endpoint, the model and the key are replaced
     /// together and there is no window in which the screen reports one and the agent dials another.
+    /// </para>
     /// </remarks>
     public async Task SaveConnectionAsync(AiConnectionForm form, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(form);
 
-        if (secrets is not { CanWrite: true } store)
+        if (!CanWriteConnection)
         {
-            throw new InvalidOperationException(NoWritableStore);
+            throw new SecretStoreReadOnlyException(NoWritableStore);
         }
 
-        var record = new StoredAiConnection(form.Kind, form.Endpoint, form.Model, Blank(form.ApiKey));
-        var json = JsonSerializer.Serialize(record, StoredAiConnectionJsonContext.Default.StoredAiConnection);
+        await management.SetAiConnectionAsync(
+            new StoredAiConnection(form.Kind, form.Endpoint, form.Model, Blank(form.ApiKey)), ct)
+            .ConfigureAwait(false);
 
-        await store.SetAsync(SecretName.Parse(StoredAiConnection.SecretName), json, ct).ConfigureAwait(false);
         management.Invalidate();
     }
 

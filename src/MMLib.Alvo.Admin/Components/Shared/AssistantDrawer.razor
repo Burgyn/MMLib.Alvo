@@ -11,6 +11,7 @@
 @inject WorkingCopyStore Copies
 @inject DataGateway Caller
 @inject NavigationManager Navigation
+@implements IDisposable
 
 <button type="button" class="a-assistant__launch" data-testid="assistant-launch"
         aria-expanded="@_open.ToString().ToLowerInvariant()" @onclick="Toggle">
@@ -106,6 +107,10 @@
 }
 
 @code {
+    /* A turn runs for seconds across several tool calls and a streaming answer. Without a token tied to
+       this component, an operator who navigates away leaves an outbound call to somebody else's endpoint
+       running and StateHasChanged firing at a disposed component. */
+    private readonly CancellationTokenSource _turnsCancelled = new();
     private readonly List<AssistantTurn> _turns = [];
     private readonly List<string> _tools = [];
     private string _message = string.Empty;
@@ -116,6 +121,13 @@
     private AssistantUpdate.Proposal? _proposal;
 
     private void Toggle() => _open = !_open;
+
+    /// <summary>Cancels a turn still in flight when the operator leaves.</summary>
+    public void Dispose()
+    {
+        _turnsCancelled.Cancel();
+        _turnsCancelled.Dispose();
+    }
 
     /// <summary>
     /// Asks one turn, redrawing as the answer arrives.
@@ -136,10 +148,19 @@
         Begin(asked);
 
         var request = new AssistantRequest(await ProjectAsync(), asked, [.. _turns]);
-        await foreach (var update in Assistant.AskAsync(request, CancellationToken.None))
+
+        try
         {
-            Apply(update);
-            StateHasChanged();
+            await foreach (var update in Assistant.AskAsync(request, _turnsCancelled.Token))
+            {
+                Apply(update);
+                StateHasChanged();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            /* The operator left. There is nothing to draw and nobody to draw it for. */
+            return;
         }
 
         End();

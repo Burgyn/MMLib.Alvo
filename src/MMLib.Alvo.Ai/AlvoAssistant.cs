@@ -68,7 +68,7 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (await _connections.ResolveAsync(ct).ConfigureAwait(false) is not { } connection)
+        if ((await _connections.ResolveAsync(ct).ConfigureAwait(false)).Connection is not { } connection)
         {
             yield return new AssistantUpdate.Failed(NoConnection);
             yield break;
@@ -77,7 +77,12 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
         var tools = ManagementTools.For(_management, request.Project);
         var answer = new StringBuilder();
 
-        var updates = RunAsync(connection, tools, request, ct).GetAsyncEnumerator(ct);
+        /* Disposed with the turn it belongs to. Today's OpenAI client holds nothing that needs releasing,
+           but IChatClient is IDisposable and a factory that later supplies its own HttpClient would start
+           leaking handlers silently. */
+        using var client = _clients(connection);
+
+        var updates = RunAsync(client, tools, request, ct).GetAsyncEnumerator(ct);
         await using (updates.ConfigureAwait(false))
         {
             while (true)
@@ -135,11 +140,11 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     private readonly record struct StreamStep(bool Moved, AssistantUpdate.Failed? Failure);
 
     /// <summary>Runs the agent loop for one turn.</summary>
-    private IAsyncEnumerable<AgentResponseUpdate> RunAsync(
-        AlvoAiConnection connection, ManagementTools tools, AssistantRequest request, CancellationToken ct)
+    private static IAsyncEnumerable<AgentResponseUpdate> RunAsync(
+        IChatClient client, ManagementTools tools, AssistantRequest request, CancellationToken ct)
     {
         var agent = new ChatClientAgent(
-            _clients(connection),
+            client,
             instructions: SystemPrompt.Text,
             name: AgentName,
             description: null,

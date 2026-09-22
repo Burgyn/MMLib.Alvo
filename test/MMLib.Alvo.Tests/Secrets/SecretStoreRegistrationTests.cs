@@ -39,6 +39,25 @@ public class SecretStoreRegistrationTests
         value.ShouldBe("sk-test");
     }
 
+    /// <summary>
+    /// A pinned secret is found whatever case the deployment typed its key in.
+    /// </summary>
+    /// <remarks>
+    /// Configuration keys are case-insensitive and <see cref="SecretName"/>'s grammar is lower-case only,
+    /// so an ordinal dictionary would hold a name no read could ever ask for — the pinned value invisible
+    /// to a read <em>and</em> un-shadowing to a write, which is a silent version of the one failure the
+    /// layered store exists to prevent.
+    /// </remarks>
+    [Fact]
+    public async Task A_configuration_key_in_the_wrong_case_still_finds_the_secret()
+    {
+        using var provider = Build(($"{AlvoSecretOptions.ConfigurationSection}:Values:AI.API-Key", "sk-test"));
+
+        var value = await provider.GetRequiredService<ISecretStore>().GetAsync(SecretName.Parse("ai.api-key"), Ct);
+
+        value.ShouldBe("sk-test");
+    }
+
     /// <summary>A writable store a driver registered is the layer behind configuration.</summary>
     [Fact]
     public async Task A_registered_writable_store_is_the_layer_behind_configuration()

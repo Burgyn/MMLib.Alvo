@@ -156,7 +156,8 @@ public sealed class AlvoAssistantTests
         // idiom: the call records an expectation and its result is never consumed as a task.
 #pragma warning disable CA2012
         resolver.ResolveAsync(Arg.Any<CancellationToken>())
-            .Returns(_ => new ValueTask<AlvoAiConnection?>(connection));
+            .Returns(_ => new ValueTask<AiConnectionResolution>(new AiConnectionResolution(
+                connection, connection is null ? AiConnectionSource.None : AiConnectionSource.Store)));
 #pragma warning restore CA2012
 
         return resolver;

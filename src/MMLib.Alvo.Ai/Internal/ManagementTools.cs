@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.AI;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Management;
+using MMLib.Alvo.Migrations;
 
 using System.Text.Json;
 
@@ -123,7 +124,31 @@ internal sealed class ManagementTools
             {
                 return Validated(descriptorJson, expectedRevision, Refusals(refused), plan: null);
             }
+            catch (DestructiveChangeNotAllowedException refused)
+            {
+                return Validated(descriptorJson, expectedRevision, [refused.Message], Destructive(refused.Plan));
+            }
+            catch (DescriptorConcurrencyException stale)
+            {
+                return Validated(descriptorJson, stale.ActualRevision, [stale.Message], plan: null);
+            }
         });
+
+    /// <summary>
+    /// A refused destructive plan, as the summary this tool reports.
+    /// </summary>
+    /// <remarks>
+    /// <b>The one path on which <c>hasDestructiveChanges</c> can be true.</b> The tool asks with
+    /// <c>AllowDestructive: false</c>, so a destructive plan is a refusal rather than a result — and without
+    /// this arm the field could only ever be <see langword="false"/>, which would leave the system prompt's
+    /// "a dropped column is lost data" with no mechanism behind it. The step lines are the plan's own
+    /// reasons, not a retelling.
+    /// </remarks>
+    /// <param name="plan">The plan the guardrail refused.</param>
+    private static ManagementPlanSummary Destructive(MigrationPlan plan) => new(
+        plan.IsEmpty,
+        plan.HasDestructiveChanges,
+        [.. plan.Steps.Where(step => step.Reason is { Length: > 0 }).Select(step => step.Reason!)]);
 
     /// <summary>The refusals, in the framework's own words and in document order.</summary>
     private static IReadOnlyList<string> Refusals(DescriptorValidationException refused) =>
@@ -172,6 +197,10 @@ internal sealed class ManagementTools
         catch (ManagementRequestException refusal)
         {
             return Error("invalid-request", refusal.Message);
+        }
+        catch (DescriptorConcurrencyException stale)
+        {
+            return Error("stale-revision", stale.Message);
         }
     }
 

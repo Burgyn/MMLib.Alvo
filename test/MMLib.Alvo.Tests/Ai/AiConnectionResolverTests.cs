@@ -5,6 +5,8 @@ using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Secrets;
 using MMLib.Alvo.Testing.Secrets;
 
+using System.Security.Cryptography;
+
 namespace MMLib.Alvo.Tests.Ai;
 
 /// <summary>
@@ -29,8 +31,9 @@ public class AiConnectionResolverTests
             Model = "from-configuration",
         });
 
-        (await resolver.ResolveAsync(Ct))!.Model.ShouldBe("from-configuration");
-        (await resolver.DescribeSourceAsync(Ct)).ShouldBe(AiConnectionSource.Configuration);
+        var resolved = await resolver.ResolveAsync(Ct);
+        resolved.Connection!.Model.ShouldBe("from-configuration");
+        resolved.Source.ShouldBe(AiConnectionSource.Configuration);
     }
 
     /// <summary>No AI is the default state of every deployment, so it is an answer rather than a refusal.</summary>
@@ -39,8 +42,9 @@ public class AiConnectionResolverTests
     {
         var resolver = Resolver(new InMemorySecretStore(), new AlvoAiOptions());
 
-        (await resolver.ResolveAsync(Ct)).ShouldBeNull();
-        (await resolver.DescribeSourceAsync(Ct)).ShouldBe(AiConnectionSource.None);
+        var resolved = await resolver.ResolveAsync(Ct);
+        resolved.Connection.ShouldBeNull();
+        resolved.Source.ShouldBe(AiConnectionSource.None);
     }
 
     [Fact]
@@ -50,12 +54,12 @@ public class AiConnectionResolverTests
         await store.SetAsync(AiConnectionResolver.StoredName, StoredJson(model: "qwen3:8b"), Ct);
 
         var resolver = Resolver(store, new AlvoAiOptions());
-        var connection = await resolver.ResolveAsync(Ct);
+        var resolved = await resolver.ResolveAsync(Ct);
 
-        connection!.Model.ShouldBe("qwen3:8b");
-        connection.Kind.ShouldBe(AiConnectionKind.OpenAiCompatible);
-        connection.ApiKey.ShouldBe("sk-stored");
-        (await resolver.DescribeSourceAsync(Ct)).ShouldBe(AiConnectionSource.Store);
+        resolved.Connection!.Model.ShouldBe("qwen3:8b");
+        resolved.Connection.Kind.ShouldBe(AiConnectionKind.OpenAiCompatible);
+        resolved.Connection.ApiKey.ShouldBe("sk-stored");
+        resolved.Source.ShouldBe(AiConnectionSource.Store);
     }
 
     /// <summary>
@@ -79,7 +83,7 @@ public class AiConnectionResolverTests
             ApiKeySecretRef = "openai.key",
         });
 
-        (await resolver.ResolveAsync(Ct))!.ApiKey.ShouldBe("sk-live");
+        (await resolver.ResolveAsync(Ct)).Connection!.ApiKey.ShouldBe("sk-live");
     }
 
     /// <summary>
@@ -108,7 +112,7 @@ public class AiConnectionResolverTests
         var store = new InMemorySecretStore();
         await store.SetAsync(AiConnectionResolver.StoredName, "not json", Ct);
 
-        (await Resolver(store, new AlvoAiOptions()).ResolveAsync(Ct)).ShouldBeNull();
+        (await Resolver(store, new AlvoAiOptions()).ResolveAsync(Ct)).Connection.ShouldBeNull();
     }
 
     /// <summary>And so must a row that parses but does not describe a connection.</summary>
@@ -121,14 +125,14 @@ public class AiConnectionResolverTests
             """{"kind":"openai-compatible","endpoint":"http://localhost:11434/v1"}""",
             Ct);
 
-        (await Resolver(store, new AlvoAiOptions()).ResolveAsync(Ct)).ShouldBeNull();
+        (await Resolver(store, new AlvoAiOptions()).ResolveAsync(Ct)).Connection.ShouldBeNull();
     }
 
     /// <summary>Half a configured connection cannot be dialled, so it is not one.</summary>
     [Fact]
     public async Task A_configured_connection_with_no_endpoint_resolves_to_null() =>
         (await Resolver(new InMemorySecretStore(), new AlvoAiOptions { Kind = "openai-compatible", Model = "x" })
-            .ResolveAsync(Ct)).ShouldBeNull();
+            .ResolveAsync(Ct)).Connection.ShouldBeNull();
 
     /// <summary>
     /// A kind this build has no adapter for is no connection.
@@ -145,7 +149,7 @@ public class AiConnectionResolverTests
         (await Resolver(
             new InMemorySecretStore(),
             new AlvoAiOptions { Kind = kind, Endpoint = "http://localhost:11434/v1", Model = "x" })
-            .ResolveAsync(Ct)).ShouldBeNull();
+            .ResolveAsync(Ct)).Connection.ShouldBeNull();
 
     [Fact]
     public async Task Azure_is_the_second_kind_this_build_dials() =>
@@ -157,7 +161,60 @@ public class AiConnectionResolverTests
                 Endpoint = "https://contoso.openai.azure.com",
                 Model = "gpt-5",
             })
-            .ResolveAsync(Ct))!.Kind.ShouldBe(AiConnectionKind.AzureOpenAi);
+            .ResolveAsync(Ct)).Connection!.Kind.ShouldBe(AiConnectionKind.AzureOpenAi);
+
+    /// <summary>
+    /// A stored row this build cannot decrypt is no connection, not a failed page.
+    /// </summary>
+    /// <remarks>
+    /// The store authenticates as it decrypts, so a tampered value — or one written under a key that has
+    /// since been rotated away — arrives as a <see cref="CryptographicException"/>. The screen asking this
+    /// is drawing a status; letting the throw through would replace the settings page that exists to fix
+    /// the row with a circuit error.
+    /// </remarks>
+    [Fact]
+    public async Task A_stored_connection_this_build_cannot_decrypt_resolves_to_nothing()
+    {
+        var resolver = Resolver(new RefusingStore(), new AlvoAiOptions());
+
+        var resolved = await resolver.ResolveAsync(Ct);
+
+        resolved.Connection.ShouldBeNull();
+        resolved.Source.ShouldBe(AiConnectionSource.None);
+    }
+
+    /// <summary>And so is a referenced API key it cannot decrypt — the connection loses its key, not its life.</summary>
+    [Fact]
+    public async Task A_key_this_build_cannot_decrypt_leaves_the_connection_without_one()
+    {
+        var resolver = Resolver(new RefusingStore(), new AlvoAiOptions
+        {
+            Kind = "openai-compatible",
+            Endpoint = "https://api.openai.com/v1",
+            Model = "gpt-5",
+            ApiKeySecretRef = "openai.key",
+        });
+
+        (await resolver.ResolveAsync(Ct)).Connection!.ApiKey.ShouldBeNull();
+    }
+
+    /// <summary>A store whose every read is a value it cannot authenticate.</summary>
+    private sealed class RefusingStore : ISecretStore
+    {
+        public bool CanWrite => false;
+
+        public ValueTask<string?> GetAsync(SecretName name, CancellationToken ct = default) =>
+            throw new CryptographicException("The authentication tag did not match.");
+
+        public ValueTask SetAsync(SecretName name, string value, CancellationToken ct = default) =>
+            throw new InvalidOperationException();
+
+        public ValueTask<bool> DeleteAsync(SecretName name, CancellationToken ct = default) =>
+            throw new InvalidOperationException();
+
+        public ValueTask<IReadOnlyList<SecretName>> ListNamesAsync(CancellationToken ct = default) =>
+            new((IReadOnlyList<SecretName>)[]);
+    }
 
     private static AiConnectionResolver Resolver(ISecretStore secrets, AlvoAiOptions configured) =>
         new AiConnectionResolver(

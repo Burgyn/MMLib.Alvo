@@ -16,6 +16,12 @@ namespace MMLib.Alvo.Ai
         OpenAiCompatible = 0,
         AzureOpenAi = 1,
     }
+    public readonly struct AiConnectionResolution : System.IEquatable<MMLib.Alvo.Ai.AiConnectionResolution>
+    {
+        public AiConnectionResolution(MMLib.Alvo.Ai.AlvoAiConnection? Connection, MMLib.Alvo.Ai.AiConnectionSource Source) { }
+        public MMLib.Alvo.Ai.AlvoAiConnection? Connection { get; init; }
+        public MMLib.Alvo.Ai.AiConnectionSource Source { get; init; }
+    }
     public enum AiConnectionSource
     {
         None = 0,
@@ -77,8 +83,7 @@ namespace MMLib.Alvo.Ai
     }
     public interface IAiConnectionResolver
     {
-        System.Threading.Tasks.ValueTask<MMLib.Alvo.Ai.AiConnectionSource> DescribeSourceAsync(System.Threading.CancellationToken ct = default);
-        System.Threading.Tasks.ValueTask<MMLib.Alvo.Ai.AlvoAiConnection?> ResolveAsync(System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.ValueTask<MMLib.Alvo.Ai.AiConnectionResolution> ResolveAsync(System.Threading.CancellationToken ct = default);
     }
     public interface IAlvoAssistant
     {
@@ -1245,6 +1250,7 @@ namespace MMLib.Alvo.Management
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementProject>> ListProjectsAsync(System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRevision>> ListRevisionsAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementApplyResult> RollbackAsync(string project, int targetRevision, MMLib.Alvo.Management.ManagementRollbackRequest request, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task SetAiConnectionAsync(MMLib.Alvo.Ai.StoredAiConnection connection, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementPolicyVerdict> SimulatePolicyAsync(string project, MMLib.Alvo.Management.ManagementPolicySimulation simulation, System.Threading.CancellationToken ct = default);
     }
     public interface IManagementIdempotencyStore
@@ -1743,5 +1749,11 @@ namespace MMLib.Alvo.Secrets
         public SecretShadowedException(MMLib.Alvo.Secrets.SecretName name, string source) { }
         public SecretShadowedException(string message, System.Exception innerException) { }
         public MMLib.Alvo.Secrets.SecretName Name { get; }
+    }
+    public sealed class SecretStoreReadOnlyException : System.InvalidOperationException
+    {
+        public SecretStoreReadOnlyException() { }
+        public SecretStoreReadOnlyException(string message) { }
+        public SecretStoreReadOnlyException(string message, System.Exception innerException) { }
     }
 }

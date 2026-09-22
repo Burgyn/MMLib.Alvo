@@ -26,7 +26,7 @@ namespace MMLib.Alvo.Admin.Internal;
 /// </para>
 /// <para>
 /// <b>It authorizes nothing.</b> Every call runs with the operator's principal published on
-/// <see cref="IAlvoContextAccessor"/>, and the core decides — see <see cref="AsOperatorAsync"/>.
+/// <see cref="IAlvoContextAccessor"/>, and the core decides — see <see cref="AsOperatorAsync{T}(Func{Task{T}}, CancellationToken)"/>.
 /// </para>
 /// </remarks>
 /// <param name="management">The one management contract, resolved in-process (design §1.2).</param>
@@ -229,6 +229,59 @@ internal sealed class ManagementGateway(
         ?? throw new InvalidOperationException(
             "This deployment registered no membership store, so there is nobody to administer. "
             + "CanAdministerPeople says so before a screen offers a control.");
+
+    /// <summary>Writes the instance's AI connection, through the core's own admission ladder.</summary>
+    /// <param name="connection">The endpoint, the model and the credential, as one record.</param>
+    /// <param name="ct">A token to cancel the write.</param>
+    public Task SetAiConnectionAsync(MMLib.Alvo.Ai.StoredAiConnection connection, CancellationToken ct)
+        => AsOperatorAsync(async () =>
+        {
+            await management.SetAiConnectionAsync(connection, ct).ConfigureAwait(false);
+
+            return true;
+        }, ct);
+
+    /// <summary>
+    /// Runs a whole stream with the operator published, for as long as it is being consumed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>An iterator rather than the <c>Func</c> overload, and the difference is load-bearing.</b>
+    /// <c>IAlvoContextAccessor</c> is an <see cref="System.Threading.AsyncLocal{T}"/> holder, so a
+    /// publication made inside a helper that then returns is gone by the time the caller enumerates
+    /// anything. Publishing here, in the body that drives the inner enumeration, is what keeps the caller
+    /// published for every <c>MoveNext</c> — which is what an assistant turn needs, because it calls the
+    /// management surface several times between one update and the next.
+    /// </para>
+    /// <para>
+    /// Without it every one of the agent's tool calls sees no principal, resolves to
+    /// <c>AlvoContext.Anonymous</c>, and is refused — the safe direction, and a blind assistant.
+    /// </para>
+    /// </remarks>
+    /// <typeparam name="T">What the stream yields.</typeparam>
+    /// <param name="stream">The stream to run.</param>
+    /// <param name="ct">Cancels resolving the caller and the enumeration.</param>
+    public async IAsyncEnumerable<T> AsOperatorAsync<T>(
+        Func<IAsyncEnumerable<T>> stream,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+
+        var previous = ambient.Principal;
+        ambient.Principal = await CallerAsync(ct).ConfigureAwait(false);
+
+        try
+        {
+            await foreach (var item in stream().WithCancellation(ct).ConfigureAwait(false))
+            {
+                yield return item;
+            }
+        }
+        finally
+        {
+            ambient.Principal = previous;
+        }
+    }
 
     /// <summary>Drops every cached read.</summary>
     /// <remarks>

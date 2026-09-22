@@ -56,13 +56,19 @@ public class ConfigurationSecretStoreTests
     /// A configuration key that is not a secret name is skipped rather than throwing.
     /// </summary>
     /// <remarks>
+    /// Case is <em>not</em> what makes a key mistyped: the dictionary is case-insensitive because
+    /// configuration keys are, so <c>Good.One</c> is the same name as <c>good.one</c>. What is refused is a
+    /// key the grammar cannot hold at all.
+    /// </remarks>
+    /// <remarks>
     /// Configuration is a place people mistype, and one bad key must not take the whole listing — and with it
     /// the settings screen — down.
     /// </remarks>
     [Fact]
     public async Task A_mistyped_key_is_skipped_rather_than_breaking_the_listing()
     {
-        var names = await Store(("Good.One", "v"), ("good.one", "v")).ListNamesAsync(Ct);
+        var names = await Store(("1-starts-with-a-digit", "v"), ("has a space", "v"), ("good.one", "v"))
+            .ListNamesAsync(Ct);
 
         names.Select(name => name.Value).ShouldBe(["good.one"]);
     }

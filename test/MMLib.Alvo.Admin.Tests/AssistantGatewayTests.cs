@@ -1,13 +1,11 @@
 ﻿using Microsoft.AspNetCore.Components.Authorization;
-
+using MMLib.Alvo.Admin;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Ai;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Secrets;
-
 using NSubstitute;
-
 using System.Text.Json;
 
 // CA2012 reads every arranged ISecretStore call below as a ValueTask nobody awaited. They are
@@ -74,25 +72,48 @@ public sealed class AssistantGatewayTests
     /// The endpoint, the model and the key change together; three names would leave a window in which the
     /// screen reports a model that is being dialled at the previous endpoint.
     /// </remarks>
+    /// <summary>
+    /// A save travels the Management API, never the store, so the core decides who may write a credential.
+    /// </summary>
+    /// <remarks>
+    /// The whole record goes in one call: the endpoint, the model and the key change together, and three
+    /// writes would leave a window in which a screen reports one and the agent dials another.
+    /// </remarks>
     [Fact]
-    public async Task A_save_writes_one_secret_under_the_reserved_name()
+    public async Task A_save_travels_the_management_api_rather_than_the_store()
     {
+        var management = Substitute.For<IAlvoManagement>();
         var store = Writable();
-        var written = new List<(SecretName Name, string Value)>();
-        store.WhenForAnyArgs(candidate => candidate.SetAsync(default!, default!, Ct))
-            .Do(call => written.Add((call.Arg<SecretName>(), call.Arg<string>())));
 
-        await Gateway(assistant: null, store).SaveConnectionAsync(Form(), Ct);
+        await Gateway(assistant: null, store, management).SaveConnectionAsync(Form(), Ct);
 
-        var one = written.ShouldHaveSingleItem();
-        one.Name.Value.ShouldBe(StoredAiConnection.SecretName);
+        await management.Received(1).SetAiConnectionAsync(
+            Arg.Is<StoredAiConnection>(record =>
+                record.Kind == "openai-compatible"
+                && record.Endpoint == "http://localhost:11434/v1"
+                && record.Model == "qwen3:8b"
+                && record.ApiKey == "sk-live"),
+            Arg.Any<CancellationToken>());
+        await store.DidNotReceiveWithAnyArgs().SetAsync(default!, default!, Ct);
+    }
 
-        var record = JsonSerializer.Deserialize(
-            one.Value, StoredAiConnectionJsonContext.Default.StoredAiConnection)!;
-        record.Kind.ShouldBe("openai-compatible");
-        record.Endpoint.ShouldBe("http://localhost:11434/v1");
-        record.Model.ShouldBe("qwen3:8b");
-        record.ApiKey.ShouldBe("sk-live");
+    /// <summary>
+    /// An operator the core refuses gets the core's refusal, and nothing is written.
+    /// </summary>
+    /// <remarks>
+    /// This is the finding a review caught: before the write moved onto the management surface, any
+    /// signed-in operator — including one at <c>read</c> — could repoint the assistant's endpoint at an
+    /// address that then received the descriptor, the schema and their colleagues' prompts.
+    /// </remarks>
+    [Fact]
+    public async Task An_operator_the_core_refuses_cannot_write_the_connection()
+    {
+        var management = Substitute.For<IAlvoManagement>();
+        management.SetAiConnectionAsync(Arg.Any<StoredAiConnection>(), Arg.Any<CancellationToken>())
+            .Returns(_ => throw new ManagementForbiddenException());
+
+        await Should.ThrowAsync<ManagementForbiddenException>(
+            async () => await Gateway(assistant: null, Writable(), management).SaveConnectionAsync(Form(), Ct));
     }
 
     /// <summary>An endpoint that needs no key is stored with none, not with an empty one.</summary>
@@ -103,15 +124,12 @@ public sealed class AssistantGatewayTests
     [Fact]
     public async Task An_empty_key_is_stored_as_no_key()
     {
-        var store = Writable();
-        string? stored = null;
-        store.WhenForAnyArgs(candidate => candidate.SetAsync(default!, default!, Ct))
-            .Do(call => stored = call.Arg<string>());
+        var management = Substitute.For<IAlvoManagement>();
 
-        await Gateway(assistant: null, store).SaveConnectionAsync(Form(apiKey: "   "), Ct);
+        await Gateway(assistant: null, Writable(), management).SaveConnectionAsync(Form(apiKey: "   "), Ct);
 
-        JsonSerializer.Deserialize(stored!, StoredAiConnectionJsonContext.Default.StoredAiConnection)!
-            .ApiKey.ShouldBeNull();
+        await management.Received(1).SetAiConnectionAsync(
+            Arg.Is<StoredAiConnection>(record => record.ApiKey == null), Arg.Any<CancellationToken>());
     }
 
     /// <summary>
@@ -124,15 +142,77 @@ public sealed class AssistantGatewayTests
     [Fact]
     public async Task A_shadowed_write_surfaces_as_the_stores_own_refusal()
     {
-        var store = Writable();
-        store.SetAsync(Arg.Any<SecretName>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+        var management = Substitute.For<IAlvoManagement>();
+        management.SetAiConnectionAsync(Arg.Any<StoredAiConnection>(), Arg.Any<CancellationToken>())
             .Returns(_ => throw new SecretShadowedException(
                 SecretName.Parse(StoredAiConnection.SecretName), "Alvo:Secrets:Values"));
 
         var refusal = await Should.ThrowAsync<SecretShadowedException>(
-            async () => await Gateway(assistant: null, store).SaveConnectionAsync(Form(), Ct));
+            async () => await Gateway(assistant: null, Writable(), management).SaveConnectionAsync(Form(), Ct));
 
         refusal.Message.ShouldContain("Alvo:Secrets:Values");
+    }
+
+    /// <summary>
+    /// A turn runs with the operator published, for the whole turn.
+    /// </summary>
+    /// <remarks>
+    /// This is the second finding a review caught. The agent reads the project through
+    /// <c>IAlvoManagement</c>, which admits nobody it cannot see; without the publication every tool
+    /// answered <c>forbidden</c> and the assistant was blind on any real deployment — the safe direction,
+    /// and useless. It is measured at the moment the inner assistant is asked <em>and</em> at the moment a
+    /// later update is pulled, because the tools run between one update and the next.
+    /// </remarks>
+    [Fact]
+    public async Task A_turn_runs_with_the_operator_published()
+    {
+        var ambient = Substitute.For<IAlvoContextAccessor>();
+        var callers = Substitute.For<IAlvoAdminCallerResolver>();
+        callers.ResolveAsync(Arg.Any<System.Security.Claims.ClaimsPrincipal>(), Arg.Any<CancellationToken>())
+            .Returns(Operator);
+
+        var assistant = new PrincipalWatchingAssistant(ambient);
+        var gateway = new AssistantGateway(assistant, secrets: null, new ManagementGateway(
+            Substitute.For<IAlvoManagement>(), people: null, callers, SignedIn(), ambient));
+
+        await foreach (var _ in gateway.AskAsync(new AssistantRequest("p", "hello", []), Ct))
+        {
+        }
+
+        assistant.SeenWhenAsked.ShouldBe(Operator);
+        assistant.SeenMidTurn.ShouldBe(Operator);
+        ambient.Principal.ShouldBeNull();
+    }
+
+    /// <summary>The caller the resolver answers with, and the one the tools must see.</summary>
+    private static AlvoPrincipal Operator { get; } = new()
+    {
+        Context = AlvoContext.System(tenant: null),
+        Scopes = new HashSet<ApiKeyScope>(),
+        KeyId = "the-operator",
+    };
+
+    /// <summary>An assistant that records who was published when it was asked, and again mid-turn.</summary>
+    private sealed class PrincipalWatchingAssistant(IAlvoContextAccessor ambient) : IAlvoAssistant
+    {
+        internal AlvoPrincipal? SeenWhenAsked { get; private set; }
+
+        internal AlvoPrincipal? SeenMidTurn { get; private set; }
+
+        public async IAsyncEnumerable<AssistantUpdate> AskAsync(
+            AssistantRequest request,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            SeenWhenAsked = ambient.Principal;
+
+            yield return new AssistantUpdate.Text("thinking");
+
+            SeenMidTurn = ambient.Principal;
+
+            yield return new AssistantUpdate.Text(" done");
+
+            await Task.CompletedTask;
+        }
     }
 
     private static ISecretStore Writable()
@@ -154,11 +234,26 @@ public sealed class AssistantGatewayTests
     /// <c>Invalidate</c>, which clears fields. Substituting the type itself is not available — it is sealed,
     /// which is the same reason the dashboard's other tests construct it too.
     /// </remarks>
-    private static AssistantGateway Gateway(IAlvoAssistant? assistant, ISecretStore? secrets) =>
+    private static AssistantGateway Gateway(
+        IAlvoAssistant? assistant, ISecretStore? secrets, IAlvoManagement? management = null) =>
         new(assistant, secrets, new ManagementGateway(
-            Substitute.For<IAlvoManagement>(),
+            management ?? Substitute.For<IAlvoManagement>(),
             people: null,
             Substitute.For<IAlvoAdminCallerResolver>(),
-            Substitute.For<AuthenticationStateProvider>(),
+            SignedIn(),
             Substitute.For<IAlvoContextAccessor>()));
+
+    /// <summary>An authentication state provider that answers, so the gateway can resolve a caller.</summary>
+    /// <remarks>
+    /// The principal it resolves to does not matter here: what these facts measure is <em>which</em> seam
+    /// the write travels, and the core is what decides whether that caller may.
+    /// </remarks>
+    private static AuthenticationStateProvider SignedIn()
+    {
+        var authentication = Substitute.For<AuthenticationStateProvider>();
+        authentication.GetAuthenticationStateAsync()
+            .Returns(Task.FromResult(new AuthenticationState(new System.Security.Claims.ClaimsPrincipal())));
+
+        return authentication;
+    }
 }
