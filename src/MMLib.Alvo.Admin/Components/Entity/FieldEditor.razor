@@ -121,6 +121,35 @@
                 break;
         }
 
+        @if (TakesADefault)
+        {
+            <div class="a-field">
+                <label class="a-label" for="new-field-default">Default value</label>
+                @if (_type is FieldType.Boolean)
+                {
+                    <div class="a-choice">
+                        @foreach (var option in new[] { string.Empty, "false", "true" })
+                        {
+                            <button type="button" id="@(option.Length == 0 ? "new-field-default" : null)"
+                                    class="@($"a-chip{(option == _default ? " a-chip--on" : string.Empty)}")"
+                                    @onclick="() => _default = option">@(option.Length == 0 ? "none" : option)</button>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <input class="a-input" id="new-field-default" value="@_default"
+                           placeholder="@DefaultPlaceholder" autocomplete="off"
+                           @oninput="args => _default = args.Value?.ToString() ?? string.Empty" />
+                }
+                <span class="a-section-sub">
+                    What a create stores when the caller omits the field. It becomes a column
+                    <code class="a-mono">DEFAULT</code> and is filled in on every write that composes a whole
+                    row. Leave it empty for no default.
+                </span>
+            </div>
+        }
+
         <div class="a-row" style="gap:var(--space-2)">
             <button type="button" class="a-btn a-btn--primary" @onclick="Add" data-testid="field-save">
                 @(IsEditing ? "Save to the working copy" : "Add to the working copy")
@@ -142,7 +171,9 @@
         <div class="a-section">
             <span class="a-section-title">Facets this build refuses</span>
             <span class="a-section-sub">
-                Declared by the schema, refused at apply — so there is no control for them here.
+                Declared by the schema, refused at apply — a whole facet, or the one form of it named
+                here. A refused facet has no control above; a refused <em>form</em> of one does, and this
+                says which value it will not take.
             </span>
         </div>
 
@@ -161,6 +192,8 @@
 
 @code {
     private string _name = string.Empty;
+    private string _default = string.Empty;
+    private bool _maintainedElsewhere;
     private string _values = string.Empty;
     private string _target = string.Empty;
     private string? _refusal;
@@ -215,6 +248,36 @@
 
     private bool IsEditing => Editing is { Length: > 0 };
 
+    /// <summary>
+    /// Whether this build fills a default in for the field as it currently stands.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A <c>ref</c> is left out because a default foreign key is a row that must already exist, which the
+    /// apply cannot promise, and <c>json</c> because a one-line box would write the string <c>"{}"</c> where
+    /// the author meant the object. Every other type takes a literal.
+    /// </para>
+    /// <para>
+    /// A <c>computed</c> or <c>rollup</c> field is left out for the reason the apply gives: its value is
+    /// maintained for it, so it can never fall back to a default, and the frozen schema forbids the pair.
+    /// </para>
+    /// </remarks>
+    private bool TakesADefault => _type is not (FieldType.Ref or FieldType.Json) && !_maintainedElsewhere;
+
+    /// <summary>An example of the literal this field's type takes, so the box is not a guess.</summary>
+    private string DefaultPlaceholder => _type switch
+    {
+        FieldType.Integer => "0",
+        FieldType.Decimal => "0.00",
+        FieldType.Enum => _values.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault() ?? "one of the values above",
+        FieldType.Uuid => "00000000-0000-0000-0000-000000000000",
+        FieldType.Date => "2026-01-01",
+        FieldType.DateTime => "2026-01-01T09:00:00Z",
+        FieldType.Text => "a paragraph of prose",
+        _ => "normal",
+    };
+
     private string? _prefilled;
 
     protected override void OnParametersSet()
@@ -222,6 +285,7 @@
         if (!IsEditing)
         {
             _prefilled = null;
+            _maintainedElsewhere = false;
             return;
         }
 
@@ -250,6 +314,10 @@
         _precision = facets["precision"]?.GetValue<int>() ?? 10;
         _scale = facets["scale"]?.GetValue<int>() ?? 2;
         _target = facets["entity"]?.GetValue<string>() ?? string.Empty;
+        _maintainedElsewhere = facets["computed"] is not null || facets["rollup"] is not null;
+        _default = facets["default"] is { } declared && declared is not System.Text.Json.Nodes.JsonArray
+            ? declared.ToString()
+            : string.Empty;
         _values = facets["values"] is System.Text.Json.Nodes.JsonArray values
             ? string.Join(", ", values.Select(value => value?.GetValue<string>()))
             : string.Empty;
@@ -274,6 +342,52 @@
     }
 
     private Task Cancel() => OnCancelled.InvokeAsync();
+
+    /// <summary>
+    /// Writes the declared default into the facets as a literal of the field's own type, or says why it
+    /// cannot be one.
+    /// </summary>
+    /// <remarks>
+    /// <b>Typed here rather than sent as a string.</b> The descriptor's <c>default</c> is a JSON literal, and
+    /// the apply refuses one whose kind the field cannot hold — so a box that always wrote a string would
+    /// produce a descriptor refused for a reason the operator never typed. An empty box removes the key: a
+    /// field with no default is the normal case, and a <c>null</c> would be a declaration of nothing.
+    /// </remarks>
+    /// <returns>The refusal to show, or <see langword="null"/> when the default was written or removed.</returns>
+    private string? WriteDefault(System.Text.Json.Nodes.JsonObject facets)
+    {
+        /* A control that was never drawn must not remove what the declaration carries: a json or computed
+           field's own default is one the editor cannot draw, and dropping it would be the silent narrowing
+           this component refuses everywhere else. */
+        if (!TakesADefault)
+        {
+            return null;
+        }
+
+        if (_default.Length == 0)
+        {
+            facets.Remove("default");
+            return null;
+        }
+
+        switch (_type)
+        {
+            case FieldType.Boolean:
+                facets["default"] = _default == "true";
+                return null;
+            case FieldType.Integer when long.TryParse(_default, CultureInfo.InvariantCulture, out var whole):
+                facets["default"] = whole;
+                return null;
+            case FieldType.Decimal when decimal.TryParse(_default, CultureInfo.InvariantCulture, out var number):
+                facets["default"] = number;
+                return null;
+            case FieldType.Integer or FieldType.Decimal:
+                return $"'{_default}' is not a number, and this field's default has to be one.";
+            default:
+                facets["default"] = _default;
+                return null;
+        }
+    }
 
     private static void Toggle(System.Text.Json.Nodes.JsonObject facets, string facet, bool on)
     {
@@ -341,13 +455,19 @@
 
         /* An edit starts from the declaration that is there, not from an empty object. The controls
            here cover the facets they can draw; a field may also carry `description`, `format`,
-           `default`, `nullable`, `index`, `renamedFrom` or an `x-` extension, and rebuilding from
+           `nullable`, `index`, `renamedFrom` or an `x-` extension, and rebuilding from
            scratch would drop every one of them — the same silent narrowing design §4.6 forbids of
            the export, arriving through the editor instead. */
         var facets = IsEditing ? Parse(EditingJson) : [];
         facets["type"] = _type.ToString().ToLowerInvariant();
 
         Toggle(facets, "required", _required);
+        if (WriteDefault(facets) is { Length: > 0 } refusal)
+        {
+            _refusal = refusal;
+            return;
+        }
+
         Toggle(facets, "unique", _unique);
         ClearFacetsOfOtherTypes(facets);
 

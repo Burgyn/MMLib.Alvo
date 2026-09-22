@@ -61,14 +61,15 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
     }
 
     /// <summary>
-    /// The field editor says why it has no control for a default value.
+    /// The field editor draws a default-value control, and still says which half of the feature is
+    /// refused.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <c>field.default</c> is refused at apply, by name, so a control for it would produce a
-    /// descriptor the apply rejects — the same argument Settings makes about issuing an API key.
-    /// But an editor that is merely <em>silent</em> about it is indistinguishable from one that
-    /// forgot, and "where do I set a default?" is the first question its reader asks.
+    /// A literal <c>field.default</c> is honoured — it becomes a column <c>DEFAULT</c> — so the editor
+    /// offers a box for it. The <c>$cel</c> half is not, because a CEL default is evaluated against the
+    /// caller's context at insert time, which is the <c>computed</c> machinery rather than a column
+    /// default; an editor silent about that line is indistinguishable from one that forgot it.
     /// </para>
     /// <para>
     /// The sentence is the framework's own, served verbatim from <c>capabilities</c> (§2.3), so this
@@ -76,17 +77,19 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
     /// </para>
     /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task The_field_editor_says_why_there_is_no_default_control()
+    public async Task The_field_editor_offers_a_default_and_names_the_half_it_refuses()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
+
+        await session.Page.Locator("#new-field-default").WaitForAsync();
 
         var refusal = session.Page.Locator("[data-testid='refused-field.default']");
         await refusal.WaitForAsync();
 
         var text = await refusal.InnerTextAsync();
-        text.ShouldContain("no column default is emitted");
-        text.ShouldContain("send the value explicitly on create");
+        text.ShouldContain("not as a '$cel' expression");
+        text.ShouldContain("Declare a literal default");
 
         session.AssertConsoleClean();
     }
