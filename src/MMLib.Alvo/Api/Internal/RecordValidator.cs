@@ -145,9 +145,15 @@ internal static class RecordValidator
     /// confidently wrong message for a create that would have succeeded.
     /// </para>
     /// </remarks>
+    /// <para>
+    /// <b>A declared default is the third way a field arrives without being sent</b>, and PR-I's own forward
+    /// commitment names it: <em>"a <c>required</c> field with a default stops being a 422"</em>. Without this
+    /// such a descriptor applies cleanly, emits a column <c>DEFAULT</c>, and then refuses every create that
+    /// relies on it — the feature and its own validation disagreeing about the same field.
+    /// </para>
     /// <param name="field">The declared field.</param>
     private static bool IsFilledInByTheStore(FieldSchema field) =>
-        field.ComputedExpression is not null || field.Rollup is not null;
+        field.ComputedExpression is not null || field.Rollup is not null || field.Default is not null;
 
     /// <summary>
     /// Whether the missing required value is one this caller could not have supplied — a create of a
