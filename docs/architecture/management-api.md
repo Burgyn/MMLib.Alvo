@@ -257,7 +257,7 @@ management-shaped scope is ever wanted, and note it would then need a default fo
 
 ## `info` reports the data provider, not the engine
 
-`GET {m}/info` answers `{ version, mode, dataProvider, startupMode }`. `dataProvider` is the **registered
+`GET {m}/info` answers `{ version, mode, dataProvider, startupMode, ai }`. `dataProvider` is the **registered
 port implementation's type name** — `EfAlvoData`, `InMemoryAlvoData` — or `"none"` when no driver is
 registered, which is a supported composition.
 
@@ -265,6 +265,22 @@ It is not `"postgresql"` or `"sqlite"`, and it cannot be. The core may not refer
 an engine's name: that is the provider-model principle, and `IAlvoData` deliberately exposes no engine
 identity. Reporting one would mean either a `switch` over type names in the core — the engine-specific `if`
 that principle forbids — or a new port member whose only consumer is a diagnostic string.
+
+## `ai` says whether one is configured, never where it dials
+
+`ai` is `{ configured, kind, model, source }`, always present — an older instance that did not report AI and
+an instance with none are two different things, and a screen that had to tell them apart from an absent field
+would have two empty states. `configured` answers the first question; `kind` and `model` are what a reader
+recognises; `source` is `configuration`, `store` or `null`, which is what turns "why is it still using the
+old model" into one glance.
+
+**There is no endpoint, and there never will be one.** The reasoning is `WebhookDelivery`'s: an address is
+where a credential ends up in practice — in a query string, in a userinfo segment — and an internal host name
+is reconnaissance on its own. What a reader needs is whether it is on, whether it is the model they meant,
+and whether their deployment or the dashboard decided that.
+
+It is resolved per request rather than remembered at boot, because both layers it reads — the deployment's
+own configuration and the secret store — change without a restart.
 
 `mode` is `standalone` or `embedded`, two values and no more; it is computed from the registered `AlvoMode`,
 whose default is `Standalone`, which is why the standalone image needs no configuration to describe itself.
