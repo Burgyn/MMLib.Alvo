@@ -439,7 +439,48 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         {
             yield return CannotEverBeCreated(path);
         }
+
+        if (DefaultRefusal(field.Value) is { } refused)
+        {
+            yield return new DescriptorValidationError(
+                $"{path}/default", refused, RemoveOrCorrectTheDefault, DescriptorValidationSeverity.Error);
+        }
     }
+
+    /// <summary>What this build refuses about the field's declared default, as a sentence.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The mapper's own answer, asked here.</b> Without it a descriptor whose literal the field cannot
+    /// hold — <c>"default": "yes"</c> on a <c>boolean</c>, a string past <c>maxLength</c>, a value outside an
+    /// enum's <c>values</c> — validated <em>clean</em> and then failed at apply with an untyped exception,
+    /// because this pass only knew about the <c>$cel</c> half. A structured error carrying the field's
+    /// pointer is what an agent reads (§0 principle 4); an exception out of apply is not.
+    /// </para>
+    /// <para>
+    /// The field is deserialized rather than re-read from JSON, so the two passes cannot drift: a refusal
+    /// added to <c>FieldDefault</c> is reported here the day it lands. A field whose shape does not
+    /// deserialize is the schema pass's business and is silent here.
+    /// </para>
+    /// </remarks>
+    /// <param name="field">The field's raw JSON.</param>
+    private static string? DefaultRefusal(JsonElement field)
+    {
+        try
+        {
+            return field.Deserialize(AlvoDescriptorJsonContext.Default.FieldDescriptor) is { } declared
+                ? FieldDefault.RefusalFor(declared)
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The fix every default refusal shares, since each names its own cause in the message.</summary>
+    private const string RemoveOrCorrectTheDefault =
+        "Correct the default so the field would accept it from a caller, or remove it and send the value on "
+        + "create.";
 
     /// <summary>
     /// Whether the field declares the literal pair <c>required: true</c> + <c>readOnly: true</c>, which makes
@@ -453,9 +494,10 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     /// <c>read-only-required-field</c> against the caller whose own mask froze the field.
     /// </para>
     /// <para>
-    /// <b><c>computed</c> and <c>rollup</c> also make a field read-only, and are deliberately not here.</b>
-    /// Those are maintained by the database on the INSERT itself, so <c>NOT NULL</c> is satisfied without
-    /// the caller ever writing the field — refusing them would refuse a shape that works.
+    /// <b><c>computed</c>, <c>rollup</c> and a literal <c>default</c> also make a field read-only, and are
+    /// deliberately not here.</b> Each supplies the value without the caller writing it, so <c>NOT NULL</c> is
+    /// satisfied and refusing them would refuse a shape that works — and for <c>default</c> this refusal's own
+    /// fix text recommends the very combination it was refusing.
     /// </para>
     /// </remarks>
     /// <param name="field">The field's raw JSON.</param>
@@ -464,7 +506,18 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         && field.TryGetProperty("required", out var required)
         && required.ValueKind == JsonValueKind.True
         && field.TryGetProperty("readOnly", out var readOnly)
-        && readOnly.ValueKind == JsonValueKind.True;
+        && readOnly.ValueKind == JsonValueKind.True
+        && !HasLiteralDefault(field);
+
+    /// <summary>Whether the field declares a default this build fills in for the caller.</summary>
+    /// <remarks>
+    /// A <c>$cel</c> default is refused elsewhere and fills nothing, so only a literal counts here.
+    /// </remarks>
+    /// <param name="field">The field's raw JSON.</param>
+    private static bool HasLiteralDefault(JsonElement field) =>
+        field.TryGetProperty("default", out var declared)
+        && declared.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+        && !ValueOrExpr.IsTaggedExpression(declared);
 
     /// <summary>
     /// Reports every feature <see cref="UnhonouredFeatures"/> records as declared-and-unhonoured that this
@@ -493,11 +546,47 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     private static IEnumerable<DescriptorValidationError> Unhonoured<T>(
         string path, JsonElement node, IReadOnlyList<UnhonouredFeature<T>> unhonoured)
     {
-        foreach (var feature in unhonoured.Where(feature => Declares(node, feature.Path)))
+        foreach (var feature in unhonoured.Where(feature => Refuses(node, feature)))
         {
             yield return new DescriptorValidationError(
                 $"{path}/{feature.Path}", feature.Consequence, feature.Fix, DescriptorValidationSeverity.Error);
         }
+    }
+
+    /// <summary>
+    /// Whether this entry refuses what <paramref name="node"/> declares at its own path.
+    /// </summary>
+    /// <param name="node">The field's or entity's raw JSON.</param>
+    /// <param name="feature">The table entry being asked about.</param>
+    /// <remarks>
+    /// The presence of the key is the question for every feature that is unhonoured whole. An entry that is
+    /// honoured in part carries its own predicate over the raw value, so this pass and the typed one answer
+    /// the same question — see <c>UnhonouredFeature{T}.IsRefusedValue</c>.
+    /// </remarks>
+    private static bool Refuses<T>(JsonElement node, UnhonouredFeature<T> feature)
+    {
+        if (!Declares(node, feature.Path))
+        {
+            return false;
+        }
+
+        return feature.IsRefusedValue is not { } refuses
+            || (Value(node, feature.Path) is { } value && refuses(value));
+    }
+
+    /// <summary>The raw value at <paramref name="featurePath"/>, or <see langword="null"/> when absent.</summary>
+    private static JsonElement? Value(JsonElement node, string featurePath)
+    {
+        var current = node;
+        foreach (var segment in featurePath.Split('/'))
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(segment, out current))
+            {
+                return null;
+            }
+        }
+
+        return current;
     }
 
     /// <summary>

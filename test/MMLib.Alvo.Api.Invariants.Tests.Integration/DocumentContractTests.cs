@@ -41,8 +41,10 @@ public class DocumentContractTests
     /// The one shipped example this build cannot apply, named so its absence is a decision and not a gap.
     /// </summary>
     /// <remarks>
-    /// <c>complex-crm</c> declares <c>field.default</c> on three fields, which the descriptor validator
-    /// refuses because the value would be silently dropped. It is schema-valid and un-appliable at once —
+    /// <c>complex-crm</c> declares <c>field.default</c> on three fields. Two of them are <c>$cel</c>
+    /// expressions (<c>@user.id</c>), which the validator still refuses because the value would be silently
+    /// dropped — the literal half landed with #113 and the third one, <c>deals.stage</c>, now applies. It is
+    /// schema-valid and un-appliable at once —
     /// <c>ExamplesTests</c> checks only the schema — and <see cref="A_shipped_example_that_cannot_be_applied_is_refused_for_a_known_reason"/>
     /// pins exactly that, so this exclusion fails the moment the example becomes appliable or starts failing
     /// for some other reason. Tracked in #208.
@@ -97,7 +99,7 @@ public class DocumentContractTests
             () => AlvoApiWorld.FromDescriptorPathAsync(Unappliable, [Admin], _documented));
 
         failure.Message.ShouldContain(
-            "Field 'default' is not honoured yet",
+            "Field 'default' is honoured as a literal, but not as a '$cel' expression",
             Case.Insensitive,
             "#208: complex-crm is excluded from the corpus for this reason and no other");
     }
