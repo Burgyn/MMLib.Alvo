@@ -165,6 +165,16 @@ namespace MMLib.Alvo.Rules
         public static bool TryBuild(MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Expressions.ICelCompiler compiler, out MMLib.Alvo.Rules.PolicyCatalog? catalog, out System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.DescriptorValidationError> errors) { }
     }
 }
+namespace MMLib.Alvo.Secrets
+{
+    public sealed class AlvoSecretOptions
+    {
+        public const string ConfigurationSection = "Alvo:Secrets";
+        public AlvoSecretOptions() { }
+        public string? EncryptionKeyFile { get; set; }
+        public System.Collections.Generic.IDictionary<string, string> Values { get; }
+    }
+}
 namespace Microsoft.AspNetCore.Builder
 {
     public static class AlvoDataApiEndpointRouteBuilderExtensions

@@ -14,6 +14,8 @@ using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Migrations.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Secrets;
+using MMLib.Alvo.Secrets.Internal;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
@@ -55,6 +57,7 @@ public static class AlvoServiceCollectionExtensions
             ServiceDescriptor.Singleton<IValidateOptions<AlvoOptions>, AlvoProviderValidation>());
 
         AddSchemaOptions(services);
+        AddSecrets(services);
 
         services.TryAddSingleton<IDescriptorValidator, MMLib.Alvo.Descriptor.Internal.DescriptorValidator>();
         AddBootPlan(services);
@@ -153,5 +156,35 @@ public static class AlvoServiceCollectionExtensions
 
         static AlvoSchemaOptionsConfiguration Create(IServiceProvider provider)
             => new(provider.GetService<IConfiguration>());
+    }
+
+    /// <summary>
+    /// Registers the secret store every caller resolves: configuration first, and the writable layer a
+    /// driver registers behind it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The writable half is resolved optionally</b>, the same shape the data port already uses: only a
+    /// deployment that mounted a key file has one, and asking for it unconditionally would turn "no key
+    /// file" into a DI failure instead of a store that answers <c>CanWrite == false</c>.
+    /// </para>
+    /// <para>
+    /// The options bind from configuration through a factory, so a host that registered no
+    /// <see cref="IConfiguration"/> gets the defaults rather than a failure — the reason
+    /// <see cref="AddSchemaOptions"/> does the same.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The service collection to register into.</param>
+    private static void AddSecrets(IServiceCollection services)
+    {
+        services.AddOptions<AlvoSecretOptions>()
+            .Configure<IServiceProvider>((options, provider) =>
+                provider.GetService<IConfiguration>()?
+                    .GetSection(AlvoSecretOptions.ConfigurationSection).Bind(options));
+
+        services.TryAddSingleton<ConfigurationSecretStore>();
+        services.TryAddSingleton<ISecretStore>(provider => new LayeredSecretStore(
+            provider.GetRequiredService<ConfigurationSecretStore>(),
+            provider.GetService<IWritableSecretStore>()));
     }
 }
