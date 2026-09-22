@@ -139,6 +139,14 @@ internal static class WholeRowGuard
     /// nor <c>nullable</c> maps to a <c>NOT NULL</c> column all the same, so a replacement that omitted it
     /// would write <see langword="null"/> and be refused by the engine — a 500 carrying the provider's own
     /// wording where the caller should have been told which field to supply.
+    /// <para>
+    /// <b>A declared default is not an exemption here, and that distinction cost a 500.</b> Exempting the
+    /// field from this check drops the refusal for an explicit <see langword="null"/> too — the caller who
+    /// <em>names</em> the field and sends null is not omitting it, nothing fills it, and the engine answers
+    /// with a <c>NOT NULL</c> violation this port does not translate. The exemption belongs one step earlier
+    /// instead: the payload this guard is asked about is the one the defaults have already been filled into,
+    /// so an omitted-with-default field is genuinely supplied and an explicit null is still refused.
+    /// </para>
     /// </remarks>
     /// <param name="field">The field as the applied schema declares it.</param>
     private static bool MustBeSupplied(FieldSchema field) => field.Required || !field.Nullable;

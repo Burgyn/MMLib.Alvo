@@ -137,4 +137,30 @@ public sealed record FieldSchema
     /// maintains a rollup — so whichever won, the other declaration would be a lie about a stored number.
     /// </remarks>
     public RollupSchema? Rollup { get; init; }
+
+    /// <summary>
+    /// Gets the value a create takes when it omits this field, or <see langword="null"/> when the field has
+    /// no default.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The literal exactly as it was declared</b>, rather than a boxed CLR value. A
+    /// <see cref="SchemaModel"/> is persisted and read back by whichever driver is registered, so a CLR value
+    /// stored here would be one driver's idea of how a JSON <c>1</c> is held; the conversion happens where
+    /// the value is used, through the same funnel a caller's own value goes through.
+    /// </para>
+    /// <para>
+    /// <b>Only a literal reaches this.</b> The frozen schema also admits <c>{"$cel": "now()"}</c>, which
+    /// needs the caller's context at write time — that is the <c>computed</c> machinery rather than a column
+    /// default, and it stays refused at apply (#113).
+    /// </para>
+    /// <para>
+    /// The generated DDL carries it as a column <c>DEFAULT</c>, so a writer that reaches the table without
+    /// going through Alvo gets the same answer. The runtime model deliberately does <b>not</b> carry it: EF
+    /// reads a property's CLR default as "not set" on a value-generated column, which would turn a caller's
+    /// explicit <see langword="false"/> into a declared <see langword="true"/> — and an insert already omits
+    /// what a payload does not carry, so nothing is lost by leaving it out.
+    /// </para>
+    /// </remarks>
+    public System.Text.Json.JsonElement? Default { get; init; }
 }

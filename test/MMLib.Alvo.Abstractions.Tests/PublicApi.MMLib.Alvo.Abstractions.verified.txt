@@ -1476,6 +1476,7 @@ namespace MMLib.Alvo.Schema
     {
         public FieldSchema() { }
         public string? ComputedExpression { get; init; }
+        public System.Text.Json.JsonElement? Default { get; init; }
         public string? Description { get; init; }
         public System.Collections.Generic.IReadOnlyList<string>? EnumValues { get; init; }
         public string? Format { get; init; }

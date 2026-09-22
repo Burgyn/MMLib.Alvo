@@ -377,6 +377,12 @@ entity carrying one is **not PUT-able** by that caller. The `422` says so in as 
 `PATCH`. Inventing a "keep the hidden one" exception would reintroduce the partial-update semantics this
 route exists not to have.
 
+> **Met by #113's literal half (2026-09-22).** A declared default is now the answer for an omitted
+> field on **both** branches of this route — `EfAlvoData.WholeRowValues` fills it for a create and a
+> replacement alike, so `PUT` twice still produces one row — and `required` + `default` stopped being
+> a `422`: `RecordValidator.IsFilledInByTheStore` and `WholeRowGuard.MustBeSupplied` both count a
+> default as supplied. The CEL half is still refused, so a `$cel` default remains outside this table.
+
 **Forward commitment for #113.** When `field.default` lands, a declared default becomes the answer for an
 omitted field *ahead of* `null`, and a `required` field **with** a default stops being a `422`. That is a
 change to this route's contract, so #113 must revisit this table rather than land beside it. Recorded here

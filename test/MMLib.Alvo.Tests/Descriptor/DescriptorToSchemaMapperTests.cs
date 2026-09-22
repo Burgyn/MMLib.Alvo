@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Schema;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using FieldType = MMLib.Alvo.Schema.FieldType;
 
@@ -199,7 +200,7 @@ public class DescriptorToSchemaMapperTests
         "computed" => @"""computed"": ""net * 1.2""",
         "rollup" => @"""rollup"": { ""from"": ""lines"", ""op"": ""count"" }",
         "validation" => @"""validation"": ""value >= 0""",
-        "default" => @"""default"": 1",
+        "default" => @"""default"": { ""$cel"": ""now()"" }",
         "softDelete" => @"""softDelete"": true",
         _ when path.StartsWith("hooks/before", StringComparison.Ordinal) =>
             $@"""hooks"": {{ ""{path["hooks/".Length..]}"": [ {{ ""action"": {{ ""reject"": ""no"" }} }} ] }}",
@@ -589,6 +590,156 @@ public class DescriptorToSchemaMapperTests
 
         FieldOf(model, "invoices", "gross").ComputedExpression.ShouldBe("net * 1.2");
     }
+
+    /// <summary>
+    /// A literal default reaches the applied schema, as the literal it was declared as.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="JsonElement"/> rather than a boxed CLR value, because the applied schema is persisted and
+    /// read back by whichever driver is registered — a CLR value stored there would be one driver's idea of
+    /// how a JSON <c>1</c> is held.
+    /// </remarks>
+    [Theory]
+    [InlineData("boolean", "false", JsonValueKind.False)]
+    [InlineData("string", "\"normal\"", JsonValueKind.String)]
+    [InlineData("integer", "1", JsonValueKind.Number)]
+    public void Map_carries_a_literal_default(string type, string literal, JsonValueKind kind)
+    {
+        var model = MapInline(WithFieldFacet($@"""type"": ""{type}"", ""default"": {literal}"));
+
+        FieldOf(model, "invoices", "flag").Default!.Value.ValueKind.ShouldBe(kind);
+    }
+
+    /// <summary>
+    /// A CEL default stays refused: it needs the caller's context at write time, which is the
+    /// <c>computed</c> machinery rather than a column default (#113).
+    /// </summary>
+    [Fact]
+    public void Map_refuses_a_cel_default_by_name()
+    {
+        var refusal = Should.Throw<InvalidDataException>(
+            () => MapInline(WithFieldFacet(@"""type"": ""uuid"", ""default"": { ""$cel"": ""@user.id"" }")));
+
+        refusal.Message.ShouldContain("flag");
+        refusal.Message.ShouldContain("$cel");
+    }
+
+    /// <summary>
+    /// A literal the field's own type cannot hold is refused at apply, naming the field.
+    /// </summary>
+    /// <remarks>
+    /// The alternative is a <c>DEFAULT</c> clause the engine rejects while migrating, which reaches an
+    /// operator as provider SQL in a stack trace rather than as a sentence about their descriptor.
+    /// </remarks>
+    [Theory]
+    [InlineData("boolean", "\"yes\"")]
+    [InlineData("integer", "3.5")]
+    [InlineData("integer", "\"1\"")]
+    [InlineData("string", "1")]
+    public void Map_refuses_a_default_the_field_cannot_hold(string type, string literal)
+    {
+        var refusal = Should.Throw<InvalidDataException>(
+            () => MapInline(WithFieldFacet($@"""type"": ""{type}"", ""default"": {literal}")));
+
+        refusal.Message.ShouldContain("flag");
+        refusal.Message.ShouldContain("default");
+    }
+
+    /// <summary>
+    /// A field whose value is maintained for it cannot also fall back to a default, so the pair is refused
+    /// rather than one of the two winning quietly.
+    /// </summary>
+    /// <remarks>
+    /// Both maintainers, because the frozen schema forbids the pair identically for each and a defence that
+    /// covered one of them would be a defence with a hole in it.
+    /// </remarks>
+    [Theory]
+    [InlineData(@"""computed"": ""net * 1.2""", "computed")]
+    [InlineData(@"""rollup"": { ""from"": ""lines"", ""op"": ""count"" }", "rollup")]
+    public void Map_refuses_a_default_on_a_field_whose_value_is_maintained(string maintainer, string named)
+    {
+        var refusal = Should.Throw<InvalidDataException>(
+            () => MapInline(WithFieldFacet($@"""type"": ""decimal"", {maintainer}, ""default"": 0")));
+
+        refusal.Message.ShouldContain("flag");
+        refusal.Message.ShouldContain(named);
+    }
+
+    /// <summary>
+    /// A literal of the right JSON kind that the field's own facets still exclude is refused, naming why.
+    /// </summary>
+    /// <remarks>
+    /// Each of these is a value the API would refuse from a caller. Left to apply, the over-length one fails
+    /// as provider SQL while migrating and the enum one is stored happily and then read back as a value the
+    /// record validator rejects — a default nobody can use and nobody was told about.
+    /// </remarks>
+    [Theory]
+    [InlineData(@"""type"": ""string"", ""maxLength"": 3, ""default"": ""toolong""", "maxLength")]
+    [InlineData(@"""type"": ""enum"", ""values"": [""a"", ""b""], ""default"": ""c""", "values")]
+    [InlineData(@"""type"": ""uuid"", ""default"": ""not-a-uuid""", "uuid")]
+    [InlineData(@"""type"": ""date"", ""default"": ""not-a-date""", "date")]
+    [InlineData(@"""type"": ""decimal"", ""precision"": 5, ""scale"": 2, ""default"": 12345.678", "precision")]
+    public void Map_refuses_a_default_the_fields_own_facets_exclude(string facets, string named)
+    {
+        var refusal = Should.Throw<InvalidDataException>(() => MapInline(WithFieldFacet(facets)));
+
+        refusal.Message.ShouldContain("flag");
+        refusal.Message.ShouldContain(named);
+    }
+
+    /// <summary>
+    /// A <c>null</c> default is no declaration, and applies as it always did.
+    /// </summary>
+    /// <remarks>
+    /// The JSON pass reads an absent, empty or <c>false</c> value as declaring nothing, so refusing a null
+    /// here would be the two passes disagreeing about a descriptor that used to apply — a behaviour change
+    /// nobody asked for, arriving with a feature.
+    /// </remarks>
+    /// <summary>
+    /// A literal an escape-prone character could break out of is still just a value.
+    /// </summary>
+    /// <remarks>
+    /// The default is the one descriptor-supplied value that ends up inside <em>generated DDL text</em>
+    /// rather than bound as a parameter, so the quoting is EF's per-provider literal generator's job and this
+    /// is the adversarial probe that says so out loud: the apply accepts it, and the per-engine SQL snapshot
+    /// beside this suite shows how each engine spells it.
+    /// </remarks>
+    [Fact]
+    public void A_default_carrying_quotes_and_a_comment_marker_is_a_value_like_any_other()
+    {
+        var model = MapInline(WithFieldFacet(
+            @"""type"": ""string"", ""maxLength"": 80, ""default"": ""o'; DROP TABLE x; --"""));
+
+        FieldOf(model, "invoices", "flag").Default!.Value.GetString().ShouldBe("o'; DROP TABLE x; --");
+    }
+
+    [Fact]
+    public void A_null_default_is_not_a_declaration()
+    {
+        var model = MapInline(WithFieldFacet(@"""type"": ""string"", ""default"": null"));
+
+        FieldOf(model, "invoices", "flag").Default.ShouldBeNull();
+    }
+
+    private static string WithFieldFacet(string facets) => $$"""
+    {
+      "apiVersion": "alvo.dev/v1",
+      "name": "demo",
+      "entities": {
+        "lines": {
+          "fields": {
+            "invoice_id": { "type": "ref", "entity": "invoices" }
+          }
+        },
+        "invoices": {
+          "fields": {
+            "net": { "type": "decimal" },
+            "flag": { {{facets}} }
+          }
+        }
+      }
+    }
+    """;
 
     private static SchemaModel MapInline(string descriptorJson)
         => DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(descriptorJson));

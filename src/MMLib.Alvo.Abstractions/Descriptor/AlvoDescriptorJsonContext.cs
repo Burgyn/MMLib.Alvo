@@ -14,4 +14,8 @@ namespace MMLib.Alvo.Descriptor;
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     WriteIndented = true)]
 [JsonSerializable(typeof(AlvoDescriptor))]
+
+// One field on its own, for the validator: it walks raw JSON and needs the typed field to ask the same
+// question the mapper asks, rather than a second reading of the same rules.
+[JsonSerializable(typeof(FieldDescriptor))]
 internal sealed partial class AlvoDescriptorJsonContext : JsonSerializerContext;

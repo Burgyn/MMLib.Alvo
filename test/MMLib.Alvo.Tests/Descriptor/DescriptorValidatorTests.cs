@@ -73,7 +73,51 @@ public class DescriptorValidatorTests
     /// phrase, so the wording can improve without the fact needing an edit.
     /// </para>
     /// </remarks>
-    /// <param name="path">The table entry's path.</param>
+    /// <summary>
+    /// A literal default this build refuses is a <b>structured error</b>, not an exception out of apply.
+    /// </summary>
+    /// <remarks>
+    /// Raised by CodeRabbit on #262 and correct: this pass knew only about the <c>$cel</c> half, so a
+    /// descriptor whose literal the field cannot hold validated clean and then failed at apply with an
+    /// untyped <see cref="InvalidDataException"/> — the two passes disagreeing in the one direction that
+    /// costs an author a debugging session, and the opposite of what §0 principle 4 asks of a refusal.
+    /// </remarks>
+    /// <param name="facets">The field's declaration.</param>
+    /// <param name="named">What the message must name.</param>
+    [Theory]
+    [InlineData(@"""type"": ""boolean"", ""default"": ""yes""", "boolean")]
+    [InlineData(@"""type"": ""string"", ""maxLength"": 3, ""default"": ""toolong""", "maxLength")]
+    [InlineData(@"""type"": ""enum"", ""values"": [""a""], ""default"": ""b""", "values")]
+    [InlineData(@"""type"": ""decimal"", ""precision"": 5, ""scale"": 2, ""default"": 12345.678", "precision")]
+    public void A_literal_default_this_build_refuses_is_a_structured_error(string facets, string named)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "invoices": { "fields": {
+            "flag": { {{facets}} } } } } }
+        """;
+
+        var errors = Validate(json).Errors;
+
+        var refusal = errors.ShouldHaveSingleItem();
+        refusal.Path.ShouldBe("/entities/invoices/fields/flag/default");
+        refusal.Message.ShouldContain(named);
+        refusal.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    /// <summary>A literal the field accepts is not reported, or the check would refuse the feature.</summary>
+    [Fact]
+    public void A_literal_default_the_field_accepts_is_not_reported()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "invoices": { "fields": {
+            "flag": { "type": "string", "maxLength": 20, "default": "normal" } } } } }
+        """;
+
+        Validate(json).Errors.ShouldBeEmpty();
+    }
+
     [Theory]
     [MemberData(nameof(EveryUnhonouredFieldFeature))]
     public void Every_unhonoured_field_feature_is_a_structured_error(string path)
@@ -132,7 +176,7 @@ public class DescriptorValidatorTests
         "computed" => @"""computed"": ""net * 1.2""",
         "rollup" => @"""rollup"": { ""from"": ""lines"", ""op"": ""count"" }",
         "validation" => @"""validation"": ""value >= 0""",
-        "default" => @"""default"": 1",
+        "default" => @"""default"": { ""$cel"": ""now()"" }",
         "softDelete" => @"""softDelete"": true",
         _ when path.StartsWith("hooks/before", StringComparison.Ordinal) =>
             $@"""hooks"": {{ ""{path["hooks/".Length..]}"": [ {{ ""action"": {{ ""reject"": ""no"" }} }} ] }}",
@@ -167,7 +211,7 @@ public class DescriptorValidatorTests
           "entities": { "invoices": { "fields": {
             "amount": {
               "type": "decimal", "precision": 18, "scale": 2,
-              "validation": "value >= 0", "default": 1 } } } } }
+              "validation": "value >= 0", "default": { "$cel": "now()" } } } } } }
         """;
 
         var reported = _validator.Validate(json).Errors.Select(error => error.Path).ToList();
