@@ -31,10 +31,58 @@ namespace MMLib.Alvo.Ai
         public string Model { get; init; }
         public override string ToString() { }
     }
+    public sealed class AssistantRequest : System.IEquatable<MMLib.Alvo.Ai.AssistantRequest>
+    {
+        public AssistantRequest(string Project, string Message, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Ai.AssistantTurn> History) { }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Ai.AssistantTurn> History { get; init; }
+        public string Message { get; init; }
+        public string Project { get; init; }
+    }
+    public enum AssistantRole
+    {
+        Operator = 0,
+        Assistant = 1,
+    }
+    public sealed class AssistantTurn : System.IEquatable<MMLib.Alvo.Ai.AssistantTurn>
+    {
+        public AssistantTurn(MMLib.Alvo.Ai.AssistantRole Role, string Text) { }
+        public MMLib.Alvo.Ai.AssistantRole Role { get; init; }
+        public string Text { get; init; }
+    }
+    public abstract class AssistantUpdate : System.IEquatable<MMLib.Alvo.Ai.AssistantUpdate>
+    {
+        public sealed class Failed : MMLib.Alvo.Ai.AssistantUpdate, System.IEquatable<MMLib.Alvo.Ai.AssistantUpdate.Failed>
+        {
+            public Failed(string Reason) { }
+            public string Reason { get; init; }
+        }
+        public sealed class Proposal : MMLib.Alvo.Ai.AssistantUpdate, System.IEquatable<MMLib.Alvo.Ai.AssistantUpdate.Proposal>
+        {
+            public Proposal(string DescriptorJson, int ExpectedRevision, string Summary, System.Collections.Generic.IReadOnlyList<string> Refusals) { }
+            public string DescriptorJson { get; init; }
+            public int ExpectedRevision { get; init; }
+            public System.Collections.Generic.IReadOnlyList<string> Refusals { get; init; }
+            public string Summary { get; init; }
+        }
+        public sealed class Text : MMLib.Alvo.Ai.AssistantUpdate, System.IEquatable<MMLib.Alvo.Ai.AssistantUpdate.Text>
+        {
+            public Text(string Delta) { }
+            public string Delta { get; init; }
+        }
+        public sealed class ToolInvoked : MMLib.Alvo.Ai.AssistantUpdate, System.IEquatable<MMLib.Alvo.Ai.AssistantUpdate.ToolInvoked>
+        {
+            public ToolInvoked(string Tool) { }
+            public string Tool { get; init; }
+        }
+    }
     public interface IAiConnectionResolver
     {
         System.Threading.Tasks.ValueTask<MMLib.Alvo.Ai.AiConnectionSource> DescribeSourceAsync(System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.ValueTask<MMLib.Alvo.Ai.AlvoAiConnection?> ResolveAsync(System.Threading.CancellationToken ct = default);
+    }
+    public interface IAlvoAssistant
+    {
+        System.Collections.Generic.IAsyncEnumerable<MMLib.Alvo.Ai.AssistantUpdate> AskAsync(MMLib.Alvo.Ai.AssistantRequest request, System.Threading.CancellationToken ct = default);
     }
 }
 namespace MMLib.Alvo

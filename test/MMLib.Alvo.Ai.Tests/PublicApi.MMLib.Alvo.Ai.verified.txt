@@ -1,0 +1,18 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Ai.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Ai
+{
+    public sealed class AlvoAssistant : MMLib.Alvo.Ai.IAlvoAssistant
+    {
+        [System.Runtime.CompilerServices.AsyncIteratorStateMachine(typeof(MMLib.Alvo.Ai.AlvoAssistant.<AskAsync>d__5))]
+        public System.Collections.Generic.IAsyncEnumerable<MMLib.Alvo.Ai.AssistantUpdate> AskAsync(MMLib.Alvo.Ai.AssistantRequest request, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken ct = default) { }
+    }
+}
+namespace Microsoft.Extensions.DependencyInjection
+{
+    public static class AlvoAiServiceCollectionExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddAlvoAi(this Microsoft.Extensions.DependencyInjection.IServiceCollection services) { }
+    }
+}

@@ -1,4 +1,4 @@
-<Project>
+﻿<Project>
 
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
@@ -32,8 +32,21 @@
     <PackageVersion Include="NSubstitute" Version="6.2.0" />
     <PackageVersion Include="PublicApiGenerator" Version="11.5.4" />
     <PackageVersion Include="Verify.XunitV3" Version="32.0.0" />
-    <PackageVersion Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.11" />
-    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
+    <!-- The AI agent (MMLib.Alvo.Ai). Microsoft.Agents.AI is the Agent Framework loop; the two
+         Microsoft.Extensions.AI packages are the IChatClient abstraction and its OpenAI-shaped
+         client. All three are MIT and first-party, so none of them touches the licensing bans in
+         alvo-dotnet-conventions, and they are confined to the one package an embedded host can
+         decline to install. -->
+    <PackageVersion Include="Microsoft.Agents.AI" Version="1.22.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.10.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.10.0" />
+    <!-- These two are 10.0.12 while the rest of this family is 10.0.11, because the AI packages above
+         demand it — Microsoft.Extensions.AI asks for DependencyInjection.Abstractions >= 10.0.12 and
+         Microsoft.Agents.AI for FileSystemGlobbing >= 10.0.12 — and NuGet refuses the whole build with
+         NU1109 rather than resolving it. A patch ahead is the smallest move that restores: every other
+         package here asks for >= 10.0.11, which 10.0.12 satisfies, so nothing else changes. -->
+    <PackageVersion Include="Microsoft.Extensions.FileSystemGlobbing" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.11" />
