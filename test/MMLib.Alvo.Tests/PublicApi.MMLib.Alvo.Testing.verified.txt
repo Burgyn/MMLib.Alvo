@@ -297,6 +297,8 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_caller_who_sends_the_clr_default_value_stores_that_value() { }
         public System.Threading.Tasks.Task A_create_that_omits_the_field_stores_the_default() { }
         public System.Threading.Tasks.Task A_create_that_sends_a_value_stores_what_it_sent() { }
+        public System.Threading.Tasks.Task A_replacement_does_not_reset_a_frozen_field_to_its_default() { }
+        public System.Threading.Tasks.Task A_replacement_naming_the_field_as_null_is_still_refused() { }
         public System.Threading.Tasks.Task A_replacement_takes_the_same_defaults_a_create_does() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
     }

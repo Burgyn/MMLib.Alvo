@@ -678,6 +678,7 @@ public class DescriptorToSchemaMapperTests
     [InlineData(@"""type"": ""enum"", ""values"": [""a"", ""b""], ""default"": ""c""", "values")]
     [InlineData(@"""type"": ""uuid"", ""default"": ""not-a-uuid""", "uuid")]
     [InlineData(@"""type"": ""date"", ""default"": ""not-a-date""", "date")]
+    [InlineData(@"""type"": ""decimal"", ""precision"": 5, ""scale"": 2, ""default"": 12345.678", "precision")]
     public void Map_refuses_a_default_the_fields_own_facets_exclude(string facets, string named)
     {
         var refusal = Should.Throw<InvalidDataException>(() => MapInline(WithFieldFacet(facets)));
@@ -694,6 +695,24 @@ public class DescriptorToSchemaMapperTests
     /// here would be the two passes disagreeing about a descriptor that used to apply — a behaviour change
     /// nobody asked for, arriving with a feature.
     /// </remarks>
+    /// <summary>
+    /// A literal an escape-prone character could break out of is still just a value.
+    /// </summary>
+    /// <remarks>
+    /// The default is the one descriptor-supplied value that ends up inside <em>generated DDL text</em>
+    /// rather than bound as a parameter, so the quoting is EF's per-provider literal generator's job and this
+    /// is the adversarial probe that says so out loud: the apply accepts it, and the per-engine SQL snapshot
+    /// beside this suite shows how each engine spells it.
+    /// </remarks>
+    [Fact]
+    public void A_default_carrying_quotes_and_a_comment_marker_is_a_value_like_any_other()
+    {
+        var model = MapInline(WithFieldFacet(
+            @"""type"": ""string"", ""maxLength"": 80, ""default"": ""o'; DROP TABLE x; --"""));
+
+        FieldOf(model, "invoices", "flag").Default!.Value.GetString().ShouldBe("o'; DROP TABLE x; --");
+    }
+
     [Fact]
     public void A_null_default_is_not_a_declaration()
     {

@@ -86,6 +86,18 @@ public abstract class SchemaSqlSnapshotTests
                 Nullable = true,
                 Default = Literal("\"standard\""),
             },
+
+            /* The adversarial one. A default is the single descriptor-supplied value that ends up inside
+               generated DDL *text* rather than bound as a parameter, so the quoting is the provider literal
+               generator's and this snapshot is where each engine's spelling of it is visible. */
+            new FieldSchema
+            {
+                Name = "note",
+                Type = FieldType.String,
+                MaxLength = 80,
+                Nullable = true,
+                Default = Literal("\"o'; DROP TABLE vehicles; --\""),
+            },
         ]));
 
         var plan = await CreateMigrator().PlanAsync(before, after, new MigrationOptions(), TestContext.Current.CancellationToken);

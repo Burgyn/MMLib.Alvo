@@ -453,9 +453,10 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     /// <c>read-only-required-field</c> against the caller whose own mask froze the field.
     /// </para>
     /// <para>
-    /// <b><c>computed</c> and <c>rollup</c> also make a field read-only, and are deliberately not here.</b>
-    /// Those are maintained by the database on the INSERT itself, so <c>NOT NULL</c> is satisfied without
-    /// the caller ever writing the field — refusing them would refuse a shape that works.
+    /// <b><c>computed</c>, <c>rollup</c> and a literal <c>default</c> also make a field read-only, and are
+    /// deliberately not here.</b> Each supplies the value without the caller writing it, so <c>NOT NULL</c> is
+    /// satisfied and refusing them would refuse a shape that works — and for <c>default</c> this refusal's own
+    /// fix text recommends the very combination it was refusing.
     /// </para>
     /// </remarks>
     /// <param name="field">The field's raw JSON.</param>
@@ -464,7 +465,18 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         && field.TryGetProperty("required", out var required)
         && required.ValueKind == JsonValueKind.True
         && field.TryGetProperty("readOnly", out var readOnly)
-        && readOnly.ValueKind == JsonValueKind.True;
+        && readOnly.ValueKind == JsonValueKind.True
+        && !HasLiteralDefault(field);
+
+    /// <summary>Whether the field declares a default this build fills in for the caller.</summary>
+    /// <remarks>
+    /// A <c>$cel</c> default is refused elsewhere and fills nothing, so only a literal counts here.
+    /// </remarks>
+    /// <param name="field">The field's raw JSON.</param>
+    private static bool HasLiteralDefault(JsonElement field) =>
+        field.TryGetProperty("default", out var declared)
+        && declared.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined)
+        && !ValueOrExpr.IsTaggedExpression(declared);
 
     /// <summary>
     /// Reports every feature <see cref="UnhonouredFeatures"/> records as declared-and-unhonoured that this

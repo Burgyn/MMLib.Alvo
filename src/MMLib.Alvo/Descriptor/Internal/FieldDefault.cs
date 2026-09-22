@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Globalization;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Descriptor.Internal;
 
@@ -122,6 +123,11 @@ internal static class FieldDefault
     /// <summary>Why the field's facets exclude this literal, or <see langword="null"/> when they do not.</summary>
     private static string? Excluded(FieldDescriptor field, JsonElement literal)
     {
+        if (literal.ValueKind is JsonValueKind.Number)
+        {
+            return OutsideDecimalBounds(field, literal);
+        }
+
         if (literal.ValueKind is not JsonValueKind.String)
         {
             return null;
@@ -141,6 +147,34 @@ internal static class FieldDefault
                 value, System.Globalization.CultureInfo.InvariantCulture, out _) => $"'{value}' is not a date",
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Why a numeric default does not fit the column's declared precision, or <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// Left to apply, <c>12345.678</c> on a <c>decimal(5,2)</c> becomes a <c>DEFAULT</c> the engine rejects
+    /// while migrating, and the write path then fills the out-of-range value into every create — the record
+    /// validator's own bounds check only runs on values a caller supplied.
+    /// </remarks>
+    private static string? OutsideDecimalBounds(FieldDescriptor field, JsonElement literal)
+    {
+        if (field.Precision is not { } precision || !literal.TryGetDecimal(out var value))
+        {
+            return null;
+        }
+
+        var scale = field.Scale ?? 0;
+        var digits = Math.Abs(value).ToString(
+            "0.############################", CultureInfo.InvariantCulture);
+        var parts = digits.Split('.');
+        var integral = parts[0] == "0" ? 0 : parts[0].Length;
+        var fractional = parts.Length > 1 ? parts[1].Length : 0;
+
+        return fractional > scale || integral + scale > precision
+            ? $"it does not fit 'precision' {precision.ToString(CultureInfo.InvariantCulture)} and 'scale' "
+                + scale.ToString(CultureInfo.InvariantCulture)
+            : null;
     }
 
     /// <summary>

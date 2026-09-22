@@ -41,7 +41,7 @@ public sealed record ValueOrExpr
     /// </remarks>
     /// <param name="value">The raw value.</param>
     /// <returns><see langword="true"/> when it carries a <c>$cel</c> tag the converter would read.</returns>
-    public static bool IsTaggedExpression(JsonElement value) => TryReadCel(value, out _);
+    internal static bool IsTaggedExpression(JsonElement value) => TryReadCel(value, out _);
 
     /// <summary>Reads the <c>$cel</c> tag, when the value carries one.</summary>
     /// <param name="element">The raw value.</param>

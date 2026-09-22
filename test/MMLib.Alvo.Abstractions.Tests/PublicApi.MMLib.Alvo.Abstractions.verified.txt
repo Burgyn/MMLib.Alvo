@@ -765,7 +765,6 @@ namespace MMLib.Alvo.Descriptor
         public System.Text.Json.JsonElement? Literal { get; init; }
         public static MMLib.Alvo.Descriptor.ValueOrExpr FromExpression(string expression) { }
         public static MMLib.Alvo.Descriptor.ValueOrExpr FromLiteral(System.Text.Json.JsonElement literal) { }
-        public static bool IsTaggedExpression(System.Text.Json.JsonElement value) { }
     }
     public sealed class WebhookAction : MMLib.Alvo.Descriptor.AutomationAction, System.IEquatable<MMLib.Alvo.Descriptor.WebhookAction>
     {

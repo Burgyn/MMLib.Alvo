@@ -34,13 +34,29 @@ internal static class FieldDefaults
     /// </summary>
     /// <param name="schema">The entity being written.</param>
     /// <param name="values">The caller's payload.</param>
+    /// <param name="frozen">
+    /// The fields this caller may not write — <c>readOnly</c> and <c>hidden</c> under their own verdict.
+    /// Empty when the row is being created, because there is no stored value a default could destroy.
+    /// </param>
+    /// <remarks>
+    /// <b>A default must not reach a field the caller could not have sent</b>, and on a replacement that is
+    /// not a nicety. A frozen field the payload cannot name would otherwise be written back to its declared
+    /// default on every <c>PUT</c> — so a caller who is forbidden to touch <c>status</c> resets it by
+    /// replacing the row's title, which is a write to a field the policy froze, through the one door
+    /// <c>WholeRowGuard</c> deliberately leaves open. Its <c>CallerOwnedFields</c> exemption cannot
+    /// catch it, because the key is already in the bag by the time the guard looks.
+    /// </remarks>
     internal static IReadOnlyDictionary<string, object?> Applied(
-        EntitySchema schema, IReadOnlyDictionary<string, object?> values)
+        EntitySchema schema, IReadOnlyDictionary<string, object?> values, IReadOnlySet<string>? frozen = null)
     {
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(values);
 
-        var missing = schema.Fields.Where(field => field.Default is not null && !values.ContainsKey(field.Name));
+        var missing = schema.Fields.Where(field =>
+            field.Default is not null
+            && !values.ContainsKey(field.Name)
+            && frozen?.Contains(field.Name) != true);
+
         if (!missing.Any())
         {
             return values;

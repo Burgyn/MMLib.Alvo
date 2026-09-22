@@ -114,6 +114,58 @@ public abstract class AlvoDataDefaultTests
         replaced.Row[Done].ShouldBe(false);
     }
 
+    /// <summary>
+    /// A replacement does not reset a field this caller may not write, even when it declares a default.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The authorization hole the fill opens if it is written without the caller's mask. A frozen field is one
+    /// the payload <em>cannot</em> name — naming it is refused — so "the payload does not carry it" is true of
+    /// every replacement such a caller makes. Filling the default there writes a field the policy froze, on
+    /// every <c>PUT</c>, through the one door the whole-row guard deliberately leaves open for frozen fields.
+    /// </para>
+    /// <para>
+    /// The stored value is not the default, so an implementation that resets it fails rather than answering
+    /// the same either way.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_replacement_does_not_reset_a_frozen_field_to_its_default()
+    {
+        var data = await CreateAsync(SchemaWithFrozenPriority, DescriptorWithFrozenPriority);
+        var created = await data.CreateAsync(
+            Tasks, Payload((Title, "first"), (Priority, "high")), _admin, cancellationToken: Ct);
+
+        var replaced = await data.ReplaceAsync(
+            Tasks, (Guid)created["id"]!, Payload((Title, "second")), _caller, cancellationToken: Ct);
+
+        replaced.Row[Priority].ShouldBe(
+            "high", "a default may not write a field this caller is forbidden to send");
+    }
+
+    /// <summary>
+    /// An explicit <see langword="null"/> is still refused on a column that cannot hold one, default or not.
+    /// </summary>
+    /// <remarks>
+    /// The other half of the same exemption. "Omitted" and "sent as null" are different requests: the first
+    /// takes the default, the second is the caller asking for a value the column refuses — and exempting the
+    /// field from the guard rather than filling it first turns that 422 into the engine's own <c>NOT NULL</c>
+    /// violation, which this port does not translate.
+    /// </remarks>
+    [Fact]
+    public async Task A_replacement_naming_the_field_as_null_is_still_refused()
+    {
+        var data = await CreateAsync(SchemaWithRequiredDefault, DescriptorWithRequiredDefault);
+        var created = await WriteAsync(data, Payload((Title, "a")));
+
+        var refusal = await Should.ThrowAsync<ArgumentException>(
+            async () => await data.ReplaceAsync(
+                Tasks, (Guid)created["id"]!, Payload((Title, "b"), (Priority, null)), _caller,
+                cancellationToken: Ct));
+
+        refusal.Message.ShouldContain(Priority);
+    }
+
     private static readonly AlvoContext _caller = new()
     {
         User = UserId.New(),
@@ -134,7 +186,48 @@ public abstract class AlvoDataDefaultTests
         return payload;
     }
 
+    /// <summary>The caller the frozen field's mask admits — the one who may set it in the first place.</summary>
+    private static readonly AlvoContext _admin = new()
+    {
+        User = UserId.New(),
+        Roles = new HashSet<Role> { Role.Authenticated, Role.Admin },
+    };
+
     private static AlvoDescriptor Descriptor => DescriptorWith(doneDefault: false);
+
+    /// <summary>
+    /// The same entity with <c>priority</c> frozen for everyone but an agent — a CEL-valued
+    /// <c>readOnly</c>, which is the shape the schema documents as the per-role mask.
+    /// </summary>
+    private static AlvoDescriptor DescriptorWithFrozenPriority => Rebuilt(
+        DescriptorWith(doneDefault: false),
+        priority => priority with { ReadOnly = BoolOrCel.FromExpression("!('admin' in @user.roles)") });
+
+    private static SchemaModel SchemaWithFrozenPriority => Schema;
+
+    /// <summary>The same entity with <c>priority</c> required, which its default supplies.</summary>
+    private static AlvoDescriptor DescriptorWithRequiredDefault => Rebuilt(
+        DescriptorWith(doneDefault: false), priority => priority with { Required = true });
+
+    private static SchemaModel SchemaWithRequiredDefault => new([TasksEntity(doneDefault: false, requiredPriority: true)]);
+
+    /// <summary>The fixture descriptor with <c>priority</c> rewritten.</summary>
+    private static AlvoDescriptor Rebuilt(AlvoDescriptor descriptor, Func<FieldDescriptor, FieldDescriptor> rewrite)
+    {
+        var entity = descriptor.Entities[Tasks];
+        var fields = new Dictionary<string, FieldDescriptor>(entity.Fields, StringComparer.Ordinal)
+        {
+            [Priority] = rewrite(entity.Fields[Priority]),
+        };
+
+        return descriptor with
+        {
+            Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
+            {
+                [Tasks] = entity with { Fields = fields },
+            },
+        };
+    }
 
     private static AlvoDescriptor DescriptorDefaultingToTrue => DescriptorWith(doneDefault: true);
 
@@ -167,7 +260,7 @@ public abstract class AlvoDataDefaultTests
         },
     };
 
-    private static EntitySchema TasksEntity(bool doneDefault) => new()
+    private static EntitySchema TasksEntity(bool doneDefault, bool requiredPriority = false) => new()
     {
         Name = Tasks,
         Tenancy = TenancyMode.Global,
@@ -181,7 +274,8 @@ public abstract class AlvoDataDefaultTests
                 Name = Priority,
                 Type = SchemaField.String,
                 MaxLength = 20,
-                Nullable = true,
+                Required = requiredPriority,
+                Nullable = !requiredPriority,
                 Default = Literal("normal"),
             },
         ],

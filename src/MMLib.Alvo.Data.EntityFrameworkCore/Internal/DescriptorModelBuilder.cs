@@ -154,26 +154,6 @@ internal static class DescriptorModelBuilder
     }
 
     /// <summary>
-    /// Marks a <c>computed</c> field a <b>stored</b> generated column, so <em>EF's own per-provider migrations
-    /// generator</em> spells the DDL.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>This is what satisfies "the core never spells the DDL", and it is not a shortcut.</b> Measured
-    /// (spike Q5–Q7): from this one annotation EF emits <c>numeric(18,2) GENERATED ALWAYS AS (…) STORED</c> in
-    /// PostgreSQL's <c>CREATE TABLE</c> and its in-place <c>ALTER TABLE … ADD</c>, the legal short form
-    /// <c>AS (…) STORED</c> on SQLite, and — the finding this whole seam turns on — SQLite's create-new / copy /
-    /// drop / rename rebuild, whose <c>INSERT … SELECT</c> correctly omits the generated column. None of that
-    /// could be assembled here without also owning every column's type mapping.
-    /// </para>
-    /// <para>
-    /// <b><c>stored: true</c>, never virtual.</b> SQLite accepts <c>VIRTUAL</c> exactly where it refuses
-    /// <c>STORED</c>, and PostgreSQL 16 has no <c>VIRTUAL</c> at all, so letting each engine pick would make
-    /// one descriptor produce a column one engine can index and filter on and the other cannot — §0 principle
-    /// 3's failure mode, silently.
-    /// </para>
-    /// </remarks>
-    /// <summary>
     /// Emits a column <c>DEFAULT</c> for a field that declares a literal one, through EF's own per-provider
     /// migrations generator — the same seam <see cref="ConfigureComputed"/> uses, for the same reason.
     /// </summary>
@@ -211,6 +191,26 @@ internal static class DescriptorModelBuilder
         _ => literal.GetRawText(),
     };
 
+    /// <summary>
+    /// Marks a <c>computed</c> field a <b>stored</b> generated column, so <em>EF's own per-provider migrations
+    /// generator</em> spells the DDL.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This is what satisfies "the core never spells the DDL", and it is not a shortcut.</b> Measured
+    /// (spike Q5–Q7): from this one annotation EF emits <c>numeric(18,2) GENERATED ALWAYS AS (…) STORED</c> in
+    /// PostgreSQL's <c>CREATE TABLE</c> and its in-place <c>ALTER TABLE … ADD</c>, the legal short form
+    /// <c>AS (…) STORED</c> on SQLite, and — the finding this whole seam turns on — SQLite's create-new / copy /
+    /// drop / rename rebuild, whose <c>INSERT … SELECT</c> correctly omits the generated column. None of that
+    /// could be assembled here without also owning every column's type mapping.
+    /// </para>
+    /// <para>
+    /// <b><c>stored: true</c>, never virtual.</b> SQLite accepts <c>VIRTUAL</c> exactly where it refuses
+    /// <c>STORED</c>, and PostgreSQL 16 has no <c>VIRTUAL</c> at all, so letting each engine pick would make
+    /// one descriptor produce a column one engine can index and filter on and the other cannot — §0 principle
+    /// 3's failure mode, silently.
+    /// </para>
+    /// </remarks>
     private static void ConfigureComputed(
         PropertyBuilder property, EntitySchema entity, FieldSchema field, ComputedColumnSql? computed)
     {
