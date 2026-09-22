@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Playwright;
 using MMLib.Alvo.Host;
@@ -29,7 +30,7 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// which is the failure mode where a suite goes green in the wrong order and red in CI.
 /// </para>
 /// </remarks>
-public sealed class AdminWorld : IAsyncLifetime
+public class AdminWorld : IAsyncLifetime
 {
     /// <summary>
     /// How long any one scenario may take before it is a failure rather than a wait.
@@ -122,6 +123,11 @@ public sealed class AdminWorld : IAsyncLifetime
            deliberately narrow, and "urls" is the key it reads anyway. */
         builder.Configuration["urls"] = BaseAddress;
 
+        /* The one seam a derived world has. Registrations added here land after the host's own, so a
+           plain Add wins over the TryAdd the host made — which is how the assistant scenarios put a
+           scripted agent in front of the real one without a second host. */
+        Configure(builder.Services);
+
         _app = await AlvoHost.BuildAsync(builder).ConfigureAwait(false);
         await _app.StartAsync().ConfigureAwait(false);
 
@@ -129,9 +135,28 @@ public sealed class AdminWorld : IAsyncLifetime
         _browser = await _playwright.Chromium.LaunchAsync(new() { Headless = true }).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Adds this world's own services to the shipped host.
+    /// </summary>
+    /// <remarks>
+    /// Empty by default, so the ordinary suite runs exactly what the container runs. A world that
+    /// overrides it is stating which one service it is standing in for, and everything else stays real.
+    /// </remarks>
+    /// <param name="services">The host's service collection, after the host registered its own.</param>
+    protected virtual void Configure(IServiceCollection services)
+    {
+    }
+
     /// <inheritdoc/>
+    /// <remarks>
+    /// <c>SuppressFinalize</c> because the type is no longer sealed — <see cref="AssistantWorld"/> derives
+    /// from it to stand one service in — and a derived type that introduced a finalizer would otherwise have
+    /// to re-implement disposal to reach it.
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
+        GC.SuppressFinalize(this);
+
         if (_browser is not null)
         {
             await _browser.DisposeAsync().ConfigureAwait(false);
