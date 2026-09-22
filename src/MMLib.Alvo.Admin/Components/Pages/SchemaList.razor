@@ -47,15 +47,18 @@
                 </span>
             </div>
 
-            <div class="a-row" style="gap:var(--space-4);flex-wrap:wrap">
-                <label class="a-row" style="gap:var(--space-2);cursor:pointer">
-                    <input type="checkbox" checked="@_scoped" @onchange="args => _scoped = args.Value is true" />
-                    <span>tenant-scoped</span>
-                </label>
-                <label class="a-row" style="gap:var(--space-2);cursor:pointer">
-                    <input type="checkbox" checked="@_audited" @onchange="args => _audited = args.Value is true" />
-                    <span>audited</span>
-                </label>
+            <div class="a-field">
+                <span class="a-label">Constraints</span>
+                <div class="a-check-row">
+                    <label class="a-check">
+                        <input type="checkbox" checked="@_scoped" @onchange="args => _scoped = args.Value is true" />
+                        <span>tenant-scoped</span>
+                    </label>
+                    <label class="a-check">
+                        <input type="checkbox" checked="@_audited" @onchange="args => _audited = args.Value is true" />
+                        <span>audited</span>
+                    </label>
+                </div>
             </div>
             <span class="a-section-sub">
                 Scoped means every row belongs to a tenant and a caller with none is refused with 403.

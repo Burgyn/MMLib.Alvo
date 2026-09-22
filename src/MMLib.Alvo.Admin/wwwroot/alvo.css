@@ -525,10 +525,26 @@ h1.a-page-title:focus {
   cursor: not-allowed;
 }
 
+/* A form is `.a-stack`, the same column every screen is built from — a second name
+   for one gap is how two forms come to sit differently. What was missing was any
+   container at all: the field editor's panel had none, so its fields had only their
+   own 4 px internal gap between them and a hint sat as close to the next control's
+   label as to the input it described. */
 .a-field {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
+}
+
+/* Two or more fields side by side, stacking when there is no room for them. */
+.a-field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.a-field-row > .a-field {
+  flex: 1 1 160px;
 }
 
 .a-label {
@@ -537,16 +553,45 @@ h1.a-page-title:focus {
   font-weight: var(--weight-medium);
 }
 
+/* A checkbox and its label read as one control, so the whole thing is the target.
+
+   This name used to mean something else — an 18 px drawn square, inherited from the
+   reference drawing, referenced by no component. Two meanings for one class is how a
+   label silently became a box, which is exactly what happened when this rule was
+   added beside it; the dead one is gone rather than both being kept apart by care. */
+.a-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.a-check-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+}
+
+/* The chips a "pick one of these" field is made of. */
+.a-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .a-input,
 .a-select,
 .a-textarea {
   width: 100%;
+  min-height: 84px;
   padding: calc(var(--space-2) * var(--density)) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--panel);
   color: var(--text);
   font-size: var(--text-sm);
+  resize: vertical;
 }
 
 .a-input::placeholder,
@@ -558,33 +603,6 @@ h1.a-page-title:focus {
 .a-select:hover,
 .a-textarea:hover {
   border-color: var(--border2);
-}
-
-.a-textarea {
-  min-height: 84px;
-  resize: vertical;
-}
-
-.a-check {
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  flex: none;
-  border: 1.5px solid var(--border2);
-  border-radius: var(--radius-xs);
-  background: var(--panel);
-  cursor: pointer;
-}
-
-.a-check:hover {
-  border-color: var(--accent);
-}
-
-.a-check--on {
-  border-color: transparent;
-  background: var(--accent);
-  color: var(--accentText);
 }
 
 .a-toggle {

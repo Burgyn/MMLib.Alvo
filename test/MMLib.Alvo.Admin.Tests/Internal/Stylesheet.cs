@@ -131,4 +131,51 @@ internal static partial class Stylesheet
         @"#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(",
         RegexOptions.Compiled)]
     private static partial Regex LiteralColour();
+
+    /// <summary>
+    /// The top-level selectors this stylesheet declares more than once.
+    /// </summary>
+    /// <param name="css">The stylesheet's text.</param>
+    /// <returns>Each repeated selector, in the order it first appears.</returns>
+    /// <remarks>
+    /// <para>
+    /// <b>A class with two definitions has two meanings, and the later one wins silently.</b>
+    /// <c>.a-check</c> was both a drawn 18 px square and a checkbox-with-its-label; a form that
+    /// asked for the second got the first, and what shipped was a label rendered as a box on top of
+    /// the field below it. Nothing failed — the page rendered, the control worked, and only the
+    /// screen was wrong.
+    /// </para>
+    /// <para>
+    /// <b>Top level only</b>, matched by the absence of indentation: a media query legitimately
+    /// redefines what it narrows, and a state selector (<c>:hover</c>, <c>--on</c>) is a different
+    /// selector rather than a second definition of the same one.
+    /// </para>
+    /// </remarks>
+    internal static IReadOnlyList<string> SelectorsDefinedTwice(string css)
+    {
+        ArgumentNullException.ThrowIfNull(css);
+
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        var order = new List<string>();
+
+        foreach (var line in css.ReplaceLineEndings("\n").Split('\n'))
+        {
+            if (TopLevelSelector().Match(line) is not { Success: true } match)
+            {
+                continue;
+            }
+
+            var selector = match.Groups["selector"].Value.Trim();
+            counts[selector] = counts.TryGetValue(selector, out var seen) ? seen + 1 : 1;
+            if (counts[selector] == 2)
+            {
+                order.Add(selector);
+            }
+        }
+
+        return order;
+    }
+
+    [GeneratedRegex(@"^(?<selector>[.#a-zA-Z][^{@]*)\{\s*$", RegexOptions.Compiled)]
+    private static partial Regex TopLevelSelector();
 }

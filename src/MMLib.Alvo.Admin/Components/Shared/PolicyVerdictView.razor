@@ -70,7 +70,7 @@ else
 {
     <div class="a-field">
         <span class="a-label">Hidden from this caller</span>
-        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+        <div class="a-choice">
             @foreach (var hidden in Verdict.HiddenFields)
             {
                 <span class="a-badge a-badge--warn a-mono">@hidden</span>
@@ -84,7 +84,7 @@ else
 {
     <div class="a-field">
         <span class="a-label">Read-only for this caller</span>
-        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+        <div class="a-choice">
             @foreach (var readOnly in Verdict.ReadOnlyFields)
             {
                 <span class="a-badge a-mono">@readOnly</span>

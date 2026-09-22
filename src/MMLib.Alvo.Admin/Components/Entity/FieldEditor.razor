@@ -9,118 +9,127 @@
     Nothing here writes to the database. The field lands in the working copy and goes through the
     same dry run as every other change.
 *@
-<div class="a-panel" style="padding:var(--space-5);margin-top:var(--space-4)">
-    <div class="a-section" style="padding:0 0 var(--space-3)">
+<div class="a-panel" style="margin-top:var(--space-4)">
+    <div class="a-section">
         <span class="a-section-title">@(IsEditing ? $"Edit {Editing}" : "Add a field")</span>
         <span class="a-section-sub">
-            It joins the working copy. Preview shows what it does to the table before anything runs.
+            @(IsEditing
+                ? "The change joins the working copy. Preview shows what it does to the table before anything runs."
+                : "It joins the working copy. Preview shows what it does to the table before anything runs.")
         </span>
     </div>
 
-    @if (_refusal is { Length: > 0 })
-    {
-        <ErrorPanel Heading="That field cannot be added" Fix="@_refusal" />
-    }
-
-    <div class="a-field">
-        <label class="a-label" for="new-field-name">Name</label>
-        <input class="a-input" id="new-field-name" value="@_name" placeholder="scheduled_for"
-               @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off"
-               disabled="@IsEditing" />
-        @if (IsEditing)
+    <div class="a-stack" style="padding:var(--space-5)">
+        @if (_refusal is { Length: > 0 })
         {
+            <ErrorPanel Heading="@(IsEditing ? "That change cannot be saved" : "That field cannot be added")"
+                        Fix="@_refusal" />
+        }
+
+        <div class="a-field">
+            <label class="a-label" for="new-field-name">Name</label>
+            <input class="a-input" id="new-field-name" value="@_name" placeholder="scheduled_for"
+                   @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off"
+                   disabled="@IsEditing" />
             <span class="a-section-sub">
-                A rename is not a facet change: the schema carries it as
-                <code class="a-mono">renamedFrom</code>, so that the migration moves the column instead
-                of dropping one and creating another. Until that control exists, rename by editing the
-                descriptor and importing it.
+                @if (IsEditing)
+                {
+                    <text>
+                        A rename is carried by <code class="a-mono">renamedFrom</code>, so that the column
+                        moves instead of being dropped and recreated — rename in the descriptor and import it.
+                    </text>
+                }
+                else
+                {
+                    <text>Lower case, digits and underscores — <code class="a-mono">@DescriptorNames.Member</code></text>
+                }
             </span>
-        }
-        else
-        {
-            <span class="a-section-sub">Lower case, digits and underscores — <code class="a-mono">@DescriptorNames.Member</code></span>
-        }
-    </div>
+        </div>
 
-    <div class="a-field">
-        <span class="a-label">Type</span>
-        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-            @foreach (var type in Enum.GetValues<FieldType>())
+        <div class="a-field">
+            <span class="a-label">Type</span>
+            <div class="a-choice">
+                @foreach (var type in Enum.GetValues<FieldType>())
+                {
+                    <button type="button" class="@($"a-chip{(type == _type ? " a-chip--on" : string.Empty)}")"
+                            @onclick="() => _type = type">@type.ToString().ToLowerInvariant()</button>
+                }
+            </div>
+        </div>
+
+        <div class="a-field">
+            <span class="a-label">Constraints</span>
+            <div class="a-check-row">
+                <label class="a-check">
+                    <input type="checkbox" checked="@_required" @onchange="args => _required = args.Value is true" />
+                    <span>required</span>
+                </label>
+                @if (_type is FieldType.String or FieldType.Integer or FieldType.Uuid or FieldType.Date or FieldType.DateTime)
+                {
+                    <label class="a-check">
+                        <input type="checkbox" checked="@_unique" @onchange="args => _unique = args.Value is true" />
+                        <span>unique</span>
+                    </label>
+                }
+            </div>
+        </div>
+
+        @switch (_type)
+        {
+            case FieldType.String:
+                <div class="a-field">
+                    <label class="a-label" for="new-field-max">Max length</label>
+                    <input class="a-input" id="new-field-max" type="number" value="@_maxLength"
+                           @oninput="args => _maxLength = Number(args.Value, 120)" />
+                </div>
+                break;
+            case FieldType.Decimal:
+                <div class="a-field-row">
+                    <div class="a-field">
+                        <label class="a-label" for="new-field-precision">Precision</label>
+                        <input class="a-input" id="new-field-precision" type="number" value="@_precision"
+                               @oninput="args => _precision = Number(args.Value, 10)" />
+                        <span class="a-section-sub">Total digits, not the ones before the point.</span>
+                    </div>
+                    <div class="a-field">
+                        <label class="a-label" for="new-field-scale">Scale</label>
+                        <input class="a-input" id="new-field-scale" type="number" value="@_scale"
+                               @oninput="args => _scale = Number(args.Value, 2)" />
+                        <span class="a-section-sub">Digits after the point.</span>
+                    </div>
+                </div>
+                break;
+            case FieldType.Enum:
+                <div class="a-field">
+                    <label class="a-label" for="new-field-values">Values</label>
+                    <input class="a-input" id="new-field-values" value="@_values" placeholder="scheduled, in_progress, completed"
+                           @oninput="args => _values = args.Value?.ToString() ?? string.Empty" />
+                    <span class="a-section-sub">Comma separated. An enum with no values is refused by the schema.</span>
+                </div>
+                break;
+            case FieldType.Ref:
+                <div class="a-field">
+                    <span class="a-label">Points at</span>
+                    <div class="a-choice">
+                        @foreach (var target in Targets)
+                        {
+                            <button type="button" class="@($"a-chip{(target == _target ? " a-chip--on" : string.Empty)}")"
+                                    @onclick="() => _target = target">@target</button>
+                        }
+                    </div>
+                </div>
+                break;
+        }
+
+        <div class="a-row" style="gap:var(--space-2)">
+            <button type="button" class="a-btn a-btn--primary" @onclick="Add" data-testid="field-save">
+                @(IsEditing ? "Save to the working copy" : "Add to the working copy")
+            </button>
+            @if (IsEditing)
             {
-                <button type="button" class="@($"a-chip{(type == _type ? " a-chip--on" : string.Empty)}")"
-                        @onclick="() => _type = type">@type.ToString().ToLowerInvariant()</button>
+                <button type="button" class="a-btn" @onclick="Cancel">Cancel</button>
             }
         </div>
-    </div>
-
-    <div class="a-row" style="gap:var(--space-4);flex-wrap:wrap">
-        <label class="a-row" style="gap:var(--space-2);cursor:pointer">
-            <input type="checkbox" checked="@_required" @onchange="args => _required = args.Value is true" />
-            <span>required</span>
-        </label>
-        @if (_type is FieldType.String or FieldType.Integer or FieldType.Uuid or FieldType.Date or FieldType.DateTime)
-        {
-            <label class="a-row" style="gap:var(--space-2);cursor:pointer">
-                <input type="checkbox" checked="@_unique" @onchange="args => _unique = args.Value is true" />
-                <span>unique</span>
-            </label>
-        }
-    </div>
-
-    @switch (_type)
-    {
-        case FieldType.String:
-            <div class="a-field">
-                <label class="a-label" for="new-field-max">Max length</label>
-                <input class="a-input" id="new-field-max" type="number" value="@_maxLength"
-                       @oninput="args => _maxLength = Number(args.Value, 120)" />
-            </div>
-            break;
-        case FieldType.Decimal:
-            <div class="a-row" style="gap:var(--space-4)">
-                <div class="a-field" style="flex:1">
-                    <label class="a-label" for="new-field-precision">Precision</label>
-                    <input class="a-input" id="new-field-precision" type="number" value="@_precision"
-                           @oninput="args => _precision = Number(args.Value, 10)" />
-                    <span class="a-section-sub">Total digits, not the ones before the point.</span>
-                </div>
-                <div class="a-field" style="flex:1">
-                    <label class="a-label" for="new-field-scale">Scale</label>
-                    <input class="a-input" id="new-field-scale" type="number" value="@_scale"
-                           @oninput="args => _scale = Number(args.Value, 2)" />
-                </div>
-            </div>
-            break;
-        case FieldType.Enum:
-            <div class="a-field">
-                <label class="a-label" for="new-field-values">Values</label>
-                <input class="a-input" id="new-field-values" value="@_values" placeholder="scheduled, in_progress, completed"
-                       @oninput="args => _values = args.Value?.ToString() ?? string.Empty" />
-                <span class="a-section-sub">Comma separated. An enum with no values is refused by the schema.</span>
-            </div>
-            break;
-        case FieldType.Ref:
-            <div class="a-field">
-                <span class="a-label">Points at</span>
-                <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
-                    @foreach (var target in Targets)
-                    {
-                        <button type="button" class="@($"a-chip{(target == _target ? " a-chip--on" : string.Empty)}")"
-                                @onclick="() => _target = target">@target</button>
-                    }
-                </div>
-            </div>
-            break;
-    }
-
-    <div class="a-row" style="gap:var(--space-2);margin-top:var(--space-4)">
-        <button type="button" class="a-btn a-btn--primary" @onclick="Add" data-testid="field-save">
-            @(IsEditing ? "Save to the working copy" : "Add to the working copy")
-        </button>
-        @if (IsEditing)
-        {
-            <button type="button" class="a-btn a-btn--ghost" @onclick="Cancel">Cancel</button>
-        }
     </div>
 </div>
 
