@@ -64,6 +64,18 @@ public sealed class AdminWorld : IAsyncLifetime
     public IBrowser Browser => _browser
         ?? throw new InvalidOperationException("The world has not started yet.");
 
+    /// <summary>
+    /// The running host's own services, for a scenario that has to change the world behind the
+    /// browser's back.
+    /// </summary>
+    /// <remarks>
+    /// Used to reach the identity store directly — the dashboard cannot disable the only
+    /// administrator it has, and a state that only arrives from outside the screens is one the
+    /// screens still have to answer for.
+    /// </remarks>
+    public IServiceProvider Services => _app?.Services
+        ?? throw new InvalidOperationException("The world has not started yet.");
+
     /// <inheritdoc/>
     public async ValueTask InitializeAsync()
     {

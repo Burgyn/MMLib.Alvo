@@ -20,6 +20,23 @@
     {
         <code class="a-error__type">@Slug</code>
     }
+
+    @* A caller the management surface does not admit sees this on every screen, and the two
+       reasons it happens need opposite answers. Either the account genuinely holds no level — the
+       sentence above is then the whole story — or the session outlived the account it names, which
+       is what a developer gets every time they delete the database and restart. The second is
+       indistinguishable from the first from here, and it strands an operator on a screen with no
+       control on it, so the way out is offered rather than left to be found in a menu. *@
+    @if (Problem is ManagementForbiddenException)
+    {
+        <form method="post" action="@AlvoAdmin.SignOutEndpoint" data-enhance="false"
+              style="margin-top:var(--space-3)">
+            <AntiforgeryToken />
+            <button type="submit" class="a-btn a-btn--sm" data-testid="forbidden-sign-out">
+                Sign out and sign in again
+            </button>
+        </form>
+    }
 </div>
 
 @code {
