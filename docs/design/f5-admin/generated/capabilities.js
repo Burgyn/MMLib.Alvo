@@ -44,8 +44,8 @@ export const CAPABILITIES = {
     },
     {
       "slot": "field.default",
-      "consequence": "Field 'default' is not honoured yet: no column default is emitted and the value is dropped before any writer sees it, so the field is simply null — and on a 'required' field that is an INSERT of NULL into a NOT NULL column.",
-      "fix": "Remove 'default' and send the value explicitly on create. Refused rather than ignored because a silently absent default is a wrong stored value, which costs more than sending the field."
+      "consequence": "Field 'default' is honoured as a literal, but not as a '$cel' expression: a CEL default is evaluated against the caller's context at insert time, which is the 'computed' machinery rather than a column default — so the value would be dropped and the field left null.",
+      "fix": "Declare a literal default, which this build emits as a column DEFAULT, or remove 'default' and send the value explicitly on create (#113)."
     },
     {
       "slot": "entity.softDelete",
@@ -189,6 +189,12 @@ export const CAPABILITIES = {
       "path": "/projects/{project}/revisions/{revision:int}/rollback",
       "operation": "RollbackRevision",
       "level": "developer"
+    },
+    {
+      "verb": "PUT",
+      "path": "/ai/connection",
+      "operation": "SetAiConnection",
+      "level": "admin"
     }
   ]
 };
