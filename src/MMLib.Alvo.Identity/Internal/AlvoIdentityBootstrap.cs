@@ -80,11 +80,9 @@ internal sealed partial class AlvoIdentityBootstrap(
             .EnsureColumnsAsync(store, cancellationToken)
             .ConfigureAwait(false);
 
-        /* IsEnabled before the join, not only Count: the generated log method skips formatting
-           when the level is off, but the argument is built at the call site either way (CA1873). */
-        if (added.Count > 0 && logger.IsEnabled(LogLevel.Information))
+        if (added.Count > 0)
         {
-            AddedIdentityColumns(logger, string.Join(", ", added));
+            AddedIdentityColumns(logger, added);
         }
     }
 
@@ -199,11 +197,12 @@ internal sealed partial class AlvoIdentityBootstrap(
 
     /// <summary>Logs the columns an older build's identity database was missing.</summary>
     /// <param name="logger">The logger.</param>
-    /// <param name="addedColumns">The columns that were added.</param>
+    /// <param name="addedColumns">The columns that were added; they render themselves.</param>
     [LoggerMessage(
         Level = LogLevel.Information,
         Message = "Added missing Alvo identity columns: {AddedColumns}.")]
-    private static partial void AddedIdentityColumns(ILogger logger, string addedColumns);
+    private static partial void AddedIdentityColumns(
+        ILogger logger, AlvoIdentitySchema.AddedColumns addedColumns);
 
     /// <summary>Logs that the bootstrap administrator was seeded.</summary>
     /// <param name="logger">The logger.</param>

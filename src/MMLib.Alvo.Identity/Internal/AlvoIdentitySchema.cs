@@ -58,10 +58,10 @@ internal static class AlvoIdentitySchema
     /// <param name="store">The identity store.</param>
     /// <param name="cancellationToken">Cancels the reconciliation.</param>
     /// <returns>The columns that were added, newest model first, for the log.</returns>
-    public static async Task<IReadOnlyList<string>> EnsureColumnsAsync(
+    public static async Task<AddedColumns> EnsureColumnsAsync(
         AlvoIdentityDbContext store, CancellationToken cancellationToken)
     {
-        var added = new List<string>();
+        var added = new AddedColumns();
 
         foreach (var table in Tables(store))
         {
@@ -249,6 +249,24 @@ internal static class AlvoIdentitySchema
                 .ExecuteSqlRawAsync(command.CommandText, cancellationToken)
                 .ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// The columns a reconciliation added, which knows how to name itself.
+    /// </summary>
+    /// <remarks>
+    /// <b>A list that renders itself is the difference between a cheap log argument and an
+    /// expensive one.</b> The obvious call is
+    /// <c>AddedIdentityColumns(logger, string.Join(", ", added))</c>, and CA1873 refuses it — the
+    /// generated log method skips the <em>formatting</em> when the level is off, but an argument is
+    /// an argument and is evaluated first. Guarding it with <c>ILogger.IsEnabled</c> does not
+    /// satisfy the rule either. Passing this instead makes the call site a bare local, and the join
+    /// happens inside <see cref="ToString"/> — which runs only if the message is really rendered.
+    /// </remarks>
+    internal sealed class AddedColumns : List<string>
+    {
+        /// <inheritdoc/>
+        public override string ToString() => string.Join(", ", this);
     }
 
     /// <summary>A table the model maps, with the columns it should have.</summary>
