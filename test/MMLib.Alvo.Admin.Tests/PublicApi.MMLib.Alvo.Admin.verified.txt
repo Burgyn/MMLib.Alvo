@@ -73,6 +73,8 @@ namespace MMLib.Alvo.Admin.Components.Entity
     {
         public FieldEditor() { }
         [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRefusedFeature> Capabilities { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string? Editing { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? EditingJson { get; set; }

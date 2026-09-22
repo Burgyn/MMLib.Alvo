@@ -93,7 +93,8 @@
         @if (_tab == "Fields")
         {
             <FieldEditor Entity="@EntityName" Targets="_entities" OnAdded="AddFieldAsync"
-                         Editing="@_editing" EditingJson="@EditedJson" OnCancelled="() => _editing = null" />
+                         Editing="@_editing" EditingJson="@EditedJson" OnCancelled="() => _editing = null"
+                         Capabilities="_refused" />
         }
     }
 </div>
@@ -116,6 +117,7 @@
     private IReadOnlyList<KeyValuePair<string, string>> _rules = [];
     private IReadOnlyList<KeyValuePair<string, string>> _hooks = [];
     private IReadOnlyList<string> _entities = [];
+    private IReadOnlyList<ManagementRefusedFeature> _refused = [];
     private IReadOnlyList<KeyValuePair<string, string>> _working = [];
     private Exception? _error;
     private string _tab = "Fields";
@@ -136,6 +138,8 @@
             _schema = await Gateway.SchemaAsync(CancellationToken.None);
             _entity = _schema.Entities.FirstOrDefault(
                 entity => string.Equals(entity.Name, EntityName, StringComparison.Ordinal));
+
+            _refused = (await Gateway.CapabilitiesAsync(CancellationToken.None)).Refused;
 
             var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
             _rules = DescriptorLens.Rules(descriptor.DescriptorJson, EntityName);

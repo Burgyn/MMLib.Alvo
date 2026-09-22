@@ -131,6 +131,32 @@
             }
         </div>
     </div>
+
+    @* The facets the frozen schema declares and this build refuses. Without this the editor's
+       silence about `default` and `validation` is indistinguishable from an oversight — the
+       question every reader of this panel asks is "where is the default value", and the answer
+       exists, in the framework's own words. Served verbatim (§2.3): a second wording of a refusal
+       is a third spelling of one truth. *@
+    @if (Refused.Count > 0)
+    {
+        <div class="a-section">
+            <span class="a-section-title">Facets this build refuses</span>
+            <span class="a-section-sub">
+                Declared by the schema, refused at apply — so there is no control for them here.
+            </span>
+        </div>
+
+        @foreach (var refusal in Refused)
+        {
+            <div class="a-listrow" data-testid="@($"refused-{refusal.Slot}")">
+                <code class="a-mono a-listrow__key">@refusal.Slot</code>
+                <span class="a-listrow__rest" style="flex-direction:column;align-items:flex-start;gap:var(--space-1)">
+                    <span class="a-section-sub">@refusal.Consequence</span>
+                    <span class="a-section-sub">@refusal.Fix</span>
+                </span>
+            </div>
+        }
+    }
 </div>
 
 @code {
@@ -175,6 +201,17 @@
     /// <summary>Raised when an edit is abandoned.</summary>
     [Parameter]
     public EventCallback OnCancelled { get; set; }
+
+    /// <summary>What this build refuses, as <c>capabilities</c> reports it.</summary>
+    [Parameter]
+    public IReadOnlyList<ManagementRefusedFeature> Capabilities { get; set; } = [];
+
+    /// <summary>
+    /// The refusals that belong to a field, which are the ones a reader of this panel is missing a
+    /// control for.
+    /// </summary>
+    private IReadOnlyList<ManagementRefusedFeature> Refused =>
+        [.. Capabilities.Where(refusal => refusal.Slot.StartsWith("field.", StringComparison.Ordinal))];
 
     private bool IsEditing => Editing is { Length: > 0 };
 

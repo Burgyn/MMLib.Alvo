@@ -61,6 +61,37 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
     }
 
     /// <summary>
+    /// The field editor says why it has no control for a default value.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>field.default</c> is refused at apply, by name, so a control for it would produce a
+    /// descriptor the apply rejects — the same argument Settings makes about issuing an API key.
+    /// But an editor that is merely <em>silent</em> about it is indistinguishable from one that
+    /// forgot, and "where do I set a default?" is the first question its reader asks.
+    /// </para>
+    /// <para>
+    /// The sentence is the framework's own, served verbatim from <c>capabilities</c> (§2.3), so this
+    /// asserts a fragment of the stored prose rather than a wording this screen invented.
+    /// </para>
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_field_editor_says_why_there_is_no_default_control()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+
+        var refusal = session.Page.Locator("[data-testid='refused-field.default']");
+        await refusal.WaitForAsync();
+
+        var text = await refusal.InnerTextAsync();
+        text.ShouldContain("no column default is emitted");
+        text.ShouldContain("send the value explicitly on create");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
     /// The columns Alvo maintains are shown as Alvo's, not as the author's.
     /// </summary>
     /// <remarks>
