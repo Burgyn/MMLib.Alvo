@@ -123,8 +123,8 @@ internal sealed partial class AlvoManagementService(
     /// <summary>The wire spelling of a resolved connection's kind — what an operator configured, not the enum.</summary>
     private static string KindOf(AlvoAiConnection connection) => connection.Kind switch
     {
-        AiConnectionKind.AzureOpenAi => AiConnectionResolver.AzureOpenAiKind,
-        _ => AiConnectionResolver.OpenAiCompatibleKind,
+        AiConnectionKind.AzureOpenAi => StoredAiConnection.AzureOpenAiKind,
+        _ => StoredAiConnection.OpenAiCompatibleKind,
     };
 
     /// <inheritdoc/>

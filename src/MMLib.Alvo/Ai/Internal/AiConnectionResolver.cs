@@ -34,11 +34,7 @@ internal sealed partial class AiConnectionResolver(
     ILogger<AiConnectionResolver> logger) : IAiConnectionResolver
 {
     /// <summary>The name the saved connection is held under.</summary>
-    /// <remarks>
-    /// Namespaced under <c>alvo.</c> so a deployment's own secrets cannot collide with the framework's, the
-    /// way every other reserved name in this repository is.
-    /// </remarks>
-    internal static SecretName StoredName { get; } = SecretName.Parse("alvo.ai.connection");
+    internal static SecretName StoredName { get; } = SecretName.Parse(StoredAiConnection.SecretName);
 
     /// <inheritdoc/>
     public async ValueTask<AlvoAiConnection?> ResolveAsync(CancellationToken ct = default) =>
@@ -140,21 +136,15 @@ internal sealed partial class AiConnectionResolver(
 
         switch (kind)
         {
-            case OpenAiCompatibleKind:
+            case StoredAiConnection.OpenAiCompatibleKind:
                 return true;
-            case AzureOpenAiKind:
+            case StoredAiConnection.AzureOpenAiKind:
                 parsed = AiConnectionKind.AzureOpenAi;
                 return true;
             default:
                 return false;
         }
     }
-
-    /// <summary>The wire spelling of <see cref="AiConnectionKind.OpenAiCompatible"/>.</summary>
-    internal const string OpenAiCompatibleKind = "openai-compatible";
-
-    /// <summary>The wire spelling of <see cref="AiConnectionKind.AzureOpenAi"/>.</summary>
-    internal const string AzureOpenAiKind = "azure-openai";
 
     [LoggerMessage(
         EventId = 6101,

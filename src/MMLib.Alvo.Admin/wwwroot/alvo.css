@@ -1339,3 +1339,122 @@ input[type="checkbox"] {
     display: none;
   }
 }
+
+/* The schema assistant.
+
+   A panel docked to the bottom-right on a desktop and a full-width sheet on a phone — the same
+   two-layouts-one-media-query shape the shell itself uses, because a second component would be a
+   second assistant to keep in step. It is only ever in the DOM when a connection resolves, so none
+   of this renders for a deployment with no AI. */
+.a-assistant__launch {
+  position: fixed;
+  right: var(--space-5);
+  bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
+  z-index: 45;
+  min-height: 44px;
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font: inherit;
+  font-weight: var(--weight-medium);
+  box-shadow: var(--shadow-pop);
+  cursor: pointer;
+}
+
+.a-assistant {
+  position: fixed;
+  right: var(--space-5);
+  bottom: calc(var(--space-5) + 44px + var(--space-3) + env(safe-area-inset-bottom));
+  z-index: 45;
+  display: flex;
+  width: min(420px, calc(100vw - var(--space-8)));
+  max-height: min(70vh, 640px);
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+
+.a-assistant__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.a-assistant__thread {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+.a-assistant__turn {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.a-assistant__who {
+  color: var(--dim);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Whitespace is preserved because a model writes lists and short paragraphs, and collapsing them
+   turns an answer into one run-on line. Wrapping anywhere is what keeps a pasted identifier from
+   pushing the panel past the viewport. */
+.a-assistant__text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.a-assistant__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.a-assistant__proposal {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.a-assistant__ask {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+}
+
+/* At phone width the launcher sits above the bottom bar rather than over it, and the panel fills
+   the screen — the bar is 5 items wide at 375 px and a floating button on top of it covers one. */
+@media (max-width: 720px) {
+  .a-assistant__launch {
+    right: var(--space-4);
+    bottom: calc(var(--space-4) + 64px + env(safe-area-inset-bottom));
+  }
+
+  .a-assistant {
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-height: 85vh;
+    border-right: none;
+    border-bottom: none;
+    border-left: none;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+}

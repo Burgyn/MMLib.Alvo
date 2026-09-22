@@ -231,11 +231,17 @@ internal sealed class ManagementGateway(
             + "CanAdministerPeople says so before a screen offers a control.");
 
     /// <summary>Drops every cached read.</summary>
+    /// <remarks>
+    /// <c>info</c> is dropped too, because it now carries the AI connection — which a save from the settings
+    /// screen changes, and a cache that outlived the save would report "not configured" to the operator who
+    /// had just configured it.
+    /// </remarks>
     public void Invalidate()
     {
         _descriptor = null;
         _schema = null;
         _capabilities = null;
+        _info = null;
     }
 
     /// <summary>

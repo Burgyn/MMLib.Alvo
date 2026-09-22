@@ -69,6 +69,21 @@ internal sealed class WorkingCopy
     public string AppliedJson => _applied?.ToJsonString(_pretty) ?? "{}";
 
     /// <summary>Whether the working document differs from the applied one.</summary>
+    /// <summary>
+    /// What the apply should say it was for, when something other than the operator's own typing composed
+    /// this copy.
+    /// </summary>
+    /// <remarks>
+    /// <b>A suggestion, never the reason itself.</b> Preview pre-fills its box with it and the operator can
+    /// replace every character — which is what keeps the history a record of what a person meant rather than
+    /// of what a machine drafted. Cleared by <see cref="Discard"/> along with everything else the copy held.
+    /// </remarks>
+    public string? SuggestedReason { get; private set; }
+
+    /// <summary>Records what an apply of this copy was asked for.</summary>
+    /// <param name="reason">The suggestion, rendered verbatim and parsed by nobody.</param>
+    public void SuggestReason(string? reason) => SuggestedReason = reason;
+
     public bool IsDirty => !string.Equals(Json, AppliedJson, StringComparison.Ordinal);
 
     /// <summary>The entity names the working document declares.</summary>
@@ -89,6 +104,7 @@ internal sealed class WorkingCopy
     /// <summary>Discards every unapplied edit.</summary>
     public void Discard()
     {
+        SuggestedReason = null;
         _working = _applied is null ? null : JsonNode.Parse(_applied.ToJsonString());
     }
 

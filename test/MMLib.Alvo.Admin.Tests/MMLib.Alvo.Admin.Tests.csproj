@@ -4,4 +4,8 @@
     <ProjectReference Include="../../src/MMLib.Alvo.Admin/MMLib.Alvo.Admin.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="NSubstitute" />
+  </ItemGroup>
+
 </Project>

@@ -1,6 +1,8 @@
 ﻿@page "/admin/settings"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
+@inject AssistantGateway Assistant
+@rendermode InteractiveServer
 
 <PageTitle>Settings · Alvo</PageTitle>
 
@@ -24,6 +26,105 @@
             <Detail Label="Data provider" Value="@_info.DataProvider"
                     Note="The IAlvoData implementation that is registered — not the database engine. The core does not know one, so a badge reading “PostgreSQL 16” would have no source." />
             <Detail Label="Startup mode" Value="@_info.StartupMode" />
+        </div>
+
+        <div class="a-panel">
+            <div class="a-section">
+                <span class="a-section-title">AI assistant</span>
+                <span class="a-section-sub">
+                    The model the schema assistant talks to. It proposes changes; you apply them.
+                </span>
+            </div>
+
+            <Detail Label="Status" Value="@(_info.Ai.Configured ? "connected" : "not configured")" />
+            @if (_info.Ai.Configured)
+            {
+                <Detail Label="Model" Value="@_info.Ai.Model" />
+                <Detail Label="Kind" Value="@_info.Ai.Kind" />
+                <Detail Label="From" Value="@_info.Ai.Source"
+                        Note="“configuration” means this deployment pinned it and a save here cannot change it; “store” means somebody saved it from this screen." />
+            }
+
+            @if (!Assistant.IsInstalled)
+            {
+                <div class="a-refused">
+                    <span class="a-refused__reason">
+                        This instance has no assistant installed. The agent ships as
+                        <code class="a-mono">MMLib.Alvo.Ai</code>, which a host adds with
+                        <code class="a-mono">AddAlvoAi()</code> — the standalone image already has it.
+                    </span>
+                </div>
+            }
+            else if (!Assistant.CanWriteConnection)
+            {
+                <div class="a-refused">
+                    <span class="a-refused__reason">
+                        This deployment's secrets come from its own configuration, which Alvo reads and
+                        never writes. Set the connection where that configuration comes from, under
+                        <code class="a-mono">Alvo:Ai</code> — or mount a key file at
+                        <code class="a-mono">Alvo:Secrets:EncryptionKeyFile</code> to save one from here.
+                    </span>
+                </div>
+            }
+            else
+            {
+                @if (_saveRefusal is { Length: > 0 })
+                {
+                    <ErrorPanel Heading="That connection could not be saved" Fix="@_saveRefusal" />
+                }
+
+                <div class="a-stack" style="padding:var(--space-5)">
+                    <div class="a-field">
+                        <span class="a-label">Kind</span>
+                        <div class="a-choice">
+                            @foreach (var kind in new[] { OpenAiCompatible, AzureOpenAi })
+                            {
+                                <button type="button" id="@(kind == OpenAiCompatible ? "ai-kind" : null)"
+                                        class="@($"a-chip{(kind == _kind ? " a-chip--on" : string.Empty)}")"
+                                        @onclick="() => _kind = kind">@kind</button>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="a-field">
+                        <label class="a-label" for="ai-endpoint">Endpoint</label>
+                        <input class="a-input" id="ai-endpoint" value="@_endpoint" autocomplete="off"
+                               placeholder="http://localhost:11434/v1"
+                               @oninput="args => _endpoint = args.Value?.ToString() ?? string.Empty" />
+                        <span class="a-section-sub">
+                            The base address. <code class="a-mono">info</code> never reports it and this page
+                            never renders it back to anyone else.
+                        </span>
+                    </div>
+
+                    <div class="a-field">
+                        <label class="a-label" for="ai-model">Model</label>
+                        <input class="a-input" id="ai-model" value="@_model" autocomplete="off"
+                               placeholder="qwen3:8b"
+                               @oninput="args => _model = args.Value?.ToString() ?? string.Empty" />
+                    </div>
+
+                    <div class="a-field">
+                        <label class="a-label" for="ai-key">API key</label>
+                        <input class="a-input" id="ai-key" type="password" value="@_apiKey" autocomplete="off"
+                               placeholder="leave empty for a local model"
+                               @oninput="args => _apiKey = args.Value?.ToString() ?? string.Empty" />
+                        <span class="a-section-sub">
+                            Stored encrypted and never read back into this page. Saving replaces the whole
+                            connection, so type the key again if you change anything else.
+                        </span>
+                    </div>
+
+                    <div class="a-row" style="gap:var(--space-2)">
+                        <button type="button" class="a-btn a-btn--primary" data-testid="ai-save"
+                                @onclick="SaveAsync">Save the connection</button>
+                        @if (_saved)
+                        {
+                            <span class="a-section-sub">Saved.</span>
+                        }
+                    </div>
+                </div>
+            }
         </div>
 
         <div class="a-panel">
@@ -60,7 +161,48 @@
 
 @code {
     private ManagementInfo? _info;
+    private string _kind = OpenAiCompatible;
+    private string _endpoint = string.Empty;
+    private string _model = string.Empty;
+    private string _apiKey = string.Empty;
+    private string? _saveRefusal;
+    private bool _saved;
+
+    private const string OpenAiCompatible = "openai-compatible";
+    private const string AzureOpenAi = "azure-openai";
 
     protected override async Task OnInitializedAsync()
         => _info = await Gateway.InfoAsync(CancellationToken.None);
+
+    /// <summary>
+    /// Saves the connection, or shows why it could not be saved.
+    /// </summary>
+    /// <remarks>
+    /// The refusal a shadowing configuration raises is caught by name, because it is the one failure whose
+    /// silent version is the worst kind: the operator saves a key, the screen says saved, and every request
+    /// keeps using the one the deployment pinned.
+    /// </remarks>
+    private async Task SaveAsync()
+    {
+        _saveRefusal = null;
+        _saved = false;
+
+        try
+        {
+            await Assistant.SaveConnectionAsync(
+                new AiConnectionForm(_kind, _endpoint, _model, _apiKey), CancellationToken.None);
+
+            _apiKey = string.Empty;
+            _saved = true;
+            _info = await Gateway.InfoAsync(CancellationToken.None);
+        }
+        catch (MMLib.Alvo.Secrets.SecretShadowedException shadowed)
+        {
+            _saveRefusal = shadowed.Message;
+        }
+        catch (InvalidOperationException refused)
+        {
+            _saveRefusal = refused.Message;
+        }
+    }
 }

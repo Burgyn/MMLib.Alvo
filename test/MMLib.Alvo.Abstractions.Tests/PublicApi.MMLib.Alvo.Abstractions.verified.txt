@@ -84,6 +84,29 @@ namespace MMLib.Alvo.Ai
     {
         System.Collections.Generic.IAsyncEnumerable<MMLib.Alvo.Ai.AssistantUpdate> AskAsync(MMLib.Alvo.Ai.AssistantRequest request, System.Threading.CancellationToken ct = default);
     }
+    public sealed class StoredAiConnection : System.IEquatable<MMLib.Alvo.Ai.StoredAiConnection>
+    {
+        public const string AzureOpenAiKind = "azure-openai";
+        public const string OpenAiCompatibleKind = "openai-compatible";
+        public const string SecretName = "alvo.ai.connection";
+        public StoredAiConnection(string? Kind, string? Endpoint, string? Model, string? ApiKey) { }
+        public string? ApiKey { get; init; }
+        public string? Endpoint { get; init; }
+        public string? Kind { get; init; }
+        public string? Model { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonSerializable(typeof(MMLib.Alvo.Ai.StoredAiConnection))]
+    [System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy=System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)]
+    public sealed class StoredAiConnectionJsonContext : System.Text.Json.Serialization.JsonSerializerContext, System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver
+    {
+        public StoredAiConnectionJsonContext() { }
+        public StoredAiConnectionJsonContext(System.Text.Json.JsonSerializerOptions options) { }
+        protected override System.Text.Json.JsonSerializerOptions? GeneratedSerializerOptions { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<MMLib.Alvo.Ai.StoredAiConnection> StoredAiConnection { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<string> String { get; }
+        public static MMLib.Alvo.Ai.StoredAiConnectionJsonContext Default { get; }
+        public override System.Text.Json.Serialization.Metadata.JsonTypeInfo? GetTypeInfo(System.Type type) { }
+    }
 }
 namespace MMLib.Alvo
 {

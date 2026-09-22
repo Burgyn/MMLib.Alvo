@@ -164,6 +164,14 @@
                 _error = exception;
             }
         }
+
+        /* A copy the assistant composed carries what it was asked for. Pre-filled rather than imposed: the
+           operator can replace every character, which is what keeps the history a record of what a person
+           meant rather than of what a machine drafted. */
+        if (_reason.Length == 0 && Copy.SuggestedReason is { Length: > 0 } suggested)
+        {
+            _reason = suggested;
+        }
     }
 
     private Task PlanAsync() => SendAsync(dryRun: true);

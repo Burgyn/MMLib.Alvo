@@ -104,6 +104,11 @@ public static class AlvoHost
         builder.Services.AddAlvoAdmin(
             admin => builder.Configuration.GetSection(AlvoAdmin.ConfigurationSection).Bind(admin));
 
+        /* The schema assistant. Registering it does not configure it: an image with no AI connection
+           has an assistant that answers "not configured", and the dashboard renders no launcher at
+           all — spec §3.3. */
+        builder.Services.AddAlvoAi();
+
         /* The port that turns a signed-in operator into the caller Alvo authorizes. The dashboard
            declares it and cannot fill it — it references neither the identity package nor the core
            — so the host, which references both, is where the two halves meet. */

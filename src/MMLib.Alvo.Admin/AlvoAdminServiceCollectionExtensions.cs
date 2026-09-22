@@ -69,6 +69,16 @@ public static class AlvoAdminServiceCollectionExtensions
             provider.GetRequiredService<IAlvoContextAccessor>()));
         services.TryAddScoped<DataGateway>();
 
+        /* Both of the assistant gateway's own dependencies are optional, and neither absence is an error: a
+           deployment that installed no agent package has no IAlvoAssistant, and one whose secrets are
+           deployed rather than clicked has no writable ISecretStore. The same factory shape the management
+           gateway already uses for the membership store, for the same reason — a nullable constructor
+           parameter is not an optional dependency to the container. */
+        services.TryAddScoped(provider => new AssistantGateway(
+            provider.GetService<MMLib.Alvo.Ai.IAlvoAssistant>(),
+            provider.GetService<MMLib.Alvo.Secrets.ISecretStore>(),
+            provider.GetRequiredService<ManagementGateway>()));
+
         /* One working copy per circuit: there is one descriptor and one apply, so three screens
            editing three things are still editing one document (§4.5). */
         /* A singleton store, not a scoped copy: a Blazor Server scope is a circuit and a circuit
