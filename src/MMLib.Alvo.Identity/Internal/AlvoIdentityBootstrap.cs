@@ -80,7 +80,9 @@ internal sealed partial class AlvoIdentityBootstrap(
             .EnsureColumnsAsync(store, cancellationToken)
             .ConfigureAwait(false);
 
-        if (added.Count > 0)
+        /* IsEnabled before the join, not only Count: the generated log method skips formatting
+           when the level is off, but the argument is built at the call site either way (CA1873). */
+        if (added.Count > 0 && logger.IsEnabled(LogLevel.Information))
         {
             AddedIdentityColumns(logger, string.Join(", ", added));
         }

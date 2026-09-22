@@ -96,6 +96,42 @@ export const CAPABILITIES = {
   "routes": [
     {
       "verb": "GET",
+      "path": "/projects/{project}/users",
+      "operation": "ManageUsers",
+      "level": "admin"
+    },
+    {
+      "verb": "POST",
+      "path": "/projects/{project}/users",
+      "operation": "ManageUsers",
+      "level": "admin"
+    },
+    {
+      "verb": "PUT",
+      "path": "/projects/{project}/users/{user:guid}/roles",
+      "operation": "ManageUsers",
+      "level": "admin"
+    },
+    {
+      "verb": "PUT",
+      "path": "/projects/{project}/users/{user:guid}/tenant",
+      "operation": "ManageUsers",
+      "level": "admin"
+    },
+    {
+      "verb": "PUT",
+      "path": "/projects/{project}/users/{user:guid}/disabled",
+      "operation": "ManageUsers",
+      "level": "admin"
+    },
+    {
+      "verb": "POST",
+      "path": "/projects/{project}/users/{user:guid}/credential-reset",
+      "operation": "ManageUsers",
+      "level": "admin"
+    },
+    {
+      "verb": "GET",
       "path": "/info",
       "operation": "GetInfo",
       "level": "viewer"
