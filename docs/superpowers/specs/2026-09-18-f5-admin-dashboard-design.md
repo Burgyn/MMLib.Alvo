@@ -1198,13 +1198,21 @@ task after the PR that adds this section merges**, and the row's "no issue exist
 the number in the same commit. They are deliberately not filed before the merge, because an issue
 citing a section of a design that is not on `main` cites nothing.
 
+**Two of them were built before they were filed, and that ordering is worth naming rather than
+hiding.** The dashboard could not be finished without an operator's tenant or a way to add a second
+person — the Data screen is blank for every scoped entity without the first, and a
+`providers: ["local"]` project has one account forever without the second — so the dashboard PR
+implements both. The accountability does not lapse because the work landed early: the two issues are
+still owed, filed and closed together the moment this design reaches `main`, so the milestone's own
+record says what happened rather than leaving two contracts nobody can trace to a decision.
+
 | Item | Action |
 |---|---|
 | **#212** (Management API) | exists as an issue and already blocks #229/#230; **needs the F5 milestone** |
 | **Identity + `IAlvoUserStore` + bootstrap admin** | **no issue exists** — must be filed, and blocks #146 and #227 |
 | **#146** (`access` enforcement + the fifth CEL profile) | currently F6; **move to F5**, ordered before #227 |
-| **An operator's tenant** (§2.7) | `AlvoUser.Tenant`, honoured by `AlvoIdentityContextResolver` on `TenantResolver`'s confirmation rule — **and `TenantId` reserving its all-zero value**, which `UserId` already does and `TenantId` does not (§2.7). **No issue exists** — must be filed. Blocks the Data screen for every scoped entity, which is two of the three in the example the product ships |
-| **`IAlvoUserAdministration`** (§3.7) | a **second** contract in Abstractions — `IAlvoUserStore` is untouched — implemented by `MMLib.Alvo.Identity`, six management routes at `admin`, the credential-set token, and the self-grant guard **in the core** with a `MMLib.Alvo.Testing` contract test. **No issue exists** — must be filed. Blocks a `providers: ["local"]` project ever having a second person |
+| **An operator's tenant** (§2.7) | `AlvoUser.Tenant`, honoured by `AlvoIdentityContextResolver` on `TenantResolver`'s confirmation rule — **and `TenantId` reserving its all-zero value**, which `UserId` already does and `TenantId` does not (§2.7). **Built** by the dashboard PR, including the reserved-value guard as a fourth refusal in `GuardedUserAdministration`, because the route binds a bare `uuid` and the type alone cannot hold the line. **No issue exists** — still to be filed and closed in the same breath |
+| **`IAlvoUserAdministration`** (§3.7) | a **second** contract in Abstractions — `IAlvoUserStore` is untouched — implemented by `MMLib.Alvo.Identity`, six management routes at `admin`, the credential-set token, and the self-grant guard **in the core** with a `MMLib.Alvo.Testing` contract test. **Built** by the dashboard PR. **No issue exists** — still to be filed and closed in the same breath |
 
 `#227`'s body must also be corrected: *"Blocked by: nothing. Can start today."* is no longer true.
 It is blocked by #146, which is blocked by the identity issue.
