@@ -652,6 +652,8 @@ namespace MMLib.Alvo.Testing.Management
         protected virtual void EnsureAvailable() { }
         public System.Threading.Tasks.Task The_bootstrap_administrator_cannot_be_disabled() { }
         public System.Threading.Tasks.Task The_bootstrap_administrators_credential_cannot_be_reset() { }
+        public System.Threading.Tasks.Task The_reserved_tenant_cannot_be_granted() { }
+        public System.Threading.Tasks.Task The_reserved_tenant_cannot_be_granted_at_creation() { }
     }
 }
 namespace MMLib.Alvo.Testing.Migrations

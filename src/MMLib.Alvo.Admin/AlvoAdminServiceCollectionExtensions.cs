@@ -48,6 +48,13 @@ public static class AlvoAdminServiceCollectionExtensions
         services.AddRazorComponents().AddInteractiveServerComponents();
         services.AddCascadingAuthenticationState();
 
+        /* AuthorizeRouteView asks IAuthorizationService on every in-circuit navigation, and a
+           circuit has no endpoint to carry the answer. Registering it here rather than relying on
+           the host is the difference between the router checking and the router silently not
+           checking: the call is idempotent, so a host that already called AddAuthorization keeps
+           its own policies. */
+        services.AddAuthorizationCore();
+
         /* Scoped: in Blazor Server a scope is a circuit, so one operator's session holds one
            gateway and its cache never crosses to another's. Its remarks argue why that cache is a
            correctness property rather than a speed one. */
@@ -68,7 +75,8 @@ public static class AlvoAdminServiceCollectionExtensions
            ends on a browser reload, so a copy held there would discard unapplied edits on F5. One
            descriptor and one apply means one copy per operator (§4.5) — not one per screen, and
            never one shared between operators. */
-        services.TryAddSingleton<WorkingCopyStore>();
+        services.TryAddSingleton(provider => new WorkingCopyStore(
+            provider.GetService<TimeProvider>() ?? TimeProvider.System));
 
         return services;
     }

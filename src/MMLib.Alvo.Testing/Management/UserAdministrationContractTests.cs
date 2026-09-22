@@ -101,6 +101,39 @@ public abstract class UserAdministrationContractTests
             () => AsAdministrator().SetTenantAsync(Administrator, TenantId.New()));
     }
 
+    /// <summary>The reserved all-zero uuid is refused as a tenant grant.</summary>
+    /// <remarks>
+    /// <b>The one refusal on this port that fails open rather than closed, which is why it is a
+    /// contract fact rather than a unit test.</b> A grant of the all-zero uuid produces a caller
+    /// whose tenant is <em>present</em>, so the tenant predicate is attached and matches every row
+    /// whose <c>tenant_id</c> was defaulted rather than assigned. Removing a tenant is
+    /// <see langword="null"/>; the two must never be conflated by an implementation.
+    /// </remarks>
+    [Fact]
+    public async Task The_reserved_tenant_cannot_be_granted()
+    {
+        EnsureAvailable();
+
+        await Should.ThrowAsync<ManagementRequestException>(
+            () => AsAdministrator().SetTenantAsync(Administrator, new TenantId(Guid.Empty)));
+    }
+
+    /// <summary>The reserved all-zero uuid is refused when a person is created, too.</summary>
+    /// <remarks>
+    /// <see cref="AlvoUserCreation"/> carries a tenant, so creation is the second door onto the
+    /// same grant. A guard on one of the two doors is not a guard.
+    /// </remarks>
+    [Fact]
+    public async Task The_reserved_tenant_cannot_be_granted_at_creation()
+    {
+        EnsureAvailable();
+
+        await Should.ThrowAsync<ManagementRequestException>(
+            () => AsAdministrator().CreateAsync(
+                new AlvoUserCreation(
+                    $"reserved-{Guid.CreateVersion7():N}@alvo.test", [], new TenantId(Guid.Empty))));
+    }
+
     /// <summary>A caller may still remove their own tenant, because that narrows.</summary>
     [Fact]
     public async Task A_caller_may_remove_their_own_tenant()

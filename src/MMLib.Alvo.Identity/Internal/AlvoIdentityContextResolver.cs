@@ -19,10 +19,16 @@ namespace MMLib.Alvo.Identity.Internal;
 /// <para>
 /// <b>Every refusal is <see langword="null"/>, and there are five of them:</b> a subject that is not
 /// a usable <see cref="UserId"/> (including the reserved all-zero value), an unknown user, a
-/// disabled user, a <see langword="null"/> role catalogue, and a caller asking to act in a tenant.
-/// The last is not an oversight — a cookie session carries no tenant grant, so honouring the request
-/// would let the caller choose the tenant it acts in, which is the one thing <c>TenantResolver</c>
-/// exists to refuse for an API key.
+/// disabled user, a <see langword="null"/> role catalogue, and a caller asking to act in a tenant
+/// that is not the one they hold.
+/// </para>
+/// <para>
+/// <b>An operator does carry a tenant, and a requested one is read as a confirmation of it.</b>
+/// <see cref="AlvoUser.Tenant"/> is the grant an administrator made, so the session's tenant comes
+/// from the stored row and never from the request: naming the tenant you already hold is honoured,
+/// naming any other is refused outright, and naming none simply leaves the grant in place. That is
+/// the same rule <c>TenantResolver</c> applies to an API key — see <see cref="Confirmed"/> for why
+/// the refusal is the whole principal rather than a principal with no tenant.
 /// </para>
 /// </remarks>
 /// <param name="users">The membership store.</param>

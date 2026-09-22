@@ -41,7 +41,6 @@ internal sealed class ManagementGateway(
     AuthenticationStateProvider authentication,
     IAlvoContextAccessor ambient)
 {
-    private AlvoPrincipal? _caller;
     private ManagementDescriptor? _descriptor;
     private SchemaModel? _schema;
     private ManagementCapabilities? _capabilities;
@@ -281,23 +280,33 @@ internal sealed class ManagementGateway(
     }
 
     /// <summary>
-    /// The operator's caller, resolved once per circuit.
+    /// The operator's caller, re-resolved before every call.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>Deliberately not cached, and this is the one place in the gateway where that rule is
+    /// reversed.</b> Every read above caches because a stale descriptor is visible and safe. A
+    /// stale <em>caller</em> is neither: a Blazor Server scope is the circuit, so a principal
+    /// resolved once at sign-in would survive for as long as the tab stays open. An operator who is
+    /// disabled, stripped of their roles or has their tenant revoked would keep the authority they
+    /// had at sign-in, while the very same person over <c>/api</c> is refused on the next request
+    /// — and §3.7 argues <c>SetDisabledAsync</c> as a real lockout, which it would not be.
+    /// </para>
+    /// <para>
+    /// The cost is one indexed read of the membership store per management call, against a screen
+    /// that already makes a network round trip to serve the click. That is the right side of the
+    /// trade: the cached version buys microseconds and sells the revocation story.
+    /// </para>
+    /// <para>
     /// A <see langword="null"/> answer is left as <see langword="null"/>: the core then sees an
     /// unauthenticated call and refuses it with <see cref="ManagementForbiddenException"/>, which
     /// is the screen an operator whose account was disabled mid-session should be looking at.
+    /// </para>
     /// </remarks>
     private async ValueTask<AlvoPrincipal?> CallerAsync()
     {
-        if (_caller is not null)
-        {
-            return _caller;
-        }
-
         var state = await authentication.GetAuthenticationStateAsync().ConfigureAwait(false);
-        _caller = await callers.ResolveAsync(state.User, CancellationToken.None).ConfigureAwait(false);
-        return _caller;
+        return await callers.ResolveAsync(state.User, CancellationToken.None).ConfigureAwait(false);
     }
 
     private async ValueTask<string> ProjectAsync(CancellationToken ct)

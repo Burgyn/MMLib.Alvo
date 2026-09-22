@@ -1,14 +1,14 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <ItemGroup>
-    <!-- What earns this package today (package-boundary.md rule (a)) is the Razor Class Library
-         boundary, not Blazor: the project contains no components yet, only a design system served
-         from wwwroot/. An RCL's wwwroot is published as static web assets under
-         _content/MMLib.Alvo.Admin/, and those travel to every consumer of the assembly that carries
-         them — so folding this wwwroot into the core would hand every embedded host a stylesheet and
-         a script it never asked for, plus the Microsoft.NET.Sdk.Razor build it takes to produce
-         them. Blazor becomes the heavier half of the same argument once #227's components land; it
-         is not the argument yet, and saying so would be a justification nothing in src/ supports.
+    <!-- What earns this package (package-boundary.md rule (a)) is now both halves of the argument.
+         The first is the Razor Class Library boundary: an RCL's wwwroot is published as static web
+         assets under _content/MMLib.Alvo.Admin/, and those travel to every consumer of the assembly
+         that carries them — so folding this wwwroot into the core would hand every embedded host a
+         stylesheet and a script it never asked for, plus the Microsoft.NET.Sdk.Razor build it takes
+         to produce them. The second, and by now the heavier one, is Blazor itself: the components
+         landed with #227–#231, and an interactive-server render mode, a circuit and a SignalR hub
+         are not something an embedded host that wants a data API should be made to carry.
          Microsoft.AspNetCore.App is taken as a framework reference rather than a
          Microsoft.AspNetCore.Components.Web PackageReference for the same reason MMLib.Alvo takes
          one — the explicit package would raise NU1510 ("will not be pruned"), which this repository

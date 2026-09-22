@@ -48,15 +48,16 @@
   them reference. It also takes `Microsoft.AspNetCore.OpenApi` directly rather than
   transitively, because a package's build targets do not travel through a
   `ProjectReference`. Details in [`host.md`](./host.md).
-- `src/MMLib.Alvo.Admin` — the admin dashboard's design system and, once #227's
-  second half lands, its Blazor components. **Earned by rule (a)**, and today the
-  heavy thing is the **Razor Class Library boundary**, not Blazor: the project holds
-  no components yet, only `wwwroot/alvo.css` and `wwwroot/alvo.js`. An RCL's
+- `src/MMLib.Alvo.Admin` — the admin dashboard: its design system and, since
+  #227–#231, its Blazor components. **Earned by rule (a)**, and by now on both halves
+  of the argument. The first is the **Razor Class Library boundary**: an RCL's
   `wwwroot` ships as static web assets under `_content/MMLib.Alvo.Admin/` and travels
-  to every consumer of the assembly carrying it, so the same files inside the core
-  would hand every embedded host a dashboard stylesheet it never asked for — plus the
-  `Microsoft.NET.Sdk.Razor` build that produces them. Blazor becomes the heavier half
-  of the same argument when the components land; it is not the argument yet. It takes
+  to every consumer of the assembly carrying it, so `alvo.css` and `alvo.js` inside
+  the core would hand every embedded host a dashboard stylesheet it never asked for —
+  plus the `Microsoft.NET.Sdk.Razor` build that produces them. The second, now the
+  heavier one, is **Blazor**: the screens are server-interactive components, so the
+  package carries a render mode, a circuit and a SignalR hub that an embedded host
+  wanting a data API should not be made to take. It takes
   `Microsoft.AspNetCore.App` as a framework reference rather than a
   `Microsoft.AspNetCore.Components.Web` package, for the same NU1510 reason
   `MMLib.Alvo` does. **It holds no project reference to `MMLib.Alvo`** — it reaches
@@ -64,9 +65,15 @@
   contract 4 ("dashboard and CLI are clients of the same API") a structural fact
   rather than a promise, and
   `EfDependencyBoundaryTests.The_admin_package_reaches_the_core_only_through_abstractions`
-  is what makes it a *measured* one. Its public surface is deliberately one
-  type, `AlvoAdminAssets`: the design system is CSS and the components are Razor,
-  and neither is a type a consumer calls. Details in
+  is what makes it a *measured* one — with a second, stricter reading of the same rule
+  in the package's own suite (`BoundaryArchitectureTests`), which asks the **loaded
+  assembly** rather than the project file, so a transitive arrival fails too. The
+  surface a host is meant to use is seven things: `AlvoAdmin`, `AlvoAdminAssets`,
+  `AlvoAdminOptions`, `AlvoAdminClaims`, the port `IAlvoAdminCallerResolver`, and the
+  two extension methods that register and map the dashboard. The screens are also
+  public in the approval baseline, and not by choice — the Razor SDK emits every
+  component class `public` and a `.razor` file cannot declare otherwise; the baseline
+  is what keeps the question asked. Details in
   [`2026-09-18-f5-admin-dashboard-design.md`](../superpowers/specs/2026-09-18-f5-admin-dashboard-design.md).
 - `src/MMLib.Alvo.Identity` — ASP.NET Core Identity + its EF stores: administrator accounts, role
   membership, the cookie `IAlvoContextResolver`, and the bootstrap administrator. Earned by **(a)**

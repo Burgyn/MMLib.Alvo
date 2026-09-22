@@ -14,7 +14,7 @@ namespace MMLib.Alvo.Management.Internal;
 /// contract 4 forbids"</i>. So the implementation administers people and this decides who may.
 /// </para>
 /// <para>
-/// There are three guards, and they are not the same kind of thing:
+/// There are four guards, and they are not the same kind of thing:
 /// </para>
 /// <list type="number">
 /// <item><b>The gate.</b> <c>ManageUsers</c> is an <c>admin</c> operation, and every member is
@@ -23,6 +23,8 @@ namespace MMLib.Alvo.Management.Internal;
 /// remark on <see cref="EnsureNoSelfEscalation"/> for what it does and does not claim.</item>
 /// <item><b>The bootstrap administrator is not a target.</b> Two members would otherwise remove the
 /// one identity the whole default-deny story rests on.</item>
+/// <item><b>The reserved tenant is not a tenant.</b> The only one of the four that fails
+/// <em>open</em> if it is missing — see <see cref="EnsureTenantIsReal"/>.</item>
 /// </list>
 /// </remarks>
 /// <param name="inner">The implementation, resolved through its key so nothing else can.</param>
@@ -51,6 +53,7 @@ internal sealed class GuardedUserAdministration(
         ArgumentNullException.ThrowIfNull(creation);
 
         EnsureMayManage();
+        EnsureTenantIsReal(creation.Tenant);
         return inner.CreateAsync(creation, cancellationToken);
     }
 
@@ -70,6 +73,7 @@ internal sealed class GuardedUserAdministration(
         UserId user, TenantId? tenant, CancellationToken cancellationToken = default)
     {
         EnsureMayManage();
+        EnsureTenantIsReal(tenant);
         EnsureNotSelfTenantGrant(user, tenant);
         return inner.SetTenantAsync(user, tenant, cancellationToken);
     }
@@ -166,6 +170,44 @@ internal sealed class GuardedUserAdministration(
                 "A caller cannot grant themselves a role that raises the management level this "
                 + "project's access block resolves for them. Ask another administrator, or change "
                 + "the access block through an apply — which is recorded.");
+        }
+    }
+
+    /// <summary>
+    /// Refuses the reserved all-zero uuid as a tenant grant.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The one refusal on this path that fails open rather than closed.</b> Every other bad
+    /// tenant grant narrows what its holder reaches; this one widens it. <see cref="TenantId"/>
+    /// reserves the all-zero uuid to mean <i>no tenant</i>, and a grant of it produces a principal
+    /// that is not <see langword="null"/> — so the tenant predicate <em>is</em> attached, and
+    /// compares equal to every row whose <c>tenant_id</c> was defaulted rather than assigned. A
+    /// caller holding it would read another tenant's leftovers and believe they had been admitted
+    /// properly.
+    /// </para>
+    /// <para>
+    /// <b>Why here rather than only in the type.</b> The parsing paths already refuse it, but the
+    /// management route binds a bare <c>uuid</c> out of the request body and constructs the
+    /// <see cref="TenantId"/> itself, as an in-process caller may. This guard is the one place
+    /// every transport passes through, so it is where the refusal cannot be routed around — the
+    /// same argument that put the other three guards here rather than in the implementation.
+    /// </para>
+    /// <para>
+    /// Removing a tenant is <see langword="null"/>, not all-zero, and the message says so: the
+    /// distinction is the whole point, and a caller who sent all-zero meaning "none" needs to be
+    /// told which one expresses it.
+    /// </para>
+    /// </remarks>
+    /// <param name="tenant">The tenant being granted, or <see langword="null"/> to remove one.</param>
+    private static void EnsureTenantIsReal(TenantId? tenant)
+    {
+        if (tenant is { Value: var value } && value == Guid.Empty)
+        {
+            throw new ManagementRequestException(
+                "The all-zero uuid is reserved to mean \"no tenant\" and cannot be granted as one: "
+                + "a caller holding it would match every row whose tenant was never assigned. Send "
+                + "null to remove a person's tenant, or a real tenant id to grant one.");
         }
     }
 

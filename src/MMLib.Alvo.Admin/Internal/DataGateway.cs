@@ -30,25 +30,25 @@ internal sealed class DataGateway(
     IAlvoAdminCallerResolver callers,
     AuthenticationStateProvider authentication)
 {
-    private AlvoContext? _context;
-
     /// <summary>The operator's own caller, as the Data API would resolve it.</summary>
     /// <remarks>
+    /// <para>
     /// Exposed because two screens need to <em>say</em> what it is — the Data screen explains an
     /// empty page by naming the tenant the caller holds, and the Rules screen offers it as one of
     /// the callers to simulate. Neither of them decides anything with it.
+    /// </para>
+    /// <para>
+    /// <b>Re-resolved on every call, never held.</b> A Blazor Server scope is the circuit, so a
+    /// context resolved once would freeze the operator's roles and tenant for as long as the tab
+    /// stays open — and it is the tenant that decides which rows the predicate admits. A revoked
+    /// grant has to take effect on the next click, exactly as it does on the next HTTP request.
+    /// </para>
     /// </remarks>
     public async ValueTask<AlvoContext> ContextAsync(CancellationToken ct)
     {
-        if (_context is not null)
-        {
-            return _context;
-        }
-
         var state = await authentication.GetAuthenticationStateAsync().ConfigureAwait(false);
         var principal = await callers.ResolveAsync(state.User, ct).ConfigureAwait(false);
-        _context = principal?.Context ?? AlvoContext.Anonymous;
-        return _context;
+        return principal?.Context ?? AlvoContext.Anonymous;
     }
 
     /// <summary>One page of records.</summary>

@@ -25,6 +25,17 @@ because it is infrastructure configuration rather than a block a locked-out proj
 | `PUT {m}/projects/{project}/descriptor` | `ApplyDescriptorAsync` | `developer` |
 | `POST {m}/projects/{project}/revisions/{revision:int}/rollback` | `RollbackAsync` | `developer` |
 
+And six more, from a second contract — see *Administering people*:
+
+| Route | `IAlvoUserAdministration` member | Level |
+|---|---|---|
+| `GET {m}/projects/{project}/users` | `ListAsync` | `admin` |
+| `POST {m}/projects/{project}/users` | `CreateAsync` | `admin` |
+| `PUT {m}/projects/{project}/users/{user:guid}/roles` | `SetRolesAsync` | `admin` |
+| `PUT {m}/projects/{project}/users/{user:guid}/tenant` | `SetTenantAsync` | `admin` |
+| `PUT {m}/projects/{project}/users/{user:guid}/disabled` | `SetDisabledAsync` | `admin` |
+| `POST {m}/projects/{project}/users/{user:guid}/credential-reset` | `IssueCredentialTokenAsync` | `admin` |
+
 **This table is generated from nothing.** It is prose, and prose drifts — so it is not what holds the
 mapping. `ManagementContractTests` does, reflectively and in four directions: every member of
 `IAlvoManagement` has a route, no route stands for two members and no member for two routes, every route
@@ -35,8 +46,9 @@ the code is right.
 
 **The level is not on the route.** A route carries a `ManagementOperation`; `ManagementOperations` is the
 one table mapping an operation to the level it needs, and an operation it does not list requires `admin` —
-the most restrictive answer, not the most convenient one. Three of the thirteen operations
-(`ManageApiKeys`, `ManageUsers`, `DeleteProject`) have no route at all; see *What is deliberately absent*.
+the most restrictive answer, not the most convenient one. Two of the thirteen operations
+(`ManageApiKeys`, `DeleteProject`) have no route at all; see *What is deliberately absent*.
+`ManageUsers` gained six in F5 — see *Administering people*.
 
 ### The one place a route's level is not the whole answer
 
@@ -259,6 +271,30 @@ whose default is `Standalone`, which is why the standalone image needs no config
 `AlvoManagementOptions.ModeLabel` is `internal` precisely so `mode` stays a two-valued contract an agent can
 branch on.
 
+## Administering people
+
+Six routes over `IAlvoUserAdministration`, all at `admin` under the single `ManageUsers` operation —
+**including the read**, because listing a project's people enumerates its administrators.
+
+**They are management routes rather than a surface of their own**, because `ManageUsers` was already a
+`ManagementOperation` in the level table and a second surface would need a second gate. They are mapped only
+when a deployment registered a membership store: `MapUsers` asks `IServiceProviderIsKeyedService` whether the
+implementation is registered and maps nothing when it is not, so a build with no identity package answers
+404 rather than 500.
+
+**The guards are in the core, and the key is what makes them non-optional.** The implementation registers
+itself under `AlvoUserAdministration.UnguardedKey`; `GuardedUserAdministration` is the only registration
+under the plain interface, and the only thing that resolves the key. So an in-process caller — the dashboard
+— gets the same four refusals an HTTP caller does: the gate, no self-escalation, the bootstrap administrator
+is not a target, and the reserved all-zero uuid is not a tenant. `UserAdministrationContractOverIdentityTests`
+resolves from the host's own composed container rather than constructing the decorator, which is what turns
+"the guards are applied" from an arrangement into a fact.
+
+**Why not `IAlvoManagement`.** A seventh contract member would have been simpler to map and wrong to own:
+`IAlvoManagement` is the descriptor's surface, membership is a store's, and a deployment can have the first
+without the second. `ManagementContractTests` still holds this table — `UserAdministrationRouteTests` is its
+counterpart for the second contract, including the non-vacuity guard and a 403-over-the-wire fact per route.
+
 ## What is deliberately absent
 
 **Data (D4).** There is no route here that reads or writes an application row, and no admin bypass at all.
@@ -299,9 +335,10 @@ keys (`name`, `revision`, `apiVersion`, `description`) and `$schema` are not sub
 list for the same reason. **Nothing holds the two lists to partitioning the schema**, so a new top-level
 block lands in neither silently; that is filed rather than fixed here.
 
-**The three `admin` operations with no route.** `ManageApiKeys`, `ManageUsers` and `DeleteProject` are in
-the level table and have no HTTP surface. Key and user administration belongs to `MMLib.Alvo.Identity`
-(§3.4); project deletion is the danger zone, and neither is in #212.
+**The two `admin` operations with no route.** `ManageApiKeys` and `DeleteProject` are in the level table
+and have no HTTP surface. Key administration belongs to `MMLib.Alvo.Identity` (§3.4); project deletion is
+the danger zone, and neither is in #212. `ManageUsers` was the third until F5 — see *Administering people*
+for the six routes it gained and why they are management routes rather than a surface of their own.
 
 **Multi-project.** `ListProjectsAsync` answers a list because the wire shape must not change when a second
 project becomes possible (§2.6); this build serves exactly one, and every parameterised route answers a

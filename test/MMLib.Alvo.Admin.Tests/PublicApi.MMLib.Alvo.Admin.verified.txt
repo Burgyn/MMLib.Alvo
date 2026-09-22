@@ -432,6 +432,12 @@ namespace MMLib.Alvo.Admin.Components.Shared
         public System.Collections.Generic.Dictionary<string, object?> Values { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
+    public class RedirectToSignIn : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public RedirectToSignIn() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnInitialized() { }
+    }
     public class RevisionRow : Microsoft.AspNetCore.Components.ComponentBase
     {
         public RevisionRow() { }

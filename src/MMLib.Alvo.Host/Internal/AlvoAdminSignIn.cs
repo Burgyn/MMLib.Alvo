@@ -2,6 +2,8 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using MMLib.Alvo.Admin;
 using MMLib.Alvo.Identity;
 
@@ -30,10 +32,25 @@ namespace MMLib.Alvo.Host.Internal;
 /// </remarks>
 internal static class AlvoAdminSignIn
 {
-    /// <summary>Maps the sign-in and sign-out endpoints.</summary>
+    /// <summary>
+    /// Maps the sign-in and sign-out endpoints, unless the dashboard is turned off.
+    /// </summary>
+    /// <remarks>
+    /// <b>It honours the same switch <c>MapAlvoAdmin</c> does, and the two must not drift.</b>
+    /// These endpoints exist to serve one screen; a deployment that set
+    /// <see cref="AlvoAdminOptions.Enabled"/> to <see langword="false"/> asked for that screen not
+    /// to be there, and a password endpoint still answering behind a dashboard nobody can reach is
+    /// surface with no purpose — lockout-protected, but reachable, and reachable is the part that
+    /// matters to whoever turned the dashboard off.
+    /// </remarks>
     /// <param name="app">The route builder to map into.</param>
     public static void MapAlvoAdminSignIn(this IEndpointRouteBuilder app)
     {
+        if (!app.ServiceProvider.GetRequiredService<IOptions<AlvoAdminOptions>>().Value.Enabled)
+        {
+            return;
+        }
+
         app.MapPost(AlvoAdmin.SignInEndpoint, SignInAsync).ExcludeFromDescription();
         app.MapPost(AlvoAdmin.SignOutEndpoint, SignOutAsync).ExcludeFromDescription();
     }

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "host-session-tenancy",
+  "description": "A tenant-scoped backend with one global entity beside it, for the facts about what a SIGNED-IN operator reaches. Every cross-tenant fact in this repository was written about an API key; AlvoUser.Tenant gives AlvoContext.Tenant a second provenance — a user row an admin edits — and this descriptor exists so that second one is measured on the same adversarial shape as the first. The access block admits 'operator' to management so the same world can seed people through IAlvoUserAdministration.",
+  "tenancy": {
+    "enabled": true
+  },
+  "auth": {
+    "providers": [
+      "local"
+    ],
+    "roles": [
+      "operator"
+    ]
+  },
+  "access": {
+    "admin": "'operator' in @user.roles"
+  },
+  "entities": {
+    "notes": {
+      "description": "A tenant-scoped note. Deliberately readable by any authenticated caller: the rule must not be what separates the tenants, or the fact would measure the rule instead of the tenant predicate.",
+      "tenancy": "scoped",
+      "fields": {
+        "title": {
+          "type": "string",
+          "required": true,
+          "maxLength": 80
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'authenticated' in @user.roles",
+        "update": "'authenticated' in @user.roles",
+        "delete": "'authenticated' in @user.roles"
+      }
+    },
+    "announcements": {
+      "description": "Shared reference data. Global rather than scoped, so the suite can tell 'this caller holds no tenant' from 'this caller was refused' — the two outcomes a null tenant would merge.",
+      "tenancy": "global",
+      "fields": {
+        "body": {
+          "type": "string",
+          "required": true,
+          "maxLength": 120
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'operator' in @user.roles"
+      }
+    }
+  }
+}

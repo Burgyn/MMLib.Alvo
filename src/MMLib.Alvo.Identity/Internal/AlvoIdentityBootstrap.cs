@@ -53,12 +53,37 @@ internal sealed partial class AlvoIdentityBootstrap(
         var store = scope.GetRequiredService<AlvoIdentityDbContext>();
         if (await TablesExistAsync(store, cancellationToken).ConfigureAwait(false))
         {
+            await ReconcileColumnsAsync(store, cancellationToken).ConfigureAwait(false);
             return;
         }
 
         var creator = store.GetService<IRelationalDatabaseCreator>();
         await creator.CreateTablesAsync(cancellationToken).ConfigureAwait(false);
         CreatedIdentityTables(logger);
+    }
+
+    /// <summary>Adds columns an older build's database does not have yet.</summary>
+    /// <remarks>
+    /// <b>Only on the branch where the tables already exist, and that is the whole point.</b>
+    /// Tables this start created are current by construction; tables an earlier build created are
+    /// current only until the model gains a column, and then every read of that table fails with a
+    /// missing-column error. <c>AspNetUsers.TenantId</c> was the first such column —
+    /// <see cref="AlvoIdentitySchema"/> carries the reasoning and the limits.
+    /// </remarks>
+    /// <param name="store">The identity store.</param>
+    /// <param name="cancellationToken">Cancels the reconciliation.</param>
+    /// <returns>A task that completes when the model's columns are all present.</returns>
+    private async Task ReconcileColumnsAsync(
+        AlvoIdentityDbContext store, CancellationToken cancellationToken)
+    {
+        var added = await AlvoIdentitySchema
+            .EnsureColumnsAsync(store, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (added.Count > 0)
+        {
+            AddedIdentityColumns(logger, string.Join(", ", added));
+        }
     }
 
     /// <summary>Probes for the identity tables with the cheapest query the model allows.</summary>
@@ -169,6 +194,14 @@ internal sealed partial class AlvoIdentityBootstrap(
     /// <param name="logger">The logger.</param>
     [LoggerMessage(Level = LogLevel.Information, Message = "Created Alvo's identity tables.")]
     private static partial void CreatedIdentityTables(ILogger logger);
+
+    /// <summary>Logs the columns an older build's identity database was missing.</summary>
+    /// <param name="logger">The logger.</param>
+    /// <param name="addedColumns">The columns that were added.</param>
+    [LoggerMessage(
+        Level = LogLevel.Information,
+        Message = "Added missing Alvo identity columns: {AddedColumns}.")]
+    private static partial void AddedIdentityColumns(ILogger logger, string addedColumns);
 
     /// <summary>Logs that the bootstrap administrator was seeded.</summary>
     /// <param name="logger">The logger.</param>
