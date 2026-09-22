@@ -132,7 +132,7 @@ public class DescriptorValidatorTests
         "computed" => @"""computed"": ""net * 1.2""",
         "rollup" => @"""rollup"": { ""from"": ""lines"", ""op"": ""count"" }",
         "validation" => @"""validation"": ""value >= 0""",
-        "default" => @"""default"": 1",
+        "default" => @"""default"": { ""$cel"": ""now()"" }",
         "softDelete" => @"""softDelete"": true",
         _ when path.StartsWith("hooks/before", StringComparison.Ordinal) =>
             $@"""hooks"": {{ ""{path["hooks/".Length..]}"": [ {{ ""action"": {{ ""reject"": ""no"" }} }} ] }}",
@@ -167,7 +167,7 @@ public class DescriptorValidatorTests
           "entities": { "invoices": { "fields": {
             "amount": {
               "type": "decimal", "precision": 18, "scale": 2,
-              "validation": "value >= 0", "default": 1 } } } } }
+              "validation": "value >= 0", "default": { "$cel": "now()" } } } } } }
         """;
 
         var reported = _validator.Validate(json).Errors.Select(error => error.Path).ToList();

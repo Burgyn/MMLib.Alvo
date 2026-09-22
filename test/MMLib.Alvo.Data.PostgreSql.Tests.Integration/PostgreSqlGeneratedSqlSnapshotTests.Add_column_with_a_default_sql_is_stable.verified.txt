@@ -1,0 +1,4 @@
+﻿ALTER TABLE vehicles ADD roadworthy boolean DEFAULT TRUE;
+
+;
+ALTER TABLE vehicles ADD service_tier character varying(20) DEFAULT 'standard';

@@ -139,9 +139,15 @@ internal static class WholeRowGuard
     /// nor <c>nullable</c> maps to a <c>NOT NULL</c> column all the same, so a replacement that omitted it
     /// would write <see langword="null"/> and be refused by the engine — a 500 carrying the provider's own
     /// wording where the caller should have been told which field to supply.
+    /// <para>
+    /// <b>A field with a declared default is supplied by definition</b>: the whole-row payload has already
+    /// taken it (see <c>EfAlvoData.WholeRowValues</c>), so there is nothing for the caller to send and
+    /// nothing for this to refuse.
+    /// </para>
     /// </remarks>
     /// <param name="field">The field as the applied schema declares it.</param>
-    private static bool MustBeSupplied(FieldSchema field) => field.Required || !field.Nullable;
+    private static bool MustBeSupplied(FieldSchema field)
+        => (field.Required || !field.Nullable) && field.Default is null;
 
     /// <summary>
     /// Whether the payload leaves <paramref name="field"/> unsaid — absent, or present as an explicit

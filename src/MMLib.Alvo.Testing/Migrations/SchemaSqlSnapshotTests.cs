@@ -56,6 +56,49 @@ public abstract class SchemaSqlSnapshotTests
         await VerifySql(plan);
     }
 
+    /// <summary>Adding a column that declares a literal <see cref="FieldSchema.Default"/>.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The one place a default is engine-visible.</b> The value a create stores is filled by the write
+    /// path, so every behavioural fact about defaults passes whether or not the column carries a
+    /// <c>DEFAULT</c> clause — delete the model builder's annotation and nothing else in the suite notices.
+    /// What the clause is for is the writer that reaches the table without going through Alvo, and its
+    /// spelling is each engine's own, which is exactly what a per-engine snapshot is for.
+    /// </para>
+    /// <para>
+    /// Two literals of different kinds, because a quoted string and a bare number are where a generator's
+    /// spelling differs if it differs at all.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Add_column_with_a_default_sql_is_stable()
+    {
+        EnsureEngineAvailable();
+        var before = Model(Vehicles());
+        var after = Model(Vehicles(
+        [
+            new FieldSchema { Name = "roadworthy", Type = FieldType.Boolean, Nullable = true, Default = Literal("true") },
+            new FieldSchema
+            {
+                Name = "service_tier",
+                Type = FieldType.String,
+                MaxLength = 20,
+                Nullable = true,
+                Default = Literal("\"standard\""),
+            },
+        ]));
+
+        var plan = await CreateMigrator().PlanAsync(before, after, new MigrationOptions(), TestContext.Current.CancellationToken);
+        await VerifySql(plan);
+    }
+
+    /// <summary>A literal that outlives the document it was parsed from.</summary>
+    private static System.Text.Json.JsonElement Literal(string json)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(json);
+        return document.RootElement.Clone();
+    }
+
     /// <summary>Renaming a column via <see cref="FieldSchema.RenamedFrom"/> (must preserve data, not drop+add).</summary>
     [Fact]
     public async Task Rename_column_sql_is_stable()

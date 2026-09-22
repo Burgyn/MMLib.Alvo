@@ -1,0 +1,4 @@
+﻿ALTER TABLE "vehicles" ADD "roadworthy" INTEGER NULL DEFAULT 1;
+
+;
+ALTER TABLE "vehicles" ADD "service_tier" TEXT NULL DEFAULT 'standard';

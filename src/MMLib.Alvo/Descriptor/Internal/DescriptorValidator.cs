@@ -493,11 +493,47 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     private static IEnumerable<DescriptorValidationError> Unhonoured<T>(
         string path, JsonElement node, IReadOnlyList<UnhonouredFeature<T>> unhonoured)
     {
-        foreach (var feature in unhonoured.Where(feature => Declares(node, feature.Path)))
+        foreach (var feature in unhonoured.Where(feature => Refuses(node, feature)))
         {
             yield return new DescriptorValidationError(
                 $"{path}/{feature.Path}", feature.Consequence, feature.Fix, DescriptorValidationSeverity.Error);
         }
+    }
+
+    /// <summary>
+    /// Whether this entry refuses what <paramref name="node"/> declares at its own path.
+    /// </summary>
+    /// <param name="node">The field's or entity's raw JSON.</param>
+    /// <param name="feature">The table entry being asked about.</param>
+    /// <remarks>
+    /// The presence of the key is the question for every feature that is unhonoured whole. An entry that is
+    /// honoured in part carries its own predicate over the raw value, so this pass and the typed one answer
+    /// the same question — see <c>UnhonouredFeature{T}.IsRefusedValue</c>.
+    /// </remarks>
+    private static bool Refuses<T>(JsonElement node, UnhonouredFeature<T> feature)
+    {
+        if (!Declares(node, feature.Path))
+        {
+            return false;
+        }
+
+        return feature.IsRefusedValue is not { } refuses
+            || (Value(node, feature.Path) is { } value && refuses(value));
+    }
+
+    /// <summary>The raw value at <paramref name="featurePath"/>, or <see langword="null"/> when absent.</summary>
+    private static JsonElement? Value(JsonElement node, string featurePath)
+    {
+        var current = node;
+        foreach (var segment in featurePath.Split('/'))
+        {
+            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(segment, out current))
+            {
+                return null;
+            }
+        }
+
+        return current;
     }
 
     /// <summary>

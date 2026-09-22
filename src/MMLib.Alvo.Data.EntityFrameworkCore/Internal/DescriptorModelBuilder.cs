@@ -142,6 +142,7 @@ internal static class DescriptorModelBuilder
         }
 
         ConfigureComputed(property, entity, field, computed);
+        ConfigureDefault(property, field);
 
         // A unique field's index is emitted by ConfigureIndexes, after this loop — see its remarks: on a
         // scoped entity it spans tenant_id, which is not a property of the entity type yet. `!field.Unique`
@@ -172,6 +173,44 @@ internal static class DescriptorModelBuilder
     /// 3's failure mode, silently.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Emits a column <c>DEFAULT</c> for a field that declares a literal one, through EF's own per-provider
+    /// migrations generator — the same seam <see cref="ConfigureComputed"/> uses, for the same reason.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This model only.</b> The runtime model (<c>AlvoDataContext</c>) deliberately carries no default:
+    /// EF reads a property's CLR default as "not set" on a value-generated column, so a caller's explicit
+    /// <see langword="false"/> on a field defaulting to <see langword="true"/> would be replaced by the
+    /// declared value — a wrong stored value, which is the failure the old refusal existed to prevent. An
+    /// insert already omits what the payload does not carry, so the column default is reached without it.
+    /// </para>
+    /// <para>
+    /// The value is converted through <see cref="ColumnValue"/>, the funnel a caller's own value and a filter
+    /// operand already share, so a default is held exactly as a value somebody sent would be. The literal has
+    /// already been refused at apply if the field's type cannot hold it.
+    /// </para>
+    /// </remarks>
+    private static void ConfigureDefault(PropertyBuilder property, FieldSchema field)
+    {
+        if (field.Default is not { } literal)
+        {
+            return;
+        }
+
+        property.HasDefaultValue(ColumnValue.For(FieldClrTypeMap.Exact(field), field.Name, Raw(literal)));
+    }
+
+    /// <summary>The literal as the CLR value its JSON kind denotes, before the column's own conversion.</summary>
+    private static object? Raw(System.Text.Json.JsonElement literal) => literal.ValueKind switch
+    {
+        System.Text.Json.JsonValueKind.True => true,
+        System.Text.Json.JsonValueKind.False => false,
+        System.Text.Json.JsonValueKind.String => literal.GetString(),
+        System.Text.Json.JsonValueKind.Number => literal.GetDecimal(),
+        _ => literal.GetRawText(),
+    };
+
     private static void ConfigureComputed(
         PropertyBuilder property, EntitySchema entity, FieldSchema field, ComputedColumnSql? computed)
     {

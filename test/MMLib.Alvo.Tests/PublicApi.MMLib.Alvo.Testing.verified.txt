@@ -291,6 +291,15 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task Deleting_a_row_nothing_references_still_succeeds() { }
         public System.Threading.Tasks.Task One_unique_value_may_be_held_by_two_tenants_at_once() { }
     }
+    public abstract class AlvoDataDefaultTests
+    {
+        protected AlvoDataDefaultTests() { }
+        public System.Threading.Tasks.Task A_caller_who_sends_the_clr_default_value_stores_that_value() { }
+        public System.Threading.Tasks.Task A_create_that_omits_the_field_stores_the_default() { }
+        public System.Threading.Tasks.Task A_create_that_sends_a_value_stores_what_it_sent() { }
+        public System.Threading.Tasks.Task A_replacement_takes_the_same_defaults_a_create_does() { }
+        protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor);
+    }
     public abstract class AlvoDataDifferentialTests
     {
         protected AlvoDataDifferentialTests() { }
@@ -702,6 +711,7 @@ namespace MMLib.Alvo.Testing.Migrations
         protected SchemaSqlSnapshotTests() { }
         protected abstract string EngineName { get; }
         public System.Threading.Tasks.Task Add_column_sql_is_stable() { }
+        public System.Threading.Tasks.Task Add_column_with_a_default_sql_is_stable() { }
         public System.Threading.Tasks.Task Add_composite_index_sql_is_stable() { }
         public System.Threading.Tasks.Task Add_ref_foreign_key_sql_is_stable() { }
         protected abstract MMLib.Alvo.Migrations.ISchemaMigrator CreateMigrator();
