@@ -60,7 +60,7 @@ internal sealed class ManagementGateway(
     {
         var project = await ProjectAsync(ct).ConfigureAwait(false);
         return _descriptor ??= await AsOperatorAsync(
-            () => management.GetDescriptorAsync(project, ct)).ConfigureAwait(false);
+            () => management.GetDescriptorAsync(project, ct), ct).ConfigureAwait(false);
     }
 
     /// <summary>The resolved schema — what the Data API actually serves.</summary>
@@ -68,7 +68,7 @@ internal sealed class ManagementGateway(
     {
         var project = await ProjectAsync(ct).ConfigureAwait(false);
         return _schema ??= await AsOperatorAsync(
-            () => management.GetSchemaAsync(project, ct)).ConfigureAwait(false);
+            () => management.GetSchemaAsync(project, ct), ct).ConfigureAwait(false);
     }
 
     /// <summary>What this build honours, warns about and refuses.</summary>
@@ -76,17 +76,17 @@ internal sealed class ManagementGateway(
     {
         var project = await ProjectAsync(ct).ConfigureAwait(false);
         return _capabilities ??= await AsOperatorAsync(
-            () => management.GetCapabilitiesAsync(project, ct)).ConfigureAwait(false);
+            () => management.GetCapabilitiesAsync(project, ct), ct).ConfigureAwait(false);
     }
 
     /// <summary>Build, mode, data provider and startup mode.</summary>
     public async ValueTask<ManagementInfo> InfoAsync(CancellationToken ct)
-        => _info ??= await AsOperatorAsync(() => management.GetInfoAsync(ct)).ConfigureAwait(false);
+        => _info ??= await AsOperatorAsync(() => management.GetInfoAsync(ct), ct).ConfigureAwait(false);
 
     /// <summary>Every project this build manages — one, today (§2.6).</summary>
     public async ValueTask<IReadOnlyList<ManagementProject>> ProjectsAsync(CancellationToken ct)
         => _projects ??= await AsOperatorAsync(
-            () => management.ListProjectsAsync(ct)).ConfigureAwait(false);
+            () => management.ListProjectsAsync(ct), ct).ConfigureAwait(false);
 
     /// <summary>The append-only configuration history, newest first.</summary>
     /// <remarks>Never cached: it is the one read whose whole purpose is to be current.</remarks>
@@ -94,7 +94,7 @@ internal sealed class ManagementGateway(
     {
         var project = await ProjectAsync(ct).ConfigureAwait(false);
         return await AsOperatorAsync(
-            () => management.ListRevisionsAsync(project, ct)).ConfigureAwait(false);
+            () => management.ListRevisionsAsync(project, ct), ct).ConfigureAwait(false);
     }
 
     /// <summary>One past revision, with the descriptor it applied.</summary>
@@ -102,7 +102,7 @@ internal sealed class ManagementGateway(
     {
         var project = await ProjectAsync(ct).ConfigureAwait(false);
         return await AsOperatorAsync(
-            () => management.GetRevisionAsync(project, revision, ct)).ConfigureAwait(false);
+            () => management.GetRevisionAsync(project, revision, ct), ct).ConfigureAwait(false);
     }
 
     /// <summary>The engine's verdict for one caller, one entity and one operation.</summary>
@@ -111,7 +111,7 @@ internal sealed class ManagementGateway(
     {
         var project = await ProjectAsync(ct).ConfigureAwait(false);
         return await AsOperatorAsync(
-            () => management.SimulatePolicyAsync(project, simulation, ct)).ConfigureAwait(false);
+            () => management.SimulatePolicyAsync(project, simulation, ct), ct).ConfigureAwait(false);
     }
 
     /// <summary>Applies a descriptor, or plans one when <paramref name="dryRun"/> is set.</summary>
@@ -128,7 +128,7 @@ internal sealed class ManagementGateway(
             descriptorJson, expectedRevision, allowDestructive, dryRun, author, reason);
 
         var result = await AsOperatorAsync(
-            () => management.ApplyDescriptorAsync(project, request, ct)).ConfigureAwait(false);
+            () => management.ApplyDescriptorAsync(project, request, ct), ct).ConfigureAwait(false);
 
         if (!dryRun)
         {
@@ -157,7 +157,7 @@ internal sealed class ManagementGateway(
             expectedRevision, allowDestructive, dryRun, author, reason);
 
         var result = await AsOperatorAsync(
-            () => management.RollbackAsync(project, targetRevision, request, ct)).ConfigureAwait(false);
+            () => management.RollbackAsync(project, targetRevision, request, ct), ct).ConfigureAwait(false);
 
         if (!dryRun)
         {
@@ -203,27 +203,27 @@ internal sealed class ManagementGateway(
 
     /// <summary>One page of the people on this project.</summary>
     public Task<AlvoUserPage> PeopleAsync(AlvoUserQuery query, CancellationToken ct)
-        => AsOperatorAsync(() => Administration.ListAsync(query, ct));
+        => AsOperatorAsync(() => Administration.ListAsync(query, ct), ct);
 
     /// <summary>Creates a person who can sign in, once somebody sets their password.</summary>
     public Task<AlvoUser> CreatePersonAsync(AlvoUserCreation creation, CancellationToken ct)
-        => AsOperatorAsync(() => Administration.CreateAsync(creation, ct));
+        => AsOperatorAsync(() => Administration.CreateAsync(creation, ct), ct);
 
     /// <summary>Replaces a person's roles.</summary>
     public Task<AlvoUser> SetRolesAsync(UserId user, IReadOnlyList<string> roleNames, CancellationToken ct)
-        => AsOperatorAsync(() => Administration.SetRolesAsync(user, roleNames, ct));
+        => AsOperatorAsync(() => Administration.SetRolesAsync(user, roleNames, ct), ct);
 
     /// <summary>Grants, changes or removes the one tenant a person acts in.</summary>
     public Task<AlvoUser> SetTenantAsync(UserId user, TenantId? tenant, CancellationToken ct)
-        => AsOperatorAsync(() => Administration.SetTenantAsync(user, tenant, ct));
+        => AsOperatorAsync(() => Administration.SetTenantAsync(user, tenant, ct), ct);
 
     /// <summary>Bars a person from signing in, or lets them back.</summary>
     public Task<AlvoUser> SetDisabledAsync(UserId user, bool disabled, CancellationToken ct)
-        => AsOperatorAsync(() => Administration.SetDisabledAsync(user, disabled, ct));
+        => AsOperatorAsync(() => Administration.SetDisabledAsync(user, disabled, ct), ct);
 
     /// <summary>Mints the single-use token with which somebody sets their own password.</summary>
     public Task<AlvoCredentialToken> IssueCredentialTokenAsync(UserId user, CancellationToken ct)
-        => AsOperatorAsync(() => Administration.IssueCredentialTokenAsync(user, ct));
+        => AsOperatorAsync(() => Administration.IssueCredentialTokenAsync(user, ct), ct);
 
     private IAlvoUserAdministration Administration => people
         ?? throw new InvalidOperationException(
@@ -264,10 +264,11 @@ internal sealed class ManagementGateway(
     /// <typeparam name="T">What the call answers with.</typeparam>
     /// <param name="call">The management call.</param>
     /// <returns>Whatever the call answered.</returns>
-    private async Task<T> AsOperatorAsync<T>(Func<Task<T>> call)
+    /// <param name="ct">Cancels resolving the caller; the call itself carries its own.</param>
+    private async Task<T> AsOperatorAsync<T>(Func<Task<T>> call, CancellationToken ct)
     {
         var previous = ambient.Principal;
-        ambient.Principal = await CallerAsync().ConfigureAwait(false);
+        ambient.Principal = await CallerAsync(ct).ConfigureAwait(false);
 
         try
         {
@@ -303,10 +304,11 @@ internal sealed class ManagementGateway(
     /// is the screen an operator whose account was disabled mid-session should be looking at.
     /// </para>
     /// </remarks>
-    private async ValueTask<AlvoPrincipal?> CallerAsync()
+    /// <param name="ct">Cancels the read of the membership store.</param>
+    private async ValueTask<AlvoPrincipal?> CallerAsync(CancellationToken ct)
     {
         var state = await authentication.GetAuthenticationStateAsync().ConfigureAwait(false);
-        return await callers.ResolveAsync(state.User, CancellationToken.None).ConfigureAwait(false);
+        return await callers.ResolveAsync(state.User, ct).ConfigureAwait(false);
     }
 
     private async ValueTask<string> ProjectAsync(CancellationToken ct)

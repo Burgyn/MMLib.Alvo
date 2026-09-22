@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Admin.Components.Layout;
+﻿using Microsoft.AspNetCore.Components;
+using MMLib.Alvo.Admin.Components.Layout;
 using System.Reflection;
 
 namespace MMLib.Alvo.Admin.Tests;
@@ -52,6 +53,59 @@ public sealed class BoundaryArchitectureTests
         => _references
             .Select(reference => reference.Name)
             .ShouldNotContain("MMLib.Alvo.Identity");
+
+    /// <summary>
+    /// The only public types are the seven a host is meant to use, plus what Blazor forces.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This converts a comment into a measurement, and the distinction is the whole of the
+    /// repository's "public is the contract" rule.</b> <c>AssemblyInfo.cs</c> states the position —
+    /// the Razor SDK emits every component class <c>public</c> and a <c>.razor</c> file cannot
+    /// declare otherwise, so the component types in the approval baseline are Blazor's doing rather
+    /// than a decision. What must never appear there is a type this package <em>chose</em> to
+    /// publish: a gateway, a helper, an option bag. Leaving that to a reviewer reading a 470-line
+    /// baseline is leaving it to nobody.
+    /// </para>
+    /// <para>
+    /// <c>FieldEditor.NewField</c> is forced too, and by the same kind of rule rather than by
+    /// taste: it is the type argument of a public <c>EventCallback&lt;NewField&gt;</c> parameter, so
+    /// <c>internal</c> would not compile. It is admitted by being nested in a component, and
+    /// <c>_Imports</c> — the class the SDK compiles <c>_Imports.razor</c> into — by name.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void The_only_public_types_are_the_seven_and_what_Blazor_forces()
+    {
+        string[] intended =
+        [
+            nameof(AlvoAdmin), nameof(AlvoAdminAssets), nameof(AlvoAdminOptions), nameof(AlvoAdminClaims),
+            nameof(IAlvoAdminCallerResolver), "AlvoAdminServiceCollectionExtensions",
+            "AlvoAdminEndpointRouteBuilderExtensions",
+
+            /* Not one of the seven and not a component: the Razor SDK compiles _Imports.razor into
+               a public class of its own, which is neither reachable nor useful to anybody. */
+            "_Imports",
+        ];
+
+        var chosen = typeof(AlvoAdmin).Assembly
+            .GetExportedTypes()
+            .Where(type => !intended.Contains(type.Name, StringComparer.Ordinal))
+            .Where(type => !IsComponentOrNestedInOne(type))
+            .Select(type => type.FullName)
+            .ToList();
+
+        chosen.ShouldBeEmpty(
+            "a public type in this package that is neither one of the seven a host uses nor something "
+            + "the Razor SDK emitted is a layout decision somebody can now depend on");
+    }
+
+    /// <summary>Whether a type is a Razor component, or declared inside one.</summary>
+    /// <param name="type">The exported type.</param>
+    /// <returns><see langword="true"/> when the Razor SDK is what made it public.</returns>
+    private static bool IsComponentOrNestedInOne(Type type)
+        => typeof(IComponent).IsAssignableFrom(type)
+            || (type.DeclaringType is { } outer && typeof(IComponent).IsAssignableFrom(outer));
 
     /// <summary>
     /// The phone's bottom bar carries five live sections and no <c>Not yet</c> one.

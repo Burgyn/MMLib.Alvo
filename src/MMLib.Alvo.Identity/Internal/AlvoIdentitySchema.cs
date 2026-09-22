@@ -17,7 +17,7 @@ namespace MMLib.Alvo.Identity.Internal;
 /// they are absent and does nothing when they are present — which is correct exactly once. The
 /// moment the model gains a column, a database created by the previous build has the tables and
 /// not the column, so the probe says "present", nothing is created, and the first read fails at
-/// runtime with a missing-column error nobody can act on. <c>AspNetUsers.TenantId</c> was the
+/// runtime with a missing-column error nobody can act on. <c>{prefix}_identity_users.TenantId</c> was the
 /// first such column; this is the mechanism so it is not also the first incident.
 /// </para>
 /// <para>
@@ -39,7 +39,17 @@ namespace MMLib.Alvo.Identity.Internal;
 /// <b>It refuses what it cannot do safely.</b> A missing column that is required and carries no
 /// default cannot be added to a table that already has rows; every engine rejects it, and
 /// inventing a value would be worse than failing. Such a column fails the start with a message
-/// naming the table, the column and the one thing to do about it.
+/// naming the table, the column and the one thing to do about it. It refuses without asking whether
+/// the table is in fact empty — the check would be a second round trip to widen an error path that
+/// should not be reachable, and an operator told to add the column by hand is not misled by it.
+/// </para>
+/// <para>
+/// <b>Two limits worth knowing before the second column.</b> The column it adds carries the type,
+/// nullability, length and defaults the model declares, and <em>not</em> precision, scale, unicode,
+/// fixed length, collation or computed SQL — so a reconciled column can differ in those from the
+/// same column on a freshly created database. And this adds only: a rename, a retype and a drop are
+/// all outside what a model-versus-database comparison can tell apart from an addition and a
+/// removal, which is exactly the information a migration history carries and this does not.
 /// </para>
 /// </remarks>
 internal static class AlvoIdentitySchema
@@ -55,6 +65,8 @@ internal static class AlvoIdentitySchema
 
         foreach (var table in Tables(store))
         {
+            await EnsureTableExistsAsync(store, table, cancellationToken).ConfigureAwait(false);
+
             var missing = await MissingAsync(store, table, cancellationToken).ConfigureAwait(false);
             foreach (var column in missing)
             {
@@ -89,6 +101,34 @@ internal static class AlvoIdentitySchema
         }
     }
 
+    /// <summary>Refuses a table the model maps and the database does not have.</summary>
+    /// <remarks>
+    /// <b>Asked before the columns, because otherwise a missing table is diagnosed as a missing
+    /// column.</b> The bootstrap probes only the users table, so a database whose
+    /// users table exists while a sibling identity table does not reaches here — and a
+    /// per-column probe would then report every column of that table as missing and fail on the
+    /// first required one with a message naming a column when the problem is the table.
+    /// </remarks>
+    /// <param name="store">The identity store.</param>
+    /// <param name="table">The table the model maps.</param>
+    /// <param name="cancellationToken">Cancels the probe.</param>
+    /// <returns>A task that completes when the table is known to be there.</returns>
+    /// <exception cref="InvalidOperationException">The table is absent.</exception>
+    private static async Task EnsureTableExistsAsync(
+        AlvoIdentityDbContext store, MappedTable table, CancellationToken cancellationToken)
+    {
+        /* A constant rather than a column list: this question is about the table, and naming a
+           column would make a missing column look like a missing table. */
+        if (!await SelectsAsync(store, table, ["1"], quoted: false, cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException(
+                $"The identity database has some of Alvo's identity tables and not '{table.Name}'. "
+                + "Adding a missing table to a half-created identity schema is not something this "
+                + "reconciliation does — restore the table, or start against an empty identity "
+                + "database.");
+        }
+    }
+
     /// <summary>The columns the model declares that the table does not have.</summary>
     /// <remarks>
     /// One probe for the whole table first, because the answer is "nothing is missing" on every
@@ -104,7 +144,7 @@ internal static class AlvoIdentitySchema
     {
         var names = table.Columns.Select(column => column.Name).ToList();
         if (names.Count == 0
-            || await SelectsAsync(store, table, names, cancellationToken).ConfigureAwait(false))
+            || await SelectsAsync(store, table, names, quoted: true, cancellationToken).ConfigureAwait(false))
         {
             return [];
         }
@@ -112,7 +152,8 @@ internal static class AlvoIdentitySchema
         var missing = new List<MappedColumn>();
         foreach (var column in table.Columns)
         {
-            if (!await SelectsAsync(store, table, [column.Name], cancellationToken).ConfigureAwait(false))
+            if (!await SelectsAsync(store, table, [column.Name], quoted: true, cancellationToken)
+                .ConfigureAwait(false))
             {
                 missing.Add(column);
             }
@@ -129,15 +170,19 @@ internal static class AlvoIdentitySchema
     /// </remarks>
     /// <param name="store">The identity store.</param>
     /// <param name="table">The table to read from.</param>
-    /// <param name="columns">The columns to name.</param>
+    /// <param name="columns">The columns to name, or a literal when <paramref name="quoted"/> is false.</param>
+    /// <param name="quoted">
+    /// Whether <paramref name="columns"/> are identifiers to delimit. <see langword="false"/> passes
+    /// them through, which only the table probe uses and only for the constant <c>1</c>.
+    /// </param>
     /// <param name="cancellationToken">Cancels the probe.</param>
     /// <returns><see langword="true"/> when every named column resolved.</returns>
     private static async Task<bool> SelectsAsync(
-        AlvoIdentityDbContext store, MappedTable table, IReadOnlyList<string> columns,
+        AlvoIdentityDbContext store, MappedTable table, IReadOnlyList<string> columns, bool quoted,
         CancellationToken cancellationToken)
     {
         var sql = store.GetService<ISqlGenerationHelper>();
-        var list = string.Join(", ", columns.Select(sql.DelimitIdentifier));
+        var list = string.Join(", ", quoted ? columns.Select(sql.DelimitIdentifier) : columns);
         var target = sql.DelimitIdentifier(table.Name, table.Schema);
 
         var connection = store.Database.GetDbConnection();

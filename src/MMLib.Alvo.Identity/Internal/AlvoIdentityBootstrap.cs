@@ -67,7 +67,7 @@ internal sealed partial class AlvoIdentityBootstrap(
     /// <b>Only on the branch where the tables already exist, and that is the whole point.</b>
     /// Tables this start created are current by construction; tables an earlier build created are
     /// current only until the model gains a column, and then every read of that table fails with a
-    /// missing-column error. <c>AspNetUsers.TenantId</c> was the first such column —
+    /// missing-column error. <c>{prefix}_identity_users.TenantId</c> was the first such column —
     /// <see cref="AlvoIdentitySchema"/> carries the reasoning and the limits.
     /// </remarks>
     /// <param name="store">The identity store.</param>

@@ -150,26 +150,34 @@ public sealed class PolicySimulatorAgreementTests : IAsyncLifetime
     private async Task AgreeAsync(string entity, string operation, AlvoContext caller)
     {
         var verdict = await SimulateAsync(entity, operation, caller);
-        var refused = await RefusedAsync(entity, operation, caller);
+        var refusal = await RefusalAsync(entity, operation, caller);
         var what = $"{operation} on {entity}";
 
         if (!verdict.Allowed)
         {
-            refused.ShouldBeTrue(
+            refusal.ShouldNotBeNull(
                 $"the simulator denied {what} ({verdict.DenyReason}) and the engine did not refuse it; "
                 + "an operator told 'no' by a screen widens a rule that was already wide enough");
             return;
         }
 
-        if (!refused)
+        if (refusal is null)
         {
             return;
         }
 
+        /* The one disagreement this suite tolerates has to be THE documented one, not merely a
+           refusal: AlvoAuthorizationException.WriteRejectedByPolicy is a public constant precisely
+           so the WITH CHECK refusal is identifiable, and three layers already say it identically. */
+        refusal.Message.ShouldBe(
+            AlvoAuthorizationException.WriteRejectedByPolicy,
+            $"the engine refused {what} while the verdict said allowed, which is legitimate only on "
+            + "the WITH CHECK path — any other refusal disagreeing with an allowed verdict is a bug "
+            + "in the simulator, and this assertion is what tells the two apart");
+
         (verdict.WithCheck ?? verdict.TenantScope).ShouldNotBeNull(
-            $"the engine refused {what} while the verdict said allowed, which is legitimate only for a "
-            + "write refused by WITH CHECK over a post-image the simulator may not invent — and only if "
-            + "the verdict hands that predicate back for the screen to render");
+            "…and only if the verdict hands that predicate back for the screen to render, since the "
+            + "post-image it was refused over is one the simulator may not invent");
 
         operation.ShouldNotBe(
             "list",
@@ -221,27 +229,32 @@ public sealed class PolicySimulatorAgreementTests : IAsyncLifetime
         }
     }
 
-    /// <summary>Whether the engine refuses the operation outright for this caller.</summary>
+    /// <summary>The engine's outright refusal for this caller, or nothing.</summary>
+    /// <remarks>
+    /// The exception itself rather than a bool, because <em>which</em> refusal it is decides whether
+    /// a disagreement with the verdict is the documented one or a defect.
+    /// </remarks>
     /// <param name="entity">The entity to act on.</param>
     /// <param name="operation">The operation to attempt.</param>
     /// <param name="caller">The caller to act as.</param>
-    /// <returns><see langword="true"/> when the engine refused outright.</returns>
-    private async Task<bool> RefusedAsync(string entity, string operation, AlvoContext caller)
+    /// <returns>The refusal, or <see langword="null"/> when the engine did not refuse outright.</returns>
+    private async Task<AlvoAuthorizationException?> RefusalAsync(
+        string entity, string operation, AlvoContext caller)
     {
         try
         {
             await AttemptAsync(entity, operation, caller);
-            return false;
+            return null;
         }
-        catch (AlvoAuthorizationException)
+        catch (AlvoAuthorizationException refusal)
         {
-            return true;
+            return refusal;
         }
         catch (AlvoRecordNotFoundException)
         {
             /* An admitted caller whose read predicate excludes the row: 404, deliberately
                indistinguishable from absence and deliberately not a refusal. */
-            return false;
+            return null;
         }
     }
 
