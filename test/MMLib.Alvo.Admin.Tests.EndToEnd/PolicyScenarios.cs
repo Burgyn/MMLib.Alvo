@@ -43,6 +43,13 @@ public sealed class PolicyScenarios(AdminWorld world) : IClassFixture<AdminWorld
         rules.ShouldContain("Simulate a policy");
         rules.ShouldContain("policy/simulate");
 
+        /* The routes name the ENTITY, not a C# property. In Razor a string parameter written
+           without an @ is a literal, so `Entity="Selected"` renders `/api/Selected` on every row —
+           which compiles, runs, and is wrong on screen. A screenshot caught it once; this is what
+           catches it next time. */
+        rules.ShouldContain("/api/work_orders");
+        rules.ShouldNotContain("/api/Selected");
+
         // --- and nothing here scores a stored row
         (await session.Page.Locator("[data-record-verdict]").CountAsync()).ShouldBe(0);
         (await session.Page.Locator("input[placeholder*='record' i]").CountAsync()).ShouldBe(0);
