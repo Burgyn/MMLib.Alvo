@@ -439,7 +439,48 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         {
             yield return CannotEverBeCreated(path);
         }
+
+        if (DefaultRefusal(field.Value) is { } refused)
+        {
+            yield return new DescriptorValidationError(
+                $"{path}/default", refused, RemoveOrCorrectTheDefault, DescriptorValidationSeverity.Error);
+        }
     }
+
+    /// <summary>What this build refuses about the field's declared default, as a sentence.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The mapper's own answer, asked here.</b> Without it a descriptor whose literal the field cannot
+    /// hold — <c>"default": "yes"</c> on a <c>boolean</c>, a string past <c>maxLength</c>, a value outside an
+    /// enum's <c>values</c> — validated <em>clean</em> and then failed at apply with an untyped exception,
+    /// because this pass only knew about the <c>$cel</c> half. A structured error carrying the field's
+    /// pointer is what an agent reads (§0 principle 4); an exception out of apply is not.
+    /// </para>
+    /// <para>
+    /// The field is deserialized rather than re-read from JSON, so the two passes cannot drift: a refusal
+    /// added to <c>FieldDefault</c> is reported here the day it lands. A field whose shape does not
+    /// deserialize is the schema pass's business and is silent here.
+    /// </para>
+    /// </remarks>
+    /// <param name="field">The field's raw JSON.</param>
+    private static string? DefaultRefusal(JsonElement field)
+    {
+        try
+        {
+            return field.Deserialize(AlvoDescriptorJsonContext.Default.FieldDescriptor) is { } declared
+                ? FieldDefault.RefusalFor(declared)
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The fix every default refusal shares, since each names its own cause in the message.</summary>
+    private const string RemoveOrCorrectTheDefault =
+        "Correct the default so the field would accept it from a caller, or remove it and send the value on "
+        + "create.";
 
     /// <summary>
     /// Whether the field declares the literal pair <c>required: true</c> + <c>readOnly: true</c>, which makes
