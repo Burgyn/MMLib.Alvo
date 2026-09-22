@@ -83,6 +83,23 @@
     private IEnumerable<FieldSchema> Managed
         => Entity.Fields.Where(column => AlvoManagedColumns.For(Entity).Contains(column.Name));
 
+    private const int LiteralBadgeLimit = 24;
+
+    /// <summary>
+    /// The declared default as the descriptor holds it, short enough to sit in a badge.
+    /// </summary>
+    /// <remarks>
+    /// The raw JSON rather than the .NET rendering, so a string default reads as <c>"unnamed"</c> and a
+    /// number as <c>0</c> — the badge is telling the reader what is in the descriptor, and a quoted string
+    /// that lost its quotes is a different declaration.
+    /// </remarks>
+    private static string Literal(System.Text.Json.JsonElement literal)
+    {
+        var text = literal.GetRawText();
+
+        return text.Length <= LiteralBadgeLimit ? text : text[..LiteralBadgeLimit] + "…";
+    }
+
     private static string Type(FieldSchema field)
         => field.Type == FieldType.Ref && field.Reference is { } reference
             ? $"ref → {reference.TargetEntity}"
@@ -100,6 +117,11 @@
         if (field.Required)
         {
             yield return "required";
+        }
+
+        if (field.Default is { } literal)
+        {
+            yield return $"default {Literal(literal)}";
         }
 
         if (field.Unique)
