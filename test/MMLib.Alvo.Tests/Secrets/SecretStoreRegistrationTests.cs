@@ -1,6 +1,8 @@
 ﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using MMLib.Alvo.Secrets;
+using MMLib.Alvo.Secrets.Internal;
 
 namespace MMLib.Alvo.Tests.Secrets;
 
@@ -50,6 +52,37 @@ public class SecretStoreRegistrationTests
         store.CanWrite.ShouldBeTrue();
         await store.SetAsync(SecretName.Parse("k"), "v", Ct);
         (await store.GetAsync(SecretName.Parse("k"), Ct)).ShouldBe("v");
+    }
+
+    /// <summary>
+    /// A key-encryption key written into configuration is refused at startup, by name.
+    /// </summary>
+    /// <remarks>
+    /// This repository already refuses <c>Alvo__Admin__BootstrapPassword</c> for the same reason, and the
+    /// reason is sharper here: a value in configuration is a value in an environment dump, a process listing
+    /// and a crash report, and this one decrypts every secret the deployment holds.
+    /// </remarks>
+    [Fact]
+    public void An_encryption_key_in_configuration_is_refused_and_says_what_to_mount()
+    {
+        using var provider = Build((AlvoSecretOptionsValidation.RefusedKey, "bm90LWEta2V5"));
+
+        var refusal = Should.Throw<OptionsValidationException>(
+            () => provider.GetRequiredService<IOptions<AlvoSecretOptions>>().Value).Message;
+
+        refusal.ShouldContain(AlvoSecretOptionsValidation.RefusedKey);
+        refusal.ShouldContain("EncryptionKeyFile");
+    }
+
+    /// <summary>And the path to a key file is not what is refused — it is the fix the refusal names.</summary>
+    [Fact]
+    public void A_path_to_a_key_file_is_accepted()
+    {
+        using var provider = Build(
+            ($"{AlvoSecretOptions.ConfigurationSection}:EncryptionKeyFile", "/run/secrets/alvo-secret-key"));
+
+        provider.GetRequiredService<IOptions<AlvoSecretOptions>>().Value
+            .EncryptionKeyFile.ShouldBe("/run/secrets/alvo-secret-key");
     }
 
     private static ServiceProvider Build(params (string Key, string Value)[] settings)

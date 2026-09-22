@@ -131,6 +131,9 @@ public class ChangeTrackerReachTests
     /// <c>RollupRecompute</c> writes the parent's own aggregate columns from a subquery over the child table
     /// and narrows by the row id it read off the child row this caller was already authorised to write, so it
     /// composes no caller-influenced predicate and every identifier in it comes from the dialect;
+    /// <c>SecretsTable</c> and <c>EfCoreSecretStore</c> read and write only the framework's secrets table,
+    /// binding the secret's name — a value already validated against <c>SecretName</c>'s grammar — and never
+    /// an entity table, so there is no row a policy predicate could be missing from;
     /// <c>RelationalReachability</c> executes one <c>const</c> of its own (<c>SELECT 1</c>) that names no
     /// table, carries no <c>WHERE</c> and binds no parameter, so there is nothing in it a caller could
     /// influence and nothing for a policy predicate to be missing from; and
@@ -222,12 +225,14 @@ public class ChangeTrackerReachTests
         "EfCoreOutboxStore.cs",
         "EfCoreRuntimeSchemaWriter.cs",
         "EfCoreSchemaMigrator.cs",
+        "EfCoreSecretStore.cs",
         "IdempotencyTable.cs",
         "OutboxTable.cs",
         "PredicateParameterBinder.cs",
         "RelationalReachability.cs",
         "RelationalSqlBatch.cs",
         "RollupRecompute.cs",
+        "SecretsTable.cs",
         "SqliteCaseSensitiveLike.cs",
         "SystemSchemaInitializer.cs",
         "VersionRowWriter.cs",

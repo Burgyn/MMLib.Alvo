@@ -180,7 +180,12 @@ public static class AlvoServiceCollectionExtensions
         services.AddOptions<AlvoSecretOptions>()
             .Configure<IServiceProvider>((options, provider) =>
                 provider.GetService<IConfiguration>()?
-                    .GetSection(AlvoSecretOptions.ConfigurationSection).Bind(options));
+                    .GetSection(AlvoSecretOptions.ConfigurationSection).Bind(options))
+            .ValidateOnStart();
+
+        services.TryAddEnumerable(
+            ServiceDescriptor.Singleton<IValidateOptions<AlvoSecretOptions>, AlvoSecretOptionsValidation>(
+                provider => new AlvoSecretOptionsValidation(provider.GetService<IConfiguration>())));
 
         services.TryAddSingleton<ConfigurationSecretStore>();
         services.TryAddSingleton<ISecretStore>(provider => new LayeredSecretStore(

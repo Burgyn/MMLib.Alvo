@@ -1605,6 +1605,13 @@ namespace MMLib.Alvo.Schema
 }
 namespace MMLib.Alvo.Secrets
 {
+    public sealed class AlvoSecretOptions
+    {
+        public const string ConfigurationSection = "Alvo:Secrets";
+        public AlvoSecretOptions() { }
+        public string? EncryptionKeyFile { get; set; }
+        public System.Collections.Generic.IDictionary<string, string> Values { get; }
+    }
     public interface ISecretStore
     {
         bool CanWrite { get; }
