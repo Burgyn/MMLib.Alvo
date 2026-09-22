@@ -512,3 +512,9 @@ playground/.run/
 samples/**/*.db
 samples/**/*.db-shm
 samples/**/*.db-wal
+
+# The prototype suite's own output: Playwright writes screenshots and its last-run state
+# beside the specs. Both are artefacts of a run, not of the drawing, and `git add -A` sweeps
+# them into whatever commit is open — 7 MB of them, once.
+docs/design/f5-admin/tests/screenshots/
+docs/design/f5-admin/tests/.artifacts/
