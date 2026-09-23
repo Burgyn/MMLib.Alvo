@@ -214,32 +214,35 @@ below is *destroyed* by an edit — it is only unauthorable.
 
 ### 5e. What the audit adds to this list
 
-Ordered by what it costs to leave alone, not by effort.
+Ordered by what it costs to leave alone, not by effort. **All seven are filed** — this list is the
+reasoning, the issues are the queue. 7 and 10–13 are on [F5](https://github.com/Burgyn/MMLib.Alvo/milestone/6);
+8 and 9 are on [F6](https://github.com/Burgyn/MMLib.Alvo/milestone/7), as debt on shipped code.
+None carries `ready`: they are gaps this audit found, not confirmed specifications.
 
-7. **A ref field's `onDelete` is chosen by nobody.** Every ref the dashboard creates gets
+7. ([#265](https://github.com/Burgyn/MMLib.Alvo/issues/265)) **A ref field's `onDelete` is chosen by nobody.** Every ref the dashboard creates gets
    `restrict`, written without a control and without a word on screen. The other three semantics
    are reachable only by editing the descriptor by hand. This is the one gap below that changes
    what the *database* does, which is why it is first.
-8. **An entity cannot be renamed without dropping it.** `renamedFrom` exists on an entity exactly
+8. ([#266](https://github.com/Burgyn/MMLib.Alvo/issues/266)) **An entity cannot be renamed without dropping it.** `renamedFrom` exists on an entity exactly
    as it does on a field, and only the field's is wired.
-9. **`hidden` and `readOnly` are invisible to the dashboard.** Not merely uneditable: absent from
+9. ([#267](https://github.com/Burgyn/MMLib.Alvo/issues/267)) **`hidden` and `readOnly` are invisible to the dashboard.** Not merely uneditable: absent from
    `SchemaModel.FieldSchema`, so no screen can show that a field never leaves the server. Fixing it
    starts one layer down, in the schema model, which makes it the only item here that is not purely
    an Admin change.
-10. **The project's own identity is unreachable** — `description` and `branding` (5a), plus a
+10. ([#268](https://github.com/Burgyn/MMLib.Alvo/issues/268)) **The project's own identity is unreachable** — `description` and `branding` (5a), plus a
     field's `description` (5c). Three keys the schema says are for the admin UI, in a dashboard
     that renders none of them.
-11. **Refusals still reach two screens out of three.** `FieldEditor` filters
+11. ([#269](https://github.com/Burgyn/MMLib.Alvo/issues/269)) **Refusals still reach two screens out of three.** `FieldEditor` filters
     `capabilities.refused` to `field.*` and the "On write" tab now reads the three action types —
     that half is done. What is left: nothing consumes the `entity.*` slots, so `softDelete` is
     still silent on the entity header; and the Fields *tab* — the list, as opposed to the editor
     over it — shows no refusal, so a field carrying `validation` looks unremarkable until you open
     it.
-12. **The read-only halves of Access are a trap.** The role catalogue and the three management
+12. ([#270](https://github.com/Burgyn/MMLib.Alvo/issues/270)) **The read-only halves of Access are a trap.** The role catalogue and the three management
     levels are rendered beside membership controls that do write, under a paragraph promising that
     a change waits for an apply. Either wire them into the working copy or say plainly that they
     are descriptor-only.
-13. **`formats`, `realtime`, `auth.providers`, `tenancy.enabled`, `dynamicEntities`** — five
+13. ([#271](https://github.com/Burgyn/MMLib.Alvo/issues/271)) **`formats`, `realtime`, `auth.providers`, `tenancy.enabled`, `dynamicEntities`** — five
     declared blocks with no screen and no sentence. The cheap fix is one honest surface (a
     "declared, not editable here" panel, as Integrations already does for `webhooks`/`templates`)
     rather than five editors.
