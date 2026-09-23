@@ -33,10 +33,11 @@ internal enum CellKind
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Invariant culture, always.</b> The API and every other screen are invariant, and a grid that
-/// followed the server's culture showed <c>21,6</c> beside a request body that says <c>21.6</c>
-/// (D-8). A decimal also keeps its declared scale, so <c>17.00</c> lines up under <c>12.90</c> in a
-/// <c>decimal(…,2)</c> column instead of reading as a different kind of number.
+/// <b>Invariant culture, always.</b> The API and every other screen are invariant, and a number shown
+/// any other way reads <c>21,6</c> beside a request body that says <c>21.6</c> (D-8; the form's half
+/// of it, and where the comma really came from, is in <see cref="FormValue"/>). A decimal also keeps
+/// its declared scale, so <c>17.00</c> lines up under <c>12.90</c> in a <c>decimal(…,2)</c> column
+/// instead of reading as a different kind of number.
 /// </para>
 /// <para>
 /// <b>Short values do not wrap and long ones are clipped.</b> An identifier such as
@@ -73,7 +74,7 @@ internal sealed record GridCell(CellKind Kind, string Text, string? Title = null
             {
                 FieldType.Enum => new GridCell(CellKind.Value, Invariant(value)),
                 FieldType.Boolean => Flag(value),
-                FieldType.Decimal => new GridCell(CellKind.Number, Amount(value, field.Scale)),
+                FieldType.Decimal => new GridCell(CellKind.Number, FormValue.Amount(value, field.Scale)),
                 FieldType.Integer => new GridCell(CellKind.Number, Invariant(value)),
                 FieldType.Date or FieldType.DateTime => new GridCell(CellKind.Moment, Moment(value)),
                 FieldType.Uuid or FieldType.Ref => Identifier(value),
@@ -96,24 +97,6 @@ internal sealed record GridCell(CellKind Kind, string Text, string? Title = null
         => value is true || (value is string text && bool.TryParse(text, out var parsed) && parsed)
             ? new GridCell(CellKind.Flag, "✓", "yes")
             : new GridCell(CellKind.Flag, Dash, "no");
-
-    private static string Amount(object value, int? scale)
-    {
-        var number = value switch
-        {
-            decimal exact => exact,
-            double or float or int or long or short or byte => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
-            string text when decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed) => parsed,
-            _ => (decimal?)null,
-        };
-
-        return number switch
-        {
-            null => Invariant(value),
-            { } known when scale is { } places => known.ToString($"F{places}", CultureInfo.InvariantCulture),
-            { } known => known.ToString(CultureInfo.InvariantCulture),
-        };
-    }
 
     private static string Moment(object value) => value switch
     {

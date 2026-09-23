@@ -128,6 +128,30 @@ internal static class DescriptorLens
     /// <param name="entity">The entity to read.</param>
     public static FieldMasks Masks(string descriptorJson, string entity)
     {
+        var (always, conditional) = BoolOrCel(descriptorJson, entity, "hidden");
+        return always.Count + conditional.Count == 0 ? FieldMasks.None : new FieldMasks(always, conditional);
+    }
+
+    /// <summary>The fields one entity declares <c>readOnly</c>.</summary>
+    /// <remarks>
+    /// Like <c>hidden</c>, a policy the resolved schema does not carry, and split the same way: <c>true</c>
+    /// freezes the field for every caller, a CEL expression for some.
+    /// </remarks>
+    /// <param name="descriptorJson">The descriptor as stored.</param>
+    /// <param name="entity">The entity to read.</param>
+    public static FieldLocks Locks(string descriptorJson, string entity)
+    {
+        var (always, conditional) = BoolOrCel(descriptorJson, entity, "readOnly");
+        return always.Count + conditional.Count == 0 ? FieldLocks.None : new FieldLocks(always, conditional);
+    }
+
+    /// <summary>The fields whose <paramref name="key"/> is <c>true</c>, and those whose is a CEL expression.</summary>
+    private static (HashSet<string> Always, HashSet<string> Conditional) BoolOrCel(
+        string descriptorJson, string entity, string key)
+    {
+        var always = new HashSet<string>(StringComparer.Ordinal);
+        var conditional = new HashSet<string>(StringComparer.Ordinal);
+
         using var document = Parse(descriptorJson);
         if (document is null
             || !document.RootElement.TryGetProperty("entities", out var entities)
@@ -135,30 +159,28 @@ internal static class DescriptorLens
             || !declared.TryGetProperty("fields", out var fields)
             || fields.ValueKind != JsonValueKind.Object)
         {
-            return FieldMasks.None;
+            return (always, conditional);
         }
 
-        var always = new HashSet<string>(StringComparer.Ordinal);
-        var conditional = new HashSet<string>(StringComparer.Ordinal);
         foreach (var field in fields.EnumerateObject())
         {
-            var hidden = HiddenKind(field.Value);
-            if (hidden == JsonValueKind.True)
+            var kind = KindOf(field.Value, key);
+            if (kind == JsonValueKind.True)
             {
                 always.Add(field.Name);
             }
-            else if (hidden == JsonValueKind.String)
+            else if (kind == JsonValueKind.String)
             {
                 conditional.Add(field.Name);
             }
         }
 
-        return new FieldMasks(always, conditional);
+        return (always, conditional);
     }
 
-    private static JsonValueKind HiddenKind(JsonElement field)
-        => field.ValueKind == JsonValueKind.Object && field.TryGetProperty("hidden", out var hidden)
-            ? hidden.ValueKind
+    private static JsonValueKind KindOf(JsonElement field, string key)
+        => field.ValueKind == JsonValueKind.Object && field.TryGetProperty(key, out var value)
+            ? value.ValueKind
             : JsonValueKind.Undefined;
 
     private static IReadOnlyList<KeyValuePair<string, string>> Pairs(

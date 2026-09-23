@@ -24,7 +24,7 @@ public class GridCellTests
         {
             CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("sk-SK");
 
-            GridCell.Of(Decimal(scale: 1), 1m).Text.ShouldBe("1.0", "D-8: the server's culture drew 1,0");
+            GridCell.Of(Decimal(scale: 1), 1m).Text.ShouldBe("1.0", "D-8: the grid never follows a culture, the server's or the browser's");
         }
         finally
         {
