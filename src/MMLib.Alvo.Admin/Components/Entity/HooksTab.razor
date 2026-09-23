@@ -1,4 +1,4 @@
-﻿@*
+@*
     What runs on a write.
 
     A before-hook and an after-hook are not the same editor and must not look like one: the frozen
@@ -6,7 +6,15 @@
     calls" — because a before-hook runs inside the write's own transaction. An after-hook is where
     a webhook or an email belongs. The point's name is therefore shown with what it may contain,
     rather than the two being flattened into one list of "actions".
+
+    All six points are honoured by this build — PR5a landed the three `after*`, PR5b the three
+    `before*` — which is what unblocked editing them at all. What is still refused is three of the
+    five *action types*, and those are read off `capabilities` rather than listed here, so the day
+    one of them lands the tab stops warning about it without anybody editing this file.
 *@
+@using System.Text.Json
+@using System.Text.Json.Nodes
+
 <div class="a-section">
     <span class="a-section-title">On write</span>
     <span class="a-section-sub">
@@ -15,6 +23,16 @@
     </span>
 </div>
 
+@if (Refused.Count > 0)
+{
+    <div class="a-refused" style="margin:var(--space-4)" data-testid="hooks-refused">
+        @foreach (var refusal in Refused)
+        {
+            <span class="a-refused__reason">@refusal.Consequence</span>
+        }
+    </div>
+}
+
 @if (Hooks.Count == 0)
 {
     <EmptyState Title="Nothing runs on a write to this entity"
@@ -22,27 +40,366 @@
 }
 else
 {
-    @foreach (var hook in Hooks)
+    @foreach (var point in Hooks)
     {
         <div style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border)">
             <div class="a-row" style="gap:var(--space-3)">
-                <span class="@($"a-badge {(IsBefore(hook.Key) ? "a-badge--warn" : "a-badge--accent")}")">@hook.Key</span>
+                <span class="@($"a-badge {(IsBefore(point.Key) ? "a-badge--warn" : "a-badge--accent")}")">@point.Key</span>
                 <span class="a-section-sub">
-                    @(IsBefore(hook.Key)
+                    @(IsBefore(point.Key)
                         ? "in the transaction · may refuse or change the row · no network"
                         : "after the commit · may leave the process")
                 </span>
             </div>
-            <CodeBlock Json="@hook.Value" />
+
+            @{
+                var declared = Declared(point.Value);
+                var name = point.Key;
+            }
+
+            @for (var position = 0; position < declared.Count; position++)
+            {
+                var hook = declared[position];
+                var at = position;
+
+                <div class="a-row" style="gap:var(--space-3);margin-top:var(--space-3)" data-testid="hook-row">
+                    <div style="flex:1">
+                        <CodeBlock Json="@hook" />
+                    </div>
+                    @if (Editable)
+                    {
+                        <button type="button" class="a-btn a-btn--ghost a-btn--sm" data-testid="hook-remove"
+                                aria-label="@($"Remove hook {at + 1} of {name}")"
+                                @onclick="() => OnRemove.InvokeAsync(new HookAt(name, at))">Remove</button>
+                    }
+                </div>
+            }
         </div>
     }
 }
 
+@if (Editable)
+{
+    <div class="a-stack" style="padding:var(--space-5);gap:var(--space-4)">
+        <div class="a-section">
+            <span class="a-section-title">Add a hook</span>
+            <span class="a-section-sub">
+                The point decides what the action may be, because the schema does: a before-hook runs
+                in the transaction and may only refuse or patch the row.
+            </span>
+        </div>
+
+        @if (_refusal is { Length: > 0 })
+        {
+            <div class="a-refused" data-testid="hook-refusal">
+                <span class="a-refused__reason">@_refusal</span>
+            </div>
+        }
+
+        <div class="a-field">
+            <span class="a-label">When</span>
+            <div class="a-choice" data-testid="hook-points">
+                @foreach (var point in _points)
+                {
+                    <button type="button" class="@($"a-chip{(point == _point ? " a-chip--on" : string.Empty)}")"
+                            @onclick="() => Choose(point)">@point</button>
+                }
+            </div>
+        </div>
+
+        <div class="a-field">
+            <label class="a-label" for="hook-condition">Only when (optional)</label>
+            <input class="a-input a-mono" id="hook-condition" value="@_condition" autocomplete="off"
+                   placeholder="new.status == 'completed'"
+                   @oninput="args => _condition = args.Value?.ToString() ?? string.Empty" />
+            <span class="a-section-sub">
+                CEL over <code class="a-mono">new</code>, <code class="a-mono">old</code> and
+                <code class="a-mono">@@user</code>. Left empty, the hook runs on every write.
+            </span>
+        </div>
+
+        <div class="a-field">
+            <span class="a-label">Then</span>
+            <div class="a-choice" data-testid="hook-actions">
+                @foreach (var kind in Kinds)
+                {
+                    <button type="button" class="@($"a-chip{(kind == _kind ? " a-chip--on" : string.Empty)}")"
+                            @onclick="() => _kind = kind">@kind</button>
+                }
+            </div>
+        </div>
+
+        @switch (_kind)
+        {
+            case Reject:
+                <div class="a-field">
+                    <label class="a-label" for="hook-reject">Refuse with</label>
+                    <input class="a-input" id="hook-reject" value="@_reject" autocomplete="off" maxlength="500"
+                           placeholder="A completed work order cannot be reopened."
+                           @oninput="args => _reject = args.Value?.ToString() ?? string.Empty" />
+                    <span class="a-section-sub">
+                        Becomes the <code class="a-mono">detail</code> of the RFC 7807 problem the caller
+                        reads, so write it for them rather than for the log.
+                    </span>
+                </div>
+                break;
+            case Mutate:
+                <div class="a-field-row">
+                    <div class="a-field">
+                        <label class="a-label" for="hook-mutate-field">Field</label>
+                        <input class="a-input a-mono" id="hook-mutate-field" value="@_mutateField" autocomplete="off"
+                               placeholder="completed_on"
+                               @oninput="args => _mutateField = args.Value?.ToString() ?? string.Empty" />
+                    </div>
+                    <div class="a-field">
+                        <label class="a-label" for="hook-mutate-value">Set to</label>
+                        <input class="a-input a-mono" id="hook-mutate-value" value="@_mutateValue" autocomplete="off"
+                               placeholder="now()"
+                               @oninput="args => _mutateValue = args.Value?.ToString() ?? string.Empty" />
+                        <span class="a-section-sub">
+                            A CEL expression, stored as <code class="a-mono">{"$cel": "…"}</code>. Wrap it in
+                            quotes for a literal string.
+                        </span>
+                    </div>
+                </div>
+                break;
+            case Webhook:
+                <div class="a-field">
+                    <label class="a-label" for="hook-endpoint">Endpoint</label>
+                    <input class="a-input a-mono" id="hook-endpoint" value="@_endpoint" autocomplete="off"
+                           placeholder="dispatch"
+                           @oninput="args => _endpoint = args.Value?.ToString() ?? string.Empty" />
+                    <span class="a-section-sub">
+                        A name declared under <code class="a-mono">webhooks.endpoints</code>, not a URL — the
+                        managed path is the one this build delivers on.
+                    </span>
+                </div>
+                break;
+            case Email:
+                <div class="a-field-row">
+                    <div class="a-field">
+                        <label class="a-label" for="hook-template">Template</label>
+                        <input class="a-input a-mono" id="hook-template" value="@_template" autocomplete="off"
+                               placeholder="work_order_completed"
+                               @oninput="args => _template = args.Value?.ToString() ?? string.Empty" />
+                    </div>
+                    <div class="a-field">
+                        <label class="a-label" for="hook-to">To</label>
+                        <input class="a-input a-mono" id="hook-to" value="@_to" autocomplete="off"
+                               placeholder="{{new.contact_email}}"
+                               @oninput="args => _to = args.Value?.ToString() ?? string.Empty" />
+                    </div>
+                </div>
+                break;
+        }
+
+        <div class="a-row">
+            <button type="button" class="a-btn a-btn--primary a-btn--sm" data-testid="hook-add"
+                    @onclick="AddAsync">Add the hook</button>
+        </div>
+    </div>
+}
+
 @code {
-    /// <summary>The hooks, as the descriptor declares them.</summary>
+    private const string Reject = "reject";
+    private const string Mutate = "mutate";
+    private const string Webhook = "webhook";
+    private const string Email = "email";
+
+    private static readonly string[] _points =
+        ["beforeCreate", "beforeUpdate", "beforeDelete", "afterCreate", "afterUpdate", "afterDelete"];
+
+    private static readonly string[] _beforeKinds = [Reject, Mutate];
+    private static readonly string[] _afterKinds = [Webhook, Email];
+
+    private string _point = _points[0];
+    private string _kind = Reject;
+    private string _condition = string.Empty;
+    private string _reject = string.Empty;
+    private string _mutateField = string.Empty;
+    private string _mutateValue = string.Empty;
+    private string _endpoint = string.Empty;
+    private string _template = string.Empty;
+    private string _to = string.Empty;
+    private string? _refusal;
+
+    /// <summary>The hooks, as the descriptor declares them: point to the raw JSON of its list.</summary>
     [Parameter, EditorRequired]
     public IReadOnlyList<KeyValuePair<string, string>> Hooks { get; set; } = [];
 
+    /// <summary>Whether this operator has a working copy to edit at all.</summary>
+    [Parameter]
+    public bool Editable { get; set; }
+
+    /// <summary>
+    /// What this build refuses that belongs on this tab.
+    /// </summary>
+    /// <remarks>
+    /// <b>Read from <c>capabilities</c>, not listed in the markup.</b> Three of the five action types are
+    /// declared by the schema and never run — and the tab said nothing about any of them, so the absence of
+    /// a control for <c>entity.update</c> read as an oversight rather than a refusal. <c>FieldEditor</c>
+    /// already does exactly this for its own half; this is the entity half the audit found nobody consuming.
+    /// </remarks>
+    [Parameter]
+    public IReadOnlyList<ManagementRefusedFeature> Capabilities { get; set; } = [];
+
+    /// <summary>Raised with the hook to declare.</summary>
+    [Parameter]
+    public EventCallback<NewHook> OnAdd { get; set; }
+
+    /// <summary>Raised with the hook to remove.</summary>
+    [Parameter]
+    public EventCallback<HookAt> OnRemove { get; set; }
+
+    /// <summary>A hook this editor built, in the schema's own shape.</summary>
+    /// <param name="Point">The hook point it belongs to.</param>
+    /// <param name="Condition">The CEL guard, or empty for a hook that always runs.</param>
+    /// <param name="Action">The action object.</param>
+    public sealed record NewHook(string Point, string? Condition, JsonObject Action);
+
+    /// <summary>One declared hook, by where it sits.</summary>
+    /// <param name="Point">The hook point.</param>
+    /// <param name="Position">Its position within that point's list.</param>
+    public sealed record HookAt(string Point, int Position);
+
+    /// <summary>The refusals that are about an action type, which is the only kind this tab can show.</summary>
+    /// <remarks>
+    /// Matched against the three discriminators rather than a prefix, because a refusal's slot is the
+    /// feature's own name for an action — <c>entity.update</c>, not <c>action.entity.update</c>.
+    /// </remarks>
+    private IReadOnlyList<ManagementRefusedFeature> Refused =>
+        [.. Capabilities.Where(refusal =>
+            refusal.Slot is "function" or "http.call" or "entity.update")];
+
+    /// <summary>The action kinds this point admits — the schema's own split, not a preference.</summary>
+    private string[] Kinds => IsBefore(_point) ? _beforeKinds : _afterKinds;
+
     private static bool IsBefore(string point)
         => point.StartsWith("before", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Switches the point, and the action kind with it when the current one no longer fits.
+    /// </summary>
+    /// <remarks>
+    /// Moving from <c>afterCreate</c> to <c>beforeCreate</c> with <c>webhook</c> still selected would leave
+    /// the editor holding a descriptor the apply refuses — a before-hook may not touch the network — and the
+    /// refusal would name a choice the operator never made.
+    /// </remarks>
+    private void Choose(string point)
+    {
+        _point = point;
+        _refusal = null;
+
+        if (!Kinds.Contains(_kind))
+        {
+            _kind = Kinds[0];
+        }
+    }
+
+    /// <summary>
+    /// The hooks declared at one point, each as its own JSON.
+    /// </summary>
+    /// <remarks>
+    /// Parsed here rather than upstream so the tab keeps taking the one shape both the applied descriptor
+    /// and the working copy are already read in. A point whose value is not an array renders as nothing
+    /// rather than throwing: the descriptor reaching this screen has been applied, but the working copy may
+    /// have been imported a moment ago and this tab is not the authority that refuses it.
+    /// </remarks>
+    private static List<string> Declared(string listJson)
+    {
+        try
+        {
+            var parsed = JsonNode.Parse(listJson);
+            return parsed is JsonArray list
+                ? [.. list.Select(hook => hook?.ToJsonString() ?? "{}")]
+                : [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>
+    /// Declares the hook, or says why it cannot.
+    /// </summary>
+    /// <remarks>
+    /// One refusal per action kind, and each is the schema's own <c>required</c>. Everything past that —
+    /// whether the CEL compiles, whether the endpoint or the template exists — is the apply's, which answers
+    /// it against the whole descriptor rather than against this one control.
+    /// </remarks>
+    private async Task AddAsync()
+    {
+        var action = Build();
+        if (action is null)
+        {
+            return;
+        }
+
+        await OnAdd.InvokeAsync(new NewHook(_point, _condition, action));
+
+        _condition = string.Empty;
+        _reject = string.Empty;
+        _mutateField = string.Empty;
+        _mutateValue = string.Empty;
+        _endpoint = string.Empty;
+        _template = string.Empty;
+        _to = string.Empty;
+        _refusal = null;
+    }
+
+    /// <summary>The action in the schema's shape, or nothing with <c>_refusal</c> set.</summary>
+    private JsonObject? Build()
+    {
+        _refusal = null;
+
+        switch (_kind)
+        {
+            case Reject:
+                if (Blank(_reject))
+                {
+                    return Refuse("A reject carries the message the caller reads. Write one.");
+                }
+
+                return new JsonObject { [Reject] = _reject };
+
+            case Mutate:
+                if (Blank(_mutateField) || Blank(_mutateValue))
+                {
+                    return Refuse("A mutate patches at least one field. Name the field and what to set it to.");
+                }
+
+                return new JsonObject
+                {
+                    [Mutate] = new JsonObject
+                    {
+                        [_mutateField] = new JsonObject { ["$cel"] = _mutateValue },
+                    },
+                };
+
+            case Webhook:
+                if (Blank(_endpoint))
+                {
+                    return Refuse("A webhook names an endpoint declared under 'webhooks.endpoints'.");
+                }
+
+                return new JsonObject { ["type"] = Webhook, ["endpoint"] = _endpoint };
+
+            default:
+                if (Blank(_template) || Blank(_to))
+                {
+                    return Refuse("An email names a template and who it goes to.");
+                }
+
+                return new JsonObject { ["type"] = Email, ["template"] = _template, ["to"] = _to };
+        }
+    }
+
+    private JsonObject? Refuse(string reason)
+    {
+        _refusal = reason;
+        return null;
+    }
+
+    private static bool Blank(string value) => string.IsNullOrWhiteSpace(value);
 }

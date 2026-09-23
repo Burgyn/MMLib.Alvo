@@ -92,7 +92,8 @@
                     <RulesTab Rules="_working" Entity="@EntityName" Editable="true" OnChanged="SetRule" />
                     break;
                 case "On write":
-                    <HooksTab Hooks="@_hooks" />
+                    <HooksTab Hooks="@_hooks" Editable="Copy.Loaded" Capabilities="_refused"
+                              OnAdd="AddHook" OnRemove="RemoveHook" />
                     break;
                 case "Indexes":
                     <Indexes Entity="@_entity" Declared="_indexes" Editable="Copy.Loaded"
@@ -164,7 +165,6 @@
 
             var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
             _rules = DescriptorLens.Rules(descriptor.DescriptorJson, EntityName);
-            _hooks = DescriptorLens.Hooks(descriptor.DescriptorJson, EntityName);
             _entities = [.. _schema.Entities.Select(entity => entity.Name)];
 
             /* The working copy is taken from the applied descriptor the first time any screen
@@ -180,6 +180,10 @@
                moment somebody navigated away and back. */
             _working = DescriptorLens.Rules(Copy.Json, EntityName);
             _indexes = Copy.IndexesOf(EntityName);
+
+            /* The On write tab edits the working copy too, so it renders the working copy — for the
+               reason the Rules tab states one field up. */
+            _hooks = Copy.HooksOf(EntityName);
 
             /* An entity that exists only in the working copy is not in GET schema, because nothing
                has been applied. Rendering it from the working copy is what lets somebody add an
@@ -287,6 +291,26 @@
     {
         Copy.RemoveIndex(EntityName, position);
         _indexes = Copy.IndexesOf(EntityName);
+    }
+
+    /// <summary>
+    /// Declares a hook in the working copy, and stays on the tab.
+    /// </summary>
+    /// <remarks>
+    /// No navigation, for <see cref="AddIndexAsync"/>'s reason: an entity's write path is usually
+    /// described by more than one hook, and a trip to the preview between each is a trip per sentence.
+    /// </remarks>
+    private void AddHook(HooksTab.NewHook added)
+    {
+        Copy.AddHook(EntityName, added.Point, added.Condition, added.Action);
+        _hooks = Copy.HooksOf(EntityName);
+    }
+
+    /// <summary>Drops one hook, and stays on the tab.</summary>
+    private void RemoveHook(HooksTab.HookAt at)
+    {
+        Copy.RemoveHook(EntityName, at.Point, at.Position);
+        _hooks = Copy.HooksOf(EntityName);
     }
 
     /// <summary>The edited field's declaration, as the working copy currently carries it.</summary>

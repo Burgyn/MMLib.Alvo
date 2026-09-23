@@ -116,10 +116,31 @@ namespace MMLib.Alvo.Admin.Components.Entity
     public class HooksTab : Microsoft.AspNetCore.Components.ComponentBase
     {
         public HooksTab() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRefusedFeature> Capabilities { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Editable { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, string>> Hooks { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.HooksTab.NewHook> OnAdd { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.HooksTab.HookAt> OnRemove { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public sealed class HookAt : System.IEquatable<MMLib.Alvo.Admin.Components.Entity.HooksTab.HookAt>
+        {
+            public HookAt(string Point, int Position) { }
+            public string Point { get; init; }
+            public int Position { get; init; }
+        }
+        public sealed class NewHook : System.IEquatable<MMLib.Alvo.Admin.Components.Entity.HooksTab.NewHook>
+        {
+            public NewHook(string Point, string? Condition, System.Text.Json.Nodes.JsonObject Action) { }
+            public System.Text.Json.Nodes.JsonObject Action { get; init; }
+            public string? Condition { get; init; }
+            public string Point { get; init; }
+        }
     }
     public class Indexes : Microsoft.AspNetCore.Components.ComponentBase
     {

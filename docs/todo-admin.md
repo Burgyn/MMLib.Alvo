@@ -6,6 +6,11 @@ the decision rather than from the symptom.
 
 Raised by the maintainer while driving the real dashboard from a phone, 23 Sep 2026.
 
+**Status, 23 Sep 2026 — all six are done.** What each item says below is what was wrong; the
+`✅ Done` note under it says what landed and, where the item's own premise turned out to be stale,
+what the answer really was. The audit in item 5 is the live part of this file: its tables are the
+record of what the dashboard still cannot reach, and items **7–13** under §5e are the queue.
+
 ## 1. Indexes cannot be created or managed
 
 `field.indexed` and `unique` are honoured by the apply, and the Fields tab *shows* them as badges,
@@ -16,6 +21,13 @@ after watching a list get slow is the one thing they have to leave the dashboard
 Probably: a section on the entity's Fields tab beside "Declared fields", listing the declared
 indexes with their fields and uniqueness, and an editor that writes the `indexes` block into the
 working copy like every other edit — no new write path, the same preview and apply.
+
+**✅ Done.** Both shapes, and on the **Indexes tab** rather than beside "Declared fields" — the tab
+already existed and already rendered the block, so a second list on the Fields tab would have been
+two places to read one thing. A composite index is picked field by field, in order, with each chip
+showing its position, because order is what a composite index is *for*. A single-field index is the
+field's own `index` facet and is now a toggle in the field editor, offered only while the field is
+not unique. `AddIndex` appends, so an index this editor cannot draw survives an edit beside it.
 
 ## 2. The AI panel never appears
 
@@ -30,6 +42,14 @@ still absent, the fault is in `AdminLayout`'s one-shot `IsConfiguredAsync` — i
 circuit, so a connection saved *during* a session does not light the launcher until a reload.
 That last part is almost certainly the real answer, and it is a bug: saving a connection should
 make the assistant appear without a reload.
+
+**✅ Done — and the guess at the end was right.** The write worked the whole time; `AdminLayout`
+resolved "is one configured" once in `OnInitializedAsync` and nothing told it the answer had moved.
+`AssistantGateway` now raises `ConnectionChanged` on a successful save and the layout re-asks over
+it. A refused save raises nothing, because the launcher is mounted off the announcement and
+announcing a write that did not happen would light an assistant that cannot be dialled. Measured by
+a browser scenario that saves on Settings and waits for the launcher in the same circuit; removing
+the subscription turns it red, which was checked rather than assumed.
 
 ## 3. `on write` hooks are not editable from the dashboard
 
@@ -50,6 +70,15 @@ there is no subset to carve out — the editor is owed for all six points. What 
 owe is the refusal of the three action *types* (`function`, `http.call`, `entity.update`) that
 `UnhonouredFeatures` does hold, which it can read the way `FieldEditor` already reads its own.
 
+**✅ Done.** All six points are editable. The point decides what the action may be, because the
+schema does: a before-point offers `reject` and `mutate` only, an after-point offers `webhook` and
+`email`, and switching from an after-point to a before-point takes the network actions away with it
+— leaving `webhook` selected would let the editor compose a descriptor the apply refuses, and the
+refusal would name a choice the operator never made. `payload` and `data` are deliberately not
+offered: both are JSONata slots this build refuses, and a control for a facet the apply refuses is
+the control this file argues against elsewhere. The three refused action types are now read off
+`capabilities` and shown on the tab, which also closes the `entity.*` half of §5e item 11.
+
 ## 4. No link to the OpenAPI documentation
 
 The host serves a generated OpenAPI document and a docs UI, and the dashboard never points at it.
@@ -59,6 +88,13 @@ click does not exist.
 Probably: a link on the entity page's API tab and one in Settings, pointing at the host's docs
 route — with the caveat that an embedded host may mount it elsewhere or not at all, so the link
 appears only when the route is actually mapped.
+
+**✅ Done.** Two links on each of the two screens — the docs UI for a person, the raw document for
+an agent. The routes arrive from the host through `AlvoAdminOptions`, since the dashboard references
+Abstractions alone and cannot see `AlvoHost.ScalarPath`; null is the default and means no link
+rather than a broken one. The standalone host writes them after the configuration bind and nulls
+them when `Alvo:Docs:Enabled` is off. It also fixed something worse than the absence: the API tab
+named `/openapi/v1.json` in prose on **every** deployment, including those that serve nothing there.
 
 ## 5. Audit: what Alvo can do that the dashboard cannot
 
@@ -123,9 +159,9 @@ reachable and the dashboard says why · **gap** = not reachable and nothing says
 | `audit` | written once, by "Add entity" | partial | As `tenancy`. The Fields tab does show the managed columns that result. |
 | `fields` | Fields tab | edit | See 5c. |
 | `rules` | Rules tab | edit | |
-| `hooks` | On write tab | read | Item 3. Now unblocked — all six points are honoured, and the tab reads no capability, so it is silent about the three refused action types too. |
+| `hooks` | On write tab | **edit** | Item 3, done. All six points; the tab now also reads `capabilities` and names the three refused action types. |
 | `realtime` | nowhere | **gap** | |
-| `indexes` | Indexes tab | read | Item 1. |
+| `indexes` | Indexes tab | **edit** | Item 1, done. |
 
 ### 5c. Field-level facets
 
@@ -148,7 +184,7 @@ below is *destroyed* by an edit — it is only unauthorable.
 | `onDelete` | no — `facets["onDelete"] ??= "restrict"` | `on delete x` | **gap** — the schema declares four semantics and the dashboard writes one, silently, on every ref field it creates. |
 | `format` | no | shown | **gap** — readable, unauthorable, and `formats` (5a) is unreachable too. |
 | `validation` | no — refusal shown | not shown | Refused by `UnhonouredFeatures.OnAField`; `FieldEditor` renders that refusal, the Fields list does not. |
-| `index` | no | `indexed` | **gap** — item 1. |
+| `index` | yes, while not unique | `indexed` | **edit** — item 1, done. |
 | `hidden` | no | not shown | **gap**, and deeper than the others: `SchemaModel.FieldSchema` carries no `Hidden`, so the dashboard cannot read it even to display it. A field hidden from every API response looks identical to one that is not. |
 | `readOnly` | no | not shown | Same, same reason. |
 | `computed` | locked (`_maintainedElsewhere`) | `computed` | read — right, it is an expression. |
@@ -187,12 +223,12 @@ Ordered by what it costs to leave alone, not by effort.
 10. **The project's own identity is unreachable** — `description` and `branding` (5a), plus a
     field's `description` (5c). Three keys the schema says are for the admin UI, in a dashboard
     that renders none of them.
-11. **Refusals reach one screen out of three.** `FieldEditor` takes `capabilities.refused` and
-    filters it to `field.*`, which is the pattern and it works. Nothing consumes the `entity.*`
-    half, so `softDelete` is silent on the entity header; nothing consumes the action types, so the
-    "On write" tab is silent about `function`, `http.call` and `entity.update`; and the Fields
-    *tab* — the list, as opposed to the editor over it — shows no refusal either, so a field
-    carrying `validation` looks unremarkable until you open it.
+11. **Refusals still reach two screens out of three.** `FieldEditor` filters
+    `capabilities.refused` to `field.*` and the "On write" tab now reads the three action types —
+    that half is done. What is left: nothing consumes the `entity.*` slots, so `softDelete` is
+    still silent on the entity header; and the Fields *tab* — the list, as opposed to the editor
+    over it — shows no refusal, so a field carrying `validation` looks unremarkable until you open
+    it.
 12. **The read-only halves of Access are a trap.** The role catalogue and the three management
     levels are rendered beside membership controls that do write, under a paragraph promising that
     a change waits for an apply. Either wire them into the working copy or say plainly that they
@@ -212,3 +248,8 @@ This is a design-system item rather than a screen one: `PageHeader`'s `Actions` 
 a primary action and a collection of secondary ones, and decide at the breakpoint which are shown
 and which fold into the menu. The sections sheet already has the sheet pattern the overflow menu
 would reuse.
+
+**✅ Done, exactly as described.** `Actions` became `Primary` and `Secondary`; above 720 px they all
+sit on the row as before, below it the secondaries fold into an overflow menu built from `Sheet`, so
+it inherits the scrim, Escape, focus and scroll lock. One markup tree and one media query, for the
+reason the shell gives about a second navigation.

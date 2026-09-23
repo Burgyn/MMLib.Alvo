@@ -232,3 +232,168 @@ public sealed class IndexEditingScenarios(AdminWorld world) : IClassFixture<Admi
         session.AssertConsoleClean();
     }
 }
+
+/// <summary>
+/// Declaring and dropping a hook, which the tab could only ever show.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Its own world for <c>IndexEditingScenarios</c>' reason</b>, and its counts are relative for
+/// the same one: the scenarios in a class share one working copy.
+/// </para>
+/// <para>
+/// <b>All six points are editable, which is the change.</b> The issue this closes assumed several
+/// hook points were still refused; none are — PR5a landed the three <c>after*</c> and PR5b the three
+/// <c>before*</c>. What is refused is three of the five action types, and the tab now says so rather
+/// than leaving their absence to read as an oversight.
+/// </para>
+/// </remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+{
+    /// <summary>
+    /// A guarded before-hook is declared, and reaches the descriptor condition first.
+    /// </summary>
+    /// <remarks>
+    /// The before half, because it is the half the schema constrains hardest: a before-hook runs in the
+    /// write's own transaction and may only refuse or patch the row.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_guarded_before_hook_is_declared_from_the_tab()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("On write");
+
+        var before = await session.Page.Locator("[data-testid='hook-row']").CountAsync();
+
+        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeUpdate')");
+        await session.Page.FillAsync("#hook-condition", "old.status == 'completed'");
+        await session.Page.FillAsync("#hook-reject", "A completed work order cannot be reopened.");
+        await session.Page.ClickAsync("[data-testid='hook-add']");
+
+        await session.Page.Locator("[data-testid='hook-row']").Nth(before).WaitForAsync();
+
+        await session.GoAsync("/schema/preview");
+        await session.Page.Locator("button:has-text('Plan this change')").WaitForAsync();
+
+        var previewed = await session.Page.Locator("main.a-content").InnerTextAsync();
+        previewed.ShouldContain("beforeUpdate");
+        previewed.ShouldContain("cannot be reopened");
+
+        /* And then plan it, which is the half worth the wall-clock: the dry run puts the composed
+           descriptor through the core's own validator, so a hook written in a shape the apply refuses
+           fails here rather than on somebody's deployment. Without this the scenario only proves the
+           editor wrote *something* into the document.
+
+           The apply control appearing is the signal the plan came back — this screen renders it only
+           then — and `.a-error` being absent is the signal it came back clean. Both, because a refused
+           descriptor leaves the error panel on a screen that still has everything else on it. */
+        await session.Page.ClickAsync("button:has-text('Plan this change')");
+        await session.Page.Locator("#apply-reason").WaitForAsync();
+
+        (await session.Page.Locator(".a-error").CountAsync()).ShouldBe(0);
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// Switching to a before-point takes the network actions away with it.
+    /// </summary>
+    /// <remarks>
+    /// The schema's own split, enforced where it can be acted on. Leaving <c>webhook</c> selected after a
+    /// move from <c>afterCreate</c> would let the editor compose a descriptor the apply refuses, and the
+    /// refusal would name a choice the operator never made.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_before_point_does_not_offer_a_network_action()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("On write");
+
+        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('afterCreate')");
+        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('webhook')").WaitForAsync();
+
+        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeCreate')");
+
+        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('webhook')").WaitForAsync(
+            new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('reject')").WaitForAsync();
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// A reject with no message is refused by the control rather than by the apply.
+    /// </summary>
+    /// <remarks>
+    /// The schema's own <c>required</c>, said where it can be acted on — and the only kind of rule this
+    /// editor enforces. Whether the CEL compiles, or the endpoint exists, is the apply's, which answers it
+    /// against the whole descriptor rather than against one control.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_reject_with_no_message_is_refused_before_the_apply()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("On write");
+
+        var before = await session.Page.Locator("[data-testid='hook-row']").CountAsync();
+
+        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeDelete')");
+        await session.Page.ClickAsync("[data-testid='hook-add']");
+
+        await session.Page.Locator("[data-testid='hook-refusal']").WaitForAsync();
+        (await session.Page.Locator("[data-testid='hook-refusal']").InnerTextAsync())
+            .ShouldContain("the message the caller reads");
+        (await session.Page.Locator("[data-testid='hook-row']").CountAsync()).ShouldBe(before);
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// The tab says which action types this build refuses, instead of leaving their absence silent.
+    /// </summary>
+    /// <remarks>
+    /// The audit's finding: <c>FieldEditor</c> filters <c>capabilities.refused</c> to <c>field.*</c> and
+    /// nothing consumed the rest, so a missing control for <c>entity.update</c> read as an oversight. The
+    /// wording is the framework's, because a reworded refusal is the one nobody tested.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_tab_says_which_action_types_this_build_refuses()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("On write");
+
+        var refused = await session.Page.Locator("[data-testid='hooks-refused']").InnerTextAsync();
+        refused.ShouldContain("entity.update");
+        refused.ShouldContain("http.call");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>Removing takes the hook that was asked for.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Removing_a_hook_takes_the_one_it_was_asked_for()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("On write");
+
+        var rows = session.Page.Locator("[data-testid='hook-row']");
+        var before = await rows.CountAsync();
+
+        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('afterDelete')");
+        await session.Page.FillAsync("#hook-endpoint", "dispatch");
+        await session.Page.ClickAsync("[data-testid='hook-add']");
+        await rows.Nth(before).WaitForAsync();
+
+        await session.Page.Locator("[data-testid='hook-remove']").Last.ClickAsync();
+        await rows.Nth(before).WaitForAsync(
+            new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+
+        session.AssertConsoleClean();
+    }
+}

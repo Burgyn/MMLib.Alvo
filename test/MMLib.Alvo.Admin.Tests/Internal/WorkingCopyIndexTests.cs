@@ -177,6 +177,19 @@ public class WorkingCopyIndexTests
     }
 
     /// <summary>
+    /// The relaxed encoder <see cref="WorkingCopy"/> itself writes with.
+    /// </summary>
+    /// <remarks>
+    /// Without it these facts assert against a re-escaping of the document rather than the document: the
+    /// default encoder turns every apostrophe into <c>\u0027</c>, and a CEL condition is mostly apostrophes.
+    /// The expectation would then be pinning this helper's serializer, not what an operator commits.
+    /// </remarks>
+    private static readonly System.Text.Json.JsonSerializerOptions _asWritten = new()
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    /// <summary>
     /// The first declared index, as one line of JSON, for a fact that is about the document.
     /// </summary>
     /// <remarks>
@@ -189,7 +202,7 @@ public class WorkingCopyIndexTests
         var indexes = document.RootElement
             .GetProperty("entities").GetProperty("work_orders").GetProperty("indexes");
 
-        return System.Text.Json.JsonSerializer.Serialize(indexes[0]);
+        return System.Text.Json.JsonSerializer.Serialize(indexes[0], _asWritten);
     }
 
     /// <summary>A copy over the smallest descriptor these facts need.</summary>
