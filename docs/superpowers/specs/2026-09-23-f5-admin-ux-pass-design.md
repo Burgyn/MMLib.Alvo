@@ -56,8 +56,9 @@ every field type, rollups, computed fields, CEL masking, before/after hooks, web
   receiver got 12 deliveries. The heading contradicts the capability it renders.
 - **D-7** "Discard every unapplied change?" confirms with a **primary green** button and offers no Cancel
   beside it — the destructive action is styled as the safe one.
-- **D-8** Decimals in the record form render in the server's culture (`1,0`, `21,6`) while the API and
-  every other screen are invariant; the grid drops the declared scale (`17` next to `12.9` in a
+- **D-8** Decimals in the record form render in the browser's locale (`1,0`, `21,6`) — the server sends
+  `1.0`, but an `<input type="number">` displays it localised — while the API and every other screen are
+  invariant; date and datetime inputs also opened empty; the grid drops the declared scale (`17` next to `12.9` in a
   `decimal(…,2)` column).
 - **D-9** The staged working copy is invisible where it is edited: a field added to `technicians` does not
   appear on its Fields tab; only a green "Preview changes" hints that *something, somewhere* is pending.
