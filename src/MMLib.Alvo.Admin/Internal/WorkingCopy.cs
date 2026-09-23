@@ -55,6 +55,22 @@ internal sealed class WorkingCopy
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
+    /// <summary>
+    /// One fragment of the working document, as a screen should read it.
+    /// </summary>
+    /// <remarks>
+    /// <b><see cref="_pretty"/>, never a bare <c>ToJsonString()</c>, and the reason is one line up.</b> The
+    /// default encoder escapes anything that could be dangerous in HTML, so a hook's CEL condition reached
+    /// the On write tab as <c>old.status == \u0027completed\u0027 \u0026\u0026 …</c> and was rendered to
+    /// operator exactly like that. Unreadable rather than wrong, which is the worse kind of display bug:
+    /// nothing fails, and the screen quietly stops being about the descriptor the author wrote. Safe here
+    /// because <c>CodeBlock</c> HTML-encodes before it highlights.
+    /// </remarks>
+    /// <param name="node">The fragment, or <see langword="null"/>.</param>
+    /// <param name="empty">What an absent fragment reads as.</param>
+    private static string Readable(JsonNode? node, string empty) =>
+        node?.ToJsonString(_pretty) ?? empty;
+
     private JsonNode? _applied;
     private JsonNode? _working;
 
@@ -413,14 +429,14 @@ internal sealed class WorkingCopy
     public IReadOnlyList<KeyValuePair<string, string>> HooksOf(string entity)
         => _working?["entities"]?[entity]?["hooks"] is JsonObject hooks
             ? [.. hooks.Select(pair => new KeyValuePair<string, string>(
-                pair.Key, pair.Value?.ToJsonString() ?? "[]"))]
+                pair.Key, Readable(pair.Value, "[]")))]
             : [];
 
     /// <summary>The fields an entity declares in the working copy, with their raw JSON.</summary>
     public IReadOnlyList<KeyValuePair<string, string>> FieldsOf(string entity)
         => _working?["entities"]?[entity]?["fields"] is JsonObject fields
             ? [.. fields.Select(pair => new KeyValuePair<string, string>(
-                pair.Key, pair.Value?.ToJsonString() ?? "{}"))]
+                pair.Key, Readable(pair.Value, "{}")))]
             : [];
 
     private static JsonObject Ensure(JsonNode? parent, string name)

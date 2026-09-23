@@ -192,8 +192,22 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     public async Task AssertNoHorizontalScrollAsync()
     {
         await SettleAsync().ConfigureAwait(false);
+        /* The document AND the shell's own content pane — those two, not every scroller on the page.
+           Measuring only the document was a blind spot the shell guarantees: `.a-content` carries
+           `overflow: auto`, so content wider than a phone scrolls that pane while the document never
+           moves, which is exactly what an operator sees and what this assertion called clean. It cost a
+           real defect — the On write tab shipped with a code block that took the content pane sideways
+           at 375 px, past a green `Every_screen_fits_a_phone` that walks that very route.
+
+           Deliberate scrollers are NOT included, and that is the distinction rather than an oversight:
+           the design system opts a tab strip, a wide table and a code block into `overflow-x: auto` on
+           purpose, and a check that failed on those would be a check somebody turns off. A pane that
+           scrolls because it was asked to is a pattern; the page's own frame scrolling is the bug. */
         var overflow = await Page.EvaluateAsync<int>(
-            "() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+            "() => { const doc = document.documentElement;"
+            + " const pane = document.querySelector('main.a-content');"
+            + " return Math.max(doc.scrollWidth - doc.clientWidth,"
+            + "   pane ? pane.scrollWidth - pane.clientWidth : 0); }")
             .ConfigureAwait(false);
 
         if (overflow <= 1)
@@ -204,8 +218,20 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
         /* Naming the widest element, because "the page scrolls sideways" sends a reader to
            look at every panel on it. The offender is almost always one element carrying a
            fixed width, or a min-width the viewport cannot satisfy. */
+        /* Naming the widest element inside the pane, because "the page scrolls sideways" sends a reader
+           to look at every panel on it. The offender is almost always one element carrying a fixed width,
+           or a flex item that kept its `min-width: auto` and refused to shrink under its own content. */
         var culprit = await Page.EvaluateAsync<string>(
-            "() => { let worst = '', width = 0; for (const el of document.querySelectorAll('body *')) { const right = el.getBoundingClientRect().right; if (right > width) { width = right; worst = el.tagName.toLowerCase() + '.' + (el.className || '(no class)'); } } return worst + ' reaches ' + Math.round(width) + 'px'; }").ConfigureAwait(false);
+            "() => { const pane = document.querySelector('main.a-content') || document.body;"
+            + " const edge = pane.getBoundingClientRect().right;"
+            + " let worst = '', width = edge;"
+            + " for (const el of pane.querySelectorAll('*')) {"
+            + "   if (/(auto|scroll)/.test(getComputedStyle(el).overflowX)) continue;"
+            + "   const right = el.getBoundingClientRect().right;"
+            + "   if (right > width) { width = right;"
+            + "     worst = el.tagName.toLowerCase() + '.' + (el.className || '(no class)'); } }"
+            + " return worst === '' ? 'no single element reaches past the pane'"
+            + "   : worst + ' reaches ' + Math.round(width - edge) + 'px past it'; }").ConfigureAwait(false);
 
         overflow.ShouldBeLessThanOrEqualTo(
             1, $"{Page.Url} scrolls sideways by {overflow}px — {culprit}");

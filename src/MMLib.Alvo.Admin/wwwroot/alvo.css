@@ -765,6 +765,51 @@ h1.a-page-title:focus {
   overflow-x: auto;
 }
 
+/* One declared hook: the JSON and the control that drops it. Beside each other while there is room,
+   stacked under 720 px — a code block sharing a 375 px row with a button wraps every condition
+   mid-token, which is what the On write tab did the first time it was opened on a phone. */
+.a-hookrow {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+}
+
+.a-hookrow > .a-code {
+  flex: 1;
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .a-hookrow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* Trailing rather than full-width: a destructive control stretched across the row reads as the
+     thing the screen is for. */
+  .a-hookrow__remove {
+    align-self: flex-end;
+  }
+}
+
+/* A refusal the operator can put away. Shut it is one line; open it is the framework's own wording,
+   which is never shortened — the fold is about when it is read, not about saying less. */
+.a-refused--fold > summary {
+  cursor: pointer;
+  color: var(--warn-fg);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.a-refused--fold > summary::marker {
+  color: var(--dim);
+}
+
+.a-refused--fold[open] > summary {
+  margin-bottom: var(--space-3);
+}
+
 .a-code-key { color: var(--accent); }
 .a-code-str { color: var(--ok-fg); }
 .a-code-dim { color: var(--faint); }

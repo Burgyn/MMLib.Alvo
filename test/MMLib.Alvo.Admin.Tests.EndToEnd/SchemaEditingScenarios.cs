@@ -444,6 +444,70 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         session.AssertConsoleClean();
     }
 
+    /// <summary>
+    /// A declared hook does not make the page scroll sideways on a phone.
+    /// </summary>
+    /// <remarks>
+    /// <b>The gap that let a real defect ship:</b> <c>Every_screen_fits_a_phone</c> already walks
+    /// <c>/schema/work_orders</c> at 375 px and passed — because the example descriptor declares no hooks,
+    /// so the tab it was measuring was the empty state. With one hook on it, the code block sat in a flex row
+    /// whose item kept its <c>min-width: auto</c>, refused to shrink under the JSON's longest line, and took
+    /// the whole document sideways. Measured with a hook present, and with the refusals rendered, because
+    /// those are the two things that make the row wide.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_declared_hook_does_not_push_the_page_sideways_on_a_phone()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("On write");
+
+        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeUpdate')");
+        await session.Page.FillAsync("#hook-condition", "old.status == 'completed' && new.status != 'completed'");
+        await session.Page.FillAsync("#hook-reject", "A completed work order cannot be reopened.");
+        await session.Page.ClickAsync("[data-testid='hook-add']");
+
+        await session.Page.Locator("[data-testid='hook-row']").First.WaitForAsync();
+
+        await session.AssertNoHorizontalScrollAsync();
+        await session.AssertNoVerticalTextAsync();
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// The condition reaches the screen as the author wrote it, not as JSON escaped it.
+    /// </summary>
+    /// <remarks>
+    /// <c>JsonNode.ToJsonString()</c> with no options takes the default encoder, which escapes anything that
+    /// could be dangerous in HTML — so <c>&amp;&amp;</c> and an apostrophe reached the tab as
+    /// <c>\u0026\u0026</c> and <c>\u0027</c>. Unreadable rather than wrong, and invisible to every fact
+    /// that asserted against the document rather than against the render.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_condition_is_rendered_as_it_was_written()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("On write");
+
+        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeUpdate')");
+        await session.Page.FillAsync("#hook-condition", "old.status == 'completed' && new.status != 'completed'");
+        await session.Page.FillAsync("#hook-reject", "A completed work order cannot be reopened.");
+        await session.Page.ClickAsync("[data-testid='hook-add']");
+
+        var row = session.Page.Locator("[data-testid='hook-row']").First;
+        await row.WaitForAsync();
+
+        var rendered = await row.InnerTextAsync();
+        rendered.ShouldContain("&&");
+        rendered.ShouldContain("'completed'");
+        rendered.ShouldNotContain("\\u0026");
+        rendered.ShouldNotContain("\\u0027");
+
+        session.AssertConsoleClean();
+    }
+
     /// <summary>Removing takes the hook that was asked for.</summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task Removing_a_hook_takes_the_one_it_was_asked_for()

@@ -1,4 +1,4 @@
-@*
+﻿@*
     What runs on a write.
 
     A before-hook and an after-hook are not the same editor and must not look like one: the frozen
@@ -23,14 +23,23 @@
     </span>
 </div>
 
+@*
+    Folded by default. Three refusals at full length were the first screen of this tab on a phone — the
+    operator scrolled past a wall to reach what the entity actually declares. Shut, it is one line that
+    still says the count and the names; the wording inside is the framework's own, unshortened.
+*@
 @if (Refused.Count > 0)
 {
-    <div class="a-refused" style="margin:var(--space-4)" data-testid="hooks-refused">
+    <details class="a-refused a-refused--fold" data-testid="hooks-refused">
+        <summary>
+            @Refused.Count action type@(Refused.Count == 1 ? "" : "s") this build declares and does not run —
+            <span class="a-mono">@string.Join(", ", Refused.Select(refusal => refusal.Slot))</span>
+        </summary>
         @foreach (var refusal in Refused)
         {
             <span class="a-refused__reason">@refusal.Consequence</span>
         }
-    </div>
+    </details>
 }
 
 @if (Hooks.Count == 0)
@@ -62,13 +71,17 @@ else
                 var hook = declared[position];
                 var at = position;
 
-                <div class="a-row" style="gap:var(--space-3);margin-top:var(--space-3)" data-testid="hook-row">
-                    <div style="flex:1">
-                        <CodeBlock Json="@hook" />
-                    </div>
+                @*
+                    The control sits under the declaration on a phone and beside it on a desktop. Beside it
+                    at 375 px, the code block gave up a third of the row to one word and every condition
+                    wrapped mid-token.
+                *@
+                <div class="a-hookrow" data-testid="hook-row">
+                    <CodeBlock Json="@hook" />
                     @if (Editable)
                     {
-                        <button type="button" class="a-btn a-btn--ghost a-btn--sm" data-testid="hook-remove"
+                        <button type="button" class="a-btn a-btn--ghost a-btn--sm a-hookrow__remove"
+                                data-testid="hook-remove"
                                 aria-label="@($"Remove hook {at + 1} of {name}")"
                                 @onclick="() => OnRemove.InvokeAsync(new HookAt(name, at))">Remove</button>
                     }
@@ -206,6 +219,24 @@ else
     private const string Mutate = "mutate";
     private const string Webhook = "webhook";
     private const string Email = "email";
+
+    /// <summary>
+    /// How one hook is written for a person to read.
+    /// </summary>
+    /// <remarks>
+    /// <b>Both options earn their place, and the encoder is the one that was missing.</b> A bare
+    /// <c>ToJsonString()</c> takes the default encoder, which escapes anything that could be dangerous in
+    /// HTML — so a CEL condition reached this tab as
+    /// <c>old.status == \u0027completed\u0027 \u0026\u0026 …</c> and was rendered exactly like that.
+    /// It is the defect <c>WorkingCopy</c> documents at length for the document as a whole, arriving one
+    /// re-serialisation later. Safe because <c>CodeBlock</c> HTML-encodes before it highlights.
+    /// Indented because one long line is what pushed this row wider than a phone.
+    /// </remarks>
+    private static readonly JsonSerializerOptions _readable = new()
+    {
+        WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     private static readonly string[] _points =
         ["beforeCreate", "beforeUpdate", "beforeDelete", "afterCreate", "afterUpdate", "afterDelete"];
@@ -353,7 +384,7 @@ else
         {
             var parsed = JsonNode.Parse(listJson);
             return parsed is JsonArray list
-                ? [.. list.Select(hook => hook?.ToJsonString() ?? "{}")]
+                ? [.. list.Select(hook => hook?.ToJsonString(_readable) ?? "{}")]
                 : [];
         }
         catch (JsonException)
