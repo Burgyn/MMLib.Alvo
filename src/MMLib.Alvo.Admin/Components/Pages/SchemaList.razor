@@ -4,6 +4,7 @@
 @inject WorkingCopyStore Copies
 @inject DataGateway Caller
 @inject NavigationManager Navigation
+@implements IDisposable
 
 <PageTitle>Schema · Alvo</PageTitle>
 
@@ -161,12 +162,34 @@
     private bool _adding;
     private bool _scoped;
     private bool _audited = true;
+    private bool _disposed;
+    private bool _following;
+
+    private void OnCopyChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        _disposed = true;
+        if (_following)
+        {
+            Copy.Changed -= OnCopyChanged;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
         /* Resolve this operator's working copy before anything reads it: the store is shared and
            keyed by user, so a copy is never another administrator's. */
         Copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
+
+        /* The pending rows are drawn from the copy, which the shell's Discard and the operator's other tabs
+           also change. Not subscribed when disposed during the await: nothing would unsubscribe it. */
+        if (!_disposed)
+        {
+            Copy.Changed += OnCopyChanged;
+            _following = true;
+        }
+
         try
         {
             _schema = await Gateway.SchemaAsync(CancellationToken.None);

@@ -4,6 +4,7 @@
 @inject WorkingCopyStore Copies
 @inject DataGateway Caller
 @inject NavigationManager Navigation
+@implements IDisposable
 
 <PageTitle>@EntityName · Schema · Alvo</PageTitle>
 
@@ -174,6 +175,8 @@
     private IReadOnlyList<string> _fieldNames = [];
     private IReadOnlyList<StagedField> _fields = [];
     private StagedView _staged = StagedView.None;
+    private WorkingCopy? _followed;
+    private bool _disposed;
     private bool _renaming;
     private string _newName = string.Empty;
     private string? _renameRefusal;
@@ -191,7 +194,7 @@
     {
         /* Resolve this operator's working copy before anything reads it: the store is shared and
            keyed by user, so a copy is never another administrator's. */
-        Copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
+        Follow(Copies.For((await Caller.ContextAsync(CancellationToken.None)).User));
         try
         {
             _schema = await Gateway.SchemaAsync(CancellationToken.None);
@@ -218,16 +221,75 @@
                has been applied. Rendering it from the working copy is what lets somebody add an
                entity and then give it rules — without this, the screen would say "there is no
                entity called invoices" to the person who just created one. */
-            if (_entity is null)
-            {
-                _entity = PendingSchema.Read(Copy.Json, EntityName);
-                _pending = _entity is not null;
-            }
+            _pending = _entity is null;
+            ReadPendingEntity();
         }
         catch (Exception exception) when (exception is ManagementForbiddenException
             or ManagementProjectNotFoundException or ManagementRequestException)
         {
             _error = exception;
+        }
+    }
+
+    /// <summary>
+    /// Follows this operator's copy, so the screen redraws when anything changes it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Anything, not only this screen.</b> The copy is the operator's and every tab they have open edits
+    /// it, and so does the shell's Discard. A tab that went on drawing the copy as it was would offer a Remove
+    /// against a position that has since moved — the removal is checked against what was drawn and refused,
+    /// but the operator would be looking at rows that are no longer there.
+    /// </para>
+    /// <para>
+    /// A redraw of the working-copy parts only: the tab, an open sheet and what was typed into it are left
+    /// as they are. The subscription is skipped when this screen was disposed during the await that resolved
+    /// the copy — nothing would unsubscribe it, and the copy outlives every circuit that shows it.
+    /// </para>
+    /// </remarks>
+    private void Follow(WorkingCopy copy)
+    {
+        if (_disposed || ReferenceEquals(copy, _followed))
+        {
+            Copy = copy;
+            return;
+        }
+
+        Unfollow();
+        Copy = copy;
+        _followed = copy;
+        _followed.Changed += OnCopyChanged;
+    }
+
+    private void Unfollow()
+    {
+        if (_followed is not null)
+        {
+            _followed.Changed -= OnCopyChanged;
+            _followed = null;
+        }
+    }
+
+    /// <summary>Redraws on the renderer's thread — the edit that raised this may be another tab's.</summary>
+    private void OnCopyChanged() => _ = InvokeAsync(() =>
+    {
+        ReadWorking();
+        ReadPendingEntity();
+        StateHasChanged();
+    });
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Unfollow();
+    }
+
+    /// <summary>An entity only the working copy declares, read again from it — gone once it is discarded.</summary>
+    private void ReadPendingEntity()
+    {
+        if (_pending)
+        {
+            _entity = PendingSchema.Read(Copy.Json, EntityName);
         }
     }
 
@@ -424,7 +486,12 @@
     /// </remarks>
     private void RemoveIndex(int position)
     {
-        Copy.RemoveIndex(EntityName, position);
+        /* Against the index this screen drew there, so a position another tab has since moved removes nothing. */
+        if (position >= 0 && position < _indexes.Count)
+        {
+            Copy.RemoveIndex(EntityName, position, _indexes[position]);
+        }
+
         ReadWorking();
     }
 
@@ -480,7 +547,13 @@
     /// <summary>Drops one hook, and stays on the tab.</summary>
     private void RemoveHook(HooksTab.HookAt at)
     {
-        Copy.RemoveHook(EntityName, at.Point, at.Position);
+        /* Against the list this screen drew, for RemoveIndex's reason. */
+        var drawn = _hooks.FirstOrDefault(point => point.Key == at.Point).Value;
+        if (drawn is not null)
+        {
+            Copy.RemoveHook(EntityName, at.Point, at.Position, drawn);
+        }
+
         ReadWorking();
     }
 

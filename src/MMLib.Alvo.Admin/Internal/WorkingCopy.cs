@@ -23,9 +23,9 @@ namespace MMLib.Alvo.Admin.Internal;
 /// holds a <see cref="JsonNode"/> and edits nodes.
 /// </para>
 /// <para>
-/// <b>Scoped to the circuit.</b> An operator's unapplied edits are theirs; another operator's
-/// apply moves the revision, and this copy's next apply is then refused by <c>If-Match</c> rather
-/// than overwriting them.
+/// <b>Scoped to the operator, not the circuit</b> (see <see cref="WorkingCopyStore"/>). An operator's
+/// unapplied edits are theirs, shared by every tab they have open; another operator's apply moves the
+/// revision, and this copy's next apply is then refused by <c>If-Match</c> rather than overwriting them.
 /// </para>
 /// </remarks>
 internal sealed class WorkingCopy
@@ -608,15 +608,25 @@ internal sealed class WorkingCopy
     /// Removes the index at one position.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// By position rather than by the fields it covers, because the block is an array and the schema does
     /// not forbid two entries over the same fields — removing "the one on (a, b)" would then be ambiguous
-    /// in exactly the case an operator is trying to clean up. The copy is per-circuit, so the position the
-    /// screen rendered is the position this removes.
+    /// in exactly the case an operator is trying to clean up.
+    /// </para>
+    /// <para>
+    /// <b>A position is only as good as the render it came from.</b> The copy is the operator's, shared by
+    /// every tab they have open, so another tab can have moved the array since this screen drew it — and a
+    /// bare position would then remove somebody else's index. <paramref name="expected"/> is what the screen
+    /// drew there; when the entry no longer matches, nothing is removed and the screen redraws from the copy.
+    /// </para>
     /// </remarks>
     /// <param name="entity">The entity.</param>
     /// <param name="position">The index's position in the declared array.</param>
-    public void RemoveIndex(string entity, int position)
+    /// <param name="expected">The index the screen rendered at that position, or <see langword="null"/> to skip the check.</param>
+    /// <returns><see langword="true"/> when an index was removed.</returns>
+    public bool RemoveIndex(string entity, int position, IndexSchema? expected = null)
     {
+        var removed = false;
         try
         {
             lock (_gate)
@@ -624,12 +634,14 @@ internal sealed class WorkingCopy
                 if (_working?["entities"]?[entity] is not JsonObject declared
                     || declared["indexes"] is not JsonArray indexes
                     || position < 0
-                    || position >= indexes.Count)
+                    || position >= indexes.Count
+                    || (expected is not null && !SameIndex(Index(indexes[position]), expected)))
                 {
-                    return;
+                    return false;
                 }
 
                 indexes.RemoveAt(position);
+                removed = true;
 
                 /* An empty array is not the same statement as no array, and the descriptor reads better without
                    one — the same reason SetRule drops an emptied `rules`. */
@@ -645,7 +657,13 @@ internal sealed class WorkingCopy
         {
             Settle();
         }
+
+        return removed;
     }
+
+    /// <summary>Whether two readings of an index declare the same one.</summary>
+    private static bool SameIndex(IndexSchema actual, IndexSchema expected)
+        => actual.Unique == expected.Unique && actual.Fields.SequenceEqual(expected.Fields, StringComparer.Ordinal);
 
     /// <summary>The indexes an entity declares in the working copy, in the order it declares them.</summary>
     /// <remarks>
@@ -753,13 +771,20 @@ internal sealed class WorkingCopy
     /// <remarks>
     /// By position for <see cref="RemoveIndex"/>'s reason — nothing forbids two hooks with the same action —
     /// and an emptied point goes with it, then an emptied <c>hooks</c> block, so removing the only hook
-    /// leaves the document an author would have written rather than two empty containers.
+    /// leaves the document an author would have written rather than two empty containers. Checked against
+    /// what the screen rendered, for <see cref="RemoveIndex"/>'s reason: another tab may have moved the list.
     /// </remarks>
     /// <param name="entity">The entity.</param>
     /// <param name="point">The hook point.</param>
     /// <param name="position">The hook's position within that point.</param>
-    public void RemoveHook(string entity, string point, int position)
+    /// <param name="expectedList">
+    /// The point's list as the screen rendered it (<see cref="HooksOf"/>'s shape), or <see langword="null"/> to
+    /// skip the check. The whole list rather than one entry, because a hook is only addressable by its place in it.
+    /// </param>
+    /// <returns><see langword="true"/> when a hook was removed.</returns>
+    public bool RemoveHook(string entity, string point, int position, string? expectedList = null)
     {
+        var removed = false;
         try
         {
             lock (_gate)
@@ -768,12 +793,15 @@ internal sealed class WorkingCopy
                     || declared["hooks"] is not JsonObject hooks
                     || hooks[point] is not JsonArray list
                     || position < 0
-                    || position >= list.Count)
+                    || position >= list.Count
+                    || (expectedList is not null
+                        && !string.Equals(Readable(list, "[]"), expectedList, StringComparison.Ordinal)))
                 {
-                    return;
+                    return false;
                 }
 
                 list.RemoveAt(position);
+                removed = true;
 
                 if (list.Count == 0)
                 {
@@ -792,6 +820,8 @@ internal sealed class WorkingCopy
         {
             Settle();
         }
+
+        return removed;
     }
 
     /// <summary>

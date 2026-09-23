@@ -54,9 +54,9 @@ public sealed class PendingWorkScenarios(AdminWorld world) : IClassFixture<Admin
     /// Discarding from the bar takes the staged row off the tab behind it, and the bar with it.
     /// </summary>
     /// <remarks>
-    /// The page under the sheet never learns the bar exists: the bar re-navigates to the same address, and the
-    /// tab re-reads the copy. Asserted on the tab, because a bar that went away over a Fields tab still listing
-    /// the field would be the two halves of the shell disagreeing about one copy.
+    /// The page under the sheet never learns the bar exists: it follows the copy, and redraws from it without a
+    /// navigation — so the tab it was on stays open. Asserted on the tabs, because a bar that went away over a tab
+    /// still listing the staged row would be the two halves of the shell disagreeing about one copy.
     /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task Confirming_discard_from_the_bar_clears_the_tab_and_the_bar()
@@ -70,6 +70,12 @@ public sealed class PendingWorkScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.ClickAsync("[data-testid='field-save']");
         await session.Page.Locator("[data-testid='staged-short_lived']").WaitForAsync();
 
+        /* And an index, so the discard is confirmed from a tab other than the one the page opens on. */
+        await session.OpenTabAsync("Indexes");
+        await session.Page.ClickAsync("[data-testid='index-fields'] button:has-text('code')");
+        await session.Page.ClickAsync("[data-testid='index-add']");
+        await session.Page.Locator("[data-testid='index-staged']").WaitForAsync();
+
         await session.Page.ClickAsync("[data-testid='pending-discard']");
         await session.Page.ClickAsync("[data-testid='discard-confirm']");
 
@@ -77,10 +83,16 @@ public sealed class PendingWorkScenarios(AdminWorld world) : IClassFixture<Admin
         {
             State = Microsoft.Playwright.WaitForSelectorState.Detached,
         };
-        await session.Page.Locator("[data-testid='field-row-short_lived']").WaitForAsync(detached);
+        await session.Page.Locator("[data-testid='index-staged']").WaitForAsync(detached);
         await session.Page.Locator("[data-testid='pending-bar']").WaitForAsync(detached);
         (await session.Page.Locator("[data-testid='project-pending']").CountAsync()).ShouldBe(0);
+
+        /* The screen followed the copy rather than being reloaded: still on the tab it was on. */
+        (await session.Page.Locator("button.a-tab--active:has-text('Indexes')").CountAsync()).ShouldBe(1);
         session.Page.Url.ShouldEndWith("/schema/regions");
+
+        await session.OpenTabAsync("Fields");
+        (await session.Page.Locator("[data-testid='field-row-short_lived']").CountAsync()).ShouldBe(0);
 
         session.AssertConsoleClean();
     }

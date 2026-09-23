@@ -168,6 +168,41 @@ public class WorkingCopyPendingTests
     }
 
     [Fact]
+    public void A_remove_against_an_index_another_tab_moved_removes_nothing()
+    {
+        var copy = Copy();
+        var drawn = copy.IndexesOf("customers")[0];
+
+        copy.AddIndex("customers", ["name"], unique: false);
+        copy.RemoveIndex("customers", 0);
+
+        copy.RemoveIndex("customers", 0, drawn).ShouldBeFalse(
+            "position 0 now holds the index on name, which is not the one the stale screen drew there");
+        copy.IndexesOf("customers").Single().Fields.ShouldBe(["name"]);
+    }
+
+    [Fact]
+    public void A_remove_against_the_hook_list_the_screen_drew_removes_it()
+    {
+        var copy = Copy();
+        var drawn = copy.HooksOf("customers").Single().Value;
+
+        copy.RemoveHook("customers", "afterCreate", 0, drawn).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_remove_against_a_hook_list_another_tab_changed_removes_nothing()
+    {
+        var copy = Copy();
+        var drawn = copy.HooksOf("customers").Single().Value;
+
+        copy.AddHook("customers", "afterCreate", "true", Webhook());
+
+        copy.RemoveHook("customers", "afterCreate", 0, drawn).ShouldBeFalse();
+        copy.StagedHooksOf("customers").ShouldBe([("afterCreate", 1)]);
+    }
+
+    [Fact]
     public void Every_edit_tells_whoever_shows_the_copy()
     {
         var copy = Copy();

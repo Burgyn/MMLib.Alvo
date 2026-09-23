@@ -277,12 +277,13 @@ namespace MMLib.Alvo.Admin.Components.Pages
     }
     [Microsoft.AspNetCore.Authorization.Authorize]
     [Microsoft.AspNetCore.Components.Route("/admin/schema/{EntityName}")]
-    public class Entity : Microsoft.AspNetCore.Components.ComponentBase
+    public class Entity : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public Entity() { }
         [Microsoft.AspNetCore.Components.Parameter]
         public string EntityName { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
         protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
     }
     [Microsoft.AspNetCore.Authorization.Authorize]
@@ -349,10 +350,11 @@ namespace MMLib.Alvo.Admin.Components.Pages
     }
     [Microsoft.AspNetCore.Authorization.Authorize]
     [Microsoft.AspNetCore.Components.Route("/admin/schema")]
-    public class SchemaList : Microsoft.AspNetCore.Components.ComponentBase
+    public class SchemaList : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public SchemaList() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
     [Microsoft.AspNetCore.Authorization.Authorize]

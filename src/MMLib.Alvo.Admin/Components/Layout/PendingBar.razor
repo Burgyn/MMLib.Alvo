@@ -96,25 +96,10 @@
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => OnChanged();
 
-    /// <summary>
-    /// Reloads the screen underneath, which is showing the copy as it was.
-    /// </summary>
+    /// <summary>Closes the sheet; the discard itself was the copy's, and every screen showing it follows.</summary>
     /// <remarks>
-    /// <para>
-    /// <b>A reload, not a navigation to the same address.</b> That navigation re-renders the router, and the
-    /// router hands the page the same route values — immutable strings — so Blazor skips setting its
-    /// parameters and the Fields tab keeps listing the row that was just discarded. Measured, by the scenario
-    /// that confirms a discard from the bar.
-    /// </para>
-    /// <para>
-    /// The cost is a new circuit, once, after the one action in the dashboard that throws work away. The copy
-    /// is in the store rather than the circuit, so nothing but the drawing is rebuilt — and the page never has
-    /// to know the bar exists.
-    /// </para>
+    /// No navigation: the screens that draw the working copy follow <see cref="WorkingCopy.Changed"/>, so the
+    /// row behind the sheet goes on its own, and the tab — and anything open on it — stays where it was.
     /// </remarks>
-    private void Discarded()
-    {
-        _discarding = false;
-        Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
-    }
+    private void Discarded() => _discarding = false;
 }
