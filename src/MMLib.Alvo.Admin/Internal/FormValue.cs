@@ -141,9 +141,13 @@ internal static class FormValue
     private static string Instant(object value) => value switch
     {
         DateTimeOffset moment => moment.ToUniversalTime().ToString(MinuteFormat, CultureInfo.InvariantCulture),
-        DateTime moment => moment.ToString(MinuteFormat, CultureInfo.InvariantCulture),
+        DateTime moment => Utc(moment).ToString(MinuteFormat, CultureInfo.InvariantCulture),
         _ => Invariant(value),
     };
+
+    /// <summary>A <see cref="DateTime"/> that says what zone it is in, in UTC; one that does not, as it is.</summary>
+    private static DateTime Utc(DateTime moment)
+        => moment.Kind == DateTimeKind.Unspecified ? moment : moment.ToUniversalTime();
 
     private static string Invariant(object value)
         => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;

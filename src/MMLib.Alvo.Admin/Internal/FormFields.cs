@@ -7,7 +7,7 @@ namespace MMLib.Alvo.Admin.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Calculated: computed, rollup and read-only</b>, shown at the bottom of the form and never sent. The
+/// <b>Calculated: computed, rollup and <c>readOnly: true</c></b>, shown at the bottom of the form and never sent. The
 /// form used to leave them out altogether, and they are the most interesting values on a record — "why
 /// is this order's total 43.50?" (usability test T5) failed because the total was nowhere on the sheet.
 /// A control for one would produce a value the engine overwrites or refuses.
@@ -28,17 +28,17 @@ internal static class FormFields
     }
 
     /// <summary>Whether the form shows the field read-only rather than as a control.</summary>
-    public static bool Calculated(FieldSchema field, FieldLocks locks, bool creating)
+    public static bool Calculated(FieldSchema field, FieldLocks locks)
     {
         ArgumentNullException.ThrowIfNull(field);
         ArgumentNullException.ThrowIfNull(locks);
 
-        return Derived(field) || locks.Locked(field.Name, creating);
+        return Derived(field) || locks.Locked(field.Name);
     }
 
     /// <summary>The fields the form offers a control for, in declaration order.</summary>
-    public static IReadOnlyList<FieldSchema> Editable(EntitySchema entity, FieldLocks locks, bool creating)
-        => [.. Own(entity).Where(field => !Calculated(field, locks, creating))];
+    public static IReadOnlyList<FieldSchema> Editable(EntitySchema entity, FieldLocks locks)
+        => [.. Own(entity).Where(field => !Calculated(field, locks))];
 
     /// <summary>The fields the form shows read-only under "Calculated"; none on a create, which has no values yet.</summary>
     public static IReadOnlyList<FieldSchema> Shown(EntitySchema entity, FieldMasks masks, FieldLocks locks, bool creating)
@@ -47,7 +47,7 @@ internal static class FormFields
 
         return creating
             ? []
-            : [.. Own(entity).Where(field => Calculated(field, locks, creating) && !masks.NeverReturned(field.Name))];
+            : [.. Own(entity).Where(field => Calculated(field, locks) && !masks.NeverReturned(field.Name))];
     }
 
     private static IEnumerable<FieldSchema> Own(EntitySchema entity)

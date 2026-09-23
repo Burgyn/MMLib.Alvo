@@ -35,20 +35,20 @@ public class FormFieldsTests
     }
 
     [Fact]
-    public void Computed_rollup_and_read_only_fields_are_calculated_on_an_edit()
+    public void Computed_rollup_and_read_only_true_fields_are_calculated_on_an_edit()
         => FormFields.Shown(Orders(), _masks, _locks, creating: false).Select(field => field.Name)
-            .ShouldBe(["external_ref", "cost_price", "labour_total", "lines_count"]);
+            .ShouldBe(["external_ref", "labour_total", "lines_count"]);
 
     [Fact]
     public void Everything_else_is_a_control_and_the_managed_columns_are_neither()
-        => FormFields.Editable(Orders(), _locks, creating: false).Select(field => field.Name)
-            .ShouldBe(["order_number", "discount", "internal_notes"]);
+        => FormFields.Editable(Orders(), _locks).Select(field => field.Name)
+            .ShouldBe(["order_number", "cost_price", "discount", "internal_notes"]);
 
     [Fact]
-    public void A_cel_lock_is_a_control_on_a_create_so_a_required_one_can_still_be_supplied()
+    public void A_cel_lock_stays_a_control_because_the_form_cannot_tell_whom_it_admits()
     {
-        FormFields.Editable(Orders(), _locks, creating: true).Select(field => field.Name)
-            .ShouldBe(["order_number", "cost_price", "discount", "internal_notes"]);
+        _locks.Locked("cost_price").ShouldBeFalse();
+        _locks.LockedForSome("cost_price").ShouldBeTrue();
         FormFields.Shown(Orders(), _masks, _locks, creating: true).ShouldBeEmpty("a new record has no values to show");
     }
 

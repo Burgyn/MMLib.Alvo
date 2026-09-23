@@ -29,7 +29,11 @@
             @foreach (var column in _editable)
             {
                 <div class="a-field">
-                    <label class="a-label" for="@ControlId(column)">
+                    @*
+                        A <label for> may only name a labelable element, and an enum's chips are a group
+                        of buttons, not one control; the group names this label by id instead.
+                    *@
+                    <label class="a-label" id="@LabelId(column)" for="@(column.Type == FieldType.Enum ? null : ControlId(column))">
                         @GridColumns.Header(column)
                         @if (column.Required)
                         {
@@ -147,7 +151,7 @@
         }
 
         _opened = Values;
-        _editable = FormFields.Editable(Entity, Locks, Creating);
+        _editable = FormFields.Editable(Entity, Locks);
         _calculated = FormFields.Shown(Entity, Scope?.Masks ?? FieldMasks.None, Locks, Creating);
         _draft = new RecordDraft(_editable, Values);
         _pickers = _editable.Where(column => column.Reference is not null)
@@ -177,6 +181,8 @@
     private static string ControlId(FieldSchema column) => $"rf-{column.Name}";
 
     private static string HintId(FieldSchema column) => $"rf-{column.Name}-hint";
+
+    private static string LabelId(FieldSchema column) => $"rf-{column.Name}-label";
 
     private static string TypeOf(FieldSchema column) => column.Reference is { } reference
         ? $"ref to {reference.TargetEntity}"
@@ -219,11 +225,14 @@
                         @onclick="() => Toggle(column.Name)" aria-pressed="@on"></button>;
     }
 
-    private RenderFragment Choice(FieldSchema column) => @<div class="a-choice" id="@ControlId(column)">
+    private RenderFragment Choice(FieldSchema column) => @<div class="a-choice" id="@ControlId(column)" role="radiogroup"
+                                                               aria-labelledby="@LabelId(column)" aria-describedby="@HintId(column)"
+                                                               aria-required="@Required(column)">
         @foreach (var option in column.EnumValues ?? [])
         {
-            <button type="button"
-                    class="@($"a-chip{(string.Equals(_draft.Text(column.Name), option, StringComparison.Ordinal) ? " a-chip--on" : string.Empty)}")"
+            var on = string.Equals(_draft.Text(column.Name), option, StringComparison.Ordinal);
+            <button type="button" role="radio" aria-checked="@(on ? "true" : "false")"
+                    class="@($"a-chip{(on ? " a-chip--on" : string.Empty)}")"
                     @onclick="() => Set(column.Name, option)">@option</button>
         }
     </div>;
@@ -244,6 +253,7 @@
         var list = $"{ControlId(column)}-options";
         return @<div class="a-combo">
             <input class="a-input" id="@ControlId(column)" type="text" role="combobox" autocomplete="off"
+                   maxlength="@GridQuery.MaxPatternLength"
                    aria-autocomplete="list" aria-expanded="@(picker.Open ? "true" : "false")"
                    aria-controls="@(picker.Open ? list : null)"
                    aria-activedescendant="@(picker.ActiveOption is { } active ? OptionId(column, active) : null)"
@@ -294,10 +304,10 @@
                     picker.Target!.Name, picker.Label!, [known], context, CancellationToken.None);
                 picker.Chosen = labels.TryGetValue(known, out var label) ? label : null;
             }
-            catch (AlvoAuthorizationException)
+            catch (Exception)
             {
-                /* A label masked from this caller, or a target they hold no tenant for: the id is
-                   still the value, so it is what the box shows. */
+                /* A label masked from this caller, a target they hold no tenant for, or a read that
+                   failed outright: the id is still the value, so it is what the box shows. */
             }
         }
 
@@ -386,8 +396,10 @@
     /// One search of the target, as the operator.
     /// </summary>
     /// <remarks>
-    /// A refusal — a label field masked from this caller, a scoped target and no tenant — is an empty
-    /// list rather than a red panel: pasting the id still works, and the list says so.
+    /// A refusal — a label field masked from this caller, a scoped target and no tenant, a query the port
+    /// will not run — or a read that failed outright is an empty list rather than a red panel, the way the
+    /// grid never turns red over a column it could draw anyway: pasting the id still works, and the list
+    /// says so. A search is a convenience; the circuit must not end over one.
     /// </remarks>
     private async Task SearchAsync(RefPicker picker, string? term, int version)
     {
@@ -400,7 +412,7 @@
                 picker.Show(picker.OptionsOf(page));
             }
         }
-        catch (AlvoAuthorizationException)
+        catch (Exception)
         {
             if (version == picker.Version)
             {
@@ -457,6 +469,11 @@
             parts.Add("unique across the entity");
         }
 
+        if (Locks.LockedForSome(column.Name))
+        {
+            parts.Add("read-only for some callers");
+        }
+
         if (!Creating && Scope?.Masks.NeverReturned(column.Name) == true)
         {
             parts.Add("never read back — type a value to replace it");
@@ -470,8 +487,7 @@
     {
         { ComputedExpression: { } expression } => $"computed: {expression}",
         { Rollup: { } rollup } => $"rollup: {rollup.Op.ToString().ToLowerInvariant()} over {rollup.From}",
-        _ when Locks.Always.Contains(column.Name) => "read-only",
-        _ => "read-only for some callers",
+        _ => "read-only",
     };
 
     private RenderFragment Readout(FieldSchema column)

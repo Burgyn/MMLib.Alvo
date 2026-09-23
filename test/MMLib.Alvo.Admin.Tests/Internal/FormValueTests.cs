@@ -78,6 +78,16 @@ public class FormValueTests
     }
 
     [Fact]
+    public void A_zoned_datetime_is_shown_in_utc_and_an_unzoned_one_as_it_is()
+    {
+        var field = Field(FieldType.DateTime);
+        var utc = new DateTime(2026, 9, 16, 8, 5, 0, DateTimeKind.Utc);
+
+        FormValue.Format(field, utc.ToLocalTime()).ShouldBe("2026-09-16T08:05");
+        FormValue.Format(field, new DateTime(2026, 9, 16, 8, 5, 0, DateTimeKind.Unspecified)).ShouldBe("2026-09-16T08:05");
+    }
+
+    [Fact]
     public void An_instant_round_trips_to_the_same_text()
     {
         var field = Field(FieldType.DateTime);

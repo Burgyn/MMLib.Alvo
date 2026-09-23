@@ -5,16 +5,18 @@
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>The dashboard cannot evaluate CEL, so an expression counts as a lock on an edit.</b> The form
-/// would otherwise offer a control the engine refuses with <c>read-only-field</c> for exactly the callers
-/// the expression exists for; showing the value read-only is wrong only for the callers it admits, and
-/// they still have the API.
+/// <b>Only <c>true</c> locks the form.</b> A field declared <c>"readOnly": true</c> is frozen for every
+/// caller, so it is shown under "Calculated" and never offered as a control.
 /// </para>
 /// <para>
-/// <b>Not on a create.</b> The engine refuses <c>required</c> with <c>readOnly: true</c> at apply, so a
-/// conditional lock is the one way a required field can be locked at all — and locking it in the form
-/// would make the create impossible for every caller, the admitted ones included. On a create the field
-/// is offered, and the engine answers for the caller it is not for.
+/// <b>A CEL lock stays a control, on an edit as on a create.</b> The dashboard cannot evaluate CEL, so it
+/// cannot know whether this caller is one the expression admits, and locking the field would take the
+/// edit away from exactly those callers (a manager's <c>purchase_price</c>). A save sends only what
+/// changed (<see cref="RecordDraft"/>), so leaving the field alone never writes it. A caller the
+/// expression freezes who does change it gets the engine's <c>read-only-field</c> refusal in the sheet.
+/// On a create the choice is forced anyway: the engine refuses <c>required</c> with <c>readOnly: true</c>
+/// at apply, so a CEL lock is the only way a required field can be locked, and locking it in the form
+/// would make the create impossible for every caller.
 /// </para>
 /// </remarks>
 /// <param name="Always">Fields declared <c>"readOnly": true</c>.</param>
@@ -25,9 +27,9 @@ internal sealed record FieldLocks(IReadOnlySet<string> Always, IReadOnlySet<stri
     public static FieldLocks None { get; } = new(
         new HashSet<string>(StringComparer.Ordinal), new HashSet<string>(StringComparer.Ordinal));
 
-    /// <summary>Whether the form treats the field as read-only.</summary>
-    /// <param name="field">The field.</param>
-    /// <param name="creating">Whether the form creates a record rather than edits one.</param>
-    public bool Locked(string field, bool creating)
-        => Always.Contains(field) || (!creating && Conditional.Contains(field));
+    /// <summary>Whether the form shows the field read-only rather than as a control.</summary>
+    public bool Locked(string field) => Always.Contains(field);
+
+    /// <summary>Whether the engine may refuse a write of the field for some callers and not others.</summary>
+    public bool LockedForSome(string field) => Conditional.Contains(field);
 }
