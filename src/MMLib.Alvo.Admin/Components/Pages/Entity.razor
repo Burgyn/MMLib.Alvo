@@ -328,10 +328,20 @@
     }
 
     /// <summary>Opens a tab by putting it in the address, so a reload, a link and Back all agree.</summary>
-    private void Open(EntityTab tab)
+    /// <remarks>
+    /// A click is a step in history; an arrow key <paramref name="replace"/>s it, because walking the
+    /// strip with the arrows is one visit, and six Back presses to leave it would be six too many. The tab
+    /// already open is left alone — a second click on it is not a second step either.
+    /// </remarks>
+    private void Open(EntityTab tab, bool replace = false)
     {
+        if (tab == _tab)
+        {
+            return;
+        }
+
         _tab = tab;
-        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter(EntityTabs.Parameter, tab.Slug));
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter(EntityTabs.Parameter, tab.Slug), replace: replace);
     }
 
     /// <summary>The arrows, Home and End on the strip: open the tab they reach and move focus onto it.</summary>
@@ -343,7 +353,7 @@
     {
         if (EntityTabs.Move(_tab, key) is { } next)
         {
-            Open(next);
+            Open(next, replace: true);
             if (_tabRefs.TryGetValue(next.Slug, out var element))
             {
                 await element.FocusAsync();

@@ -90,7 +90,25 @@ internal static class AdminNavigation
     /// An address rather than a call into the page, so the palette needs no reference to a screen
     /// that may not be mounted, and the form opens the same way from a reload or a pasted link.
     /// </remarks>
-    public static string NewEntity { get; } = $"{AlvoAdmin.BasePath}/schema?new=entity";
+    public static string NewEntity { get; } = $"{AlvoAdmin.BasePath}/schema?{NewEntityParameter}=entity";
+
+    /// <summary>The query parameter <see cref="NewEntity"/> carries.</summary>
+    public const string NewEntityParameter = "new";
+
+    /// <summary>Whether an absolute address is Schema asked to open its New entity form.</summary>
+    /// <remarks>
+    /// Parsed rather than matched as a suffix: <c>?x=1&amp;new=entity</c> asks the same thing, and a path
+    /// that merely ends in those characters asks nothing.
+    /// </remarks>
+    public static bool IsNewEntity(string uri)
+    {
+        var address = new Uri(uri);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(address.Query);
+
+        return address.AbsolutePath.TrimEnd('/').EndsWith($"{AlvoAdmin.BasePath}/schema", StringComparison.Ordinal)
+            && query.TryGetValue(NewEntityParameter, out var value)
+            && string.Equals(value.ToString(), "entity", StringComparison.Ordinal);
+    }
 
     /// <summary>The section <c>g</c> then <paramref name="key"/> reaches, if any.</summary>
     /// <remarks>

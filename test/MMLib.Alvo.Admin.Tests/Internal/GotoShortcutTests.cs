@@ -60,4 +60,14 @@ public class GotoShortcutTests
                 .ShouldBeTrue($"alvo.js does not forward g {section.GoKey}");
         }
     }
+
+    [Theory]
+    [InlineData("https://host/admin/schema?new=entity", true)]
+    [InlineData("https://host/admin/schema/?other=1&new=entity", true)]
+    [InlineData("https://host/admin/schema", false)]
+    [InlineData("https://host/admin/schema?new=field", false)]
+    [InlineData("https://host/admin/schema/work_orders?new=entity", false)]
+    [InlineData("https://host/admin/data?next=/admin/schema?new=entity", false)]
+    public void Schema_opens_its_new_entity_form_only_when_its_own_address_asks(string uri, bool asks)
+        => AdminNavigation.IsNewEntity(uri).ShouldBe(asks);
 }

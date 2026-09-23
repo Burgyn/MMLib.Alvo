@@ -23,6 +23,7 @@
 @code {
     private IJSObjectReference? _module;
     private DotNetObjectReference<JsEventHandler>? _self;
+    private int? _subscription;
     private string _theme = string.Empty;
 
     private string Label => _theme == "dark" ? "Switch to light theme" : "Switch to dark theme";
@@ -36,7 +37,7 @@
 
         _module = await Js.InvokeAsync<IJSObjectReference>("import", AlvoAdminAssets.Module);
         _self = DotNetObjectReference.Create(new JsEventHandler(OnThemeChanged));
-        await _module.InvokeVoidAsync("subscribe", "theme", _self, JsEventHandler.Method);
+        _subscription = await _module.InvokeAsync<int>("subscribe", "theme", _self, JsEventHandler.Method);
         _theme = await _module.InvokeAsync<string>("theme");
         StateHasChanged();
     }
@@ -62,7 +63,11 @@
         {
             try
             {
-                await _module.InvokeVoidAsync("unsubscribe", "theme", JsEventHandler.Method);
+                if (_subscription is { } subscription)
+                {
+                    await _module.InvokeVoidAsync("unsubscribe", subscription);
+                }
+
                 await _module.DisposeAsync();
             }
             catch (JSDisconnectedException)

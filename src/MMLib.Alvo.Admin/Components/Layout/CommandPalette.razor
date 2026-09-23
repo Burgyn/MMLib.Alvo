@@ -58,6 +58,7 @@
     private readonly List<Entry> _entries = [];
     private IJSObjectReference? _module;
     private DotNetObjectReference<CommandPalette>? _self;
+    private readonly List<int> _subscriptions = [];
     private ElementReference _input;
     private bool _open;
     private bool _focusPending;
@@ -76,9 +77,9 @@
         {
             _module = await Js.InvokeAsync<IJSObjectReference>("import", AlvoAdminAssets.Module);
             _self = DotNetObjectReference.Create(this);
-            await _module.InvokeVoidAsync("subscribe", "palette", _self, nameof(OnPaletteRequested));
-            await _module.InvokeVoidAsync("subscribe", "goto", _self, nameof(OnGoto));
-            await _module.InvokeVoidAsync("subscribe", "dismiss", _self, nameof(OnDismiss));
+            _subscriptions.Add(await _module.InvokeAsync<int>("subscribe", "palette", _self, nameof(OnPaletteRequested)));
+            _subscriptions.Add(await _module.InvokeAsync<int>("subscribe", "goto", _self, nameof(OnGoto)));
+            _subscriptions.Add(await _module.InvokeAsync<int>("subscribe", "dismiss", _self, nameof(OnDismiss)));
             await _module.InvokeVoidAsync("markKeyboardReady");
         }
 
@@ -212,9 +213,11 @@
         {
             try
             {
-                await _module.InvokeVoidAsync("unsubscribe", "palette", nameof(OnPaletteRequested));
-                await _module.InvokeVoidAsync("unsubscribe", "goto", nameof(OnGoto));
-                await _module.InvokeVoidAsync("unsubscribe", "dismiss", nameof(OnDismiss));
+                foreach (var subscription in _subscriptions)
+                {
+                    await _module.InvokeVoidAsync("unsubscribe", subscription);
+                }
+
                 await _module.DisposeAsync();
             }
             catch (JSDisconnectedException)

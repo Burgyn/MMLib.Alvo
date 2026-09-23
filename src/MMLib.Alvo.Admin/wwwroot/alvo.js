@@ -106,8 +106,16 @@
       return;
     }
 
+    /* Nor while a dialog or a sheet is over the page: a jump would navigate out from under it, and
+       whatever was half-done in it would be lost to a stray `g`. */
+    const underModal = document.querySelector('[aria-modal="true"]') !== null;
+
     if (awaitingGoto) {
       awaitingGoto = false;
+      if (underModal) {
+        return;
+      }
+
       if (GOTO_KEY.test(event.key)) {
         event.preventDefault();
         emit('goto', { key: event.key });
@@ -126,7 +134,7 @@
         emit('move', { by: -1 });
         break;
       case 'g':
-        awaitingGoto = true;
+        awaitingGoto = !underModal;
         break;
       case '/':
         event.preventDefault();

@@ -355,7 +355,71 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
     }
 
     /// <summary>
-    /// An entity's tab is in its address: a reload opens on it, the arrows move it, and Back returns.
+    /// A sheet open over the page holds the jump back — a stray <c>g d</c> must not navigate out from under it.
+    /// </summary>
+    /// <remarks>
+    /// A negative, so it waits a fixed moment; the positive twin above shows the same keys do navigate
+    /// when nothing is open, which is what keeps this from passing for a shortcut that is simply broken.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_goto_shortcut_is_held_while_a_sheet_is_open()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+
+        await session.Page.ClickAsync("[data-testid='rename-entity']");
+        await session.Page.Locator("[data-testid='rename-sheet']").WaitForAsync();
+        await session.Page.EvaluateAsync("document.activeElement?.blur()");
+
+        await session.Page.Keyboard.PressAsync("g");
+        await session.Page.Keyboard.PressAsync("d");
+        await session.Page.WaitForTimeoutAsync(750);
+
+        session.Page.Url.ShouldEndWith("/admin/schema/work_orders");
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// The palette's Toggle theme flips the theme, and the header's toggle follows a flip it did not make.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Toggle_theme_from_the_palette_and_the_header_both_flip_it()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("");
+
+        var toggle = session.Page.Locator("[data-testid='theme-toggle']");
+        await session.Page.WaitForFunctionAsync(
+            "document.querySelector(\"[data-testid='theme-toggle']\")?.getAttribute('aria-label')?.startsWith('Switch')");
+        var before = await Theme(session);
+
+        await session.Page.Keyboard.PressAsync("Meta+k");
+        await session.Page.Locator(".a-palette").WaitForAsync();
+        await session.Page.WaitForFunctionAsync("document.activeElement?.classList.contains('a-palette__input')");
+        await session.Page.Keyboard.TypeAsync("toggle theme");
+        await session.Page.Locator("[role='option'][aria-selected='true']:has-text('Toggle theme')").WaitForAsync();
+        await session.Page.Keyboard.PressAsync("Enter");
+
+        var flipped = before == "dark" ? "light" : "dark";
+        await session.Page.WaitForFunctionAsync($"document.documentElement.dataset.theme === '{flipped}'");
+        await session.Page.WaitForFunctionAsync(
+            $"document.querySelector(\"[data-testid='theme-toggle']\").getAttribute('aria-label') === 'Switch to {before} theme'");
+
+        await toggle.ClickAsync();
+        await session.Page.WaitForFunctionAsync($"document.documentElement.dataset.theme === '{before}'");
+        await session.Page.WaitForFunctionAsync(
+            $"document.querySelector(\"[data-testid='theme-toggle']\").getAttribute('aria-label') === 'Switch to {flipped} theme'");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>The theme the page resolves to — the stored choice, else the system's.</summary>
+    private static Task<string> Theme(AdminSession session) => session.Page.EvaluateAsync<string>(
+        "document.documentElement.dataset.theme ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')");
+
+    /// <summary>
+    /// An entity's tab is in its address: a reload opens on it, the arrows move it without a history step,
+    /// a click is one, and Back returns.
     /// </summary>
     /// <remarks>
     /// The reload is the half that matters to an operator — a link somebody was sent — and the only
@@ -379,9 +443,13 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await session.Page.Locator("[role='tab'][aria-selected='true']:has-text('On write')").WaitForAsync();
         (await session.Page.EvaluateAsync<string>("document.activeElement.textContent")).ShouldBe("On write");
 
+        /* The arrow replaced the entry, so the click is the one step Back undoes — to On write, not Rules. */
+        await session.OpenTabAsync("Indexes");
+        await session.Page.WaitForURLAsync("**/admin/schema/work_orders?tab=indexes");
+
         await session.Page.GoBackAsync();
-        await session.Page.WaitForURLAsync("**/admin/schema/work_orders?tab=rules");
-        await session.Page.Locator("[role='tab'][aria-selected='true']:has-text('Rules')").WaitForAsync();
+        await session.Page.WaitForURLAsync("**/admin/schema/work_orders?tab=on-write");
+        await session.Page.Locator("[role='tab'][aria-selected='true']:has-text('On write')").WaitForAsync();
 
         session.AssertConsoleClean();
     }
@@ -397,6 +465,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
 
         await session.Page.Keyboard.PressAsync("Meta+k");
         await session.Page.Locator(".a-palette [role='option']:has-text('Data') kbd:has-text('g d')").WaitForAsync();
+        await session.Page.WaitForFunctionAsync("document.activeElement?.classList.contains('a-palette__input')");
 
         await session.Page.Keyboard.TypeAsync("new entity");
         await session.Page.Locator("[role='option'][aria-selected='true']:has-text('New entity')").WaitForAsync();

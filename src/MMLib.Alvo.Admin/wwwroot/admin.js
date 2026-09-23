@@ -12,6 +12,7 @@
    =========================================================================== */
 
 const handlers = new Map();
+let nextToken = 0;
 
 /**
  * Marks the keyboard as live.
@@ -28,21 +29,42 @@ export function markKeyboardReady() {
   document.documentElement.dataset.alvoKeyboard = 'ready';
 }
 
-/** Forwards one `alvo:<name>` document event to a .NET object's method. */
+/**
+ * Keeps the arrow keys on an entity's tab strip from also scrolling it.
+ *
+ * Blazor cannot prevent a default for some keys and not others — `@onkeydown:preventDefault` would
+ * swallow Tab and Enter too — so the strip's own handler moves the tab and this stops the browser
+ * from moving the page as well. Registered once, when the module is first imported.
+ */
+document.addEventListener('keydown', (event) => {
+  if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)
+      && event.target instanceof Element && event.target.closest('[role="tab"]')) {
+    event.preventDefault();
+  }
+});
+
+/**
+ * Forwards one `alvo:<name>` document event to a .NET object's method, and answers a token.
+ *
+ * The token, not the event name, is what `unsubscribe` takes: two components may listen to the same
+ * event, and a key built from the name would let the second replace the first — and let the first,
+ * disposing, remove the second.
+ */
 export function subscribe(name, target, method) {
   const handler = (event) =>
     target.invokeMethodAsync(method, event.detail?.key ?? event.detail?.value ?? null);
   document.addEventListener(`alvo:${name}`, handler);
-  handlers.set(`${name}:${method}`, handler);
+  nextToken += 1;
+  handlers.set(nextToken, { name, handler });
+  return nextToken;
 }
 
-/** Removes a subscription. Called from the component's DisposeAsync. */
-export function unsubscribe(name, method) {
-  const key = `${name}:${method}`;
-  const handler = handlers.get(key);
-  if (handler) {
-    document.removeEventListener(`alvo:${name}`, handler);
-    handlers.delete(key);
+/** Removes one subscription by the token `subscribe` answered. Called from the component's DisposeAsync. */
+export function unsubscribe(token) {
+  const subscription = handlers.get(token);
+  if (subscription) {
+    document.removeEventListener(`alvo:${subscription.name}`, subscription.handler);
+    handlers.delete(token);
   }
 }
 
