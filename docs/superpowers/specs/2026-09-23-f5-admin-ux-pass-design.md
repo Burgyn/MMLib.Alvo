@@ -115,7 +115,7 @@ This pass narrows usage and fixes defects; it does not redesign.
    latin-ext subsets (Slovak diacritics), `font-display: swap`, OFL-1.1 licence files beside them. Raise
    *usage*, not the scale: body copy and section subtitles move from 12 to 13 px, table cells from 12 to
    13 px; 11 px stays for badges and meta only. `.a-mono` becomes family-only (size and colour inherit),
-   with `.a-code` for the old "small dim identifier" look where that is what is meant. Fixes D-1.
+   with `.a-ident` for the old "small dim identifier" look where that is what is meant. Fixes D-1.
 2. **One page header.** Every route renders `PageHeader`; the crumb/eyebrow, title, subtitle and actions
    have one markup. Identifiers stay mono (they are what the operator types), at title size.
 3. **Section heads stack.** `.a-section` becomes title-over-subtitle; the bar variant keeps a control on

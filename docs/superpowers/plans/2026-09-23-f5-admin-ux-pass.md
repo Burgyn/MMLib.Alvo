@@ -62,9 +62,9 @@ screens working. Decisions §4.1, §4.3, §4.8 and D-1, D-5.
    web assets of the Razor class library (check the path under `_content/MMLib.Alvo.Admin/`) and that
    `AlvoAdminAssets` / any asset tests know about them if they enumerate assets.
 2. **`.a-mono` is family-only.** It keeps `font-family: var(--font-mono)` and the overflow-wrap behaviour, but
-   no longer sets `font-size` or `color`. Introduce `.a-code` = mono + `--text-xs` + `--dim` for the places that
+   no longer sets `font-size` or `color`. Introduce `.a-ident` = mono + `--text-xs` + `--dim` for the places that
    relied on the small dim look (grep every `a-mono` usage and choose per site: identifiers inside prose and
-   titles → `.a-mono`; standalone small ids/routes/meta → `.a-code`). `h1.a-page-title.a-mono` must render at
+   titles → `.a-mono`; standalone small ids/routes/meta → `.a-ident`). `h1.a-page-title.a-mono` must render at
    `--text-xl` on desktop.
 3. **Type usage.** `.a-section-sub`, `.a-note`, body paragraphs in panels, table cells (`.a-table td` or the
    grid's cell class) and form hints move from `--text-xs` (12) to `--text-sm` (13). `--text-2xs` (11) stays for
@@ -188,7 +188,7 @@ Decision §4.6. `Pages/EntityData.razor` and whatever grid/cell components it us
 1. **Ref labels.** For each `ref` column on the current page, collect distinct ids, query the target entity once
    with an `AlvoComparison(id, In, ids)` filter and `Select` = `id` + label field, and render the label. Label
    field = target's first required `string` field, else first `string`, else none (then show the first 8 chars of
-   the id in `.a-code` with the full id in `title`). Put the label resolution in an internal, unit-tested helper
+   the id in `.a-ident` with the full id in `title`). Put the label resolution in an internal, unit-tested helper
    (`Internal/RefLabels.cs` or similar) — pure selection logic tested without a database; the query goes through
    `DataGateway`. Respect `AlvoFilter.MaxInCandidates`. A label is a link to that record in the target's Data
    screen (open its edit sheet via a query parameter, e.g. `/admin/data/bikes?record=<id>` — implement the
