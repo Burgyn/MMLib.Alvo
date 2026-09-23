@@ -246,7 +246,14 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await session.Page.Locator(".a-palette").WaitForAsync();
 
         await session.Page.Keyboard.TypeAsync("access");
-        await session.SettleAsync();
+
+        /* Wait for the filter to have produced the match, not for a timer. Enter opens whatever is
+           selected, so pressing it before the typed query has round-tripped opens whatever the list
+           held a moment ago — which on a slower runner is the unfiltered first entry, and the
+           navigation this fact waits for never comes. */
+        await session.Page.Locator("[role='option'][aria-selected='true']:has-text('Access')")
+            .WaitForAsync();
+
         await session.Page.Keyboard.PressAsync("Enter");
         await session.Page.WaitForURLAsync("**/admin/access");
         await session.SettleAsync();

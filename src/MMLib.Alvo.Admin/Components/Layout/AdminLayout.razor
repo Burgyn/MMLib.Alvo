@@ -65,7 +65,8 @@
             <span style="margin-left:auto"></span>
             <ThemeToggle />
             <button type="button" class="a-btn a-btn--ghost a-btn--sm a-only-mobile" @onclick="OpenSheet"
-                    aria-label="More sections" aria-expanded="@_sheetOpen" data-testid="more-sections">
+                    aria-label="More sections" data-testid="more-sections"
+                    aria-expanded="@(_sheetOpen ? "true" : "false")">
                 <Icon Path="@Icons.More" />
             </button>
         </header>

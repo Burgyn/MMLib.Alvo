@@ -29,7 +29,12 @@
                 }
                 @foreach (var (match, index) in Matches.Select((match, index) => (match, index)))
                 {
-                    <button type="button" role="option" aria-selected="@(index == _active)"
+                    @* Blazor renders a bool attribute the HTML way — present-and-empty for true, absent
+                       for false — and ARIA wants the literal strings. `aria-selected=""` is what a
+                       screen reader was being handed for the highlighted row, on the one control the
+                       keyboard-only flow runs through. *@
+                    <button type="button" role="option"
+                            aria-selected="@((index == _active) ? "true" : "false")"
                             class="@($"a-palette__item{(index == _active ? " a-palette__item--active" : string.Empty)}")"
                             @onclick="() => Go(match)">
                         <Icon Path="@match.Icon" />
