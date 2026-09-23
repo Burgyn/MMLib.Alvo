@@ -29,6 +29,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         {
             await session.GoAsync(route);
             await session.AssertNoHorizontalScrollAsync();
+            await session.AssertNoVerticalTextAsync();
             await session.AssertRenderedAsync();
         }
 

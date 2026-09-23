@@ -9,17 +9,19 @@
     Nothing here writes to the database. The field lands in the working copy and goes through the
     same dry run as every other change.
 *@
-<div class="a-panel" style="margin-top:var(--space-4)">
-    <div class="a-section">
-        <span class="a-section-title">@(IsEditing ? $"Edit {Editing}" : "Add a field")</span>
-        <span class="a-section-sub">
-            @(IsEditing
-                ? "The change joins the working copy. Preview shows what it does to the table before anything runs."
-                : "It joins the working copy. Preview shows what it does to the table before anything runs.")
-        </span>
-    </div>
+@*
+    The chrome belongs to <Sheet>: one overlay that is a bottom sheet on a phone and a centred
+    dialog on a desktop. A field editor that sat permanently under the list was a panel the
+    operator scrolled past on every visit and a second thing competing for the screen on a phone.
+*@
+<Sheet Open="true" TestId="field-sheet"
+       Title="@(IsEditing ? $"Edit {Editing}" : "Add a field")"
+       Subtitle="@(IsEditing
+           ? "The change joins the working copy. Preview shows what it does to the table before anything runs."
+           : "It joins the working copy. Preview shows what it does to the table before anything runs.")"
+       OnClose="Cancel">
 
-    <div class="a-stack" style="padding:var(--space-5)">
+    <div class="a-stack">
         @if (_refusal is { Length: > 0 })
         {
             <ErrorPanel Heading="@(IsEditing ? "That change cannot be saved" : "That field cannot be added")"
@@ -150,17 +152,6 @@
             </div>
         }
 
-        <div class="a-row" style="gap:var(--space-2)">
-            <button type="button" class="a-btn a-btn--primary" @onclick="Add" data-testid="field-save">
-                @(IsEditing ? "Save to the working copy" : "Add to the working copy")
-            </button>
-            @if (IsEditing)
-            {
-                <button type="button" class="a-btn" @onclick="Cancel">Cancel</button>
-            }
-        </div>
-    </div>
-
     @* The facets the frozen schema declares and this build refuses. Without this the editor's
        silence about `default` and `validation` is indistinguishable from an oversight — the
        question every reader of this panel asks is "where is the default value", and the answer
@@ -188,7 +179,17 @@
             </div>
         }
     }
-</div>
+    </div>
+
+    <div class="a-sheet__actions">
+        <button type="button" class="a-btn" @onclick="Cancel">Cancel</button>
+        <span style="margin-left:auto"></span>
+        <button type="button" class="a-btn a-btn--primary" @onclick="Add" data-testid="field-save">
+            @(IsEditing ? "Save to the working copy" : "Add to the working copy")
+        </button>
+    </div>
+
+</Sheet>
 
 @code {
     private string _name = string.Empty;

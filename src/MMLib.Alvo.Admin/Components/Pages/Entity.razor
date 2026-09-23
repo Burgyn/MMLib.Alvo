@@ -70,6 +70,13 @@
             @switch (_tab)
             {
                 case "Fields":
+                    @if (Copy.Loaded)
+                    {
+                        <div class="a-row" style="gap:var(--space-2);padding:var(--space-4)">
+                            <button type="button" class="a-btn a-btn--primary" data-testid="add-field"
+                                    @onclick="AddField">Add a field</button>
+                        </div>
+                    }
                     <Fields Entity="@_entity" Editable="Copy.Loaded" OnEdit="EditField" OnRemove="RemoveField" />
                     break;
                 case "Relationships":
@@ -90,10 +97,15 @@
             }
         </div>
 
-        @if (_tab == "Fields")
+        @*
+            The editor is a sheet now, so it is on the page only while somebody is editing. As a
+            permanent panel it was something to scroll past on every visit, and on a phone a second
+            thing competing with the list for the screen.
+        *@
+        @if (_tab == "Fields" && _editorOpen)
         {
             <FieldEditor Entity="@EntityName" Targets="_entities" OnAdded="AddFieldAsync"
-                         Editing="@_editing" EditingJson="@EditedJson" OnCancelled="() => _editing = null"
+                         Editing="@_editing" EditingJson="@EditedJson" OnCancelled="CloseEditor"
                          Capabilities="_refused" />
         }
     }
@@ -122,6 +134,7 @@
     private Exception? _error;
     private string _tab = "Fields";
     private string? _editing;
+    private bool _editorOpen;
     private bool _pending;
 
     /// <summary>The entity's name, from the route.</summary>
@@ -191,12 +204,36 @@
     private void AddFieldAsync(FieldEditor.NewField added)
     {
         Copy.AddField(EntityName, added.Name, added.Facets);
-        _editing = null;
+        CloseEditor();
         Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/preview");
     }
 
     /// <summary>Opens the editor over a field the descriptor already declares.</summary>
-    private void EditField(string field) => _editing = field;
+    private void EditField(string field)
+    {
+        _editing = field;
+        _editorOpen = true;
+    }
+
+    /// <summary>Opens the editor with nothing prefilled.</summary>
+    private void AddField()
+    {
+        _editing = null;
+        _editorOpen = true;
+    }
+
+    /// <summary>
+    /// Closes the editor without touching the working copy.
+    /// </summary>
+    /// <remarks>
+    /// Dismissing is not discarding: what the operator typed was never in the copy until they
+    /// saved, so there is nothing to roll back — and nothing to warn them about either.
+    /// </remarks>
+    private void CloseEditor()
+    {
+        _editing = null;
+        _editorOpen = false;
+    }
 
     /// <summary>
     /// Drops a field from the working copy and offers the preview.
@@ -210,7 +247,7 @@
     private void RemoveField(string field)
     {
         Copy.RemoveField(EntityName, field);
-        _editing = null;
+        CloseEditor();
         Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/preview");
     }
 

@@ -82,6 +82,7 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
 
+        await session.Page.ClickAsync("[data-testid='add-field']");
         await session.Page.Locator("#new-field-default").WaitForAsync();
 
         var refusal = session.Page.Locator("[data-testid='refused-field.default']");

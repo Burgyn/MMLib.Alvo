@@ -156,6 +156,39 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     /// F5's first acceptance criterion, measured rather than eyeballed. A table, a diagram or a code
     /// block may scroll inside its own container; the document may not.
     /// </remarks>
+    /// <summary>
+    /// Asserts that no text on the page is wrapping one character per line.
+    /// </summary>
+    /// <remarks>
+    /// <b>The failure a horizontal-scroll check cannot see.</b> A flex container turns every inline
+    /// child into a flex item; one that also carries <c>overflow-wrap: anywhere</c> then shrinks to a
+    /// single character wide and runs down the page as a column of letters. The page does not
+    /// overflow, every element is visible, and the screen is unreadable — which is how a sentence
+    /// about <c>IApiKeyStore</c> reached a phone as five vertical strips.
+    /// </remarks>
+    public async Task AssertNoVerticalTextAsync()
+    {
+        await SettleAsync().ConfigureAwait(false);
+
+        /* A leaf with real text, narrower than about two characters and taller than a couple of
+           lines, is not a narrow column — it is a word broken per character. */
+        var offenders = await Page.EvaluateAsync<string[]>(
+            "() => { const bad = []; for (const el of document.querySelectorAll('body *')) {"
+            + " if (el.children.length) continue;"
+            + " const text = (el.textContent || '').trim(); if (text.length < 6) continue;"
+            + " const style = getComputedStyle(el);"
+            + " if (style.display === 'none' || style.visibility === 'hidden') continue;"
+            + " const box = el.getBoundingClientRect();"
+            + " const size = parseFloat(style.fontSize) || 14;"
+            + " if (box.width > 0 && box.width < size * 2.2 && box.height > size * 2.5) {"
+            + "   bad.push(el.tagName.toLowerCase() + '.' + (el.className || '(no class)')"
+            + "     + ' \"' + text.slice(0, 24) + '\"'); } }"
+            + " return [...new Set(bad)]; }").ConfigureAwait(false);
+
+        offenders.ShouldBeEmpty(
+            $"these wrap one character per line at this width: {string.Join(" · ", offenders)}");
+    }
+
     public async Task AssertNoHorizontalScrollAsync()
     {
         await SettleAsync().ConfigureAwait(false);

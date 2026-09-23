@@ -1025,12 +1025,23 @@ h1.a-page-title:focus {
   pointer-events: none;
 }
 
+/* Prose, so it flows as prose. It was `display: flex`, which made every inline <code> its own
+   flex item: each shrank to min-content and `.a-mono`'s `overflow-wrap: anywhere` then broke it
+   one character per line. At 375 px that turned a sentence about IApiKeyStore into five vertical
+   columns of letters. */
 .a-refused__reason {
-  display: flex;
-  gap: var(--space-2);
+  display: block;
   margin-top: var(--space-1);
   color: var(--warn-fg);
   font-size: var(--text-2xs);
+  line-height: 1.5;
+}
+
+/* Inline code inside prose breaks at word boundaries like the prose around it. `anywhere` is for
+   a route or a connection string standing alone in its own box, not for a type name mid-sentence. */
+.a-refused__reason .a-mono,
+.a-section-sub .a-mono {
+  overflow-wrap: break-word;
 }
 
 /* ===========================================================================
@@ -1228,24 +1239,74 @@ input[type="checkbox"] {
   display: none;
 }
 
+/* Above 720 px the overlay is a centred dialog: a sheet rising from the bottom edge of a 1400 px
+   window is a phone gesture on a screen that has no bottom edge to speak of. One component, two
+   shapes — the shell's own argument about a second navigation applies to a second dialog just as
+   well, and the media query below is where the phone half lives. */
 .a-sheet {
   z-index: 40;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
+  justify-content: center;
+  align-items: center;
+  padding: var(--space-6);
 }
 
 .a-sheet__panel {
   display: flex;
-  max-height: 80vh;
+  width: min(560px, 100%);
+  max-height: min(80vh, 720px);
   flex-direction: column;
-  gap: var(--space-2);
-  padding: var(--space-4) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--border);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   background: var(--panel);
   box-shadow: var(--shadow-pop);
+  overflow: hidden;
+}
+
+.a-sheet__panel:focus-visible {
+  outline: none;
+}
+
+.a-sheet__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+/* The body scrolls, not the panel: the title and the close control stay put while a long form
+   moves under them, which is what keeps the way out reachable on a phone. */
+.a-sheet__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-3);
   overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The drag handle a phone sheet is recognised by. Decoration on a desktop dialog, so it is
+   hidden there rather than drawn as a stray line. */
+/* The row of controls a sheet ends with. Outside the scrolling body, so Save and Delete stay
+   reachable while a long form moves — the same reason the head stays put. */
+.a-sheet__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.a-sheet__grip {
+  display: none;
+  width: 36px;
+  height: 4px;
+  margin: 0 auto var(--space-1);
+  border-radius: 2px;
+  background: var(--border);
 }
 
 .a-bottomnav__item {
@@ -1305,6 +1366,26 @@ input[type="checkbox"] {
   }
 
   .a-only-mobile-block {
+    display: block;
+  }
+
+  .a-sheet {
+    justify-content: flex-end;
+    align-items: stretch;
+    padding: 0;
+  }
+
+  .a-sheet__panel {
+    width: 100%;
+    max-height: 85vh;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
+    border: none;
+    border-top: 1px solid var(--border);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  .a-sheet__grip {
     display: block;
   }
 

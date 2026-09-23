@@ -11,20 +11,21 @@
 *@
 @inject DataGateway Data
 
-<div class="a-scrim" style="display:flex;justify-content:flex-end;z-index:30" @onclick="Cancel">
-    <div class="a-drawer" @onclick:stopPropagation="true">
-        <div class="a-toolbar">
-            <span class="a-section-title">@(RecordId is null ? "New" : "Edit") @Entity.Name</span>
-            <span style="margin-left:auto"></span>
-            <button type="button" class="a-btn a-btn--ghost a-btn--sm" @onclick="Cancel">Close</button>
-        </div>
+@*
+    The chrome — the overlay, the title, the way out, the scroll lock — belongs to <Sheet>. This
+    component is the form, so the same markup reads as a bottom sheet on a phone and a centred
+    dialog on a desktop without knowing which it is in.
+*@
+<Sheet Open="true" TestId="record-sheet"
+       Title="@($"{(RecordId is null ? "New" : "Edit")} {Entity.Name}")"
+       Subtitle="@Verb" OnClose="Cancel">
 
         @if (_error is not null)
         {
             <ErrorPanel Problem="@_error" Fix="@_fix" />
         }
 
-        <div class="a-stack" style="padding:var(--space-4) 0">
+        <div class="a-stack">
             @foreach (var column in Editable)
             {
                 <div class="a-field">
@@ -73,19 +74,17 @@
             }
         </div>
 
-        <div class="a-toolbar" style="border-top:1px solid var(--border);padding-top:var(--space-4)">
+        <div class="a-sheet__actions">
             @if (RecordId is { } id)
             {
                 <button type="button" class="a-btn a-btn--danger a-btn--sm" @onclick="Delete">Delete</button>
             }
             <span style="margin-left:auto"></span>
-            <code class="a-mono" style="font-size:var(--text-2xs);color:var(--faint)">@Verb</code>
             <button type="button" class="a-btn a-btn--primary" disabled="@_saving" @onclick="Save">
                 @(RecordId is null ? "Create" : "Save")
             </button>
         </div>
-    </div>
-</div>
+</Sheet>
 
 @code {
     private Exception? _error;

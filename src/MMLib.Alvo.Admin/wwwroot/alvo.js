@@ -132,5 +132,17 @@
   applyStored();
   document.addEventListener('keydown', onKeyDown);
 
-  window.alvo = { toggleTheme, toggleDensity, resolvedTheme };
+  /* Holds the page still while a sheet is over it. Without this a drag near the panel's edge
+     scrolls the list underneath and the sheet appears to float over a page that is still
+     moving — the one thing that makes a bottom sheet read as a web page rather than a control.
+     Counted rather than boolean: two overlays can be open at once (a sheet over the palette),
+     and the first to close must not release the page for the second. */
+  let scrollLocks = 0;
+
+  const lockScroll = (locked) => {
+    scrollLocks = Math.max(0, scrollLocks + (locked ? 1 : -1));
+    document.body.style.overflow = scrollLocks > 0 ? 'hidden' : '';
+  };
+
+  window.alvo = { toggleTheme, toggleDensity, resolvedTheme, lockScroll };
 })();

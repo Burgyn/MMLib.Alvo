@@ -35,6 +35,10 @@ public sealed class FieldDefaultScenarios(AdminWorld world) : IClassFixture<Admi
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
         await session.GoAsync("/schema/regions");
 
+        /* The editor is a sheet now: it is on the page only while somebody is editing it. */
+        await session.Page.ClickAsync("[data-testid='add-field']");
+        await session.Page.Locator("[data-testid='field-sheet']").WaitForAsync();
+
         await session.Page.FillAsync("#new-field-name", "dispatch_note");
         await session.Page.ClickAsync(".a-choice button:has-text('integer')");
         await session.Page.FillAsync("#new-field-default", "not a number");
