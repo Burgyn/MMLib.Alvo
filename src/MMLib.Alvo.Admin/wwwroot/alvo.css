@@ -368,6 +368,12 @@ button {
   border-bottom: 1px solid var(--border);
 }
 
+/* A section heading that also carries a control: the heading keeps the left, the control the
+   right, on one line at every width. */
+.a-section--bar {
+  justify-content: space-between;
+}
+
 .a-section-title {
   font-size: var(--text-base);
   font-weight: var(--weight-medium);
@@ -412,6 +418,17 @@ button {
   gap: var(--space-2);
 }
 
+/* Always at the row's end, never inside the facets. As the last item of a wrapping list they
+   landed wherever the badges left room — inline on a short row, on their own line on a long one,
+   in the same list. */
+.a-listrow__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
 .a-detail__label {
   flex: none;
   min-width: 150px;
@@ -426,10 +443,89 @@ button {
 }
 
 .a-page-title {
-  margin: 0 0 var(--space-1);
+  margin: 0;
   font-size: var(--text-xl);
   font-weight: var(--weight-bold);
   letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+/* One header shape for every screen: an eyebrow that says which section you are in, the thing's
+   own name, and the controls that belong to it. */
+.a-pagehead {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.a-pagehead__eyebrow {
+  align-self: flex-start;
+  color: var(--dim);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+a.a-pagehead__eyebrow:hover {
+  color: var(--text);
+}
+
+/* The title and its actions share a line while there is room, and the actions drop to their own
+   line rather than squeezing the name — a title that wraps to make space for a button is the
+   version of this row that looks broken. */
+.a-pagehead__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.a-pagehead__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* Fine print: provenance, counts, the sentence that explains a screen once. Dimmer and smaller
+   than body text on purpose — these lines were set at body weight and became the loudest thing on
+   several screens, above the data they describe. */
+.a-note {
+  margin: 0;
+  max-width: 72ch;
+  color: var(--dim);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.a-pagehead__sub {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--dim);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+/* At phone width the actions take the full line under the title and share it evenly, so the
+   primary one is a thumb-sized target rather than a word at the end of a row. */
+@media (max-width: 720px) {
+  .a-pagehead__row {
+    align-items: flex-start;
+  }
+
+  .a-pagehead__actions {
+    width: 100%;
+  }
+
+  .a-pagehead__actions > * {
+    flex: 1;
+    justify-content: center;
+  }
 }
 
 /* `FocusOnNavigate` moves focus to the `h1` after every navigation, which is the right
@@ -841,6 +937,13 @@ h1.a-page-title:focus {
   display: none;
 }
 
+/* The table's wrapper, hidden with the table it holds. Hiding only the table left the wrapper's
+   border and radius behind as an empty strip — a rule across the page under the row cards that
+   looked like a divider nobody had drawn. */
+.a-only-desktop-block {
+  display: block;
+}
+
 .a-row-card {
   display: none;
   flex-direction: column;
@@ -851,19 +954,44 @@ h1.a-page-title:focus {
 
 .a-row-card__head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
 }
 
+.a-row-card__title {
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+
+/* Two columns of label/value pairs, so a card reads as a small record rather than a sentence of
+   names and values run together. One column when the values are long enough to need it. */
 .a-row-card__meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin: 0;
+}
+
+.a-row-card__pair {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-  color: var(--dim);
-  font-size: var(--text-xs);
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.a-row-card__pair dt {
+  color: var(--faint);
+  font-size: var(--text-2xs);
+}
+
+.a-row-card__pair dd {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
 }
 
 /* ===========================================================================
@@ -1369,6 +1497,10 @@ input[type="checkbox"] {
     display: block;
   }
 
+  .a-only-desktop-block {
+    display: none;
+  }
+
   .a-sheet {
     justify-content: flex-end;
     align-items: stretch;
@@ -1393,8 +1525,22 @@ input[type="checkbox"] {
     display: flex;
   }
 
+  /* Two up rather than one. Each stat is a label, a number and half a line of prose; stacked one
+     per row they filled a phone screen with three figures and pushed everything else below the
+     fold. */
   .a-cards {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+
+  /* The prose under a figure is what makes a two-up tile too tall to be worth having; the figure
+     and its label are the part being scanned. */
+  .a-cards .a-card {
+    padding: var(--space-4);
+  }
+
+  .a-cards .a-stat {
+    font-size: var(--text-xl);
   }
 
   /* A key beside its value needs a viewport wide enough for both. At this width the
@@ -1405,6 +1551,27 @@ input[type="checkbox"] {
     flex-direction: column;
     align-items: flex-start;
     gap: var(--space-1);
+  }
+
+  /* A heading and its one control are not a key and a value: they fit on a line at any width, and
+     stacking them put a button under a title with nothing to tell them apart. */
+  .a-section--bar {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  /* The name of the thing you are looking at, at the size of a title rather than of a label. */
+  .a-page-title {
+    font-size: var(--text-2xl);
+  }
+
+  /* Stacked at phone width, so the controls take their own line and sit where the eye already
+     is — the right edge, under the thing they act on. */
+  .a-listrow__actions {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
   }
 
   .a-listrow__key,

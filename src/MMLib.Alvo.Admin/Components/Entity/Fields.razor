@@ -15,18 +15,23 @@
             {
                 <span class="a-badge">@facet</span>
             }
-            @if (Editable)
-            {
-                <span style="margin-left:auto;display:flex;gap:var(--space-2)">
-                    <button type="button" class="a-btn a-btn--ghost a-btn--sm"
-                            data-testid="@($"edit-field-{field.Name}")"
-                            @onclick="() => OnEdit.InvokeAsync(field.Name)">Edit</button>
-                    <button type="button" class="a-btn a-btn--ghost a-btn--sm"
-                            data-testid="@($"remove-field-{field.Name}")"
-                            @onclick="() => OnRemove.InvokeAsync(field.Name)">Remove</button>
-                </span>
-            }
         </span>
+        @*
+            The controls are a sibling of the facets, not the last item inside them. Inside, a row
+            with three badges pushed them onto a second line and a row with one kept them inline —
+            so the same list drew its own controls in two different places.
+        *@
+        @if (Editable)
+        {
+            <span class="a-listrow__actions">
+                <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                        data-testid="@($"edit-field-{field.Name}")"
+                        @onclick="() => OnEdit.InvokeAsync(field.Name)">Edit</button>
+                <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                        data-testid="@($"remove-field-{field.Name}")"
+                        @onclick="() => OnRemove.InvokeAsync(field.Name)">Remove</button>
+            </span>
+        }
     </div>
 }
 

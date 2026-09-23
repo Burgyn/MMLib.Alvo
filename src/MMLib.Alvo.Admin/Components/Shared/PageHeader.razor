@@ -1,0 +1,69 @@
+@*
+    Every screen announces where you are the same way: a section eyebrow that goes back, the
+    thing's own name as the page's one <h1>, and the actions that belong to it.
+
+    It replaces a toolbar that carried four different jobs in one flat row — a back link, the
+    entity name, a cross-link and a primary button — where the name read as another button and sat
+    off the others' baseline because it was set in mono at a title size.
+*@
+
+<header class="a-pagehead">
+    @if (Eyebrow is { Length: > 0 })
+    {
+        @if (EyebrowHref is { Length: > 0 })
+        {
+            <a class="a-pagehead__eyebrow" href="@EyebrowHref">@Eyebrow</a>
+        }
+        else
+        {
+            <span class="a-pagehead__eyebrow">@Eyebrow</span>
+        }
+    }
+
+    <div class="a-pagehead__row">
+        <h1 class="@($"a-page-title{(Mono ? " a-mono" : string.Empty)}")">@Title</h1>
+        @if (Actions is not null)
+        {
+            <div class="a-pagehead__actions">
+                @Actions
+            </div>
+        }
+    </div>
+
+    @if (Subtitle is { Length: > 0 })
+    {
+        <p class="a-pagehead__sub">@Subtitle</p>
+    }
+</header>
+
+@code {
+    /// <summary>The section this screen belongs to, shown above the title.</summary>
+    [Parameter]
+    public string? Eyebrow { get; set; }
+
+    /// <summary>Where the eyebrow goes, when it is a way back rather than a label.</summary>
+    [Parameter]
+    public string? EyebrowHref { get; set; }
+
+    /// <summary>The thing this screen is about.</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Whether the title is an identifier rather than prose.
+    /// </summary>
+    /// <remarks>
+    /// An entity is called <c>work_orders</c> in the descriptor, the URL and the API, so the screen
+    /// spells it the way the operator will have to type it.
+    /// </remarks>
+    [Parameter]
+    public bool Mono { get; set; }
+
+    /// <summary>One line under the title.</summary>
+    [Parameter]
+    public string? Subtitle { get; set; }
+
+    /// <summary>The controls this screen owns.</summary>
+    [Parameter]
+    public RenderFragment? Actions { get; set; }
+}

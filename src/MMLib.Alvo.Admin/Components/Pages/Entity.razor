@@ -8,18 +8,17 @@
 <PageTitle>@EntityName · Schema · Alvo</PageTitle>
 
 <div class="a-stack">
-    <div class="a-toolbar">
-        <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema")">Schema</a>
-        <h1 class="a-page-title a-mono">@EntityName</h1>
-        <span style="margin-left:auto"></span>
-        <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/data/{EntityName}")">Browse records</a>
-        @if (Copy.IsDirty)
-        {
-            <a class="a-btn a-btn--primary a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/preview")">
-                Preview changes
-            </a>
-        }
-    </div>
+    <PageHeader Eyebrow="Schema" EyebrowHref="@($"{AlvoAdmin.BasePath}/schema")" Title="@EntityName" Mono="true">
+        <Actions>
+            <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/data/{EntityName}")">Browse records</a>
+            @if (Copy.IsDirty)
+            {
+                <a class="a-btn a-btn--primary a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/preview")">
+                    Preview changes
+                </a>
+            }
+        </Actions>
+    </PageHeader>
 
     @if (_error is not null)
     {
@@ -70,13 +69,18 @@
             @switch (_tab)
             {
                 case "Fields":
-                    @if (Copy.Loaded)
-                    {
-                        <div class="a-row" style="gap:var(--space-2);padding:var(--space-4)">
-                            <button type="button" class="a-btn a-btn--primary" data-testid="add-field"
+                    @*
+                        The control sits with the list's own heading rather than as a green block above
+                        the first row, where it outweighed every field on the screen.
+                    *@
+                    <div class="a-section a-section--bar">
+                        <span class="a-section-title">Declared fields</span>
+                        @if (Copy.Loaded)
+                        {
+                            <button type="button" class="a-btn a-btn--sm" data-testid="add-field"
                                     @onclick="AddField">Add a field</button>
-                        </div>
-                    }
+                        }
+                    </div>
                     <Fields Entity="@_entity" Editable="Copy.Loaded" OnEdit="EditField" OnRemove="RemoveField" />
                     break;
                 case "Relationships":

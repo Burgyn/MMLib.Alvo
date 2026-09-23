@@ -437,6 +437,24 @@ namespace MMLib.Alvo.Admin.Components.Shared
         public string? Slug { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
+    public class PageHeader : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public PageHeader() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? Actions { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Eyebrow { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? EyebrowHref { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Mono { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Subtitle { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Title { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
     public class PolicyVerdictView : Microsoft.AspNetCore.Components.ComponentBase
     {
         public PolicyVerdictView() { }

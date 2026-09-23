@@ -6,16 +6,15 @@
 <PageTitle>@EntityName · Data · Alvo</PageTitle>
 
 <div class="a-stack">
-    <div class="a-toolbar">
-        <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/data")">Data</a>
-        <h1 class="a-page-title a-mono">@EntityName</h1>
-        <span style="margin-left:auto"></span>
-        <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/{EntityName}")">Schema</a>
-        @if (_entity is not null && !OutOfScope)
-        {
-            <button type="button" class="a-btn a-btn--primary a-btn--sm" @onclick="NewRecord">New record</button>
-        }
-    </div>
+    <PageHeader Eyebrow="Data" EyebrowHref="@($"{AlvoAdmin.BasePath}/data")" Title="@EntityName" Mono="true">
+        <Actions>
+            <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/{EntityName}")">Schema</a>
+            @if (_entity is not null && !OutOfScope)
+            {
+                <button type="button" class="a-btn a-btn--primary a-btn--sm" @onclick="NewRecord">New record</button>
+            }
+        </Actions>
+    </PageHeader>
 
     @if (_error is not null)
     {
@@ -36,10 +35,15 @@
     }
     else
     {
-        <p class="a-section-sub">
+        @*
+            Provenance, not a headline. It answers "whose rows am I looking at" — which matters, and
+            matters once — so it is set as the fine print it is rather than as the first paragraph of
+            the page competing with the data underneath it.
+        *@
+        <p class="a-note">
             Reading as <strong>@_who</strong>@(_context?.Tenant is { } tenant
                 ? $", tenant {tenant.Value}" : ", with no tenant").
-            You see exactly the rows this credential sees through <code class="a-mono">/api/@EntityName</code>.
+            These are exactly the rows this credential sees through <code class="a-mono">/api/@EntityName</code>.
         </p>
 
         @if (OutOfScope)
@@ -62,7 +66,7 @@
         }
         else
         {
-            <div class="a-grid-wrap">
+            <div class="a-grid-wrap a-only-desktop-block">
                 <table class="a-grid">
                     <thead>
                         <tr>
@@ -101,24 +105,37 @@
                 {
                     <div class="a-row-card" data-testid="row-card">
                         <div class="a-row-card__head">
-                            <span>@Display(row[Columns.First().Name])</span>
+                            <span class="a-row-card__title">@Display(row[Columns.First().Name])</span>
                             <button type="button" class="a-btn a-btn--ghost a-btn--sm"
                                     @onclick="() => Edit(row)">Edit</button>
                         </div>
-                        <div class="a-row-card__meta">
+                        @*
+                            Label above value for every column the head does not already carry. The
+                            first column is the card's title, so repeating it underneath would be the
+                            same value twice with one of them labelled.
+                        *@
+                        <dl class="a-row-card__meta">
                             @foreach (var column in Columns.Skip(1))
                             {
-                                <span><span class="a-mono">@column.Name</span> @Display(row[column.Name])</span>
+                                <div class="a-row-card__pair">
+                                    <dt class="a-mono">@column.Name</dt>
+                                    <dd>@Display(row[column.Name])</dd>
+                                </div>
                             }
-                        </div>
+                        </dl>
                     </div>
                 }
             </div>
 
             <div class="a-row" style="gap:var(--space-3);align-items:center">
-                <span class="a-section-sub">
-                    showing @_page.Items.Count@(_page.TotalCount is { } total ? $" of {total}" : string.Empty) ·
-                    keyset paging over an opaque cursor, stable under concurrent writes
+                @*
+                    The count is what a reader needs; how the paging works is a property of the
+                    product, not of this screen's data, and at body weight it was the loudest text
+                    under the list. It is a title on the count now.
+                *@
+                <span class="a-note"
+                      title="Keyset paging over an opaque cursor, stable under concurrent writes.">
+                    showing @_page.Items.Count@(_page.TotalCount is { } total ? $" of {total}" : string.Empty)
                 </span>
                 <span style="margin-left:auto"></span>
                 @if (_cursors.Count > 0)
