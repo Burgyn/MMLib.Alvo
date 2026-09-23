@@ -111,7 +111,7 @@ reload or a shared link loses them; a ref's target on Relationships is not a lin
 Visual identity is **kept** (maintainer's call): the palette, the accent, the scales and the radii stay.
 This pass narrows usage and fixes defects; it does not redesign.
 
-1. **Type.** Ship Public Sans (500/600/700) and IBM Plex Mono (400/500) as static web assets, latin +
+1. **Type.** Ship Public Sans (500/600/700) and IBM Plex Mono (500/600 — the weights the stylesheet actually requests; a mono title is capped at 600) as static web assets, latin +
    latin-ext subsets (Slovak diacritics), `font-display: swap`, OFL-1.1 licence files beside them. Raise
    *usage*, not the scale: body copy and section subtitles move from 12 to 13 px, table cells from 12 to
    13 px; 11 px stays for badges and meta only. `.a-mono` becomes family-only (size and colour inherit),
