@@ -39,7 +39,7 @@ Reference descriptors validated against `schema/project.schema.json`
   fixture for the per-engine generated-SQL snapshot tests (the EF-drift
   guard) in `MMLib.Alvo.Data.Sqlite.Tests` / `.Data.PostgreSql.Tests.Integration`.
 - **`bike-workshop/`** — **applies as it stands.** The admin dashboard's demo backend (see
-  `bike-workshop/README.md`): a bicycle repair and rental workshop over seven entities, exercising every
+  `bike-workshop/README.md`): a bicycle repair and rental workshop over eight entities, exercising every
   field type, declared `formats`, literal `default`s, all three `onDelete`s, `computed` fields (one reading
   a rollup), `count`/`sum` rollups, `hidden`/`readOnly` as CEL, before-hooks (`reject` and `mutate`),
   `email` and `webhook` after-hooks, `access` levels and role-differentiated rules. `scripts/demo-admin`

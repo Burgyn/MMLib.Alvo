@@ -159,6 +159,32 @@ This pass narrows usage and fixes defects; it does not redesign.
 - **Prototype not followed.** `docs/design/f5-admin` is not updated to match (maintainer's call); it
   retires with the prototype suite.
 
+### 4.2 Decisions taken while building it
+
+Recorded here so a later reader can tell a decision from an oversight; each is also in the code it governs.
+
+- **D-6 has no *partly* vs *not running* split.** `ManagementCapabilities` carries no such signal and the
+  core is out of scope, so every unhonoured block renders under one honest heading ("Declared, with limits in
+  this build"), each row stating its own limit. A real split needs a core signal (follow-up).
+- **Ref labels (refines §4.6).** Name-like string field first (`name`, `title`, `label`, `display_name`,
+  `reference`, `code`, `sku`, then `*_number`), then `first_name` + `last_name`, then the first required string,
+  the first string, else the short id. A descriptor `displayField` would replace it (follow-up).
+- **Default grid columns.** Cap 8: label, ≤ 2 enums, ≤ 2 refs, one *amount* (`total` › `amount` ›
+  `grand_total` › last `*_total` › last computed/rollup decimal › first decimal), one *date* (`*_on` › `*_at` ›
+  `*_date` › `due`/`deadline`, never an audit stamp), then the rest. A column picker is the proper follow-up.
+- **CEL `readOnly` stays editable.** The record form sends only changed fields, so a field whose `readOnly`
+  is a CEL expression is a control with the hint "read-only for some callers"; the engine's `read-only-field`
+  refusal is the authority and lands inline. `readOnly: true` is shown under *Calculated*.
+- **Plan steps are reworded.** `ManagementPlanSummary.Steps` asks clients not to respell steps; the Preview
+  screen maps only the verb to a sentence and keeps the target and the destructive marker's meaning, with an
+  unknown step shown verbatim. The API and the CLI keep the raw lines.
+- **IBM Plex Mono ships 500/600**, not 400/500 — the weights the stylesheet requests; a mono title is capped
+  at 600 rather than shipping a 700 face for one heading.
+- **Razor components are public.** The Razor SDK gives every component a public class, so the pass kept
+  new state off the surface through internal helpers and private cascading parameters; the few members
+  that could not be avoided (`PendingBar`, `DiscardSheet`, `Sheet.Eyebrow`, lifecycle overrides) are
+  justified in their commits.
+
 ## 5. Acceptance
 
 - The §2.1 measurements meet their targets, re-measured by the same scripts.
