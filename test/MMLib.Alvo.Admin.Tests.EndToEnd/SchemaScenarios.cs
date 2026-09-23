@@ -85,6 +85,9 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.Page.ClickAsync("[data-testid='add-field']");
         await session.Page.Locator("#new-field-default").WaitForAsync();
 
+        /* The refusals are folded into one line at the end of the sheet, so the operator adding a field
+           is not reading them first; the one who asks where the default went opens it. */
+        await session.Page.ClickAsync("[data-testid='refused-facets'] > summary");
         var refusal = session.Page.Locator("[data-testid='refused-field.default']");
         await refusal.WaitForAsync();
 

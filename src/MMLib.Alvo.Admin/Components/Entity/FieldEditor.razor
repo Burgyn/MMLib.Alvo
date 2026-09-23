@@ -30,7 +30,7 @@
 
         <div class="a-field">
             <label class="a-label" for="new-field-name">Name</label>
-            <input class="a-input" id="new-field-name" value="@_name" placeholder="scheduled_for"
+            <input class="a-input" id="new-field-name" value="@_name" placeholder="e.g. scheduled_for"
                    @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
             <span class="a-section-sub">
                 @if (IsEditing && !string.Equals(_name, Editing, StringComparison.Ordinal))
@@ -43,7 +43,7 @@
                 }
                 else
                 {
-                    <text>Lower case, digits and underscores — <code class="a-mono">@DescriptorNames.Member</code></text>
+                    <span title="@DescriptorNames.Member">@DescriptorNames.Hint</span>
                 }
             </span>
         </div>
@@ -127,7 +127,7 @@
             case FieldType.Enum:
                 <div class="a-field">
                     <label class="a-label" for="new-field-values">Values</label>
-                    <input class="a-input" id="new-field-values" value="@_values" placeholder="scheduled, in_progress, completed"
+                    <input class="a-input" id="new-field-values" value="@_values" placeholder="e.g. scheduled, in_progress, completed"
                            @oninput="args => _values = args.Value?.ToString() ?? string.Empty" />
                     <span class="a-section-sub">Comma separated. An enum with no values is refused by the schema.</span>
                 </div>
@@ -180,27 +180,32 @@
        question every reader of this panel asks is "where is the default value", and the answer
        exists, in the framework's own words. Served verbatim (§2.3): a second wording of a refusal
        is a third spelling of one truth. *@
+    @*
+        Collapsed and last: the answer is there for the operator who asks where the default or the
+        validation box went, and out of the way of the one adding a field — open, it took more than
+        half of the dialog.
+    *@
     @if (Refused.Count > 0)
     {
-        <div class="a-section">
-            <span class="a-section-title">Facets this build refuses</span>
-            <span class="a-section-sub">
+        <details class="a-disclosure" data-testid="refused-facets">
+            <summary>@Refused.Count facet@(Refused.Count == 1 ? " is" : "s are") not supported yet</summary>
+            <p class="a-section-sub">
                 Declared by the schema, refused at apply — a whole facet, or the one form of it named
                 here. A refused facet has no control above; a refused <em>form</em> of one does, and this
                 says which value it will not take.
-            </span>
-        </div>
+            </p>
 
-        @foreach (var refusal in Refused)
-        {
-            <div class="a-listrow" data-testid="@($"refused-{refusal.Slot}")">
-                <code class="a-mono a-listrow__key">@refusal.Slot</code>
-                <span class="a-listrow__rest" style="flex-direction:column;align-items:flex-start;gap:var(--space-1)">
-                    <span class="a-section-sub">@refusal.Consequence</span>
-                    <span class="a-section-sub">@refusal.Fix</span>
-                </span>
-            </div>
-        }
+            @foreach (var refusal in Refused)
+            {
+                <div class="a-listrow" data-testid="@($"refused-{refusal.Slot}")">
+                    <code class="a-mono a-listrow__key">@refusal.Slot</code>
+                    <span class="a-listrow__rest" style="flex-direction:column;align-items:flex-start;gap:var(--space-1)">
+                        <span class="a-section-sub">@refusal.Consequence</span>
+                        <span class="a-section-sub">@refusal.Fix</span>
+                    </span>
+                </div>
+            }
+        </details>
     }
     </div>
 
@@ -303,10 +308,15 @@
     /// <summary>An example of the literal this field's type takes, so the box is not a guess.</summary>
     private string DefaultPlaceholder => _type switch
     {
+        FieldType.Enum => _values.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault() is { } first ? $"e.g. {first}" : "one of the values above",
+        _ => $"e.g. {DefaultExample}",
+    };
+
+    private string DefaultExample => _type switch
+    {
         FieldType.Integer => "0",
         FieldType.Decimal => "0.00",
-        FieldType.Enum => _values.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .FirstOrDefault() ?? "one of the values above",
         FieldType.Uuid => "00000000-0000-0000-0000-000000000000",
         FieldType.Date => "2026-01-01",
         FieldType.DateTime => "2026-01-01T09:00:00Z",

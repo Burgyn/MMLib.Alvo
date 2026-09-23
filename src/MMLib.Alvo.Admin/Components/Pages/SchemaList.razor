@@ -44,11 +44,9 @@
 
             <div class="a-field">
                 <label class="a-label" for="new-entity-name">Name</label>
-                <input class="a-input" id="new-entity-name" value="@_name" placeholder="invoices"
+                <input class="a-input" id="new-entity-name" value="@_name" placeholder="e.g. invoices"
                        @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
-                <span class="a-section-sub">
-                    Lower case, digits and underscores — <code class="a-mono">@DescriptorNames.Member</code>
-                </span>
+                <span class="a-section-sub" title="@DescriptorNames.Member">@DescriptorNames.Hint</span>
             </div>
 
             <div class="a-field">

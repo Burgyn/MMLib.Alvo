@@ -38,10 +38,10 @@
                     <div>
                         <span class="a-section-title">Simulate a policy</span>
                         <p class="a-section-sub">
-                            An entity, an operation and a caller in; the engine's own verdict out. This is
-                            <code class="a-mono">POST /management/projects/{project}/policy/simulate</code>,
-                            answered by the same <code class="a-mono">IPolicyEngine</code> the Data API uses.
+                            Pick a caller and an operation; the verdict comes from the same rule engine the
+                            Data API uses.
                         </p>
+                        <span class="a-ident">API: POST …/policy/simulate</span>
                     </div>
 
                     <div class="a-field">
@@ -78,17 +78,14 @@
                     }
                     else if (_verdict is { } verdict)
                     {
-                        <PolicyVerdictView Verdict="verdict" Operation="_operation" Entity="@Selected" />
+                        <PolicyVerdictView Verdict="verdict" Operation="@_operation" Entity="@Selected" />
                     }
 
                     <p class="a-note" style="border-top:1px solid var(--border);padding-top:var(--space-3)">
                         <strong>Why there is no record picker.</strong>
-                        <code class="a-mono">ManagementPolicySimulation</code> takes no record id, deliberately:
-                        evaluating a predicate against a stored row needs a read, and the Management API has no
-                        data surface. A client that scored a row here would be a second policy evaluator — and
-                        the first time it disagreed with the engine, this screen would teach the wrong thing
-                        with total confidence. To check one row, open it in Data under your own credential and
-                        compare.
+                        Checking a rule against one stored row needs a read of that row, which this screen does
+                        not make — scoring it here would make it a second policy evaluator that could disagree
+                        with the engine. To check one row, open it in Data as yourself.
                         <a class="a-btn a-btn--sm" style="margin-top:var(--space-3)"
                            href="@($"{AlvoAdmin.BasePath}/data/{Selected}")">Open @Selected in Data</a>
                     </p>

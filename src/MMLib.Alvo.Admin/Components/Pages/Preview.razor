@@ -28,9 +28,9 @@
     }
     else
     {
-        <p class="a-section-sub">
-            This is <code class="a-mono">PUT /management/projects/{project}/descriptor?dryRun=true</code> —
-            the same call the CLI makes, through the same plan. Nothing below has run.
+        <p class="a-note">
+            Nothing below has run. Planning asks the database what this change would do, and changes nothing.
+            <span class="a-ident" style="display:block;margin-top:var(--space-1)">API: PUT …/descriptor?dryRun=true</span>
         </p>
 
         <div class="a-panel">
@@ -71,13 +71,25 @@
                     </span>
                 </div>
 
-                @foreach (var step in _plan.Plan.Steps)
+                @foreach (var step in _plan.Plan.Steps.Select(PlanStep.Parse))
                 {
-                    <div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4);align-items:flex-start">
-                        <span class="@($"a-badge {(Destructive(step) ? "a-badge--danger" : "a-badge--ok")}")" style="flex:none">
-                            @(Destructive(step) ? "destroys" : "safe")
+                    <div class="a-row" data-testid="plan-step" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4);align-items:flex-start">
+                        <span class="@($"a-badge {(step.Destructive ? "a-badge--danger" : "a-badge--ok")}")" style="flex:none">
+                            @(step.Destructive ? "destroys" : "safe")
                         </span>
-                        <span class="a-mono" style="flex:1;font-size:var(--text-xs)">@step</span>
+                        <span style="flex:1;min-width:0;font-size:var(--text-sm)">
+                            @* One expression with its trailing space: a bare `@step.Verb` followed by the element on
+                               the next line lost the whitespace between them ("Drop columncustomers.notes"). *@
+                            @($"{step.Verb} ")
+                            @if (step.Target.Length > 0)
+                            {
+                                <code class="a-mono">@step.Target</code>
+                            }
+                            @if (step.Consequence is { } consequence)
+                            {
+                                <text> — @consequence</text>
+                            }
+                        </span>
                     </div>
                 }
             </div>
@@ -85,7 +97,7 @@
             @if (_plan.Plan.HasDestructiveChanges)
             {
                 <ConfirmByName Title="This plan destroys data"
-                               Detail="allowDestructive is never implied — not by this preview, and not by your management level. Confirming here is what sets it."
+                               Detail="Losing data is never implied — not by this preview, and not by your management level. Confirming here is what allows it."
                                Expected="@Gateway.Project"
                                OnConfirmedChanged="confirmed => _allowed = confirmed" />
             }
@@ -93,7 +105,7 @@
             <div class="a-panel" style="padding:var(--space-5)">
                 <div class="a-field">
                     <label class="a-label" for="apply-reason">Why</label>
-                    <input class="a-input" id="apply-reason" value="@_reason" placeholder="Widen quoted_price so larger quotes fit"
+                    <input class="a-input" id="apply-reason" value="@_reason" placeholder="@ReasonPlaceholder"
                            @oninput="args => _reason = args.Value?.ToString() ?? string.Empty" />
                     <span class="a-section-sub">Configuration history shows this on the revision forever.</span>
                 </div>
@@ -107,8 +119,8 @@
                 </button>
                 <span style="margin-left:auto"></span>
                 <span class="a-section-sub">
-                    Applying as yourself, against revision @Copy.Revision — sent as
-                    <code class="a-mono">If-Match: "@Copy.Revision"</code>.
+                    Applying as yourself, against revision @Copy.Revision. If somebody applies first, this is
+                    refused rather than written over theirs.
                 </span>
                 <button type="button" class="a-btn a-btn--primary"
                         disabled="@(_busy || (_plan.Plan.HasDestructiveChanges && !_allowed))"
@@ -260,7 +272,7 @@
         Migrations.DescriptorConcurrencyException
             => "Somebody applied a revision while this copy was open. Reload the descriptor, re-check the diff, and apply again — your edits are still here.",
         Migrations.DestructiveChangeNotAllowedException
-            => "The plan discards data and allowDestructive was not set. Type the project's name above to allow it.",
+            => "The plan discards data and that was not confirmed. Type the project's name above to allow it.",
         Descriptor.DescriptorValidationException
             => "The descriptor does not satisfy schema/project.schema.json. The message names the pointer that failed.",
         ManagementEscalationException
@@ -269,14 +281,16 @@
     };
 
     /// <summary>
-    /// Whether a plan step discards data.
+    /// What the "Why" box offers before anything is typed: a sentence about this change, when one can be said.
     /// </summary>
     /// <remarks>
-    /// The step wording is the framework's own — the same sentences a refused boot prints — so this
-    /// reads the marker the planner puts there rather than inventing a classification of its own.
+    /// The fixed example it replaced — about widening a price — sat above every plan, including ones that
+    /// created a table, and read as a value somebody had already filled in. The assistant's own suggestion
+    /// comes first, because it knows what it was asked; a one-step plan can be named from the step; anything
+    /// else gets the question the box is asking.
     /// </remarks>
-    private static bool Destructive(string step)
-        => step.Contains("destructive", StringComparison.OrdinalIgnoreCase)
-            || step.Contains("drop", StringComparison.OrdinalIgnoreCase)
-            || step.Contains("loses", StringComparison.OrdinalIgnoreCase);
+    private string ReasonPlaceholder
+        => Copy.SuggestedReason is { Length: > 0 } suggested
+            ? suggested
+            : PlanStep.SuggestReason(_plan?.Plan.Steps ?? []) ?? "What does this change do, and why?";
 }

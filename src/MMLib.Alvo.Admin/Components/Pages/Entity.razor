@@ -40,7 +40,7 @@
                 <input class="a-input a-mono" id="rename-entity-name" value="@_newName" autocomplete="off"
                        @oninput="args => _newName = args.Value?.ToString() ?? string.Empty" />
                 <span class="a-section-sub">
-                    Lower case, digits and underscores — <code class="a-mono">@DescriptorNames.Member</code>.
+                    <span title="@DescriptorNames.Member">@DescriptorNames.Hint</span>
                     The change is carried by <code class="a-mono">renamedFrom</code>, so the apply moves the
                     table instead of dropping it and creating a new one.
                 </span>

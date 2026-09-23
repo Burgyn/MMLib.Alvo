@@ -31,6 +31,13 @@ internal static class DescriptorNames
     /// <summary>The pattern an entity or field name must match.</summary>
     public const string Member = "^[a-z][a-z0-9_]{0,62}$";
 
+    /// <summary><see cref="Member"/> as a sentence, for the hint under a name box.</summary>
+    /// <remarks>
+    /// The regex itself goes in the hint's <c>title</c>, for the developer who wants it: shown as the hint it
+    /// was the one line of the form an operator could not read.
+    /// </remarks>
+    public const string Hint = "Lower case letters, digits and _; starts with a letter.";
+
     /// <summary>The pattern a webhook endpoint or function name must match.</summary>
     public const string Identifier = "^[a-z][a-z0-9-]{0,62}$";
 

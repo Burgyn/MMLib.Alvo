@@ -19,13 +19,13 @@
         <div class="a-panel">
             <div class="a-section">
                 <span class="a-section-title">This build</span>
-                <span class="a-section-sub"><code class="a-mono">GET /management/info</code></span>
+                <span class="a-section-sub">What is running, and how it starts.</span>
             </div>
             <Detail Label="Version" Value="@_info.Version" />
             <Detail Label="Mode" Value="@_info.Mode"
                     Note="Standalone is the container; embedded is Alvo inside your own host." />
             <Detail Label="Data provider" Value="@_info.DataProvider"
-                    Note="The IAlvoData implementation that is registered — not the database engine. The core does not know one, so a badge reading “PostgreSQL 16” would have no source." />
+                    Note="The data layer this host registered. It is not the database engine, which Alvo does not report." />
             <Detail Label="Startup mode" Value="@_info.StartupMode" />
         </div>
 
@@ -82,18 +82,17 @@
             @if (!Assistant.IsInstalled)
             {
                 <p class="a-note">
-                    This instance has no assistant installed. The agent ships as
-                    <code class="a-mono">MMLib.Alvo.Ai</code>, which a host adds with
-                    <code class="a-mono">AddAlvoAi()</code> — the standalone image already has it.
+                    No assistant is installed on this instance. The standalone image includes one; an
+                    embedded host adds the <code class="a-mono">MMLib.Alvo.Ai</code> package.
                 </p>
             }
             else if (!Assistant.CanWriteConnection)
             {
                 <p class="a-note">
-                    This deployment's secrets come from its own configuration, which Alvo reads and
-                    never writes. Set the connection where that configuration comes from, under
-                    <code class="a-mono">Alvo:Ai</code> — or mount a key file at
-                    <code class="a-mono">Alvo:Secrets:EncryptionKeyFile</code> to save one from here.
+                    This deployment sets the connection in its own configuration, under
+                    <code class="a-mono">Alvo:Ai</code>, and the dashboard cannot change it. To save one from
+                    here instead, give the host an encryption key file
+                    (<code class="a-mono">Alvo:Secrets:EncryptionKeyFile</code>).
                 </p>
             }
             else
@@ -119,18 +118,17 @@
                     <div class="a-field">
                         <label class="a-label" for="ai-endpoint">Endpoint</label>
                         <input class="a-input" id="ai-endpoint" value="@_endpoint" autocomplete="off"
-                               placeholder="http://localhost:11434/v1"
+                               placeholder="e.g. http://localhost:11434/v1"
                                @oninput="args => _endpoint = args.Value?.ToString() ?? string.Empty" />
                         <span class="a-section-sub">
-                            The base address. <code class="a-mono">info</code> never reports it and this page
-                            never renders it back to anyone else.
+                            The base address. It is never shown back, on this page or anywhere else.
                         </span>
                     </div>
 
                     <div class="a-field">
                         <label class="a-label" for="ai-model">Model</label>
                         <input class="a-input" id="ai-model" value="@_model" autocomplete="off"
-                               placeholder="qwen3:8b"
+                               placeholder="e.g. qwen3:8b"
                                @oninput="args => _model = args.Value?.ToString() ?? string.Empty" />
                     </div>
 
@@ -160,26 +158,12 @@
         <div class="a-panel">
             <div class="a-section">
                 <span class="a-section-title">API keys</span>
-                <span class="a-section-sub">Read-only, and that is a capability rather than a choice.</span>
+                <span class="a-section-sub">Not managed from this dashboard.</span>
             </div>
             <p class="a-note">
-                <code class="a-mono">IApiKeyStore</code> is <code class="a-mono">FindAsync</code> plus
-                <code class="a-mono">TouchAsync</code>, and the management surface has no route for
-                issuing or revoking one. So there is no control here: a button whose only possible
-                outcome is a refusal is worse than its absence. Keys are issued by whatever created
-                them — configuration, or a host that registered its own store.
-            </p>
-        </div>
-
-        <div class="a-panel">
-            <div class="a-section">
-                <span class="a-section-title">Danger zone</span>
-                <span class="a-section-sub">There isn't one.</span>
-            </div>
-            <p class="a-note">
-                Deleting a project has no route on the management surface. Removing a backend is
-                done by removing its descriptor and its database, deliberately — an irreversible
-                action with a one-click path is a footgun with a handle.
+                Keys are issued and revoked where they were created — in this host's configuration, or by a
+                key store the host registered. The dashboard has no way to issue or revoke one, so it offers
+                no control for it.
             </p>
         </div>
     }

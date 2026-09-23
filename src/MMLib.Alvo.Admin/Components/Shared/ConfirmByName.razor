@@ -12,8 +12,10 @@
         <label class="a-label" for="confirm-name">
             Type <code class="a-mono">@Expected</code> to allow it
         </label>
-        <input class="a-input" id="confirm-name" value="@_typed" placeholder="@Expected"
-               @oninput="OnTyped" autocomplete="off" />
+        @* No placeholder. It used to be the very word to type, so the box looked filled in and an
+           operator could not tell whether they had confirmed anything yet. *@
+        <input class="a-input" id="confirm-name" value="@_typed"
+               @oninput="OnTyped" autocomplete="off" spellcheck="false" />
     </div>
 </div>
 

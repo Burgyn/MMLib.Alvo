@@ -1009,6 +1009,23 @@ textarea.a-textarea {
   margin-bottom: var(--space-3);
 }
 
+/* Something the operator may want to read and usually does not: one quiet line, shut, at the end of
+   a form. Neutral rather than amber — what it holds explains a limit, it does not warn about a risk. */
+.a-disclosure {
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.a-disclosure > summary {
+  cursor: pointer;
+  color: var(--dim);
+  font-size: var(--text-sm);
+}
+
+.a-disclosure[open] > summary {
+  margin-bottom: var(--space-3);
+}
+
 .a-code-key { color: var(--accent); }
 .a-code-str { color: var(--ok-fg); }
 .a-code-dim { color: var(--faint); }
