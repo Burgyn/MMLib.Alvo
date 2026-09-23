@@ -13,15 +13,6 @@
             <button type="button" class="a-btn a-btn--sm" @onclick="() => _adding = !_adding">New entity</button>
             <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/transfer")">Import / export</a>
         </Secondary>
-        <Primary>
-            @* Only while something is staged, as on the entity screen: with nothing staged, Preview is an empty page. *@
-            @if (Copy.IsDirty)
-            {
-                <a class="a-btn a-btn--primary a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/preview")">
-                    Preview changes
-                </a>
-            }
-        </Primary>
     </PageHeader>
 
     @if (_error is not null)
@@ -29,14 +20,19 @@
         <ErrorPanel Problem="@_error" />
     }
 
+    @*
+        Above the list rather than instead of it: the name an operator is about to type is best chosen
+        looking at the names already there.
+    *@
     @if (_adding)
     {
-        <div class="a-panel" style="padding:var(--space-5)">
+        <div class="a-panel" style="padding:var(--space-5)" data-testid="new-entity">
             <div class="a-section" style="padding:0 0 var(--space-3)">
                 <span class="a-section-title">New entity</span>
                 <span class="a-section-sub">
-                    It arrives with one required <code class="a-mono">name</code> field, which is the
-                    smallest entity the schema admits. Everything else is added on its Fields tab.
+                    It arrives with one required <code class="a-mono">name</code> field, the smallest entity
+                    the schema admits, and opens on its Fields tab to add the rest. Nothing reaches the
+                    database until you preview and apply.
                 </span>
             </div>
 
@@ -73,12 +69,17 @@
                 write possible.
             </span>
 
-            <button type="button" class="a-btn a-btn--primary" style="margin-top:var(--space-4)" @onclick="AddEntity">
-                Add to the working copy
-            </button>
+            <div class="a-row" style="gap:var(--space-2);margin-top:var(--space-4)">
+                <button type="button" class="a-btn a-btn--primary" @onclick="AddEntity">
+                    Add to the working copy
+                </button>
+                <button type="button" class="a-btn a-btn--ghost" data-testid="new-entity-cancel"
+                        @onclick="CancelAdding">Cancel</button>
+            </div>
         </div>
     }
-    else if (_schema is null)
+
+    @if (_schema is null)
     {
         <div class="a-skeleton" style="height:220px"></div>
     }
@@ -198,7 +199,7 @@
 
     private void Open(string entity) => Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/{entity}");
 
-    /// <summary>Puts a new entity in the working copy and offers the preview.</summary>
+    /// <summary>Puts a new entity in the working copy and opens it, to add its fields.</summary>
     /// <remarks>
     /// The name is checked against the frozen schema's own pattern before anything else, because a
     /// control must never produce a descriptor the apply would reject — and because an entity name
@@ -221,6 +222,14 @@
         }
 
         Copy.AddEntity(_name, _scoped, _audited);
-        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/preview");
+        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/{_name}");
+    }
+
+    /// <summary>Closes the form without touching the working copy, and forgets what was typed.</summary>
+    private void CancelAdding()
+    {
+        _adding = false;
+        _name = string.Empty;
+        _refusal = null;
     }
 }

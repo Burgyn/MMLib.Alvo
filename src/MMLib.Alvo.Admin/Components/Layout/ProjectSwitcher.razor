@@ -13,17 +13,27 @@
 @implements IDisposable
 @inject ManagementGateway Gateway
 @inject NavigationManager Navigation
+@inject WorkingCopyStore Copies
+@inject DataGateway Caller
 
 <div class="a-switcher" data-testid="project-card">
     <span class="a-brand-mark">@Initial</span>
     <span style="min-width:0">
         <span class="a-switcher-name">@(_project?.Name ?? (_refused ? "No project" : "…"))</span>
-        <span class="a-switcher-meta">@Meta</span>
+        <span class="a-switcher-meta">
+            @Meta
+            @* The same count as the pending bar, with the project as §4.5 draws it: "3 unapplied". *@
+            @if (_copy?.PendingCount is > 0 and var pending)
+            {
+                <span class="a-badge a-badge--accent a-switcher-pending" data-testid="project-pending">@pending unapplied</span>
+            }
+        </span>
     </span>
 </div>
 
 @code {
     private ManagementProject? _project;
+    private WorkingCopy? _copy;
     private int? _revision;
     private bool _refused;
 
@@ -73,7 +83,34 @@
             StateHasChanged();
         });
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        await FollowCopyAsync();
+    }
+
+    /// <summary>
+    /// Follows this operator's working copy, so the count moves with every staged edit.
+    /// </summary>
+    /// <remarks>
+    /// A refused caller gets no count rather than a failed shell, for the reason <see cref="LoadAsync"/>
+    /// renders its refusal instead of throwing it.
+    /// </remarks>
+    private async Task FollowCopyAsync()
+    {
+        try
+        {
+            _copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
+            _copy.Changed += Redraw;
+        }
+        catch (Exception)
+        {
+            _copy = null;
+        }
+    }
+
+    /// <summary>Redraws on the renderer's thread — the edit that raised this may be another tab's.</summary>
+    private void Redraw() => _ = InvokeAsync(StateHasChanged);
 
     private async Task LoadAsync()
     {
@@ -117,5 +154,10 @@
     {
         Navigation.LocationChanged -= Reload;
         Gateway.Applied -= Refresh;
+
+        if (_copy is not null)
+        {
+            _copy.Changed -= Redraw;
+        }
     }
 }

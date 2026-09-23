@@ -56,7 +56,7 @@ public sealed class FieldDefaultScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Page.ClickAsync(".a-choice button:has-text('string')");
         await session.Page.FillAsync("#new-field-default", "unassigned");
         await session.Page.ClickAsync("[data-testid='field-save']");
-        await session.Page.WaitForURLAsync("**/schema/preview");
+        await session.PreviewPendingAsync();
 
         /* Waiting for the plan control rather than for the URL alone: the navigation resolves before
            the preview's own render arrives, and the diff below is what that render draws. */

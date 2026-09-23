@@ -331,6 +331,31 @@ button {
   overflow: auto;
 }
 
+/* What is waiting for an apply, under the header on every screen (design §4.5). Slim and in the accent
+   tint rather than amber: a staged edit is work in progress, not a risk, and the warning tone is kept
+   for things that are. The count leads because it is the fact; the one primary action is Preview. */
+.a-pending {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: none;
+  padding: var(--space-2) var(--space-6);
+  border-bottom: 1px solid var(--accentBorder);
+  background: var(--accentSoft);
+  font-size: var(--text-sm);
+}
+
+.a-pending__count {
+  min-width: 0;
+}
+
+.a-pending__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
 .a-brand {
   display: flex;
   align-items: center;
@@ -388,6 +413,10 @@ button.a-switcher:hover {
   display: block;
   color: var(--dim);
   font-size: var(--text-2xs);
+}
+
+.a-switcher-pending {
+  margin-left: var(--space-1);
 }
 
 /* --- Navigation --- */
@@ -552,6 +581,14 @@ button.a-switcher:hover {
   align-items: center;
   gap: var(--space-2);
   margin-left: auto;
+}
+
+/* A field the working copy removed stays in its list until the apply, struck through, so the tab it was
+   removed on is also where it can be put back. Dimmed rather than coloured: the badge carries the tone. */
+.a-listrow--removed .a-listrow__key,
+.a-listrow--removed .a-listrow__type {
+  color: var(--dim);
+  text-decoration: line-through;
 }
 
 .a-detail__label {
@@ -1751,6 +1788,10 @@ input[type="checkbox"] {
 
   .a-header {
     padding: 0 var(--space-4);
+  }
+
+  .a-pending {
+    padding: var(--space-2) var(--space-4);
   }
 
   .a-bottomnav {

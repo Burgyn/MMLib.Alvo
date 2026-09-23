@@ -51,7 +51,7 @@ public sealed class SchemaEditingScenarios(AdminWorld world) : IClassFixture<Adm
 
         await session.Page.FillAsync("#new-field-max", "200");
         await session.Page.ClickAsync("[data-testid='field-save']");
-        await session.Page.WaitForURLAsync("**/schema/preview");
+        await session.PreviewPendingAsync();
 
         await session.Page.ClickAsync("button:has-text('Plan this change')");
 
@@ -220,7 +220,7 @@ public sealed class IndexEditingScenarios(AdminWorld world) : IClassFixture<Admi
 
         await session.Page.CheckAsync("[data-testid='field-index']");
         await session.Page.ClickAsync("[data-testid='field-save']");
-        await session.Page.WaitForURLAsync("**/schema/preview");
+        await session.PreviewPendingAsync();
 
         /* And then for something *on* the preview. The URL moves before the screen behind it does, so
            a read taken on the URL alone reads the entity page it just left — which is what this fact
@@ -592,7 +592,7 @@ public sealed class RenameScenarios(AdminWorld world) : IClassFixture<AdminWorld
 
         await session.Page.FillAsync("#new-field-name", "contact_email");
         await session.Page.ClickAsync("[data-testid='field-save']");
-        await session.Page.WaitForURLAsync("**/schema/preview");
+        await session.PreviewPendingAsync();
         await session.Page.Locator("button:has-text('Plan this change')").WaitForAsync();
 
         var previewed = await session.Page.Locator("main.a-content").InnerTextAsync();
@@ -663,7 +663,7 @@ public sealed class DiscardScenarios(AdminWorld world) : IClassFixture<AdminWorl
         await session.GoAsync("/schema/customers");
 
         await session.Page.ClickAsync("[data-testid='remove-field-notes']");
-        await session.Page.WaitForURLAsync("**/schema/preview");
+        await session.PreviewPendingAsync();
         await session.Page.Locator("[data-testid='discard']").First.WaitForAsync();
 
         /* The premise: it really is staged before anything was planned. */
@@ -698,7 +698,7 @@ public sealed class DiscardScenarios(AdminWorld world) : IClassFixture<AdminWorl
         await session.GoAsync("/schema/regions");
 
         await session.Page.ClickAsync("[data-testid='remove-field-name']");
-        await session.Page.WaitForURLAsync("**/schema/preview");
+        await session.PreviewPendingAsync();
 
         await session.Page.Locator("[data-testid='discard']").First.ClickAsync();
         await session.Page.Locator("[data-testid='discard-sheet']").WaitForAsync();

@@ -1,0 +1,101 @@
+﻿@*
+    What is waiting for an apply, on every screen — design §4.5 "What the shell shows".
+
+    One count and one bar, whose primary action is Preview and never Apply: the apply is a decision made
+    in front of the diff and the plan, and a bar that offered it from the Data screen would be applying a
+    change the operator is not looking at. It is the way to Preview, which is why adding a field no longer
+    jumps there.
+
+    Hidden on Preview itself, where the same count is the whole page.
+*@
+@implements IDisposable
+@inject WorkingCopyStore Copies
+@inject DataGateway Caller
+@inject NavigationManager Navigation
+
+@if (Pending > 0 && !OnPreview)
+{
+    <div class="a-pending" role="status" data-testid="pending-bar">
+        <span class="a-pending__count">
+            <strong data-testid="pending-count">@Pending</strong>
+            unapplied change@(Pending == 1 ? string.Empty : "s")
+        </span>
+        <span class="a-pending__actions">
+            <button type="button" class="a-btn a-btn--ghost a-btn--sm" data-testid="pending-discard"
+                    @onclick="() => _discarding = true">Discard</button>
+            <a class="a-btn a-btn--primary a-btn--sm" data-testid="pending-preview"
+               href="@($"{AlvoAdmin.BasePath}/schema/preview")">Preview</a>
+        </span>
+    </div>
+}
+
+<DiscardSheet Open="_discarding" OnClose="() => _discarding = false" OnDiscarded="Discarded" />
+
+@code {
+    private WorkingCopy? _copy;
+    private bool _discarding;
+
+    private int Pending => _copy?.PendingCount ?? 0;
+
+    private bool OnPreview => new Uri(Navigation.Uri).AbsolutePath.TrimEnd('/')
+        .EndsWith($"{AlvoAdmin.BasePath}/schema/preview", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Follows this operator's copy, and every navigation.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The copy's own event rather than the page's.</b> The page that staged an edit is not the only
+    /// writer: the assistant's proposal replaces the copy from the drawer, an import from Transfer, and a
+    /// second tab from another circuit. Every one of them goes through the copy, so that is the one place to
+    /// listen.
+    /// </para>
+    /// <para>
+    /// <b>A caller the resolver refuses gets no bar, never a failed shell.</b> The layout renders for a
+    /// session that has been revoked, and the screen that says so must not be replaced by an exception
+    /// thrown from a strip of chrome above it.
+    /// </para>
+    /// </remarks>
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+
+        try
+        {
+            _copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
+            _copy.Changed += OnChanged;
+        }
+        catch (Exception)
+        {
+            _copy = null;
+        }
+    }
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+
+        if (_copy is not null)
+        {
+            _copy.Changed -= OnChanged;
+        }
+    }
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => OnChanged();
+
+    /// <summary>
+    /// Redraws the screen underneath, which is showing the copy as it was.
+    /// </summary>
+    /// <remarks>
+    /// The same address, navigated to again: every editor reads the copy when its parameters are set, so
+    /// this is what takes a staged row off the Fields tab behind the sheet — without the page knowing the bar
+    /// exists.
+    /// </remarks>
+    private void Discarded()
+    {
+        _discarding = false;
+        Navigation.NavigateTo(Navigation.Uri);
+    }
+}

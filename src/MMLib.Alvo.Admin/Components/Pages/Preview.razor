@@ -119,26 +119,7 @@
         }
     }
 
-    @*
-        Discarding is confirmed, and applying-a-draft is not, which is the opposite way round from the
-        usual reflex — deliberately. Every edit up to here wrote to a draft and touched no table, so
-        staging one needs no ceremony; this is the only control on the screen that destroys work the
-        operator did, and it is the one that cannot be undone from here.
-    *@
-    <Sheet Open="_discarding" Title="Discard every unapplied change?"
-           Subtitle="The working copy goes back to the applied revision. Nothing in the database changes."
-           TestId="discard-sheet" OnClose="() => _discarding = false">
-        <div class="a-stack">
-            <p class="a-section-sub">
-                Every edit made since revision @Copy.Revision is thrown away — across all screens, not
-                only this one, because there is one working copy and one apply. There is no undo.
-            </p>
-            <div class="a-row">
-                <button type="button" class="a-btn a-btn--primary a-btn--sm" data-testid="discard-confirm"
-                        @onclick="Discard">Discard them</button>
-            </div>
-        </div>
-    </Sheet>
+    <DiscardSheet Open="_discarding" OnClose="() => _discarding = false" OnDiscarded="Discarded" />
 
     @if (_applied is { } result)
     {
@@ -202,7 +183,7 @@
     }
 
     /// <summary>
-    /// Throws away every unapplied edit and returns to the editor.
+    /// Returns to the editor once every unapplied edit has been thrown away.
     /// </summary>
     /// <remarks>
     /// <b>The control that was missing, and its absence made the draft one-way.</b> Removing a field, or
@@ -211,9 +192,8 @@
     /// there was not: <c>WorkingCopy.Discard</c> existed and no screen called it, so an operator who staged
     /// something they did not want could only apply it or abandon the session.
     /// </remarks>
-    private void Discard()
+    private void Discarded()
     {
-        Copy.Discard();
         _discarding = false;
         _plan = null;
         _applied = null;

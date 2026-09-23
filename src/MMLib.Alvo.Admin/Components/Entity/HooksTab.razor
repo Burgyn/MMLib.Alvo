@@ -77,6 +77,11 @@ else
                     wrapped mid-token.
                 *@
                 <div class="a-hookrow" data-testid="hook-row">
+                    @if (Staged.Contains(new HookAt(name, at)))
+                    {
+                        <span class="a-badge a-badge--accent" style="flex:none;align-self:flex-start"
+                              data-testid="hook-staged">new</span>
+                    }
                     <CodeBlock Json="@hook" />
                     @if (Editable)
                     {
@@ -263,6 +268,13 @@ else
     /// <summary>Whether this operator has a working copy to edit at all.</summary>
     [Parameter]
     public bool Editable { get; set; }
+
+    /// <summary>
+    /// The hooks, by point and position, the applied revision does not hold — badged <c>new</c>, because a
+    /// hook that is only in the working copy does not run yet and must not read as if it did.
+    /// </summary>
+    [Parameter]
+    public IReadOnlySet<HookAt> Staged { get; set; } = new HashSet<HookAt>();
 
     /// <summary>
     /// What this build refuses that belongs on this tab.

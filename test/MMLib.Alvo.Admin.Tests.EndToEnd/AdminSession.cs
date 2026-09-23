@@ -77,6 +77,21 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     }
 
     /// <summary>
+    /// Follows the shell's pending bar to Preview, the way an operator reaches it after staging an edit.
+    /// </summary>
+    /// <remarks>
+    /// Staging a field used to jump to Preview by itself, and a scenario waited for the URL. It stays on the
+    /// entity now (design pass §4.1), so a scenario that wants the diff takes the bar there — and waits for the
+    /// plan control rather than the URL alone, because the URL moves before the screen behind it does.
+    /// </remarks>
+    public async Task PreviewPendingAsync()
+    {
+        await Page.ClickAsync("[data-testid='pending-preview']").ConfigureAwait(false);
+        await Page.WaitForURLAsync("**/schema/preview").ConfigureAwait(false);
+        await Page.Locator("button:has-text('Plan this change')").WaitForAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Opens one of an entity's tabs and waits for it to actually be the open one.
     /// </summary>
     /// <remarks>

@@ -113,6 +113,10 @@ namespace MMLib.Alvo.Admin.Components.Entity
         public Microsoft.AspNetCore.Components.EventCallback<string> OnEdit { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<string> OnRemove { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> OnRestore { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyDictionary<string, string> Staged { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     public class HooksTab : Microsoft.AspNetCore.Components.ComponentBase
@@ -129,6 +133,8 @@ namespace MMLib.Alvo.Admin.Components.Entity
         public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.HooksTab.NewHook> OnAdd { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.HooksTab.HookAt> OnRemove { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Admin.Components.Entity.HooksTab.HookAt> Staged { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public sealed class HookAt : System.IEquatable<MMLib.Alvo.Admin.Components.Entity.HooksTab.HookAt>
         {
@@ -159,6 +165,8 @@ namespace MMLib.Alvo.Admin.Components.Entity
         public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Schema.IndexSchema> OnAdd { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<int> OnRemove { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlySet<int> Staged { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     public class Relationships : Microsoft.AspNetCore.Components.ComponentBase
@@ -223,6 +231,13 @@ namespace MMLib.Alvo.Admin.Components.Layout
         [Microsoft.AspNetCore.Components.Parameter]
         public int Size { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class PendingBar : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public PendingBar() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
     public class ProjectSwitcher : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
@@ -445,6 +460,18 @@ namespace MMLib.Alvo.Admin.Components.Shared
         [Microsoft.AspNetCore.Components.Parameter]
         public string Value { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class DiscardSheet : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public DiscardSheet() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnClose { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnDiscarded { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Open { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
     }
     public class EmptyState : Microsoft.AspNetCore.Components.ComponentBase
     {

@@ -37,7 +37,7 @@ public sealed class ChangeTheBackendScenarios(AdminWorld world) : IClassFixture<
         await session.Page.ClickAsync("button:has-text('New entity')");
         await session.Page.FillAsync("#new-entity-name", "invoices");
         await session.Page.ClickAsync("button:has-text('Add to the working copy')");
-        await session.Page.WaitForURLAsync("**/schema/preview");
+        await session.Page.WaitForURLAsync("**/schema/invoices");
 
 
         await session.GoAsync("/schema");

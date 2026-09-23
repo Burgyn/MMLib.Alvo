@@ -19,7 +19,8 @@
             <div class="a-sheet__grip" aria-hidden="true"></div>
 
             <div class="a-sheet__head">
-                <div class="a-section" style="gap:2px">
+                @* The stacked head without the panel section's padding and rule: the sheet is its own frame. *@
+                <div class="a-section__text">
                     <span class="a-section-title">@Title</span>
                     @if (Subtitle is { Length: > 0 })
                     {

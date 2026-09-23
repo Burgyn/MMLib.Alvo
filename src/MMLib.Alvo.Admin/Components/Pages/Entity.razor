@@ -18,14 +18,6 @@
                         @onclick="OpenRename">Rename</button>
             }
         </Secondary>
-        <Primary>
-            @if (Copy.IsDirty)
-            {
-                <a class="a-btn a-btn--primary a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/preview")">
-                    Preview changes
-                </a>
-            }
-        </Primary>
     </PageHeader>
 
     @*
@@ -118,7 +110,8 @@
                                     @onclick="AddField">Add a field</button>
                         }
                     </div>
-                    <Fields Entity="@_entity" Editable="Copy.Loaded" OnEdit="EditField" OnRemove="RemoveField" />
+                    <Fields Entity="@FieldsView(_entity)" Staged="_stagedFields" Editable="DeclaredHere"
+                            OnEdit="EditField" OnRemove="RemoveField" OnRestore="RestoreField" />
                     break;
                 case "Relationships":
                     <Relationships Entity="@_entity" Schema="_schema!" />
@@ -127,11 +120,11 @@
                     <RulesTab Rules="_working" Entity="@EntityName" Editable="true" OnChanged="SetRule" />
                     break;
                 case "On write":
-                    <HooksTab Hooks="@_hooks" Editable="Copy.Loaded" Capabilities="_refused"
+                    <HooksTab Hooks="@_hooks" Staged="_stagedHooks" Editable="Copy.Loaded" Capabilities="_refused"
                               OnAdd="AddHook" OnRemove="RemoveHook" />
                     break;
                 case "Indexes":
-                    <Indexes Entity="@_entity" Declared="_indexes" Editable="Copy.Loaded"
+                    <Indexes Entity="@_entity" Declared="_indexes" Staged="_stagedIndexes" Editable="Copy.Loaded"
                              OnAdd="AddIndex" OnRemove="RemoveIndex" />
                     break;
                 default:
@@ -176,6 +169,10 @@
     private IReadOnlyList<KeyValuePair<string, string>> _working = [];
     private IReadOnlyList<IndexSchema> _indexes = [];
     private IReadOnlyList<string> _fieldNames = [];
+    private IReadOnlyList<StagedField> _fields = [];
+    private IReadOnlyDictionary<string, string> _stagedFields = new Dictionary<string, string>();
+    private IReadOnlySet<int> _stagedIndexes = new HashSet<int>();
+    private IReadOnlySet<HooksTab.HookAt> _stagedHooks = new HashSet<HooksTab.HookAt>();
     private bool _renaming;
     private string _newName = string.Empty;
     private string? _renameRefusal;
@@ -214,16 +211,7 @@
                 Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
             }
 
-            /* The Rules tab edits the WORKING copy, so it must render the working copy — showing
-               the applied rules in an editable box would quietly discard an unapplied edit the
-               moment somebody navigated away and back. */
-            _working = DescriptorLens.Rules(Copy.Json, EntityName);
-            _indexes = Copy.IndexesOf(EntityName);
-            _fieldNames = [.. Copy.FieldsOf(EntityName).Select(field => field.Key)];
-
-            /* The On write tab edits the working copy too, so it renders the working copy — for the
-               reason the Rules tab states one field up. */
-            _hooks = Copy.HooksOf(EntityName);
+            ReadWorking();
 
             /* An entity that exists only in the working copy is not in GET schema, because nothing
                has been applied. Rendering it from the working copy is what lets somebody add an
@@ -242,26 +230,102 @@
         }
     }
 
+    /// <summary>
+    /// Reads everything the tabs render from the working copy, with what differs from the applied revision.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Every tab that edits the working copy renders the working copy.</b> Showing the applied rules in an
+    /// editable box would quietly discard an unapplied edit the moment somebody navigated away and back, and
+    /// a field, an index or a hook that vanished on being added reads as a control that did nothing.
+    /// </para>
+    /// <para>
+    /// <b>And each staged row says so</b> — <c>new</c>, <c>changed</c>, or struck through as
+    /// <c>removed</c> — because a staged row that looks applied is the opposite lie: a column the operator
+    /// believes exists, before anything has run.
+    /// </para>
+    /// </remarks>
+    private void ReadWorking()
+    {
+        _working = DescriptorLens.Rules(Copy.Json, EntityName);
+        _indexes = Copy.IndexesOf(EntityName);
+        _fieldNames = [.. Copy.FieldsOf(EntityName).Select(field => field.Key)];
+        _hooks = Copy.HooksOf(EntityName);
+
+        _fields = Copy.FieldChangesOf(EntityName);
+        _stagedFields = _fields
+            .Where(field => field.Change != StagedChange.None)
+            .ToDictionary(field => field.Name, field => field.Change.ToString().ToLowerInvariant(), StringComparer.Ordinal);
+        _stagedIndexes = Copy.StagedIndexesOf(EntityName);
+        _stagedHooks = Copy.StagedHooksOf(EntityName)
+            .Select(hook => new HooksTab.HookAt(hook.Point, hook.Position))
+            .ToHashSet();
+    }
+
+    /// <summary>
+    /// The entity as the Fields tab lists it: the working copy's fields, the removed ones in place, then the
+    /// columns Alvo maintains.
+    /// </summary>
+    /// <remarks>
+    /// A field the applied schema already serves unchanged is drawn from it, because the resolved schema
+    /// knows facets the working copy's reader does not (a default, a rollup); a staged one can only be drawn
+    /// from the working copy, because the applied schema has never heard of it.
+    /// </remarks>
+    private EntitySchema FieldsView(EntitySchema entity)
+    {
+        if (!Copy.Loaded)
+        {
+            return entity;
+        }
+
+        var pending = PendingSchema.Read(Copy.Json, EntityName);
+        var managed = AlvoManagedColumns.For(entity);
+        var declared = _fields.Select(field => FieldFor(field, entity, pending)).OfType<FieldSchema>();
+
+        return entity with
+        {
+            Fields = [.. declared, .. entity.Fields.Where(field => managed.Contains(field.Name))],
+        };
+    }
+
+    /// <summary>One row's field, from the applied schema when it is unchanged or removed, else from the copy.</summary>
+    private static FieldSchema? FieldFor(StagedField field, EntitySchema applied, EntitySchema? pending)
+    {
+        var fromApplied = applied.Fields.FirstOrDefault(declared => declared.Name == field.Name);
+        var fromCopy = pending?.Fields.FirstOrDefault(declared => declared.Name == field.Name);
+
+        return field.Change is StagedChange.None or StagedChange.Removed
+            ? fromApplied ?? fromCopy
+            : fromCopy ?? fromApplied;
+    }
+
     /// <summary>Writes one operation's rule into the working copy.</summary>
     /// <remarks>
     /// No navigation: an operator setting five rules would be sent to the preview five times. The
-    /// toolbar's "Preview changes" appears as soon as the copy is dirty, which is the affordance.
+    /// shell's pending bar appears as soon as the copy is dirty, which is the affordance.
     /// </remarks>
     private void SetRule((string Operation, string Cel) change)
     {
         Copy.SetRule(EntityName, change.Operation, change.Cel);
-        _working = DescriptorLens.Rules(Copy.Json, EntityName);
+        ReadWorking();
     }
 
     /// <summary>
-    /// Puts the field in the working copy and offers the preview.
+    /// Puts the field in the working copy, and stays on the tab.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>The facets are written under the OLD name and the rename happens after, which is an order and
     /// not a style.</b> The editor's facets were parsed from the declaration as it stood, so they carry
     /// whatever <c>renamedFrom</c> it already had; writing them under the new name would land that stale
     /// value on the renamed field, and <c>RenameField</c> would then read it as the origin. Facets first,
     /// then the rename, and the origin is computed from a declaration that is current.
+    /// </para>
+    /// <para>
+    /// <b>No navigation</b>, for <see cref="AddIndex"/>'s reason: fields are added in sets, and the preview
+    /// after each one made staging three a round trip per field. The row appears badged <c>new</c>, and the
+    /// shell's pending bar is the way to the preview.
+    /// </para>
     /// </remarks>
     private void AddFieldAsync(FieldEditor.NewField added)
     {
@@ -282,7 +346,7 @@
         }
 
         CloseEditor();
-        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/preview");
+        ReadWorking();
     }
 
     /// <summary>Opens the editor over a field the descriptor already declares.</summary>
@@ -313,7 +377,7 @@
     }
 
     /// <summary>
-    /// Drops a field from the working copy and offers the preview.
+    /// Drops a field from the working copy, and leaves its row struck through where it was.
     /// </summary>
     /// <remarks>
     /// No confirmation here, and that is deliberate: nothing has happened to the database yet. The
@@ -325,7 +389,14 @@
     {
         Copy.RemoveField(EntityName, field);
         CloseEditor();
-        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/preview");
+        ReadWorking();
+    }
+
+    /// <summary>Puts a removed field back exactly as the applied revision declares it.</summary>
+    private void RestoreField(string field)
+    {
+        Copy.RestoreField(EntityName, field);
+        ReadWorking();
     }
 
     /// <summary>
@@ -335,13 +406,13 @@
     /// <b>No navigation, unlike a field.</b> Indexes are declared in sets — the reason an operator
     /// opens this tab at all is usually a query that needs two of them — and being sent to the
     /// preview after each one would make declaring three a round trip per index. It is the argument
-    /// <see cref="SetRule"/> already makes, and "Preview changes" appears on the header the moment
-    /// the copy is dirty either way.
+    /// <see cref="SetRule"/> already makes, and the shell's pending bar appears the moment the copy is
+    /// dirty either way.
     /// </remarks>
     private void AddIndex(IndexSchema index)
     {
         Copy.AddIndex(EntityName, index.Fields, index.Unique);
-        _indexes = Copy.IndexesOf(EntityName);
+        ReadWorking();
     }
 
     /// <summary>
@@ -354,7 +425,7 @@
     private void RemoveIndex(int position)
     {
         Copy.RemoveIndex(EntityName, position);
-        _indexes = Copy.IndexesOf(EntityName);
+        ReadWorking();
     }
 
     /// <summary>
@@ -367,7 +438,7 @@
     private void AddHook(HooksTab.NewHook added)
     {
         Copy.AddHook(EntityName, added.Point, added.Condition, added.Action);
-        _hooks = Copy.HooksOf(EntityName);
+        ReadWorking();
     }
 
     /// <summary>Opens the rename sheet, prefilled with the name it has.</summary>
@@ -410,8 +481,14 @@
     private void RemoveHook(HooksTab.HookAt at)
     {
         Copy.RemoveHook(EntityName, at.Point, at.Position);
-        _hooks = Copy.HooksOf(EntityName);
+        ReadWorking();
     }
+
+    /// <summary>
+    /// Whether the working copy still declares this entity, so a field's Edit, Remove and Undo have something
+    /// to write to — an entity the copy removed lists every field as removed, and an Undo there would do nothing.
+    /// </summary>
+    private bool DeclaredHere => Copy.Loaded && Copy.Entities.Contains(EntityName, StringComparer.Ordinal);
 
     /// <summary>The edited field's declaration, as the working copy currently carries it.</summary>
     private string? EditedJson => _editing is null

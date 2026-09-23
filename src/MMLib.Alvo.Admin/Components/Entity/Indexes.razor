@@ -50,6 +50,10 @@ else
             {
                 <span class="a-badge a-badge--accent">unique</span>
             }
+            @if (Staged.Contains(at))
+            {
+                <span class="a-badge a-badge--accent" data-testid="index-staged">new</span>
+            }
             @if (Editable)
             {
                 <button type="button" class="a-btn a-btn--ghost a-btn--sm" data-testid="index-remove"
@@ -134,6 +138,13 @@ else
     /// <summary>Whether this operator has a working copy to edit at all.</summary>
     [Parameter]
     public bool Editable { get; set; }
+
+    /// <summary>
+    /// The positions in <see cref="Declared"/> the applied revision does not hold — badged <c>new</c>, so an
+    /// index staged here reads as staged rather than as already serving queries.
+    /// </summary>
+    [Parameter]
+    public IReadOnlySet<int> Staged { get; set; } = new HashSet<int>();
 
     /// <summary>
     /// Raised with the index to declare.

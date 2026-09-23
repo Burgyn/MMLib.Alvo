@@ -7,10 +7,18 @@
 *@
 @foreach (var field in Declared)
 {
-    <div class="a-listrow">
+    var staged = Staged.GetValueOrDefault(field.Name);
+    var removed = staged == Removed;
+
+    <div class="@($"a-listrow{(removed ? " a-listrow--removed" : string.Empty)}")" data-testid="@($"field-row-{field.Name}")">
         <span class="a-mono a-listrow__key" style="font-weight:var(--weight-medium)">@field.Name</span>
         <span class="a-ident a-listrow__type">@Type(field)</span>
         <span class="a-listrow__rest">
+            @if (staged is { Length: > 0 })
+            {
+                <span class="@($"a-badge {(removed ? "a-badge--danger" : "a-badge--accent")}")"
+                      data-testid="@($"staged-{field.Name}")">@staged</span>
+            }
             @foreach (var facet in Facets(field))
             {
                 <span class="a-badge">@facet</span>
@@ -21,7 +29,15 @@
             with three badges pushed them onto a second line and a row with one kept them inline —
             so the same list drew its own controls in two different places.
         *@
-        @if (Editable)
+        @if (Editable && removed)
+        {
+            <span class="a-listrow__actions">
+                <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                        data-testid="@($"restore-field-{field.Name}")"
+                        @onclick="() => OnRestore.InvokeAsync(field.Name)">Undo</button>
+            </span>
+        }
+        else if (Editable)
         {
             <span class="a-listrow__actions">
                 <button type="button" class="a-btn a-btn--ghost a-btn--sm"
@@ -79,6 +95,24 @@
     /// <summary>Raised with the field an operator asked to drop.</summary>
     [Parameter]
     public EventCallback<string> OnRemove { get; set; }
+
+    /// <summary>
+    /// The fields the working copy changed, each with the word its badge reads — <c>new</c>, <c>changed</c>
+    /// or <c>removed</c>; an unchanged field is absent.
+    /// </summary>
+    /// <remarks>
+    /// <b>The rows themselves come from <see cref="Entity"/>, which the caller builds from the working copy</b>
+    /// with the removed fields still in it — so a field staged here appears here, where it was staged, and
+    /// not only in the preview. A removed row offers Undo rather than Edit and Remove.
+    /// </remarks>
+    [Parameter]
+    public IReadOnlyDictionary<string, string> Staged { get; set; } = new Dictionary<string, string>();
+
+    /// <summary>Raised with a removed field the operator asked to put back.</summary>
+    [Parameter]
+    public EventCallback<string> OnRestore { get; set; }
+
+    private const string Removed = "removed";
 
     /// <summary>The fields the descriptor declares.</summary>
     private IEnumerable<FieldSchema> Declared
