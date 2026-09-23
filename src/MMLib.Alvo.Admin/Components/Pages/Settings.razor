@@ -2,6 +2,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
 @inject AssistantGateway Assistant
+@inject Microsoft.Extensions.Options.IOptions<AlvoAdminOptions> Admin
 @rendermode InteractiveServer
 
 <PageTitle>Settings · Alvo</PageTitle>
@@ -27,6 +28,39 @@
                     Note="The IAlvoData implementation that is registered — not the database engine. The core does not know one, so a badge reading “PostgreSQL 16” would have no source." />
             <Detail Label="Startup mode" Value="@_info.StartupMode" />
         </div>
+
+        @*
+            The generated contract, where an operator who has just changed a schema looks for what changed.
+            Rendered only when the host says it maps one: an embedded host may mount it elsewhere or serve
+            none, and a link on the assumption is a 404 reached from the screen that promised it.
+        *@
+        @if (Admin.Value.DocsPath is { Length: > 0 } || Admin.Value.OpenApiPath is { Length: > 0 })
+        {
+            <div class="a-panel">
+                <div class="a-section">
+                    <span class="a-section-title">API documentation</span>
+                    <span class="a-section-sub">
+                        Generated from the applied descriptor, not hand-written — so it changes when the
+                        schema does.
+                    </span>
+                </div>
+
+                <div class="a-row" style="padding:var(--space-4) var(--space-5);gap:var(--space-3)">
+                    @if (Admin.Value.DocsPath is { Length: > 0 } docs)
+                    {
+                        <a class="a-btn a-btn--sm" href="@docs" target="_blank" rel="noopener"
+                           data-testid="settings-docs">Open the documentation</a>
+                    }
+                    @if (Admin.Value.OpenApiPath is { Length: > 0 } document)
+                    {
+                        <a class="a-btn a-btn--sm a-btn--ghost" href="@document" target="_blank" rel="noopener"
+                           data-testid="settings-document">
+                            <code class="a-mono">@document</code>
+                        </a>
+                    }
+                </div>
+            </div>
+        }
 
         <div class="a-panel">
             <div class="a-section">

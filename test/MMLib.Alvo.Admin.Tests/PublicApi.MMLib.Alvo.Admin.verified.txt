@@ -30,7 +30,9 @@ namespace MMLib.Alvo.Admin
     public sealed class AlvoAdminOptions
     {
         public AlvoAdminOptions() { }
+        public string? DocsPath { get; set; }
         public bool Enabled { get; set; }
+        public string? OpenApiPath { get; set; }
     }
     public static class AlvoAdminServiceCollectionExtensions
     {
@@ -442,13 +444,15 @@ namespace MMLib.Alvo.Admin.Components.Shared
     {
         public PageHeader() { }
         [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.RenderFragment? Actions { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
         public string? Eyebrow { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? EyebrowHref { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool Mono { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? Primary { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? Secondary { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Subtitle { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]

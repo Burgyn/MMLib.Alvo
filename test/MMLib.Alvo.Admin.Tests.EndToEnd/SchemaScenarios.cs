@@ -129,6 +129,52 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
     }
 
     /// <summary>
+    /// The API tab links the generated contract, and the link resolves.
+    /// </summary>
+    /// <remarks>
+    /// <b>The route is asserted by fetching it, not by comparing two constants.</b> The dashboard cannot see
+    /// the host's route — it references Abstractions alone — so the path arrives through
+    /// <c>AlvoAdminOptions</c>, and the failure this guards against is exactly that the two halves drift
+    /// into a link the screen offers and the host answers 404 for. Which is what the tab did before: it
+    /// named <c>/openapi/v1.json</c> in prose, on every deployment, whether or not one was served.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_api_tab_links_documentation_the_host_actually_serves()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("API");
+
+        foreach (var control in new[] { "api-docs", "api-document" })
+        {
+            var href = await session.Page.Locator($"[data-testid='{control}']").GetAttributeAsync("href");
+            href.ShouldNotBeNullOrEmpty();
+
+            var served = await session.Page.APIRequest.GetAsync($"{world.BaseAddress}{href}");
+            served.Status.ShouldBe(200, $"{control} points at {href}, which this host does not serve.");
+        }
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// Settings links it too, because that is the other place an operator looks for it.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Settings_links_the_documentation_as_well()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/settings");
+
+        (await session.Page.Locator("[data-testid='settings-docs']").GetAttributeAsync("href"))
+            .ShouldNotBeNullOrEmpty();
+        (await session.Page.Locator("[data-testid='settings-document']").GetAttributeAsync("href"))
+            .ShouldNotBeNullOrEmpty();
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
     /// Exporting is the stored document, not a re-serialisation of it.
     /// </summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]

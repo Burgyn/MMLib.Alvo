@@ -492,6 +492,14 @@ a.a-pagehead__eyebrow:hover {
   flex-wrap: wrap;
 }
 
+/* The secondary actions are not a box, they are part of the actions row — `display: contents`
+   lets them sit in it with the primary one and share its gap, so above the breakpoint this is
+   exactly the row it has always been. Below it the whole group goes, and the overflow button
+   beside it is what reaches them. */
+.a-pagehead__secondary {
+  display: contents;
+}
+
 /* Fine print: provenance, counts, the sentence that explains a screen once. Dimmer and smaller
    than body text on purpose — these lines were set at body weight and became the loudest thing on
    several screens, above the data they describe. */
@@ -525,6 +533,17 @@ a.a-pagehead__eyebrow:hover {
   .a-pagehead__actions > * {
     flex: 1;
     justify-content: center;
+  }
+
+  /* Folded away, and reached through the button below instead. */
+  .a-pagehead__secondary {
+    display: none;
+  }
+
+  /* The one control on this row that is not a share of the line: an icon button stretched to
+     half the width reads as a second primary action, which is the wall this exists to undo. */
+  .a-pagehead__actions > .a-pagehead__more {
+    flex: none;
   }
 }
 

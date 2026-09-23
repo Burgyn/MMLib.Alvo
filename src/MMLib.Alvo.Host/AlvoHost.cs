@@ -101,8 +101,17 @@ public static class AlvoHost
            decisions: MMLib.Alvo.Admin adds no authentication of its own (an embedded host already
            has one), and the standalone image is the deployment that needs one. */
         builder.Services.AddAlvoIdentityCookieSignIn(AlvoAdmin.SignInPath);
-        builder.Services.AddAlvoAdmin(
-            admin => builder.Configuration.GetSection(AlvoAdmin.ConfigurationSection).Bind(admin));
+        builder.Services.AddAlvoAdmin(admin =>
+        {
+            builder.Configuration.GetSection(AlvoAdmin.ConfigurationSection).Bind(admin);
+
+            /* The docs routes are the host's to state, not configuration's, and they are assigned after the
+               bind for that reason: this is the one place that knows both whether the documentation is
+               mapped and where. Written unconditionally — null when it is off — so a value left in
+               configuration cannot outlive the switch and point the dashboard at a 404. */
+            admin.DocsPath = options.Docs.Enabled ? ScalarPath : null;
+            admin.OpenApiPath = options.Docs.Enabled ? OpenApiDocumentPath : null;
+        });
 
         /* The schema assistant. Registering it does not configure it: an image with no AI connection
            has an assistant that answers "not configured", and the dashboard renders no launcher at

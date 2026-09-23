@@ -5,6 +5,18 @@
     It replaces a toolbar that carried four different jobs in one flat row — a back link, the
     entity name, a cross-link and a primary button — where the name read as another button and sat
     off the others' baseline because it was set in mono at a title size.
+
+    The actions are two slots rather than one, and that is the ordinary toolbar behaviour: a screen
+    names its primary action and its secondary ones separately, and this decides at the breakpoint
+    which are shown. Above 720 px they all sit on the row; below it the secondaries fold into an
+    overflow menu, because a header row of equal-weight buttons on a phone is a wall rather than a
+    toolbar, and it gets worse with every control a screen gains.
+
+    One markup tree and one media query — not two components — for the reason the shell gives about
+    a second navigation. The secondary fragment is rendered twice, inline and in the sheet, and CSS
+    decides which of the two is on the screen; the overflow menu reuses `Sheet`, so it inherits the
+    scrim, Escape, focus and scroll lock rather than reimplementing four behaviours nobody notices
+    until one is missing.
 *@
 
 <header class="a-pagehead">
@@ -22,10 +34,27 @@
 
     <div class="a-pagehead__row">
         <h1 class="@($"a-page-title{(Mono ? " a-mono" : string.Empty)}")">@Title</h1>
-        @if (Actions is not null)
+        @if (Primary is not null || Secondary is not null)
         {
             <div class="a-pagehead__actions">
-                @Actions
+                @if (Secondary is not null)
+                {
+                    @* display:contents above the breakpoint, display:none below it, so these keep
+                       sitting in the actions row itself rather than in a box of their own. *@
+                    <div class="a-pagehead__secondary">
+                        @Secondary
+                    </div>
+
+                    <button type="button"
+                            class="a-btn a-btn--ghost a-btn--sm a-only-mobile a-pagehead__more"
+                            @onclick="() => _overflow = true" aria-label="More actions"
+                            data-testid="pagehead-overflow"
+                            aria-expanded="@(_overflow ? "true" : "false")">
+                        <Icon Path="@Icons.More" />
+                    </button>
+                }
+
+                @Primary
             </div>
         }
     </div>
@@ -35,6 +64,18 @@
         <p class="a-pagehead__sub">@Subtitle</p>
     }
 </header>
+
+@*
+    The same fragment again. Closing on a click inside is deliberate: every control that folds in
+    here either navigates or opens something, so a menu that stayed open would sit over what the
+    operator just asked for.
+*@
+<Sheet Open="_overflow" Title="@Title" Subtitle="Actions" TestId="pagehead-overflow-sheet"
+       OnClose="() => _overflow = false">
+    <div class="a-stack" @onclick="() => _overflow = false">
+        @Secondary
+    </div>
+</Sheet>
 
 @code {
     /// <summary>The section this screen belongs to, shown above the title.</summary>
@@ -63,7 +104,28 @@
     [Parameter]
     public string? Subtitle { get; set; }
 
-    /// <summary>The controls this screen owns.</summary>
+    /// <summary>
+    /// The one action this screen is for — the button that stays on the row at every width.
+    /// </summary>
+    /// <remarks>
+    /// A screen may have none: an entity with no unapplied edit has nothing to preview, and an
+    /// empty slot is right where a disabled button would be a control whose only outcome is
+    /// nothing.
+    /// </remarks>
     [Parameter]
-    public RenderFragment? Actions { get; set; }
+    public RenderFragment? Primary { get; set; }
+
+    /// <summary>
+    /// The rest of the screen's controls — shown beside the primary one, or behind the overflow
+    /// menu on a phone.
+    /// </summary>
+    /// <remarks>
+    /// <b>Separate from <see cref="Primary"/> rather than ordered within one slot</b>, because
+    /// "which of these is the action" is the screen's answer and not a position this component
+    /// could infer. One slot of buttons is what produced the wall this splits up.
+    /// </remarks>
+    [Parameter]
+    public RenderFragment? Secondary { get; set; }
+
+    private bool _overflow;
 }

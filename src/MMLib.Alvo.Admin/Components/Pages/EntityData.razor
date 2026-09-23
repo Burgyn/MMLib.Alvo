@@ -7,13 +7,15 @@
 
 <div class="a-stack">
     <PageHeader Eyebrow="Data" EyebrowHref="@($"{AlvoAdmin.BasePath}/data")" Title="@EntityName" Mono="true">
-        <Actions>
+        <Secondary>
             <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/{EntityName}")">Schema</a>
+        </Secondary>
+        <Primary>
             @if (_entity is not null && !OutOfScope)
             {
                 <button type="button" class="a-btn a-btn--primary a-btn--sm" @onclick="NewRecord">New record</button>
             }
-        </Actions>
+        </Primary>
     </PageHeader>
 
     @if (_error is not null)

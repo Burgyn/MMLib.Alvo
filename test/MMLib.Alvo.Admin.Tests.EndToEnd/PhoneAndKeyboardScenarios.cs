@@ -37,6 +37,45 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
     }
 
     /// <summary>
+    /// A screen's secondary actions fold behind the overflow menu on a phone, and are reachable there.
+    /// </summary>
+    /// <remarks>
+    /// <b>Both halves, because either one alone is the bug.</b> Hidden and unreachable is a control that
+    /// vanished at 375 px; shown inline is the wall of equal-weight buttons this exists to undo. Measured on
+    /// the entity screen because it is the one that gains a control with every editor the dashboard grows.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Secondary_actions_fold_into_the_overflow_menu_on_a_phone()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
+        await session.GoAsync("/schema/work_orders");
+
+        var inline = session.Page.Locator(".a-pagehead__secondary a:has-text('Browse records')");
+        await inline.WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Hidden });
+
+        await session.Page.ClickAsync("[data-testid='pagehead-overflow']");
+        await session.Page.Locator(
+            "[data-testid='pagehead-overflow-sheet'] a:has-text('Browse records')").WaitForAsync();
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// On a desktop they stay on the row, and the overflow button is not drawn over them.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Secondary_actions_stay_on_the_row_on_a_desktop()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+
+        await session.Page.Locator(".a-pagehead__secondary a:has-text('Browse records')").WaitForAsync();
+        (await session.Page.Locator("[data-testid='pagehead-overflow']").IsVisibleAsync()).ShouldBeFalse();
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
     /// Rows are visible at both widths, in whichever layout that width draws.
     /// </summary>
     /// <remarks>

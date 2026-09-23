@@ -9,15 +9,17 @@
 
 <div class="a-stack">
     <PageHeader Eyebrow="Schema" EyebrowHref="@($"{AlvoAdmin.BasePath}/schema")" Title="@EntityName" Mono="true">
-        <Actions>
+        <Secondary>
             <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/data/{EntityName}")">Browse records</a>
+        </Secondary>
+        <Primary>
             @if (Copy.IsDirty)
             {
                 <a class="a-btn a-btn--primary a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/preview")">
                     Preview changes
                 </a>
             }
-        </Actions>
+        </Primary>
     </PageHeader>
 
     @if (_error is not null)

@@ -5,13 +5,39 @@
     entity itself, so an entity with no rule for an operation still shows the route — and says that
     the route answers 403 for everyone, which is the fact an operator is actually looking for.
 *@
+@inject Microsoft.Extensions.Options.IOptions<AlvoAdminOptions> Options
+
 <div class="a-section">
     <span class="a-section-title">Generated API</span>
     <span class="a-section-sub">
-        Alvo generates exactly these five from the entity. The OpenAPI document under
-        <code class="a-mono">/openapi/v1.json</code> is the same thing, formally.
+        Alvo generates exactly these five from the entity. The OpenAPI document this host serves is the
+        same thing, formally.
     </span>
 </div>
+
+@*
+    The contract, one click from the schema that changed it — and only where it exists. The route comes
+    from the host through AlvoAdminOptions, because serving a document is a hosting decision and this
+    package cannot see the host's constants. Before this the sentence above named `/openapi/v1.json` in
+    prose on every deployment, including those that serve nothing there.
+*@
+@if (Docs is { Length: > 0 } || Document is { Length: > 0 })
+{
+    <div class="a-row" style="padding:var(--space-3) var(--space-5);gap:var(--space-3)">
+        @if (Docs is { Length: > 0 } docs)
+        {
+            <a class="a-btn a-btn--sm" href="@docs" target="_blank" rel="noopener"
+               data-testid="api-docs">Open the API documentation</a>
+        }
+        @if (Document is { Length: > 0 } document)
+        {
+            <a class="a-btn a-btn--sm a-btn--ghost" href="@document" target="_blank" rel="noopener"
+               data-testid="api-document">
+                <code class="a-mono">@document</code>
+            </a>
+        }
+    </div>
+}
 
 @foreach (var route in Routes)
 {
@@ -46,6 +72,12 @@
     /// <summary>The entity whose routes these are.</summary>
     [Parameter, EditorRequired]
     public EntitySchema Entity { get; set; } = default!;
+
+    /// <summary>Where this host's documentation UI is, when it maps one.</summary>
+    private string? Docs => Options.Value.DocsPath;
+
+    /// <summary>Where this host's OpenAPI document is, when it serves one.</summary>
+    private string? Document => Options.Value.OpenApiPath;
 
     private IEnumerable<(string Method, string Path, string Note)> Routes
     {
