@@ -97,7 +97,7 @@
             @if (_plan.Plan.HasDestructiveChanges)
             {
                 <ConfirmByName Title="This plan destroys data"
-                               Detail="Losing data is never implied — not by this preview, and not by your management level. Confirming here is what allows it."
+                               Detail="Permission to lose data is never implied — not by this preview, and not by your management level. Confirming here is what allows it."
                                Expected="@Gateway.Project"
                                OnConfirmedChanged="confirmed => _allowed = confirmed" />
             }

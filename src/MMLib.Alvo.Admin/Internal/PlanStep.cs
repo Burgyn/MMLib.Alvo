@@ -11,7 +11,7 @@
 /// marker for a terminal; on the Preview screen the badge beside the step already says it destroys data.
 /// So the line is parsed back into its parts and said as a sentence, and nothing is lost: the target is
 /// the planner's, the destructive flag is the planner's marker, and a step this parser does not recognise
-/// is shown exactly as it arrived.
+/// is shown exactly as it arrived, minus the marker.
 /// </para>
 /// <para>
 /// <b>A deliberate deviation, recorded.</b> <c>ManagementPlanSummary.Steps</c> asks clients not to reword a

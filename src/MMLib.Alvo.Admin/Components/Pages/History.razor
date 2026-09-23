@@ -58,7 +58,7 @@
                                     new revision at the top of the list, and this one stays where it is.
                                 </p>
                                 <ConfirmByName Title="@($"Restore revision {_selected.Version.Revision}")"
-                                               Detail="A reverse migration can discard data that was added after this revision. Losing data is never implied."
+                                               Detail="A reverse migration can discard data that was added after this revision. Permission to lose data is never implied."
                                                Expected="@Gateway.Project"
                                                OnConfirmedChanged="confirmed => _allowed = confirmed" />
                                 <button type="button" class="a-btn a-btn--danger" style="margin-top:var(--space-3)"

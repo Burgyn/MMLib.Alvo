@@ -87,11 +87,28 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
         (await session.Page.Locator("[data-testid='tenant-self']").InnerTextAsync())
             .ShouldContain("You cannot grant yourself a tenant — another administrator can.");
 
-        var roles = session.Page.Locator($"#person-{me} .a-choice button");
-        if (await roles.CountAsync() > 0)
-        {
-            (await roles.First.GetAttributeAsync("aria-pressed")).ShouldBeOneOf("true", "false");
-        }
+        /* The administrator holds only the built-in `admin` role, so a declared role is known to be
+           unassigned on their row. */
+        (await session.Page.Locator($"#person-{me} .a-choice button:has-text('dispatcher')")
+            .GetAttributeAsync("aria-pressed")).ShouldBe("false");
+
+        // --- another person's row keeps both tenant controls, and a role pressed there reads as assigned
+        await session.Page.FillAsync("#new-person-email", "tenant-peer@alvo.test");
+        await session.Page.ClickAsync("button:has-text('Create')");
+        await session.Page.GetByText("tenant-peer@alvo.test").First.WaitForAsync();
+
+        var peer = await IdOfAsync(session, "tenant-peer@alvo.test");
+        await session.Page.ClickAsync($"#change-{peer}");
+        await session.Page.Locator($"#grant-tenant-{peer}").WaitForAsync();
+
+        (await session.Page.Locator($"#grant-tenant-{peer}").CountAsync()).ShouldBe(1);
+        (await session.Page.Locator($"#clear-tenant-{peer}").CountAsync()).ShouldBe(1);
+
+        var dispatcher = session.Page.Locator($"#person-{peer} .a-choice button:has-text('dispatcher')");
+        (await dispatcher.GetAttributeAsync("aria-pressed")).ShouldBe("false");
+        await dispatcher.ClickAsync();
+        await session.Page.Locator(
+            $"#person-{peer} .a-choice button[aria-pressed='true']:has-text('dispatcher')").WaitForAsync();
 
         session.AssertConsoleClean();
     }
