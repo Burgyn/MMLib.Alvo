@@ -91,6 +91,30 @@
                 </table>
             </div>
 
+            @*
+                The 375 px substitute for the table above, which the stylesheet hides at that width.
+                Both render the same rows from the same page — this is a second *layout*, never a second
+                query, and never a second idea of which rows exist.
+            *@
+            <div class="a-grid-wrap a-only-mobile-block">
+                @foreach (var row in _page.Items)
+                {
+                    <div class="a-row-card" data-testid="row-card">
+                        <div class="a-row-card__head">
+                            <span>@Display(row[Columns.First().Name])</span>
+                            <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                                    @onclick="() => Edit(row)">Edit</button>
+                        </div>
+                        <div class="a-row-card__meta">
+                            @foreach (var column in Columns.Skip(1))
+                            {
+                                <span><span class="a-mono">@column.Name</span> @Display(row[column.Name])</span>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+
             <div class="a-row" style="gap:var(--space-3);align-items:center">
                 <span class="a-section-sub">
                     showing @_page.Items.Count@(_page.TotalCount is { } total ? $" of {total}" : string.Empty) ·

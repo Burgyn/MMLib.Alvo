@@ -832,7 +832,15 @@ h1.a-page-title:focus {
   border-bottom: 1px solid var(--border);
 }
 
-/* The 375 px substitute for a grid row. */
+/* The 375 px substitute for the data grid. Its wrapper is hidden above that width and the
+   table is hidden below it, so exactly one of the two is ever on the page — the swap the
+   design system describes, which the Razor dashboard previously only had half of: the table
+   was hidden on a phone and nothing replaced it, so every data screen read "showing 2 of 2"
+   over an empty box. */
+.a-only-mobile-block {
+  display: none;
+}
+
 .a-row-card {
   display: none;
   flex-direction: column;
@@ -1294,6 +1302,10 @@ input[type="checkbox"] {
 
   .a-grid {
     display: none;
+  }
+
+  .a-only-mobile-block {
+    display: block;
   }
 
   .a-row-card {

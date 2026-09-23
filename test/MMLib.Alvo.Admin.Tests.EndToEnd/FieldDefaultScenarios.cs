@@ -1,6 +1,4 @@
-﻿using Microsoft.Playwright;
-
-namespace MMLib.Alvo.Admin.Tests.EndToEnd;
+﻿namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
 /// Declaring what a create stores when the caller omits the field.
@@ -82,15 +80,15 @@ public sealed class FieldDefaultScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Page.FillAsync("#rf-code", "NOR");
         await session.Page.ClickAsync("button:has-text('Create')");
 
-        var row = session.Page.Locator("table.a-grid tbody tr").First;
-        await row.WaitForAsync(new() { State = WaitForSelectorState.Attached });
+        /* Visible, at this width, in whichever layout this width draws. The table is hidden below
+           720 px and the row cards are hidden above it, so asserting on the table alone measured a
+           layout the operator was not looking at — which is exactly how a phone came to show
+           "showing 2 of 2" over an empty box while this suite stayed green. */
+        var card = session.Page.Locator("[data-testid='row-card']").First;
+        await card.WaitForAsync();
 
-        /* The text content rather than the rendered text: at phone width the grid keeps the narrow
-           columns and hides the rest, and what is being measured here is the stored value, not which
-           cells this width chose to draw. */
-        var stored = await row.TextContentAsync();
-        stored.ShouldNotBeNull();
-        stored!.ShouldContain("Northern");
+        var stored = await card.InnerTextAsync();
+        stored.ShouldContain("Northern");
         stored.ShouldContain("unassigned");
 
         session.AssertConsoleClean();

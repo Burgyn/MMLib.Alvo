@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Tests.EndToEnd;
+﻿using System.Globalization;
+
+namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
 /// The two acceptance criteria that a screenshot cannot answer.
@@ -29,6 +31,43 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
             await session.AssertNoHorizontalScrollAsync();
             await session.AssertRenderedAsync();
         }
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// Rows are visible at both widths, in whichever layout that width draws.
+    /// </summary>
+    /// <remarks>
+    /// <b>The defect this exists for shipped, and this suite was green while it did.</b> The stylesheet
+    /// hides the table below 720 px and the row cards above it, and the Razor dashboard had only the
+    /// table — so a phone showed a row count over an empty box. Asserting "a row is visible" rather than
+    /// "a <c>&lt;td&gt;</c> is attached" is the whole difference: the second passes for a layout nobody
+    /// can see.
+    /// </remarks>
+    [Theory(Timeout = AdminWorld.ScenarioTimeout)]
+    [InlineData(1280)]
+    [InlineData(375)]
+    public async Task A_data_screen_shows_its_rows_at_this_width(int width)
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, width);
+        await session.GoAsync("/data/regions");
+
+        /* The row this fact reads is the one it writes: the example ships no seed rows, and a fact that
+           asserted over an empty table would pass for both the fixed layout and the broken one. */
+        await session.Page.ClickAsync("button:has-text('New record')");
+        await session.Page.Locator("#rf-name").WaitForAsync();
+        await session.Page.FillAsync("#rf-name", $"Visible at {width.ToString(CultureInfo.InvariantCulture)}");
+        await session.Page.FillAsync("#rf-code", width <= 720 ? "PHN" : "WDE");
+        await session.Page.ClickAsync("button:has-text('Create')");
+
+        var rows = width <= 720
+            ? session.Page.Locator("[data-testid='row-card']")
+            : session.Page.Locator("table.a-grid tbody tr");
+
+        await rows.First.WaitForAsync();
+        (await rows.CountAsync()).ShouldBeGreaterThan(0);
+        (await rows.First.InnerTextAsync()).ShouldContain("Visible at");
 
         session.AssertConsoleClean();
     }
