@@ -63,29 +63,36 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
     }
 
     /// <summary>
-    /// Nobody grants themselves a tenant, and the refusal names the recorded alternative.
+    /// Nobody grants themselves a tenant, and their own row says so instead of offering the control.
     /// </summary>
     /// <remarks>
-    /// The guard is in the core, not in this screen — the screen only has to render what the core
-    /// refused. Asserting it here therefore measures both halves at once: that the guard fires, and
-    /// that the operator is told what to do instead.
+    /// The guard is in the core, not in this screen (§3.7 U3.2). The screen used to offer Grant on the
+    /// operator's own row and then render the core's refusal at the top of the page (D-10); it now offers
+    /// no Grant and no Remove there and says, beside the tenant, who can make the change. Another person's
+    /// row still carries both, which is what keeps this from passing on a screen that dropped them for
+    /// everybody.
     /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task An_administrator_cannot_grant_themselves_a_tenant()
+    public async Task An_administrator_is_not_offered_a_tenant_for_themselves()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/access");
 
         var me = await IdOfAsync(session, AdminWorld.AdminEmail);
         await session.Page.ClickAsync($"#change-{me}");
-        await session.Page.Locator($"#tenant-{me}").WaitForAsync();
-        await session.Page.FillAsync($"#tenant-{me}", "9f1c4a20-7d38-4a5e-9c11-2b6e0d4f8a4e");
-        await session.Page.ClickAsync($"#grant-tenant-{me}");
-        await session.Page.GetByText("higher management level").First.WaitForAsync();
+        await session.Page.Locator("[data-testid='tenant-self']").WaitForAsync();
 
-        var text = await session.Page.Locator("main.a-content").InnerTextAsync();
-        text.ShouldContain("higher management level");
-        text.ShouldContain("Another administrator");
+        (await session.Page.Locator($"#grant-tenant-{me}").CountAsync()).ShouldBe(0);
+        (await session.Page.Locator($"#clear-tenant-{me}").CountAsync()).ShouldBe(0);
+        (await session.Page.Locator("[data-testid='tenant-self']").InnerTextAsync())
+            .ShouldContain("You cannot grant yourself a tenant — another administrator can.");
+
+        var roles = session.Page.Locator($"#person-{me} .a-choice button");
+        if (await roles.CountAsync() > 0)
+        {
+            (await roles.First.GetAttributeAsync("aria-pressed")).ShouldBeOneOf("true", "false");
+        }
+
         session.AssertConsoleClean();
     }
 

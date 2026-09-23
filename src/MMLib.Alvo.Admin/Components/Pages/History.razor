@@ -46,8 +46,8 @@
                 {
                     <div class="a-card" style="gap:var(--space-4)">
                         <div class="a-row" style="gap:var(--space-3)">
-                            <span class="a-badge a-badge--accent">r@(_selected.Version.Revision)</span>
-                            <span class="a-section-sub">@(_selected.Version.Reason ?? "no reason recorded")</span>
+                            <span class="a-badge a-badge--accent a-badge--rev">r@(_selected.Version.Revision)</span>
+                            <span class="a-section-sub">@RevisionHistory.Title(_selected.Version)</span>
                         </div>
 
                         @if (_selected.Version.Revision != _current)
@@ -55,10 +55,10 @@
                             <div>
                                 <p class="a-section-sub">
                                     Rolling back does not rewrite history — it appends the reverse migration as a
-                                    new revision, which is why the row above stays where it is.
+                                    new revision at the top of the list, and this one stays where it is.
                                 </p>
                                 <ConfirmByName Title="@($"Restore revision {_selected.Version.Revision}")"
-                                               Detail="A reverse migration can discard data that was added after this revision. allowDestructive is never implied."
+                                               Detail="A reverse migration can discard data that was added after this revision. Losing data is never implied."
                                                Expected="@Gateway.Project"
                                                OnConfirmedChanged="confirmed => _allowed = confirmed" />
                                 <button type="button" class="a-btn a-btn--danger" style="margin-top:var(--space-3)"

@@ -41,6 +41,31 @@ internal static class DescriptorLens
     public static IReadOnlyList<KeyValuePair<string, string>> Hooks(string descriptorJson, string entity)
         => Pairs(descriptorJson, entity, "hooks");
 
+    /// <summary>How many rules the descriptor declares, over every entity and operation.</summary>
+    /// <remarks>
+    /// One parse for the whole count, because Overview shows it beside a link and a count that parsed
+    /// the document once per entity would cost more than the screen it decorates.
+    /// </remarks>
+    /// <param name="descriptorJson">The descriptor as stored.</param>
+    public static int RuleCount(string descriptorJson)
+    {
+        using var document = Parse(descriptorJson);
+        if (document is null
+            || !document.RootElement.TryGetProperty("entities", out var entities)
+            || entities.ValueKind != JsonValueKind.Object)
+        {
+            return 0;
+        }
+
+        return entities.EnumerateObject()
+            .Where(entity => entity.Value.ValueKind == JsonValueKind.Object)
+            .Select(entity => entity.Value.TryGetProperty("rules", out var rules)
+                && rules.ValueKind == JsonValueKind.Object
+                    ? rules.EnumerateObject().Count()
+                    : 0)
+            .Sum();
+    }
+
     /// <summary>The top-level blocks this descriptor declares.</summary>
     public static IReadOnlySet<string> DeclaredBlocks(string descriptorJson)
     {

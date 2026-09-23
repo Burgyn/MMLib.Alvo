@@ -109,6 +109,16 @@ public sealed class ChangeTheBackendScenarios(AdminWorld world) : IClassFixture<
         history.ShouldContain("Add invoices, admin only");
         history.ShouldContain(AdminWorld.AdminEmail);
 
+        // --- newest first (D-3), and Overview's latest change is that same revision, not r1 (D-2)
+        var newest = await session.Page.Locator("[data-testid='revision-row']").First.InnerTextAsync();
+        newest.ShouldContain($"r{applied}");
+        newest.ShouldContain("Add invoices, admin only");
+
+        await session.GoAsync("");
+        await session.Page.Locator("[data-testid='revision-row']").First.WaitForAsync();
+        (await session.Page.Locator("[data-testid='revision-row']").First.InnerTextAsync())
+            .ShouldContain("Add invoices, admin only");
+
         session.AssertConsoleClean();
     }
 }

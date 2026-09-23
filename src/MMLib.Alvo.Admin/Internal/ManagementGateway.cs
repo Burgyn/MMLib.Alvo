@@ -106,12 +106,17 @@ internal sealed class ManagementGateway(
             () => management.ListProjectsAsync(ct), ct).ConfigureAwait(false);
 
     /// <summary>The append-only configuration history, newest first.</summary>
-    /// <remarks>Never cached: it is the one read whose whole purpose is to be current.</remarks>
+    /// <remarks>
+    /// Never cached: it is the one read whose whole purpose is to be current. Sorted here, because the
+    /// contract answers oldest first and every screen reads newest first — see <see cref="RevisionHistory"/>.
+    /// </remarks>
     public async Task<IReadOnlyList<ManagementRevision>> RevisionsAsync(CancellationToken ct)
     {
         var project = await ProjectAsync(ct).ConfigureAwait(false);
-        return await AsOperatorAsync(
+        var revisions = await AsOperatorAsync(
             () => management.ListRevisionsAsync(project, ct), ct).ConfigureAwait(false);
+
+        return RevisionHistory.NewestFirst(revisions);
     }
 
     /// <summary>One past revision, with the descriptor it applied.</summary>
@@ -219,6 +224,16 @@ internal sealed class ManagementGateway(
     /// feature: a control whose only possible outcome is a refusal is worse than its absence.
     /// </remarks>
     public bool CanAdministerPeople => people is not null;
+
+    /// <summary>The signed-in operator's own user id, or <see langword="null"/> when they resolve to no caller.</summary>
+    /// <remarks>
+    /// For a screen that has to recognise the operator's own row — Access, where the core refuses a person
+    /// granting themselves a tenant, and a control whose only outcome is that refusal should not be offered.
+    /// It decides nothing: the core still refuses the call if a screen offers it anyway.
+    /// </remarks>
+    /// <param name="ct">Cancels the read of the membership store.</param>
+    public async ValueTask<UserId?> SelfAsync(CancellationToken ct)
+        => (await CallerAsync(ct).ConfigureAwait(false))?.Context.User;
 
     /// <summary>One page of the people on this project.</summary>
     public Task<AlvoUserPage> PeopleAsync(AlvoUserQuery query, CancellationToken ct)

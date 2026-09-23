@@ -54,25 +54,52 @@
                   Note="of the descriptor, running today" />
         </div>
 
+        @*
+            A normal panel under the stats rather than the centred dashed callout it was: it lists
+            facts about blocks this project declared, and the callout's shape — kept for empty states —
+            made a list of consequences read as one. The heading claims only what is true of every row;
+            DeclaredLimits says why the rows are not split into "not running" and "partly running".
+        *@
         @if (Declared.Count > 0)
         {
-            <div class="a-notyet-panel">
+            <div class="a-panel" data-testid="overview-limits">
                 <div class="a-section">
-                    <span class="a-section-title">Declared, and not running yet</span>
-                    <span class="a-section-sub">
-                        This descriptor declares @Declared.Count block@(Declared.Count == 1 ? "" : "s")
-                        that this build parses and then honours nowhere. The apply succeeded; nothing runs.
-                    </span>
+                    <span class="a-section-title">Declared, with limits in this build</span>
+                    <span class="a-section-sub">Parts of these blocks are not honoured yet — each says which.</span>
                 </div>
                 @foreach (var block in Declared)
                 {
-                    <div class="a-notyet-panel__body">
-                        <span class="a-badge a-badge--warn">@block.Block</span>
-                        <span class="a-notyet-panel__consequence">@block.Consequence</span>
+                    <div class="a-listrow" data-testid="@($"overview-limit-{block.Block}")">
+                        <span class="a-listrow__type"><span class="a-badge a-badge--warn a-mono">@block.Block</span></span>
+                        <p class="a-note">@block.Consequence</p>
                     </div>
                 }
             </div>
         }
+
+        @*
+            The four places an operator goes next, each with the one number that says what is there.
+            Only counts this screen already holds or reads from the descriptor it already has: a count
+            that cost its own round trip would make the landing page the slowest screen to open.
+        *@
+        <nav class="a-cards" aria-label="Sections" data-testid="overview-links">
+            <a class="a-card a-card--action" href="@($"{AlvoAdmin.BasePath}/schema")" data-testid="overview-link-schema">
+                <span class="a-section-title">Schema</span>
+                <span class="a-section-sub">@Count(_schema.Entities.Count, "entity", "entities")</span>
+            </a>
+            <a class="a-card a-card--action" href="@($"{AlvoAdmin.BasePath}/data")" data-testid="overview-link-data">
+                <span class="a-section-title">Data</span>
+                <span class="a-section-sub">Browse the records of @Count(_schema.Entities.Count, "entity", "entities")</span>
+            </a>
+            <a class="a-card a-card--action" href="@($"{AlvoAdmin.BasePath}/rules")" data-testid="overview-link-rules">
+                <span class="a-section-title">Rules</span>
+                <span class="a-section-sub">@Count(_rules, "rule", "rules") declared</span>
+            </a>
+            <a class="a-card a-card--action" href="@($"{AlvoAdmin.BasePath}/access")" data-testid="overview-link-access">
+                <span class="a-section-title">Access</span>
+                <span class="a-section-sub">@Count(_roles, "role", "roles") declared</span>
+            </a>
+        </nav>
 
         <div class="a-panel">
             <div class="a-section">
@@ -103,14 +130,11 @@
     private ManagementCapabilities? _capabilities;
     private ManagementInfo? _info;
     private IReadOnlyList<ManagementRevision> _revisions = [];
+    private int _rules;
+    private int _roles;
     private Exception? _error;
 
-    /// <summary>
-    /// <b>Warned blocks intersected with what this descriptor actually declares</b> (§4.2).
-    /// <c>capabilities.warned</c> lists every block this build honours nowhere; a project that
-    /// declares none of them has nothing to be warned about, and a panel listing five subsystems
-    /// nobody asked for would train an operator to ignore the panel.
-    /// </summary>
+    /// <summary>The warned blocks this descriptor declares (§4.2) — see <see cref="DeclaredLimits"/>.</summary>
     private IReadOnlyList<ManagementWarnedBlock> Declared { get; set; } = [];
 
     protected override async Task OnInitializedAsync()
@@ -122,7 +146,9 @@
             _capabilities = await Gateway.CapabilitiesAsync(CancellationToken.None);
             _info = await Gateway.InfoAsync(CancellationToken.None);
             _revisions = await Gateway.RevisionsAsync(CancellationToken.None);
-            Declared = DeclaredWarnings(_descriptor.DescriptorJson, _capabilities);
+            Declared = DeclaredLimits.Of(_descriptor.DescriptorJson, _capabilities);
+            _rules = DescriptorLens.RuleCount(_descriptor.DescriptorJson);
+            _roles = DescriptorLens.DeclaredRoles(_descriptor.DescriptorJson).Count;
         }
         catch (Exception exception) when (exception is ManagementForbiddenException
             or ManagementProjectNotFoundException or ManagementRequestException)
@@ -153,19 +179,7 @@
         return $"{mode} · {startup}";
     }
 
-    private static IReadOnlyList<ManagementWarnedBlock> DeclaredWarnings(
-        string descriptorJson, ManagementCapabilities capabilities)
-    {
-        using var document = JsonDocument.Parse(descriptorJson);
-        if (document.RootElement.ValueKind != JsonValueKind.Object)
-        {
-            return [];
-        }
-
-        var declared = document.RootElement.EnumerateObject()
-            .Select(property => property.Name)
-            .ToHashSet(StringComparer.Ordinal);
-
-        return capabilities.Warned.Where(block => declared.Contains(block.Block)).ToList();
-    }
+    /// <summary>A count with its noun, singular or plural.</summary>
+    private static string Count(int count, string one, string many)
+        => $"{count.ToString(CultureInfo.InvariantCulture)} {(count == 1 ? one : many)}";
 }

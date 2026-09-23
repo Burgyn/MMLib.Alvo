@@ -1063,6 +1063,15 @@ textarea.a-textarea {
   font-family: var(--font-mono);
 }
 
+/* A revision number at the head of a history row. One width for r1 and r12, so the reasons beside
+   them start on one line instead of stepping right as the numbers grow. */
+.a-badge--rev {
+  flex: none;
+  min-width: 40px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .a-chip {
   display: inline-flex;
   align-items: center;

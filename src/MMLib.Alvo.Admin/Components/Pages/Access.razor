@@ -19,9 +19,7 @@
         <div class="a-panel" style="padding:var(--space-5);border-color:var(--accentBorder)">
             <span class="a-section-title">Credential token for @_tokenFor</span>
             <p class="a-section-sub">
-                Hand this over out of band — nothing in this build delivers it. There is no mail
-                transport, and <code class="a-mono">templates</code> is a warned subsystem whose reach
-                is an after-hook on an entity write, not an identity event. It works once, until
+                Hand this over out of band — this build sends no email. It works once, until
                 @token.ExpiresAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture).
             </p>
             <pre class="a-code"><code>@token.Token</code></pre>
@@ -42,10 +40,8 @@
         {
             <div class="a-refused">
                 <span class="a-refused__reason">
-                    No package implements <code class="a-mono">IAlvoUserAdministration</code>, so there
-                    is nobody to administer and no control to offer. An embedded host fills this port
-                    over its own directory; the standalone image fills it with
-                    <code class="a-mono">MMLib.Alvo.Identity</code>.
+                    This deployment has no membership store, so there is nobody to administer here. An
+                    embedded host provides one over its own directory; the standalone image ships with one.
                 </span>
             </div>
         }
@@ -83,14 +79,16 @@
 
                     @if (_editing == person.Id)
                     {
-                        <div style="flex-basis:100%">
-                            <div class="a-field">
-                                <span class="a-label">Roles</span>
-                                <div class="a-choice">
+                        var self = person.Id == _self;
+                        <div class="a-stack" style="flex-basis:100%;gap:var(--space-4)">
+                            <div class="a-field" style="gap:var(--space-2)">
+                                <span class="a-label" id="@($"roles-{person.Id.Value}")">Roles</span>
+                                <div class="a-choice" role="group" aria-labelledby="@($"roles-{person.Id.Value}")">
                                     @foreach (var role in _roles)
                                     {
-                                        <button type="button"
-                                                class="@($"a-chip{(person.RoleNames.Contains(role, StringComparer.Ordinal) ? " a-chip--on" : string.Empty)}")"
+                                        var assigned = person.RoleNames.Contains(role, StringComparer.Ordinal);
+                                        <button type="button" aria-pressed="@(assigned ? "true" : "false")"
+                                                class="@($"a-chip{(assigned ? " a-chip--on" : string.Empty)}")"
                                                 @onclick="() => ToggleRoleAsync(person, role)">@role</button>
                                     }
                                 </div>
@@ -101,35 +99,64 @@
                                         A role nothing declares is never minted, so assigning one would do nothing.
                                     </span>
                                 }
+                                else
+                                {
+                                    <span class="a-section-sub">A highlighted role is assigned. Press one to change it.</span>
+                                }
                             </div>
 
-                            <div class="a-field">
-                                <label class="a-label" for="@($"tenant-{person.Id.Value}")">Tenant</label>
-                                <div class="a-row" style="gap:var(--space-2)">
-                                    <input class="a-input" id="@($"tenant-{person.Id.Value}")" style="flex:1"
-                                           value="@(person.Tenant?.Value.ToString() ?? string.Empty)"
-                                           placeholder="00000000-0000-0000-0000-000000000000"
-                                           @oninput="args => _tenantDraft = args.Value?.ToString() ?? string.Empty" />
-                                    <button type="button" class="a-btn a-btn--sm"
-                                            id="@($"grant-tenant-{person.Id.Value}")"
-                                            @onclick="() => SetTenantAsync(person)">Grant</button>
-                                    <button type="button" class="a-btn a-btn--ghost a-btn--sm"
-                                            id="@($"clear-tenant-{person.Id.Value}")"
-                                            @onclick="() => ClearTenantAsync(person)">Remove</button>
-                                </div>
-                                <span class="a-section-sub">
-                                    One tenant, not a set — acting in more than one is a cross-tenant
-                                    capability this build does not have. A tenant-scoped entity refuses a
-                                    caller with none, with 403, before any rule runs.
-                                </span>
+                            <div class="a-field" style="gap:var(--space-2)">
+                                @if (self)
+                                {
+                                    <span class="a-label">Tenant</span>
+                                }
+                                else
+                                {
+                                    <label class="a-label" for="@($"tenant-{person.Id.Value}")">Tenant</label>
+                                }
+                                @*
+                                    The operator's own row offers no Grant and no Remove. The core refuses a
+                                    person changing their own tenant (§3.7 U3.2), and a control whose only
+                                    outcome is that refusal — shown at the top of the page, far from the
+                                    button — is worse than the sentence that says who can.
+                                *@
+                                @if (self)
+                                {
+                                    <span class="@(person.Tenant is null ? null : "a-mono")" style="font-size:var(--text-sm)">
+                                        @(person.Tenant?.Value.ToString() ?? "No tenant")
+                                    </span>
+                                    <span class="a-section-sub" data-testid="tenant-self">
+                                        You cannot grant yourself a tenant — another administrator can.
+                                    </span>
+                                }
+                                else
+                                {
+                                    <div class="a-row" style="gap:var(--space-2)">
+                                        <input class="a-input a-mono" id="@($"tenant-{person.Id.Value}")" style="flex:1"
+                                               value="@(person.Tenant?.Value.ToString() ?? string.Empty)"
+                                               autocomplete="off" spellcheck="false"
+                                               @oninput="args => _tenantDraft = args.Value?.ToString() ?? string.Empty" />
+                                        <button type="button" class="a-btn a-btn--sm"
+                                                id="@($"grant-tenant-{person.Id.Value}")"
+                                                @onclick="() => SetTenantAsync(person)">Grant</button>
+                                        <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                                                id="@($"clear-tenant-{person.Id.Value}")"
+                                                @onclick="() => ClearTenantAsync(person)">Remove</button>
+                                    </div>
+                                    <span class="a-section-sub">
+                                        A tenant id (a uuid). One tenant, not a set: a tenant-scoped entity
+                                        refuses a person with none before any rule runs.
+                                    </span>
+                                }
                             </div>
 
-                            <div class="a-row" style="gap:var(--space-2);flex-wrap:wrap">
+                            <div class="a-row" style="gap:var(--space-3);flex-wrap:wrap;padding-top:var(--space-3);border-top:1px solid var(--border)">
                                 <button type="button" class="a-btn a-btn--sm"
                                         id="@($"issue-token-{person.Id.Value}")"
                                         @onclick="() => IssueTokenAsync(person)">
                                     Issue a credential token
                                 </button>
+                                <span style="margin-left:auto"></span>
                                 <button type="button" class="a-btn a-btn--danger a-btn--sm"
                                         id="@($"disable-{person.Id.Value}")"
                                         @onclick="() => SetDisabledAsync(person, !person.IsDisabled)">
@@ -219,6 +246,7 @@
     private string _tenantDraft = string.Empty;
     private string _newEmail = string.Empty;
     private UserId? _editing;
+    private UserId? _self;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
@@ -229,6 +257,7 @@
             var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
             _roles = DescriptorLens.DeclaredRoles(descriptor.DescriptorJson);
             _levels = DescriptorLens.AccessLevels(descriptor.DescriptorJson);
+            _self ??= await Gateway.SelfAsync(CancellationToken.None);
 
             if (Gateway.CanAdministerPeople)
             {
