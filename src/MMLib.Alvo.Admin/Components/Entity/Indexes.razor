@@ -50,7 +50,7 @@ else
             {
                 <span class="a-badge a-badge--accent">unique</span>
             }
-            @if (Staged.Contains(at))
+            @if (Staged.IsNewIndex(at))
             {
                 <span class="a-badge a-badge--accent" data-testid="index-staged">new</span>
             }
@@ -140,11 +140,11 @@ else
     public bool Editable { get; set; }
 
     /// <summary>
-    /// The positions in <see cref="Declared"/> the applied revision does not hold — badged <c>new</c>, so an
-    /// index staged here reads as staged rather than as already serving queries.
+    /// What the working copy changed, cascaded by the entity screen — an index only it declares is badged
+    /// <c>new</c>, so it reads as staged rather than as already serving queries.
     /// </summary>
-    [Parameter]
-    public IReadOnlySet<int> Staged { get; set; } = new HashSet<int>();
+    [CascadingParameter]
+    private StagedView Staged { get; set; } = StagedView.None;
 
     /// <summary>
     /// Raised with the index to declare.

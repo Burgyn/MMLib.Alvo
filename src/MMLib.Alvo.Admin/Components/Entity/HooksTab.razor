@@ -77,7 +77,7 @@ else
                     wrapped mid-token.
                 *@
                 <div class="a-hookrow" data-testid="hook-row">
-                    @if (Staged.Contains(new HookAt(name, at)))
+                    @if (Staged.IsNewHook(name, at))
                     {
                         <span class="a-badge a-badge--accent" style="flex:none;align-self:flex-start"
                               data-testid="hook-staged">new</span>
@@ -270,11 +270,11 @@ else
     public bool Editable { get; set; }
 
     /// <summary>
-    /// The hooks, by point and position, the applied revision does not hold — badged <c>new</c>, because a
-    /// hook that is only in the working copy does not run yet and must not read as if it did.
+    /// What the working copy changed, cascaded by the entity screen — a hook only it declares is badged
+    /// <c>new</c>, because it does not run yet and must not read as if it did.
     /// </summary>
-    [Parameter]
-    public IReadOnlySet<HookAt> Staged { get; set; } = new HashSet<HookAt>();
+    [CascadingParameter]
+    private StagedView Staged { get; set; } = StagedView.None;
 
     /// <summary>
     /// What this build refuses that belongs on this tab.

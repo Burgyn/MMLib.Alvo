@@ -113,10 +113,6 @@ namespace MMLib.Alvo.Admin.Components.Entity
         public Microsoft.AspNetCore.Components.EventCallback<string> OnEdit { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<string> OnRemove { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback<string> OnRestore { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public System.Collections.Generic.IReadOnlyDictionary<string, string> Staged { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     public class HooksTab : Microsoft.AspNetCore.Components.ComponentBase
@@ -133,8 +129,6 @@ namespace MMLib.Alvo.Admin.Components.Entity
         public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.HooksTab.NewHook> OnAdd { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.HooksTab.HookAt> OnRemove { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public System.Collections.Generic.IReadOnlySet<MMLib.Alvo.Admin.Components.Entity.HooksTab.HookAt> Staged { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public sealed class HookAt : System.IEquatable<MMLib.Alvo.Admin.Components.Entity.HooksTab.HookAt>
         {
@@ -165,8 +159,6 @@ namespace MMLib.Alvo.Admin.Components.Entity
         public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Schema.IndexSchema> OnAdd { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<int> OnRemove { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public System.Collections.Generic.IReadOnlySet<int> Staged { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     public class Relationships : Microsoft.AspNetCore.Components.ComponentBase

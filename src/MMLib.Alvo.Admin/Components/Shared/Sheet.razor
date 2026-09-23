@@ -128,6 +128,12 @@
         catch (ObjectDisposedException)
         {
         }
+        catch (OperationCanceledException)
+        {
+            /* The same death, reported by the call rather than the circuit: a reload tears the circuit
+               down while the release is in flight, and the canceled call surfaced as an unhandled circuit
+               error on the way out. */
+        }
     }
 
     public async ValueTask DisposeAsync()

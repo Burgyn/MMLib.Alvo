@@ -7,17 +7,17 @@
 *@
 @foreach (var field in Declared)
 {
-    var staged = Staged.GetValueOrDefault(field.Name);
-    var removed = staged == Removed;
+    var staged = Staged.FieldChange(field.Name);
+    var removed = staged == StagedChange.Removed;
 
     <div class="@($"a-listrow{(removed ? " a-listrow--removed" : string.Empty)}")" data-testid="@($"field-row-{field.Name}")">
         <span class="a-mono a-listrow__key" style="font-weight:var(--weight-medium)">@field.Name</span>
         <span class="a-ident a-listrow__type">@Type(field)</span>
         <span class="a-listrow__rest">
-            @if (staged is { Length: > 0 })
+            @if (staged != StagedChange.None)
             {
                 <span class="@($"a-badge {(removed ? "a-badge--danger" : "a-badge--accent")}")"
-                      data-testid="@($"staged-{field.Name}")">@staged</span>
+                      data-testid="@($"staged-{field.Name}")">@Word(staged)</span>
             }
             @foreach (var facet in Facets(field))
             {
@@ -34,7 +34,7 @@
             <span class="a-listrow__actions">
                 <button type="button" class="a-btn a-btn--ghost a-btn--sm"
                         data-testid="@($"restore-field-{field.Name}")"
-                        @onclick="() => OnRestore.InvokeAsync(field.Name)">Undo</button>
+                        @onclick="() => Staged.Restore.InvokeAsync(field.Name)">Undo</button>
             </span>
         }
         else if (Editable)
@@ -97,22 +97,24 @@
     public EventCallback<string> OnRemove { get; set; }
 
     /// <summary>
-    /// The fields the working copy changed, each with the word its badge reads — <c>new</c>, <c>changed</c>
-    /// or <c>removed</c>; an unchanged field is absent.
+    /// What the working copy changed, cascaded by the entity screen.
     /// </summary>
     /// <remarks>
     /// <b>The rows themselves come from <see cref="Entity"/>, which the caller builds from the working copy</b>
     /// with the removed fields still in it — so a field staged here appears here, where it was staged, and
-    /// not only in the preview. A removed row offers Undo rather than Edit and Remove.
+    /// not only in the preview. A removed row offers Undo rather than Edit and Remove. Cascaded and private
+    /// rather than a parameter, so the staging model stays out of the package's public surface.
     /// </remarks>
-    [Parameter]
-    public IReadOnlyDictionary<string, string> Staged { get; set; } = new Dictionary<string, string>();
+    [CascadingParameter]
+    private StagedView Staged { get; set; } = StagedView.None;
 
-    /// <summary>Raised with a removed field the operator asked to put back.</summary>
-    [Parameter]
-    public EventCallback<string> OnRestore { get; set; }
-
-    private const string Removed = "removed";
+    /// <summary>The word a staged row's badge reads.</summary>
+    private static string Word(StagedChange change) => change switch
+    {
+        StagedChange.New => "new",
+        StagedChange.Changed => "changed",
+        _ => "removed",
+    };
 
     /// <summary>The fields the descriptor declares.</summary>
     private IEnumerable<FieldSchema> Declared

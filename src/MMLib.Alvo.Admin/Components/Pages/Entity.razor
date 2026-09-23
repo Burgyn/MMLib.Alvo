@@ -92,46 +92,49 @@
             }
         </div>
 
-        <div class="a-panel">
-            @switch (_tab)
-            {
-                case "Fields":
-                    @*
-                        The control sits with the list's own heading rather than as a green block above
-                        the first row, where it outweighed every field on the screen.
-                    *@
-                    <div class="a-section a-section--bar">
-                        <div class="a-section__text">
-                            <span class="a-section-title">Declared fields</span>
+        @* The staged rows' badges reach the tabs as a cascade, which keeps their model internal. *@
+        <CascadingValue Value="_staged">
+            <div class="a-panel">
+                @switch (_tab)
+                {
+                    case "Fields":
+                        @*
+                            The control sits with the list's own heading rather than as a green block above
+                            the first row, where it outweighed every field on the screen.
+                        *@
+                        <div class="a-section a-section--bar">
+                            <div class="a-section__text">
+                                <span class="a-section-title">Declared fields</span>
+                            </div>
+                            @if (Copy.Loaded)
+                            {
+                                <button type="button" class="a-btn a-btn--sm" data-testid="add-field"
+                                        @onclick="AddField">Add a field</button>
+                            }
                         </div>
-                        @if (Copy.Loaded)
-                        {
-                            <button type="button" class="a-btn a-btn--sm" data-testid="add-field"
-                                    @onclick="AddField">Add a field</button>
-                        }
-                    </div>
-                    <Fields Entity="@FieldsView(_entity)" Staged="_stagedFields" Editable="DeclaredHere"
-                            OnEdit="EditField" OnRemove="RemoveField" OnRestore="RestoreField" />
-                    break;
-                case "Relationships":
-                    <Relationships Entity="@_entity" Schema="_schema!" />
-                    break;
-                case "Rules":
-                    <RulesTab Rules="_working" Entity="@EntityName" Editable="true" OnChanged="SetRule" />
-                    break;
-                case "On write":
-                    <HooksTab Hooks="@_hooks" Staged="_stagedHooks" Editable="Copy.Loaded" Capabilities="_refused"
-                              OnAdd="AddHook" OnRemove="RemoveHook" />
-                    break;
-                case "Indexes":
-                    <Indexes Entity="@_entity" Declared="_indexes" Staged="_stagedIndexes" Editable="Copy.Loaded"
-                             OnAdd="AddIndex" OnRemove="RemoveIndex" />
-                    break;
-                default:
-                    <ApiTab Entity="@_entity" />
-                    break;
-            }
-        </div>
+                        <Fields Entity="@FieldsView(_entity)" Editable="DeclaredHere"
+                                OnEdit="EditField" OnRemove="RemoveField" />
+                        break;
+                    case "Relationships":
+                        <Relationships Entity="@_entity" Schema="_schema!" />
+                        break;
+                    case "Rules":
+                        <RulesTab Rules="_working" Entity="@EntityName" Editable="true" OnChanged="SetRule" />
+                        break;
+                    case "On write":
+                        <HooksTab Hooks="@_hooks" Editable="Copy.Loaded" Capabilities="_refused"
+                                  OnAdd="AddHook" OnRemove="RemoveHook" />
+                        break;
+                    case "Indexes":
+                        <Indexes Entity="@_entity" Declared="_indexes" Editable="Copy.Loaded"
+                                 OnAdd="AddIndex" OnRemove="RemoveIndex" />
+                        break;
+                    default:
+                        <ApiTab Entity="@_entity" />
+                        break;
+                }
+            </div>
+        </CascadingValue>
 
         @*
             The editor is a sheet now, so it is on the page only while somebody is editing. As a
@@ -170,9 +173,7 @@
     private IReadOnlyList<IndexSchema> _indexes = [];
     private IReadOnlyList<string> _fieldNames = [];
     private IReadOnlyList<StagedField> _fields = [];
-    private IReadOnlyDictionary<string, string> _stagedFields = new Dictionary<string, string>();
-    private IReadOnlySet<int> _stagedIndexes = new HashSet<int>();
-    private IReadOnlySet<HooksTab.HookAt> _stagedHooks = new HashSet<HooksTab.HookAt>();
+    private StagedView _staged = StagedView.None;
     private bool _renaming;
     private string _newName = string.Empty;
     private string? _renameRefusal;
@@ -253,13 +254,12 @@
         _hooks = Copy.HooksOf(EntityName);
 
         _fields = Copy.FieldChangesOf(EntityName);
-        _stagedFields = _fields
-            .Where(field => field.Change != StagedChange.None)
-            .ToDictionary(field => field.Name, field => field.Change.ToString().ToLowerInvariant(), StringComparer.Ordinal);
-        _stagedIndexes = Copy.StagedIndexesOf(EntityName);
-        _stagedHooks = Copy.StagedHooksOf(EntityName)
-            .Select(hook => new HooksTab.HookAt(hook.Point, hook.Position))
-            .ToHashSet();
+        _staged = new StagedView(
+            _fields.Where(field => field.Change != StagedChange.None)
+                .ToDictionary(field => field.Name, field => field.Change, StringComparer.Ordinal),
+            Copy.StagedIndexesOf(EntityName),
+            Copy.StagedHooksOf(EntityName),
+            EventCallback.Factory.Create<string>(this, RestoreField));
     }
 
     /// <summary>

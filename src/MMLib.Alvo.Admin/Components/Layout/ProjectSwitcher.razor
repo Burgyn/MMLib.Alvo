@@ -34,6 +34,7 @@
 @code {
     private ManagementProject? _project;
     private WorkingCopy? _copy;
+    private bool _disposed;
     private int? _revision;
     private bool _refused;
 
@@ -100,7 +101,15 @@
     {
         try
         {
-            _copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
+            var copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
+
+            /* Disposed during the await must not subscribe — see PendingBar, which has the same wait. */
+            if (_disposed)
+            {
+                return;
+            }
+
+            _copy = copy;
             _copy.Changed += Redraw;
         }
         catch (Exception)
@@ -152,6 +161,7 @@
 
     public void Dispose()
     {
+        _disposed = true;
         Navigation.LocationChanged -= Reload;
         Gateway.Applied -= Refresh;
 

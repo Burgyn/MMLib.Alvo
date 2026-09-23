@@ -34,6 +34,7 @@
 @code {
     private WorkingCopy? _copy;
     private bool _discarding;
+    private bool _disposed;
 
     private int Pending => _copy?.PendingCount ?? 0;
 
@@ -62,7 +63,16 @@
 
         try
         {
-            _copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
+            var copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
+
+            /* Disposed during the await — a navigation away mid-render — must not subscribe: nothing would
+               unsubscribe it, and the copy outlives every circuit that shows it. */
+            if (_disposed)
+            {
+                return;
+            }
+
+            _copy = copy;
             _copy.Changed += OnChanged;
         }
         catch (Exception)
@@ -73,6 +83,7 @@
 
     public void Dispose()
     {
+        _disposed = true;
         Navigation.LocationChanged -= OnLocationChanged;
 
         if (_copy is not null)
@@ -86,16 +97,24 @@
     private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => OnChanged();
 
     /// <summary>
-    /// Redraws the screen underneath, which is showing the copy as it was.
+    /// Reloads the screen underneath, which is showing the copy as it was.
     /// </summary>
     /// <remarks>
-    /// The same address, navigated to again: every editor reads the copy when its parameters are set, so
-    /// this is what takes a staged row off the Fields tab behind the sheet — without the page knowing the bar
-    /// exists.
+    /// <para>
+    /// <b>A reload, not a navigation to the same address.</b> That navigation re-renders the router, and the
+    /// router hands the page the same route values — immutable strings — so Blazor skips setting its
+    /// parameters and the Fields tab keeps listing the row that was just discarded. Measured, by the scenario
+    /// that confirms a discard from the bar.
+    /// </para>
+    /// <para>
+    /// The cost is a new circuit, once, after the one action in the dashboard that throws work away. The copy
+    /// is in the store rather than the circuit, so nothing but the drawing is rebuilt — and the page never has
+    /// to know the bar exists.
+    /// </para>
     /// </remarks>
     private void Discarded()
     {
         _discarding = false;
-        Navigation.NavigateTo(Navigation.Uri);
+        Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
     }
 }

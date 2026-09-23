@@ -71,8 +71,24 @@ internal sealed class WorkingCopy
     private static string Readable(JsonNode? node, string empty) =>
         node?.ToJsonString(_pretty) ?? empty;
 
+    /// <summary>
+    /// Serialises every read and write of the two documents.
+    /// </summary>
+    /// <remarks>
+    /// The copy belongs to the operator, not to a circuit, so two tabs are two threads over one pair of
+    /// <see cref="JsonNode"/> trees — and <see cref="Changed"/> makes a read in one straight after a write in
+    /// the other the ordinary case rather than a coincidence. <c>JsonNode</c> is not safe for that.
+    /// </remarks>
+    private readonly Lock _gate = new();
+
     private JsonNode? _applied;
     private JsonNode? _working;
+
+    /// <summary>The pending count as of the last edit, so the shell reads an int rather than two serialisations.</summary>
+    private int _pending;
+
+    /// <summary>Whether an edit under the gate changed anything <see cref="Settle"/> has not yet announced.</summary>
+    private bool _touched;
 
     /// <summary>The revision the working copy was taken from.</summary>
     public int Revision { get; private set; }
@@ -81,10 +97,10 @@ internal sealed class WorkingCopy
     public bool Loaded => _working is not null;
 
     /// <summary>The working document, formatted.</summary>
-    public string Json => _working?.ToJsonString(_pretty) ?? "{}";
+    public string Json => Read(() => _working?.ToJsonString(_pretty) ?? "{}");
 
     /// <summary>The applied document, formatted.</summary>
-    public string AppliedJson => _applied?.ToJsonString(_pretty) ?? "{}";
+    public string AppliedJson => Read(() => _applied?.ToJsonString(_pretty) ?? "{}");
 
     /// <summary>
     /// Raised after anything changed this copy — an edit, an import, a discard, a fresh take.
@@ -119,40 +135,65 @@ internal sealed class WorkingCopy
     public void SuggestReason(string? reason) => SuggestedReason = reason;
 
     /// <summary>Whether the working document differs from the applied one.</summary>
-    public bool IsDirty => !string.Equals(Json, AppliedJson, StringComparison.Ordinal);
+    public bool IsDirty => Read(() => !string.Equals(Json, AppliedJson, StringComparison.Ordinal));
 
     /// <summary>
     /// How many changes are waiting for an apply, as an operator would count them.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Never zero while the copy is dirty: a document that differs only in the order of its entities is
     /// still one the preview shows a diff for, and a bar reading "0 unapplied changes" above a Preview
     /// button contradicts itself.
+    /// </para>
+    /// <para>
+    /// Taken once per edit, under the gate, rather than on every read: the bar and the project card both
+    /// render it on every render of the shell, and each read would otherwise serialise both documents.
+    /// </para>
     /// </remarks>
-    public int PendingCount => IsDirty ? Math.Max(1, StagedChanges.Count(_applied, _working)) : 0;
+    public int PendingCount => Volatile.Read(ref _pending);
 
     /// <summary>The entity names the working document declares.</summary>
-    public IReadOnlyList<string> Entities => _working?["entities"] is JsonObject entities
-        ? [.. entities.Select(entity => entity.Key)]
-        : [];
+    public IReadOnlyList<string> Entities => Read<IReadOnlyList<string>>(
+        () => _working?["entities"] is JsonObject entities ? [.. entities.Select(entity => entity.Key)] : []);
 
     /// <summary>Takes a fresh working copy from an applied descriptor.</summary>
     /// <param name="descriptorJson">The descriptor as stored.</param>
     /// <param name="revision">The revision it is at.</param>
     public void Take(string descriptorJson, int revision)
     {
-        _applied = JsonNode.Parse(descriptorJson);
-        _working = JsonNode.Parse(descriptorJson);
-        Revision = revision;
-        Touch();
+        try
+        {
+            lock (_gate)
+            {
+                _applied = JsonNode.Parse(descriptorJson);
+                _working = JsonNode.Parse(descriptorJson);
+                Revision = revision;
+                Touch();
+            }
+        }
+        finally
+        {
+            Settle();
+        }
     }
 
     /// <summary>Discards every unapplied edit.</summary>
     public void Discard()
     {
-        SuggestedReason = null;
-        _working = _applied is null ? null : JsonNode.Parse(_applied.ToJsonString());
-        Touch();
+        try
+        {
+            lock (_gate)
+            {
+                SuggestedReason = null;
+                _working = _applied is null ? null : JsonNode.Parse(_applied.ToJsonString());
+                Touch();
+            }
+        }
+        finally
+        {
+            Settle();
+        }
     }
 
     /// <summary>
@@ -171,13 +212,23 @@ internal sealed class WorkingCopy
     {
         try
         {
-            _working = JsonNode.Parse(descriptorJson);
-            Touch();
-            return _working is not null;
+            lock (_gate)
+            {
+                try
+                {
+                    _working = JsonNode.Parse(descriptorJson);
+                    Touch();
+                    return _working is not null;
+                }
+                catch (JsonException)
+                {
+                    return false;
+                }
+            }
         }
-        catch (JsonException)
+        finally
         {
-            return false;
+            Settle();
         }
     }
 
@@ -187,22 +238,32 @@ internal sealed class WorkingCopy
     /// <param name="audited">Whether it carries the audit columns.</param>
     public void AddEntity(string name, bool scoped, bool audited)
     {
-        var entities = Ensure(_working, "entities");
-        entities[name] = new JsonObject
+        try
         {
-            ["tenancy"] = scoped ? "scoped" : "global",
-            ["audit"] = audited,
-            ["fields"] = new JsonObject
+            lock (_gate)
             {
-                ["name"] = new JsonObject
+                var entities = Ensure(_working, "entities");
+                entities[name] = new JsonObject
                 {
-                    ["type"] = "string",
-                    ["required"] = true,
-                    ["maxLength"] = 120,
-                },
-            },
-        };
-        Touch();
+                    ["tenancy"] = scoped ? "scoped" : "global",
+                    ["audit"] = audited,
+                    ["fields"] = new JsonObject
+                    {
+                        ["name"] = new JsonObject
+                        {
+                            ["type"] = "string",
+                            ["required"] = true,
+                            ["maxLength"] = 120,
+                        },
+                    },
+                };
+                Touch();
+            }
+        }
+        finally
+        {
+            Settle();
+        }
     }
 
     /// <summary>
@@ -231,22 +292,32 @@ internal sealed class WorkingCopy
     /// <returns>A sentence saying why it cannot, or <see langword="null"/> when it was renamed.</returns>
     public string? RenameEntity(string from, string to)
     {
-        if (_working?["entities"] is not JsonObject entities || entities[from] is not JsonObject declared)
+        try
         {
-            return $"There is no entity called {from} in this working copy.";
-        }
+            lock (_gate)
+            {
+                if (_working?["entities"] is not JsonObject entities || entities[from] is not JsonObject declared)
+                {
+                    return $"There is no entity called {from} in this working copy.";
+                }
 
-        if (Refusal(from, to, entities, "entity") is { } refusal)
+                if (Refusal(from, to, entities, "entity") is { } refusal)
+                {
+                    return refusal;
+                }
+
+                var origin = Origin(declared, from, _applied?["entities"]?[from] is not null);
+                Rekey(entities, from, to);
+                Carry(entities[to] as JsonObject, origin, to);
+                Touch();
+
+                return null;
+            }
+        }
+        finally
         {
-            return refusal;
+            Settle();
         }
-
-        var origin = Origin(declared, from, _applied?["entities"]?[from] is not null);
-        Rekey(entities, from, to);
-        Carry(entities[to] as JsonObject, origin, to);
-        Touch();
-
-        return null;
     }
 
     /// <summary>
@@ -262,28 +333,38 @@ internal sealed class WorkingCopy
     /// <returns>A sentence saying why it cannot, or <see langword="null"/> when it was renamed.</returns>
     public string? RenameField(string entity, string from, string to)
     {
-        if (_working?["entities"]?[entity]?["fields"] is not JsonObject fields
-            || fields[from] is not JsonObject declared)
+        try
         {
-            return $"There is no field called {from} on {entity}.";
-        }
+            lock (_gate)
+            {
+                if (_working?["entities"]?[entity]?["fields"] is not JsonObject fields
+                    || fields[from] is not JsonObject declared)
+                {
+                    return $"There is no field called {from} on {entity}.";
+                }
 
-        if (Refusal(from, to, fields, "field") is { } refusal)
+                if (Refusal(from, to, fields, "field") is { } refusal)
+                {
+                    return refusal;
+                }
+
+                /* Against the entity's applied name, not its working one: renaming a field on an entity that was
+                   itself renamed in this copy must still resolve the column that exists in the database. */
+                var appliedEntity = AppliedNameOf(entity);
+                var origin = Origin(
+                    declared, from, _applied?["entities"]?[appliedEntity]?["fields"]?[from] is not null);
+
+                Rekey(fields, from, to);
+                Carry(fields[to] as JsonObject, origin, to);
+                Touch();
+
+                return null;
+            }
+        }
+        finally
         {
-            return refusal;
+            Settle();
         }
-
-        /* Against the entity's applied name, not its working one: renaming a field on an entity that was
-           itself renamed in this copy must still resolve the column that exists in the database. */
-        var appliedEntity = AppliedNameOf(entity);
-        var origin = Origin(
-            declared, from, _applied?["entities"]?[appliedEntity]?["fields"]?[from] is not null);
-
-        Rekey(fields, from, to);
-        Carry(fields[to] as JsonObject, origin, to);
-        Touch();
-
-        return null;
     }
 
     /// <summary>The name this entity is applied under, which is what a field's origin has to be read against.</summary>
@@ -373,8 +454,20 @@ internal sealed class WorkingCopy
     /// <summary>Removes an entity.</summary>
     public void RemoveEntity(string name)
     {
-        (_working?["entities"] as JsonObject)?.Remove(name);
-        Touch();
+        try
+        {
+            lock (_gate)
+            {
+                if ((_working?["entities"] as JsonObject)?.Remove(name) is true)
+                {
+                    Touch();
+                }
+            }
+        }
+        finally
+        {
+            Settle();
+        }
     }
 
     /// <summary>Adds a field to an entity.</summary>
@@ -383,19 +476,41 @@ internal sealed class WorkingCopy
     /// <param name="facets">Its type and facets, already in the schema's own shape.</param>
     public void AddField(string entity, string name, JsonObject facets)
     {
-        if (_working?["entities"]?[entity] is JsonObject declared)
+        try
         {
-            var fields = Ensure(declared, "fields");
-            fields[name] = facets;
-            Touch();
+            lock (_gate)
+            {
+                if (_working?["entities"]?[entity] is JsonObject declared)
+                {
+                    var fields = Ensure(declared, "fields");
+                    fields[name] = facets;
+                    Touch();
+                }
+            }
+        }
+        finally
+        {
+            Settle();
         }
     }
 
     /// <summary>Removes a field from an entity.</summary>
     public void RemoveField(string entity, string name)
     {
-        (_working?["entities"]?[entity]?["fields"] as JsonObject)?.Remove(name);
-        Touch();
+        try
+        {
+            lock (_gate)
+            {
+                if ((_working?["entities"]?[entity]?["fields"] as JsonObject)?.Remove(name) is true)
+                {
+                    Touch();
+                }
+            }
+        }
+        finally
+        {
+            Settle();
+        }
     }
 
     /// <summary>Sets or clears one operation's rule on an entity.</summary>
@@ -404,26 +519,36 @@ internal sealed class WorkingCopy
     /// <param name="cel">The CEL source, or empty to remove the rule.</param>
     public void SetRule(string entity, string operation, string cel)
     {
-        if (_working?["entities"]?[entity] is not JsonObject declared)
+        try
         {
-            return;
-        }
-
-        if (cel.Length == 0)
-        {
-            var existing = declared["rules"] as JsonObject;
-            existing?.Remove(operation);
-            if (existing is { Count: 0 })
+            lock (_gate)
             {
-                declared.Remove("rules");
+                if (_working?["entities"]?[entity] is not JsonObject declared)
+                {
+                    return;
+                }
+
+                if (cel.Length == 0)
+                {
+                    var existing = declared["rules"] as JsonObject;
+                    existing?.Remove(operation);
+                    if (existing is { Count: 0 })
+                    {
+                        declared.Remove("rules");
+                    }
+
+                    Touch();
+                    return;
+                }
+
+                Ensure(declared, "rules")[operation] = cel;
+                Touch();
             }
-
-            Touch();
-            return;
         }
-
-        Ensure(declared, "rules")[operation] = cel;
-        Touch();
+        finally
+        {
+            Settle();
+        }
     }
 
     /// <summary>
@@ -439,34 +564,44 @@ internal sealed class WorkingCopy
     /// <param name="unique">Whether it enforces uniqueness across them.</param>
     public void AddIndex(string entity, IReadOnlyList<string> fields, bool unique)
     {
-        ArgumentNullException.ThrowIfNull(fields);
-
-        if (_working?["entities"]?[entity] is not JsonObject declared)
+        try
         {
-            return;
+            lock (_gate)
+            {
+                ArgumentNullException.ThrowIfNull(fields);
+
+                if (_working?["entities"]?[entity] is not JsonObject declared)
+                {
+                    return;
+                }
+
+                if (declared["indexes"] is not JsonArray indexes)
+                {
+                    indexes = [];
+                    declared["indexes"] = indexes;
+                }
+
+                var index = new JsonObject
+                {
+                    ["fields"] = new JsonArray([.. fields.Select(field => JsonValue.Create(field))]),
+                };
+
+                /* Written only when true, for the reason the field editor writes its own booleans that way:
+                   `unique: false` is the schema's default, and a descriptor full of defaults is a descriptor
+                   whose diffs stop saying what changed. */
+                if (unique)
+                {
+                    index["unique"] = true;
+                }
+
+                indexes.Add(index);
+                Touch();
+            }
         }
-
-        if (declared["indexes"] is not JsonArray indexes)
+        finally
         {
-            indexes = [];
-            declared["indexes"] = indexes;
+            Settle();
         }
-
-        var index = new JsonObject
-        {
-            ["fields"] = new JsonArray([.. fields.Select(field => JsonValue.Create(field))]),
-        };
-
-        /* Written only when true, for the reason the field editor writes its own booleans that way:
-           `unique: false` is the schema's default, and a descriptor full of defaults is a descriptor
-           whose diffs stop saying what changed. */
-        if (unique)
-        {
-            index["unique"] = true;
-        }
-
-        indexes.Add(index);
-        Touch();
     }
 
     /// <summary>
@@ -482,24 +617,34 @@ internal sealed class WorkingCopy
     /// <param name="position">The index's position in the declared array.</param>
     public void RemoveIndex(string entity, int position)
     {
-        if (_working?["entities"]?[entity] is not JsonObject declared
-            || declared["indexes"] is not JsonArray indexes
-            || position < 0
-            || position >= indexes.Count)
+        try
         {
-            return;
+            lock (_gate)
+            {
+                if (_working?["entities"]?[entity] is not JsonObject declared
+                    || declared["indexes"] is not JsonArray indexes
+                    || position < 0
+                    || position >= indexes.Count)
+                {
+                    return;
+                }
+
+                indexes.RemoveAt(position);
+
+                /* An empty array is not the same statement as no array, and the descriptor reads better without
+                   one — the same reason SetRule drops an emptied `rules`. */
+                if (indexes.Count == 0)
+                {
+                    declared.Remove("indexes");
+                }
+
+                Touch();
+            }
         }
-
-        indexes.RemoveAt(position);
-
-        /* An empty array is not the same statement as no array, and the descriptor reads better without
-           one — the same reason SetRule drops an emptied `rules`. */
-        if (indexes.Count == 0)
+        finally
         {
-            declared.Remove("indexes");
+            Settle();
         }
-
-        Touch();
     }
 
     /// <summary>The indexes an entity declares in the working copy, in the order it declares them.</summary>
@@ -509,10 +654,10 @@ internal sealed class WorkingCopy
     /// is the defect the Rules tab already records for its own case.
     /// </remarks>
     /// <param name="entity">The entity.</param>
-    public IReadOnlyList<IndexSchema> IndexesOf(string entity)
-        => _working?["entities"]?[entity]?["indexes"] is JsonArray indexes
+    public IReadOnlyList<IndexSchema> IndexesOf(string entity) => Read<IReadOnlyList<IndexSchema>>(
+        () => _working?["entities"]?[entity]?["indexes"] is JsonArray indexes
             ? [.. indexes.Select(Index)]
-            : [];
+            : []);
 
     /// <summary>
     /// One declared index, in the shape every screen already reads.
@@ -564,32 +709,42 @@ internal sealed class WorkingCopy
     /// <param name="action">The action, already in the schema's own shape.</param>
     public void AddHook(string entity, string point, string? condition, JsonObject action)
     {
-        ArgumentNullException.ThrowIfNull(action);
-
-        if (_working?["entities"]?[entity] is not JsonObject declared)
+        try
         {
-            return;
-        }
+            lock (_gate)
+            {
+                ArgumentNullException.ThrowIfNull(action);
 
-        var hooks = Ensure(declared, "hooks");
-        if (hooks[point] is not JsonArray list)
+                if (_working?["entities"]?[entity] is not JsonObject declared)
+                {
+                    return;
+                }
+
+                var hooks = Ensure(declared, "hooks");
+                if (hooks[point] is not JsonArray list)
+                {
+                    list = [];
+                    hooks[point] = list;
+                }
+
+                var hook = new JsonObject();
+
+                /* Condition before action, because that is the order the schema lists them and the order a
+                   reader of the committed file wants: what guards this, then what it does. */
+                if (!string.IsNullOrWhiteSpace(condition))
+                {
+                    hook["condition"] = condition;
+                }
+
+                hook["action"] = action;
+                list.Add(hook);
+                Touch();
+            }
+        }
+        finally
         {
-            list = [];
-            hooks[point] = list;
+            Settle();
         }
-
-        var hook = new JsonObject();
-
-        /* Condition before action, because that is the order the schema lists them and the order a
-           reader of the committed file wants: what guards this, then what it does. */
-        if (!string.IsNullOrWhiteSpace(condition))
-        {
-            hook["condition"] = condition;
-        }
-
-        hook["action"] = action;
-        list.Add(hook);
-        Touch();
     }
 
     /// <summary>
@@ -605,28 +760,38 @@ internal sealed class WorkingCopy
     /// <param name="position">The hook's position within that point.</param>
     public void RemoveHook(string entity, string point, int position)
     {
-        if (_working?["entities"]?[entity] is not JsonObject declared
-            || declared["hooks"] is not JsonObject hooks
-            || hooks[point] is not JsonArray list
-            || position < 0
-            || position >= list.Count)
+        try
         {
-            return;
+            lock (_gate)
+            {
+                if (_working?["entities"]?[entity] is not JsonObject declared
+                    || declared["hooks"] is not JsonObject hooks
+                    || hooks[point] is not JsonArray list
+                    || position < 0
+                    || position >= list.Count)
+                {
+                    return;
+                }
+
+                list.RemoveAt(position);
+
+                if (list.Count == 0)
+                {
+                    hooks.Remove(point);
+                }
+
+                if (hooks.Count == 0)
+                {
+                    declared.Remove("hooks");
+                }
+
+                Touch();
+            }
         }
-
-        list.RemoveAt(position);
-
-        if (list.Count == 0)
+        finally
         {
-            hooks.Remove(point);
+            Settle();
         }
-
-        if (hooks.Count == 0)
-        {
-            declared.Remove("hooks");
-        }
-
-        Touch();
     }
 
     /// <summary>
@@ -639,34 +804,38 @@ internal sealed class WorkingCopy
     /// </remarks>
     /// <param name="entity">The entity.</param>
     public IReadOnlyList<KeyValuePair<string, string>> HooksOf(string entity)
-        => _working?["entities"]?[entity]?["hooks"] is JsonObject hooks
-            ? [.. hooks.Select(pair => new KeyValuePair<string, string>(
-                pair.Key, Readable(pair.Value, "[]")))]
-            : [];
+        => Read<IReadOnlyList<KeyValuePair<string, string>>>(
+            () => _working?["entities"]?[entity]?["hooks"] is JsonObject hooks
+                ? [.. hooks.Select(pair => new KeyValuePair<string, string>(
+                    pair.Key, Readable(pair.Value, "[]")))]
+                : []);
 
     /// <summary>The fields an entity declares in the working copy, with their raw JSON.</summary>
     public IReadOnlyList<KeyValuePair<string, string>> FieldsOf(string entity)
-        => _working?["entities"]?[entity]?["fields"] is JsonObject fields
-            ? [.. fields.Select(pair => new KeyValuePair<string, string>(
-                pair.Key, Readable(pair.Value, "{}")))]
-            : [];
+        => Read<IReadOnlyList<KeyValuePair<string, string>>>(
+            () => _working?["entities"]?[entity]?["fields"] is JsonObject fields
+                ? [.. fields.Select(pair => new KeyValuePair<string, string>(
+                    pair.Key, Readable(pair.Value, "{}")))]
+                : []);
 
     /// <summary>
     /// An entity's fields as the Fields tab lists them: the working copy's, and the ones it removed.
     /// </summary>
     /// <param name="entity">The entity's name in the working copy.</param>
     public IReadOnlyList<StagedField> FieldChangesOf(string entity)
-        => StagedChanges.Fields(AppliedEntityOf(entity), WorkingEntityOf(entity));
+        => Read(() => StagedChanges.Fields(AppliedEntityOf(entity), WorkingEntityOf(entity)));
 
     /// <summary>The positions of the indexes this copy declared and the applied revision does not.</summary>
     /// <param name="entity">The entity's name in the working copy.</param>
     public IReadOnlySet<int> StagedIndexesOf(string entity)
-        => StagedChanges.NewEntries(
-            AppliedEntityOf(entity)?["indexes"] as JsonArray, WorkingEntityOf(entity)?["indexes"] as JsonArray);
+        => Read(() => StagedChanges.NewEntries(
+            AppliedEntityOf(entity)?["indexes"] as JsonArray, WorkingEntityOf(entity)?["indexes"] as JsonArray));
 
     /// <summary>The hooks, by point and position, this copy declared and the applied revision does not.</summary>
     /// <param name="entity">The entity's name in the working copy.</param>
-    public IReadOnlySet<(string Point, int Position)> StagedHooksOf(string entity)
+    public IReadOnlySet<(string Point, int Position)> StagedHooksOf(string entity) => Read(() => HooksStagedOn(entity));
+
+    private HashSet<(string Point, int Position)> HooksStagedOn(string entity)
     {
         var applied = AppliedEntityOf(entity)?["hooks"] as JsonObject;
         var working = WorkingEntityOf(entity)?["hooks"] as JsonObject ?? [];
@@ -690,30 +859,46 @@ internal sealed class WorkingCopy
     /// <param name="name">The field's applied name.</param>
     public void RestoreField(string entity, string name)
     {
-        if (AppliedEntityOf(entity)?["fields"] is not JsonObject applied
-            || applied[name] is not { } declared
-            || WorkingEntityOf(entity) is not { } working)
+        try
         {
-            return;
-        }
+            lock (_gate)
+            {
+                if (AppliedEntityOf(entity)?["fields"] is not JsonObject applied
+                    || applied[name] is not { } declared
+                    || WorkingEntityOf(entity) is not { } working)
+                {
+                    return;
+                }
 
-        var fields = Ensure(working, "fields");
-        if (fields.ContainsKey(name))
+                var fields = Ensure(working, "fields");
+                if (fields.ContainsKey(name))
+                {
+                    return;
+                }
+
+                Reinsert(fields, name, declared.DeepClone(), applied);
+                Touch();
+            }
+        }
+        finally
         {
-            return;
+            Settle();
         }
-
-        Reinsert(fields, name, declared.DeepClone(), [.. applied.Select(pair => pair.Key)]);
-        Touch();
     }
 
-    /// <summary>Inserts a key just after the last key that preceded it in <paramref name="order"/>.</summary>
-    /// <remarks>Rebuilt rather than appended, for the reason <see cref="Rekey"/> gives.</remarks>
-    private static void Reinsert(JsonObject owner, string name, JsonNode value, List<string> order)
+    /// <summary>Inserts a key just after the last working key whose applied name preceded it.</summary>
+    /// <remarks>
+    /// Rebuilt rather than appended, for the reason <see cref="Rekey"/> gives. A working key is read through
+    /// its <c>renamedFrom</c>, as <c>StagedChanges</c> places a removed row: a field renamed since it was
+    /// applied still stands where its applied name stood.
+    /// </remarks>
+    private static void Reinsert(JsonObject owner, string name, JsonNode value, JsonObject applied)
     {
+        var order = applied.Select(pair => pair.Key).ToList();
         var earlier = order.Take(order.IndexOf(name)).ToHashSet(StringComparer.Ordinal);
         var pairs = owner.Select(pair => (pair.Key, Value: pair.Value?.DeepClone())).ToList();
-        var at = pairs.FindLastIndex(pair => earlier.Contains(pair.Key)) + 1;
+        var at = pairs.FindLastIndex(
+            pair => StagedChanges.OriginOf(pair.Value, pair.Key, applied) is { } origin && earlier.Contains(origin)) + 1;
 
         pairs.Insert(at, (name, value));
         owner.Clear();
@@ -736,8 +921,43 @@ internal sealed class WorkingCopy
         return origin is null ? null : applied![origin] as JsonObject;
     }
 
-    /// <summary>Tells whoever shows this copy that it moved.</summary>
-    private void Touch() => Changed?.Invoke();
+    /// <summary>Records, under the gate, that this edit changed something.</summary>
+    private void Touch() => _touched = true;
+
+    /// <summary>
+    /// After an edit: takes the pending count and tells whoever shows this copy that it moved.
+    /// </summary>
+    /// <remarks>
+    /// The event is raised outside the gate, because a handler belongs to another component — possibly on
+    /// another circuit — and holding a lock while calling code nobody here wrote is how a lock deadlocks.
+    /// </remarks>
+    private void Settle()
+    {
+        bool changed;
+        lock (_gate)
+        {
+            changed = _touched;
+            _touched = false;
+            if (changed)
+            {
+                Volatile.Write(ref _pending, IsDirty ? Math.Max(1, StagedChanges.Count(_applied, _working)) : 0);
+            }
+        }
+
+        if (changed)
+        {
+            Changed?.Invoke();
+        }
+    }
+
+    /// <summary>Reads under the gate.</summary>
+    private T Read<T>(Func<T> read)
+    {
+        lock (_gate)
+        {
+            return read();
+        }
+    }
 
     private static JsonObject Ensure(JsonNode? parent, string name)
     {

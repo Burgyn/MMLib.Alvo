@@ -51,6 +51,41 @@ public sealed class PendingWorkScenarios(AdminWorld world) : IClassFixture<Admin
     }
 
     /// <summary>
+    /// Discarding from the bar takes the staged row off the tab behind it, and the bar with it.
+    /// </summary>
+    /// <remarks>
+    /// The page under the sheet never learns the bar exists: the bar re-navigates to the same address, and the
+    /// tab re-reads the copy. Asserted on the tab, because a bar that went away over a Fields tab still listing
+    /// the field would be the two halves of the shell disagreeing about one copy.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Confirming_discard_from_the_bar_clears_the_tab_and_the_bar()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/regions");
+
+        await session.Page.ClickAsync("[data-testid='add-field']");
+        await session.Page.Locator("[data-testid='field-sheet']").WaitForAsync();
+        await session.Page.FillAsync("#new-field-name", "short_lived");
+        await session.Page.ClickAsync("[data-testid='field-save']");
+        await session.Page.Locator("[data-testid='staged-short_lived']").WaitForAsync();
+
+        await session.Page.ClickAsync("[data-testid='pending-discard']");
+        await session.Page.ClickAsync("[data-testid='discard-confirm']");
+
+        var detached = new Microsoft.Playwright.LocatorWaitForOptions
+        {
+            State = Microsoft.Playwright.WaitForSelectorState.Detached,
+        };
+        await session.Page.Locator("[data-testid='field-row-short_lived']").WaitForAsync(detached);
+        await session.Page.Locator("[data-testid='pending-bar']").WaitForAsync(detached);
+        (await session.Page.Locator("[data-testid='project-pending']").CountAsync()).ShouldBe(0);
+        session.Page.Url.ShouldEndWith("/schema/regions");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
     /// Discarding looks destructive and can be backed out of; a removed field stays, struck through, and
     /// Undo puts it back.
     /// </summary>

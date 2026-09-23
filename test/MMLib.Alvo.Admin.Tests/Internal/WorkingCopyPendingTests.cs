@@ -154,6 +154,20 @@ public class WorkingCopyPendingTests
     }
 
     [Fact]
+    public void A_field_restored_beside_a_renamed_one_goes_back_after_the_rename()
+    {
+        var copy = new WorkingCopy();
+        copy.Take("""{"entities":{"jobs":{"fields":{"a":{"type":"string"},"b":{"type":"string"},"c":{"type":"string"}}}}}""", 1);
+        copy.RenameField("jobs", "a", "x").ShouldBeNull();
+        copy.RemoveField("jobs", "b");
+
+        copy.RestoreField("jobs", "b");
+
+        copy.FieldsOf("jobs").Select(field => field.Key).ShouldBe(
+            ["x", "b", "c"], "b followed a when it was applied, and x is a under a new name");
+    }
+
+    [Fact]
     public void Every_edit_tells_whoever_shows_the_copy()
     {
         var copy = Copy();
@@ -162,9 +176,39 @@ public class WorkingCopyPendingTests
 
         copy.AddField("customers", "phone", Facets());
         copy.RemoveField("customers", "phone");
+        copy.RenameField("customers", "email", "contact_email");
+        copy.RemoveField("customers", "notes");
+        copy.RestoreField("customers", "notes");
+        copy.Replace(copy.Json);
         copy.Discard();
+        copy.Take(Descriptor, revision: 5);
 
-        raised.ShouldBe(3);
+        raised.ShouldBe(8);
+    }
+
+    [Fact]
+    public void A_removal_that_removed_nothing_tells_nobody()
+    {
+        var copy = Copy();
+        var raised = 0;
+        copy.Changed += () => raised++;
+
+        copy.RemoveField("customers", "no_such_field");
+        copy.RemoveEntity("no_such_entity");
+
+        raised.ShouldBe(0, "a redraw of every open tab for an edit that did not happen is noise");
+    }
+
+    [Fact]
+    public void The_count_is_current_the_moment_the_event_is_raised()
+    {
+        var copy = Copy();
+        var seen = -1;
+        copy.Changed += () => seen = copy.PendingCount;
+
+        copy.AddEntity("invoices", scoped: false, audited: true);
+
+        seen.ShouldBe(1, "a handler redraws from the count, so it must be taken before the event");
     }
 
     private static WorkingCopy Copy()
