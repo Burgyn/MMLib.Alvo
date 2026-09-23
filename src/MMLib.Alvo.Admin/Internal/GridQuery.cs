@@ -34,6 +34,17 @@ internal sealed record GridSort(string Field, bool Descending);
 /// </remarks>
 internal static class GridQuery
 {
+    /// <summary>The longest <c>ilike</c> pattern a search sends, wildcards included.</summary>
+    /// <remarks>
+    /// The Data API's own bound — <c>QueryStringParser.MaxPatternLength</c>, 512 — which is internal to the
+    /// core and so restated here rather than referenced. A pattern past it is refused over <c>/api</c>, and
+    /// the grid must not reach rows through the port by a query the API would not have answered.
+    /// </remarks>
+    public const int MaxPatternLength = 512;
+
+    /// <summary>The longest term a search keeps: the pattern less its two <c>%</c>.</summary>
+    public const int MaxTermLength = MaxPatternLength - 2;
+
     /// <summary>The string fields a quick search looks in.</summary>
     public static IReadOnlyList<string> Searchable(EntitySchema entity, FieldMasks masks)
     {
@@ -49,6 +60,7 @@ internal static class GridQuery
     }
 
     /// <summary>The filter a search term becomes; <see langword="null"/> when there is nothing to search for.</summary>
+    /// <remarks>A term longer than <see cref="MaxTermLength"/> is cut to it, never sent whole.</remarks>
     public static AlvoFilter? Search(IReadOnlyList<string> fields, string? term)
     {
         ArgumentNullException.ThrowIfNull(fields);
@@ -59,7 +71,7 @@ internal static class GridQuery
             return null;
         }
 
-        var pattern = $"%{trimmed}%";
+        var pattern = $"%{(trimmed.Length > MaxTermLength ? trimmed[..MaxTermLength] : trimmed)}%";
         return new AlvoOr([.. fields.Select(field => new AlvoComparison(field, AlvoFilterOperator.ILike, pattern))]);
     }
 

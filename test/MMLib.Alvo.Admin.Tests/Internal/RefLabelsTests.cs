@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Admin.Tests.Internal;
 
@@ -35,14 +36,14 @@ public class RefLabelsTests
     [Fact]
     public void The_read_is_an_in_filter_projected_to_the_id_and_the_label()
     {
-        var query = RefLabels.Query("bikes", "model", [_bike, _other]);
+        var query = RefLabels.Query("customers", new RowLabel(["first_name", "last_name"]), [_bike, _other]);
 
-        query.Entity.ShouldBe("bikes");
+        query.Entity.ShouldBe("customers");
         var filter = query.Filter.ShouldBeOfType<AlvoComparison>();
         filter.Field.ShouldBe("id");
         filter.Operator.ShouldBe(AlvoFilterOperator.In);
         filter.Value.ShouldBeAssignableTo<IEnumerable<Guid>>()!.ShouldBe([_bike, _other]);
-        query.Select.ShouldBe(["id", "model"]);
+        query.Select.ShouldBe(["id", "first_name", "last_name"]);
         query.Limit.ShouldBe(2);
         AlvoFilter.EnsureWithinLimits(query.Filter);
     }
@@ -58,4 +59,92 @@ public class RefLabelsTests
     [Fact]
     public void A_short_id_is_the_first_eight_characters()
         => RefLabels.ShortId(_bike).ShouldBe("0199a1b2");
+
+    [Theory]
+    [InlineData("name")]
+    [InlineData("title")]
+    [InlineData("label")]
+    [InlineData("display_name")]
+    [InlineData("reference")]
+    [InlineData("code")]
+    [InlineData("sku")]
+    [InlineData("order_number")]
+    public void A_name_like_field_is_the_label_before_the_first_required_string(string named)
+    {
+        var entity = Entity(
+            Strings("brand", required: true),
+            Strings("colour"),
+            Strings(named));
+
+        RefLabels.For(entity, FieldMasks.None)!.Fields.ShouldBe([named]);
+    }
+
+    [Fact]
+    public void The_name_like_fields_are_tried_in_their_order()
+        => RefLabels.For(
+                Entity(Strings("order_number"), Strings("sku"), Strings("title"), Strings("name")), FieldMasks.None)!
+            .Fields.ShouldBe(["name"]);
+
+    [Fact]
+    public void First_and_last_name_together_are_the_label()
+    {
+        var label = RefLabels.For(
+            Entity(Strings("email", required: true), Strings("last_name"), Strings("first_name")), FieldMasks.None)!;
+
+        label.Fields.ShouldBe(["first_name", "last_name"]);
+        label.Of(Row(("first_name", "Ada"), ("last_name", "Lovelace"))).ShouldBe("Ada Lovelace");
+        label.Of(Row(("last_name", "Lovelace"))).ShouldBe("Lovelace", "a masked or unset half is skipped");
+        label.Of(Row()).ShouldBeNull();
+    }
+
+    [Fact]
+    public void A_first_name_alone_is_not_a_composite()
+        => RefLabels.For(Entity(Strings("phone", required: true), Strings("first_name")), FieldMasks.None)!
+            .Fields.ShouldBe(["phone"]);
+
+    [Fact]
+    public void Otherwise_the_label_is_the_first_required_string_then_the_first_string()
+    {
+        RefLabels.For(Entity(Strings("nickname"), Strings("brand", required: true)), FieldMasks.None)!
+            .Fields.ShouldBe(["brand"]);
+        RefLabels.For(Entity(Strings("nickname"), Strings("colour")), FieldMasks.None)!
+            .Fields.ShouldBe(["nickname"]);
+    }
+
+    [Fact]
+    public void An_entity_with_no_string_has_no_label()
+        => RefLabels.For(
+                Entity(
+                    new FieldSchema { Name = "amount", Type = FieldType.Decimal },
+                    new FieldSchema { Name = "name", Type = FieldType.Text }),
+                FieldMasks.None)
+            .ShouldBeNull("a text field is prose, not a name, whatever it is called");
+
+    [Fact]
+    public void A_field_hidden_from_everyone_is_never_the_label()
+        => RefLabels.For(Entity(Strings("name"), Strings("brand", required: true)), Masks(always: ["name"]))!
+            .Fields.ShouldBe(["brand"], "a field that never comes back would label every row with the short id");
+
+    [Fact]
+    public void A_field_masked_by_cel_can_still_be_the_label()
+        => RefLabels.For(Entity(Strings("name")), Masks(conditional: ["name"]))!
+            .Fields.ShouldBe(["name"], "it comes back for some callers, and the others get the short id");
+
+    [Fact]
+    public void A_managed_column_is_never_the_label()
+        => RefLabels.For(Entity(Strings("created_by"), Strings("brand")) with { Audit = true }, FieldMasks.None)!
+            .Fields.ShouldBe(["brand"]);
+
+    private static FieldMasks Masks(string[]? always = null, string[]? conditional = null)
+        => new(
+            new HashSet<string>(always ?? [], StringComparer.Ordinal),
+            new HashSet<string>(conditional ?? [], StringComparer.Ordinal));
+
+    private static EntitySchema Entity(params FieldSchema[] fields) => new() { Name = "bikes", Fields = fields };
+
+    private static FieldSchema Strings(string name, bool required = false)
+        => new() { Name = name, Type = FieldType.String, Required = required };
+
+    private static AlvoRecord Row(params (string Field, object? Value)[] values)
+        => new(values.ToDictionary(value => value.Field, value => value.Value));
 }

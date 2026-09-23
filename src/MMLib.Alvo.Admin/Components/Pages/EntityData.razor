@@ -65,7 +65,7 @@
                 <div class="a-grid-search">
                     <input type="search" class="a-input" data-testid="grid-search" data-alvo-search
                            placeholder="@($"Search {EntityName}…")" aria-label="@($"Search {EntityName}")"
-                           title="@($"Looks in {string.Join(", ", _searchable)}")"
+                           title="@($"Looks in {string.Join(", ", _searchable)}")" maxlength="@GridQuery.MaxPatternLength"
                            @bind="_search" @bind:event="oninput" @bind:after="SearchChanged" />
                 </div>
             }
@@ -159,7 +159,7 @@
                                 same value twice with one of them labelled.
                             *@
                             <dl class="a-row-card__meta">
-                                @foreach (var column in _columns.Where(column => column != _label))
+                                @foreach (var column in _columns.Where(column => _label?.Covers(column.Name) != true))
                                 {
                                     <div class="a-row-card__pair">
                                         <dt title="@column.Name">@GridColumns.Header(column)</dt>
@@ -214,7 +214,8 @@
     private string _descriptor = string.Empty;
     private FieldMasks _masks = FieldMasks.None;
     private IReadOnlyList<FieldSchema> _columns = [];
-    private FieldSchema? _label;
+    private RowLabel? _label;
+    private IReadOnlyDictionary<string, RowLabel> _targets = new Dictionary<string, RowLabel>(StringComparer.Ordinal);
     private IReadOnlyList<string> _searchable = [];
     private IReadOnlyDictionary<string, IReadOnlyDictionary<Guid, string>> _labels
         = new Dictionary<string, IReadOnlyDictionary<Guid, string>>(StringComparer.Ordinal);
@@ -356,8 +357,33 @@
             entity => string.Equals(entity.Name, EntityName, StringComparison.Ordinal));
         _masks = DescriptorLens.Masks(_descriptor, EntityName);
         _columns = _entity is null ? [] : GridColumns.Choose(_entity, _masks);
-        _label = _entity is null ? null : GridColumns.LabelField(_entity, _masks);
+        _label = _entity is null ? null : RefLabels.For(_entity, _masks);
         _searchable = _entity is null ? [] : GridQuery.Searchable(_entity, _masks);
+        _targets = Targets();
+    }
+
+    /// <summary>
+    /// The label of every entity a shown reference column points at, worked out once per entity rather
+    /// than once per page.
+    /// </summary>
+    /// <remarks>
+    /// Keyed by the target alone, because the label is a function of the target: two columns pointing
+    /// at the same entity share one read. A target with no label is absent, and its cells show short ids.
+    /// </remarks>
+    private Dictionary<string, RowLabel> Targets()
+    {
+        var targets = new Dictionary<string, RowLabel>(StringComparer.Ordinal);
+        foreach (var name in _columns.Select(column => column.Reference?.TargetEntity).OfType<string>().Distinct())
+        {
+            var target = _schema!.Entities.FirstOrDefault(
+                entity => string.Equals(entity.Name, name, StringComparison.Ordinal));
+            if (target is not null && RefLabels.For(target, DescriptorLens.Masks(_descriptor, name)) is { } label)
+            {
+                targets[name] = label;
+            }
+        }
+
+        return targets;
     }
 
     /// <summary>
@@ -374,8 +400,9 @@
         {
             var query = GridQuery.Page(
                 _entity!, GridQuery.Search(_searchable, _search), _sort, PageSize, _cursor);
-            var page = await Records.PageAsync(query, CancellationToken.None);
-            var labels = await LabelsAsync(page);
+            var context = await Records.ContextAsync(CancellationToken.None);
+            var page = await Records.PageAsync(query, context, CancellationToken.None);
+            var labels = await LabelsAsync(page, context);
             if (version != _loadVersion)
             {
                 return;
@@ -395,14 +422,19 @@
         }
     }
 
-    private async Task<IReadOnlyDictionary<string, IReadOnlyDictionary<Guid, string>>> LabelsAsync(AlvoPage page)
+    /// <summary>The labels the page's references point at, by target entity.</summary>
+    private async Task<IReadOnlyDictionary<string, IReadOnlyDictionary<Guid, string>>> LabelsAsync(
+        AlvoPage page, AlvoContext context)
     {
         var labels = new Dictionary<string, IReadOnlyDictionary<Guid, string>>(StringComparer.Ordinal);
-        foreach (var column in _columns.Where(column => column.Reference is not null))
+        foreach (var (target, label) in _targets)
         {
-            if (await ColumnLabelsAsync(column, page) is { } resolved)
+            var values = _columns
+                .Where(column => string.Equals(column.Reference?.TargetEntity, target, StringComparison.Ordinal))
+                .SelectMany(column => page.Items.Select(row => row[column.Name]));
+            if (await TargetLabelsAsync(target, label, values, context) is { } resolved)
             {
-                labels[column.Name] = resolved;
+                labels[target] = resolved;
             }
         }
 
@@ -410,27 +442,19 @@
     }
 
     /// <summary>
-    /// One reference column's labels, or nothing — and nothing is a state, not a fault.
+    /// One target's labels, or nothing — and nothing is a state, not a fault.
     /// </summary>
     /// <remarks>
-    /// A target with no string field has no label to show; a label field masked from this caller, or a
-    /// scoped target read with no tenant, is refused by the data port. Every one of them leaves the
-    /// cell its short id, which is still a link to the record — so the grid never turns red over a
-    /// column it could draw anyway.
+    /// A label field masked from this caller, or a scoped target read with no tenant, is refused by the
+    /// data port. Either leaves the cell its short id, which is still a link to the record — so the grid
+    /// never turns red over a column it could draw anyway.
     /// </remarks>
-    private async Task<IReadOnlyDictionary<Guid, string>?> ColumnLabelsAsync(FieldSchema column, AlvoPage page)
+    private async Task<IReadOnlyDictionary<Guid, string>?> TargetLabelsAsync(
+        string target, RowLabel label, IEnumerable<object?> values, AlvoContext context)
     {
-        var target = _schema!.Entities.FirstOrDefault(
-            entity => string.Equals(entity.Name, column.Reference!.TargetEntity, StringComparison.Ordinal));
-        if (target is null || GridColumns.LabelField(target, DescriptorLens.Masks(_descriptor, target.Name)) is not { } label)
-        {
-            return null;
-        }
-
         try
         {
-            return await Records.LabelsAsync(
-                target.Name, label.Name, page.Items.Select(row => row[column.Name]), CancellationToken.None);
+            return await Records.LabelsAsync(target, label, values, context, CancellationToken.None);
         }
         catch (AlvoAuthorizationException)
         {
@@ -613,7 +637,11 @@
     }
 
     private string? LabelOf(FieldSchema column, Guid id)
-        => _labels.TryGetValue(column.Name, out var labels) && labels.TryGetValue(id, out var label) ? label : null;
+        => column.Reference is { } reference
+            && _labels.TryGetValue(reference.TargetEntity, out var labels)
+            && labels.TryGetValue(id, out var label)
+                ? label
+                : null;
 
     private RenderFragment Value(FieldSchema column, AlvoRecord row)
         => column.Reference is not null && RefLabels.IdOf(row[column.Name]) is { } id
@@ -644,8 +672,8 @@
         _ => @<text>@cell.Text</text>,
     };
 
-    /// <summary>A phone card's title: the label field, else the row's short id.</summary>
-    private RenderFragment CardTitle(AlvoRecord row) => _label is not null
-        ? Value(_label, row)
+    /// <summary>A phone card's title: the row's label, else its short id.</summary>
+    private RenderFragment CardTitle(AlvoRecord row) => _label?.Of(row) is { } label
+        ? Drawn(GridCell.Plain(label))
         : Drawn(GridCell.Of(new FieldSchema { Name = AlvoManagedColumns.Id, Type = FieldType.Uuid }, row[AlvoManagedColumns.Id]));
 }

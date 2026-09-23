@@ -9,68 +9,32 @@ namespace MMLib.Alvo.Admin.Tests.Internal;
 public class GridColumnsTests
 {
     [Fact]
-    public void The_label_is_the_first_required_string()
-    {
-        var entity = Entity(
-            Field("nickname", FieldType.String),
-            Field("status", FieldType.Enum, required: true),
-            Field("order_number", FieldType.String, required: true),
-            Field("title", FieldType.String, required: true));
-
-        GridColumns.LabelField(entity, FieldMasks.None)!.Name.ShouldBe("order_number");
-    }
-
-    [Fact]
-    public void Without_a_required_string_the_label_is_the_first_string()
-    {
-        var entity = Entity(
-            Field("amount", FieldType.Decimal, required: true),
-            Field("nickname", FieldType.String),
-            Field("colour", FieldType.String));
-
-        GridColumns.LabelField(entity, FieldMasks.None)!.Name.ShouldBe("nickname");
-    }
-
-    [Fact]
-    public void An_entity_with_no_string_has_no_label()
-        => GridColumns.LabelField(
-            Entity(Field("amount", FieldType.Decimal), Field("notes", FieldType.Text)), FieldMasks.None)
-            .ShouldBeNull("a text field is prose, not a name");
-
-    [Fact]
-    public void A_field_hidden_from_everyone_is_never_the_label()
-    {
-        var entity = Entity(
-            Field("access_code", FieldType.String, required: true),
-            Field("reference", FieldType.String, required: true));
-
-        GridColumns.LabelField(entity, Masks(always: ["access_code"]))!.Name.ShouldBe(
-            "reference", "a field that never comes back would label every row with the short id");
-    }
-
-    [Fact]
-    public void A_field_masked_by_cel_can_still_be_the_label()
-    {
-        var entity = Entity(Field("full_name", FieldType.String, required: true));
-
-        GridColumns.LabelField(entity, Masks(conditional: ["full_name"]))!.Name.ShouldBe(
-            "full_name", "it comes back for some callers, and the others get the short id");
-    }
-
-    [Fact]
-    public void The_columns_are_the_label_then_enums_refs_dates_amounts_and_the_rest()
+    public void The_columns_are_the_label_two_enums_refs_amounts_dates_the_other_enums_and_the_rest()
     {
         var entity = Entity(
             Field("contact_email", FieldType.String),
+            Field("payment_method", FieldType.Enum),
             Field("total", FieldType.Decimal, computed: "labour + parts"),
             Field("promised_on", FieldType.Date),
             Field("bike_id", FieldType.Ref),
             Field("status", FieldType.Enum, required: true),
-            Field("order_number", FieldType.String, required: true),
-            Field("paid", FieldType.Boolean));
+            Field("priority", FieldType.Enum, required: true),
+            Field("order_number", FieldType.String, required: true));
 
         GridColumns.Choose(entity, FieldMasks.None).Select(field => field.Name).ShouldBe(
-            ["order_number", "status", "bike_id", "promised_on", "total", "contact_email", "paid"]);
+            ["order_number", "payment_method", "status", "bike_id", "total", "promised_on", "priority"]);
+    }
+
+    [Fact]
+    public void A_composite_label_leads_with_both_its_fields()
+    {
+        var entity = Entity(
+            Field("tier", FieldType.Enum),
+            Field("first_name", FieldType.String, required: true),
+            Field("last_name", FieldType.String, required: true));
+
+        GridColumns.Choose(entity, FieldMasks.None).Select(field => field.Name)
+            .ShouldBe(["first_name", "last_name", "tier"]);
     }
 
     [Fact]

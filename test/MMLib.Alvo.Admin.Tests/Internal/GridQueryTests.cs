@@ -55,6 +55,16 @@ public class GridQueryTests
         AlvoFilter.EnsureWithinLimits(filter);
     }
 
+    [Fact]
+    public void A_term_past_the_data_apis_pattern_bound_is_cut_to_it()
+    {
+        var filter = GridQuery.Search(["reference"], new string('x', 2_000));
+
+        var pattern = (string)filter.ShouldBeOfType<AlvoOr>().Filters.Cast<AlvoComparison>().Single().Value!;
+        pattern.Length.ShouldBe(512, "QueryStringParser.MaxPatternLength, wildcards included");
+        pattern.ShouldBe($"%{new string('x', 510)}%");
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

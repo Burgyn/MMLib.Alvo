@@ -67,6 +67,28 @@ public sealed class DataGridScenarios(AdminWorld world) : IClassFixture<AdminWor
     }
 
     /// <summary>
+    /// A link to a record this caller cannot read says so, rather than opening nothing silently.
+    /// </summary>
+    /// <remarks>
+    /// Over <c>regions</c>, which is global, so the answer is about the record and not about a tenant.
+    /// The same words cover "does not exist" and "a rule excludes it", because the data port answers
+    /// both the same way on purpose.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_link_to_a_record_nobody_can_read_says_so()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync($"/data/regions?record={Guid.NewGuid()}");
+
+        var note = session.Page.Locator("[data-testid='record-unreachable']");
+        await note.WaitForAsync();
+        (await note.InnerTextAsync()).ShouldContain("not one this credential can read");
+        (await session.Page.Locator("#rf-name").CountAsync()).ShouldBe(0, "no sheet opens over nothing");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
     /// Gives the operator a tenant and writes two work orders into it, one per customer.
     /// </summary>
     /// <returns>The two customers' ids.</returns>
