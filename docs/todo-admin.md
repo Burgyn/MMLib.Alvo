@@ -158,7 +158,7 @@ reachable and the dashboard says why · **gap** = not reachable and nothing says
 | Facet | Where | State | What that costs |
 |---|---|---|---|
 | `description` | Entity header, Schema list | read | The absence is explained ("no description in the descriptor") and cannot be fixed from the screen that explains it. |
-| `renamedFrom` | nowhere | **gap** | A field carries a rename through `FieldEditor`; an entity does not. Renaming an entity from the dashboard is therefore remove + add — a drop and recreate, which is the exact data loss the key exists to prevent. |
+| `renamedFrom` | Rename, in the header | **edit** | Item 8, done ([#266](https://github.com/Burgyn/MMLib.Alvo/issues/266)). The key names the **applied** name, never an intermediate; it is dropped on a rename back, and absent for an entity this working copy invented. |
 | `storage` | Entity header badge | read | Right: `dynamic` is F7. |
 | `tenancy` | written once, by "Add entity" | partial | Nothing changes it afterwards. |
 | `softDelete` | nowhere | **gap** | Refused by `UnhonouredFeatures.OnAnEntity`, so an editor would be wrong — but the refusal is never rendered: `FieldEditor` filters `capabilities.refused` to `field.*` and nothing consumes the `entity.*` half. Its absence reads as an oversight rather than a refusal. |
@@ -178,7 +178,7 @@ below is *destroyed* by an edit — it is only unauthorable.
 |---|---|---|---|
 | `type` | yes | column | edit |
 | `description` | no | not shown | **gap** — the schema says "surfaced to agents and in the admin UI"; an entity's is shown, a field's is not. |
-| `renamedFrom` | written by the rename | — | edit, implicitly |
+| `renamedFrom` | written by the rename | **edit** | The audit said "edit, implicitly" and that was wrong: the field editor **locked** the name, so nothing wrote the key on either level. Both now do (#266). |
 | `required` | yes | `required` | edit |
 | `unique` | yes | `unique` | edit |
 | `nullable` | no | not shown | **gap** — preserved, never authored. |
@@ -223,8 +223,11 @@ None carries `ready`: they are gaps this audit found, not confirmed specificatio
    `restrict`, written without a control and without a word on screen. The other three semantics
    are reachable only by editing the descriptor by hand. This is the one gap below that changes
    what the *database* does, which is why it is first.
-8. ([#266](https://github.com/Burgyn/MMLib.Alvo/issues/266)) **An entity cannot be renamed without dropping it.** `renamedFrom` exists on an entity exactly
-   as it does on a field, and only the field's is wired.
+8. ✅ ([#266](https://github.com/Burgyn/MMLib.Alvo/issues/266), **done**) **Nothing can be renamed without dropping it.** `renamedFrom` exists on an entity
+   exactly as it does on a field, and the audit recorded that "only the field's is wired" — which was
+   itself wrong. Neither was: the field editor **locked** the name and told the operator to edit the
+   descriptor by hand, so no screen wrote the key at all. Both are wired now, and the key names the
+   applied name rather than an intermediate.
 9. ([#267](https://github.com/Burgyn/MMLib.Alvo/issues/267)) **`hidden` and `readOnly` are invisible to the dashboard.** Not merely uneditable: absent from
    `SchemaModel.FieldSchema`, so no screen can show that a field never leaves the server. Fixing it
    starts one layer down, in the schema model, which makes it the only item here that is not purely
@@ -246,6 +249,28 @@ None carries `ready`: they are gaps this audit found, not confirmed specificatio
     declared blocks with no screen and no sentence. The cheap fix is one honest surface (a
     "declared, not editable here" panel, as Integrations already does for `webhooks`/`templates`)
     rather than five editors.
+
+### 5f. Found after the audit, by using it
+
+The audit walked the descriptor against the dashboard. These three were not reachable that way —
+two came from driving the real thing on a phone, one from a review — and they are recorded because
+the pattern is the point: **a walk over what a screen *declares* does not see what it *renders*, and
+sees nothing at all about what it cannot undo.**
+
+- ✅ **A hook's CEL condition was rendered escaped.** `HooksTab` re-serialised each entry with a bare
+  `ToJsonString()`, so the default encoder turned `&&` into `\u0026\u0026` and every apostrophe into
+  `\u0027`. `WorkingCopy` carries two paragraphs about exactly this defect for the document as a
+  whole; it arrived one re-serialisation later. Every fact that asserted against the *document*
+  passed while the *screen* was wrong.
+- ✅ **The phone-fit check was measuring the wrong element.** `AssertNoHorizontalScrollAsync` read
+  `document.documentElement`, but the shell gives `.a-content` `overflow: auto` — so content wider
+  than a phone scrolls that pane and the document never moves. It reported clean on the very route
+  whose screenshot showed it scrolling. It now measures the shell pane too, and still excludes
+  deliberate scrollers, because a check that fails on a tab strip is a check somebody turns off.
+- ✅ **A staged change could not be discarded.** `WorkingCopy.Discard` was fully written and **no
+  screen called it**, so an edit could be applied or abandoned with the session and nothing else.
+  This is the sharpest of the three for the audit's method: the method asks "can an operator reach
+  this", and `Discard` is not a descriptor facet, so nothing in §5a–5d was ever going to ask.
 
 ## 6. Crowded toolbars on a phone
 
