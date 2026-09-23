@@ -355,6 +355,7 @@ namespace MMLib.Alvo.Admin.Components.Pages
         public SchemaList() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
     [Microsoft.AspNetCore.Authorization.Authorize]

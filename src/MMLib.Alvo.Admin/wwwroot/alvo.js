@@ -49,10 +49,13 @@
     document.documentElement.dataset.theme ??
     (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 
+  /* Announced as well as returned: the palette can flip the theme too, and the header's toggle has
+     to redraw its icon for a flip it did not make. `emit` is a hoisted function below. */
   const toggleTheme = () => {
     const next = resolvedTheme() === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = next;
     writeStored(THEME_KEY, next);
+    emit('theme', { value: next });
     return next;
   };
 
@@ -73,8 +76,13 @@
     element instanceof HTMLElement &&
     (element.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName));
 
-  const emit = (name, detail) =>
+  function emit(name, detail) {
     document.dispatchEvent(new CustomEvent(`alvo:${name}`, { detail, bubbles: true }));
+  }
+
+  /* The keys that may follow `g`: the sections' letters, and the comma Settings takes from the
+     convention of ⌘, for preferences. Which key reaches which section is AdminNavigation's to say. */
+  const GOTO_KEY = /^[a-z,]$/;
 
   let awaitingGoto = false;
 
@@ -91,13 +99,16 @@
       return;
     }
 
-    if (isTypingTarget(document.activeElement)) {
+    /* A chord with a modifier belongs to the browser or the operating system — ⌥D, ⌘R — and a
+       half-typed `g` must not turn the next one into a jump. */
+    if (isTypingTarget(document.activeElement) || event.metaKey || event.ctrlKey || event.altKey) {
+      awaitingGoto = false;
       return;
     }
 
     if (awaitingGoto) {
       awaitingGoto = false;
-      if (/^[a-z]$/.test(event.key)) {
+      if (GOTO_KEY.test(event.key)) {
         event.preventDefault();
         emit('goto', { key: event.key });
       }

@@ -87,9 +87,10 @@ public sealed class PendingWorkScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.Locator("[data-testid='pending-bar']").WaitForAsync(detached);
         (await session.Page.Locator("[data-testid='project-pending']").CountAsync()).ShouldBe(0);
 
-        /* The screen followed the copy rather than being reloaded: still on the tab it was on. */
+        /* The screen followed the copy rather than being reloaded: still on the tab it was on — which the
+           address carries now, so it is still the address the tab click left. */
         (await session.Page.Locator("button.a-tab--active:has-text('Indexes')").CountAsync()).ShouldBe(1);
-        session.Page.Url.ShouldEndWith("/schema/regions");
+        session.Page.Url.ShouldEndWith("/schema/regions?tab=indexes");
 
         await session.OpenTabAsync("Fields");
         (await session.Page.Locator("[data-testid='field-row-short_lived']").CountAsync()).ShouldBe(0);

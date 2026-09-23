@@ -6,6 +6,9 @@
     work without a pointer, and Escape always dismisses. The list is the navigation plus every
     entity in the schema, because "go to the customers entity" is the query an operator actually
     has — and a palette that only listed sections would send them to Schema to look for it.
+
+    Each section carries its `g` shortcut beside it, which is how the shortcuts are learned: the
+    palette is where somebody who does not know them yet already is.
 *@
 @implements IAsyncDisposable
 @inject ManagementGateway Gateway
@@ -18,13 +21,13 @@
          @onclick="Close">
         <div class="a-palette" role="dialog" aria-modal="true" aria-label="Search"
              @onclick:stopPropagation="true" @onkeydown="OnKeyDown">
-            <input class="a-palette__input" placeholder="Go to a section or an entity…"
+            <input class="a-palette__input" placeholder="Go to a section or an entity, or run an action…"
                    @ref="_input" @bind="_query" @bind:event="oninput" aria-label="Search" />
             <div role="listbox" class="a-palette__list">
                 @if (Matches.Count == 0)
                 {
                     <div class="a-palette__item" style="color:var(--dim)">
-                        Nothing matches “@_query”. Sections and entities are what this searches.
+                        Nothing matches “@_query”. Sections, entities and actions are what this searches.
                     </div>
                 }
                 @foreach (var (match, index) in Matches.Select((match, index) => (match, index)))
@@ -40,6 +43,10 @@
                         <Icon Path="@match.Icon" />
                         <span>@match.Title</span>
                         <span style="margin-left:auto;color:var(--faint);font-size:var(--text-2xs)">@match.Kind</span>
+                        @if (match.Shortcut is { } shortcut)
+                        {
+                            <kbd class="a-kbd">@shortcut</kbd>
+                        }
                     </button>
                 }
             </div>
@@ -111,10 +118,7 @@
     [JSInvokable]
     public Task OnGoto(string? key)
     {
-        var target = AdminNavigation.All.FirstOrDefault(
-            candidate => candidate.GoKey is { } go && key is { Length: 1 } && go == key[0]);
-
-        if (target is not null)
+        if (AdminNavigation.GoTo(key) is { } target)
         {
             Navigation.NavigateTo(target.Path);
         }
@@ -128,8 +132,13 @@
         foreach (var entry in AdminNavigation.All)
         {
             _entries.Add(new Entry(entry.Title, entry.Path, entry.Icon,
-                entry.NotYet ? "not yet" : "section"));
+                entry.NotYet ? "not yet" : "section", AdminNavigation.Hint(entry)));
         }
+
+        /* The two things an operator reaches for that are not a place. Listed after the sections so
+           an empty query still opens on where to go, which is what the palette is mostly for. */
+        _entries.Add(new Entry("New entity", AdminNavigation.NewEntity, Icons.Schema, "action"));
+        _entries.Add(new Entry("Toggle theme", null, Icons.Moon, "action"));
 
         try
         {
@@ -147,7 +156,7 @@
         }
     }
 
-    private void OnKeyDown(KeyboardEventArgs args)
+    private async Task OnKeyDown(KeyboardEventArgs args)
     {
         switch (args.Key)
         {
@@ -158,7 +167,7 @@
                 _active = Math.Max(_active - 1, 0);
                 break;
             case "Enter" when Matches.Count > 0:
-                Go(Matches[Math.Min(_active, Matches.Count - 1)]);
+                await Go(Matches[Math.Min(_active, Matches.Count - 1)]);
                 break;
             case "Escape":
                 Close();
@@ -169,10 +178,20 @@
         }
     }
 
-    private void Go(Entry entry)
+    private async Task Go(Entry entry)
     {
         Close();
-        Navigation.NavigateTo(entry.Path);
+
+        if (entry.Path is { } path)
+        {
+            Navigation.NavigateTo(path);
+        }
+        else if (_module is not null)
+        {
+            /* The only entry without an address. alvo.js announces the flip, so the header's toggle
+               redraws its icon without the palette knowing it exists. */
+            await _module.InvokeAsync<string>("toggleTheme");
+        }
     }
 
     private void Close()
@@ -207,5 +226,6 @@
         _self?.Dispose();
     }
 
-    private sealed record Entry(string Title, string Path, string Icon, string Kind);
+    /// <summary>One row. <c>Path</c> is <see langword="null"/> for the one action that goes nowhere.</summary>
+    private sealed record Entry(string Title, string? Path, string Icon, string Kind, string? Shortcut = null);
 }

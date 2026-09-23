@@ -20,7 +20,7 @@ else
     {
         <div class="a-listrow">
             <span class="a-mono a-listrow__key">@field.Name</span>
-            <span class="a-listrow__rest">→ <a class="a-mono" href="@($"{AlvoAdmin.BasePath}/schema/{field.Reference!.TargetEntity}")">@field.Reference!.TargetEntity</a></span>
+            <span class="a-listrow__rest">→ <a class="a-mono a-link" href="@($"{AlvoAdmin.BasePath}/schema/{field.Reference!.TargetEntity}")">@field.Reference!.TargetEntity</a></span>
             <span class="a-badge">on delete @field.Reference!.OnDelete.ToString().ToLowerInvariant()</span>
             @if (field.Required)
             {
@@ -46,7 +46,7 @@ else
     {
         <div class="a-listrow">
             <span class="a-listrow__rest">
-                <a class="a-mono" href="@($"{AlvoAdmin.BasePath}/schema/{entity.Name}")">@entity.Name</a>
+                <a class="a-mono a-link" href="@($"{AlvoAdmin.BasePath}/schema/{entity.Name}")">@entity.Name</a>
                 <span class="a-mono" style="color:var(--dim)">.@field.Name</span>
             </span>
             <span class="a-badge">on delete @field.Reference!.OnDelete.ToString().ToLowerInvariant()</span>

@@ -331,4 +331,80 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
 
         session.AssertConsoleClean();
     }
+
+    /// <summary>
+    /// <c>g d</c> from Overview lands on Data, and <c>g ,</c> — the one key that is not a letter — on Settings.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_goto_shortcut_reaches_data_and_settings()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("");
+
+        await session.Page.Keyboard.PressAsync("g");
+        await session.Page.Keyboard.PressAsync("d");
+        await session.Page.WaitForURLAsync("**/admin/data");
+        await session.SettleAsync();
+
+        await session.Page.Keyboard.PressAsync("g");
+        await session.Page.Keyboard.PressAsync(",");
+        await session.Page.WaitForURLAsync("**/admin/settings");
+        await session.SettleAsync();
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// An entity's tab is in its address: a reload opens on it, the arrows move it, and Back returns.
+    /// </summary>
+    /// <remarks>
+    /// The reload is the half that matters to an operator — a link somebody was sent — and the only
+    /// half a component test cannot reach, because it is the address arriving cold at the server.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task An_entity_tab_survives_a_reload_and_follows_history()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders?tab=rules");
+
+        await session.Page.ReloadAsync();
+        await session.SettleAsync();
+        var selected = session.Page.Locator("[role='tab'][aria-selected='true']");
+        await session.Page.Locator("[role='tab'][aria-selected='true']:has-text('Rules')").WaitForAsync();
+        (await selected.CountAsync()).ShouldBe(1);
+
+        await selected.FocusAsync();
+        await session.Page.Keyboard.PressAsync("ArrowRight");
+        await session.Page.WaitForURLAsync("**/admin/schema/work_orders?tab=on-write");
+        await session.Page.Locator("[role='tab'][aria-selected='true']:has-text('On write')").WaitForAsync();
+        (await session.Page.EvaluateAsync<string>("document.activeElement.textContent")).ShouldBe("On write");
+
+        await session.Page.GoBackAsync();
+        await session.Page.WaitForURLAsync("**/admin/schema/work_orders?tab=rules");
+        await session.Page.Locator("[role='tab'][aria-selected='true']:has-text('Rules')").WaitForAsync();
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// The palette lists the shortcuts beside the sections, and its New entity opens the form on Schema.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_palette_teaches_the_shortcuts_and_opens_a_new_entity()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("");
+
+        await session.Page.Keyboard.PressAsync("Meta+k");
+        await session.Page.Locator(".a-palette [role='option']:has-text('Data') kbd:has-text('g d')").WaitForAsync();
+
+        await session.Page.Keyboard.TypeAsync("new entity");
+        await session.Page.Locator("[role='option'][aria-selected='true']:has-text('New entity')").WaitForAsync();
+        await session.Page.Keyboard.PressAsync("Enter");
+
+        await session.Page.Locator("[data-testid='new-entity']").WaitForAsync();
+        await session.Page.WaitForFunctionAsync("document.activeElement?.id === 'new-entity-name'");
+
+        session.AssertConsoleClean();
+    }
 }

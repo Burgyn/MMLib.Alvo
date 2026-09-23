@@ -82,4 +82,26 @@ internal static class AdminNavigation
     /// reach from a phone.
     /// </remarks>
     public static IEnumerable<AdminSection> BeyondTheBar => Live.Skip(5);
+
+    /// <summary>
+    /// The address that opens Schema with its New entity form already open — the palette's action.
+    /// </summary>
+    /// <remarks>
+    /// An address rather than a call into the page, so the palette needs no reference to a screen
+    /// that may not be mounted, and the form opens the same way from a reload or a pasted link.
+    /// </remarks>
+    public static string NewEntity { get; } = $"{AlvoAdmin.BasePath}/schema?new=entity";
+
+    /// <summary>The section <c>g</c> then <paramref name="key"/> reaches, if any.</summary>
+    /// <remarks>
+    /// Read from the sections' own letters, so the shortcut, the sidebar and the palette's hint
+    /// cannot disagree about where <c>g s</c> goes.
+    /// </remarks>
+    public static AdminSection? GoTo(string? key) => key is { Length: 1 }
+        ? All.FirstOrDefault(section => section.GoKey == key[0])
+        : null;
+
+    /// <summary>The shortcut as the palette spells it beside the section — <c>g d</c> — or nothing.</summary>
+    public static string? Hint(AdminSection section) =>
+        section.GoKey is { } key ? $"g {key}" : null;
 }

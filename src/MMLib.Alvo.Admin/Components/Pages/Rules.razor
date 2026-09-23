@@ -20,20 +20,43 @@
     }
     else
     {
-        <div class="a-tabs">
-            @foreach (var entity in _schema.Entities)
-            {
-                <button type="button" class="@($"a-tab{(entity.Name == Selected ? " a-tab--active" : string.Empty)}")"
-                        @onclick="() => Choose(entity.Name)">@entity.Name</button>
-            }
-        </div>
+        @*
+            A strip reads at a glance while it fits; past a handful of entities it scrolls sideways and
+            the one somebody wants is off the edge, so it becomes a select — which a phone also draws as
+            its own picker.
+        *@
+        @if (_schema.Entities.Count > TabStripLimit)
+        {
+            <div class="a-field" style="max-width:360px">
+                <label class="a-label" for="rules-entity">Entity</label>
+                <select class="a-select a-mono" id="rules-entity" data-testid="rules-entity"
+                        value="@Selected" @onchange="args => Choose(args.Value?.ToString() ?? string.Empty)">
+                    @foreach (var entity in _schema.Entities)
+                    {
+                        <option value="@entity.Name">@entity.Name</option>
+                    }
+                </select>
+            </div>
+        }
+        else
+        {
+            <div class="a-tabs">
+                @foreach (var entity in _schema.Entities)
+                {
+                    <button type="button" class="@($"a-tab{(entity.Name == Selected ? " a-tab--active" : string.Empty)}")"
+                            @onclick="() => Choose(entity.Name)">@entity.Name</button>
+                }
+            </div>
+        }
 
         <div class="a-split">
             <div class="a-panel" style="flex:1;min-width:0">
                 <RulesTab Rules="_rules" Entity="@Selected" />
             </div>
 
-            <div class="a-split__aside" style="min-width:340px;max-width:420px">
+            @* The aside's own width, and full width once the split stacks — a fixed minimum here made the
+               simulator narrower or wider than the rules card above it on a phone. *@
+            <div class="a-split__aside">
                 <div class="a-card" style="gap:var(--space-4)">
                     <div>
                         <span class="a-section-title">Simulate a policy</span>
@@ -97,6 +120,9 @@
 
 @code {
     private static readonly string[] _operations = ["list", "get", "create", "update", "delete"];
+
+    /// <summary>The most entities the picker draws as a tab strip before it becomes a select.</summary>
+    private const int TabStripLimit = 6;
 
     private readonly List<Caller> _callers = [];
     private SchemaModel? _schema;

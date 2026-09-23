@@ -84,21 +84,28 @@ else
             </div>
         }
 
-        <div class="a-choice" data-testid="index-fields">
-            @foreach (var field in Entity.Fields)
-            {
-                var name = field.Name;
+        @*
+            The declared fields first — they are what an index is usually for — and the columns Alvo
+            maintains after them under their own label, the way the Fields tab lists them. They stay
+            pickable: a filter on created_at or tenant_id is exactly what an index serves.
+        *@
+        <div class="a-stack" style="gap:var(--space-3)" data-testid="index-fields">
+            <div class="a-choice">
+                @foreach (var field in Declarable)
+                {
+                    @Chip(field.Name)
+                }
+            </div>
 
-                <button type="button"
-                        class="@($"a-chip{(_chosen.Contains(name) ? " a-chip--on" : string.Empty)}")"
-                        aria-pressed="@(_chosen.Contains(name) ? "true" : "false")"
-                        @onclick="() => Toggle(name)">
-                    <span class="a-mono">@name</span>
-                    @if (_chosen.IndexOf(name) is >= 0 and var order)
+            @if (Maintained.Count > 0)
+            {
+                <span class="a-label">Maintained by Alvo</span>
+                <div class="a-choice" data-testid="index-fields-maintained">
+                    @foreach (var field in Maintained)
                     {
-                        <span class="a-badge">@(order + 1)</span>
+                        @Chip(field.Name)
                     }
-                </button>
+                </div>
             }
         </div>
 
@@ -116,6 +123,24 @@ else
 }
 
 @code {
+    /// <summary>One field to pick, pressed while it is in the index, with its position in it.</summary>
+    private RenderFragment Chip(string name) => @<button type="button"
+            class="@($"a-chip{(_chosen.Contains(name) ? " a-chip--on" : string.Empty)}")"
+            aria-pressed="@(_chosen.Contains(name) ? "true" : "false")"
+            @onclick="() => Toggle(name)">
+        <span class="a-mono">@name</span>
+        @if (_chosen.IndexOf(name) is >= 0 and var order)
+        {
+            <span class="a-badge">@(order + 1)</span>
+        }
+    </button>;
+
+    private List<FieldSchema> Declarable
+        => Entity.Fields.Where(column => !AlvoManagedColumns.For(Entity).Contains(column.Name)).ToList();
+
+    private List<FieldSchema> Maintained
+        => Entity.Fields.Where(column => AlvoManagedColumns.For(Entity).Contains(column.Name)).ToList();
+
     private readonly List<string> _chosen = [];
     private bool _unique;
     private string? _refusal;

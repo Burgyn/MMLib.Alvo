@@ -85,18 +85,26 @@
             <span class="a-badge">@(_entity.Storage == EntityStorage.Physical ? "physical table" : "dynamic")</span>
         </div>
 
-        <div class="a-tabs">
-            @foreach (var tab in _tabs)
+        @*
+            The WAI-ARIA tabs pattern: one tab in the Tab order, the arrows move between them. The
+            selected state is spelled "true"/"false" because Blazor renders a bool attribute the HTML way.
+        *@
+        <div class="a-tabs" role="tablist" aria-label="@($"{EntityName} sections")">
+            @foreach (var tab in EntityTabs.All)
             {
-                <button type="button" class="@($"a-tab{(_tab == tab ? " a-tab--active" : string.Empty)}")"
-                        @onclick="() => _tab = tab">@tab</button>
+                var selected = tab == _tab;
+                <button type="button" role="tab" id="@($"entity-tab-{tab.Slug}")"
+                        aria-selected="@(selected ? "true" : "false")" aria-controls="entity-tabpanel"
+                        tabindex="@(selected ? 0 : -1)" @ref="_tabRefs[tab.Slug]"
+                        class="@($"a-tab{(selected ? " a-tab--active" : string.Empty)}")"
+                        @onclick="() => Open(tab)" @onkeydown="args => Move(args.Key)">@tab.Title</button>
             }
         </div>
 
         @* The staged rows' badges reach the tabs as a cascade, which keeps their model internal. *@
         <CascadingValue Value="_staged">
-            <div class="a-panel">
-                @switch (_tab)
+            <div class="a-panel" role="tabpanel" id="entity-tabpanel" aria-labelledby="@($"entity-tab-{_tab.Slug}")">
+                @switch (_tab.Title)
                 {
                     case "Fields":
                         @*
@@ -142,7 +150,7 @@
             permanent panel it was something to scroll past on every visit, and on a phone a second
             thing competing with the list for the screen.
         *@
-        @if (_tab == "Fields" && _editorOpen)
+        @if (_tab == EntityTabs.First && _editorOpen)
         {
             <FieldEditor Entity="@EntityName" Targets="_entities" OnAdded="AddFieldAsync"
                          Editing="@_editing" EditingJson="@EditedJson" OnCancelled="CloseEditor"
@@ -161,9 +169,7 @@
     /// </remarks>
     private WorkingCopy Copy { get; set; } = new();
 
-    private static readonly string[] _tabs =
-        ["Fields", "Relationships", "Rules", "On write", "Indexes", "API"];
-
+    private readonly Dictionary<string, ElementReference> _tabRefs = new(StringComparer.Ordinal);
     private SchemaModel? _schema;
     private EntitySchema? _entity;
     private IReadOnlyList<KeyValuePair<string, string>> _rules = [];
@@ -181,7 +187,8 @@
     private string _newName = string.Empty;
     private string? _renameRefusal;
     private Exception? _error;
-    private string _tab = "Fields";
+    private EntityTab _tab = EntityTabs.First;
+    private bool _followingAddress;
     private string? _editing;
     private bool _editorOpen;
     private bool _pending;
@@ -192,6 +199,16 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        /* Subscribed here, once, rather than in an OnInitialized override: an override is a member on this
+           public component's contract, and the screen already has the one lifecycle method it needs. */
+        if (!_followingAddress)
+        {
+            _followingAddress = true;
+            Navigation.LocationChanged += OnLocationChanged;
+        }
+
+        _tab = EntityTabs.FromUri(Navigation.Uri);
+
         /* Resolve this operator's working copy before anything reads it: the store is shared and
            keyed by user, so a copy is never another administrator's. */
         Follow(Copies.For((await Caller.ContextAsync(CancellationToken.None)).User));
@@ -281,7 +298,57 @@
     public void Dispose()
     {
         _disposed = true;
+        if (_followingAddress)
+        {
+            Navigation.LocationChanged -= OnLocationChanged;
+        }
+
         Unfollow();
+    }
+
+    /// <summary>
+    /// Follows the address's <c>?tab=</c>, which is how Back and Forward reach the tab.
+    /// </summary>
+    /// <remarks>
+    /// A change of the query alone does not set a routed page's parameters again, so this is the only
+    /// place a history step between two tabs of one entity arrives. An open field editor stays open
+    /// underneath: it is drawn on Fields only, and returning to Fields finds it as it was left.
+    /// </remarks>
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        var tab = EntityTabs.FromUri(args.Location);
+        if (tab != _tab)
+        {
+            _ = InvokeAsync(() =>
+            {
+                _tab = tab;
+                StateHasChanged();
+            });
+        }
+    }
+
+    /// <summary>Opens a tab by putting it in the address, so a reload, a link and Back all agree.</summary>
+    private void Open(EntityTab tab)
+    {
+        _tab = tab;
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter(EntityTabs.Parameter, tab.Slug));
+    }
+
+    /// <summary>The arrows, Home and End on the strip: open the tab they reach and move focus onto it.</summary>
+    /// <remarks>
+    /// Every tab is always drawn, so the one being moved to already has its element and takes focus now;
+    /// the render that follows only moves the roving <c>tabindex</c> after it.
+    /// </remarks>
+    private async Task Move(string key)
+    {
+        if (EntityTabs.Move(_tab, key) is { } next)
+        {
+            Open(next);
+            if (_tabRefs.TryGetValue(next.Slug, out var element))
+            {
+                await element.FocusAsync();
+            }
+        }
     }
 
     /// <summary>An entity only the working copy declares, read again from it — gone once it is discarded.</summary>

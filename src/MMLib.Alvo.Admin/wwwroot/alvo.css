@@ -1737,7 +1737,9 @@ textarea.a-textarea {
   box-shadow: var(--shadow-pop);
 }
 
-.a-chip--on {
+/* The pressed state is the style, so a chip that says aria-pressed="true" cannot look unpicked. */
+.a-chip--on,
+.a-chip[aria-pressed='true'] {
   border-color: var(--accentBorder);
   background: var(--accentSoft);
   color: var(--accent);

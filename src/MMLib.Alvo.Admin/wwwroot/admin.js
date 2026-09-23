@@ -30,7 +30,8 @@ export function markKeyboardReady() {
 
 /** Forwards one `alvo:<name>` document event to a .NET object's method. */
 export function subscribe(name, target, method) {
-  const handler = (event) => target.invokeMethodAsync(method, event.detail?.key ?? null);
+  const handler = (event) =>
+    target.invokeMethodAsync(method, event.detail?.key ?? event.detail?.value ?? null);
   document.addEventListener(`alvo:${name}`, handler);
   handlers.set(`${name}:${method}`, handler);
 }

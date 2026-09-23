@@ -44,7 +44,7 @@
 
             <div class="a-field">
                 <label class="a-label" for="new-entity-name">Name</label>
-                <input class="a-input" id="new-entity-name" value="@_name" placeholder="e.g. invoices"
+                <input class="a-input" id="new-entity-name" value="@_name" placeholder="e.g. invoices" @ref="_nameInput"
                        @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
                 <span class="a-section-sub" title="@DescriptorNames.Member">@DescriptorNames.Hint</span>
             </div>
@@ -162,12 +162,15 @@
     private bool _audited = true;
     private bool _disposed;
     private bool _following;
+    private bool _focusName;
+    private ElementReference _nameInput;
 
     private void OnCopyChanged() => _ = InvokeAsync(StateHasChanged);
 
     public void Dispose()
     {
         _disposed = true;
+        Navigation.LocationChanged -= OnLocationChanged;
         if (_following)
         {
             Copy.Changed -= OnCopyChanged;
@@ -176,6 +179,9 @@
 
     protected override async Task OnInitializedAsync()
     {
+        Navigation.LocationChanged += OnLocationChanged;
+        OpenIfAsked(Navigation.Uri);
+
         /* Resolve this operator's working copy before anything reads it: the store is shared and
            keyed by user, so a copy is never another administrator's. */
         Copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
@@ -247,10 +253,62 @@
     }
 
     /// <summary>Closes the form without touching the working copy, and forgets what was typed.</summary>
+    /// <remarks>
+    /// And drops the palette's <c>?new=entity</c> from the address, without a history step, so a reload
+    /// does not open the form the operator has just closed.
+    /// </remarks>
     private void CancelAdding()
     {
         _adding = false;
         _name = string.Empty;
         _refusal = null;
+
+        if (IsNewEntityRequest(Navigation.Uri))
+        {
+            Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("new", (string?)null), replace: true);
+        }
+    }
+
+    /// <summary>
+    /// The palette's New entity, which arrives as an address — from another screen, or from this one.
+    /// </summary>
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        if (IsNewEntityRequest(args.Location))
+        {
+            _ = InvokeAsync(() =>
+            {
+                OpenIfAsked(args.Location);
+                StateHasChanged();
+            });
+        }
+    }
+
+    private void OpenIfAsked(string uri)
+    {
+        if (IsNewEntityRequest(uri))
+        {
+            _adding = true;
+            _focusName = true;
+        }
+    }
+
+    private static bool IsNewEntityRequest(string uri) =>
+        uri.EndsWith(AdminNavigation.NewEntity, StringComparison.Ordinal);
+
+    /// <summary>Puts the caret in the name, since a form opened from the keyboard is filled from it.</summary>
+    /// <remarks>
+    /// <b>After the render, and it has to be.</b> Arriving from another screen, the router's
+    /// <c>FocusOnNavigate</c> moves focus to the page's heading once the new page has been drawn, so a
+    /// focus made any earlier — from the end of initialisation — is taken straight back. This screen's
+    /// after-render runs after the router's, which is what lets the name keep it.
+    /// </remarks>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusName && _adding)
+        {
+            _focusName = false;
+            await _nameInput.FocusAsync();
+        }
     }
 }

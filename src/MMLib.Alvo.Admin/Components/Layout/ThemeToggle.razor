@@ -8,6 +8,9 @@
 
     An icon of the theme it switches to, and the action spelled out in the label and the tooltip. A
     bare "Light" read as either the state or the action, and nothing on the button said which.
+
+    It also follows a flip it did not make — the palette's Toggle theme — through alvo.js's
+    `alvo:theme` event, so the icon never shows the theme the page is already in.
 *@
 @implements IAsyncDisposable
 @inject IJSRuntime Js
@@ -19,6 +22,7 @@
 
 @code {
     private IJSObjectReference? _module;
+    private DotNetObjectReference<JsEventHandler>? _self;
     private string _theme = string.Empty;
 
     private string Label => _theme == "dark" ? "Switch to light theme" : "Switch to dark theme";
@@ -31,9 +35,18 @@
         }
 
         _module = await Js.InvokeAsync<IJSObjectReference>("import", AlvoAdminAssets.Module);
+        _self = DotNetObjectReference.Create(new JsEventHandler(OnThemeChanged));
+        await _module.InvokeVoidAsync("subscribe", "theme", _self, JsEventHandler.Method);
         _theme = await _module.InvokeAsync<string>("theme");
         StateHasChanged();
     }
+
+    /// <summary>A flip from anywhere, forwarded from alvo.js with the theme it flipped to.</summary>
+    private Task OnThemeChanged(string? theme) => InvokeAsync(() =>
+    {
+        _theme = theme ?? _theme;
+        StateHasChanged();
+    });
 
     private async Task Toggle()
     {
@@ -49,6 +62,7 @@
         {
             try
             {
+                await _module.InvokeVoidAsync("unsubscribe", "theme", JsEventHandler.Method);
                 await _module.DisposeAsync();
             }
             catch (JSDisconnectedException)
@@ -58,5 +72,7 @@
                    here is the documented pattern rather than a hidden failure. */
             }
         }
+
+        _self?.Dispose();
     }
 }
