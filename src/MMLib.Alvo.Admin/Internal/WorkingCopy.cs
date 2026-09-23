@@ -289,13 +289,41 @@ internal sealed class WorkingCopy
             ? [.. indexes.Select(Index)]
             : [];
 
-    /// <summary>One declared index, in the shape every screen already reads.</summary>
+    /// <summary>
+    /// One declared index, in the shape every screen already reads.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It reads defensively, and that is not belt-and-braces.</b> <see cref="Replace"/> validates nothing
+    /// beyond "is it JSON" on purpose — the apply is the authority — so an imported descriptor or an
+    /// assistant's proposal can put <c>"unique": "yes"</c> or a number among the field names into the working
+    /// copy. <c>JsonNode.GetValue&lt;T&gt;</c> throws <see cref="InvalidOperationException"/> for that, and
+    /// <c>Entity.razor</c> reads the indexes on every tab, so one bad entry ended the circuit instead of
+    /// spoiling one panel. <c>HooksTab</c> already degraded this way and this path did not.
+    /// </para>
+    /// <para>
+    /// <b>An unreadable entry is kept, not skipped</b>, because <see cref="RemoveIndex"/> addresses the array
+    /// by position: dropping it here would shift every position after it and remove the wrong index. It comes
+    /// back with no fields, which the tab renders as the one thing an operator wants for it — a row they can
+    /// delete.
+    /// </para>
+    /// </remarks>
     /// <param name="declared">The array entry.</param>
-    private static IndexSchema Index(JsonNode? declared) => new(
-        declared?["fields"] is JsonArray fields
-            ? [.. fields.Select(field => field?.GetValue<string>() ?? string.Empty)]
-            : [],
-        declared?["unique"]?.GetValue<bool>() ?? false);
+    private static IndexSchema Index(JsonNode? declared)
+    {
+        if (declared is not JsonObject index)
+        {
+            return new([], Unique: false);
+        }
+
+        return new(
+            index["fields"] is JsonArray fields ? [.. fields.Select(Name).OfType<string>()] : [],
+            index["unique"] is JsonValue unique && unique.TryGetValue<bool>(out var enforced) && enforced);
+    }
+
+    /// <summary>One field name, or nothing when the entry is not one.</summary>
+    private static string? Name(JsonNode? field) =>
+        field is JsonValue value && value.TryGetValue<string>(out var name) ? name : null;
 
     /// <summary>
     /// Declares one hook at one point.

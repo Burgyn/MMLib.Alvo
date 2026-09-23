@@ -70,9 +70,15 @@ there is no subset to carve out — the editor is owed for all six points. What 
 owe is the refusal of the three action *types* (`function`, `http.call`, `entity.update`) that
 `UnhonouredFeatures` does hold, which it can read the way `FieldEditor` already reads its own.
 
-**✅ Done.** All six points are editable. The point decides what the action may be, because the
-schema does: a before-point offers `reject` and `mutate` only, an after-point offers `webhook` and
-`email`, and switching from an after-point to a before-point takes the network actions away with it
+**✅ Done.** All six points are editable. The point decides what the action may be — mostly because
+the schema does: a before-point offers `reject` and `mutate`, an after-point offers `webhook` and
+`email`. One restriction is **not** the schema's: `$defs/beforeHookList` is one definition for all
+three before-points, but `BeforeHookCompiler` refuses a `mutate` under `beforeDelete` outright (the
+row is going, so the patch is discarded), and it refuses `new.` there and `old.` under a
+`beforeCreate` — so the editor offers `reject` only at `beforeDelete`, and the condition guidance
+names only the row images the selected point actually has. Both were caught by plan-guard rather
+than by a test, which is why there are now two. Switching from an after-point to a before-point
+takes the network actions away with it
 — leaving `webhook` selected would let the editor compose a descriptor the apply refuses, and the
 refusal would name a choice the operator never made. `payload` and `data` are deliberately not
 offered: both are JSONata slots this build refuses, and a control for a facet the apply refuses is

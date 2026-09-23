@@ -30,7 +30,22 @@ else
 
         <div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4)"
              data-testid="index-row">
-            <span class="a-mono" style="flex:1;font-size:var(--text-sm)">@string.Join(", ", index.Fields)</span>
+            @*
+                An entry the working copy could not read — an imported or proposed descriptor may carry one,
+                and the apply is what refuses it. Shown rather than hidden, and shown in its own position,
+                because the only useful thing to do with it is remove it.
+            *@
+            @if (index.Fields.Count == 0)
+            {
+                <span class="a-section-sub" style="flex:1" data-testid="index-unreadable">
+                    Declared in a shape this screen cannot read. The apply will refuse it — remove it here,
+                    or fix it in the descriptor and import it again.
+                </span>
+            }
+            else
+            {
+                <span class="a-mono" style="flex:1;font-size:var(--text-sm)">@string.Join(", ", index.Fields)</span>
+            }
             @if (index.Unique)
             {
                 <span class="a-badge a-badge--accent">unique</span>

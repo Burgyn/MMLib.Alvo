@@ -164,6 +164,115 @@ public class WorkingCopyIndexTests
         copy.Json.ShouldBe(before);
     }
 
+    /// <summary>
+    /// An index whose value is the wrong type renders as nothing rather than taking the page down.
+    /// </summary>
+    /// <remarks>
+    /// <b>Reachable, not hypothetical.</b> <see cref="WorkingCopy.Replace"/> validates nothing beyond "is it
+    /// JSON" on purpose — the apply is the authority — so a hand-edited import or an assistant's proposal can
+    /// put <c>"unique": "yes"</c> in the working copy. <c>JsonNode.GetValue&lt;T&gt;</c> throws
+    /// <see cref="InvalidOperationException"/> for that, and the entity page reads the indexes on every tab,
+    /// so one bad entry would end the circuit rather than spoil one panel. <c>HooksTab</c> already degrades
+    /// this way and this path did not.
+    /// </remarks>
+    [Theory]
+    [InlineData("""{ "fields": [7] }""")]
+    [InlineData("""{ "fields": "status" }""")]
+    [InlineData("""{ "unique": true }""")]
+    [InlineData("""["status"]""")]
+    public void An_index_of_the_wrong_shape_renders_as_nothing(string declared)
+    {
+        var copy = new WorkingCopy();
+        copy.Take(
+            $$"""
+            {
+              "apiVersion": "v1",
+              "name": "field-service",
+              "entities": {
+                "work_orders": {
+                  "fields": { "status": { "type": "string" } },
+                  "indexes": [ {{declared}} ]
+                }
+              }
+            }
+            """,
+            revision: 3);
+
+        var read = Should.NotThrow(() => copy.IndexesOf("work_orders"));
+
+        /* Kept, not skipped: RemoveIndex addresses the array by position, so dropping an unreadable entry
+           here would shift every position after it and remove the wrong index. */
+        read.ShouldHaveSingleItem().Fields.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// A readable index with an unreadable <c>unique</c> is still the index it names.
+    /// </summary>
+    /// <remarks>
+    /// The line between this and the case above, and it is worth drawing: <c>"unique": "yes"</c> spoils one
+    /// facet, not the declaration. Reading the whole entry as unreadable would hide an index the operator
+    /// can see in their own file, and telling them it enforces uniqueness because a string is truthy
+    /// somewhere would be worse. It falls back to the schema's own default, and the apply is what refuses
+    /// the string.
+    /// </remarks>
+    [Fact]
+    public void An_unreadable_unique_falls_back_to_the_schemas_default()
+    {
+        var copy = new WorkingCopy();
+        copy.Take(
+            """
+            {
+              "apiVersion": "v1",
+              "name": "field-service",
+              "entities": {
+                "work_orders": {
+                  "fields": { "status": { "type": "string" } },
+                  "indexes": [ { "fields": ["status"], "unique": "yes" } ]
+                }
+              }
+            }
+            """,
+            revision: 3);
+
+        var read = copy.IndexesOf("work_orders").ShouldHaveSingleItem();
+        read.Fields.ShouldBe(["status"]);
+        read.Unique.ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A bad entry keeps its position, so removing the good one beside it removes the good one.
+    /// </summary>
+    /// <remarks>
+    /// This is why an unreadable index is rendered rather than filtered out. A screen that hid it would hand
+    /// <see cref="WorkingCopy.RemoveIndex"/> a position one short of the truth, and the operator asking to
+    /// drop <c>(status)</c> would silently drop something else.
+    /// </remarks>
+    [Fact]
+    public void An_unreadable_index_keeps_the_positions_of_the_ones_beside_it()
+    {
+        var copy = new WorkingCopy();
+        copy.Take(
+            """
+            {
+              "apiVersion": "v1",
+              "name": "field-service",
+              "entities": {
+                "work_orders": {
+                  "fields": { "status": { "type": "string" } },
+                  "indexes": [ { "fields": [7] }, { "fields": ["status"] } ]
+                }
+              }
+            }
+            """,
+            revision: 3);
+
+        copy.IndexesOf("work_orders")[1].Fields.ShouldBe(["status"]);
+
+        copy.RemoveIndex("work_orders", 1);
+
+        copy.IndexesOf("work_orders").ShouldHaveSingleItem().Fields.ShouldBeEmpty();
+    }
+
     /// <summary>An entity the document does not declare is not created by indexing it.</summary>
     [Fact]
     public void An_entity_that_is_not_declared_gains_nothing()

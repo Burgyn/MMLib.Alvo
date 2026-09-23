@@ -325,6 +325,76 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
     }
 
     /// <summary>
+    /// <c>beforeDelete</c> offers no <c>mutate</c>, because the compiler refuses one outright.
+    /// </summary>
+    /// <remarks>
+    /// <b>The one restriction here that the schema does not state.</b> <c>$defs/beforeHookList</c> is one
+    /// definition for all three before-points, so reading the split off "is this a before-point" offered
+    /// <c>mutate</c> at <c>beforeDelete</c> — which <c>BeforeHookCompiler</c> refuses, because the row is
+    /// being removed and a patch against it is a slot that compiles cleanly and is then discarded. Caught by
+    /// plan-guard, not by a test, which is why there is now a test.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_before_delete_does_not_offer_a_mutate()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("On write");
+
+        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeUpdate')");
+        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('mutate')").WaitForAsync();
+
+        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeDelete')");
+
+        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('mutate')").WaitForAsync(
+            new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('reject')").WaitForAsync();
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// The condition guidance names only the row images the selected point actually has.
+    /// </summary>
+    /// <remarks>
+    /// A create has no pre-image and a delete produces no post-image, and <c>BeforeHookCompiler</c> refuses
+    /// both references rather than tolerating them — an unanswerable reference resolves to null, and the null
+    /// rule collapses every comparison against it, so "every row except…" would fire for every row. Guidance
+    /// that named both at every point was guidance to write a descriptor the apply rejects.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_condition_guidance_names_only_the_images_the_point_has()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("On write");
+
+        var guidance = session.Page.Locator("#hook-condition").Locator("xpath=following-sibling::span[1]");
+
+        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeCreate')");
+        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('mutate')").WaitForAsync();
+
+        var onCreate = await guidance.InnerTextAsync();
+        onCreate.ShouldContain("new");
+        onCreate.ShouldNotContain("old");
+
+        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeDelete')");
+
+        /* Waited on, not read straight after the click: `InnerTextAsync` does not retry, so reading here
+           reads the frame the click has not yet replaced — which is what this scenario did first, and it
+           reported the beforeCreate wording under beforeDelete. The mutate chip leaving is the signal that
+           the re-render arrived. */
+        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('mutate')").WaitForAsync(
+            new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+
+        var onDelete = await guidance.InnerTextAsync();
+        onDelete.ShouldContain("old");
+        onDelete.ShouldNotContain("new");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
     /// A reject with no message is refused by the control rather than by the apply.
     /// </summary>
     /// <remarks>

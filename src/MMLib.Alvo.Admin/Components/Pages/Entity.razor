@@ -97,7 +97,7 @@
                     break;
                 case "Indexes":
                     <Indexes Entity="@_entity" Declared="_indexes" Editable="Copy.Loaded"
-                             OnAdd="AddIndexAsync" OnRemove="RemoveIndexAsync" />
+                             OnAdd="AddIndex" OnRemove="RemoveIndex" />
                     break;
                 default:
                     <ApiTab Entity="@_entity" />
@@ -274,7 +274,7 @@
     /// <see cref="SetRule"/> already makes, and "Preview changes" appears on the header the moment
     /// the copy is dirty either way.
     /// </remarks>
-    private void AddIndexAsync(IndexSchema index)
+    private void AddIndex(IndexSchema index)
     {
         Copy.AddIndex(EntityName, index.Fields, index.Unique);
         _indexes = Copy.IndexesOf(EntityName);
@@ -287,7 +287,7 @@
     /// No confirmation, for <see cref="RemoveField"/>'s reason: nothing has happened to the database
     /// yet, and the apply is where dropping something is stated as a cost.
     /// </remarks>
-    private void RemoveIndexAsync(int position)
+    private void RemoveIndex(int position)
     {
         Copy.RemoveIndex(EntityName, position);
         _indexes = Copy.IndexesOf(EntityName);
@@ -297,7 +297,7 @@
     /// Declares a hook in the working copy, and stays on the tab.
     /// </summary>
     /// <remarks>
-    /// No navigation, for <see cref="AddIndexAsync"/>'s reason: an entity's write path is usually
+    /// No navigation, for <see cref="AddIndex"/>'s reason: an entity's write path is usually
     /// described by more than one hook, and a trip to the preview between each is a trip per sentence.
     /// </remarks>
     private void AddHook(HooksTab.NewHook added)

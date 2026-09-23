@@ -84,8 +84,9 @@ else
         <div class="a-section">
             <span class="a-section-title">Add a hook</span>
             <span class="a-section-sub">
-                The point decides what the action may be, because the schema does: a before-hook runs
-                in the transaction and may only refuse or patch the row.
+                The point decides what the action may be. A before-hook runs in the transaction and may
+                only refuse or patch the row; a <code class="a-mono">beforeDelete</code> may only refuse,
+                because the row is going and a patch against it would be discarded.
             </span>
         </div>
 
@@ -110,11 +111,11 @@ else
         <div class="a-field">
             <label class="a-label" for="hook-condition">Only when (optional)</label>
             <input class="a-input a-mono" id="hook-condition" value="@_condition" autocomplete="off"
-                   placeholder="new.status == 'completed'"
+                   placeholder="@Example"
                    @oninput="args => _condition = args.Value?.ToString() ?? string.Empty" />
             <span class="a-section-sub">
-                CEL over <code class="a-mono">new</code>, <code class="a-mono">old</code> and
-                <code class="a-mono">@@user</code>. Left empty, the hook runs on every write.
+                CEL over @((MarkupString)Images) and <code class="a-mono">@@user</code>. Left empty, the hook
+                runs on every write.
             </span>
         </div>
 
@@ -210,6 +211,7 @@ else
         ["beforeCreate", "beforeUpdate", "beforeDelete", "afterCreate", "afterUpdate", "afterDelete"];
 
     private static readonly string[] _beforeKinds = [Reject, Mutate];
+    private static readonly string[] _deleteKinds = [Reject];
     private static readonly string[] _afterKinds = [Webhook, Email];
 
     private string _point = _points[0];
@@ -271,11 +273,51 @@ else
         [.. Capabilities.Where(refusal =>
             refusal.Slot is "function" or "http.call" or "entity.update")];
 
-    /// <summary>The action kinds this point admits — the schema's own split, not a preference.</summary>
-    private string[] Kinds => IsBefore(_point) ? _beforeKinds : _afterKinds;
+    /// <summary>
+    /// The action kinds this point admits.
+    /// </summary>
+    /// <remarks>
+    /// <b>Three answers, not two, and the third does not come from the schema.</b> <c>$defs/beforeHookList</c>
+    /// is one definition for all three before-points, so the schema alone would offer <c>mutate</c> at
+    /// <c>beforeDelete</c> — which <c>BeforeHookCompiler</c> refuses outright, because the row is being
+    /// removed and a patch against it is a slot that compiles cleanly and is then discarded. Reading the
+    /// split off <c>IsBefore</c> alone therefore let the editor compose a descriptor the apply refuses, which
+    /// is the trap <see cref="Choose"/> exists to close one case earlier.
+    /// </remarks>
+    private string[] Kinds => _point switch
+    {
+        "beforeDelete" => _deleteKinds,
+        _ => IsBefore(_point) ? _beforeKinds : _afterKinds,
+    };
 
     private static bool IsBefore(string point)
         => point.StartsWith("before", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The row images a condition at this point may name.
+    /// </summary>
+    /// <remarks>
+    /// <b>Guidance that named both at every point was guidance to write a refused descriptor.</b> A create
+    /// has no pre-image and a delete produces no post-image, so <c>old.</c> under a <c>beforeCreate</c> and
+    /// <c>new.</c> under a <c>beforeDelete</c> are references the phase cannot answer — and
+    /// <c>BeforeHookCompiler</c> refuses both, because an unanswerable reference resolves to null and the
+    /// null rule collapses every comparison against it, including <c>!=</c>. A condition written as "every
+    /// row except…" would then fire for every row.
+    /// </remarks>
+    private string Images => _point switch
+    {
+        "beforeCreate" => "<code class=\"a-mono\">new</code>",
+        "beforeDelete" => "<code class=\"a-mono\">old</code>",
+        _ => "<code class=\"a-mono\">new</code>, <code class=\"a-mono\">old</code>",
+    };
+
+    /// <summary>A condition that is valid at this point, for the placeholder.</summary>
+    private string Example => _point switch
+    {
+        "beforeCreate" => "new.priority == 'high'",
+        "beforeDelete" => "old.status == 'completed'",
+        _ => "new.status == 'completed'",
+    };
 
     /// <summary>
     /// Switches the point, and the action kind with it when the current one no longer fits.
