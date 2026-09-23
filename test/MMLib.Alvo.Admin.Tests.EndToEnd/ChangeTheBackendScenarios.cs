@@ -68,6 +68,13 @@ public sealed class ChangeTheBackendScenarios(AdminWorld world) : IClassFixture<
         await session.Page.ClickAsync("button:has-text('Apply these changes')");
         await session.Page.GetByText("Applied as revision").First.WaitForAsync();
 
+        // --- the shell's project card follows the apply without a navigation (D-4): Preview stays
+        //     put after one, and the card used to keep the old revision until the operator moved on
+        var applied = (await session.Page.GetByText("Applied as revision").First.InnerTextAsync())
+            .Split(' ')[^1];
+        await session.Page.Locator($"[data-testid='project-card']:has-text('revision {applied}')")
+            .First.WaitForAsync();
+
         // --- the entity now serves rows
         await session.GoAsync("/data/invoices");
         await session.Page.ClickAsync("button:has-text('New record')");

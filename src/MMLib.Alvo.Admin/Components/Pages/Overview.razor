@@ -5,7 +5,7 @@
 <PageTitle>Overview · Alvo</PageTitle>
 
 <div class="a-stack">
-    <h1 class="a-page-title">@(_descriptor is null ? "Overview" : Gateway.Project)</h1>
+    <PageHeader Title="@(_descriptor is null ? "Overview" : Gateway.Project)" />
 
     @if (_error is not null)
     {
@@ -35,11 +35,14 @@
             </div>
         }
 
-        <div class="a-row" style="gap:var(--space-2);flex-wrap:wrap">
+        @*
+            One badge for the fact an operator acts on, and one quiet line for how this instance runs.
+            The registered data provider's type name was a third chip here; it is an implementation
+            name, and Settings is where it is shown with the sentence that explains it.
+        *@
+        <div class="a-row" style="gap:var(--space-3);flex-wrap:wrap">
             <span class="a-badge a-badge--ok">Revision @_descriptor!.Revision applied</span>
-            <span class="a-badge">@_info!.DataProvider</span>
-            <span class="a-badge">@_info.Mode</span>
-            <span class="a-badge">@_info.StartupMode</span>
+            <span class="a-note" data-testid="overview-runtime">@Runtime(_info!)</span>
         </div>
 
         <div class="a-cards">
@@ -126,6 +129,28 @@
         {
             _error = exception;
         }
+    }
+
+    /// <summary>How this instance runs, as one line an operator reads rather than three raw values.</summary>
+    /// <remarks>
+    /// A mode this build does not name is shown as reported rather than hidden, so a future value
+    /// reads as itself instead of as the nearest one this switch happens to know.
+    /// </remarks>
+    private static string Runtime(ManagementInfo info)
+    {
+        var mode = info.Mode.Length > 0
+            ? string.Concat(info.Mode[..1].ToUpperInvariant(), info.Mode[1..])
+            : info.Mode;
+
+        var startup = info.StartupMode switch
+        {
+            "apply" => "applies on start",
+            "verify" => "verifies on start",
+            "skip" => "leaves the schema alone on start",
+            var other => $"starts in {other} mode",
+        };
+
+        return $"{mode} · {startup}";
     }
 
     private static IReadOnlyList<ManagementWarnedBlock> DeclaredWarnings(

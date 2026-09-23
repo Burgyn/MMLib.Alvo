@@ -8,7 +8,8 @@
 <PageTitle>@EntityName · Schema · Alvo</PageTitle>
 
 <div class="a-stack">
-    <PageHeader Eyebrow="Schema" EyebrowHref="@($"{AlvoAdmin.BasePath}/schema")" Title="@EntityName" Mono="true">
+    <PageHeader Eyebrow="Schema" EyebrowHref="@($"{AlvoAdmin.BasePath}/schema")" Title="@EntityName" Mono="true"
+                Subtitle="@(_entity is null ? null : _entity.Description ?? "This entity has no description in the descriptor.")">
         <Secondary>
             <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/data/{EntityName}")">Browse records</a>
             @if (Copy.Loaded)
@@ -77,23 +78,18 @@
     }
     else
     {
-        <div>
-            <p class="a-section-sub" style="max-width:72ch">
-                @(_entity.Description ?? "This entity has no description in the descriptor.")
-            </p>
-            <div style="display:flex;gap:var(--space-2);margin-top:var(--space-3);flex-wrap:wrap">
-                @if (_pending)
-                {
-                    <span class="a-badge a-badge--warn">not applied yet</span>
-                }
-                <span class="a-badge">@(_entity.Tenancy == TenancyMode.Scoped ? "tenancy: scoped" : "tenancy: global")</span>
-                <span class="a-badge">@(_entity.Audit ? "audited" : "not audited")</span>
-                @if (_entity.SoftDelete)
-                {
-                    <span class="a-badge">soft delete</span>
-                }
-                <span class="a-badge">@(_entity.Storage == EntityStorage.Physical ? "physical table" : "dynamic")</span>
-            </div>
+        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+            @if (_pending)
+            {
+                <span class="a-badge a-badge--warn">not applied yet</span>
+            }
+            <span class="a-badge">@(_entity.Tenancy == TenancyMode.Scoped ? "tenancy: scoped" : "tenancy: global")</span>
+            <span class="a-badge">@(_entity.Audit ? "audited" : "not audited")</span>
+            @if (_entity.SoftDelete)
+            {
+                <span class="a-badge">soft delete</span>
+            }
+            <span class="a-badge">@(_entity.Storage == EntityStorage.Physical ? "physical table" : "dynamic")</span>
         </div>
 
         <div class="a-tabs">

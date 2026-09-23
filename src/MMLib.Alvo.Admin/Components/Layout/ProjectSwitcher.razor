@@ -3,14 +3,18 @@
 
     `GET {m}/projects` answers with exactly one project (§2.6), so a control offering a choice would
     be offering a choice that does not exist — the drawing's dropdown is drawn here as what it
-    really is: the project's name, its revision, and the data provider under it. The day the API
-    answers with two, this is the one place that changes.
+    really is: the project's name and its revision, as a label rather than a button — no pointer, no
+    hover, because a card that lights up under the cursor and then does nothing is a broken control.
+    The day the API answers with two, this is the one place that changes, and it becomes a button then.
+
+    The data provider's type name used to sit under the revision. It is an implementation name, and
+    Settings is where it is shown, with the sentence that says what it is and is not.
 *@
 @implements IDisposable
 @inject ManagementGateway Gateway
 @inject NavigationManager Navigation
 
-<div class="a-switcher" style="cursor:default">
+<div class="a-switcher" data-testid="project-card">
     <span class="a-brand-mark">@Initial</span>
     <span style="min-width:0">
         <span class="a-switcher-name">@(_project?.Name ?? (_refused ? "No project" : "…"))</span>
@@ -20,15 +24,15 @@
 
 @code {
     private ManagementProject? _project;
-    private ManagementInfo? _info;
+    private int? _revision;
     private bool _refused;
 
     private string Initial => (_project?.Name is { Length: > 0 } name ? name[..1] : "?").ToUpperInvariant();
 
-    private string Meta => (_project, _info) switch
+    private string Meta => (_project, _revision) switch
     {
-        ({ Revision: { } revision }, { } info) => $"revision {revision} · {info.DataProvider}",
-        ({ Revision: null }, { } info) => $"not applied yet · {info.DataProvider}",
+        ({ }, { } revision) => $"revision {revision}",
+        ({ }, null) => "not applied yet",
         _ => _refused ? "not admitted to this project" : "loading",
     };
 
@@ -41,7 +45,11 @@
     /// nothing must still get a dashboard that says so, which is exactly the failure mode design
     /// §5.5 has in mind when it says an error lands where it happened and stays.
     /// </remarks>
-    protected override void OnInitialized() => Navigation.LocationChanged += Reload;
+    protected override void OnInitialized()
+    {
+        Navigation.LocationChanged += Reload;
+        Gateway.Applied += Refresh;
+    }
 
     /// <summary>
     /// Re-reads on navigation, because this sits in the layout and the layout is not re-initialised.
@@ -52,7 +60,13 @@
     /// looking at. The gateway's own cache is what makes this cheap: after an apply it has been
     /// invalidated, and on every other navigation the read is already in hand.
     /// </remarks>
-    private void Reload(object? sender, LocationChangedEventArgs args)
+    private void Reload(object? sender, LocationChangedEventArgs args) => Refresh();
+
+    /// <summary>
+    /// Re-reads, on the renderer's thread — after a navigation, and after an apply, because Preview stays
+    /// put after one and waiting for a navigation left the card a revision behind the panel announcing it.
+    /// </summary>
+    private void Refresh()
         => _ = InvokeAsync(async () =>
         {
             await LoadAsync();
@@ -67,7 +81,7 @@
         {
             var projects = await Gateway.ProjectsAsync(CancellationToken.None);
             _project = projects.Count > 0 ? projects[0] : null;
-            _info = await Gateway.InfoAsync(CancellationToken.None);
+            _revision = _project is null ? null : await CurrentRevisionAsync(_project);
         }
         catch (Exception exception) when (exception is ManagementForbiddenException
             or ManagementRequestException or ManagementProjectNotFoundException)
@@ -76,5 +90,32 @@
         }
     }
 
-    public void Dispose() => Navigation.LocationChanged -= Reload;
+    /// <summary>
+    /// The revision the history is at now, rather than the one the project list reports.
+    /// </summary>
+    /// <remarks>
+    /// <b>The list's revision is the one this process booted at</b> — it is read from the boot state,
+    /// which an apply does not move — so re-reading the list after an apply answered with the same
+    /// stale number. The descriptor read is the current one, and the gateway already holds it for
+    /// every other screen. An operator who may list projects and not read the descriptor still gets
+    /// the boot revision, which is what the card showed before.
+    /// </remarks>
+    private async Task<int?> CurrentRevisionAsync(ManagementProject project)
+    {
+        try
+        {
+            var revision = (await Gateway.DescriptorAsync(CancellationToken.None)).Revision;
+            return revision > 0 ? revision : null;
+        }
+        catch (ManagementForbiddenException)
+        {
+            return project.Revision;
+        }
+    }
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= Reload;
+        Gateway.Applied -= Refresh;
+    }
 }

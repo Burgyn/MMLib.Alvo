@@ -55,6 +55,23 @@ internal sealed class ManagementGateway(
     /// </remarks>
     public string Project { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Raised after a real apply or rollback, so a component showing the applied revision can read it again.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It exists for the shell, which is mounted once and outlives the screen that applied.</b> The
+    /// project card re-read only on navigation, and Preview stays where it is after an apply, so the card
+    /// said "revision 1" beside a panel announcing revision 2.
+    /// </para>
+    /// <para>
+    /// The same shape as <see cref="AssistantGateway.ConnectionChanged"/> and for the same reason: this
+    /// scoped gateway is what the layout and the page share for a circuit, and the write path is the one
+    /// place that knows the answer moved. A dry run raises nothing, because it wrote nothing.
+    /// </para>
+    /// </remarks>
+    public event Action? Applied;
+
     /// <summary>The descriptor as stored, with the revision it is at.</summary>
     public async ValueTask<ManagementDescriptor> DescriptorAsync(CancellationToken ct)
     {
@@ -133,6 +150,7 @@ internal sealed class ManagementGateway(
         if (!dryRun)
         {
             Invalidate();
+            Applied?.Invoke();
         }
 
         return result;
@@ -162,6 +180,7 @@ internal sealed class ManagementGateway(
         if (!dryRun)
         {
             Invalidate();
+            Applied?.Invoke();
         }
 
         return result;

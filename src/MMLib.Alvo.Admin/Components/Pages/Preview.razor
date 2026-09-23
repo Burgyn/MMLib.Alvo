@@ -8,10 +8,7 @@
 <PageTitle>Preview changes · Alvo</PageTitle>
 
 <div class="a-stack">
-    <div class="a-toolbar">
-        <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema")">Schema</a>
-        <h1 class="a-page-title">Preview changes</h1>
-    </div>
+    <PageHeader Eyebrow="Schema" EyebrowHref="@($"{AlvoAdmin.BasePath}/schema")" Title="Preview changes" />
 
     @if (_error is not null)
     {

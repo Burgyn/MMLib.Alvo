@@ -8,14 +8,21 @@
 <PageTitle>Schema · Alvo</PageTitle>
 
 <div class="a-stack">
-    <div class="a-toolbar">
-        <h1 class="a-page-title">Schema</h1>
-        <span style="margin-left:auto"></span>
-        <button type="button" class="a-btn a-btn--sm" @onclick="() => _adding = !_adding">New entity</button>
-        <a class="@($"a-btn a-btn--sm{(Copy.IsDirty ? " a-btn--primary" : string.Empty)}")"
-           href="@($"{AlvoAdmin.BasePath}/schema/preview")">Preview changes</a>
-        <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/transfer")">Import / export</a>
-    </div>
+    <PageHeader Title="Schema">
+        <Secondary>
+            <button type="button" class="a-btn a-btn--sm" @onclick="() => _adding = !_adding">New entity</button>
+            <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/transfer")">Import / export</a>
+        </Secondary>
+        <Primary>
+            @* Only while something is staged, as on the entity screen: with nothing staged, Preview is an empty page. *@
+            @if (Copy.IsDirty)
+            {
+                <a class="a-btn a-btn--primary a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/preview")">
+                    Preview changes
+                </a>
+            }
+        </Primary>
+    </PageHeader>
 
     @if (_error is not null)
     {

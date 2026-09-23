@@ -366,10 +366,16 @@ button {
   background: var(--panel2);
   color: var(--text);
   text-align: left;
+}
+
+/* Inert by default: with one project the card is a label, and a hover state on a label promises a
+   menu that is not there. The day there is a choice the card becomes a button, and only then does
+   it look like one. */
+button.a-switcher {
   cursor: pointer;
 }
 
-.a-switcher:hover {
+button.a-switcher:hover {
   border-color: var(--accentBorder);
 }
 
@@ -642,11 +648,13 @@ a.a-pagehead__eyebrow:hover {
   padding-top: 0;
 }
 
+/* The sentence that says what a screen is for, at the body size section subtitles moved to: it
+   is read once, and at 12 px it was the smallest text on a screen that opens with it. */
 .a-pagehead__sub {
   margin: 0;
-  max-width: 68ch;
+  max-width: 76ch;
   color: var(--dim);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   line-height: 1.5;
 }
 
@@ -678,17 +686,17 @@ a.a-pagehead__eyebrow:hover {
   }
 }
 
-/* `FocusOnNavigate` moves focus to the `h1` after every navigation, which is the right
-   thing for a screen reader and the wrong thing to draw: Chrome matches :focus-visible
-   on that programmatic focus, so every screen opened with a ring around its own title
-   and the heading read as a text input. The heading is not tabbable — tabindex is -1 —
-   so nothing is taken away from a keyboard by removing it. */
 /* An identifier as a page title is set at 600, not the title's 700: Plex Mono ships up to 600, and
    a weight with no face behind it is drawn as the browser's faux bold. */
 .a-page-title.a-mono {
   font-weight: var(--weight-medium);
 }
 
+/* `FocusOnNavigate` moves focus to the `h1` after every navigation, which is the right
+   thing for a screen reader and the wrong thing to draw: Chrome matches :focus-visible
+   on that programmatic focus, so every screen opened with a ring around its own title
+   and the heading read as a text input. The heading is not tabbable — tabindex is -1 —
+   so nothing is taken away from a keyboard by removing it. */
 h1.a-page-title:focus-visible,
 h1.a-page-title:focus {
   outline: none;

@@ -10,10 +10,7 @@
 <PageTitle>Import and export · Alvo</PageTitle>
 
 <div class="a-stack">
-    <div class="a-toolbar">
-        <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema")">Schema</a>
-        <h1 class="a-page-title">Import and export</h1>
-    </div>
+    <PageHeader Eyebrow="Schema" EyebrowHref="@($"{AlvoAdmin.BasePath}/schema")" Title="Import and export" />
 
     @if (_error is not null)
     {

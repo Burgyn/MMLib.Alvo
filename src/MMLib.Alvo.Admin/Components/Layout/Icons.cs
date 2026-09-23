@@ -53,4 +53,10 @@ internal static class Icons
 
     /// <summary>A magnifier.</summary>
     public const string Search = """<circle cx="9" cy="9" r="5.5"/><path d="M13 13l4 4"/>""";
+
+    /// <summary>A sun — the light theme.</summary>
+    public const string Sun = """<circle cx="10" cy="10" r="3.5"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.3 4.3l1.4 1.4M14.3 14.3l1.4 1.4M15.7 4.3l-1.4 1.4M5.7 14.3l-1.4 1.4"/>""";
+
+    /// <summary>A crescent — the dark theme.</summary>
+    public const string Moon = """<path d="M16.5 12.2A6.8 6.8 0 017.8 3.5a6.8 6.8 0 108.7 8.7z"/>""";
 }
