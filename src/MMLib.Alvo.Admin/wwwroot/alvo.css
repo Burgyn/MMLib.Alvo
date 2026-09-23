@@ -1154,6 +1154,8 @@ textarea.a-textarea {
   font-size: var(--text-sm);
 }
 
+/* Sentence case, and the identifier in the header's title. The uppercase snake_case this replaced
+   was the database's name for the column shouted at the reader; "Order number" is what they call it. */
 .a-grid th {
   position: sticky;
   top: 0;
@@ -1162,12 +1164,61 @@ textarea.a-textarea {
   border-bottom: 1px solid var(--border);
   background: var(--panel2);
   color: var(--dim);
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   font-weight: var(--weight-medium);
-  letter-spacing: 0.03em;
   text-align: left;
-  text-transform: uppercase;
   white-space: nowrap;
+}
+
+/* `.a-num` alone loses to `.a-grid th` on specificity, so an amount's header sat left of its column. */
+.a-grid th.a-num {
+  text-align: right;
+}
+
+/* A header that sorts is a button that looks like the header it is. */
+.a-grid__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+}
+
+.a-grid__sort:hover {
+  color: var(--text);
+}
+
+.a-grid__arrow {
+  min-width: 1ch;
+}
+
+/* The whole row opens the record; the Edit button in it is the same action for the keyboard. */
+.a-grid__row {
+  cursor: pointer;
+}
+
+/* An identifier broken over two lines is two things nobody typed. */
+.a-grid td.a-cell--short {
+  white-space: nowrap;
+}
+
+/* Long text keeps to one line and says the rest in its title, so one paragraph does not set the
+   height of every row on the page. */
+.a-cell__clip {
+  display: inline-block;
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.a-grid-search {
+  max-width: 360px;
 }
 
 .a-grid td {
@@ -1216,6 +1267,19 @@ textarea.a-textarea {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   overflow-wrap: anywhere;
+}
+
+/* A link inside running content: underlined, because colour alone is not a link on a page where
+   green already means "safe". */
+.a-link {
+  text-decoration: underline;
+  text-decoration-color: var(--border2);
+  text-underline-offset: 2px;
+}
+
+.a-link:hover {
+  color: var(--accent);
+  text-decoration-color: currentColor;
 }
 
 .a-grid-wrap {

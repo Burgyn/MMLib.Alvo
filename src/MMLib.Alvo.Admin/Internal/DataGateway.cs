@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Components.Authorization;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Admin.Internal;
 
@@ -52,14 +53,41 @@ internal sealed class DataGateway(
     }
 
     /// <summary>One page of records.</summary>
-    public async Task<AlvoPage> PageAsync(
-        string entity, int limit, string? after, bool total, CancellationToken ct)
+    public async Task<AlvoPage> PageAsync(AlvoQuery query, CancellationToken ct)
     {
         var context = await ContextAsync(ct).ConfigureAwait(false);
-        return await data.QueryAsync(
-            new AlvoQuery { Entity = entity, Limit = limit, After = after, IncludeTotalCount = total },
-            context,
-            ct).ConfigureAwait(false);
+        return await data.QueryAsync(query, context, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The label of each row of <paramref name="entity"/> that <paramref name="values"/> point at.</summary>
+    /// <remarks>
+    /// An id with no entry is a row this caller cannot read, or one with no label; the screen draws
+    /// both as the short id. A refusal — the label field masked from this caller, a scoped target and
+    /// no tenant — is left to the caller, which knows what to fall back to.
+    /// </remarks>
+    /// <param name="entity">The target of the reference.</param>
+    /// <param name="labelField">The target's label field.</param>
+    /// <param name="values">The reference column's values on the page.</param>
+    /// <param name="ct">The cancellation token.</param>
+    public async Task<IReadOnlyDictionary<Guid, string>> LabelsAsync(
+        string entity, string labelField, IEnumerable<object?> values, CancellationToken ct)
+    {
+        var context = await ContextAsync(ct).ConfigureAwait(false);
+        var labels = new Dictionary<Guid, string>();
+        foreach (var batch in RefLabels.Batches(values))
+        {
+            var page = await data.QueryAsync(RefLabels.Query(entity, labelField, batch), context, ct)
+                .ConfigureAwait(false);
+            foreach (var row in page.Items)
+            {
+                if (RefLabels.IdOf(row[AlvoManagedColumns.Id]) is { } id && RefLabels.Label(row[labelField]) is { } label)
+                {
+                    labels[id] = label;
+                }
+            }
+        }
+
+        return labels;
     }
 
     /// <summary>One record, or nothing.</summary>

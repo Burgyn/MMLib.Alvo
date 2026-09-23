@@ -119,6 +119,9 @@
         break;
       case '/':
         event.preventDefault();
+        /* Focused here rather than from .NET: a screen's search box is plain markup, and moving
+           focus into it needs no round trip over the circuit — nor a public method on the page. */
+        document.querySelector('[data-alvo-search]')?.focus();
         emit('search');
         break;
       case 'Enter':
