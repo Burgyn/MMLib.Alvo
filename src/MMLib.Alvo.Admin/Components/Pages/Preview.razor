@@ -48,9 +48,13 @@
 
         @if (_plan is null)
         {
-            <div class="a-panel" style="padding:var(--space-5)">
+            <div class="a-panel a-row" style="padding:var(--space-5);gap:var(--space-3)">
                 <button type="button" class="a-btn a-btn--primary" disabled="@_busy" @onclick="PlanAsync">
                     Plan this change
+                </button>
+                <button type="button" class="a-btn a-btn--sm" disabled="@_busy"
+                        data-testid="discard" @onclick="() => _discarding = true">
+                    Discard them
                 </button>
             </div>
         }
@@ -100,6 +104,10 @@
 
             <div class="a-toolbar">
                 <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema")">Back to the editor</a>
+                <button type="button" class="a-btn a-btn--sm" disabled="@_busy"
+                        data-testid="discard" @onclick="() => _discarding = true">
+                    Discard them
+                </button>
                 <span style="margin-left:auto"></span>
                 <span class="a-section-sub">
                     Applying as yourself, against revision @Copy.Revision — sent as
@@ -113,6 +121,27 @@
             </div>
         }
     }
+
+    @*
+        Discarding is confirmed, and applying-a-draft is not, which is the opposite way round from the
+        usual reflex — deliberately. Every edit up to here wrote to a draft and touched no table, so
+        staging one needs no ceremony; this is the only control on the screen that destroys work the
+        operator did, and it is the one that cannot be undone from here.
+    *@
+    <Sheet Open="_discarding" Title="Discard every unapplied change?"
+           Subtitle="The working copy goes back to the applied revision. Nothing in the database changes."
+           TestId="discard-sheet" OnClose="() => _discarding = false">
+        <div class="a-stack">
+            <p class="a-section-sub">
+                Every edit made since revision @Copy.Revision is thrown away — across all screens, not
+                only this one, because there is one working copy and one apply. There is no undo.
+            </p>
+            <div class="a-row">
+                <button type="button" class="a-btn a-btn--primary a-btn--sm" data-testid="discard-confirm"
+                        @onclick="Discard">Discard them</button>
+            </div>
+        </div>
+    </Sheet>
 
     @if (_applied is { } result)
     {
@@ -145,6 +174,7 @@
     private string _reason = string.Empty;
     private bool _allowed;
     private bool _busy;
+    private bool _discarding;
 
     protected override async Task OnInitializedAsync()
     {
@@ -172,6 +202,25 @@
         {
             _reason = suggested;
         }
+    }
+
+    /// <summary>
+    /// Throws away every unapplied edit and returns to the editor.
+    /// </summary>
+    /// <remarks>
+    /// <b>The control that was missing, and its absence made the draft one-way.</b> Removing a field, or
+    /// any other edit, writes to the working copy immediately and deliberately — nothing has touched the
+    /// database, so staging needs no confirmation. That argument only holds while there is a way back, and
+    /// there was not: <c>WorkingCopy.Discard</c> existed and no screen called it, so an operator who staged
+    /// something they did not want could only apply it or abandon the session.
+    /// </remarks>
+    private void Discard()
+    {
+        Copy.Discard();
+        _discarding = false;
+        _plan = null;
+        _applied = null;
+        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema");
     }
 
     private Task PlanAsync() => SendAsync(dryRun: true);

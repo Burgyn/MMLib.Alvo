@@ -641,3 +641,76 @@ public sealed class RenameScenarios(AdminWorld world) : IClassFixture<AdminWorld
         session.AssertConsoleClean();
     }
 }
+
+/// <summary>
+/// Throwing away a draft, which the dashboard had no control for.
+/// </summary>
+/// <remarks>
+/// <b>Reported from the dashboard, and the two halves are one defect.</b> Removing a field stages the
+/// change immediately — deliberately, because nothing has touched the database and a confirmation in
+/// front of an edit to a draft trains an operator to click through the one that matters. That argument
+/// only holds while there is a way back, and there was none: <c>WorkingCopy.Discard</c> existed and no
+/// screen called it, so a staged change could only be applied or abandoned with the session.
+/// </remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class DiscardScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+{
+    /// <summary>A staged change can be thrown away, and the editor shows it gone.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_staged_change_can_be_discarded()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/customers");
+
+        await session.Page.ClickAsync("[data-testid='remove-field-notes']");
+        await session.Page.WaitForURLAsync("**/schema/preview");
+        await session.Page.Locator("[data-testid='discard']").First.WaitForAsync();
+
+        /* The premise: it really is staged before anything was planned. */
+        (await session.Page.Locator("main.a-content").InnerTextAsync()).ShouldContain("notes");
+
+        await session.Page.Locator("[data-testid='discard']").First.ClickAsync();
+        await session.Page.ClickAsync("[data-testid='discard-confirm']");
+
+        await session.Page.WaitForURLAsync("**/schema");
+
+        await session.GoAsync("/schema/preview");
+        await session.Page.GetByText("Nothing to apply").WaitForAsync();
+
+        /* And the field is back on the entity, because the copy went to the applied revision. */
+        await session.GoAsync("/schema/customers");
+        (await session.Page.Locator("main.a-content").InnerTextAsync()).ShouldContain("notes");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// Discarding is confirmed; the sheet can be dismissed without losing the draft.
+    /// </summary>
+    /// <remarks>
+    /// The one control on this screen that destroys work the operator did, and the only one that cannot be
+    /// undone from here — which is why it is the one that asks, while staging does not.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Dismissing_the_confirmation_keeps_the_draft()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/regions");
+
+        await session.Page.ClickAsync("[data-testid='remove-field-name']");
+        await session.Page.WaitForURLAsync("**/schema/preview");
+
+        await session.Page.Locator("[data-testid='discard']").First.ClickAsync();
+        await session.Page.Locator("[data-testid='discard-sheet']").WaitForAsync();
+        await session.Page.ClickAsync("[data-testid='sheet-close']");
+
+        await session.Page.Locator("[data-testid='discard-sheet']").WaitForAsync(
+            new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+
+        /* Still staged: dismissing a confirmation is not confirming it. */
+        await session.Page.Locator("[data-testid='discard']").First.WaitForAsync();
+        (await session.Page.GetByText("Nothing to apply").CountAsync()).ShouldBe(0);
+
+        session.AssertConsoleClean();
+    }
+}
