@@ -1,5 +1,7 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
+using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -285,65 +287,59 @@ public class DescriptorToSchemaMapperTests
     public static TheoryData<string> EveryExampleMarkedNotRunnable() => [.. AlvoExamples.NotRunnable()];
 
     /// <summary>
-    /// <b>No shipped example declares an <c>after*</c> hook</b>, which is what makes PR5a's removal of the
-    /// three <c>after*</c> entries from <see cref="UnhonouredFeatures"/> safe for the example corpus.
+    /// <b>Every runnable example's after-hooks compile</b> — the positive fact this file used to hold only
+    /// the negative half of.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The hazard is specific and it is created by shrinking that table: <c>complex-crm</c> ships five
-    /// expressions that do not compile, four of them inside its <c>hooks</c> block, and all of them are
-    /// invisible today because the hook point is refused before anything is compiled. The day a hook entry
-    /// leaves, the example's refusal reason silently changes from a structured unhonoured-feature error to a
-    /// CEL syntax error — and <see cref="Every_example_marked_not_runnable_really_is_refused"/> keeps passing,
-    /// because it asserts only that <em>an</em> <see cref="InvalidDataException"/> was thrown.
+    /// This retires <c>No_shipped_example_declares_an_after_hook_so_pr5a_exposes_none_of_their_cel_defects</c>,
+    /// which guarded a specific hazard while <c>after*</c> hooks were refused before anything compiled:
+    /// <c>complex-crm</c> shipped five CEL expressions that did not compile, four of them inside its
+    /// <c>hooks</c> block, invisible only because the hook point was refused first. That guard's own history
+    /// records the hazard closing without ever materializing — <c>lower(new.email)</c> became
+    /// <c>lowerAscii(new.email)</c> in PR5b-1, <c>now()</c> started compiling as a side effect of the
+    /// <c>Mutate</c> profile landing, and PR5b-2 fixed the remaining three (two list literals in
+    /// <c>deals.beforeUpdate</c> conditions and an unresolvable <c>{{@user.email}}</c> template) — so deviation
+    /// 76 is fully discharged and no shipped example carries an uncompilable hook expression any more.
     /// </para>
     /// <para>
-    /// PR5a was safe from that only because the corpus declares <c>beforeCreate</c> and <c>beforeUpdate</c> and
-    /// nothing else, so the example stayed refused by the two <c>before*</c> entries that remained. That is a
-    /// measured property of the tree rather than an assumption, which is what this fact records; the example's
-    /// own five fixes and the strengthening of the refusal-reason assertion belong to the PR that lifts a
-    /// <c>before*</c> refusal.
+    /// <c>bike-workshop</c> is now the corpus's first example to declare <c>after*</c> hooks for real
+    /// (<c>service_orders.afterCreate</c>/<c>afterUpdate</c>, <c>rentals.afterCreate</c>), so "no example
+    /// declares one" stopped being true and the guard's premise inverted. Rather than delete the coverage, this
+    /// fact asserts the thing the old one could only clear the way for: every runnable example's after-hooks
+    /// compile through the same pipeline <see cref="DescriptorValidator"/> runs at apply —
+    /// <see cref="DescriptorToSchemaMapper"/> then <see cref="PolicyCatalog"/>'s builder — so a future CEL
+    /// defect in an after-hook (a bad function name, a template that cannot resolve) fails here instead of
+    /// surfacing as an opaque compile error deep in the apply path.
     /// </para>
     /// <para>
-    /// <b>PR5b lifted all three <c>before*</c> entries, and the hazard measurably did not materialize.</b>
-    /// <c>complex-crm</c> is still refused by a <em>structured unhonoured-feature error</em> and not by a CEL
-    /// syntax error — the reason simply moved to another entry in the same table: <c>owner_id</c> declares
-    /// <c>default</c>, which is refused with its own fix suggestion. So the marker still means what it says.
-    /// Measured on this branch by applying the example, not inferred.
-    /// </para>
-    /// <para>
-    /// <b>Deviation 76 is now discharged in full, and the guard against the hazard is no longer this fact
-    /// alone.</b> Of its five defects: <c>lower(new.email)</c> became <c>lowerAscii(new.email)</c> in PR5b-1
-    /// (that PR's own rename forced it); <c>now()</c> stopped being a defect untouched, because it compiles as
-    /// a side-effect of the <c>Mutate</c> profile landing; and PR5b-2 fixed the remaining three — the two list
-    /// literals in <c>deals.beforeUpdate</c> conditions and the unresolvable <c>{{@user.email}}</c> template.
-    /// PR5b-2 also strengthened <see cref="Every_example_marked_not_runnable_really_is_refused"/> to assert the
-    /// refusal's <em>reason</em>, which is what closes the substitution this fact could only warn about: a CEL
-    /// syntax error can no longer stand in for a feature refusal, because the assertion now demands a fix
-    /// suggestion from <see cref="UnhonouredFeatures"/> itself.
-    /// </para>
-    /// <para>
-    /// Driven off the tree rather than off <c>complex-crm</c> by name, so a <em>new</em> example declaring an
-    /// after-hook fails this the moment it is added.
+    /// Driven off the tree rather than off <c>bike-workshop</c> by name, so a new example's after-hook is
+    /// covered the moment it is added; the non-empty assertion is what stops this passing vacuously if the
+    /// corpus ever stopped declaring one.
     /// </para>
     /// </remarks>
     [Fact]
-    public void No_shipped_example_declares_an_after_hook_so_pr5a_exposes_none_of_their_cel_defects()
+    public void Every_runnable_examples_after_hooks_compile()
     {
-        var hooks = AlvoExamples.Descriptors()
+        var withAfterHooks = AlvoExamples.Runnable()
             .Select(path => AlvoDescriptor.Parse(File.ReadAllText(path)))
-            .SelectMany(descriptor => descriptor.Entities.Values)
-            .Select(entity => entity.Hooks)
-            .OfType<EntityHooks>()
+            .Where(descriptor => descriptor.Entities.Values
+                .Select(entity => entity.Hooks)
+                .OfType<EntityHooks>()
+                .Any(hook => hook.AfterCreate != null || hook.AfterUpdate != null || hook.AfterDelete != null))
             .ToList();
 
-        hooks.ShouldNotBeEmpty(
-            "at least one example must declare hooks, or this fact passes by covering nothing — it is "
-            + "complex-crm today");
-        hooks.ShouldAllBe(
-            hook => hook.AfterCreate == null && hook.AfterUpdate == null && hook.AfterDelete == null,
-            "an example declaring an after-hook is now compiled rather than refused, so its expressions are "
-            + "exposed and this PR's scope changed");
+        withAfterHooks.ShouldNotBeEmpty(
+            "at least one runnable example must declare an after-hook, or this fact passes by covering "
+            + "nothing — it is bike-workshop today");
+
+        foreach (var descriptor in withAfterHooks)
+        {
+            var schema = DescriptorToSchemaMapper.Map(descriptor);
+
+            PolicyCatalog.TryBuild(descriptor, schema, new CelCompiler(), out _, out var errors)
+                .ShouldBeTrue($"'{descriptor.Name}': {string.Join("; ", errors)}");
+        }
     }
 
     /// <summary>

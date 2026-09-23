@@ -1,0 +1,2779 @@
+{
+  "$comment": "Seed data for examples/bike-workshop, posted by scripts/demo-admin in the order below. '$key' names a row so later rows can point at it: '@ref:<key>' becomes that row's id, '@user:<email>' the id of the sign-in account created under 'users'. '@date:<n>' is today plus n days and '@datetime:<n>T<hh:mm>' that day at that time (UTC), so the demo always looks current. '$key' is stripped before a row is sent.",
+  "users": [
+    {
+      "email": "martina.vargova@velo-dielna.example",
+      "roleNames": [
+        "manager"
+      ]
+    },
+    {
+      "email": "katarina.novotna@velo-dielna.example",
+      "roleNames": [
+        "reception"
+      ]
+    },
+    {
+      "email": "peter.hudec@velo-dielna.example",
+      "roleNames": [
+        "technician"
+      ]
+    },
+    {
+      "email": "lukas.balaz@velo-dielna.example",
+      "roleNames": [
+        "technician"
+      ]
+    },
+    {
+      "email": "tomas.chovan@velo-dielna.example",
+      "roleNames": [
+        "technician"
+      ]
+    },
+    {
+      "email": "zuzana.kmetova@velo-dielna.example",
+      "roleNames": [
+        "technician",
+        "reception"
+      ]
+    }
+  ],
+  "entities": [
+    {
+      "entity": "technicians",
+      "rows": [
+        {
+          "$key": "t-peter",
+          "full_name": "Peter Hudec",
+          "email": "peter.hudec@velo-dielna.example",
+          "phone": "+421 905 311 204",
+          "specialization": "mtb_suspension",
+          "hourly_rate": 28.0,
+          "hired_on": "2019-03-01",
+          "active": true,
+          "user_id": "@user:peter.hudec@velo-dielna.example"
+        },
+        {
+          "$key": "t-lukas",
+          "full_name": "Lukáš Baláž",
+          "email": "lukas.balaz@velo-dielna.example",
+          "phone": "+421 911 482 736",
+          "specialization": "ebike",
+          "hourly_rate": 30.0,
+          "hired_on": "2021-04-12",
+          "active": true,
+          "user_id": "@user:lukas.balaz@velo-dielna.example"
+        },
+        {
+          "$key": "t-tomas",
+          "full_name": "Tomáš Chovan",
+          "email": "tomas.chovan@velo-dielna.example",
+          "phone": "+421 948 120 559",
+          "specialization": "road",
+          "hourly_rate": 26.0,
+          "hired_on": "2022-02-01",
+          "active": true,
+          "user_id": "@user:tomas.chovan@velo-dielna.example"
+        },
+        {
+          "$key": "t-zuzana",
+          "full_name": "Zuzana Kmeťová",
+          "email": "zuzana.kmetova@velo-dielna.example",
+          "phone": "+421 903 774 018",
+          "specialization": "general",
+          "hourly_rate": 24.0,
+          "hired_on": "2023-05-15",
+          "active": true,
+          "user_id": "@user:zuzana.kmetova@velo-dielna.example"
+        },
+        {
+          "$key": "t-michal",
+          "full_name": "Michal Sliacky",
+          "email": "michal.sliacky@velo-dielna.example",
+          "phone": "+421 915 660 342",
+          "specialization": "wheels",
+          "hourly_rate": 27.0,
+          "hired_on": "2017-08-01",
+          "active": false
+        }
+      ]
+    },
+    {
+      "entity": "customers",
+      "rows": [
+        {
+          "$key": "c01",
+          "first_name": "Ján",
+          "last_name": "Kováč",
+          "email": "jan.kovac@gmail.com",
+          "phone": "+421 905 123 456",
+          "street": "Námestie SNP 14",
+          "city": "Banská Bystrica",
+          "postal_code": "974 01",
+          "loyalty_tier": "club",
+          "marketing_consent": true,
+          "preferences": {
+            "contact": "sms",
+            "tyre_pressure_bar": {
+              "front": 1.6,
+              "rear": 1.8
+            }
+          }
+        },
+        {
+          "$key": "c02",
+          "first_name": "Mária",
+          "last_name": "Horváthová",
+          "email": "maria.horvathova@centrum.sk",
+          "phone": "+421 907 882 310",
+          "street": "Skuteckého 21",
+          "city": "Banská Bystrica",
+          "postal_code": "974 01",
+          "loyalty_tier": "none",
+          "marketing_consent": true,
+          "notes": "Prefers to be called after 16:00, works shifts at the hospital."
+        },
+        {
+          "$key": "c03",
+          "first_name": "Martin",
+          "last_name": "Varga",
+          "email": "martin.varga@gmail.com",
+          "phone": "+421 944 215 870",
+          "street": "Tajovského 8",
+          "city": "Banská Bystrica",
+          "postal_code": "974 01",
+          "loyalty_tier": "team",
+          "marketing_consent": false,
+          "notes": "Rides for MTB klub Banská Bystrica. Races XC most weekends — always asks for express.",
+          "preferences": {
+            "contact": "phone",
+            "tyre_pressure_bar": {
+              "front": 1.4,
+              "rear": 1.5
+            },
+            "tubeless": true
+          }
+        },
+        {
+          "$key": "c04",
+          "first_name": "Eva",
+          "last_name": "Tóthová",
+          "email": "eva.tothova@azet.sk",
+          "phone": "+421 918 406 227",
+          "street": "Sládkovičova 3",
+          "city": "Zvolen",
+          "postal_code": "960 01",
+          "loyalty_tier": "none",
+          "marketing_consent": true
+        },
+        {
+          "$key": "c05",
+          "first_name": "Tomáš",
+          "last_name": "Nagy",
+          "email": "tomas.nagy@gmail.com",
+          "phone": "+421 902 551 694",
+          "street": "Rudlovská cesta 45",
+          "city": "Banská Bystrica",
+          "postal_code": "974 11",
+          "loyalty_tier": "club",
+          "marketing_consent": true
+        },
+        {
+          "$key": "c06",
+          "first_name": "Zuzana",
+          "last_name": "Baláková",
+          "email": "zuzana.balakova@post.sk",
+          "phone": "+421 915 330 148",
+          "street": "Hviezdoslavova 17",
+          "city": "Brezno",
+          "postal_code": "977 01",
+          "loyalty_tier": "none",
+          "marketing_consent": false
+        },
+        {
+          "$key": "c07",
+          "first_name": "Michal",
+          "last_name": "Lukáč",
+          "email": "michal.lukac@gmail.com",
+          "phone": "+421 948 772 015",
+          "street": "Moyzesova 2",
+          "city": "Banská Bystrica",
+          "postal_code": "974 01",
+          "loyalty_tier": "team",
+          "marketing_consent": true,
+          "preferences": {
+            "contact": "email",
+            "saddle_height_mm": 742
+          }
+        },
+        {
+          "$key": "c08",
+          "first_name": "Jana",
+          "last_name": "Šimková",
+          "email": "jana.simkova@zoznam.sk",
+          "phone": "+421 903 640 552",
+          "street": "Družby 12",
+          "city": "Banská Bystrica",
+          "postal_code": "974 04",
+          "loyalty_tier": "club",
+          "marketing_consent": true
+        },
+        {
+          "$key": "c09",
+          "first_name": "Peter",
+          "last_name": "Molnár",
+          "email": "peter.molnar@gmail.com",
+          "phone": "+421 911 208 443",
+          "street": "Hlavná 56",
+          "city": "Badín",
+          "postal_code": "976 32",
+          "loyalty_tier": "none",
+          "marketing_consent": false,
+          "notes": "Pays in cash only."
+        },
+        {
+          "$key": "c10",
+          "first_name": "Lucia",
+          "last_name": "Krajčírová",
+          "email": "lucia.krajcirova@outlook.com",
+          "phone": "+421 950 114 786",
+          "street": "Kremnička 4",
+          "city": "Banská Bystrica",
+          "postal_code": "974 05",
+          "loyalty_tier": "none",
+          "marketing_consent": true
+        },
+        {
+          "$key": "c11",
+          "first_name": "Andrej",
+          "last_name": "Oravec",
+          "email": "andrej.oravec@gmail.com",
+          "phone": "+421 904 997 312",
+          "street": "Letecká 9",
+          "city": "Sliač",
+          "postal_code": "962 31",
+          "loyalty_tier": "club",
+          "marketing_consent": true,
+          "notes": "Commutes to Sliač airport daily, cannot be without a bike for more than two days."
+        },
+        {
+          "$key": "c12",
+          "first_name": "Katarína",
+          "last_name": "Polaková",
+          "email": "katarina.polakova@centrum.sk",
+          "phone": "+421 917 523 604",
+          "street": "Štúrova 31",
+          "city": "Kremnica",
+          "postal_code": "967 01",
+          "loyalty_tier": "none",
+          "marketing_consent": false
+        },
+        {
+          "$key": "c13",
+          "first_name": "Róbert",
+          "last_name": "Hudák",
+          "email": "robert.hudak@gmail.com",
+          "phone": "+421 908 346 921",
+          "street": "Tulská 88",
+          "city": "Banská Bystrica",
+          "postal_code": "974 04",
+          "loyalty_tier": "team",
+          "marketing_consent": true,
+          "notes": "Team rider, enduro. Bring fork issues to Peter.",
+          "preferences": {
+            "contact": "phone",
+            "suspension": {
+              "fork_psi": 85,
+              "shock_psi": 190
+            }
+          }
+        },
+        {
+          "$key": "c14",
+          "first_name": "Veronika",
+          "last_name": "Kmeťová",
+          "email": "veronika.kmetova@azet.sk",
+          "phone": "+421 949 061 377",
+          "street": "Selčianska 6",
+          "city": "Selce",
+          "postal_code": "976 11",
+          "loyalty_tier": "none",
+          "marketing_consent": true
+        },
+        {
+          "$key": "c15",
+          "first_name": "Juraj",
+          "last_name": "Mikuš",
+          "email": "juraj.mikus@gmail.com",
+          "phone": "+421 910 758 204",
+          "street": "Partizánska cesta 101",
+          "city": "Banská Bystrica",
+          "postal_code": "974 01",
+          "loyalty_tier": "club",
+          "marketing_consent": false,
+          "preferences": {
+            "contact": "email",
+            "invoice_to": "Mikuš s.r.o., IČO 47 258 913"
+          }
+        }
+      ]
+    },
+    {
+      "entity": "bikes",
+      "rows": [
+        {
+          "$key": "b01",
+          "customer_id": "@ref:c01",
+          "brand": "Trek",
+          "model": "Marlin 7",
+          "category": "mtb_hardtail",
+          "model_year": 2023,
+          "frame_number": "WTU312C4471T",
+          "frame_size": "L",
+          "color": "Matte Olive Grey",
+          "is_electric": false,
+          "purchased_on": "2023-04-18"
+        },
+        {
+          "$key": "b02",
+          "customer_id": "@ref:c01",
+          "brand": "Specialized",
+          "model": "Sirrus X 3.0",
+          "category": "city",
+          "model_year": 2022,
+          "frame_number": "WSBC604218840N",
+          "frame_size": "M",
+          "color": "Gloss Black",
+          "is_electric": false,
+          "purchased_on": "2022-06-02"
+        },
+        {
+          "$key": "b03",
+          "customer_id": "@ref:c02",
+          "brand": "Kellys",
+          "model": "Avenue 30",
+          "category": "city",
+          "model_year": 2021,
+          "frame_number": "KS21AV30M01877",
+          "frame_size": "M",
+          "color": "White",
+          "is_electric": false,
+          "purchased_on": "2021-05-11"
+        },
+        {
+          "$key": "b04",
+          "customer_id": "@ref:c03",
+          "brand": "Specialized",
+          "model": "Epic Hardtail Comp",
+          "category": "mtb_hardtail",
+          "model_year": 2024,
+          "frame_number": "WSBC614302117R",
+          "frame_size": "M",
+          "color": "Gloss Red Tint",
+          "is_electric": false,
+          "purchased_on": "2024-02-20"
+        },
+        {
+          "$key": "b05",
+          "customer_id": "@ref:c03",
+          "brand": "Canyon",
+          "model": "Grail CF SL 7",
+          "category": "gravel",
+          "model_year": 2023,
+          "frame_number": "CNY23GR7SL04512",
+          "frame_size": "M",
+          "color": "Stealth",
+          "is_electric": false,
+          "purchased_on": "2023-03-09"
+        },
+        {
+          "$key": "b06",
+          "customer_id": "@ref:c04",
+          "brand": "Author",
+          "model": "Solution ASL",
+          "category": "trekking",
+          "model_year": 2020,
+          "frame_number": "AUT20SOL2291K",
+          "frame_size": "S",
+          "color": "Petrol Blue",
+          "is_electric": false,
+          "purchased_on": "2020-07-24"
+        },
+        {
+          "$key": "b07",
+          "customer_id": "@ref:c05",
+          "brand": "Cube",
+          "model": "Reaction Hybrid Pro 625",
+          "category": "ebike",
+          "model_year": 2023,
+          "frame_number": "CUB23RHP62550918",
+          "frame_size": "L",
+          "color": "Grey'n'Metal",
+          "is_electric": true,
+          "battery_wh": 625,
+          "purchased_on": "2023-08-15"
+        },
+        {
+          "$key": "b08",
+          "customer_id": "@ref:c06",
+          "brand": "Kellys",
+          "model": "Tygon R50",
+          "category": "ebike",
+          "model_year": 2022,
+          "frame_number": "KS22TYR50L00341",
+          "frame_size": "L",
+          "color": "Black Blue",
+          "is_electric": true,
+          "battery_wh": 725,
+          "purchased_on": "2022-09-01"
+        },
+        {
+          "$key": "b09",
+          "customer_id": "@ref:c07",
+          "brand": "Trek",
+          "model": "Domane SL 5",
+          "category": "road",
+          "model_year": 2023,
+          "frame_number": "WTU188D0925S",
+          "frame_size": "56",
+          "color": "Crimson",
+          "is_electric": false,
+          "purchased_on": "2023-05-30"
+        },
+        {
+          "$key": "b10",
+          "customer_id": "@ref:c07",
+          "brand": "Scott",
+          "model": "Spark 930",
+          "category": "mtb_full",
+          "model_year": 2022,
+          "frame_number": "SCT22SP930M8812",
+          "frame_size": "M",
+          "color": "Black",
+          "is_electric": false,
+          "purchased_on": "2022-04-14"
+        },
+        {
+          "$key": "b11",
+          "customer_id": "@ref:c08",
+          "brand": "Kellys",
+          "model": "Kiter 50",
+          "category": "kids",
+          "model_year": 2024,
+          "frame_number": "KS24KIT50K02214",
+          "frame_size": "24\"",
+          "color": "Lime",
+          "is_electric": false,
+          "purchased_on": "2024-06-01"
+        },
+        {
+          "$key": "b12",
+          "customer_id": "@ref:c08",
+          "brand": "Giant",
+          "model": "Talon 2",
+          "category": "mtb_hardtail",
+          "model_year": 2021,
+          "frame_number": "GNT21TL2C1180447",
+          "frame_size": "M",
+          "color": "Charcoal",
+          "is_electric": false,
+          "purchased_on": "2021-03-27"
+        },
+        {
+          "$key": "b13",
+          "customer_id": "@ref:c09",
+          "brand": "Rock Machine",
+          "model": "Blizz 30-29",
+          "category": "mtb_hardtail",
+          "model_year": 2020,
+          "frame_number": "RM20BLZ3029L0712",
+          "frame_size": "L",
+          "color": "Dark Grey",
+          "is_electric": false,
+          "purchased_on": "2020-05-05"
+        },
+        {
+          "$key": "b14",
+          "customer_id": "@ref:c10",
+          "brand": "Specialized",
+          "model": "Turbo Vado 4.0",
+          "category": "ebike",
+          "model_year": 2023,
+          "frame_number": "WSBC623500671E",
+          "frame_size": "M",
+          "color": "Cast Blue",
+          "is_electric": true,
+          "battery_wh": 710,
+          "purchased_on": "2023-07-19"
+        },
+        {
+          "$key": "b15",
+          "customer_id": "@ref:c11",
+          "brand": "Merida",
+          "model": "Crossway 300",
+          "category": "trekking",
+          "model_year": 2021,
+          "frame_number": "MRD21CW300M9021",
+          "frame_size": "L",
+          "color": "Silk Anthracite",
+          "is_electric": false,
+          "purchased_on": "2021-04-10"
+        },
+        {
+          "$key": "b16",
+          "customer_id": "@ref:c11",
+          "brand": "Author",
+          "model": "Ronin 29",
+          "category": "mtb_hardtail",
+          "model_year": 2019,
+          "frame_number": "AUT19RON29L1042",
+          "frame_size": "L",
+          "color": "Matte Black",
+          "is_electric": false,
+          "purchased_on": "2019-06-22"
+        },
+        {
+          "$key": "b17",
+          "customer_id": "@ref:c12",
+          "brand": "Kellys",
+          "model": "Phanatic 70",
+          "category": "trekking",
+          "model_year": 2022,
+          "frame_number": "KS22PHA70S00893",
+          "frame_size": "S",
+          "color": "Sand",
+          "is_electric": false,
+          "purchased_on": "2022-05-18"
+        },
+        {
+          "$key": "b18",
+          "customer_id": "@ref:c13",
+          "brand": "Trek",
+          "model": "Slash 8",
+          "category": "mtb_full",
+          "model_year": 2023,
+          "frame_number": "WTU407F1182H",
+          "frame_size": "L",
+          "color": "Galactic Grey",
+          "is_electric": false,
+          "purchased_on": "2023-03-01"
+        },
+        {
+          "$key": "b19",
+          "customer_id": "@ref:c13",
+          "brand": "Trek",
+          "model": "Checkpoint ALR 5",
+          "category": "gravel",
+          "model_year": 2022,
+          "frame_number": "WTU095G6630P",
+          "frame_size": "56",
+          "color": "Mulsanne Blue",
+          "is_electric": false,
+          "purchased_on": "2022-08-11"
+        },
+        {
+          "$key": "b20",
+          "customer_id": "@ref:c14",
+          "brand": "Ghost",
+          "model": "Square Urban",
+          "category": "city",
+          "model_year": 2021,
+          "frame_number": "GHT21SQU00M3321",
+          "frame_size": "M",
+          "color": "Pearl White",
+          "is_electric": false,
+          "purchased_on": "2021-09-04"
+        },
+        {
+          "$key": "b21",
+          "customer_id": "@ref:c15",
+          "brand": "Haibike",
+          "model": "Trekking 6",
+          "category": "ebike",
+          "model_year": 2024,
+          "frame_number": "HAI24TRK6M00176",
+          "frame_size": "M",
+          "color": "Black Matte",
+          "is_electric": true,
+          "battery_wh": 630,
+          "purchased_on": "2024-03-12"
+        },
+        {
+          "$key": "b22",
+          "customer_id": "@ref:c15",
+          "brand": "Specialized",
+          "model": "Allez Sport",
+          "category": "road",
+          "model_year": 2020,
+          "frame_number": "WSBC020931455A",
+          "frame_size": "54",
+          "color": "Satin Black",
+          "is_electric": false,
+          "purchased_on": "2020-04-02"
+        },
+        {
+          "$key": "b23",
+          "customer_id": "@ref:c05",
+          "brand": "Kellys",
+          "model": "Spider 10",
+          "category": "mtb_hardtail",
+          "model_year": 2018,
+          "frame_number": "KS18SPD10M04420",
+          "frame_size": "M",
+          "color": "Blue",
+          "is_electric": false
+        },
+        {
+          "$key": "b24",
+          "customer_id": "@ref:c10",
+          "brand": "Author",
+          "model": "Grand 26",
+          "category": "city",
+          "model_year": 2017,
+          "frame_number": "AUT17GRN260788",
+          "frame_size": "S",
+          "color": "Cream",
+          "is_electric": false
+        },
+        {
+          "$key": "b25",
+          "customer_id": "@ref:c02",
+          "brand": "Cube",
+          "model": "Kathmandu Hybrid SLX 750",
+          "category": "ebike",
+          "model_year": 2024,
+          "frame_number": "CUB24KTH75011562",
+          "frame_size": "M",
+          "color": "Mint",
+          "is_electric": true,
+          "battery_wh": 750,
+          "purchased_on": "2024-05-07"
+        }
+      ]
+    },
+    {
+      "entity": "parts",
+      "rows": [
+        {
+          "$key": "p-chain12",
+          "sku": "SHI-CN-M6100",
+          "name": "Shimano Deore chain CN-M6100, 12-speed, 126 links",
+          "brand": "Shimano",
+          "category": "drivetrain",
+          "unit_price": 29.9,
+          "purchase_price": 17.4,
+          "stock_quantity": 14,
+          "reorder_level": 4,
+          "supplier": "shimano_cz",
+          "discontinued": false,
+          "compatibility": {
+            "speeds": 12,
+            "links": 126
+          }
+        },
+        {
+          "$key": "p-chain11",
+          "sku": "SHI-CN-HG701",
+          "name": "Shimano XT/Ultegra chain CN-HG701, 11-speed",
+          "brand": "Shimano",
+          "category": "drivetrain",
+          "unit_price": 39.9,
+          "purchase_price": 24.1,
+          "stock_quantity": 6,
+          "reorder_level": 3,
+          "supplier": "shimano_cz",
+          "discontinued": false,
+          "compatibility": {
+            "speeds": 11
+          }
+        },
+        {
+          "$key": "p-chain8",
+          "sku": "KMC-Z8-3",
+          "name": "KMC Z8.3 chain, 6/7/8-speed",
+          "brand": "KMC",
+          "category": "drivetrain",
+          "unit_price": 13.9,
+          "purchase_price": 6.9,
+          "stock_quantity": 22,
+          "reorder_level": 6,
+          "supplier": "paul_lange",
+          "discontinued": true,
+          "compatibility": {
+            "speeds": [
+              6,
+              7,
+              8
+            ]
+          }
+        },
+        {
+          "$key": "p-cass12",
+          "sku": "SHI-CS-M6100",
+          "name": "Shimano Deore cassette CS-M6100, 10-51T, 12-speed",
+          "brand": "Shimano",
+          "category": "drivetrain",
+          "unit_price": 74.9,
+          "purchase_price": 46.0,
+          "stock_quantity": 3,
+          "reorder_level": 2,
+          "supplier": "shimano_cz",
+          "discontinued": false,
+          "compatibility": {
+            "speeds": 12,
+            "range": "10-51T",
+            "freehub": "Micro Spline"
+          }
+        },
+        {
+          "$key": "p-cass8",
+          "sku": "SHI-CS-HG50-8",
+          "name": "Shimano cassette CS-HG50-8, 11-32T, 8-speed",
+          "brand": "Shimano",
+          "category": "drivetrain",
+          "unit_price": 22.9,
+          "purchase_price": 12.5,
+          "stock_quantity": 7,
+          "reorder_level": 3,
+          "supplier": "shimano_cz",
+          "discontinued": false,
+          "compatibility": {
+            "speeds": 8,
+            "range": "11-32T"
+          }
+        },
+        {
+          "$key": "p-cass-sram",
+          "sku": "SRAM-PG1230",
+          "name": "SRAM NX Eagle cassette PG-1230, 11-50T, 12-speed",
+          "brand": "SRAM",
+          "category": "drivetrain",
+          "unit_price": 79.0,
+          "purchase_price": 49.0,
+          "stock_quantity": 2,
+          "reorder_level": 2,
+          "supplier": "bike_components",
+          "discontinued": false,
+          "compatibility": {
+            "speeds": 12,
+            "range": "11-50T"
+          }
+        },
+        {
+          "$key": "p-rd12",
+          "sku": "SHI-RD-M6100",
+          "name": "Shimano Deore rear derailleur RD-M6100-SGS, 12-speed",
+          "brand": "Shimano",
+          "category": "drivetrain",
+          "unit_price": 64.9,
+          "purchase_price": 40.0,
+          "stock_quantity": 2,
+          "reorder_level": 1,
+          "supplier": "shimano_cz",
+          "discontinued": false,
+          "compatibility": {
+            "speeds": 12
+          }
+        },
+        {
+          "$key": "p-bb",
+          "sku": "SHI-SM-BB52",
+          "name": "Shimano Hollowtech II bottom bracket SM-BB52, BSA 68/73 mm",
+          "brand": "Shimano",
+          "category": "drivetrain",
+          "unit_price": 29.9,
+          "purchase_price": 17.9,
+          "stock_quantity": 5,
+          "reorder_level": 2,
+          "supplier": "shimano_cz",
+          "discontinued": false,
+          "compatibility": {
+            "shell": "BSA",
+            "widths_mm": [
+              68,
+              73
+            ]
+          }
+        },
+        {
+          "$key": "p-pads-b01s",
+          "sku": "SHI-B01S",
+          "name": "Shimano B01S resin disc brake pads (pair)",
+          "brand": "Shimano",
+          "category": "brakes",
+          "unit_price": 12.9,
+          "purchase_price": 6.2,
+          "stock_quantity": 18,
+          "reorder_level": 6,
+          "supplier": "shimano_cz",
+          "discontinued": false,
+          "compatibility": {
+            "calipers": [
+              "MT200",
+              "MT201",
+              "M315"
+            ]
+          }
+        },
+        {
+          "$key": "p-pads-l03a",
+          "sku": "SHI-L03A",
+          "name": "Shimano L03A resin disc brake pads (pair)",
+          "brand": "Shimano",
+          "category": "brakes",
+          "unit_price": 16.9,
+          "purchase_price": 8.9,
+          "stock_quantity": 12,
+          "reorder_level": 5,
+          "supplier": "shimano_cz",
+          "discontinued": false,
+          "compatibility": {
+            "calipers": [
+              "MT500",
+              "M6100",
+              "M8100 2-piston"
+            ]
+          }
+        },
+        {
+          "$key": "p-pads-n03a",
+          "sku": "SHI-N03A",
+          "name": "Shimano N03A resin disc brake pads, 4-piston (pair)",
+          "brand": "Shimano",
+          "category": "brakes",
+          "unit_price": 19.9,
+          "purchase_price": 10.4,
+          "stock_quantity": 1,
+          "reorder_level": 4,
+          "supplier": "shimano_cz",
+          "discontinued": false,
+          "compatibility": {
+            "calipers": [
+              "M6120",
+              "M8120",
+              "MT520"
+            ]
+          }
+        },
+        {
+          "$key": "p-rotor180",
+          "sku": "SHI-RT-MT800-180",
+          "name": "Shimano rotor RT-MT800, 180 mm, Center Lock",
+          "brand": "Shimano",
+          "category": "brakes",
+          "unit_price": 49.9,
+          "purchase_price": 31.0,
+          "stock_quantity": 4,
+          "reorder_level": 2,
+          "supplier": "shimano_cz",
+          "discontinued": false,
+          "compatibility": {
+            "diameter_mm": 180,
+            "mount": "Center Lock"
+          }
+        },
+        {
+          "$key": "p-rotor160",
+          "sku": "SHI-SM-RT54-160",
+          "name": "Shimano rotor SM-RT54, 160 mm, Center Lock",
+          "brand": "Shimano",
+          "category": "brakes",
+          "unit_price": 18.9,
+          "purchase_price": 10.2,
+          "stock_quantity": 6,
+          "reorder_level": 2,
+          "supplier": "shimano_cz",
+          "discontinued": false,
+          "compatibility": {
+            "diameter_mm": 160,
+            "mount": "Center Lock"
+          }
+        },
+        {
+          "$key": "p-oil",
+          "sku": "SHI-MINOIL-100",
+          "name": "Shimano mineral brake oil, 100 ml",
+          "brand": "Shimano",
+          "category": "consumables",
+          "unit_price": 11.9,
+          "purchase_price": 6.1,
+          "stock_quantity": 9,
+          "reorder_level": 3,
+          "supplier": "shimano_cz",
+          "discontinued": false
+        },
+        {
+          "$key": "p-shiftcable",
+          "sku": "JAG-SPORT-SHIFT",
+          "name": "Jagwire Sport shift cable and housing kit",
+          "brand": "Jagwire",
+          "category": "cockpit",
+          "unit_price": 14.9,
+          "purchase_price": 7.8,
+          "stock_quantity": 11,
+          "reorder_level": 4,
+          "supplier": "paul_lange",
+          "discontinued": false
+        },
+        {
+          "$key": "p-brakecable",
+          "sku": "JAG-BASIC-BRAKE",
+          "name": "Jagwire Basics brake cable and housing kit",
+          "brand": "Jagwire",
+          "category": "brakes",
+          "unit_price": 12.9,
+          "purchase_price": 6.3,
+          "stock_quantity": 8,
+          "reorder_level": 4,
+          "supplier": "paul_lange",
+          "discontinued": false
+        },
+        {
+          "$key": "p-marathon",
+          "sku": "SCHW-MPLUS-40-622",
+          "name": "Schwalbe Marathon Plus tyre, 700x38C, reflex",
+          "brand": "Schwalbe",
+          "category": "tyres_tubes",
+          "unit_price": 49.9,
+          "purchase_price": 31.5,
+          "stock_quantity": 6,
+          "reorder_level": 2,
+          "supplier": "paul_lange",
+          "discontinued": false,
+          "compatibility": {
+            "etrto": "40-622"
+          }
+        },
+        {
+          "$key": "p-nobby",
+          "sku": "SCHW-NOBBY-29-240",
+          "name": "Schwalbe Nobby Nic tyre, 29x2.40, Addix Performance",
+          "brand": "Schwalbe",
+          "category": "tyres_tubes",
+          "unit_price": 44.9,
+          "purchase_price": 27.0,
+          "stock_quantity": 4,
+          "reorder_level": 2,
+          "supplier": "paul_lange",
+          "discontinued": false,
+          "compatibility": {
+            "etrto": "62-622",
+            "tubeless_ready": true
+          }
+        },
+        {
+          "$key": "p-gp5000",
+          "sku": "CONT-GP5000-28",
+          "name": "Continental Grand Prix 5000 tyre, 700x28C",
+          "brand": "Continental",
+          "category": "tyres_tubes",
+          "unit_price": 59.9,
+          "purchase_price": 38.0,
+          "stock_quantity": 5,
+          "reorder_level": 2,
+          "supplier": "bike_components",
+          "discontinued": false,
+          "compatibility": {
+            "etrto": "28-622"
+          }
+        },
+        {
+          "$key": "p-dhf",
+          "sku": "MAXX-DHF-29-250",
+          "name": "Maxxis Minion DHF tyre, 29x2.50 WT, 3C MaxxTerra EXO",
+          "brand": "Maxxis",
+          "category": "tyres_tubes",
+          "unit_price": 64.9,
+          "purchase_price": 41.0,
+          "stock_quantity": 2,
+          "reorder_level": 2,
+          "supplier": "bike_components",
+          "discontinued": false,
+          "compatibility": {
+            "etrto": "63-622",
+            "tubeless_ready": true
+          }
+        },
+        {
+          "$key": "p-tube28",
+          "sku": "SCHW-SV17",
+          "name": "Schwalbe SV17 inner tube, 28\", presta 40 mm",
+          "brand": "Schwalbe",
+          "category": "tyres_tubes",
+          "unit_price": 7.9,
+          "purchase_price": 3.6,
+          "stock_quantity": 34,
+          "reorder_level": 10,
+          "supplier": "paul_lange",
+          "discontinued": false,
+          "compatibility": {
+            "valve": "presta"
+          }
+        },
+        {
+          "$key": "p-tube29",
+          "sku": "SCHW-SV19",
+          "name": "Schwalbe SV19 inner tube, 29\", presta 40 mm",
+          "brand": "Schwalbe",
+          "category": "tyres_tubes",
+          "unit_price": 8.5,
+          "purchase_price": 3.9,
+          "stock_quantity": 27,
+          "reorder_level": 10,
+          "supplier": "paul_lange",
+          "discontinued": false,
+          "compatibility": {
+            "valve": "presta"
+          }
+        },
+        {
+          "$key": "p-sealant",
+          "sku": "STAN-SEAL-473",
+          "name": "Stan's NoTubes tyre sealant, 473 ml",
+          "brand": "Stan's NoTubes",
+          "category": "consumables",
+          "unit_price": 24.9,
+          "purchase_price": 14.5,
+          "stock_quantity": 5,
+          "reorder_level": 2,
+          "supplier": "bike_components",
+          "discontinued": false
+        },
+        {
+          "$key": "p-grips",
+          "sku": "ERG-GA3",
+          "name": "Ergon GA3 lock-on grips, size L",
+          "brand": "Ergon",
+          "category": "cockpit",
+          "unit_price": 29.9,
+          "purchase_price": 17.0,
+          "stock_quantity": 4,
+          "reorder_level": 2,
+          "supplier": "paul_lange",
+          "discontinued": false
+        },
+        {
+          "$key": "p-fox34",
+          "sku": "FOX-SKF-34",
+          "name": "Fox 34 mm fork seal kit (SKF wipers and foam rings)",
+          "brand": "Fox",
+          "category": "suspension",
+          "unit_price": 39.9,
+          "purchase_price": 24.0,
+          "stock_quantity": 3,
+          "reorder_level": 1,
+          "supplier": "bike_components",
+          "discontinued": false,
+          "compatibility": {
+            "stanchion_mm": 34
+          }
+        },
+        {
+          "$key": "p-pike",
+          "sku": "RS-SVC-PIKE",
+          "name": "RockShox 200-hour service kit, Pike/Lyrik (2020+)",
+          "brand": "RockShox",
+          "category": "suspension",
+          "unit_price": 49.9,
+          "purchase_price": 29.0,
+          "stock_quantity": 2,
+          "reorder_level": 1,
+          "supplier": "bike_components",
+          "discontinued": false,
+          "compatibility": {
+            "forks": [
+              "Pike",
+              "Lyrik"
+            ]
+          }
+        },
+        {
+          "$key": "p-bosch-chg",
+          "sku": "BOS-CHG-4A",
+          "name": "Bosch Standard Charger 4A",
+          "brand": "Bosch",
+          "category": "ebike",
+          "unit_price": 159.0,
+          "purchase_price": 112.0,
+          "stock_quantity": 1,
+          "reorder_level": 1,
+          "supplier": "kellys_sk",
+          "discontinued": false,
+          "compatibility": {
+            "system": "Bosch Smart System"
+          }
+        },
+        {
+          "$key": "p-bosch-pad",
+          "sku": "BOS-BRK-SENS",
+          "name": "Bosch speed sensor with spoke magnet",
+          "brand": "Bosch",
+          "category": "ebike",
+          "unit_price": 34.9,
+          "purchase_price": 21.5,
+          "stock_quantity": 3,
+          "reorder_level": 1,
+          "supplier": "kellys_sk",
+          "discontinued": false
+        },
+        {
+          "$key": "p-cleaner",
+          "sku": "MUC-NANO-1L",
+          "name": "Muc-Off Nano Tech bike cleaner, 1 l",
+          "brand": "Muc-Off",
+          "category": "consumables",
+          "unit_price": 12.9,
+          "purchase_price": 6.8,
+          "stock_quantity": 10,
+          "reorder_level": 4,
+          "supplier": "local",
+          "discontinued": false
+        },
+        {
+          "$key": "p-lube",
+          "sku": "FIN-DRY-120",
+          "name": "Finish Line Dry Teflon chain lube, 120 ml",
+          "brand": "Finish Line",
+          "category": "consumables",
+          "unit_price": 9.9,
+          "purchase_price": 4.9,
+          "stock_quantity": 15,
+          "reorder_level": 5,
+          "supplier": "local",
+          "discontinued": false
+        }
+      ]
+    },
+    {
+      "entity": "service_orders",
+      "rows": [
+        {
+          "$key": "o01",
+          "order_number": "SO-2026-0103",
+          "bike_id": "@ref:b01",
+          "technician_id": "@ref:t-zuzana",
+          "status": "collected",
+          "priority": "normal",
+          "service_type": "full_service",
+          "received_at": "@datetime:-45T17:25",
+          "promised_on": "@date:-39",
+          "problem_description": "Annual service, customer asks for new tyres.",
+          "contact_email": "jan.kovac@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 21.6,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example",
+          "labour_hours": 2.25,
+          "work_notes": "Full service, fitted new tyres and tubes.",
+          "completed_at": "@datetime:-43T16:36",
+          "paid": true,
+          "payment_method": "card"
+        },
+        {
+          "$key": "o02",
+          "order_number": "SO-2026-0107",
+          "bike_id": "@ref:b02",
+          "technician_id": "@ref:t-zuzana",
+          "status": "collected",
+          "priority": "high",
+          "service_type": "basic_service",
+          "received_at": "@datetime:-44T17:25",
+          "promised_on": "@date:-38",
+          "problem_description": "Spring check — gears and brakes feel sluggish.",
+          "contact_email": "jan.kovac@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 21.6,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example",
+          "labour_hours": 1.0,
+          "work_notes": "Cleaned and lubed drivetrain, adjusted gears and brakes, checked bolts to torque.",
+          "completed_at": "@datetime:-42T16:11",
+          "paid": true,
+          "payment_method": "cash"
+        },
+        {
+          "$key": "o03",
+          "order_number": "SO-2026-0109",
+          "bike_id": "@ref:b03",
+          "technician_id": "@ref:t-peter",
+          "status": "cancelled",
+          "priority": "high",
+          "service_type": "basic_service",
+          "received_at": "@datetime:-40T11:20",
+          "promised_on": "@date:-34",
+          "problem_description": "Squeaky brakes, chain is noisy.",
+          "contact_email": "maria.horvathova@centrum.sk",
+          "notify_customer": true,
+          "labour_rate": 28.0,
+          "assigned_user_id": "@user:peter.hudec@velo-dielna.example",
+          "labour_hours": 1.25,
+          "work_notes": "Customer collected the bike unrepaired — will buy a new one."
+        },
+        {
+          "$key": "o04",
+          "order_number": "SO-2026-0110",
+          "bike_id": "@ref:b04",
+          "technician_id": "@ref:t-peter",
+          "status": "collected",
+          "priority": "express",
+          "service_type": "wheel_build",
+          "received_at": "@datetime:-38T09:05",
+          "promised_on": "@date:-37",
+          "problem_description": "Rear wheel wobbles, two broken spokes.",
+          "contact_email": "martin.varga@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 23.8,
+          "assigned_user_id": "@user:peter.hudec@velo-dielna.example",
+          "labour_hours": 1.5,
+          "work_notes": "Replaced three spokes, trued and tensioned the wheel.",
+          "completed_at": "@datetime:-36T16:28",
+          "paid": true,
+          "payment_method": "card"
+        },
+        {
+          "$key": "o05",
+          "order_number": "SO-2026-0114",
+          "bike_id": "@ref:b05",
+          "technician_id": "@ref:t-tomas",
+          "status": "collected",
+          "priority": "express",
+          "service_type": "wheel_build",
+          "received_at": "@datetime:-36T11:20",
+          "promised_on": "@date:-35",
+          "problem_description": "Rear wheel wobbles, two broken spokes.",
+          "contact_email": "martin.varga@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 22.1,
+          "assigned_user_id": "@user:tomas.chovan@velo-dielna.example",
+          "labour_hours": 1.5,
+          "work_notes": "Replaced three spokes, trued and tensioned the wheel.",
+          "completed_at": "@datetime:-34T16:39",
+          "paid": true,
+          "payment_method": "cash",
+          "internal_notes": "Customer disputes the previous invoice — ask Martina before giving any discount."
+        },
+        {
+          "$key": "o06",
+          "order_number": "SO-2026-0116",
+          "bike_id": "@ref:b06",
+          "technician_id": "@ref:t-tomas",
+          "status": "collected",
+          "priority": "normal",
+          "service_type": "full_service",
+          "received_at": "@datetime:-33T13:45",
+          "promised_on": "@date:-30",
+          "problem_description": "Annual service, customer asks for new tyres.",
+          "contact_email": "eva.tothova@azet.sk",
+          "notify_customer": false,
+          "labour_rate": 26.0,
+          "assigned_user_id": "@user:tomas.chovan@velo-dielna.example",
+          "labour_hours": 2.25,
+          "work_notes": "Full service, fitted new tyres and tubes.",
+          "completed_at": "@datetime:-31T16:55",
+          "paid": true,
+          "payment_method": "bank_transfer"
+        },
+        {
+          "$key": "o07",
+          "order_number": "SO-2026-0120",
+          "bike_id": "@ref:b07",
+          "technician_id": "@ref:t-lukas",
+          "status": "collected",
+          "priority": "normal",
+          "service_type": "ebike_diagnostics",
+          "received_at": "@datetime:-31T11:20",
+          "promised_on": "@date:-28",
+          "problem_description": "Motor cuts out, display shows error 503.",
+          "contact_email": "tomas.nagy@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 27.0,
+          "assigned_user_id": "@user:lukas.balaz@velo-dielna.example",
+          "labour_hours": 1.0,
+          "work_notes": "Speed sensor misaligned and cable chafed — replaced sensor, updated firmware.",
+          "completed_at": "@datetime:-29T16:37",
+          "paid": true,
+          "payment_method": "card",
+          "diagnostics": {
+            "tool": "Bosch DiagnosticTool 3",
+            "error_codes": [
+              "503"
+            ],
+            "battery_health_pct": 88,
+            "odometer_km": 5032
+          }
+        },
+        {
+          "$key": "o08",
+          "order_number": "SO-2026-0122",
+          "bike_id": "@ref:b08",
+          "technician_id": "@ref:t-lukas",
+          "status": "cancelled",
+          "priority": "low",
+          "service_type": "ebike_diagnostics",
+          "received_at": "@datetime:-29T17:25",
+          "promised_on": "@date:-25",
+          "problem_description": "Battery range dropped to half since last summer.",
+          "contact_email": "zuzana.balakova@post.sk",
+          "notify_customer": true,
+          "labour_rate": 30.0,
+          "assigned_user_id": "@user:lukas.balaz@velo-dielna.example",
+          "labour_hours": 0.75,
+          "work_notes": "Customer declined the quote."
+        },
+        {
+          "$key": "o09",
+          "order_number": "SO-2026-0123",
+          "bike_id": "@ref:b09",
+          "technician_id": "@ref:t-tomas",
+          "status": "collected",
+          "priority": "normal",
+          "service_type": "full_service",
+          "received_at": "@datetime:-28T17:25",
+          "promised_on": "@date:-25",
+          "problem_description": "Gears skip on the big cogs, chain measured stretched.",
+          "contact_email": "michal.lukac@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 22.1,
+          "assigned_user_id": "@user:tomas.chovan@velo-dielna.example",
+          "labour_hours": 2.75,
+          "work_notes": "Chain at 0.75 % wear and cassette worn — replaced both. Full service.",
+          "completed_at": "@datetime:-26T16:21",
+          "paid": true,
+          "payment_method": "card",
+          "diagnostics": {
+            "chain_wear_pct": 0.5,
+            "front_pads_mm": 1.2,
+            "rear_pads_mm": 1.5,
+            "tyre_pressure_bar": {
+              "front": 2.0,
+              "rear": 2.2
+            }
+          }
+        },
+        {
+          "$key": "o10",
+          "order_number": "SO-2026-0124",
+          "bike_id": "@ref:b10",
+          "technician_id": "@ref:t-peter",
+          "status": "collected",
+          "priority": "normal",
+          "service_type": "suspension_service",
+          "received_at": "@datetime:-21T15:10",
+          "promised_on": "@date:-16",
+          "problem_description": "Fork feels harsh and leaks oil on the stanchions.",
+          "contact_email": "michal.lukac@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 23.8,
+          "assigned_user_id": "@user:peter.hudec@velo-dielna.example",
+          "labour_hours": 1.75,
+          "work_notes": "Lower-leg service, new seals and foam rings, fresh oil.",
+          "completed_at": "@datetime:-19T16:50",
+          "paid": true,
+          "payment_method": "card"
+        },
+        {
+          "$key": "o11",
+          "order_number": "SO-2026-0126",
+          "bike_id": "@ref:b11",
+          "technician_id": "@ref:t-tomas",
+          "status": "collected",
+          "priority": "normal",
+          "service_type": "full_service",
+          "received_at": "@datetime:-18T16:30",
+          "promised_on": "@date:-13",
+          "problem_description": "Full service before the season, new chain if needed.",
+          "contact_email": "jana.simkova@zoznam.sk",
+          "notify_customer": true,
+          "labour_rate": 23.4,
+          "assigned_user_id": "@user:tomas.chovan@velo-dielna.example",
+          "labour_hours": 2.5,
+          "work_notes": "Full strip and clean, new chain and cables, bottom bracket regreased, wheels trued.",
+          "completed_at": "@datetime:-16T16:11",
+          "paid": true,
+          "payment_method": "cash"
+        },
+        {
+          "$key": "o12",
+          "order_number": "SO-2026-0129",
+          "bike_id": "@ref:b12",
+          "technician_id": "@ref:t-tomas",
+          "status": "waiting_for_parts",
+          "priority": "normal",
+          "service_type": "full_service",
+          "received_at": "@datetime:-12T16:30",
+          "promised_on": "@date:-7",
+          "problem_description": "Annual service, customer asks for new tyres.",
+          "contact_email": "jana.simkova@zoznam.sk",
+          "notify_customer": true,
+          "labour_rate": 23.4,
+          "assigned_user_id": "@user:tomas.chovan@velo-dielna.example",
+          "labour_hours": 0.25,
+          "work_notes": "Quote approved. Parts ordered from the supplier, expected in 3–5 working days.",
+          "diagnostics": {
+            "chain_wear_pct": 1.0,
+            "front_pads_mm": 1.2,
+            "rear_pads_mm": 1.5,
+            "tyre_pressure_bar": {
+              "front": 2.0,
+              "rear": 2.2
+            }
+          }
+        },
+        {
+          "$key": "o13",
+          "order_number": "SO-2026-0131",
+          "bike_id": "@ref:b13",
+          "technician_id": "@ref:t-zuzana",
+          "status": "waiting_for_parts",
+          "priority": "express",
+          "service_type": "full_service",
+          "received_at": "@datetime:-11T17:25",
+          "promised_on": "@date:-10",
+          "problem_description": "Gears skip on the big cogs, chain measured stretched.",
+          "contact_email": "peter.molnar@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 24.0,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example",
+          "labour_hours": 0.25,
+          "work_notes": "Quote approved. Parts ordered from the supplier, expected in 3–5 working days.",
+          "diagnostics": {
+            "chain_wear_pct": 0.75,
+            "front_pads_mm": 0.8,
+            "rear_pads_mm": 0.9,
+            "tyre_pressure_bar": {
+              "front": 2.0,
+              "rear": 2.2
+            }
+          }
+        },
+        {
+          "$key": "o14",
+          "order_number": "SO-2026-0132",
+          "bike_id": "@ref:b14",
+          "technician_id": "@ref:t-lukas",
+          "status": "cancelled",
+          "priority": "normal",
+          "service_type": "repair",
+          "received_at": "@datetime:-11T13:45",
+          "promised_on": "@date:-6",
+          "problem_description": "Front brake lever goes to the bar.",
+          "contact_email": "lucia.krajcirova@outlook.com",
+          "notify_customer": true,
+          "labour_rate": 30.0,
+          "assigned_user_id": "@user:lukas.balaz@velo-dielna.example",
+          "labour_hours": 1.25,
+          "work_notes": "Customer collected the bike unrepaired — will buy a new one."
+        },
+        {
+          "$key": "o15",
+          "order_number": "SO-2026-0133",
+          "bike_id": "@ref:b15",
+          "technician_id": "@ref:t-zuzana",
+          "status": "ready",
+          "priority": "express",
+          "service_type": "repair",
+          "received_at": "@datetime:-8T11:20",
+          "promised_on": "@date:-7",
+          "problem_description": "Creaking from the bottom bracket when pedalling hard.",
+          "contact_email": "andrej.oravec@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 21.6,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example",
+          "labour_hours": 1.0,
+          "work_notes": "Replaced bottom bracket, greased pedal threads.",
+          "completed_at": "@datetime:-6T16:38"
+        },
+        {
+          "$key": "o16",
+          "order_number": "SO-2026-0137",
+          "bike_id": "@ref:b16",
+          "technician_id": "@ref:t-zuzana",
+          "status": "waiting_for_parts",
+          "priority": "express",
+          "service_type": "repair",
+          "received_at": "@datetime:-7T10:15",
+          "promised_on": "@date:-6",
+          "problem_description": "Puncture, rear wheel keeps going flat.",
+          "contact_email": "andrej.oravec@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 21.6,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example",
+          "labour_hours": 0.25,
+          "work_notes": "Quote approved. Parts ordered from the supplier, expected in 3–5 working days."
+        },
+        {
+          "$key": "o17",
+          "order_number": "SO-2026-0141",
+          "bike_id": "@ref:b17",
+          "technician_id": "@ref:t-zuzana",
+          "status": "in_progress",
+          "priority": "normal",
+          "service_type": "basic_service",
+          "received_at": "@datetime:-7T08:40",
+          "promised_on": "@date:-3",
+          "problem_description": "Squeaky brakes, chain is noisy.",
+          "contact_email": "katarina.polakova@centrum.sk",
+          "notify_customer": true,
+          "labour_rate": 24.0,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example",
+          "labour_hours": 1.25,
+          "work_notes": "Replaced worn brake pads front and rear, cleaned rotors, new chain."
+        },
+        {
+          "$key": "o18",
+          "order_number": "SO-2026-0145",
+          "bike_id": "@ref:b18",
+          "technician_id": "@ref:t-peter",
+          "status": "in_progress",
+          "priority": "low",
+          "service_type": "suspension_service",
+          "received_at": "@datetime:-7T16:30",
+          "promised_on": "@date:-4",
+          "problem_description": "200-hour fork service, fork is sticky.",
+          "contact_email": "robert.hudak@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 23.8,
+          "assigned_user_id": "@user:peter.hudec@velo-dielna.example",
+          "labour_hours": 2.5,
+          "work_notes": "Full damper and air-spring service, sag set for rider weight.",
+          "internal_notes": "Frame has a hairline crack near the dropout; customer informed, signed a waiver."
+        },
+        {
+          "$key": "o19",
+          "order_number": "SO-2026-0147",
+          "bike_id": "@ref:b19",
+          "technician_id": "@ref:t-tomas",
+          "status": "diagnosed",
+          "priority": "express",
+          "service_type": "repair",
+          "received_at": "@datetime:-5T08:40",
+          "promised_on": "@date:-4",
+          "problem_description": "Puncture, rear wheel keeps going flat.",
+          "contact_email": "robert.hudak@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 22.1,
+          "assigned_user_id": "@user:tomas.chovan@velo-dielna.example",
+          "labour_hours": 0.25,
+          "work_notes": "Diagnosed, waiting for the customer to approve the quote."
+        },
+        {
+          "$key": "o20",
+          "order_number": "SO-2026-0148",
+          "bike_id": "@ref:b20",
+          "technician_id": "@ref:t-tomas",
+          "status": "waiting_for_parts",
+          "priority": "normal",
+          "service_type": "full_service",
+          "received_at": "@datetime:-5T17:25",
+          "promised_on": "@date:-2",
+          "problem_description": "Full service before the season, new chain if needed.",
+          "contact_email": "veronika.kmetova@azet.sk",
+          "notify_customer": true,
+          "labour_rate": 26.0,
+          "assigned_user_id": "@user:tomas.chovan@velo-dielna.example",
+          "labour_hours": 0.25,
+          "work_notes": "Quote approved. Parts ordered from the supplier, expected in 3–5 working days.",
+          "diagnostics": {
+            "chain_wear_pct": 1.0,
+            "front_pads_mm": 0.8,
+            "rear_pads_mm": 1.5,
+            "tyre_pressure_bar": {
+              "front": 2.0,
+              "rear": 2.2
+            }
+          }
+        },
+        {
+          "$key": "o21",
+          "order_number": "SO-2026-0150",
+          "bike_id": "@ref:b21",
+          "technician_id": "@ref:t-lukas",
+          "status": "in_progress",
+          "priority": "normal",
+          "service_type": "full_service",
+          "received_at": "@datetime:-5T10:15",
+          "promised_on": "@date:1",
+          "problem_description": "Full service before the season, new chain if needed.",
+          "contact_email": "juraj.mikus@gmail.com",
+          "notify_customer": false,
+          "labour_rate": 27.0,
+          "assigned_user_id": "@user:lukas.balaz@velo-dielna.example",
+          "labour_hours": 2.5,
+          "work_notes": "Full strip and clean, new chain and cables, bottom bracket regreased, wheels trued.",
+          "diagnostics": {
+            "tool": "Bosch DiagnosticTool 3",
+            "error_codes": [],
+            "battery_health_pct": 93,
+            "odometer_km": 6445
+          }
+        },
+        {
+          "$key": "o22",
+          "order_number": "SO-2026-0154",
+          "bike_id": "@ref:b22",
+          "technician_id": "@ref:t-tomas",
+          "status": "ready",
+          "priority": "express",
+          "service_type": "full_service",
+          "received_at": "@datetime:-5T10:15",
+          "promised_on": "@date:-4",
+          "problem_description": "Full service before the season, new chain if needed.",
+          "contact_email": "juraj.mikus@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 23.4,
+          "assigned_user_id": "@user:tomas.chovan@velo-dielna.example",
+          "labour_hours": 2.5,
+          "work_notes": "Full strip and clean, new chain and cables, bottom bracket regreased, wheels trued.",
+          "completed_at": "@datetime:-3T16:28"
+        },
+        {
+          "$key": "o23",
+          "order_number": "SO-2026-0155",
+          "bike_id": "@ref:b23",
+          "technician_id": "@ref:t-tomas",
+          "status": "ready",
+          "priority": "high",
+          "service_type": "full_service",
+          "received_at": "@datetime:-5T11:20",
+          "promised_on": "@date:-2",
+          "problem_description": "Gears skip on the big cogs, chain measured stretched.",
+          "contact_email": "tomas.nagy@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 23.4,
+          "assigned_user_id": "@user:tomas.chovan@velo-dielna.example",
+          "labour_hours": 2.75,
+          "work_notes": "Chain at 0.75 % wear and cassette worn — replaced both. Full service.",
+          "completed_at": "@datetime:-3T16:32"
+        },
+        {
+          "$key": "o24",
+          "order_number": "SO-2026-0158",
+          "bike_id": "@ref:b24",
+          "technician_id": "@ref:t-peter",
+          "status": "diagnosed",
+          "priority": "normal",
+          "service_type": "basic_service",
+          "received_at": "@datetime:-4T10:15",
+          "promised_on": "@date:2",
+          "problem_description": "Squeaky brakes, chain is noisy.",
+          "contact_email": "lucia.krajcirova@outlook.com",
+          "notify_customer": true,
+          "labour_rate": 28.0,
+          "assigned_user_id": "@user:peter.hudec@velo-dielna.example",
+          "labour_hours": 0.25,
+          "work_notes": "Diagnosed, waiting for the customer to approve the quote."
+        },
+        {
+          "$key": "o25",
+          "order_number": "SO-2026-0161",
+          "bike_id": "@ref:b25",
+          "technician_id": "@ref:t-lukas",
+          "status": "waiting_for_parts",
+          "priority": "normal",
+          "service_type": "ebike_diagnostics",
+          "received_at": "@datetime:-4T13:45",
+          "promised_on": "@date:0",
+          "problem_description": "Battery range dropped to half since last summer.",
+          "contact_email": "maria.horvathova@centrum.sk",
+          "notify_customer": true,
+          "labour_rate": 30.0,
+          "assigned_user_id": "@user:lukas.balaz@velo-dielna.example",
+          "labour_hours": 0.25,
+          "work_notes": "Quote approved. Parts ordered from the supplier, expected in 3–5 working days."
+        },
+        {
+          "$key": "o26",
+          "order_number": "SO-2026-0163",
+          "bike_id": "@ref:b15",
+          "technician_id": "@ref:t-zuzana",
+          "status": "ready",
+          "priority": "low",
+          "service_type": "basic_service",
+          "received_at": "@datetime:-4T08:40",
+          "promised_on": "@date:2",
+          "problem_description": "Spring check — gears and brakes feel sluggish.",
+          "contact_email": "andrej.oravec@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 21.6,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example",
+          "labour_hours": 1.0,
+          "work_notes": "Cleaned and lubed drivetrain, adjusted gears and brakes, checked bolts to torque.",
+          "completed_at": "@datetime:-2T16:46"
+        },
+        {
+          "$key": "o27",
+          "order_number": "SO-2026-0167",
+          "bike_id": "@ref:b16",
+          "technician_id": "@ref:t-zuzana",
+          "status": "in_progress",
+          "priority": "low",
+          "service_type": "repair",
+          "received_at": "@datetime:-3T15:10",
+          "promised_on": "@date:0",
+          "problem_description": "Puncture, rear wheel keeps going flat.",
+          "contact_email": "andrej.oravec@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 21.6,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example",
+          "labour_hours": 0.5,
+          "work_notes": "Found glass shard in tyre, new tube fitted."
+        },
+        {
+          "$key": "o28",
+          "order_number": "SO-2026-0168",
+          "bike_id": "@ref:b17",
+          "technician_id": "@ref:t-zuzana",
+          "status": "ready",
+          "priority": "normal",
+          "service_type": "repair",
+          "received_at": "@datetime:-3T15:10",
+          "promised_on": "@date:2",
+          "problem_description": "Creaking from the bottom bracket when pedalling hard.",
+          "contact_email": "katarina.polakova@centrum.sk",
+          "notify_customer": true,
+          "labour_rate": 24.0,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example",
+          "labour_hours": 1.0,
+          "work_notes": "Replaced bottom bracket, greased pedal threads.",
+          "completed_at": "@datetime:-1T16:52"
+        },
+        {
+          "$key": "o29",
+          "order_number": "SO-2026-0170",
+          "bike_id": "@ref:b13",
+          "technician_id": "@ref:t-tomas",
+          "status": "diagnosed",
+          "priority": "normal",
+          "service_type": "basic_service",
+          "received_at": "@datetime:-2T15:10",
+          "promised_on": "@date:1",
+          "problem_description": "Squeaky brakes, chain is noisy.",
+          "contact_email": "peter.molnar@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 26.0,
+          "assigned_user_id": "@user:tomas.chovan@velo-dielna.example",
+          "labour_hours": 0.25,
+          "work_notes": "Diagnosed, waiting for the customer to approve the quote."
+        },
+        {
+          "$key": "o30",
+          "order_number": "SO-2026-0174",
+          "bike_id": "@ref:b14",
+          "technician_id": "@ref:t-lukas",
+          "status": "in_progress",
+          "priority": "high",
+          "service_type": "ebike_diagnostics",
+          "received_at": "@datetime:-2T17:25",
+          "promised_on": "@date:3",
+          "problem_description": "Motor cuts out, display shows error 503.",
+          "contact_email": "lucia.krajcirova@outlook.com",
+          "notify_customer": true,
+          "labour_rate": 30.0,
+          "assigned_user_id": "@user:lukas.balaz@velo-dielna.example",
+          "labour_hours": 1.0,
+          "work_notes": "Speed sensor misaligned and cable chafed — replaced sensor, updated firmware."
+        },
+        {
+          "$key": "o31",
+          "order_number": "SO-2026-0177",
+          "bike_id": "@ref:b11",
+          "technician_id": "@ref:t-zuzana",
+          "status": "received",
+          "priority": "normal",
+          "service_type": "basic_service",
+          "received_at": "@datetime:-1T15:10",
+          "promised_on": "@date:2",
+          "problem_description": "Spring check — gears and brakes feel sluggish.",
+          "contact_email": "jana.simkova@zoznam.sk",
+          "notify_customer": true,
+          "labour_rate": 21.6,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example",
+          "internal_notes": "Warranty claim with Kellys started, RMA 2026-0419."
+        },
+        {
+          "$key": "o32",
+          "order_number": "SO-2026-0181",
+          "bike_id": "@ref:b20",
+          "technician_id": "@ref:t-peter",
+          "status": "received",
+          "priority": "high",
+          "service_type": "full_service",
+          "received_at": "@datetime:-1T09:30",
+          "promised_on": "@date:5",
+          "problem_description": "Gears skip on the big cogs, chain measured stretched.",
+          "contact_email": "veronika.kmetova@azet.sk",
+          "notify_customer": false,
+          "labour_rate": 28.0,
+          "assigned_user_id": "@user:peter.hudec@velo-dielna.example"
+        },
+        {
+          "$key": "o33",
+          "order_number": "SO-2026-0183",
+          "bike_id": "@ref:b13",
+          "technician_id": "@ref:t-peter",
+          "status": "received",
+          "priority": "normal",
+          "service_type": "full_service",
+          "received_at": "@datetime:-1T08:40",
+          "promised_on": "@date:2",
+          "problem_description": "Full service before the season, new chain if needed.",
+          "contact_email": "peter.molnar@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 28.0,
+          "assigned_user_id": "@user:peter.hudec@velo-dielna.example"
+        },
+        {
+          "$key": "o34",
+          "order_number": "SO-2026-0185",
+          "bike_id": "@ref:b10",
+          "technician_id": "@ref:t-peter",
+          "status": "received",
+          "priority": "normal",
+          "service_type": "suspension_service",
+          "received_at": "@datetime:-1T09:05",
+          "promised_on": "@date:3",
+          "problem_description": "200-hour fork service, fork is sticky.",
+          "contact_email": "michal.lukac@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 23.8,
+          "assigned_user_id": "@user:peter.hudec@velo-dielna.example"
+        },
+        {
+          "$key": "o35",
+          "order_number": "SO-2026-0188",
+          "bike_id": "@ref:b04",
+          "technician_id": "@ref:t-zuzana",
+          "status": "diagnosed",
+          "priority": "express",
+          "service_type": "wheel_build",
+          "received_at": "@datetime:-1T09:30",
+          "promised_on": "@date:0",
+          "problem_description": "Rear wheel wobbles, two broken spokes.",
+          "contact_email": "martin.varga@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 20.4,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example",
+          "labour_hours": 0.25,
+          "work_notes": "Diagnosed, waiting for the customer to approve the quote."
+        },
+        {
+          "$key": "o36",
+          "order_number": "SO-2026-0190",
+          "bike_id": "@ref:b15",
+          "technician_id": "@ref:t-peter",
+          "status": "diagnosed",
+          "priority": "low",
+          "service_type": "full_service",
+          "received_at": "@datetime:-1T15:10",
+          "promised_on": "@date:5",
+          "problem_description": "Full service before the season, new chain if needed.",
+          "contact_email": "andrej.oravec@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 25.2,
+          "assigned_user_id": "@user:peter.hudec@velo-dielna.example",
+          "labour_hours": 0.25,
+          "work_notes": "Diagnosed, waiting for the customer to approve the quote.",
+          "diagnostics": {
+            "chain_wear_pct": 0.5,
+            "front_pads_mm": 2.5,
+            "rear_pads_mm": 2.2,
+            "tyre_pressure_bar": {
+              "front": 2.0,
+              "rear": 2.2
+            }
+          }
+        },
+        {
+          "$key": "o37",
+          "order_number": "SO-2026-0192",
+          "bike_id": "@ref:b24",
+          "technician_id": "@ref:t-zuzana",
+          "status": "in_progress",
+          "priority": "high",
+          "service_type": "full_service",
+          "received_at": "@datetime:-1T16:30",
+          "promised_on": "@date:3",
+          "problem_description": "Gears skip on the big cogs, chain measured stretched.",
+          "contact_email": "lucia.krajcirova@outlook.com",
+          "notify_customer": true,
+          "labour_rate": 24.0,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example",
+          "labour_hours": 2.75,
+          "work_notes": "Chain at 0.75 % wear and cassette worn — replaced both. Full service."
+        },
+        {
+          "$key": "o38",
+          "order_number": "SO-2026-0194",
+          "bike_id": "@ref:b06",
+          "technician_id": "@ref:t-zuzana",
+          "status": "in_progress",
+          "priority": "normal",
+          "service_type": "basic_service",
+          "received_at": "@datetime:-1T08:40",
+          "promised_on": "@date:2",
+          "problem_description": "Squeaky brakes, chain is noisy.",
+          "contact_email": "eva.tothova@azet.sk",
+          "notify_customer": true,
+          "labour_rate": 24.0,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example",
+          "labour_hours": 1.25,
+          "work_notes": "Replaced worn brake pads front and rear, cleaned rotors, new chain."
+        },
+        {
+          "$key": "o39",
+          "order_number": "SO-2026-0195",
+          "bike_id": "@ref:b16",
+          "technician_id": "@ref:t-zuzana",
+          "status": "received",
+          "priority": "normal",
+          "service_type": "full_service",
+          "received_at": "@datetime:-0T16:30",
+          "promised_on": "@date:5",
+          "problem_description": "Full service before the season, new chain if needed.",
+          "contact_email": "andrej.oravec@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 21.6,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example"
+        },
+        {
+          "$key": "o40",
+          "order_number": "SO-2026-0196",
+          "bike_id": "@ref:b01",
+          "technician_id": "@ref:t-zuzana",
+          "status": "received",
+          "priority": "high",
+          "service_type": "repair",
+          "received_at": "@datetime:-0T11:20",
+          "promised_on": "@date:6",
+          "problem_description": "Front brake lever goes to the bar.",
+          "contact_email": "jan.kovac@gmail.com",
+          "notify_customer": true,
+          "labour_rate": 21.6,
+          "assigned_user_id": "@user:zuzana.kmetova@velo-dielna.example"
+        }
+      ]
+    },
+    {
+      "entity": "order_lines",
+      "rows": [
+        {
+          "order_id": "@ref:o01",
+          "quantity": 2,
+          "part_id": "@ref:p-marathon",
+          "kind": "part",
+          "description": "Schwalbe Marathon Plus tyre, 700x38C, reflex",
+          "unit_price": 49.9
+        },
+        {
+          "order_id": "@ref:o01",
+          "quantity": 2,
+          "part_id": "@ref:p-tube28",
+          "kind": "part",
+          "description": "Schwalbe SV17 inner tube, 28\", presta 40 mm",
+          "unit_price": 7.9
+        },
+        {
+          "order_id": "@ref:o01",
+          "quantity": 1,
+          "part_id": "@ref:p-brakecable",
+          "kind": "part",
+          "description": "Jagwire Basics brake cable and housing kit",
+          "unit_price": 12.9
+        },
+        {
+          "order_id": "@ref:o02",
+          "quantity": 1,
+          "part_id": "@ref:p-lube",
+          "kind": "part",
+          "description": "Finish Line Dry Teflon chain lube, 120 ml",
+          "unit_price": 9.9
+        },
+        {
+          "order_id": "@ref:o02",
+          "quantity": 1,
+          "kind": "flat_rate",
+          "description": "Drivetrain degrease",
+          "unit_price": 12.0
+        },
+        {
+          "order_id": "@ref:o03",
+          "quantity": 2,
+          "part_id": "@ref:p-pads-b01s",
+          "kind": "part",
+          "description": "Shimano B01S resin disc brake pads (pair)",
+          "unit_price": 12.9
+        },
+        {
+          "order_id": "@ref:o03",
+          "quantity": 1,
+          "part_id": "@ref:p-chain8",
+          "kind": "part",
+          "description": "KMC Z8.3 chain, 6/7/8-speed",
+          "unit_price": 13.9
+        },
+        {
+          "order_id": "@ref:o04",
+          "quantity": 3,
+          "kind": "flat_rate",
+          "description": "Spoke replacement incl. spokes",
+          "unit_price": 4.5
+        },
+        {
+          "order_id": "@ref:o04",
+          "quantity": 1,
+          "kind": "flat_rate",
+          "description": "Wheel truing",
+          "unit_price": 9.0
+        },
+        {
+          "order_id": "@ref:o05",
+          "quantity": 3,
+          "kind": "flat_rate",
+          "description": "Spoke replacement incl. spokes",
+          "unit_price": 4.5
+        },
+        {
+          "order_id": "@ref:o05",
+          "quantity": 1,
+          "kind": "flat_rate",
+          "description": "Wheel truing",
+          "unit_price": 9.0
+        },
+        {
+          "order_id": "@ref:o06",
+          "quantity": 2,
+          "part_id": "@ref:p-marathon",
+          "kind": "part",
+          "description": "Schwalbe Marathon Plus tyre, 700x38C, reflex",
+          "unit_price": 49.9
+        },
+        {
+          "order_id": "@ref:o06",
+          "quantity": 2,
+          "part_id": "@ref:p-tube28",
+          "kind": "part",
+          "description": "Schwalbe SV17 inner tube, 28\", presta 40 mm",
+          "unit_price": 7.9
+        },
+        {
+          "order_id": "@ref:o06",
+          "quantity": 1,
+          "part_id": "@ref:p-brakecable",
+          "kind": "part",
+          "description": "Jagwire Basics brake cable and housing kit",
+          "unit_price": 12.9
+        },
+        {
+          "order_id": "@ref:o07",
+          "quantity": 1,
+          "part_id": "@ref:p-bosch-pad",
+          "kind": "part",
+          "description": "Bosch speed sensor with spoke magnet",
+          "unit_price": 34.9
+        },
+        {
+          "order_id": "@ref:o07",
+          "quantity": 1,
+          "kind": "flat_rate",
+          "description": "E-bike diagnostics and firmware update",
+          "unit_price": 25.0
+        },
+        {
+          "order_id": "@ref:o08",
+          "quantity": 1,
+          "kind": "flat_rate",
+          "description": "E-bike diagnostics and battery health report",
+          "unit_price": 25.0
+        },
+        {
+          "order_id": "@ref:o09",
+          "quantity": 1,
+          "part_id": "@ref:p-chain12",
+          "kind": "part",
+          "description": "Shimano Deore chain CN-M6100, 12-speed, 126 links",
+          "unit_price": 29.9
+        },
+        {
+          "order_id": "@ref:o09",
+          "quantity": 1,
+          "part_id": "@ref:p-cass12",
+          "kind": "part",
+          "description": "Shimano Deore cassette CS-M6100, 10-51T, 12-speed",
+          "unit_price": 74.9
+        },
+        {
+          "order_id": "@ref:o09",
+          "quantity": 1,
+          "part_id": "@ref:p-lube",
+          "kind": "part",
+          "description": "Finish Line Dry Teflon chain lube, 120 ml",
+          "unit_price": 0,
+          "warranty": true
+        },
+        {
+          "order_id": "@ref:o10",
+          "quantity": 1,
+          "part_id": "@ref:p-fox34",
+          "kind": "part",
+          "description": "Fox 34 mm fork seal kit (SKF wipers and foam rings)",
+          "unit_price": 39.9
+        },
+        {
+          "order_id": "@ref:o10",
+          "quantity": 1,
+          "kind": "flat_rate",
+          "description": "Suspension oil and grease",
+          "unit_price": 8.5
+        },
+        {
+          "order_id": "@ref:o11",
+          "quantity": 1,
+          "part_id": "@ref:p-chain12",
+          "kind": "part",
+          "description": "Shimano Deore chain CN-M6100, 12-speed, 126 links",
+          "unit_price": 29.9
+        },
+        {
+          "order_id": "@ref:o11",
+          "quantity": 1,
+          "part_id": "@ref:p-shiftcable",
+          "kind": "part",
+          "description": "Jagwire Sport shift cable and housing kit",
+          "unit_price": 14.9
+        },
+        {
+          "order_id": "@ref:o11",
+          "quantity": 2,
+          "kind": "flat_rate",
+          "description": "Wheel truing, both wheels",
+          "unit_price": 9.0
+        },
+        {
+          "order_id": "@ref:o12",
+          "quantity": 2,
+          "part_id": "@ref:p-marathon",
+          "kind": "part",
+          "description": "Schwalbe Marathon Plus tyre, 700x38C, reflex",
+          "unit_price": 49.9
+        },
+        {
+          "order_id": "@ref:o12",
+          "quantity": 2,
+          "part_id": "@ref:p-tube28",
+          "kind": "part",
+          "description": "Schwalbe SV17 inner tube, 28\", presta 40 mm",
+          "unit_price": 7.9
+        },
+        {
+          "order_id": "@ref:o12",
+          "quantity": 1,
+          "part_id": "@ref:p-brakecable",
+          "kind": "part",
+          "description": "Jagwire Basics brake cable and housing kit",
+          "unit_price": 12.9
+        },
+        {
+          "order_id": "@ref:o13",
+          "quantity": 1,
+          "part_id": "@ref:p-chain12",
+          "kind": "part",
+          "description": "Shimano Deore chain CN-M6100, 12-speed, 126 links",
+          "unit_price": 29.9
+        },
+        {
+          "order_id": "@ref:o13",
+          "quantity": 1,
+          "part_id": "@ref:p-cass12",
+          "kind": "part",
+          "description": "Shimano Deore cassette CS-M6100, 10-51T, 12-speed",
+          "unit_price": 74.9
+        },
+        {
+          "order_id": "@ref:o13",
+          "quantity": 1,
+          "part_id": "@ref:p-lube",
+          "kind": "part",
+          "description": "Finish Line Dry Teflon chain lube, 120 ml",
+          "unit_price": 9.9
+        },
+        {
+          "order_id": "@ref:o14",
+          "quantity": 1,
+          "part_id": "@ref:p-oil",
+          "kind": "part",
+          "description": "Shimano mineral brake oil, 100 ml",
+          "unit_price": 11.9
+        },
+        {
+          "order_id": "@ref:o14",
+          "quantity": 1,
+          "part_id": "@ref:p-pads-l03a",
+          "kind": "part",
+          "description": "Shimano L03A resin disc brake pads (pair)",
+          "unit_price": 16.9
+        },
+        {
+          "order_id": "@ref:o14",
+          "quantity": 1,
+          "part_id": "@ref:p-rotor180",
+          "kind": "part",
+          "description": "Shimano rotor RT-MT800, 180 mm, Center Lock",
+          "unit_price": 49.9
+        },
+        {
+          "order_id": "@ref:o15",
+          "quantity": 1,
+          "part_id": "@ref:p-bb",
+          "kind": "part",
+          "description": "Shimano Hollowtech II bottom bracket SM-BB52, BSA 68/73 mm",
+          "unit_price": 29.9
+        },
+        {
+          "order_id": "@ref:o16",
+          "quantity": 1,
+          "part_id": "@ref:p-tube29",
+          "kind": "part",
+          "description": "Schwalbe SV19 inner tube, 29\", presta 40 mm",
+          "unit_price": 8.5
+        },
+        {
+          "order_id": "@ref:o17",
+          "quantity": 2,
+          "part_id": "@ref:p-pads-b01s",
+          "kind": "part",
+          "description": "Shimano B01S resin disc brake pads (pair)",
+          "unit_price": 12.9
+        },
+        {
+          "order_id": "@ref:o17",
+          "quantity": 1,
+          "part_id": "@ref:p-chain8",
+          "kind": "part",
+          "description": "KMC Z8.3 chain, 6/7/8-speed",
+          "unit_price": 13.9
+        },
+        {
+          "order_id": "@ref:o18",
+          "quantity": 1,
+          "part_id": "@ref:p-pike",
+          "kind": "part",
+          "description": "RockShox 200-hour service kit, Pike/Lyrik (2020+)",
+          "unit_price": 49.9
+        },
+        {
+          "order_id": "@ref:o19",
+          "quantity": 1,
+          "kind": "flat_rate",
+          "description": "Diagnosis",
+          "unit_price": 10.0
+        },
+        {
+          "order_id": "@ref:o20",
+          "quantity": 1,
+          "part_id": "@ref:p-chain12",
+          "kind": "part",
+          "description": "Shimano Deore chain CN-M6100, 12-speed, 126 links",
+          "unit_price": 29.9
+        },
+        {
+          "order_id": "@ref:o20",
+          "quantity": 1,
+          "part_id": "@ref:p-shiftcable",
+          "kind": "part",
+          "description": "Jagwire Sport shift cable and housing kit",
+          "unit_price": 14.9
+        },
+        {
+          "order_id": "@ref:o20",
+          "quantity": 2,
+          "kind": "flat_rate",
+          "description": "Wheel truing, both wheels",
+          "unit_price": 9.0
+        },
+        {
+          "order_id": "@ref:o21",
+          "quantity": 1,
+          "part_id": "@ref:p-chain12",
+          "kind": "part",
+          "description": "Shimano Deore chain CN-M6100, 12-speed, 126 links",
+          "unit_price": 29.9
+        },
+        {
+          "order_id": "@ref:o21",
+          "quantity": 1,
+          "part_id": "@ref:p-shiftcable",
+          "kind": "part",
+          "description": "Jagwire Sport shift cable and housing kit",
+          "unit_price": 14.9
+        },
+        {
+          "order_id": "@ref:o21",
+          "quantity": 2,
+          "kind": "flat_rate",
+          "description": "Wheel truing, both wheels",
+          "unit_price": 9.0
+        },
+        {
+          "order_id": "@ref:o22",
+          "quantity": 1,
+          "part_id": "@ref:p-chain12",
+          "kind": "part",
+          "description": "Shimano Deore chain CN-M6100, 12-speed, 126 links",
+          "unit_price": 29.9
+        },
+        {
+          "order_id": "@ref:o22",
+          "quantity": 1,
+          "part_id": "@ref:p-shiftcable",
+          "kind": "part",
+          "description": "Jagwire Sport shift cable and housing kit",
+          "unit_price": 14.9
+        },
+        {
+          "order_id": "@ref:o22",
+          "quantity": 2,
+          "kind": "flat_rate",
+          "description": "Wheel truing, both wheels",
+          "unit_price": 9.0
+        },
+        {
+          "order_id": "@ref:o23",
+          "quantity": 1,
+          "part_id": "@ref:p-chain12",
+          "kind": "part",
+          "description": "Shimano Deore chain CN-M6100, 12-speed, 126 links",
+          "unit_price": 29.9
+        },
+        {
+          "order_id": "@ref:o23",
+          "quantity": 1,
+          "part_id": "@ref:p-cass12",
+          "kind": "part",
+          "description": "Shimano Deore cassette CS-M6100, 10-51T, 12-speed",
+          "unit_price": 74.9
+        },
+        {
+          "order_id": "@ref:o23",
+          "quantity": 1,
+          "part_id": "@ref:p-lube",
+          "kind": "part",
+          "description": "Finish Line Dry Teflon chain lube, 120 ml",
+          "unit_price": 9.9
+        },
+        {
+          "order_id": "@ref:o24",
+          "quantity": 1,
+          "kind": "flat_rate",
+          "description": "Diagnosis",
+          "unit_price": 10.0
+        },
+        {
+          "order_id": "@ref:o25",
+          "quantity": 1,
+          "kind": "flat_rate",
+          "description": "E-bike diagnostics and battery health report",
+          "unit_price": 25.0
+        },
+        {
+          "order_id": "@ref:o26",
+          "quantity": 1,
+          "part_id": "@ref:p-lube",
+          "kind": "part",
+          "description": "Finish Line Dry Teflon chain lube, 120 ml",
+          "unit_price": 9.9
+        },
+        {
+          "order_id": "@ref:o26",
+          "quantity": 1,
+          "kind": "flat_rate",
+          "description": "Drivetrain degrease",
+          "unit_price": 12.0
+        },
+        {
+          "order_id": "@ref:o27",
+          "quantity": 1,
+          "part_id": "@ref:p-tube29",
+          "kind": "part",
+          "description": "Schwalbe SV19 inner tube, 29\", presta 40 mm",
+          "unit_price": 8.5
+        },
+        {
+          "order_id": "@ref:o28",
+          "quantity": 1,
+          "part_id": "@ref:p-bb",
+          "kind": "part",
+          "description": "Shimano Hollowtech II bottom bracket SM-BB52, BSA 68/73 mm",
+          "unit_price": 29.9
+        },
+        {
+          "order_id": "@ref:o29",
+          "quantity": 1,
+          "kind": "flat_rate",
+          "description": "Diagnosis",
+          "unit_price": 10.0
+        },
+        {
+          "order_id": "@ref:o30",
+          "quantity": 1,
+          "part_id": "@ref:p-bosch-pad",
+          "kind": "part",
+          "description": "Bosch speed sensor with spoke magnet",
+          "unit_price": 34.9
+        },
+        {
+          "order_id": "@ref:o30",
+          "quantity": 1,
+          "kind": "flat_rate",
+          "description": "E-bike diagnostics and firmware update",
+          "unit_price": 25.0
+        },
+        {
+          "order_id": "@ref:o32",
+          "quantity": 1,
+          "part_id": "@ref:p-chain12",
+          "kind": "part",
+          "description": "Shimano Deore chain CN-M6100, 12-speed, 126 links",
+          "unit_price": 29.9
+        },
+        {
+          "order_id": "@ref:o32",
+          "quantity": 1,
+          "part_id": "@ref:p-cass12",
+          "kind": "part",
+          "description": "Shimano Deore cassette CS-M6100, 10-51T, 12-speed",
+          "unit_price": 74.9
+        },
+        {
+          "order_id": "@ref:o32",
+          "quantity": 1,
+          "part_id": "@ref:p-lube",
+          "kind": "part",
+          "description": "Finish Line Dry Teflon chain lube, 120 ml",
+          "unit_price": 9.9
+        },
+        {
+          "order_id": "@ref:o34",
+          "quantity": 1,
+          "part_id": "@ref:p-pike",
+          "kind": "part",
+          "description": "RockShox 200-hour service kit, Pike/Lyrik (2020+)",
+          "unit_price": 49.9
+        },
+        {
+          "order_id": "@ref:o35",
+          "quantity": 1,
+          "kind": "flat_rate",
+          "description": "Diagnosis",
+          "unit_price": 10.0
+        },
+        {
+          "order_id": "@ref:o36",
+          "quantity": 1,
+          "kind": "flat_rate",
+          "description": "Diagnosis",
+          "unit_price": 10.0
+        },
+        {
+          "order_id": "@ref:o37",
+          "quantity": 1,
+          "part_id": "@ref:p-chain12",
+          "kind": "part",
+          "description": "Shimano Deore chain CN-M6100, 12-speed, 126 links",
+          "unit_price": 29.9
+        },
+        {
+          "order_id": "@ref:o37",
+          "quantity": 1,
+          "part_id": "@ref:p-cass12",
+          "kind": "part",
+          "description": "Shimano Deore cassette CS-M6100, 10-51T, 12-speed",
+          "unit_price": 74.9
+        },
+        {
+          "order_id": "@ref:o37",
+          "quantity": 1,
+          "part_id": "@ref:p-lube",
+          "kind": "part",
+          "description": "Finish Line Dry Teflon chain lube, 120 ml",
+          "unit_price": 9.9
+        },
+        {
+          "order_id": "@ref:o38",
+          "quantity": 2,
+          "part_id": "@ref:p-pads-b01s",
+          "kind": "part",
+          "description": "Shimano B01S resin disc brake pads (pair)",
+          "unit_price": 12.9
+        },
+        {
+          "order_id": "@ref:o38",
+          "quantity": 1,
+          "part_id": "@ref:p-chain8",
+          "kind": "part",
+          "description": "KMC Z8.3 chain, 6/7/8-speed",
+          "unit_price": 13.9
+        },
+        {
+          "order_id": "@ref:o40",
+          "quantity": 1,
+          "part_id": "@ref:p-oil",
+          "kind": "part",
+          "description": "Shimano mineral brake oil, 100 ml",
+          "unit_price": 11.9
+        },
+        {
+          "order_id": "@ref:o40",
+          "quantity": 1,
+          "part_id": "@ref:p-pads-l03a",
+          "kind": "part",
+          "description": "Shimano L03A resin disc brake pads (pair)",
+          "unit_price": 16.9
+        },
+        {
+          "order_id": "@ref:o40",
+          "quantity": 1,
+          "part_id": "@ref:p-rotor180",
+          "kind": "part",
+          "description": "Shimano rotor RT-MT800, 180 mm, Center Lock",
+          "unit_price": 49.9
+        }
+      ]
+    },
+    {
+      "entity": "rental_fleet",
+      "rows": [
+        {
+          "$key": "f1",
+          "code": "RENT-001",
+          "brand": "Kellys",
+          "model": "Estima 40",
+          "category": "ebike",
+          "frame_size": "M",
+          "daily_rate": 45.0,
+          "deposit": 300.0,
+          "in_service": true
+        },
+        {
+          "$key": "f2",
+          "code": "RENT-002",
+          "brand": "Kellys",
+          "model": "Estima 40",
+          "category": "ebike",
+          "frame_size": "L",
+          "daily_rate": 45.0,
+          "deposit": 300.0,
+          "in_service": true
+        },
+        {
+          "$key": "f3",
+          "code": "RENT-003",
+          "brand": "Haibike",
+          "model": "Trekking 6",
+          "category": "ebike",
+          "frame_size": "M",
+          "daily_rate": 49.0,
+          "deposit": 400.0,
+          "in_service": true
+        },
+        {
+          "$key": "f4",
+          "code": "RENT-004",
+          "brand": "Kellys",
+          "model": "Carson 50",
+          "category": "trekking",
+          "frame_size": "M",
+          "daily_rate": 18.0,
+          "deposit": 100.0,
+          "in_service": true
+        },
+        {
+          "$key": "f5",
+          "code": "RENT-005",
+          "brand": "Kellys",
+          "model": "Carson 50",
+          "category": "trekking",
+          "frame_size": "L",
+          "daily_rate": 18.0,
+          "deposit": 100.0,
+          "in_service": true
+        },
+        {
+          "$key": "f6",
+          "code": "RENT-006",
+          "brand": "Trek",
+          "model": "Marlin 5",
+          "category": "mtb_hardtail",
+          "frame_size": "M",
+          "daily_rate": 22.0,
+          "deposit": 150.0,
+          "in_service": true
+        },
+        {
+          "$key": "f7",
+          "code": "RENT-007",
+          "brand": "Trek",
+          "model": "Marlin 5",
+          "category": "mtb_hardtail",
+          "frame_size": "L",
+          "daily_rate": 22.0,
+          "deposit": 150.0,
+          "in_service": false
+        },
+        {
+          "$key": "f8",
+          "code": "RENT-008",
+          "brand": "Kellys",
+          "model": "Kiter 50",
+          "category": "kids",
+          "frame_size": "24\"",
+          "daily_rate": 10.0,
+          "deposit": 50.0,
+          "in_service": true
+        }
+      ]
+    },
+    {
+      "entity": "rentals",
+      "rows": [
+        {
+          "fleet_bike_id": "@ref:f1",
+          "customer_id": "@ref:c04",
+          "status": "returned",
+          "starts_at": "@datetime:-30T09:00",
+          "due_at": "@datetime:-28T18:00",
+          "days": 2,
+          "daily_rate": 45.0,
+          "deposit_paid": true,
+          "id_document": "EF553085",
+          "returned_at": "@datetime:-28T17:25"
+        },
+        {
+          "fleet_bike_id": "@ref:f3",
+          "customer_id": "@ref:c12",
+          "status": "returned",
+          "starts_at": "@datetime:-26T09:00",
+          "due_at": "@datetime:-23T18:00",
+          "days": 3,
+          "daily_rate": 49.0,
+          "deposit_paid": true,
+          "id_document": "EE533722",
+          "returned_at": "@datetime:-23T17:11"
+        },
+        {
+          "fleet_bike_id": "@ref:f4",
+          "customer_id": "@ref:c14",
+          "status": "returned",
+          "starts_at": "@datetime:-21T09:00",
+          "due_at": "@datetime:-20T18:00",
+          "days": 1,
+          "daily_rate": 18.0,
+          "deposit_paid": true,
+          "id_document": "EF436642",
+          "returned_at": "@datetime:-20T17:50"
+        },
+        {
+          "fleet_bike_id": "@ref:f7",
+          "customer_id": "@ref:c09",
+          "status": "returned",
+          "starts_at": "@datetime:-18T09:00",
+          "due_at": "@datetime:-16T18:00",
+          "days": 2,
+          "daily_rate": 22.0,
+          "deposit_paid": true,
+          "id_document": "EC395449",
+          "returned_at": "@datetime:-16T17:33",
+          "damage_report": "Rear derailleur bent, hanger snapped — bike taken out of the fleet for repair. Deducted 35 EUR from the deposit."
+        },
+        {
+          "fleet_bike_id": "@ref:f2",
+          "customer_id": "@ref:c10",
+          "status": "returned",
+          "starts_at": "@datetime:-12T09:00",
+          "due_at": "@datetime:-10T18:00",
+          "days": 1.5,
+          "daily_rate": 45.0,
+          "deposit_paid": true,
+          "id_document": "ED889625",
+          "returned_at": "@datetime:-10T17:19"
+        },
+        {
+          "fleet_bike_id": "@ref:f6",
+          "customer_id": "@ref:c11",
+          "status": "returned",
+          "starts_at": "@datetime:-9T09:00",
+          "due_at": "@datetime:-8T18:00",
+          "days": 0.5,
+          "daily_rate": 22.0,
+          "deposit_paid": true,
+          "id_document": "EF503312",
+          "returned_at": "@datetime:-8T17:20"
+        },
+        {
+          "fleet_bike_id": "@ref:f1",
+          "customer_id": "@ref:c08",
+          "status": "active",
+          "starts_at": "@datetime:-1T09:00",
+          "due_at": "@datetime:2T18:00",
+          "days": 3,
+          "daily_rate": 45.0,
+          "deposit_paid": true,
+          "id_document": "EE982238"
+        },
+        {
+          "fleet_bike_id": "@ref:f8",
+          "customer_id": "@ref:c08",
+          "status": "active",
+          "starts_at": "@datetime:-1T09:00",
+          "due_at": "@datetime:2T18:00",
+          "days": 3,
+          "daily_rate": 10.0,
+          "deposit_paid": true,
+          "id_document": "EA329270"
+        },
+        {
+          "fleet_bike_id": "@ref:f5",
+          "customer_id": "@ref:c02",
+          "status": "overdue",
+          "starts_at": "@datetime:-5T09:00",
+          "due_at": "@datetime:-3T18:00",
+          "days": 2,
+          "daily_rate": 18.0,
+          "deposit_paid": true,
+          "id_document": "EE772624"
+        },
+        {
+          "fleet_bike_id": "@ref:f3",
+          "customer_id": "@ref:c06",
+          "status": "reserved",
+          "starts_at": "@datetime:2T09:00",
+          "due_at": "@datetime:4T18:00",
+          "days": 2,
+          "daily_rate": 49.0,
+          "deposit_paid": true,
+          "id_document": "EB471351"
+        },
+        {
+          "fleet_bike_id": "@ref:f2",
+          "customer_id": "@ref:c15",
+          "status": "reserved",
+          "starts_at": "@datetime:4T09:00",
+          "due_at": "@datetime:5T18:00",
+          "days": 1,
+          "daily_rate": 45.0,
+          "deposit_paid": true,
+          "id_document": "EF205145"
+        },
+        {
+          "fleet_bike_id": "@ref:f4",
+          "customer_id": "@ref:c01",
+          "status": "cancelled",
+          "starts_at": "@datetime:-3T09:00",
+          "due_at": "@datetime:-2T18:00",
+          "days": 1,
+          "daily_rate": 18.0,
+          "deposit_paid": false,
+          "id_document": "EA544389"
+        }
+      ]
+    }
+  ]
+}

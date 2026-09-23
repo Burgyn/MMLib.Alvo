@@ -1,0 +1,308 @@
+#!/usr/bin/env bash
+# The admin dashboard's demo: the real MMLib.Alvo.Host over a fresh SQLite file, driven by the
+# examples/bike-workshop descriptor and seeded with a realistic workshop's data through the public
+# REST API — then left running in the foreground for a UX review or a local demo.
+#
+# IN NO RING, like scripts/test-admin-e2e: it binds a port and keeps a process alive, and it is a
+# demo rather than a gate. Nothing in CI runs it.
+#
+# Usage:
+#   scripts/demo-admin                 build, start on :5080 over a new database, seed, stay up
+#   scripts/demo-admin --port 5090     another port
+#   scripts/demo-admin --keep          reuse the previous run's database (skips seeding if it has data)
+#   scripts/demo-admin --no-build      skip `dotnet build` (the previous build is used as it stands)
+#
+# Environment:
+#   ALVO_DEMO_DIR        where the database, password file and logs live
+#                        (default: ${TMPDIR:-/tmp}/alvo-demo-admin; its database is recreated unless --keep)
+#   ALVO_DEMO_ARTIFACTS  the build's --artifacts-path (default: <repo>/artifacts/demo-admin, gitignored).
+#                        Its own path so a demo never shares bin/ or obj/ with a build or a test run
+#                        going on in the same tree.
+#
+# Seeding goes through the Data API and the Management API exactly as an agent would, with a dev API
+# key minted for this run (Development only, never committed). The key is printed so the same
+# credential can drive /scalar while the demo is up.
+#
+# The rental after-hook posts to a webhook receiver on 127.0.0.1:5081. If python3 is available and
+# the port is free, a tiny receiver is started and every delivery is appended to webhooks.log in the
+# demo directory; otherwise deliveries fail and are retried, which the dashboard shows as such.
+#
+# Requires: dotnet (the SDK in global.json), curl, jq.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+example="$root/examples/bike-workshop"
+descriptor="$example/bike-workshop.alvo.json"
+seed="$example/seed/bike-workshop.seed.json"
+project="$root/src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj"
+artifacts="${ALVO_DEMO_ARTIFACTS:-$root/artifacts/demo-admin}"
+
+port=5080
+keep=0
+build=1
+webhook_port=5081
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --port) port="${2:?--port needs a value}"; shift 2 ;;
+    --port=*) port="${1#--port=}"; shift ;;
+    --keep) keep=1; shift ;;
+    --no-build) build=0; shift ;;
+    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "[demo-admin] unknown argument: $1 (try --help)" >&2; exit 2 ;;
+  esac
+done
+
+for tool in dotnet curl jq; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "[demo-admin] '$tool' is required but not on PATH" >&2; exit 1; }
+done
+
+say() { printf '[demo-admin] %s\n' "$*"; }
+
+port_in_use() {
+  # bash's /dev/tcp is the portable probe: lsof is absent from minimal Linux images, ss from macOS.
+  (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+}
+
+if port_in_use "$port"; then
+  echo "[demo-admin] port $port is already in use — pass --port <free port>" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------------------------------
+# The demo directory: database, bootstrap password, logs.
+# ---------------------------------------------------------------------------------------------------
+tmp="${TMPDIR:-/tmp}"
+dir="${ALVO_DEMO_DIR:-${tmp%/}/alvo-demo-admin}"
+mkdir -p "$dir"
+if [ "$keep" -eq 0 ]; then
+  rm -f "$dir/alvo.db" "$dir/alvo.db-wal" "$dir/alvo.db-shm" "$dir/host.log" "$dir/webhooks.log"
+fi
+
+# od rather than `tr </dev/urandom | head`: under pipefail, tr's SIGPIPE fails the whole assignment.
+random_hex() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
+
+admin_email="admin@alvo.demo"
+password_file="$dir/bootstrap.pwd"
+if [ ! -s "$password_file" ]; then
+  # Kept across runs, because the bootstrap administrator is created from it only on a new database:
+  # a password regenerated under --keep would no longer be the one that signs in.
+  printf 'Velo-%s-Demo!' "$(random_hex 5)" >"$password_file"
+fi
+admin_password="$(cat "$password_file")"
+
+key_id="demo-seed"
+key_secret="$(random_hex 16)"
+key_user="5eed0000-0000-4000-8000-000000000001"
+api_key="$key_id.$key_secret"
+
+base="http://127.0.0.1:$port"
+host_log="$dir/host.log"
+
+# ---------------------------------------------------------------------------------------------------
+# Build.
+# ---------------------------------------------------------------------------------------------------
+if [ "$build" -eq 1 ]; then
+  say "dotnet build (artifacts: $artifacts)"
+  # -nodeReuse:false, so no idle MSBuild node outlives the demo.
+  HUSKY=0 dotnet build "$project" -c Debug --nologo -v q -nodeReuse:false --artifacts-path "$artifacts"
+fi
+host_dir="$artifacts/bin/MMLib.Alvo.Host/debug"
+if [ ! -f "$host_dir/MMLib.Alvo.Host.dll" ]; then
+  echo "[demo-admin] no build at $host_dir — run without --no-build" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------------------------------
+# Processes, and the trap that stops them — whichever way this script ends.
+# ---------------------------------------------------------------------------------------------------
+host_pid=""
+receiver_pid=""
+stop() {
+  trap - EXIT INT TERM
+  # Each kill is followed by a wait, which reaps the job and keeps bash's "Terminated" notice quiet.
+  if [ -n "$receiver_pid" ]; then kill "$receiver_pid" 2>/dev/null || true; wait "$receiver_pid" 2>/dev/null || true; fi
+  if [ -n "$host_pid" ] && kill -0 "$host_pid" 2>/dev/null; then
+    say "stopping the host (pid $host_pid)"
+    kill "$host_pid" 2>/dev/null || true
+    # Graceful first: the host flushes the outbox and closes SQLite. Then no second chance.
+    for _ in $(seq 1 20); do kill -0 "$host_pid" 2>/dev/null || break; sleep 0.25; done
+    kill -9 "$host_pid" 2>/dev/null || true
+    wait "$host_pid" 2>/dev/null || true
+  fi
+}
+trap stop EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+start_receiver() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    say "python3 not found — no webhook receiver; rental deliveries will be retried and fail"
+    return
+  fi
+  if port_in_use "$webhook_port"; then
+    say "port $webhook_port is in use — no webhook receiver started"
+    return
+  fi
+  cat >"$dir/webhook-receiver.py" <<'PY'
+import sys, datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
+port, log = int(sys.argv[1]), sys.argv[2]
+class Receiver(BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode("utf-8", "replace")
+        with open(log, "a", encoding="utf-8") as out:
+            out.write(f"{datetime.datetime.now().isoformat(timespec='seconds')} POST {self.path} {body}\n")
+        self.send_response(204)
+        self.end_headers()
+    def log_message(self, *args):
+        pass
+HTTPServer(("127.0.0.1", port), Receiver).serve_forever()
+PY
+  python3 "$dir/webhook-receiver.py" "$webhook_port" "$dir/webhooks.log" >/dev/null 2>&1 &
+  receiver_pid=$!
+  say "webhook receiver on 127.0.0.1:$webhook_port → $dir/webhooks.log"
+}
+
+start_host() {
+  say "starting the host on $base (log: $host_log)"
+  (
+    # The content root is the build output, where the static-web-asset manifest the dashboard's
+    # design system is served from lives.
+    cd "$host_dir"
+    export Alvo__Auth__DevKeys__0__KeyId="$key_id"
+    export Alvo__Auth__DevKeys__0__Secret="$key_secret"
+    export Alvo__Auth__DevKeys__0__User="$key_user"
+    export Alvo__Auth__DevKeys__0__Roles__0=authenticated
+    export Alvo__Auth__DevKeys__0__Roles__1=admin
+    export Alvo__Auth__DevKeys__0__Scopes__0='*:read'
+    export Alvo__Auth__DevKeys__0__Scopes__1='*:write'
+    exec dotnet MMLib.Alvo.Host.dll \
+      --environment Development \
+      --Logging:LogLevel:Microsoft.EntityFrameworkCore=Warning \
+      --Logging:LogLevel:System.Net.Http.HttpClient=Warning \
+      --urls "$base" \
+      --Alvo:DescriptorPath="$descriptor" \
+      --Alvo:Database:Provider=Sqlite \
+      "--Alvo:Database:SqliteConnectionString=Data Source=$dir/alvo.db" \
+      --Alvo:Admin:BootstrapEmail="$admin_email" \
+      --Alvo:Admin:BootstrapPasswordFile="$password_file"
+  ) >>"$host_log" 2>&1 &
+  host_pid=$!
+}
+
+wait_until_ready() {
+  # /health/ready rather than /health/live: readiness is 503 until the descriptor has applied.
+  for _ in $(seq 1 120); do
+    if ! kill -0 "$host_pid" 2>/dev/null; then
+      echo "[demo-admin] the host exited during start-up — last lines of $host_log:" >&2
+      tail -n 40 "$host_log" >&2
+      exit 1
+    fi
+    if [ "$(curl -s -o /dev/null -w '%{http_code}' "$base/health/ready" || true)" = "200" ]; then
+      return
+    fi
+    sleep 0.5
+  done
+  echo "[demo-admin] the host did not become ready within 60 s — see $host_log" >&2
+  exit 1
+}
+
+# ---------------------------------------------------------------------------------------------------
+# Seeding, through the public API.
+# ---------------------------------------------------------------------------------------------------
+
+# Answers the body, or fails the script naming the request and Alvo's problem document.
+api() {
+  local method="$1" path="$2" out status
+  local -a data=()
+  if [ $# -ge 3 ]; then data=(--data-binary "$3"); fi
+  out="$dir/.response"
+  status="$(curl -sS -o "$out" -w '%{http_code}' -X "$method" "$base$path" \
+    -H "X-Alvo-Api-Key: $api_key" -H 'Content-Type: application/json' \
+    ${data[@]+"${data[@]}"})"
+  if [ "${status:0:1}" != "2" ]; then
+    echo "[demo-admin] $method $path answered $status:" >&2
+    jq . "$out" >&2 2>/dev/null || cat "$out" >&2
+    rm -f "$out"
+    exit 1
+  fi
+  cat "$out"
+  rm -f "$out"
+}
+
+# Replaces the seed file's placeholders — see its $comment — and strips '$key'.
+resolve='
+  def day($offset): (now + ($offset | tonumber) * 86400) | strftime("%Y-%m-%d");
+  walk(
+    if type == "string" then
+      if startswith("@ref:") then ($ids[.[5:]] // error("unknown @ref " + .))
+      elif startswith("@user:") then ($users[.[6:]] // error("unknown @user " + .))
+      elif test("^@date:-?[0-9]+$") then day(.[6:])
+      elif test("^@datetime:-?[0-9]+T[0-9]{2}:[0-9]{2}$") then
+        (capture("^@datetime:(?<d>-?[0-9]+)T(?<t>.+)$") as $m | day($m.d) + "T" + $m.t + ":00Z")
+      else . end
+    elif type == "object" then del(.["$key"])
+    else . end)'
+
+seed_data() {
+  local project_name users="{}" ids="{}" count i entity keys rows answer
+  project_name="$(jq -r .name "$descriptor")"
+
+  count="$(jq '.users | length' "$seed")"
+  for i in $(seq 0 $((count - 1))); do
+    local user email id
+    user="$(jq -c ".users[$i]" "$seed")"
+    email="$(jq -r .email <<<"$user")"
+    id="$(api POST "/management/projects/$project_name/users" "$user" | jq -r .id)"
+    users="$(jq -c --arg e "$email" --arg id "$id" '. + {($e): $id}' <<<"$users")"
+  done
+  say "users: $count staff accounts"
+
+  count="$(jq '.entities | length' "$seed")"
+  for i in $(seq 0 $((count - 1))); do
+    entity="$(jq -r ".entities[$i].entity" "$seed")"
+    keys="$(jq -c ".entities[$i].rows | map(.[\"\$key\"])" "$seed")"
+    rows="$(jq -c --argjson ids "$ids" --argjson users "$users" ".entities[$i].rows | $resolve" "$seed")"
+    # One batch per entity: one transaction, so a bad row leaves nothing half-seeded.
+    answer="$(api POST "/api/$entity/batch" "{\"rows\":$rows}")"
+    ids="$(jq -c --argjson keys "$keys" --argjson ids "$ids" \
+      '[$keys, (.items | map(.id))] | transpose
+       | map(select(.[0] != null) | {(.[0]): .[1]}) | add // {} | $ids + .' <<<"$answer")"
+    say "$entity: $(jq '.items | length' <<<"$answer") rows"
+  done
+}
+
+already_seeded() {
+  [ "$(api GET "/api/customers?limit=1" | jq '.items | length')" -gt 0 ]
+}
+
+# ---------------------------------------------------------------------------------------------------
+start_receiver
+start_host
+wait_until_ready
+
+if [ "$keep" -eq 1 ] && already_seeded; then
+  say "the kept database already has data — not seeding again"
+else
+  seed_data
+fi
+
+cat <<EOF
+
+  Velo Dielňa — the Alvo admin dashboard demo is up.
+
+    Dashboard   $base/admin
+    Sign in     $admin_email
+    Password    $admin_password
+
+    API docs    $base/scalar
+    API key     X-Alvo-Api-Key: $api_key   (admin, for this run only)
+
+    Demo dir    $dir   (database, host.log$( [ -n "$receiver_pid" ] && printf ', webhooks.log'))
+
+  Ctrl+C stops it. Re-run with --keep to come back to the same data.
+
+EOF
+
+wait "$host_pid"

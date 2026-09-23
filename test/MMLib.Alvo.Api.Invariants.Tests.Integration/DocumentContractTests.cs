@@ -5,7 +5,7 @@ namespace MMLib.Alvo.Api.Tests.Invariants;
 
 /// <summary>
 /// The generated OpenAPI document holds Alvo's contract for <em>every</em> descriptor — sixteen generated
-/// ones and three of the four the repository ships — and not only for the fixture the rules were written
+/// ones and four of the five the repository ships — and not only for the fixture the rules were written
 /// against.
 /// </summary>
 /// <remarks>
@@ -18,7 +18,7 @@ namespace MMLib.Alvo.Api.Tests.Invariants;
 /// </para>
 /// <para>
 /// The <c>examples/</c> descriptors are here for a second reason: spec §415 asks for the lint to run
-/// "against the demo's OpenAPI", and they are what the compose stacks actually serve. Three of the four
+/// "against the demo's OpenAPI", and they are what the compose stacks actually serve. Four of the five
 /// boot; <c>complex-crm</c> cannot be applied at all and is pinned as such below (#208).
 /// </para>
 /// </remarks>
@@ -118,8 +118,8 @@ public class DocumentContractTests
             .ToList();
 
         found.Count.ShouldBe(
-            4,
-            "the repository ships four positive examples, of which three are appliable; adjust this suite when that changes");
+            5,
+            "the repository ships five positive examples, of which four are appliable; adjust this suite when that changes");
 
         return found;
     }

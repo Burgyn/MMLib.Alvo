@@ -38,6 +38,12 @@ Reference descriptors validated against `schema/project.schema.json`
   `renamedFrom` on `vehicles.plate` (was `license_plate`). Doubles as the
   fixture for the per-engine generated-SQL snapshot tests (the EF-drift
   guard) in `MMLib.Alvo.Data.Sqlite.Tests` / `.Data.PostgreSql.Tests.Integration`.
+- **`bike-workshop/`** — **applies as it stands.** The admin dashboard's demo backend (see
+  `bike-workshop/README.md`): a bicycle repair and rental workshop over seven entities, exercising every
+  field type, declared `formats`, literal `default`s, all three `onDelete`s, `computed` fields (one reading
+  a rollup), `count`/`sum` rollups, `hidden`/`readOnly` as CEL, before-hooks (`reject` and `mutate`),
+  `email` and `webhook` after-hooks, `access` levels and role-differentiated rules. `scripts/demo-admin`
+  starts the host over it and seeds realistic data from `bike-workshop/seed/` through the public API.
 - **`_negative/`** — descriptors that MUST be rejected, each proving one
   constraint (unknown property, `decimal` missing `scale`, the reserved
   `users` entity name, a wrong `apiVersion`). The test asserts they fail with
