@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Admin.Tests.Internal;
+using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Admin.Tests;
 
@@ -15,7 +16,7 @@ namespace MMLib.Alvo.Admin.Tests;
 /// one.
 /// </para>
 /// </remarks>
-public sealed class ComponentLayerTests
+public sealed partial class ComponentLayerTests
 {
     private static readonly string _css = File.ReadAllText(Stylesheet.AlvoCssPath);
 
@@ -71,4 +72,54 @@ public sealed class ComponentLayerTests
     [Fact]
     public void Numeric_columns_are_tabular()
         => _css.ShouldContain("font-variant-numeric: tabular-nums");
+
+    /// <summary>
+    /// <c>.a-mono</c> names a family and leaves size and colour to wherever it is used.
+    /// </summary>
+    /// <remarks>
+    /// A utility that also set 11 px and the dim colour was the last word on every element it joined —
+    /// declared after <c>.a-page-title</c>, it drew an entity's name in its own page heading at 11 px
+    /// (finding D-1). The small dim look is <c>.a-ident</c>, which says so in its name.
+    /// </remarks>
+    [Fact]
+    public void The_mono_utility_sets_the_family_and_nothing_else_a_context_decides()
+    {
+        var rule = TopLevelRule(".a-mono");
+        rule.ShouldContain("font-family: var(--font-mono)");
+        rule.ShouldNotContain("font-size:");
+        rule.ShouldNotContain("color:");
+    }
+
+    /// <summary>
+    /// Every face the stylesheet declares has a file behind it.
+    /// </summary>
+    /// <remarks>
+    /// A missing font fails silently by design — <c>font-display: swap</c> keeps the fallback on
+    /// screen — so a renamed or dropped file would ship a dashboard drawn in system-ui with nothing
+    /// red anywhere.
+    /// </remarks>
+    [Fact]
+    public void Every_font_the_stylesheet_names_is_shipped_beside_it()
+    {
+        var fonts = Path.Combine(Path.GetDirectoryName(Stylesheet.AlvoCssPath)!, "fonts");
+        var named = FontUrl().Matches(_css).Select(match => match.Groups["file"].Value).ToList();
+
+        named.ShouldNotBeEmpty();
+        named.Where(file => !File.Exists(Path.Combine(fonts, file))).ShouldBeEmpty();
+    }
+
+    /// <summary>The body of the one top-level rule for <paramref name="selector"/>.</summary>
+    /// <param name="selector">The selector, exactly as it opens its rule.</param>
+    /// <returns>The declarations between its braces.</returns>
+    private static string TopLevelRule(string selector)
+    {
+        var css = _css.ReplaceLineEndings("\n");
+        var start = css.IndexOf($"\n{selector} {{", StringComparison.Ordinal);
+        start.ShouldBeGreaterThanOrEqualTo(0, $"{selector} has no top-level rule");
+        var body = css[(start + selector.Length + 3)..];
+        return body[..body.IndexOf('}', StringComparison.Ordinal)];
+    }
+
+    [GeneratedRegex(@"url\('fonts/(?<file>[^']+)'\)")]
+    private static partial Regex FontUrl();
 }

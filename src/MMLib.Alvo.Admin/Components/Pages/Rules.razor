@@ -81,7 +81,7 @@
                         <PolicyVerdictView Verdict="verdict" Operation="_operation" Entity="@Selected" />
                     }
 
-                    <div class="p-note" style="font-size:var(--text-xs);color:var(--dim);border-top:1px solid var(--border);padding-top:var(--space-3)">
+                    <p class="a-note" style="border-top:1px solid var(--border);padding-top:var(--space-3)">
                         <strong>Why there is no record picker.</strong>
                         <code class="a-mono">ManagementPolicySimulation</code> takes no record id, deliberately:
                         evaluating a predicate against a stored row needs a read, and the Management API has no
@@ -91,7 +91,7 @@
                         compare.
                         <a class="a-btn a-btn--sm" style="margin-top:var(--space-3)"
                            href="@($"{AlvoAdmin.BasePath}/data/{Selected}")">Open @Selected in Data</a>
-                    </div>
+                    </p>
                 </div>
             </div>
         </div>

@@ -35,10 +35,10 @@ else if (!Editable)
 
     @if (Missing.Count > 0)
     {
-        <div class="p-note" style="padding:var(--space-4);color:var(--dim);font-size:var(--text-xs)">
+        <p class="a-note">
             No rule for @string.Join(", ", Missing) — those operations are refused for everyone,
             which is default-deny working rather than a gap.
-        </div>
+        </p>
     }
 }
 else
@@ -64,11 +64,11 @@ else
         </div>
     }
 
-    <div class="p-note" style="padding:var(--space-4);color:var(--dim);font-size:var(--text-xs)">
+    <p class="a-note">
         The rule is checked inside the same transaction as the query and may read the caller's id,
         their roles, their tenant and this record's own fields — nothing else. It goes through the
         same dry run as every other change.
-    </div>
+    </p>
 }
 
 @code {

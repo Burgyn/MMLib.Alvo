@@ -62,11 +62,11 @@
     </div>
 </div>
 
-<div class="p-note" style="padding:var(--space-4);color:var(--dim);font-size:var(--text-xs)">
+<p class="a-note">
     @(Entity.Tenancy == TenancyMode.Scoped
         ? "This entity is tenancy: scoped, so a caller with no tenant is refused with 403 before any rule is consulted."
         : "This entity is global, so no tenant is required to reach it.")
-</div>
+</p>
 
 @code {
     /// <summary>The entity whose routes these are.</summary>
