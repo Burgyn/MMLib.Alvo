@@ -11,6 +11,11 @@
     <PageHeader Eyebrow="Schema" EyebrowHref="@($"{AlvoAdmin.BasePath}/schema")" Title="@EntityName" Mono="true">
         <Secondary>
             <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/data/{EntityName}")">Browse records</a>
+            @if (Copy.Loaded)
+            {
+                <button type="button" class="a-btn a-btn--sm" data-testid="rename-entity"
+                        @onclick="OpenRename">Rename</button>
+            }
         </Secondary>
         <Primary>
             @if (Copy.IsDirty)
@@ -21,6 +26,38 @@
             }
         </Primary>
     </PageHeader>
+
+    @*
+        Renaming is its own control rather than an editable title: it is the one edit where the name in
+        the descriptor and the name in the database come apart, and it needs a sentence saying so before
+        the operator commits to it.
+    *@
+    <Sheet Open="_renaming" Title="@($"Rename {EntityName}")"
+           Subtitle="The apply moves the table. Its rows come with it."
+           TestId="rename-sheet" OnClose="CloseRename">
+        <div class="a-stack">
+            @if (_renameRefusal is { Length: > 0 })
+            {
+                <ErrorPanel Heading="That name cannot be used" Fix="@_renameRefusal" />
+            }
+
+            <div class="a-field">
+                <label class="a-label" for="rename-entity-name">New name</label>
+                <input class="a-input a-mono" id="rename-entity-name" value="@_newName" autocomplete="off"
+                       @oninput="args => _newName = args.Value?.ToString() ?? string.Empty" />
+                <span class="a-section-sub">
+                    Lower case, digits and underscores — <code class="a-mono">@DescriptorNames.Member</code>.
+                    The change is carried by <code class="a-mono">renamedFrom</code>, so the apply moves the
+                    table instead of dropping it and creating a new one.
+                </span>
+            </div>
+
+            <div class="a-row">
+                <button type="button" class="a-btn a-btn--primary a-btn--sm" data-testid="rename-save"
+                        @onclick="RenameAsync">Rename in the working copy</button>
+            </div>
+        </div>
+    </Sheet>
 
     @if (_error is not null)
     {
@@ -114,7 +151,7 @@
         {
             <FieldEditor Entity="@EntityName" Targets="_entities" OnAdded="AddFieldAsync"
                          Editing="@_editing" EditingJson="@EditedJson" OnCancelled="CloseEditor"
-                         Capabilities="_refused" />
+                         Siblings="_fieldNames" Capabilities="_refused" />
         }
     }
 </div>
@@ -140,6 +177,10 @@
     private IReadOnlyList<ManagementRefusedFeature> _refused = [];
     private IReadOnlyList<KeyValuePair<string, string>> _working = [];
     private IReadOnlyList<IndexSchema> _indexes = [];
+    private IReadOnlyList<string> _fieldNames = [];
+    private bool _renaming;
+    private string _newName = string.Empty;
+    private string? _renameRefusal;
     private Exception? _error;
     private string _tab = "Fields";
     private string? _editing;
@@ -180,6 +221,7 @@
                moment somebody navigated away and back. */
             _working = DescriptorLens.Rules(Copy.Json, EntityName);
             _indexes = Copy.IndexesOf(EntityName);
+            _fieldNames = [.. Copy.FieldsOf(EntityName).Select(field => field.Key)];
 
             /* The On write tab edits the working copy too, so it renders the working copy — for the
                reason the Rules tab states one field up. */
@@ -213,10 +255,34 @@
         _working = DescriptorLens.Rules(Copy.Json, EntityName);
     }
 
-    /// <summary>Puts a new field in the working copy and offers the preview.</summary>
+    /// <summary>
+    /// Puts the field in the working copy and offers the preview.
+    /// </summary>
+    /// <remarks>
+    /// <b>The facets are written under the OLD name and the rename happens after, which is an order and
+    /// not a style.</b> The editor's facets were parsed from the declaration as it stood, so they carry
+    /// whatever <c>renamedFrom</c> it already had; writing them under the new name would land that stale
+    /// value on the renamed field, and <c>RenameField</c> would then read it as the origin. Facets first,
+    /// then the rename, and the origin is computed from a declaration that is current.
+    /// </remarks>
     private void AddFieldAsync(FieldEditor.NewField added)
     {
-        Copy.AddField(EntityName, added.Name, added.Facets);
+        var editing = _editing;
+
+        if (editing is { Length: > 0 })
+        {
+            Copy.AddField(EntityName, editing, added.Facets);
+
+            if (!string.Equals(editing, added.Name, StringComparison.Ordinal))
+            {
+                Copy.RenameField(EntityName, editing, added.Name);
+            }
+        }
+        else
+        {
+            Copy.AddField(EntityName, added.Name, added.Facets);
+        }
+
         CloseEditor();
         Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/preview");
     }
@@ -304,6 +370,42 @@
     {
         Copy.AddHook(EntityName, added.Point, added.Condition, added.Action);
         _hooks = Copy.HooksOf(EntityName);
+    }
+
+    /// <summary>Opens the rename sheet, prefilled with the name it has.</summary>
+    private void OpenRename()
+    {
+        _newName = EntityName;
+        _renameRefusal = null;
+        _renaming = true;
+    }
+
+    /// <summary>Closes it without touching the working copy.</summary>
+    private void CloseRename()
+    {
+        _renaming = false;
+        _renameRefusal = null;
+    }
+
+    /// <summary>
+    /// Renames the entity and follows it to its new address.
+    /// </summary>
+    /// <remarks>
+    /// <b>The navigation is the point, not a convenience.</b> This screen is routed by the entity's name,
+    /// so after a rename the URL in the address bar names something the working copy no longer declares —
+    /// and the next render would say "there is no entity called …" to the person who just renamed it.
+    /// </remarks>
+    private void RenameAsync()
+    {
+        if (Copy.RenameEntity(EntityName, _newName) is { } refusal)
+        {
+            _renameRefusal = refusal;
+            return;
+        }
+
+        var renamed = _newName;
+        CloseRename();
+        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/{renamed}");
     }
 
     /// <summary>Drops one hook, and stays on the tab.</summary>

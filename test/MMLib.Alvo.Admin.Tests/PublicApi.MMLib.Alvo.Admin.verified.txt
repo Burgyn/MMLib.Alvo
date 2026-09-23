@@ -87,6 +87,8 @@ namespace MMLib.Alvo.Admin.Components.Entity
         public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.FieldEditor.NewField> OnAdded { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback OnCancelled { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<string> Siblings { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<string> Targets { get; set; }

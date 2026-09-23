@@ -31,14 +31,14 @@
         <div class="a-field">
             <label class="a-label" for="new-field-name">Name</label>
             <input class="a-input" id="new-field-name" value="@_name" placeholder="scheduled_for"
-                   @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off"
-                   disabled="@IsEditing" />
+                   @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
             <span class="a-section-sub">
-                @if (IsEditing)
+                @if (IsEditing && !string.Equals(_name, Editing, StringComparison.Ordinal))
                 {
                     <text>
-                        A rename is carried by <code class="a-mono">renamedFrom</code>, so that the column
-                        moves instead of being dropped and recreated — rename in the descriptor and import it.
+                        Renaming <code class="a-mono">@Editing</code>. The change is carried by
+                        <code class="a-mono">renamedFrom</code>, so the apply moves the column instead of
+                        dropping it and creating a new one — the rows come with it.
                     </text>
                 }
                 else
@@ -236,6 +236,17 @@
     /// <summary>The entities a ref may point at.</summary>
     [Parameter, EditorRequired]
     public IReadOnlyList<string> Targets { get; set; } = [];
+
+    /// <summary>
+    /// The field names this entity already declares, so a rename onto one of them is refused here.
+    /// </summary>
+    /// <remarks>
+    /// Refused in the editor rather than after it closes, for the reason every other refusal on this panel
+    /// is: the operator is looking at the name they typed. <c>WorkingCopy.RenameField</c> refuses it too —
+    /// it has to, being the one that writes — and this is the copy that can point at the box.
+    /// </remarks>
+    [Parameter]
+    public IReadOnlyList<string> Siblings { get; set; } = [];
 
     /// <summary>Raised with the field to add, once it is one the schema can carry.</summary>
     [Parameter]
@@ -476,6 +487,15 @@
         if (!DescriptorNames.IsMember(_name))
         {
             _refusal = $"A field name must match {DescriptorNames.Member}.";
+            return;
+        }
+
+        /* A rename onto a name that is taken would merge two declarations into one, silently. The add
+           path is guarded by the same check for the same reason. */
+        if (!string.Equals(_name, Editing, StringComparison.Ordinal)
+            && Siblings.Contains(_name, StringComparer.Ordinal))
+        {
+            _refusal = $"This entity already declares a field called {_name}.";
             return;
         }
 

@@ -41,9 +41,12 @@ public sealed class SchemaEditingScenarios(AdminWorld world) : IClassFixture<Adm
            assertions below would then read the panel before the click's re-render arrived. */
         await session.Page.GetByText("Edit email").WaitForAsync();
 
-        /* The name is the field's identity in the document, so the editor locks it: replacing a key
-           is a drop and a create, which is not what "edit" means to the person clicking it. */
-        (await session.Page.Locator("#new-field-name").IsDisabledAsync()).ShouldBeTrue();
+        /* The name is editable, and this assertion used to say the opposite. It locked the box because
+           "replacing a key is a drop and a create" — true while nothing wrote `renamedFrom`, and false
+           since the editor does: the apply moves the column and the rows come with it. What is still
+           asserted is that the box opens on the name the field has, so an edit that is not a rename
+           stays one. `RenameScenarios` covers the rename itself. */
+        (await session.Page.Locator("#new-field-name").IsDisabledAsync()).ShouldBeFalse();
         (await session.Page.Locator("#new-field-name").InputValueAsync()).ShouldBe("email");
 
         await session.Page.FillAsync("#new-field-max", "200");
@@ -527,6 +530,113 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.Locator("[data-testid='hook-remove']").Last.ClickAsync();
         await rows.Nth(before).WaitForAsync(
             new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+
+        session.AssertConsoleClean();
+    }
+}
+
+/// <summary>
+/// Renaming an entity and a field, which the dashboard could only ever explain.
+/// </summary>
+/// <remarks>
+/// Its own world for <c>IndexEditingScenarios</c>' reason, and it stops at the preview for the same one:
+/// what is under test is the document the editor composes, and the migrator has its own suite.
+/// </remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class RenameScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+{
+    /// <summary>
+    /// An entity rename carries <c>renamedFrom</c> and takes the operator with it.
+    /// </summary>
+    /// <remarks>
+    /// Both halves. Without the key the apply reads a drop and a create, and the rows go with the old
+    /// table; without the navigation the screen is routed by a name the working copy no longer declares
+    /// and answers "there is no entity called …" to the person who just renamed it.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task An_entity_rename_is_carried_rather_than_dropped()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/regions");
+
+        await session.Page.ClickAsync("[data-testid='rename-entity']");
+        await session.Page.FillAsync("#rename-entity-name", "service_areas");
+        await session.Page.ClickAsync("[data-testid='rename-save']");
+
+        await session.Page.WaitForURLAsync("**/schema/service_areas");
+
+        await session.GoAsync("/schema/preview");
+        await session.Page.Locator("button:has-text('Plan this change')").WaitForAsync();
+
+        var previewed = await session.Page.Locator("main.a-content").InnerTextAsync();
+        previewed.ShouldContain("service_areas");
+        previewed.ShouldContain("\"renamedFrom\": \"regions\"");
+    }
+
+    /// <summary>
+    /// A field rename carries its own <c>renamedFrom</c>, and the facets survive it.
+    /// </summary>
+    /// <remarks>
+    /// The facets are written under the old name and the rename runs after, so the origin is computed from
+    /// a declaration that is current. Written the other way round, the editor's stale <c>renamedFrom</c>
+    /// lands on the renamed field and the apply is pointed at the wrong column.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_field_rename_is_carried_and_keeps_its_facets()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/customers");
+
+        await session.Page.ClickAsync("[data-testid='edit-field-email']");
+        await session.Page.GetByText("Edit email").WaitForAsync();
+
+        await session.Page.FillAsync("#new-field-name", "contact_email");
+        await session.Page.ClickAsync("[data-testid='field-save']");
+        await session.Page.WaitForURLAsync("**/schema/preview");
+        await session.Page.Locator("button:has-text('Plan this change')").WaitForAsync();
+
+        var previewed = await session.Page.Locator("main.a-content").InnerTextAsync();
+        previewed.ShouldContain("contact_email");
+        previewed.ShouldContain("\"renamedFrom\": \"email\"");
+
+        /* The facets the editor cannot draw must survive a rename exactly as they survive an edit. */
+        previewed.ShouldContain("\"format\": \"email\"");
+    }
+
+    /// <summary>A name another field already has is refused in the editor, not after it closes.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_field_rename_onto_a_taken_name_is_refused()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/customers");
+
+        await session.Page.ClickAsync("[data-testid='edit-field-phone']");
+        await session.Page.GetByText("Edit phone").WaitForAsync();
+
+        await session.Page.FillAsync("#new-field-name", "name");
+        await session.Page.ClickAsync("[data-testid='field-save']");
+
+        await session.Page.GetByText("already declares a field called name").WaitForAsync();
+
+        /* Still open, still on the editor: a refusal the operator can act on without retyping. */
+        (await session.Page.Locator("#new-field-name").InputValueAsync()).ShouldBe("name");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>An entity name the schema cannot carry is refused, with the pattern.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task An_entity_name_the_schema_cannot_carry_is_refused()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/regions");
+
+        await session.Page.ClickAsync("[data-testid='rename-entity']");
+        await session.Page.FillAsync("#rename-entity-name", "Service Areas");
+        await session.Page.ClickAsync("[data-testid='rename-save']");
+
+        await session.Page.Locator("[data-testid='rename-sheet'] .a-error").WaitForAsync();
+        session.Page.Url.ShouldContain("/schema/regions");
 
         session.AssertConsoleClean();
     }
