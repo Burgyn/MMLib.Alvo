@@ -123,6 +123,44 @@ internal static class DescriptorLens
             : null;
     }
 
+    /// <summary>The fields one entity declares <c>hidden</c>.</summary>
+    /// <param name="descriptorJson">The descriptor as stored.</param>
+    /// <param name="entity">The entity to read.</param>
+    public static FieldMasks Masks(string descriptorJson, string entity)
+    {
+        using var document = Parse(descriptorJson);
+        if (document is null
+            || !document.RootElement.TryGetProperty("entities", out var entities)
+            || !entities.TryGetProperty(entity, out var declared)
+            || !declared.TryGetProperty("fields", out var fields)
+            || fields.ValueKind != JsonValueKind.Object)
+        {
+            return FieldMasks.None;
+        }
+
+        var always = new HashSet<string>(StringComparer.Ordinal);
+        var conditional = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var field in fields.EnumerateObject())
+        {
+            var hidden = HiddenKind(field.Value);
+            if (hidden == JsonValueKind.True)
+            {
+                always.Add(field.Name);
+            }
+            else if (hidden == JsonValueKind.String)
+            {
+                conditional.Add(field.Name);
+            }
+        }
+
+        return new FieldMasks(always, conditional);
+    }
+
+    private static JsonValueKind HiddenKind(JsonElement field)
+        => field.ValueKind == JsonValueKind.Object && field.TryGetProperty("hidden", out var hidden)
+            ? hidden.ValueKind
+            : JsonValueKind.Undefined;
+
     private static IReadOnlyList<KeyValuePair<string, string>> Pairs(
         string descriptorJson, string entity, string block)
     {
