@@ -877,6 +877,91 @@ h1.a-page-title:focus {
   gap: var(--space-2) var(--space-5);
 }
 
+/* What a record form could not read in a control, under the control. Only the text is red: the
+   refusal from the engine is the panel at the top of the sheet, and this is not that. */
+.a-field__problem {
+  color: var(--danger-fg);
+  font-size: var(--text-xs);
+}
+
+/* A reference's search box and the rows it found. The list sits in the flow under the box rather
+   than floating over the form, because the sheet's body scrolls and a floating list is cut off at
+   its edge when the field is near the bottom. */
+.a-combo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.a-combo__list {
+  max-height: 240px;
+  margin: 0;
+  padding: var(--space-1) 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  list-style: none;
+  overflow-y: auto;
+}
+
+.a-combo__option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.a-combo__option:hover,
+.a-combo__option[aria-selected='true'] {
+  background: var(--accentSoft);
+}
+
+.a-combo__empty {
+  padding: var(--space-2) var(--space-3);
+  color: var(--dim);
+  font-size: var(--text-sm);
+}
+
+/* The record form's derived and read-only values: label above value, the phone card's shape, closing
+   the form under a rule so they read as a summary of the record rather than as more fields. */
+.a-readout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.a-readout__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--space-3) var(--space-4);
+  margin: 0;
+}
+
+.a-readout__pair {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.a-readout__pair dt {
+  color: var(--dim);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.a-readout__pair dd {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
 /* The chips a "pick one of these" field is made of. */
 .a-choice {
   display: flex;
@@ -1219,6 +1304,29 @@ textarea.a-textarea {
 
 .a-grid-search {
   max-width: 360px;
+}
+
+/* The line over the grid: its search, and the sentence a write leaves behind. A block rather than a
+   stack, so the always-present (and usually empty) status region adds no gap of its own. */
+.a-grid-bar {
+  display: block;
+}
+
+/* "Saved SO-2026-0163" — quiet, neutral, and gone when dismissed. Not a toast: it does not float,
+   time out or cover anything, and an error never appears here. */
+.a-status-line {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--dim);
+  font-size: var(--text-sm);
 }
 
 .a-grid td {

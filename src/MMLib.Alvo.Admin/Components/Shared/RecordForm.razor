@@ -7,7 +7,9 @@
 
     What it refuses to do is validate ahead of the engine. The facets are shown and the obvious
     input types are used, but the answer to "is this value acceptable" comes from the write — a
-    second validator in the client is a second set of rules to disagree with.
+    second validator in the client is a second set of rules to disagree with. The one thing it does
+    check is whether the text can be read as the field's type at all, because a value it cannot build
+    is not one it can send (FormValue).
 *@
 @inject DataGateway Data
 
@@ -16,9 +18,7 @@
     component is the form, so the same markup reads as a bottom sheet on a phone and a centred
     dialog on a desktop without knowing which it is in.
 *@
-<Sheet Open="true" TestId="record-sheet"
-       Title="@($"{(RecordId is null ? "New" : "Edit")} {Entity.Name}")"
-       Subtitle="@Verb" OnClose="Cancel">
+<Sheet Open="true" TestId="record-sheet" Eyebrow="@Entity.Name" Title="@Title" OnClose="Cancel">
 
         @if (_error is not null)
         {
@@ -26,53 +26,53 @@
         }
 
         <div class="a-stack">
-            @foreach (var column in Editable)
+            @foreach (var column in _editable)
             {
                 <div class="a-field">
-                    <label class="a-label" for="@($"rf-{column.Name}")">
-                        @column.Name
+                    <label class="a-label" for="@ControlId(column)">
+                        @GridColumns.Header(column)
                         @if (column.Required)
                         {
-                            <span style="color:var(--accent)"> *</span>
+                            <span style="color:var(--accent)" aria-hidden="true"> *</span>
                         }
-                        <span style="color:var(--faint);font-weight:var(--weight-normal)"> · @column.Type.ToString().ToLowerInvariant()</span>
                     </label>
-                    @if (Hint(column) is { Length: > 0 } hint)
+                    <span class="a-section-sub" id="@HintId(column)">
+                        <span class="a-ident">@column.Name · @TypeOf(column)</span>@Hint(column)
+                    </span>
+                    @Control(column)
+                    @if (_problems.TryGetValue(column.Name, out var problem))
                     {
-                        <span class="a-section-sub">@hint</span>
-                    }
-                    @switch (column.Type)
-                    {
-                        case FieldType.Boolean:
-                            <button type="button" id="@($"rf-{column.Name}")"
-                                    class="@($"a-toggle{(Truthy(column.Name) ? " a-toggle--on" : string.Empty)}")"
-                                    @onclick="() => Toggle(column.Name)"
-                                    aria-pressed="@Truthy(column.Name)"></button>
-                            break;
-                        case FieldType.Enum:
-                            <div class="a-choice">
-                                @foreach (var option in column.EnumValues ?? [])
-                                {
-                                    <button type="button"
-                                            class="@($"a-chip{(string.Equals(Text(column.Name), option, StringComparison.Ordinal) ? " a-chip--on" : string.Empty)}")"
-                                            @onclick="() => Set(column.Name, option)">@option</button>
-                                }
-                            </div>
-                            break;
-                        case FieldType.Text:
-                            <textarea class="a-textarea" id="@($"rf-{column.Name}")" rows="4"
-                                      value="@Text(column.Name)"
-                                      @oninput="args => Set(column.Name, args.Value?.ToString())"></textarea>
-                            break;
-                        default:
-                            <input class="a-input" id="@($"rf-{column.Name}")" type="@InputType(column)"
-                                   value="@Text(column.Name)"
-                                   @oninput="args => Set(column.Name, args.Value?.ToString())" />
-                            break;
+                        <span class="a-field__problem" data-testid="field-problem">@problem</span>
                     }
                 </div>
             }
         </div>
+
+        @*
+            Read-only values last, under their own heading, formatted exactly as the grid formats them:
+            they answer "why is the total 43.50?", and a greyed input would read as a control that is
+            broken rather than as a value that is derived.
+        *@
+        @if (_calculated.Count > 0)
+        {
+            <section class="a-readout" aria-labelledby="rf-calculated" data-testid="record-calculated">
+                <span class="a-section-title" id="rf-calculated">Calculated</span>
+                <dl class="a-readout__list">
+                    @foreach (var column in _calculated)
+                    {
+                        <div class="a-readout__pair">
+                            <dt title="@($"{column.Name} · {Why(column)}")">@GridColumns.Header(column)</dt>
+                            <dd>@Readout(column)</dd>
+                        </div>
+                    }
+                </dl>
+            </section>
+        }
+
+        <details class="a-disclosure">
+            <summary>API</summary>
+            <code class="a-ident">@Verb</code>
+        </details>
 
         <div class="a-sheet__actions">
             @if (RecordId is { } id)
@@ -87,15 +87,24 @@
 </Sheet>
 
 @code {
+    /// <summary>How long typing into a reference has to pause before it searches.</summary>
+    private static readonly TimeSpan _searchDelay = TimeSpan.FromMilliseconds(250);
+
     private Exception? _error;
     private string? _fix;
     private bool _saving;
+    private Dictionary<string, object?>? _opened;
+    private RecordDraft _draft = new([], new Dictionary<string, object?>());
+    private IReadOnlyList<FieldSchema> _editable = [];
+    private IReadOnlyList<FieldSchema> _calculated = [];
+    private Dictionary<string, RefPicker> _pickers = new(StringComparer.Ordinal);
+    private IReadOnlyDictionary<string, string> _problems = new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <summary>The entity this record belongs to.</summary>
     [Parameter, EditorRequired]
     public EntitySchema Entity { get; set; } = default!;
 
-    /// <summary>The values being edited. Mutated in place; the caller owns the dictionary.</summary>
+    /// <summary>The record's values as read, or an empty dictionary for a new record. Read, never changed.</summary>
     [Parameter, EditorRequired]
     public Dictionary<string, object?> Values { get; set; } = default!;
 
@@ -103,7 +112,7 @@
     [Parameter]
     public Guid? RecordId { get; set; }
 
-    /// <summary>Raised when the operator dismisses the form.</summary>
+    /// <summary>Raised when the operator dismisses the form, or saves it with nothing changed.</summary>
     [Parameter]
     public EventCallback OnCancel { get; set; }
 
@@ -115,46 +124,309 @@
     [Parameter]
     public EventCallback OnDeleted { get; set; }
 
-    /// <summary>
-    /// The fields an operator may actually send.
-    /// </summary>
-    /// <remarks>
-    /// <c>id</c> and the audit columns are Alvo's own and are refused on a write; a computed field
-    /// or a rollup is derived, so a control for one would produce a value the engine overwrites.
-    /// Showing them as disabled inputs was the alternative, and it loses: a form full of greyed
-    /// boxes reads as broken.
-    /// </remarks>
-    private IEnumerable<FieldSchema> Editable => Entity.Fields.Where(column =>
-        !AlvoManagedColumns.For(Entity).Contains(column.Name)
-        && column.ComputedExpression is null
-        && column.Rollup is null);
+    /// <summary>What the Data screen knows about the entity beyond its shape; see <see cref="RecordFormScope"/>.</summary>
+    [CascadingParameter]
+    private RecordFormScope? Scope { get; set; }
 
-    private string Verb => RecordId is null
+    private bool Creating => RecordId is null;
+
+    private FieldLocks Locks => Scope?.Locks ?? FieldLocks.None;
+
+    private string Title => Creating ? "New record" : $"Edit {LabelOf(new AlvoRecord(Values))}";
+
+    private string Verb => Creating
         ? $"POST /api/{Entity.Name}"
         : $"PATCH /api/{Entity.Name}/{RecordId}";
 
-    private string Text(string name)
-        => Values.TryGetValue(name, out var value) && value is not null
-            ? Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty
-            : string.Empty;
+    /// <summary>Opens the draft on the values it was given, once per record rather than once per render.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ReferenceEquals(_opened, Values))
+        {
+            return;
+        }
 
-    private bool Truthy(string name)
-        => Values.TryGetValue(name, out var value) && value is true;
+        _opened = Values;
+        _editable = FormFields.Editable(Entity, Locks, Creating);
+        _calculated = FormFields.Shown(Entity, Scope?.Masks ?? FieldMasks.None, Locks, Creating);
+        _draft = new RecordDraft(_editable, Values);
+        _pickers = _editable.Where(column => column.Reference is not null)
+            .ToDictionary(column => column.Name, Picker, StringComparer.Ordinal);
+        _problems = new Dictionary<string, string>(StringComparer.Ordinal);
 
-    private void Set(string name, object? value) => Values[name] = value;
+        foreach (var picker in _pickers.Values)
+        {
+            await ResolveChosenAsync(picker);
+        }
+    }
 
-    private void Toggle(string name) => Values[name] = !Truthy(name);
+    private RefPicker Picker(FieldSchema column)
+    {
+        var name = column.Reference!.TargetEntity;
+        var target = Scope?.Schema.Entities.FirstOrDefault(
+            entity => string.Equals(entity.Name, name, StringComparison.Ordinal));
+        var label = Scope?.Targets.TryGetValue(name, out var found) == true ? found : null;
+        return new RefPicker(column, target, label) { Term = _draft.Text(column.Name) };
+    }
 
+    /// <summary>What a record is called in a title or a report: its label, else its short id.</summary>
+    private string LabelOf(AlvoRecord record)
+        => Scope?.Label?.Of(record)
+            ?? (RefLabels.IdOf(record[AlvoManagedColumns.Id]) is { } id ? RefLabels.ShortId(id) : Entity.Name);
+
+    private static string ControlId(FieldSchema column) => $"rf-{column.Name}";
+
+    private static string HintId(FieldSchema column) => $"rf-{column.Name}-hint";
+
+    private static string TypeOf(FieldSchema column) => column.Reference is { } reference
+        ? $"ref to {reference.TargetEntity}"
+        : column.Type.ToString().ToLowerInvariant();
+
+    private void Set(string name, string? text)
+    {
+        _draft.Set(name, text);
+        if (_problems.ContainsKey(name))
+        {
+            _problems = _problems.Where(pair => pair.Key != name)
+                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+        }
+    }
+
+    private void Toggle(string name)
+        => Set(name, string.Equals(_draft.Text(name), "true", StringComparison.Ordinal) ? "false" : "true");
+
+    private RenderFragment Control(FieldSchema column) => column.Type switch
+    {
+        FieldType.Boolean => Flag(column),
+        FieldType.Enum => Choice(column),
+        FieldType.Text => @<textarea class="a-textarea" id="@ControlId(column)" rows="4"
+                                     aria-required="@Required(column)" aria-describedby="@HintId(column)"
+                                     value="@_draft.Text(column.Name)"
+                                     @oninput="args => Set(column.Name, args.Value?.ToString())"></textarea>,
+        _ when _pickers.TryGetValue(column.Name, out var picker) => Reference(picker),
+        _ => @<input class="a-input" id="@ControlId(column)" type="@InputType(column)"
+                     inputmode="@InputMode(column)" aria-required="@Required(column)"
+                     aria-describedby="@HintId(column)" value="@_draft.Text(column.Name)"
+                     @oninput="args => Set(column.Name, args.Value?.ToString())" />,
+    };
+
+    private RenderFragment Flag(FieldSchema column)
+    {
+        var on = string.Equals(_draft.Text(column.Name), "true", StringComparison.Ordinal);
+        return @<button type="button" id="@ControlId(column)"
+                        class="@($"a-toggle{(on ? " a-toggle--on" : string.Empty)}")"
+                        aria-describedby="@HintId(column)"
+                        @onclick="() => Toggle(column.Name)" aria-pressed="@on"></button>;
+    }
+
+    private RenderFragment Choice(FieldSchema column) => @<div class="a-choice" id="@ControlId(column)">
+        @foreach (var option in column.EnumValues ?? [])
+        {
+            <button type="button"
+                    class="@($"a-chip{(string.Equals(_draft.Text(column.Name), option, StringComparison.Ordinal) ? " a-chip--on" : string.Empty)}")"
+                    @onclick="() => Set(column.Name, option)">@option</button>
+        }
+    </div>;
+
+    /// <summary>
+    /// A reference: a combobox over the target's labelled rows (<see cref="RefPicker"/>).
+    /// </summary>
+    /// <remarks>
+    /// The list is in the flow of the form, not floated over it: the sheet's body scrolls, and a list
+    /// positioned over a scrolling box is cut off at its edge exactly when the field is near the bottom.
+    /// An option is chosen on <c>mousedown</c>, with the default prevented, so the box keeps focus and its
+    /// <c>blur</c> — which puts the chosen label back — does not run first. Escape closes the list and
+    /// stops there, rather than also closing the sheet around it.
+    /// </remarks>
+    private RenderFragment Reference(RefPicker picker)
+    {
+        var column = picker.Field;
+        var list = $"{ControlId(column)}-options";
+        return @<div class="a-combo">
+            <input class="a-input" id="@ControlId(column)" type="text" role="combobox" autocomplete="off"
+                   aria-autocomplete="list" aria-expanded="@(picker.Open ? "true" : "false")"
+                   aria-controls="@(picker.Open ? list : null)"
+                   aria-activedescendant="@(picker.ActiveOption is { } active ? OptionId(column, active) : null)"
+                   aria-required="@Required(column)" aria-describedby="@HintId(column)"
+                   placeholder="@Placeholder(picker)" title="@_draft.Text(column.Name)" value="@picker.Term"
+                   data-testid="ref-input"
+                   @oninput="args => RefTypedAsync(picker, args.Value?.ToString())"
+                   @onfocus="() => RefFocusedAsync(picker)" @onblur="() => RefLeft(picker)"
+                   @onkeydown="args => RefKeyAsync(picker, args)" @onkeydown:stopPropagation="picker.Open" />
+            @if (picker.Open)
+            {
+                <ul class="a-combo__list" role="listbox" id="@list" aria-label="@($"{picker.Target?.Name} to choose from")">
+                    @if (picker.Options.Count == 0)
+                    {
+                        <li class="a-combo__empty" role="presentation">Nothing matches. A full id pasted here sets it anyway.</li>
+                    }
+                    @foreach (var option in picker.Options)
+                    {
+                        <li class="a-combo__option" role="option" id="@OptionId(column, option)" data-testid="ref-option"
+                            aria-selected="@(ReferenceEquals(option, picker.ActiveOption) ? "true" : "false")"
+                            @onmousedown="() => Choose(picker, option)" @onmousedown:preventDefault="true">
+                            <span>@option.Label</span>
+                            <span class="a-ident">@RefLabels.ShortId(option.Id)</span>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>;
+    }
+
+    private static string OptionId(FieldSchema column, RefOption option) => $"{ControlId(column)}-{option.Id:N}";
+
+    private static string Placeholder(RefPicker picker) => picker.Searchable
+        ? $"Search {picker.Target!.Name}, or paste an id"
+        : "Paste the full id";
+
+    /// <summary>Puts the label of the row the reference names in the box; the full id when it has none.</summary>
+    private async Task ResolveChosenAsync(RefPicker picker)
+    {
+        var id = RefLabels.IdOf(_draft.Text(picker.Field.Name));
+        picker.Chosen = null;
+        if (picker.Searchable && id is { } known)
+        {
+            try
+            {
+                var context = await Data.ContextAsync(CancellationToken.None);
+                var labels = await Data.LabelsAsync(
+                    picker.Target!.Name, picker.Label!, [known], context, CancellationToken.None);
+                picker.Chosen = labels.TryGetValue(known, out var label) ? label : null;
+            }
+            catch (AlvoAuthorizationException)
+            {
+                /* A label masked from this caller, or a target they hold no tenant for: the id is
+                   still the value, so it is what the box shows. */
+            }
+        }
+
+        picker.Settle(id);
+    }
+
+    /// <summary>A full uuid sets the reference at once; anything else searches once typing pauses.</summary>
+    private async Task RefTypedAsync(RefPicker picker, string? text)
+    {
+        picker.Term = text ?? string.Empty;
+        if (RefPicker.Pasted(picker.Term) is { } id)
+        {
+            picker.Version++;
+            Set(picker.Field.Name, id.ToString());
+            await ResolveChosenAsync(picker);
+            return;
+        }
+
+        if (!picker.Searchable)
+        {
+            return;
+        }
+
+        var version = ++picker.Version;
+        await Task.Delay(_searchDelay);
+        if (version == picker.Version)
+        {
+            await SearchAsync(picker, picker.Term, version);
+        }
+    }
+
+    /// <summary>Opens the list on the target's first rows, the way a select opens on its options.</summary>
+    private async Task RefFocusedAsync(RefPicker picker)
+    {
+        if (picker.Searchable && !picker.Open)
+        {
+            await SearchAsync(picker, null, ++picker.Version);
+        }
+    }
+
+    /// <summary>Leaving the box keeps the chosen row; leaving it empty clears the reference.</summary>
+    private void RefLeft(RefPicker picker)
+    {
+        picker.Version++;
+        if (string.IsNullOrWhiteSpace(picker.Term))
+        {
+            Set(picker.Field.Name, null);
+            picker.Chosen = null;
+        }
+
+        picker.Settle(RefLabels.IdOf(_draft.Text(picker.Field.Name)));
+    }
+
+    private async Task RefKeyAsync(RefPicker picker, KeyboardEventArgs args)
+    {
+        switch (args.Key)
+        {
+            case "ArrowDown" when !picker.Open:
+                await RefFocusedAsync(picker);
+                break;
+            case "ArrowDown":
+                picker.Move(1);
+                break;
+            case "ArrowUp":
+                picker.Move(-1);
+                break;
+            case "Enter" when picker.ActiveOption is { } option:
+                Choose(picker, option);
+                break;
+            case "Escape" when picker.Open:
+                picker.Version++;
+                picker.Settle(RefLabels.IdOf(_draft.Text(picker.Field.Name)));
+                break;
+        }
+    }
+
+    private void Choose(RefPicker picker, RefOption option)
+    {
+        picker.Version++;
+        Set(picker.Field.Name, option.Id.ToString());
+        picker.Chosen = option.Label;
+        picker.Settle(option.Id);
+    }
+
+    /// <summary>
+    /// One search of the target, as the operator.
+    /// </summary>
+    /// <remarks>
+    /// A refusal — a label field masked from this caller, a scoped target and no tenant — is an empty
+    /// list rather than a red panel: pasting the id still works, and the list says so.
+    /// </remarks>
+    private async Task SearchAsync(RefPicker picker, string? term, int version)
+    {
+        try
+        {
+            var context = await Data.ContextAsync(CancellationToken.None);
+            var page = await Data.PageAsync(picker.Query(term), context, CancellationToken.None);
+            if (version == picker.Version)
+            {
+                picker.Show(picker.OptionsOf(page));
+            }
+        }
+        catch (AlvoAuthorizationException)
+        {
+            if (version == picker.Version)
+            {
+                picker.Show([]);
+            }
+        }
+    }
+
+    private static string? Required(FieldSchema column) => column.Required ? "true" : null;
+
+    /// <summary>
+    /// The control's type. A decimal is text, not <c>number</c>: a number input displays its value in the
+    /// browser's locale, which is what drew <c>21,6</c> (D-8); <c>inputmode</c> keeps the numeric keypad.
+    /// </summary>
     private static string InputType(FieldSchema column) => column.Type switch
     {
-        FieldType.Integer or FieldType.Decimal => "number",
+        FieldType.Integer => "number",
         FieldType.Date => "date",
         FieldType.DateTime => "datetime-local",
         _ => "text",
     };
 
+    private static string? InputMode(FieldSchema column) => column.Type == FieldType.Decimal ? "decimal" : null;
+
     /// <summary>What the schema says about this field, in the words an author would recognise.</summary>
-    private static string Hint(FieldSchema column)
+    private string Hint(FieldSchema column)
     {
         var parts = new List<string>();
 
@@ -175,57 +447,69 @@
             parts.Add($"{precision} digits in total, {scale} after the point");
         }
 
+        if (column.Type == FieldType.DateTime)
+        {
+            parts.Add("in UTC");
+        }
+
         if (column.Unique)
         {
             parts.Add("unique across the entity");
         }
 
-        if (column.Reference is { } reference)
+        if (!Creating && Scope?.Masks.NeverReturned(column.Name) == true)
         {
-            parts.Add($"the id of a {reference.TargetEntity} record");
+            parts.Add("never read back — type a value to replace it");
         }
 
-        return string.Join(" · ", parts);
+        return string.Concat(parts.Select(part => $" · {part}"));
+    }
+
+    /// <summary>Why a field is in the Calculated group, for the title on its name.</summary>
+    private string Why(FieldSchema column) => column switch
+    {
+        { ComputedExpression: { } expression } => $"computed: {expression}",
+        { Rollup: { } rollup } => $"rollup: {rollup.Op.ToString().ToLowerInvariant()} over {rollup.From}",
+        _ when Locks.Always.Contains(column.Name) => "read-only",
+        _ => "read-only for some callers",
+    };
+
+    private RenderFragment Readout(FieldSchema column)
+    {
+        var cell = GridCell.Of(column, Values.TryGetValue(column.Name, out var value) ? value : null);
+        return cell.Kind switch
+        {
+            CellKind.Value => @<span class="a-badge a-badge--value">@cell.Text</span>,
+            CellKind.Identifier => @<span class="a-ident" title="@cell.Title">@cell.Text</span>,
+            _ => @<span title="@cell.Title">@cell.Text</span>,
+        };
     }
 
     private Task Cancel() => OnCancel.InvokeAsync();
 
+    /// <summary>Writes what changed; with nothing changed, closes without a write at all.</summary>
     private async Task Save()
     {
-        _saving = true;
         _error = null;
         _fix = null;
+        if (!Creating && !_draft.Dirty)
+        {
+            await OnCancel.InvokeAsync();
+            return;
+        }
 
+        var changes = _draft.Read();
+        _problems = changes.Problems;
+        if (_problems.Count > 0)
+        {
+            return;
+        }
+
+        _saving = true;
         try
         {
-            var payload = Editable
-                .Where(column => Values.ContainsKey(column.Name))
-                .ToDictionary(column => column.Name, column => Values[column.Name], StringComparer.Ordinal);
-
-            /* A create into a tenant-scoped entity carries tenant_id, and it is the one managed
-               column a caller may write — `AlvoManagedColumns.IsCallerWritable` says so, because a
-               create legitimately places a row in a tenant and the synthesized tenant scope
-               evaluated over the candidate row is what decides whether that tenant is allowed.
-               Sending the operator's own is therefore not a shortcut past the guard; it is the
-               value the guard is there to check. Omitting it is what fails. */
-            if (RecordId is null && Entity.Tenancy == TenancyMode.Scoped)
-            {
-                var context = await Data.ContextAsync(CancellationToken.None);
-                if (context.Tenant is { } tenant)
-                {
-                    payload[AlvoManagedColumns.TenantId] = tenant.Value;
-                }
-            }
-
-            if (RecordId is { } id)
-            {
-                await Data.UpdateAsync(Entity.Name, id, payload, CancellationToken.None);
-            }
-            else
-            {
-                await Data.CreateAsync(Entity.Name, payload, CancellationToken.None);
-            }
-
+            var saved = await WriteAsync(changes.Values);
+            Scope?.Report($"{(Creating ? "Created" : "Saved")} {LabelOf(saved)}");
             await OnSaved.InvokeAsync();
         }
         catch (Exception exception)
@@ -236,6 +520,28 @@
         {
             _saving = false;
         }
+    }
+
+    private async Task<AlvoRecord> WriteAsync(Dictionary<string, object?> payload)
+    {
+        if (RecordId is { } id)
+        {
+            return await Data.UpdateAsync(Entity.Name, id, payload, CancellationToken.None);
+        }
+
+        /* A create into a tenant-scoped entity carries tenant_id, and it is the one managed
+           column a caller may write — `AlvoManagedColumns.IsCallerWritable` says so, because a
+           create legitimately places a row in a tenant and the synthesized tenant scope
+           evaluated over the candidate row is what decides whether that tenant is allowed.
+           Sending the operator's own is therefore not a shortcut past the guard; it is the
+           value the guard is there to check. Omitting it is what fails. */
+        if (Entity.Tenancy == TenancyMode.Scoped
+            && (await Data.ContextAsync(CancellationToken.None)).Tenant is { } tenant)
+        {
+            payload[AlvoManagedColumns.TenantId] = tenant.Value;
+        }
+
+        return await Data.CreateAsync(Entity.Name, payload, CancellationToken.None);
     }
 
     private async Task Delete()
@@ -249,6 +555,7 @@
         try
         {
             await Data.DeleteAsync(Entity.Name, id, CancellationToken.None);
+            Scope?.Report($"Deleted {LabelOf(new AlvoRecord(Values))}");
             await OnDeleted.InvokeAsync();
         }
         catch (Exception exception)

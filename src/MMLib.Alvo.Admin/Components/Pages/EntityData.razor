@@ -60,15 +60,34 @@
                 Outside every branch below, so a search that narrows the page to nothing, or back, never
                 unmounts the box being typed into — which would drop its focus mid-word.
             *@
-            @if (_searchable.Count > 0)
-            {
-                <div class="a-grid-search">
-                    <input type="search" class="a-input" data-testid="grid-search" data-alvo-search
-                           placeholder="@($"Search {EntityName}…")" aria-label="@($"Search {EntityName}")"
-                           title="@($"Looks in {string.Join(", ", _searchable)}")" maxlength="@GridQuery.MaxPatternLength"
-                           @bind="_search" @bind:event="oninput" @bind:after="SearchChanged" />
+            <div class="a-grid-bar">
+                @if (_searchable.Count > 0)
+                {
+                    <div class="a-grid-search">
+                        <input type="search" class="a-input" data-testid="grid-search" data-alvo-search
+                               placeholder="@($"Search {EntityName}…")" aria-label="@($"Search {EntityName}")"
+                               title="@($"Looks in {string.Join(", ", _searchable)}")" maxlength="@GridQuery.MaxPatternLength"
+                               @bind="_search" @bind:event="oninput" @bind:after="SearchChanged" />
+                    </div>
+                }
+
+                @*
+                    What the last write did, said once and quietly. The live region is always on the page
+                    and only its content comes and goes, because a region inserted together with its text
+                    is one a screen reader may never announce. An error is never said here: it stays in
+                    the sheet it happened in (design §5.5 — errors are not toasts).
+                *@
+                <div role="status" aria-live="polite" data-testid="record-status">
+                    @if (_status is { } status)
+                    {
+                        <div class="a-status-line">
+                            <span>@status</span>
+                            <button type="button" class="a-btn a-btn--ghost a-btn--sm" aria-label="Dismiss"
+                                    @onclick="() => _status = null">Dismiss</button>
+                        </div>
+                    }
                 </div>
-            }
+            </div>
 
             @if (_unreachable)
             {
@@ -196,10 +215,12 @@
     }
 </div>
 
-@if (_form is not null && _entity is not null)
+@if (_form is not null && _entity is not null && _scope is not null)
 {
-    <RecordForm Entity="_entity" Values="_form" RecordId="_editing"
-                OnCancel="CloseForm" OnSaved="Saved" OnDeleted="Saved" />
+    <CascadingValue Value="_scope">
+        <RecordForm Entity="_entity" Values="_form" RecordId="_editing"
+                    OnCancel="CloseForm" OnSaved="Saved" OnDeleted="Saved" />
+    </CascadingValue>
 }
 
 @code {
@@ -215,6 +236,8 @@
     private FieldMasks _masks = FieldMasks.None;
     private IReadOnlyList<FieldSchema> _columns = [];
     private RowLabel? _label;
+    private RecordFormScope? _scope;
+    private string? _status;
     private IReadOnlyDictionary<string, RowLabel> _targets = new Dictionary<string, RowLabel>(StringComparer.Ordinal);
     private IReadOnlyList<string> _searchable = [];
     private IReadOnlyDictionary<string, IReadOnlyDictionary<Guid, string>> _labels
@@ -325,6 +348,7 @@
         _search = string.Empty;
         _sort = null;
         _page = null;
+        _status = null;
         CloseSheet();
         ResetPaging();
         try
@@ -360,20 +384,28 @@
         _label = _entity is null ? null : RefLabels.For(_entity, _masks);
         _searchable = _entity is null ? [] : GridQuery.Searchable(_entity, _masks);
         _targets = Targets();
+        _scope = _entity is null ? null : new RecordFormScope(
+            _schema, _label, _masks, DescriptorLens.Locks(_descriptor, EntityName), _targets, Report);
     }
 
+    /// <summary>What the record form says after a write, shown above the grid until dismissed or replaced.</summary>
+    private void Report(string status) => _status = status;
+
     /// <summary>
-    /// The label of every entity a shown reference column points at, worked out once per entity rather
+    /// The label of every entity a reference on this entity points at, worked out once per entity rather
     /// than once per page.
     /// </summary>
     /// <remarks>
     /// Keyed by the target alone, because the label is a function of the target: two columns pointing
     /// at the same entity share one read. A target with no label is absent, and its cells show short ids.
+    /// Every reference rather than only the shown columns, because the record form searches each of them;
+    /// a target no column shows costs the grid nothing, since it has no ids on the page to look up.
     /// </remarks>
     private Dictionary<string, RowLabel> Targets()
     {
         var targets = new Dictionary<string, RowLabel>(StringComparer.Ordinal);
-        foreach (var name in _columns.Select(column => column.Reference?.TargetEntity).OfType<string>().Distinct())
+        var references = _entity?.Fields.Select(field => field.Reference?.TargetEntity).OfType<string>() ?? [];
+        foreach (var name in references.Distinct())
         {
             var target = _schema!.Entities.FirstOrDefault(
                 entity => string.Equals(entity.Name, name, StringComparison.Ordinal));
@@ -562,12 +594,14 @@
 
     private void NewRecord()
     {
+        _status = null;
         _editing = null;
         _form = new Dictionary<string, object?>(StringComparer.Ordinal);
     }
 
     private void Open(AlvoRecord record)
     {
+        _status = null;
         _editing = RefLabels.IdOf(record[AlvoManagedColumns.Id]);
         _form = _entity!.Fields.ToDictionary(
             column => column.Name, column => record[column.Name], StringComparer.Ordinal);

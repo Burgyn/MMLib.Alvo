@@ -95,56 +95,17 @@ public sealed class DataGridScenarios(AdminWorld world) : IClassFixture<AdminWor
     private async Task<(Guid Ada, Guid Grace)> SeedAsync()
     {
         using var scope = world.Services.CreateScope();
-        await GrantTheOperatorATenantAsync(scope.ServiceProvider);
+        await FieldServiceSeed.GrantTheOperatorAsync(scope.ServiceProvider, _tenant);
 
         var data = scope.ServiceProvider.GetRequiredService<IAlvoData>();
         var system = AlvoContext.System(_tenant);
-        var region = await data.CreateAsync(
-            "regions", new Dictionary<string, object?> { ["code"] = "NORTH", ["name"] = "North" }, system);
-        var ada = await CustomerAsync(data, system, "Ada Lovelace");
-        var grace = await CustomerAsync(data, system, "Grace Hopper");
+        var region = await FieldServiceSeed.RegionAsync(data, system, "NORTH");
+        var ada = await FieldServiceSeed.CustomerAsync(data, system, _tenant, "Ada Lovelace");
+        var grace = await FieldServiceSeed.CustomerAsync(data, system, _tenant, "Grace Hopper");
 
-        await WorkOrderAsync(data, system, "WO-0001", ada, region);
-        await WorkOrderAsync(data, system, "WO-0002", grace, region);
+        await FieldServiceSeed.WorkOrderAsync(data, system, _tenant, "WO-0001", ada, region);
+        await FieldServiceSeed.WorkOrderAsync(data, system, _tenant, "WO-0002", grace, region);
 
-        return (IdOf(ada), IdOf(grace));
+        return (FieldServiceSeed.IdOf(ada), FieldServiceSeed.IdOf(grace));
     }
-
-    private static async Task GrantTheOperatorATenantAsync(IServiceProvider services)
-    {
-        var people = services.GetRequiredKeyedService<IAlvoUserAdministration>(AlvoUserAdministration.UnguardedKey);
-        var page = await people.ListAsync(new AlvoUserQuery());
-        var operatorAccount = page.Users.Single(
-            person => string.Equals(person.Email, AdminWorld.AdminEmail, StringComparison.OrdinalIgnoreCase));
-
-        await people.SetTenantAsync(operatorAccount.Id, _tenant);
-    }
-
-    private static Task<AlvoRecord> CustomerAsync(IAlvoData data, AlvoContext context, string name)
-        => data.CreateAsync(
-            "customers", new Dictionary<string, object?> { ["tenant_id"] = _tenant.Value, ["name"] = name, ["tier"] = "standard" },
-            context);
-
-    private static Task<AlvoRecord> WorkOrderAsync(
-        IAlvoData data, AlvoContext context, string reference, AlvoRecord customer, AlvoRecord region)
-        => data.CreateAsync(
-            "work_orders",
-            new Dictionary<string, object?>
-            {
-                ["tenant_id"] = _tenant.Value,
-                ["reference"] = reference,
-                ["title"] = $"Service call {reference}",
-                ["status"] = "scheduled",
-                ["priority"] = 3,
-                ["access_code"] = "1234",
-                ["customer_id"] = IdOf(customer),
-                ["region_id"] = IdOf(region),
-            },
-            context);
-
-    private static Guid IdOf(AlvoRecord record) => record["id"] switch
-    {
-        Guid id => id,
-        var other => Guid.Parse(other!.ToString()!),
-    };
 }

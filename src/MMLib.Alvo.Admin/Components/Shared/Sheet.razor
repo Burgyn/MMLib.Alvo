@@ -1,4 +1,4 @@
-@*
+﻿@*
     One overlay, two shapes: a sheet that rises from the bottom edge on a phone, a centred
     dialog on a desktop. One component rather than two, for the reason the shell itself gives
     about navigation — a second implementation is a second set of behaviours to keep in step,
@@ -21,6 +21,10 @@
             <div class="a-sheet__head">
                 @* The stacked head without the panel section's padding and rule: the sheet is its own frame. *@
                 <div class="a-section__text">
+                    @if (Eyebrow is { Length: > 0 })
+                    {
+                        <span class="a-pagehead__eyebrow">@Eyebrow</span>
+                    }
                     <span class="a-section-title">@Title</span>
                     @if (Subtitle is { Length: > 0 })
                     {
@@ -54,6 +58,14 @@
     /// <summary>What the sheet is for, read out as the dialog's label.</summary>
     [Parameter, EditorRequired]
     public string Title { get; set; } = string.Empty;
+
+    /// <summary>What the sheet's subject belongs to, set above the title the way a page header sets its section.</summary>
+    /// <remarks>
+    /// A record's sheet is titled by the record ("Edit SO-2026-0163"), and the entity it is a row of is
+    /// the context that title needs — which is what a page header's eyebrow already is, so it looks the same.
+    /// </remarks>
+    [Parameter]
+    public string? Eyebrow { get; set; }
 
     /// <summary>One line under the title, or nothing.</summary>
     [Parameter]
