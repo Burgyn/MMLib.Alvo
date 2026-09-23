@@ -86,7 +86,23 @@ internal sealed class WorkingCopy
     /// <summary>The applied document, formatted.</summary>
     public string AppliedJson => _applied?.ToJsonString(_pretty) ?? "{}";
 
-    /// <summary>Whether the working document differs from the applied one.</summary>
+    /// <summary>
+    /// Raised after anything changed this copy — an edit, an import, a discard, a fresh take.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It exists for the shell, which shows the pending count on every screen and edits none of
+    /// them.</b> The page that staged a field knows it did; the bar under the header and the project card
+    /// do not, and without this they would say "nothing to apply" until the next navigation.
+    /// </para>
+    /// <para>
+    /// <b>It can be raised on another circuit's thread.</b> The copy is the operator's, not the circuit's
+    /// (see <see cref="WorkingCopyStore"/>), so an edit in one tab raises it in every tab they have open —
+    /// a handler redraws through <c>InvokeAsync</c>, never directly.
+    /// </para>
+    /// </remarks>
+    public event Action? Changed;
+
     /// <summary>
     /// What the apply should say it was for, when something other than the operator's own typing composed
     /// this copy.
@@ -102,7 +118,18 @@ internal sealed class WorkingCopy
     /// <param name="reason">The suggestion, rendered verbatim and parsed by nobody.</param>
     public void SuggestReason(string? reason) => SuggestedReason = reason;
 
+    /// <summary>Whether the working document differs from the applied one.</summary>
     public bool IsDirty => !string.Equals(Json, AppliedJson, StringComparison.Ordinal);
+
+    /// <summary>
+    /// How many changes are waiting for an apply, as an operator would count them.
+    /// </summary>
+    /// <remarks>
+    /// Never zero while the copy is dirty: a document that differs only in the order of its entities is
+    /// still one the preview shows a diff for, and a bar reading "0 unapplied changes" above a Preview
+    /// button contradicts itself.
+    /// </remarks>
+    public int PendingCount => IsDirty ? Math.Max(1, StagedChanges.Count(_applied, _working)) : 0;
 
     /// <summary>The entity names the working document declares.</summary>
     public IReadOnlyList<string> Entities => _working?["entities"] is JsonObject entities
@@ -117,6 +144,7 @@ internal sealed class WorkingCopy
         _applied = JsonNode.Parse(descriptorJson);
         _working = JsonNode.Parse(descriptorJson);
         Revision = revision;
+        Touch();
     }
 
     /// <summary>Discards every unapplied edit.</summary>
@@ -124,6 +152,7 @@ internal sealed class WorkingCopy
     {
         SuggestedReason = null;
         _working = _applied is null ? null : JsonNode.Parse(_applied.ToJsonString());
+        Touch();
     }
 
     /// <summary>
@@ -143,6 +172,7 @@ internal sealed class WorkingCopy
         try
         {
             _working = JsonNode.Parse(descriptorJson);
+            Touch();
             return _working is not null;
         }
         catch (JsonException)
@@ -172,6 +202,7 @@ internal sealed class WorkingCopy
                 },
             },
         };
+        Touch();
     }
 
     /// <summary>
@@ -213,6 +244,7 @@ internal sealed class WorkingCopy
         var origin = Origin(declared, from, _applied?["entities"]?[from] is not null);
         Rekey(entities, from, to);
         Carry(entities[to] as JsonObject, origin, to);
+        Touch();
 
         return null;
     }
@@ -249,6 +281,7 @@ internal sealed class WorkingCopy
 
         Rekey(fields, from, to);
         Carry(fields[to] as JsonObject, origin, to);
+        Touch();
 
         return null;
     }
@@ -338,7 +371,11 @@ internal sealed class WorkingCopy
     }
 
     /// <summary>Removes an entity.</summary>
-    public void RemoveEntity(string name) => (_working?["entities"] as JsonObject)?.Remove(name);
+    public void RemoveEntity(string name)
+    {
+        (_working?["entities"] as JsonObject)?.Remove(name);
+        Touch();
+    }
 
     /// <summary>Adds a field to an entity.</summary>
     /// <param name="entity">The entity to add it to.</param>
@@ -350,12 +387,16 @@ internal sealed class WorkingCopy
         {
             var fields = Ensure(declared, "fields");
             fields[name] = facets;
+            Touch();
         }
     }
 
     /// <summary>Removes a field from an entity.</summary>
     public void RemoveField(string entity, string name)
-        => (_working?["entities"]?[entity]?["fields"] as JsonObject)?.Remove(name);
+    {
+        (_working?["entities"]?[entity]?["fields"] as JsonObject)?.Remove(name);
+        Touch();
+    }
 
     /// <summary>Sets or clears one operation's rule on an entity.</summary>
     /// <param name="entity">The entity.</param>
@@ -377,10 +418,12 @@ internal sealed class WorkingCopy
                 declared.Remove("rules");
             }
 
+            Touch();
             return;
         }
 
         Ensure(declared, "rules")[operation] = cel;
+        Touch();
     }
 
     /// <summary>
@@ -423,6 +466,7 @@ internal sealed class WorkingCopy
         }
 
         indexes.Add(index);
+        Touch();
     }
 
     /// <summary>
@@ -454,6 +498,8 @@ internal sealed class WorkingCopy
         {
             declared.Remove("indexes");
         }
+
+        Touch();
     }
 
     /// <summary>The indexes an entity declares in the working copy, in the order it declares them.</summary>
@@ -543,6 +589,7 @@ internal sealed class WorkingCopy
 
         hook["action"] = action;
         list.Add(hook);
+        Touch();
     }
 
     /// <summary>
@@ -578,6 +625,8 @@ internal sealed class WorkingCopy
         {
             declared.Remove("hooks");
         }
+
+        Touch();
     }
 
     /// <summary>
@@ -601,6 +650,94 @@ internal sealed class WorkingCopy
             ? [.. fields.Select(pair => new KeyValuePair<string, string>(
                 pair.Key, Readable(pair.Value, "{}")))]
             : [];
+
+    /// <summary>
+    /// An entity's fields as the Fields tab lists them: the working copy's, and the ones it removed.
+    /// </summary>
+    /// <param name="entity">The entity's name in the working copy.</param>
+    public IReadOnlyList<StagedField> FieldChangesOf(string entity)
+        => StagedChanges.Fields(AppliedEntityOf(entity), WorkingEntityOf(entity));
+
+    /// <summary>The positions of the indexes this copy declared and the applied revision does not.</summary>
+    /// <param name="entity">The entity's name in the working copy.</param>
+    public IReadOnlySet<int> StagedIndexesOf(string entity)
+        => StagedChanges.NewEntries(
+            AppliedEntityOf(entity)?["indexes"] as JsonArray, WorkingEntityOf(entity)?["indexes"] as JsonArray);
+
+    /// <summary>The hooks, by point and position, this copy declared and the applied revision does not.</summary>
+    /// <param name="entity">The entity's name in the working copy.</param>
+    public IReadOnlySet<(string Point, int Position)> StagedHooksOf(string entity)
+    {
+        var applied = AppliedEntityOf(entity)?["hooks"] as JsonObject;
+        var working = WorkingEntityOf(entity)?["hooks"] as JsonObject ?? [];
+
+        return working
+            .SelectMany(point => StagedChanges
+                .NewEntries(applied?[point.Key] as JsonArray, point.Value as JsonArray)
+                .Select(position => (point.Key, position)))
+            .ToHashSet();
+    }
+
+    /// <summary>
+    /// Puts a removed field back, exactly as the applied revision declares it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Back in its place, not at the end.</b> <see cref="IsDirty"/> compares the documents as text, so a
+    /// field restored to the end of the object would leave the copy dirty with nothing an operator could
+    /// name as a change — undoing the only edit must leave nothing to preview.
+    /// </remarks>
+    /// <param name="entity">The entity's name in the working copy.</param>
+    /// <param name="name">The field's applied name.</param>
+    public void RestoreField(string entity, string name)
+    {
+        if (AppliedEntityOf(entity)?["fields"] is not JsonObject applied
+            || applied[name] is not { } declared
+            || WorkingEntityOf(entity) is not { } working)
+        {
+            return;
+        }
+
+        var fields = Ensure(working, "fields");
+        if (fields.ContainsKey(name))
+        {
+            return;
+        }
+
+        Reinsert(fields, name, declared.DeepClone(), [.. applied.Select(pair => pair.Key)]);
+        Touch();
+    }
+
+    /// <summary>Inserts a key just after the last key that preceded it in <paramref name="order"/>.</summary>
+    /// <remarks>Rebuilt rather than appended, for the reason <see cref="Rekey"/> gives.</remarks>
+    private static void Reinsert(JsonObject owner, string name, JsonNode value, List<string> order)
+    {
+        var earlier = order.Take(order.IndexOf(name)).ToHashSet(StringComparer.Ordinal);
+        var pairs = owner.Select(pair => (pair.Key, Value: pair.Value?.DeepClone())).ToList();
+        var at = pairs.FindLastIndex(pair => earlier.Contains(pair.Key)) + 1;
+
+        pairs.Insert(at, (name, value));
+        owner.Clear();
+        foreach (var (key, node) in pairs)
+        {
+            owner[key] = node;
+        }
+    }
+
+    /// <summary>The entity as the working copy declares it.</summary>
+    private JsonObject? WorkingEntityOf(string entity)
+        => (_working as JsonObject)?["entities"] is JsonObject entities ? entities[entity] as JsonObject : null;
+
+    /// <summary>The entity as applied — under its own name, or under the name it was renamed from.</summary>
+    private JsonObject? AppliedEntityOf(string entity)
+    {
+        var applied = (_applied as JsonObject)?["entities"] as JsonObject;
+        var origin = StagedChanges.OriginOf(WorkingEntityOf(entity), entity, applied);
+
+        return origin is null ? null : applied![origin] as JsonObject;
+    }
+
+    /// <summary>Tells whoever shows this copy that it moved.</summary>
+    private void Touch() => Changed?.Invoke();
 
     private static JsonObject Ensure(JsonNode? parent, string name)
     {
