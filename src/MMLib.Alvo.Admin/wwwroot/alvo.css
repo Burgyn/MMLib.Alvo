@@ -699,13 +699,20 @@ h1.a-page-title:focus {
 .a-select,
 .a-textarea {
   width: 100%;
-  min-height: 84px;
   padding: calc(var(--space-2) * var(--density)) var(--space-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--panel);
   color: var(--text);
   font-size: var(--text-sm);
+}
+
+/* A textarea is the only one of the three that opens taller than its content and can be dragged.
+   Both properties lived here until a refactor folded this rule into the shared block above — which
+   gave every single-line input an 84 px floor, so a sign-in form was two boxes the size of a
+   paragraph, and `resize` to controls that cannot be resized. */
+textarea.a-textarea {
+  min-height: 84px;
   resize: vertical;
 }
 
@@ -1471,11 +1478,17 @@ input[type="checkbox"] {
 
 /* The body scrolls, not the panel: the title and the close control stay put while a long form
    moves under them, which is what keeps the way out reachable on a phone. */
+/* The gutter is for the focus ring, not for looks. `overflow-y: auto` forces `overflow-x` to
+   compute to `auto` as well, and the ring is a box-shadow drawn 4 px OUTSIDE a control that is
+   `width: 100%` — so every focused input in a sheet had its ring sliced down both edges. The
+   negative margin gives the space back, so nothing moves. */
 .a-sheet__body {
   display: flex;
   flex: 1;
   flex-direction: column;
   gap: var(--space-3);
+  padding-inline: 4px;
+  margin-inline: -4px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }

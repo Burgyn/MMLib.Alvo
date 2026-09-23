@@ -150,6 +150,16 @@ internal static partial class Stylesheet
     /// redefines what it narrows, and a state selector (<c>:hover</c>, <c>--on</c>) is a different
     /// selector rather than a second definition of the same one.
     /// </para>
+    /// <para>
+    /// <b>A grouped selector counts as each of its parts, and it did not used to.</b> The scan was
+    /// line-by-line and only the line ending in <c>{</c> matched, so
+    /// <c>.a-input,\n.a-select,\n.a-textarea {</c> registered as <c>.a-textarea</c> alone —
+    /// <c>.a-input</c> and <c>.a-select</c> were invisible to this check entirely, and the one name it
+    /// did see was the one that happened to be written last. That is how a textarea's
+    /// <c>min-height: 84px</c> came to be folded into the shared rule: splitting it back out looked like
+    /// a duplicate to this method, and merging it satisfied it. The 84 px floor then applied to every
+    /// single-line input in the dashboard, which nothing else measured.
+    /// </para>
     /// </remarks>
     internal static IReadOnlyList<string> SelectorsDefinedTwice(string css)
     {
@@ -158,19 +168,48 @@ internal static partial class Stylesheet
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         var order = new List<string>();
 
+        var group = new System.Text.StringBuilder();
+
         foreach (var line in css.ReplaceLineEndings("\n").Split('\n'))
         {
-            if (TopLevelSelector().Match(line) is not { Success: true } match)
+            /* A group's earlier lines end in a comma and carry no brace, so they are accumulated until
+               the line that opens the block. An indented line resets: the run has left the top level. */
+            if (line.Length > 0 && char.IsWhiteSpace(line[0]))
             {
+                group.Clear();
                 continue;
             }
 
-            var selector = match.Groups["selector"].Value.Trim();
-            counts[selector] = counts.TryGetValue(selector, out var seen) ? seen + 1 : 1;
-            if (counts[selector] == 2)
+            if (TopLevelSelector().Match(line) is not { Success: true } match)
             {
-                order.Add(selector);
+                /* Only a line that ends in a comma continues a group. Anything else — a closing brace,
+                   a comment, a blank — ends whatever was being accumulated, so a stray `}` cannot be
+                   carried into the next selector's name. */
+                if (line.TrimEnd().EndsWith(','))
+                {
+                    group.Append(line);
+                }
+                else
+                {
+                    group.Clear();
+                }
+
+                continue;
             }
+
+            group.Append(match.Groups["selector"].Value);
+
+            foreach (var selector in group.ToString().Split(',',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                counts[selector] = counts.TryGetValue(selector, out var seen) ? seen + 1 : 1;
+                if (counts[selector] == 2)
+                {
+                    order.Add(selector);
+                }
+            }
+
+            group.Clear();
         }
 
         return order;
