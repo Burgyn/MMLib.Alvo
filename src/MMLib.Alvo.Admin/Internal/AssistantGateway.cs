@@ -29,6 +29,26 @@ namespace MMLib.Alvo.Admin.Internal;
 internal sealed class AssistantGateway(
     IAlvoAssistant? assistant, ISecretStore? secrets, ManagementGateway management)
 {
+    /// <summary>
+    /// Raised when the stored connection changed, so a screen holding an answer from before it can ask again.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It exists because "is an assistant configured" is answered once per circuit and then acted on for
+    /// the rest of it.</b> <c>AdminLayout</c> mounts the drawer from a single <see cref="IsConfiguredAsync"/>
+    /// in <c>OnInitializedAsync</c> — correct for a shell, wrong the moment the operator configures the
+    /// connection in the same session, which left them reading a Settings page that said <c>configured</c>
+    /// beside a shell with no launcher anywhere, and no reason to suspect a reload would fix it.
+    /// </para>
+    /// <para>
+    /// <b>An event on this gateway rather than a poll or a shared flag.</b> The gateway is scoped, so it is
+    /// already the one thing the layout and the settings page share for a circuit, and the write path that
+    /// invalidates the cached <c>info</c> is the exact place that knows the answer may have moved. A layout
+    /// that polled would ask on a timer for a change that happens at most once a session.
+    /// </para>
+    /// </remarks>
+    public event Action? ConnectionChanged;
+
     /// <summary>Whether this deployment can save a connection from the dashboard at all.</summary>
     /// <remarks>
     /// False for every GitOps deployment, which is the common case rather than the broken one: its secrets
@@ -112,6 +132,7 @@ internal sealed class AssistantGateway(
             .ConfigureAwait(false);
 
         management.Invalidate();
+        ConnectionChanged?.Invoke();
     }
 
     /// <summary>An empty key is no key, not an empty one.</summary>

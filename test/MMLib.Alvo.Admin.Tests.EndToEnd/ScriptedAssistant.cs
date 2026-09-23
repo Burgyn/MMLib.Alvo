@@ -23,6 +23,39 @@ public sealed class AssistantWorld : AdminWorld
     }
 }
 
+/// <summary>
+/// A world with an agent installed, a writable secret store, and no connection saved yet.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>The connection resolver is the real one</b>, unlike <see cref="AssistantWorld"/>'s. That is the point:
+/// the question this world exists to ask is whether saving a connection through the shipped write path makes
+/// the shipped read path report one, and a substituted resolver would answer it by construction.
+/// </para>
+/// <para>
+/// The key file is what makes the store writable, so the settings panel draws a save at all. Thirty-two bytes
+/// of base64, generated per world, exactly as a deployment mounts one.
+/// </para>
+/// </remarks>
+public sealed class ConfigurableAssistantWorld : AdminWorld
+{
+    /// <inheritdoc/>
+    protected override void Configure(IServiceCollection services) =>
+        services.AddSingleton<IAlvoAssistant, ScriptedAssistant>();
+
+    /// <inheritdoc/>
+    protected override void Configure(IDictionary<string, string?> settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        var key = Path.Combine(Root, "secret.key");
+        File.WriteAllText(
+            key, Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)));
+
+        settings["Alvo:Secrets:EncryptionKeyFile"] = key;
+    }
+}
+
 /// <summary>A connection that always resolves, so the drawer mounts.</summary>
 /// <remarks>
 /// The address is never dialled: <see cref="ScriptedAssistant"/> answers without a client. It is a loopback

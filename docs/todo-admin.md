@@ -41,6 +41,15 @@ apply refuses is the control this dashboard already argues against elsewhere.
 So: first the audit in item 5, then an editor for exactly the hook points that are honoured, with
 the refused ones staying as the read-only explanation they are now.
 
+**Answered by the audit (23 Sep 2026): none of them are refused.** The premise above was stale on
+both halves. `UnhonouredFeatures.OnAnEntity` holds no hook entry at all — PR5a removed the three
+`after*` points and PR5b the three `before*`, and the table's own remark records that it kept the
+shape rather than deleting it. And the tab does not in fact "say which this build refuses": it
+renders each declared point with what that *kind* of point may contain, and reads no capability. So
+there is no subset to carve out — the editor is owed for all six points. What the tab does still
+owe is the refusal of the three action *types* (`function`, `http.call`, `entity.update`) that
+`UnhonouredFeatures` does hold, which it can read the way `FieldEditor` already reads its own.
+
 ## 4. No link to the OpenAPI documentation
 
 The host serves a generated OpenAPI document and a docs UI, and the dashboard never points at it.
@@ -61,6 +70,137 @@ The audit is mechanical: walk `IAlvoManagement`, the descriptor schema's top-lev
 `UnhonouredFeatures`, and for each ask — can an operator reach this from the dashboard, is it
 read-only when it should be editable, and is its absence explained or silent? Output is a table in
 this file, not prose.
+
+**Done, 23 Sep 2026, against the code at `d038b29`.** The tables are below. Three things the walk
+settled before any of them:
+
+- **The Management API is not the gap.** All twelve `IAlvoManagement` operations are reached by a
+  screen (5d). Every hole in this audit is a *descriptor* hole — a block or a facet the schema
+  declares and no control writes — which means none of them needs a new port, a new endpoint or a
+  new gateway method. They all land in `WorkingCopy` and go out through the one apply.
+- **Item 3's premise is stale.** It says "several hook points are in `UnhonouredFeatures`". None
+  are: PR5a removed the three `after*` points and PR5b the three `before*`, and the table's own
+  remark says so. All six hook points are honoured, so the audit item 3 was waiting for is
+  answered — an editor for `hooks` is owed for every point, not for a subset.
+- **The distinction that matters is not "missing" but "silent".** A facet this build refuses
+  (`validation`, `softDelete`) should have no editor; it should still have a sentence. The tables
+  separate *refused-and-explained* from *absent-and-silent*, and almost everything below is the
+  second.
+
+Legend: **edit** = an operator can change it · **read** = rendered, not editable · **said** = not
+reachable and the dashboard says why · **gap** = not reachable and nothing says so.
+
+### 5a. Descriptor top-level blocks
+
+| Block | Where in the dashboard | State | What that costs |
+|---|---|---|---|
+| `apiVersion` | Preview (raw JSON) | read | Right. The apply owns the format version. |
+| `name` | Overview title, project switcher | read | Right. A project rename is not a dashboard operation. |
+| `description` | nowhere | **gap** | The schema says it is "surfaced to agents and in the admin UI". It is surfaced in neither. |
+| `branding` | nowhere | **gap** | `title` and `logoUrl`, declared to be shown "wherever the project is presented". Every deployment draws the Alvo mark instead, including one that declared its own. |
+| `revision` | History, Preview | read | Right. |
+| `tenancy.enabled` | nowhere | **gap** | Nothing breaks — `AddEntity` writes `tenancy: scoped` per entity and `ResolveTenancy` honours it with the block absent. But the project-level switch that makes an *undeclared* entity scoped cannot be set or even seen, so an operator cannot tell which default their next entity will get. |
+| `dynamicEntities` | nowhere | **gap** | Eight governance keys. A warned subsystem (F7), so read-only is the right answer — silence is not. |
+| `auth.providers` | nowhere | **gap** | |
+| `auth.roles` | Access → role catalogue | read | The page's own text says a change here "waits for an apply", and then offers no way to make one. Membership sits beside it and *is* editable, which makes the read-only half read as broken rather than deliberate. |
+| `access.admin/developer/viewer` | Access → management levels | read | Same sentence, same page, same problem. |
+| `entities` | Schema, Entity | edit | See 5b and 5c. |
+| `automation` | Automations (nav) | said | "Not yet", from `capabilities`. Right. |
+| `templates` | Integrations | read | Served as stored, with the build's warning. Right for now. |
+| `formats` | nowhere | **gap** | Named validation formats. `field.format` has no control either (5c), so a project's own formats are unreachable from both ends at once. |
+| `webhooks.endpoints` | Integrations | read | As `templates`. |
+| `functions` | Functions (nav) | said | "Not yet". Right. |
+
+### 5b. Entity-level facets
+
+| Facet | Where | State | What that costs |
+|---|---|---|---|
+| `description` | Entity header, Schema list | read | The absence is explained ("no description in the descriptor") and cannot be fixed from the screen that explains it. |
+| `renamedFrom` | nowhere | **gap** | A field carries a rename through `FieldEditor`; an entity does not. Renaming an entity from the dashboard is therefore remove + add — a drop and recreate, which is the exact data loss the key exists to prevent. |
+| `storage` | Entity header badge | read | Right: `dynamic` is F7. |
+| `tenancy` | written once, by "Add entity" | partial | Nothing changes it afterwards. |
+| `softDelete` | nowhere | **gap** | Refused by `UnhonouredFeatures.OnAnEntity`, so an editor would be wrong — but the refusal is never rendered: `FieldEditor` filters `capabilities.refused` to `field.*` and nothing consumes the `entity.*` half. Its absence reads as an oversight rather than a refusal. |
+| `audit` | written once, by "Add entity" | partial | As `tenancy`. The Fields tab does show the managed columns that result. |
+| `fields` | Fields tab | edit | See 5c. |
+| `rules` | Rules tab | edit | |
+| `hooks` | On write tab | read | Item 3. Now unblocked — all six points are honoured, and the tab reads no capability, so it is silent about the three refused action types too. |
+| `realtime` | nowhere | **gap** | |
+| `indexes` | Indexes tab | read | Item 1. |
+
+### 5c. Field-level facets
+
+`FieldEditor` deliberately preserves facets it cannot draw (its own comment says so), so nothing
+below is *destroyed* by an edit — it is only unauthorable.
+
+| Facet | Editor control | Fields-tab badge | State |
+|---|---|---|---|
+| `type` | yes | column | edit |
+| `description` | no | not shown | **gap** — the schema says "surfaced to agents and in the admin UI"; an entity's is shown, a field's is not. |
+| `renamedFrom` | written by the rename | — | edit, implicitly |
+| `required` | yes | `required` | edit |
+| `unique` | yes | `unique` | edit |
+| `nullable` | no | not shown | **gap** — preserved, never authored. |
+| `default` | yes, literal only | `default …` | edit. A `$cel` default is refused by the build, and the editor's refusal says so. |
+| `maxLength` | yes | `max N` | edit |
+| `precision` / `scale` | yes | `p,s` | edit |
+| `values` | yes | `N values` | edit |
+| `entity` | yes | — | edit |
+| `onDelete` | no — `facets["onDelete"] ??= "restrict"` | `on delete x` | **gap** — the schema declares four semantics and the dashboard writes one, silently, on every ref field it creates. |
+| `format` | no | shown | **gap** — readable, unauthorable, and `formats` (5a) is unreachable too. |
+| `validation` | no — refusal shown | not shown | Refused by `UnhonouredFeatures.OnAField`; `FieldEditor` renders that refusal, the Fields list does not. |
+| `index` | no | `indexed` | **gap** — item 1. |
+| `hidden` | no | not shown | **gap**, and deeper than the others: `SchemaModel.FieldSchema` carries no `Hidden`, so the dashboard cannot read it even to display it. A field hidden from every API response looks identical to one that is not. |
+| `readOnly` | no | not shown | Same, same reason. |
+| `computed` | locked (`_maintainedElsewhere`) | `computed` | read — right, it is an expression. |
+| `rollup` | locked | `rollup` | read — right. |
+
+### 5d. `IAlvoManagement`
+
+| Operation | Where | |
+|---|---|---|
+| `GetInfoAsync` | Settings | ✓ |
+| `ListProjectsAsync` | Project switcher | ✓ |
+| `GetDescriptorAsync` | Preview and every editor | ✓ |
+| `ListRevisionsAsync` | History | ✓ |
+| `GetRevisionAsync` | History detail | ✓ |
+| `GetSchemaAsync` | Schema, Entity, Data | ✓ |
+| `GetCapabilitiesAsync` | Integrations, "Not yet" badges | ✓ |
+| `SimulatePolicyAsync` | Rules | ✓ |
+| `ApplyDescriptorAsync` | Preview | ✓ |
+| `RollbackAsync` | History | ✓ |
+| `SetAiConnectionAsync` | Settings | ✓ — but see item 2 |
+
+### 5e. What the audit adds to this list
+
+Ordered by what it costs to leave alone, not by effort.
+
+7. **A ref field's `onDelete` is chosen by nobody.** Every ref the dashboard creates gets
+   `restrict`, written without a control and without a word on screen. The other three semantics
+   are reachable only by editing the descriptor by hand. This is the one gap below that changes
+   what the *database* does, which is why it is first.
+8. **An entity cannot be renamed without dropping it.** `renamedFrom` exists on an entity exactly
+   as it does on a field, and only the field's is wired.
+9. **`hidden` and `readOnly` are invisible to the dashboard.** Not merely uneditable: absent from
+   `SchemaModel.FieldSchema`, so no screen can show that a field never leaves the server. Fixing it
+   starts one layer down, in the schema model, which makes it the only item here that is not purely
+   an Admin change.
+10. **The project's own identity is unreachable** — `description` and `branding` (5a), plus a
+    field's `description` (5c). Three keys the schema says are for the admin UI, in a dashboard
+    that renders none of them.
+11. **Refusals reach one screen out of three.** `FieldEditor` takes `capabilities.refused` and
+    filters it to `field.*`, which is the pattern and it works. Nothing consumes the `entity.*`
+    half, so `softDelete` is silent on the entity header; nothing consumes the action types, so the
+    "On write" tab is silent about `function`, `http.call` and `entity.update`; and the Fields
+    *tab* — the list, as opposed to the editor over it — shows no refusal either, so a field
+    carrying `validation` looks unremarkable until you open it.
+12. **The read-only halves of Access are a trap.** The role catalogue and the three management
+    levels are rendered beside membership controls that do write, under a paragraph promising that
+    a change waits for an apply. Either wire them into the working copy or say plainly that they
+    are descriptor-only.
+13. **`formats`, `realtime`, `auth.providers`, `tenancy.enabled`, `dynamicEntities`** — five
+    declared blocks with no screen and no sentence. The cheap fix is one honest surface (a
+    "declared, not editable here" panel, as Integrations already does for `webhooks`/`templates`)
+    rather than five editors.
 
 ## 6. Crowded toolbars on a phone
 

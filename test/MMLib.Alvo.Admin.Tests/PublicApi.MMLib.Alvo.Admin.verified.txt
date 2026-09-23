@@ -159,10 +159,11 @@ namespace MMLib.Alvo.Admin.Components.Entity
 }
 namespace MMLib.Alvo.Admin.Components.Layout
 {
-    public class AdminLayout : Microsoft.AspNetCore.Components.LayoutComponentBase
+    public class AdminLayout : Microsoft.AspNetCore.Components.LayoutComponentBase, System.IDisposable
     {
         public AdminLayout() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
     public class CommandPalette : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable

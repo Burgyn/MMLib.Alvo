@@ -117,6 +117,43 @@ public sealed class RefusedProposalScenarios(AssistantWorld world) : IClassFixtu
 }
 
 /// <summary>
+/// Configuring the assistant from the dashboard, in the session that configured it.
+/// </summary>
+/// <param name="world">A host with an agent installed, a writable secret store and no connection saved.</param>
+public sealed class ConfiguringTheAssistantScenarios(ConfigurableAssistantWorld world)
+    : IClassFixture<ConfigurableAssistantWorld>
+{
+    /// <summary>
+    /// Saving a connection lights the launcher, without a reload.
+    /// </summary>
+    /// <remarks>
+    /// <b>Reported from a phone, and the "without a reload" is the whole scenario.</b> The shell resolved
+    /// "is an assistant configured" once per circuit, so an operator who configured one on Settings read a
+    /// panel saying <c>configured</c> beside a shell with no launcher in it, for the rest of the session and
+    /// with nothing on screen suggesting a reload would fix it. Measured in a browser rather than over the
+    /// gateway because the defect was entirely in when the shell asked — the write worked the whole time.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Saving_a_connection_lights_the_launcher_without_a_reload()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/settings");
+
+        /* The premise: nothing is configured, so nothing is mounted. */
+        (await session.Page.Locator("[data-testid='assistant-launch']").CountAsync()).ShouldBe(0);
+
+        await session.Page.FillAsync("#ai-endpoint", "http://127.0.0.1:1/v1");
+        await session.Page.FillAsync("#ai-model", "scripted");
+        await session.Page.ClickAsync("[data-testid='ai-save']");
+
+        /* No GoAsync, no reload: the same circuit that saved has to grow the launcher. */
+        await session.Page.Locator("[data-testid='assistant-launch']").WaitForAsync();
+
+        session.AssertConsoleClean();
+    }
+}
+
+/// <summary>
 /// The default world — no AI connection, and therefore no assistant anywhere.
 /// </summary>
 /// <param name="world">The running host and browser, exactly as the container runs it.</param>

@@ -6,6 +6,7 @@
     navigation starts lying about what works.
 *@
 @inherits LayoutComponentBase
+@implements IDisposable
 @inject AssistantGateway Assistant
 
 <div class="a-shell">
@@ -150,15 +151,44 @@
     private bool _assistant;
 
     /// <summary>
-    /// Whether to mount the assistant, decided once per circuit.
+    /// Whether to mount the assistant, asked at boot and again whenever the connection is saved.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>Every refusal is "no launcher", never a failed page.</b> The shell renders for a caller the
     /// project names nowhere and for one whose account has been deleted since they signed in — and both
     /// reach this call. A layout that let either throw would replace the screen that says what happened
     /// with a 500, which is measured rather than imagined: it took out the revoked-session scenario.
+    /// </para>
+    /// <para>
+    /// <b>Asked again, because once per circuit was a bug rather than a simplification.</b> An operator who
+    /// configured the connection on Settings got a panel reporting <c>configured</c> and a shell with no
+    /// launcher in it, for the rest of the session and with nothing on screen suggesting a reload. The
+    /// subscription is to <see cref="AssistantGateway.ConnectionChanged"/>, which the save raises — see the
+    /// argument for the event there.
+    /// </para>
     /// </remarks>
     protected override async Task OnInitializedAsync()
+    {
+        Assistant.ConnectionChanged += OnConnectionChanged;
+        await RefreshAssistantAsync();
+    }
+
+    public void Dispose() => Assistant.ConnectionChanged -= OnConnectionChanged;
+
+    /// <summary>
+    /// Re-asks, then redraws — on the renderer's thread, because the save that raised this ran on the
+    /// settings page's own.
+    /// </summary>
+    private void OnConnectionChanged() =>
+        _ = InvokeAsync(async () =>
+        {
+            await RefreshAssistantAsync();
+            StateHasChanged();
+        });
+
+    /// <summary>The one place the question is asked, so the boot and the re-ask cannot answer it differently.</summary>
+    private async Task RefreshAssistantAsync()
     {
         try
         {

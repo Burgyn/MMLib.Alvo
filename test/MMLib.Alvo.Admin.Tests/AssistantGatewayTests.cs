@@ -154,6 +154,53 @@ public sealed class AssistantGatewayTests
     }
 
     /// <summary>
+    /// A saved connection announces itself, so a shell that already asked can ask again.
+    /// </summary>
+    /// <remarks>
+    /// Reported from a phone: Settings said the connection was configured and no assistant launcher
+    /// appeared anywhere, for the rest of the session. <c>AdminLayout</c> resolves "is one configured" once
+    /// in <c>OnInitializedAsync</c>, and nothing told it the answer had moved — so the fix is this event and
+    /// the subscription over it, and this is the half that can be measured without a browser.
+    /// </remarks>
+    [Fact]
+    public async Task A_saved_connection_announces_itself()
+    {
+        var gateway = Gateway(assistant: null, Writable());
+        var announced = 0;
+
+        gateway.ConnectionChanged += () => announced++;
+
+        await gateway.SaveConnectionAsync(Form(), Ct);
+
+        announced.ShouldBe(1);
+    }
+
+    /// <summary>
+    /// A refused save announces nothing.
+    /// </summary>
+    /// <remarks>
+    /// The launcher is mounted off the announcement, so announcing a write that did not happen would light
+    /// an assistant that cannot be dialled — the failure the read-only-store refusal exists to prevent,
+    /// arriving one layer later.
+    /// </remarks>
+    [Fact]
+    public async Task A_refused_save_announces_nothing()
+    {
+        var store = Substitute.For<ISecretStore>();
+        store.CanWrite.Returns(false);
+
+        var gateway = Gateway(assistant: null, store);
+        var announced = 0;
+
+        gateway.ConnectionChanged += () => announced++;
+
+        await Should.ThrowAsync<InvalidOperationException>(
+            async () => await gateway.SaveConnectionAsync(Form(), Ct));
+
+        announced.ShouldBe(0);
+    }
+
+    /// <summary>
     /// A turn runs with the operator published, for the whole turn.
     /// </summary>
     /// <remarks>
