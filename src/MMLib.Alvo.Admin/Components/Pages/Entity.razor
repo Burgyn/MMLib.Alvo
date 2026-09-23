@@ -95,7 +95,8 @@
                     <HooksTab Hooks="@_hooks" />
                     break;
                 case "Indexes":
-                    <Indexes Entity="@_entity" />
+                    <Indexes Entity="@_entity" Declared="_indexes" Editable="Copy.Loaded"
+                             OnAdd="AddIndexAsync" OnRemove="RemoveIndexAsync" />
                     break;
                 default:
                     <ApiTab Entity="@_entity" />
@@ -137,6 +138,7 @@
     private IReadOnlyList<string> _entities = [];
     private IReadOnlyList<ManagementRefusedFeature> _refused = [];
     private IReadOnlyList<KeyValuePair<string, string>> _working = [];
+    private IReadOnlyList<IndexSchema> _indexes = [];
     private Exception? _error;
     private string _tab = "Fields";
     private string? _editing;
@@ -177,6 +179,7 @@
                the applied rules in an editable box would quietly discard an unapplied edit the
                moment somebody navigated away and back. */
             _working = DescriptorLens.Rules(Copy.Json, EntityName);
+            _indexes = Copy.IndexesOf(EntityName);
 
             /* An entity that exists only in the working copy is not in GET schema, because nothing
                has been applied. Rendering it from the working copy is what lets somebody add an
@@ -255,6 +258,35 @@
         Copy.RemoveField(EntityName, field);
         CloseEditor();
         Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/preview");
+    }
+
+    /// <summary>
+    /// Declares an index in the working copy, and stays on the tab.
+    /// </summary>
+    /// <remarks>
+    /// <b>No navigation, unlike a field.</b> Indexes are declared in sets — the reason an operator
+    /// opens this tab at all is usually a query that needs two of them — and being sent to the
+    /// preview after each one would make declaring three a round trip per index. It is the argument
+    /// <see cref="SetRule"/> already makes, and "Preview changes" appears on the header the moment
+    /// the copy is dirty either way.
+    /// </remarks>
+    private void AddIndexAsync(IndexSchema index)
+    {
+        Copy.AddIndex(EntityName, index.Fields, index.Unique);
+        _indexes = Copy.IndexesOf(EntityName);
+    }
+
+    /// <summary>
+    /// Drops the index at one position, and stays on the tab.
+    /// </summary>
+    /// <remarks>
+    /// No confirmation, for <see cref="RemoveField"/>'s reason: nothing has happened to the database
+    /// yet, and the apply is where dropping something is stated as a cost.
+    /// </remarks>
+    private void RemoveIndexAsync(int position)
+    {
+        Copy.RemoveIndex(EntityName, position);
+        _indexes = Copy.IndexesOf(EntityName);
     }
 
     /// <summary>The edited field's declaration, as the working copy currently carries it.</summary>

@@ -75,3 +75,160 @@ public sealed class SchemaEditingScenarios(AdminWorld world) : IClassFixture<Adm
         session.AssertConsoleClean();
     }
 }
+
+/// <summary>
+/// Declaring and dropping an index, which used to be the one thing an operator had to leave for.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Its own world for <c>SchemaEditingScenarios</c>' reason</b>: a working copy is composed per
+/// operator, so two classes signing in as the same administrator would write one document between
+/// them. <c>IClassFixture</c> gives this class a host of its own.
+/// </para>
+/// <para>
+/// <b>Every count below is relative to what the tab already shows, and that is not fastidiousness.</b>
+/// The three scenarios here <em>do</em> share one working copy — the fixture is per class, not per
+/// scenario, and a copy is composed across screens by design — so a fact asserting "there are now
+/// three" passes or fails on the order the runner happens to pick. Which is the order-dependence
+/// this suite has already paid for once, and it cost two red scenarios to rediscover.
+/// </para>
+/// <para>
+/// <b>It stops at the preview rather than applying.</b> The change under test is what the editor
+/// writes into the descriptor, and the preview is where that document is shown — adding an apply
+/// would be measuring the migrator, which has its own suite, at the cost of the second-apply limit
+/// <c>ChangeTheBackendScenarios</c> records.
+/// </para>
+/// </remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class IndexEditingScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+{
+    /// <summary>
+    /// A composite index is declared from the tab and reaches the descriptor in the schema's shape.
+    /// </summary>
+    /// <remarks>
+    /// The field order is asserted because it is what the index is <em>for</em>: an index on
+    /// <c>(a, b)</c> serves a filter on <c>a</c> and does nothing for one on <c>b</c> alone, so a
+    /// control that sorted the names would declare a different index from the one that was asked for.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_composite_index_is_declared_from_the_tab()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("Indexes");
+
+        var before = await session.Page.Locator("[data-testid='index-row']").CountAsync();
+
+        await session.Page.ClickAsync("[data-testid='index-fields'] button:has-text('scheduled_for')");
+        await session.Page.ClickAsync("[data-testid='index-fields'] button:has-text('status')");
+        await session.Page.ClickAsync("[data-testid='index-add']");
+
+        await session.Page.Locator("[data-testid='index-row']").Nth(before).WaitForAsync();
+
+        await session.GoAsync("/schema/preview");
+        var previewed = await session.Page.Locator("main.a-content").InnerTextAsync();
+        previewed.ShouldContain("scheduled_for");
+        previewed.ShouldContain("status");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// An index with no fields is refused by the control rather than by the apply.
+    /// </summary>
+    /// <remarks>
+    /// The schema's own <c>minItems: 1</c>, said where it can be acted on. It is the only rule this
+    /// control enforces: a second validator in the client is a second set of rules to disagree with,
+    /// and the apply is the authority on everything else.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task An_index_with_no_fields_is_refused_before_the_apply()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("Indexes");
+
+        var before = await session.Page.Locator("[data-testid='index-row']").CountAsync();
+
+        await session.Page.ClickAsync("[data-testid='index-add']");
+
+        /* Waited for rather than read: a click returns when it is dispatched, and the re-render that
+           carries the refusal arrives a circuit round trip later. Reading the page straight after the
+           click measures the frame before the one under test. */
+        await session.Page.Locator("[data-testid='index-refusal']").WaitForAsync();
+
+        (await session.Page.Locator("[data-testid='index-refusal']").InnerTextAsync())
+            .ShouldContain("at least one field");
+        (await session.Page.Locator("[data-testid='index-row']").CountAsync()).ShouldBe(before);
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// Removing takes the row that was asked for, and leaves the other where it was.
+    /// </summary>
+    /// <remarks>
+    /// Removal is by position, because the schema does not forbid two entries over the same fields —
+    /// so "the one on (status, priority)" would be ambiguous in exactly the case somebody is cleaning
+    /// up. This measures that the position the screen rendered is the position that goes.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Removing_an_index_takes_the_row_it_was_asked_for()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("Indexes");
+
+        var rows = session.Page.Locator("[data-testid='index-row']");
+        var before = await rows.CountAsync();
+        before.ShouldBeGreaterThan(0, "there is nothing to remove otherwise");
+
+        var went = await rows.First.InnerTextAsync();
+
+        await session.Page.Locator("[data-testid='index-remove']").First.ClickAsync();
+
+        await rows.Nth(before - 1).WaitForAsync(
+            new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+
+        /* The row that went is the one that was asked for, not merely one of them. */
+        (await rows.AllInnerTextsAsync()).ShouldNotContain(went);
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// A single-field index is the field's own facet, and the editor can now write it.
+    /// </summary>
+    /// <remarks>
+    /// The other half of the same gap. `index` was readable — the Fields tab has always badged it —
+    /// and unauthorable, so the one index shape an operator reaches for most often was the one the
+    /// dashboard could only show them. Asserted against the descriptor rather than the badge, because
+    /// the badge comes from the applied schema and this change is not applied — which is what sends
+    /// the assertion to the preview's diff rather than to the export screen.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_single_field_index_is_declared_on_the_field_itself()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+
+        await session.Page.ClickAsync("[data-testid='edit-field-title']");
+        await session.Page.GetByText("Edit title").WaitForAsync();
+
+        await session.Page.CheckAsync("[data-testid='field-index']");
+        await session.Page.ClickAsync("[data-testid='field-save']");
+        await session.Page.WaitForURLAsync("**/schema/preview");
+
+        /* And then for something *on* the preview. The URL moves before the screen behind it does, so
+           a read taken on the URL alone reads the entity page it just left — which is what this fact
+           did on its first run, and it reported a facet as missing that had been written correctly. */
+        await session.Page.Locator("button:has-text('Plan this change')").WaitForAsync();
+
+        /* The preview's diff, not the export screen: export serves the *applied* document, and this
+           change has deliberately not been applied. */
+        (await session.Page.Locator("main.a-content").InnerTextAsync())
+            .ShouldContain("\"index\": true");
+
+        session.AssertConsoleClean();
+    }
+}

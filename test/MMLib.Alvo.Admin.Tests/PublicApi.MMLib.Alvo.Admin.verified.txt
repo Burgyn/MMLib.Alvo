@@ -126,7 +126,16 @@ namespace MMLib.Alvo.Admin.Components.Entity
         public Indexes() { }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Schema.IndexSchema> Declared { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Editable { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
         public MMLib.Alvo.Schema.EntitySchema Entity { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Schema.IndexSchema> OnAdd { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<int> OnRemove { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     public class Relationships : Microsoft.AspNetCore.Components.ComponentBase

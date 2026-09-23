@@ -1,4 +1,6 @@
-﻿using System.Text.Json;
+﻿using MMLib.Alvo.Schema;
+
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Internal;
@@ -201,6 +203,99 @@ internal sealed class WorkingCopy
 
         Ensure(declared, "rules")[operation] = cel;
     }
+
+    /// <summary>
+    /// Declares one index on an entity.
+    /// </summary>
+    /// <remarks>
+    /// <b>Appended to the array the descriptor already has</b>, not written over it: the block is an ordered
+    /// list and an author may have declared indexes this editor cannot draw. Replacing it would be the same
+    /// silent narrowing the field editor refuses — an edit that drops what the control did not know about.
+    /// </remarks>
+    /// <param name="entity">The entity the index is on.</param>
+    /// <param name="fields">The fields it covers, in the order they are declared in.</param>
+    /// <param name="unique">Whether it enforces uniqueness across them.</param>
+    public void AddIndex(string entity, IReadOnlyList<string> fields, bool unique)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+
+        if (_working?["entities"]?[entity] is not JsonObject declared)
+        {
+            return;
+        }
+
+        if (declared["indexes"] is not JsonArray indexes)
+        {
+            indexes = [];
+            declared["indexes"] = indexes;
+        }
+
+        var index = new JsonObject
+        {
+            ["fields"] = new JsonArray([.. fields.Select(field => JsonValue.Create(field))]),
+        };
+
+        /* Written only when true, for the reason the field editor writes its own booleans that way:
+           `unique: false` is the schema's default, and a descriptor full of defaults is a descriptor
+           whose diffs stop saying what changed. */
+        if (unique)
+        {
+            index["unique"] = true;
+        }
+
+        indexes.Add(index);
+    }
+
+    /// <summary>
+    /// Removes the index at one position.
+    /// </summary>
+    /// <remarks>
+    /// By position rather than by the fields it covers, because the block is an array and the schema does
+    /// not forbid two entries over the same fields — removing "the one on (a, b)" would then be ambiguous
+    /// in exactly the case an operator is trying to clean up. The copy is per-circuit, so the position the
+    /// screen rendered is the position this removes.
+    /// </remarks>
+    /// <param name="entity">The entity.</param>
+    /// <param name="position">The index's position in the declared array.</param>
+    public void RemoveIndex(string entity, int position)
+    {
+        if (_working?["entities"]?[entity] is not JsonObject declared
+            || declared["indexes"] is not JsonArray indexes
+            || position < 0
+            || position >= indexes.Count)
+        {
+            return;
+        }
+
+        indexes.RemoveAt(position);
+
+        /* An empty array is not the same statement as no array, and the descriptor reads better without
+           one — the same reason SetRule drops an emptied `rules`. */
+        if (indexes.Count == 0)
+        {
+            declared.Remove("indexes");
+        }
+    }
+
+    /// <summary>The indexes an entity declares in the working copy, in the order it declares them.</summary>
+    /// <remarks>
+    /// Read from the working document rather than from <c>SchemaModel</c> deliberately: the tab that edits
+    /// them must render what it is editing, or an unapplied index disappears the moment it is added — which
+    /// is the defect the Rules tab already records for its own case.
+    /// </remarks>
+    /// <param name="entity">The entity.</param>
+    public IReadOnlyList<IndexSchema> IndexesOf(string entity)
+        => _working?["entities"]?[entity]?["indexes"] is JsonArray indexes
+            ? [.. indexes.Select(Index)]
+            : [];
+
+    /// <summary>One declared index, in the shape every screen already reads.</summary>
+    /// <param name="declared">The array entry.</param>
+    private static IndexSchema Index(JsonNode? declared) => new(
+        declared?["fields"] is JsonArray fields
+            ? [.. fields.Select(field => field?.GetValue<string>() ?? string.Empty)]
+            : [],
+        declared?["unique"]?.GetValue<bool>() ?? false);
 
     /// <summary>The fields an entity declares in the working copy, with their raw JSON.</summary>
     public IReadOnlyList<KeyValuePair<string, string>> FieldsOf(string entity)

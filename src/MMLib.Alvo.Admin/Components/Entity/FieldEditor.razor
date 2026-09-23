@@ -73,7 +73,30 @@
                         <span>unique</span>
                     </label>
                 }
+
+                @*
+                    Offered only while the field is not unique, because a unique field already carries
+                    an index — declaring a second one over the same column is a second B-tree the
+                    database maintains on every write and no query can use. The Indexes tab makes the
+                    same point in prose; this is the half that stops it being declarable.
+                *@
+                @if (!_unique)
+                {
+                    <label class="a-check">
+                        <input type="checkbox" checked="@_indexed" data-testid="field-index"
+                               @onchange="args => _indexed = args.Value is true" />
+                        <span>indexed</span>
+                    </label>
+                }
             </div>
+            @if (_unique && _indexed)
+            {
+                <span class="a-section-sub">
+                    <code class="a-mono">index</code> is kept as declared and is redundant beside
+                    <code class="a-mono">unique</code>, which already carries one. Clear
+                    <code class="a-mono">unique</code> to change it.
+                </span>
+            }
         </div>
 
         @switch (_type)
@@ -201,6 +224,7 @@
     private FieldType _type = FieldType.String;
     private bool _required;
     private bool _unique;
+    private bool _indexed;
     private int _maxLength = 120;
     private int _precision = 10;
     private int _scale = 2;
@@ -311,6 +335,7 @@
             ? type : FieldType.String;
         _required = facets["required"]?.GetValue<bool>() ?? false;
         _unique = facets["unique"]?.GetValue<bool>() ?? false;
+        _indexed = facets["index"]?.GetValue<bool>() ?? false;
         _maxLength = facets["maxLength"]?.GetValue<int>() ?? 120;
         _precision = facets["precision"]?.GetValue<int>() ?? 10;
         _scale = facets["scale"]?.GetValue<int>() ?? 2;
@@ -470,6 +495,7 @@
         }
 
         Toggle(facets, "unique", _unique);
+        Toggle(facets, "index", _indexed);
         ClearFacetsOfOtherTypes(facets);
 
         switch (_type)
