@@ -42,8 +42,8 @@
 @foreach (var route in Routes)
 {
     <div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4)">
-        <span class="a-badge" style="flex:none;min-width:64px">@route.Method</span>
-        <code class="a-mono" style="flex:1;font-size:var(--text-xs)">@route.Path</code>
+        <span class="@($"a-badge a-badge--verb {VerbTone(route.Method)}")">@route.Method</span>
+        <code class="a-mono" style="flex:1;font-size:var(--text-sm)">@route.Path</code>
         <span class="a-section-sub" style="flex:none">@route.Note</span>
     </div>
 }
@@ -78,6 +78,17 @@
 
     /// <summary>Where this host's OpenAPI document is, when it serves one.</summary>
     private string? Document => Options.Value.OpenApiPath;
+
+    /// <summary>The tone a method is drawn in: reads neutral, a create ok, a patch warn, a delete danger.</summary>
+    /// <param name="method">The HTTP method.</param>
+    /// <returns>The badge modifier, or nothing for a read.</returns>
+    private static string VerbTone(string method) => method switch
+    {
+        "POST" => "a-badge--ok",
+        "PATCH" => "a-badge--warn",
+        "DELETE" => "a-badge--danger",
+        _ => string.Empty,
+    };
 
     private IEnumerable<(string Method, string Path, string Note)> Routes
     {

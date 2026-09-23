@@ -53,19 +53,15 @@
             </div>
             @if (Refusals.Count == 0)
             {
-                <div style="padding:var(--space-4)" class="a-section-sub">
-                    This build refuses nothing in these blocks.
-                </div>
+                <p class="a-note">This build refuses nothing in these blocks.</p>
             }
             else
             {
                 @foreach (var refusal in Refusals)
                 {
-                    <div class="a-refused">
-                        <code class="a-mono">@refusal.Slot</code>
-                        <span class="a-refused__reason">@refusal.Consequence</span>
-                        <span class="a-refused__reason">@refusal.Fix</span>
-                    </div>
+                    <p class="a-note">
+                        <code class="a-mono">@refusal.Slot</code> — @refusal.Consequence @refusal.Fix
+                    </p>
                 }
             }
         </div>

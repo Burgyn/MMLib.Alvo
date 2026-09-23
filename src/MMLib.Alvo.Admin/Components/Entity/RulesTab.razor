@@ -27,7 +27,7 @@ else if (!Editable)
         <div style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border)">
             <div class="a-row" style="gap:var(--space-3)">
                 <span class="a-badge a-badge--accent">@rule.Key</span>
-                <code class="a-mono" style="font-size:var(--text-xs);color:var(--dim)">@Route(rule.Key)</code>
+                <code class="a-ident">@Route(rule.Key)</code>
             </div>
             <pre class="a-code" style="margin-top:var(--space-2)"><code>@rule.Value</code></pre>
         </div>
@@ -53,7 +53,7 @@ else
         <div style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border)">
             <div class="a-row" style="gap:var(--space-3)">
                 <span class="@($"a-badge {(Declared(operation) is { Length: > 0 } ? "a-badge--accent" : string.Empty)}")">@operation</span>
-                <code class="a-mono" style="font-size:var(--text-xs);color:var(--dim)">@Route(operation)</code>
+                <code class="a-ident">@Route(operation)</code>
             </div>
             <textarea class="a-textarea a-mono" rows="2" spellcheck="false"
                       id="@($"rule-{operation}")"

@@ -9,7 +9,7 @@
 {
     <div class="a-listrow">
         <span class="a-mono a-listrow__key" style="font-weight:var(--weight-medium)">@field.Name</span>
-        <span class="a-mono a-listrow__type" style="color:var(--dim)">@Type(field)</span>
+        <span class="a-ident a-listrow__type">@Type(field)</span>
         <span class="a-listrow__rest">
             @foreach (var facet in Facets(field))
             {
@@ -48,7 +48,7 @@
 {
     <div class="a-listrow" style="color:var(--dim)">
         <span class="a-mono a-listrow__key">@field.Name</span>
-        <span class="a-mono a-listrow__type">@Type(field)</span>
+        <span class="a-ident a-listrow__type">@Type(field)</span>
         <span class="a-listrow__rest">
             <span class="a-badge">@(AlvoManagedColumns.IsCallerWritable(field.Name, isUpdate: false)
                 ? "supplied on create only" : "framework writes it")</span>
