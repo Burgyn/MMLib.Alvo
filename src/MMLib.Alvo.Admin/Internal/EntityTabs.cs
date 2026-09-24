@@ -21,15 +21,38 @@ internal static class EntityTabs
     /// <summary>The name of the query parameter the tab is carried in.</summary>
     public const string Parameter = "tab";
 
+    /// <summary>The Fields tab's slug.</summary>
+    /// <remarks>
+    /// The slugs are constants so the screen can dispatch on them: a slug is the tab's address, kept
+    /// stable for the links already sent, while a title is copy and free to change — which is why a
+    /// switch over the titles once sent a renamed tab silently to its <c>default:</c> (F-14).
+    /// </remarks>
+    public const string Fields = "fields";
+
+    /// <summary>The Relationships tab's slug.</summary>
+    public const string Relationships = "relationships";
+
+    /// <summary>The Rules tab's slug.</summary>
+    public const string Rules = "rules";
+
+    /// <summary>The On write tab's slug.</summary>
+    public const string OnWrite = "on-write";
+
+    /// <summary>The Indexes tab's slug.</summary>
+    public const string Indexes = "indexes";
+
+    /// <summary>The API tab's slug.</summary>
+    public const string Api = "api";
+
     /// <summary>The tabs, in the order they are drawn, each with its slug.</summary>
     public static IReadOnlyList<EntityTab> All { get; } =
     [
-        new("Fields", "fields"),
-        new("Relationships", "relationships"),
-        new("Rules", "rules"),
-        new("On write", "on-write"),
-        new("Indexes", "indexes"),
-        new("API", "api"),
+        new("Fields", Fields),
+        new("Relationships", Relationships),
+        new("Rules", Rules),
+        new("On write", OnWrite),
+        new("Indexes", Indexes),
+        new("API", Api),
     ];
 
     /// <summary>The tab a screen opens on when the address names none.</summary>

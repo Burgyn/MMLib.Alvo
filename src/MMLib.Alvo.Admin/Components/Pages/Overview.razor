@@ -30,7 +30,7 @@
                     Three things make a backend: entities, the rules that guard them, and a tenant if
                     the data is per-customer. The first run walks through them in that order.
                 </p>
-                <a class="a-btn a-btn--primary a-btn--sm" href="@($"{AlvoAdmin.BasePath}/welcome")">
+                <a class="a-btn a-btn--primary a-btn--sm" href="@AdminPaths.Welcome">
                     Open the first run
                 </a>
             </div>
@@ -84,19 +84,19 @@
             that cost its own round trip would make the landing page the slowest screen to open.
         *@
         <nav class="a-cards" aria-label="Sections" data-testid="overview-links">
-            <a class="a-card a-card--action" href="@($"{AlvoAdmin.BasePath}/schema")" data-testid="overview-link-schema">
+            <a class="a-card a-card--action" href="@AdminPaths.Schema" data-testid="overview-link-schema">
                 <span class="a-section-title">Schema</span>
                 <span class="a-section-sub">@Count(_schema.Entities.Count, "entity", "entities")</span>
             </a>
-            <a class="a-card a-card--action" href="@($"{AlvoAdmin.BasePath}/data")" data-testid="overview-link-data">
+            <a class="a-card a-card--action" href="@AdminPaths.Data" data-testid="overview-link-data">
                 <span class="a-section-title">Data</span>
                 <span class="a-section-sub">Browse the records of @Count(_schema.Entities.Count, "entity", "entities")</span>
             </a>
-            <a class="a-card a-card--action" href="@($"{AlvoAdmin.BasePath}/rules")" data-testid="overview-link-rules">
+            <a class="a-card a-card--action" href="@AdminPaths.Rules()" data-testid="overview-link-rules">
                 <span class="a-section-title">Rules</span>
                 <span class="a-section-sub">@Count(_rules, "rule", "rules") declared</span>
             </a>
-            <a class="a-card a-card--action" href="@($"{AlvoAdmin.BasePath}/access")" data-testid="overview-link-access">
+            <a class="a-card a-card--action" href="@AdminPaths.Access" data-testid="overview-link-access">
                 <span class="a-section-title">Access</span>
                 <span class="a-section-sub">@Count(_roles, "role", "roles") declared</span>
             </a>

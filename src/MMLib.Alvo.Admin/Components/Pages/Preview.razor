@@ -1,4 +1,4 @@
-﻿@page "/admin/schema/preview"
+﻿@page "/admin/changes"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
 @inject AdminSession Session
@@ -8,7 +8,7 @@
 <PageTitle>Preview changes · Alvo</PageTitle>
 
 <div class="a-stack">
-    <PageHeader Eyebrow="Schema" EyebrowHref="@($"{AlvoAdmin.BasePath}/schema")" Title="Preview changes" />
+    <PageHeader Eyebrow="Schema" EyebrowHref="@AdminPaths.Schema" Title="Preview changes" />
 
     @if (_problem is not null)
     {
@@ -23,7 +23,7 @@
     {
         <EmptyState Title="Nothing to apply"
                     Body="@($"The working copy is identical to revision {Copy.Revision}. Change something in Schema, or import a descriptor.")">
-            <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema")">Back to Schema</a>
+            <a class="a-btn a-btn--sm" href="@AdminPaths.Schema">Back to Schema</a>
         </EmptyState>
     }
     else
@@ -112,7 +112,7 @@
             </div>
 
             <div class="a-toolbar">
-                <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema")">Back to the editor</a>
+                <a class="a-btn a-btn--ghost a-btn--sm" href="@AdminPaths.Schema">Back to the editor</a>
                 <button type="button" class="a-btn a-btn--sm" disabled="@_busy"
                         data-testid="discard" @onclick="() => _discarding = true">
                     Discard them
@@ -142,7 +142,7 @@
                     ? "This request repeated one that had already run — the revision it names was applied by the earlier one."
                     : "The migration ran and the revision was appended.")
             </p>
-            <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/history")">Open Configuration history</a>
+            <a class="a-btn a-btn--sm" href="@AdminPaths.History">Open Configuration history</a>
         </div>
     }
 </div>
@@ -200,7 +200,7 @@
         _discarding = false;
         _plan = null;
         _applied = null;
-        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema");
+        Navigation.NavigateTo(AdminPaths.Schema);
     }
 
     private Task PlanAsync() => SendAsync(dryRun: true);

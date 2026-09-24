@@ -111,7 +111,7 @@
                         not make — scoring it here would make it a second policy evaluator that could disagree
                         with the engine. To check one row, open it in Data as yourself.
                         <a class="a-btn a-btn--sm" style="margin-top:var(--space-3)"
-                           href="@($"{AlvoAdmin.BasePath}/data/{Selected}")">Open @Selected in Data</a>
+                           href="@AdminPaths.Records(Selected)">Open @Selected in Data</a>
                     </p>
                 </div>
             </div>
@@ -191,7 +191,7 @@
         }
     }
 
-    private void Choose(string entity) => Navigation.NavigateTo($"{AlvoAdmin.BasePath}/rules/{entity}");
+    private void Choose(string entity) => Navigation.NavigateTo(AdminPaths.Rules(entity));
 
     private async Task Pick(Caller caller)
     {

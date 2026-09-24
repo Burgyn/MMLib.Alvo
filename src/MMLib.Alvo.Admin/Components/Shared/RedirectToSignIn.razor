@@ -20,7 +20,7 @@
         var returnUrl = "/" + target.TrimStart('/');
 
         Navigation.NavigateTo(
-            $"{AlvoAdmin.SignInPath}?returnUrl={Uri.EscapeDataString(returnUrl)}",
+            $"{AdminPaths.SignIn}?returnUrl={Uri.EscapeDataString(returnUrl)}",
             forceLoad: false,
             replace: true);
     }

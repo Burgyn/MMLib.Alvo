@@ -8,9 +8,9 @@
 <PageTitle>@EntityName · Data · Alvo</PageTitle>
 
 <div class="a-stack">
-    <PageHeader Eyebrow="Data" EyebrowHref="@($"{AlvoAdmin.BasePath}/data")" Title="@EntityName" Mono="true">
+    <PageHeader Eyebrow="Data" EyebrowHref="@AdminPaths.Data" Title="@EntityName" Mono="true">
         <Secondary>
-            <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/{EntityName}")">Schema</a>
+            <a class="a-btn a-btn--sm" href="@AdminPaths.Entity(EntityName)">Schema</a>
         </Secondary>
         <Primary>
             @if (_entity is not null && !OutOfScope)
@@ -600,7 +600,7 @@
         CloseSheet();
         if (Record is not null)
         {
-            Navigation.NavigateTo($"{AlvoAdmin.BasePath}/data/{EntityName}", replace: true);
+            Navigation.NavigateTo(AdminPaths.Records(EntityName), replace: true);
         }
     }
 
@@ -677,7 +677,7 @@
     /// </remarks>
     private RenderFragment Reference(FieldSchema column, Guid id)
     {
-        var href = $"{AlvoAdmin.BasePath}/data/{column.Reference!.TargetEntity}?record={id}";
+        var href = AdminPaths.Records(column.Reference!.TargetEntity, id);
         var cell = LabelOf(column, id) is { } label ? GridCell.Plain(label) : GridCell.Identifier(id);
         var style = cell.Kind == CellKind.Identifier ? "a-link a-ident" : cell.Short ? "a-link" : "a-link a-cell__clip";
         return @<a class="@style" href="@href" title="@(cell.Title ?? id.ToString())" data-testid="ref-cell"

@@ -70,7 +70,7 @@ public sealed class SchemaEditingScenarios(AdminWorld world) : IClassFixture<Adm
            `format`, and an editor that rebuilt the declaration from its own controls would drop both
            — silently, with the apply carrying on working, which is exactly the narrowing §4.6
            forbids of the export. */
-        await session.GoAsync("/schema/transfer");
+        await session.GoAsync("/transfer");
         var descriptor = await session.Page.Locator("main.a-content").InnerTextAsync();
         descriptor.ShouldContain("Where to send correspondence");
         descriptor.ShouldContain("\"format\": \"email\"");
@@ -128,7 +128,7 @@ public sealed class IndexEditingScenarios(AdminWorld world) : IClassFixture<Admi
 
         await session.Page.Locator("[data-testid='index-row']").Nth(before).WaitForAsync();
 
-        await session.GoAsync("/schema/preview");
+        await session.GoAsync("/changes");
         var previewed = await session.Page.Locator("main.a-content").InnerTextAsync();
         previewed.ShouldContain("scheduled_for");
         previewed.ShouldContain("status");
@@ -277,7 +277,7 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
 
         await session.Page.Locator("[data-testid='hook-row']").Nth(before).WaitForAsync();
 
-        await session.GoAsync("/schema/preview");
+        await session.GoAsync("/changes");
         await session.Page.Locator("button:has-text('Plan this change')").WaitForAsync();
 
         var previewed = await session.Page.Locator("main.a-content").InnerTextAsync();
@@ -565,7 +565,7 @@ public sealed class RenameScenarios(AdminWorld world) : IClassFixture<AdminWorld
 
         await session.Page.WaitForURLAsync("**/schema/service_areas");
 
-        await session.GoAsync("/schema/preview");
+        await session.GoAsync("/changes");
         await session.Page.Locator("button:has-text('Plan this change')").WaitForAsync();
 
         var previewed = await session.Page.Locator("main.a-content").InnerTextAsync();
@@ -674,7 +674,7 @@ public sealed class DiscardScenarios(AdminWorld world) : IClassFixture<AdminWorl
 
         await session.Page.WaitForURLAsync("**/schema");
 
-        await session.GoAsync("/schema/preview");
+        await session.GoAsync("/changes");
         await session.Page.GetByText("Nothing to apply").WaitForAsync();
 
         /* And the field is back on the entity, because the copy went to the applied revision. */

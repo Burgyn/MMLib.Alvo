@@ -12,7 +12,7 @@
     <PageHeader Title="Schema">
         <Secondary>
             <button type="button" class="a-btn a-btn--sm" @onclick="ToggleAdding">New entity</button>
-            <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/transfer")">Import / export</a>
+            <a class="a-btn a-btn--sm" href="@AdminPaths.Transfer">Import / export</a>
         </Secondary>
     </PageHeader>
 
@@ -88,7 +88,7 @@
     {
         <EmptyState Title="This project has no entities yet"
                     Body="An entity is a table Alvo creates and keeps in step with the descriptor. Import a descriptor, or add the first entity in the editor.">
-            <a class="a-btn a-btn--primary a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/transfer")">Import a descriptor</a>
+            <a class="a-btn a-btn--primary a-btn--sm" href="@AdminPaths.Transfer">Import a descriptor</a>
         </EmptyState>
     }
     else
@@ -206,7 +206,7 @@
             entity => string.Equals(entity.Name, name, StringComparison.Ordinal)))
         : [];
 
-    private void Open(string entity) => Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/{entity}");
+    private void Open(string entity) => Navigation.NavigateTo(AdminPaths.Entity(entity));
 
     /// <summary>Puts a new entity in the working copy and opens it, to add its fields.</summary>
     /// <remarks>
@@ -231,7 +231,7 @@
         }
 
         Copy.AddEntity(_name, _scoped, _audited);
-        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/{_name}");
+        Navigation.NavigateTo(AdminPaths.Entity(_name));
     }
 
     /// <summary>Closes the form without touching the working copy, and forgets what was typed.</summary>

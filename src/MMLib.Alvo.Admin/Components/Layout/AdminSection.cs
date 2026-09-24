@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Components.Layout;
+﻿using MMLib.Alvo.Admin.Internal;
+
+namespace MMLib.Alvo.Admin.Components.Layout;
 
 /// <summary>
 /// One entry in the dashboard's navigation.
@@ -40,13 +42,13 @@ internal static class AdminNavigation
     /// <summary>The sections that work today, in navigation order.</summary>
     public static IReadOnlyList<AdminSection> Live { get; } =
     [
-        new("Overview", AlvoAdmin.BasePath, Icons.Overview, 'o'),
-        new("Schema", $"{AlvoAdmin.BasePath}/schema", Icons.Schema, 's'),
-        new("Data", $"{AlvoAdmin.BasePath}/data", Icons.Data, 'd'),
-        new("Rules", $"{AlvoAdmin.BasePath}/rules", Icons.Rules, 'r'),
-        new("Access", $"{AlvoAdmin.BasePath}/access", Icons.Access, 'a'),
-        new("Configuration history", $"{AlvoAdmin.BasePath}/history", Icons.History, 'h'),
-        new("Integrations", $"{AlvoAdmin.BasePath}/integrations", Icons.Integrations, 'i'),
+        new("Overview", AdminPaths.Overview, Icons.Overview, 'o'),
+        new("Schema", AdminPaths.Schema, Icons.Schema, 's'),
+        new("Data", AdminPaths.Data, Icons.Data, 'd'),
+        new("Rules", AdminPaths.Rules(), Icons.Rules, 'r'),
+        new("Access", AdminPaths.Access, Icons.Access, 'a'),
+        new("Configuration history", AdminPaths.History, Icons.History, 'h'),
+        new("Integrations", AdminPaths.Integrations, Icons.Integrations, 'i'),
     ];
 
     /// <summary>The sections the descriptor may declare and this build does not run.</summary>
@@ -57,14 +59,14 @@ internal static class AdminNavigation
     /// </remarks>
     public static IReadOnlyList<AdminSection> NotYet { get; } =
     [
-        new("Automations", $"{AlvoAdmin.BasePath}/automations", Icons.Automations, NotYet: true),
-        new("Functions", $"{AlvoAdmin.BasePath}/functions", Icons.Functions, NotYet: true),
+        new("Automations", AdminPaths.Automations, Icons.Automations, NotYet: true),
+        new("Functions", AdminPaths.Functions, Icons.Functions, NotYet: true),
     ];
 
     /// <summary>The sections that sit below the second separator.</summary>
     public static IReadOnlyList<AdminSection> Footer { get; } =
     [
-        new("Settings", $"{AlvoAdmin.BasePath}/settings", Icons.Settings, ','),
+        new("Settings", AdminPaths.Settings, Icons.Settings, ','),
     ];
 
     /// <summary>Every section, in the order they are drawn.</summary>
@@ -90,7 +92,7 @@ internal static class AdminNavigation
     /// An address rather than a call into the page, so the palette needs no reference to a screen
     /// that may not be mounted, and the form opens the same way from a reload or a pasted link.
     /// </remarks>
-    public static string NewEntity { get; } = $"{AlvoAdmin.BasePath}/schema?{NewEntityParameter}=entity";
+    public static string NewEntity { get; } = $"{AdminPaths.Schema}?{NewEntityParameter}=entity";
 
     /// <summary>The query parameter <see cref="NewEntity"/> carries.</summary>
     public const string NewEntityParameter = "new";
@@ -102,10 +104,9 @@ internal static class AdminNavigation
     /// </remarks>
     public static bool IsNewEntity(string uri)
     {
-        var address = new Uri(uri);
-        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(address.Query);
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(uri).Query);
 
-        return address.AbsolutePath.TrimEnd('/').EndsWith($"{AlvoAdmin.BasePath}/schema", StringComparison.Ordinal)
+        return AdminPaths.IsAt(uri, AdminPaths.Schema)
             && query.TryGetValue(NewEntityParameter, out var value)
             && string.Equals(value.ToString(), "entity", StringComparison.Ordinal);
     }

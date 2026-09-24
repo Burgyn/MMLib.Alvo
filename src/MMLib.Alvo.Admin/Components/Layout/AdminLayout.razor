@@ -12,7 +12,7 @@
 
 <div class="a-shell">
     <nav class="a-sidebar" aria-label="Sections">
-        <a class="a-brand" href="@AlvoAdmin.BasePath" aria-label="Alvo">
+        <a class="a-brand" href="@AdminPaths.Overview" aria-label="Alvo">
             <img src="@AlvoAdminAssets.Mark" width="26" height="26" alt="" />
             <span>Alvo</span>
         </a>
@@ -241,7 +241,7 @@
     /// Overview is the dashboard's root, so a prefix match would mark it active on every screen.
     /// </summary>
     private static NavLinkMatch MatchFor(AdminSection entry)
-        => entry.Path == AlvoAdmin.BasePath ? NavLinkMatch.All : NavLinkMatch.Prefix;
+        => entry.Path == AdminPaths.Overview ? NavLinkMatch.All : NavLinkMatch.Prefix;
 
     /// <summary>
     /// The bar is five items wide at 375 px, so a label that wraps pushes the bar over the fold.

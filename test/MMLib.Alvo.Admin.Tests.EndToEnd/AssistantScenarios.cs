@@ -34,7 +34,7 @@ public sealed class AssistantScenarios(AssistantWorld world) : IClassFixture<Ass
             .ShouldContain("validate_descriptor");
 
         await session.Page.ClickAsync("[data-testid='assistant-review']");
-        await session.Page.WaitForURLAsync("**/schema/preview");
+        await session.Page.WaitForURLAsync("**/changes");
 
         await session.Page.ClickAsync("button:has-text('Plan this change')");
         await session.Page.GetByText("against the database").First.WaitForAsync();

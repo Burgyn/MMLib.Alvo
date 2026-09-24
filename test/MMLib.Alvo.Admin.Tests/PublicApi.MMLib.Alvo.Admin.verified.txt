@@ -331,7 +331,7 @@ namespace MMLib.Alvo.Admin.Components.Pages
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
     [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/schema/preview")]
+    [Microsoft.AspNetCore.Components.Route("/admin/changes")]
     public class Preview : Microsoft.AspNetCore.Components.ComponentBase
     {
         public Preview() { }
@@ -379,7 +379,7 @@ namespace MMLib.Alvo.Admin.Components.Pages
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/schema/transfer")]
+    [Microsoft.AspNetCore.Components.Route("/admin/transfer")]
     public class Transfer : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
     {
         public Transfer() { }

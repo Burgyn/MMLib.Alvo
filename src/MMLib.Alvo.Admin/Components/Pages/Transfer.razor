@@ -1,4 +1,4 @@
-﻿@page "/admin/schema/transfer"
+﻿@page "/admin/transfer"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
 @inject AdminSession Session
@@ -10,7 +10,7 @@
 <PageTitle>Import and export · Alvo</PageTitle>
 
 <div class="a-stack">
-    <PageHeader Eyebrow="Schema" EyebrowHref="@($"{AlvoAdmin.BasePath}/schema")" Title="Import and export" />
+    <PageHeader Eyebrow="Schema" EyebrowHref="@AdminPaths.Schema" Title="Import and export" />
 
     @if (_problem is not null)
     {
@@ -137,7 +137,7 @@
             return;
         }
 
-        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/preview");
+        Navigation.NavigateTo(AdminPaths.Changes);
     }
 
     public async ValueTask DisposeAsync()

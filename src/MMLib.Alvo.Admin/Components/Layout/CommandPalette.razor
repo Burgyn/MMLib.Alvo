@@ -146,7 +146,7 @@
             var schema = await Gateway.SchemaAsync(CancellationToken.None);
             foreach (var entity in schema.Entities)
             {
-                _entries.Add(new Entry(entity.Name, $"{AlvoAdmin.BasePath}/schema/{entity.Name}",
+                _entries.Add(new Entry(entity.Name, AdminPaths.Entity(entity.Name),
                     Icons.Schema, "entity"));
             }
         }

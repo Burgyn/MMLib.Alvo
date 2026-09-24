@@ -1,4 +1,4 @@
-@*
+﻿@*
     The schema assistant, as a drawer.
 
     It is mounted only when a connection resolves, so a deployment with no AI has no launcher, no
@@ -217,7 +217,7 @@
         copy.Replace(proposal.DescriptorJson);
         copy.SuggestReason(ReasonFor());
 
-        Navigation.NavigateTo("/admin/schema/preview");
+        Navigation.NavigateTo(AdminPaths.Changes);
     }
 
     /// <summary>

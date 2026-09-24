@@ -34,8 +34,8 @@
         An entity is a table Alvo creates and keeps in step with the descriptor. Add one in Schema,
         give it fields, and preview what the change does to the database before it runs.
         <div style="margin-top:var(--space-3)">
-            <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema")">Open Schema</a>
-            <a class="a-btn a-btn--ghost a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/transfer")">Import a descriptor</a>
+            <a class="a-btn a-btn--sm" href="@AdminPaths.Schema">Open Schema</a>
+            <a class="a-btn a-btn--ghost a-btn--sm" href="@AdminPaths.Transfer">Import a descriptor</a>
         </div>
     </Step>
 
@@ -44,7 +44,7 @@
         which is default-deny working rather than a gap. The Rules screen shows the predicate the
         engine compiled and answers <em>what would this caller get</em> with the engine's own verdict.
         <div style="margin-top:var(--space-3)">
-            <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/rules")">Open Rules</a>
+            <a class="a-btn a-btn--sm" href="@AdminPaths.Rules()">Open Rules</a>
         </div>
     </Step>
 
@@ -60,7 +60,7 @@
                 global.
             </text>
             <div style="margin-top:var(--space-3)">
-                <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/access")">Open Access</a>
+                <a class="a-btn a-btn--sm" href="@AdminPaths.Access">Open Access</a>
             </div>
         }
         else
@@ -79,7 +79,7 @@
             it somewhere else, and you have the same backend — which is why nothing in this dashboard
             can do something the descriptor cannot say.
         </p>
-        <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/schema/transfer")">Export the descriptor</a>
+        <a class="a-btn a-btn--sm" href="@AdminPaths.Transfer">Export the descriptor</a>
     </div>
 </div>
 

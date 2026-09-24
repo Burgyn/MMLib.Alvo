@@ -17,7 +17,7 @@
 {
     <EmptyState Title="This entity has no rules"
                 Body="Default-deny: with no rule for an operation, nobody reaches it through the Data API — not an empty page, a refusal.">
-        <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/rules/{Entity}")">Open Rules</a>
+        <a class="a-btn a-btn--sm" href="@AdminPaths.Rules(Entity)">Open Rules</a>
     </EmptyState>
 }
 else if (!Editable)

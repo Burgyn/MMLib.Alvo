@@ -87,7 +87,7 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     public async Task PreviewPendingAsync()
     {
         await Page.ClickAsync("[data-testid='pending-preview']").ConfigureAwait(false);
-        await Page.WaitForURLAsync("**/schema/preview").ConfigureAwait(false);
+        await Page.WaitForURLAsync("**/changes").ConfigureAwait(false);
         await Page.Locator("button:has-text('Plan this change')").WaitForAsync().ConfigureAwait(false);
     }
 

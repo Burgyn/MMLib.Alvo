@@ -9,10 +9,10 @@
 <PageTitle>@EntityName · Schema · Alvo</PageTitle>
 
 <div class="a-stack">
-    <PageHeader Eyebrow="Schema" EyebrowHref="@($"{AlvoAdmin.BasePath}/schema")" Title="@EntityName" Mono="true"
+    <PageHeader Eyebrow="Schema" EyebrowHref="@AdminPaths.Schema" Title="@EntityName" Mono="true"
                 Subtitle="@(_entity is null ? null : _entity.Description ?? "This entity has no description in the descriptor.")">
         <Secondary>
-            <a class="a-btn a-btn--sm" href="@($"{AlvoAdmin.BasePath}/data/{EntityName}")">Browse records</a>
+            <a class="a-btn a-btn--sm" href="@AdminPaths.Records(EntityName)">Browse records</a>
             @if (Copy.Loaded)
             {
                 <button type="button" class="a-btn a-btn--sm" data-testid="rename-entity"
@@ -104,9 +104,9 @@
         @* The staged rows' badges reach the tabs as a cascade, which keeps their model internal. *@
         <CascadingValue Value="_staged">
             <div class="a-panel" role="tabpanel" id="entity-tabpanel" aria-labelledby="@($"entity-tab-{_tab.Slug}")">
-                @switch (_tab.Title)
+                @switch (_tab.Slug)
                 {
-                    case "Fields":
+                    case EntityTabs.Fields:
                         @*
                             The control sits with the list's own heading rather than as a green block above
                             the first row, where it outweighed every field on the screen.
@@ -124,21 +124,21 @@
                         <Fields Entity="@FieldsView(_entity)" Editable="DeclaredHere"
                                 OnEdit="EditField" OnRemove="RemoveField" />
                         break;
-                    case "Relationships":
+                    case EntityTabs.Relationships:
                         <Relationships Entity="@_entity" Schema="_schema!" />
                         break;
-                    case "Rules":
+                    case EntityTabs.Rules:
                         <RulesTab Rules="_working" Entity="@EntityName" Editable="true" OnChanged="SetRule" />
                         break;
-                    case "On write":
+                    case EntityTabs.OnWrite:
                         <HooksTab Hooks="@_hooks" Editable="Copy.Loaded" Refused="_refused"
                                   OnAdd="AddHook" OnRemove="RemoveHook" />
                         break;
-                    case "Indexes":
+                    case EntityTabs.Indexes:
                         <Indexes Entity="@_entity" Declared="_indexes" Editable="Copy.Loaded"
                                  OnAdd="AddIndex" OnRemove="RemoveIndex" />
                         break;
-                    default:
+                    case EntityTabs.Api:
                         <ApiTab Entity="@_entity" />
                         break;
                 }
@@ -603,7 +603,7 @@
 
         var renamed = _newName;
         CloseRename();
-        Navigation.NavigateTo($"{AlvoAdmin.BasePath}/schema/{renamed}");
+        Navigation.NavigateTo(AdminPaths.Entity(renamed));
     }
 
     /// <summary>Drops one hook, and stays on the tab.</summary>

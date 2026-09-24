@@ -56,7 +56,7 @@ public sealed class ChangeTheBackendScenarios(AdminWorld world) : IClassFixture<
         }
 
         // --- the plan, then the apply
-        await session.GoAsync("/schema/preview");
+        await session.GoAsync("/changes");
         await session.Page.ClickAsync("button:has-text('Plan this change')");
         await session.Page.GetByText("against the database").First.WaitForAsync();
 
@@ -95,7 +95,7 @@ public sealed class ChangeTheBackendScenarios(AdminWorld world) : IClassFixture<
         await session.Page.GetByText("INV-1001-amended").First.WaitForAsync();
 
         // --- the descriptor carries what the editor sent, and the history says who and why
-        await session.GoAsync("/schema/transfer");
+        await session.GoAsync("/transfer");
         var descriptor = await session.Page.Locator("main.a-content").InnerTextAsync();
         descriptor.ShouldContain("invoices");
         /* The apostrophes matter. The editor writes the descriptor back out, and a JSON encoder

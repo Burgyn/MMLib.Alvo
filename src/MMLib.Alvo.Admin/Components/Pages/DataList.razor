@@ -41,7 +41,7 @@
             @foreach (var entity in _schema.Entities)
             {
                 <a class="a-row" style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4);text-decoration:none;color:inherit"
-                   href="@($"{AlvoAdmin.BasePath}/data/{entity.Name}")">
+                   href="@AdminPaths.Records(entity.Name)">
                     <Icon Path="@Icons.Data" />
                     <span class="a-mono" style="flex:1;font-size:var(--text-sm)">@entity.Name</span>
                     @if (entity.Tenancy == TenancyMode.Scoped)

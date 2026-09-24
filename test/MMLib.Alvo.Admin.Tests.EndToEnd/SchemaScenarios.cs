@@ -184,7 +184,7 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
     public async Task The_export_screen_shows_the_descriptor_as_stored()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await session.GoAsync("/schema/transfer");
+        await session.GoAsync("/transfer");
 
         var text = await session.Page.Locator("main.a-content").InnerTextAsync();
         text.ShouldContain("byte for byte");
@@ -205,7 +205,7 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
     public async Task An_imported_descriptor_with_a_name_the_schema_refuses_is_refused()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await session.GoAsync("/schema/transfer");
+        await session.GoAsync("/transfer");
 
         await session.Page.FillAsync(
             "#import-json",
@@ -213,7 +213,7 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.Page.ClickAsync("button:has-text('Load it into the working copy')");
         await session.SettleAsync();
 
-        session.Page.Url.ShouldContain("/schema/transfer");
+        session.Page.Url.ShouldContain("/transfer");
         (await session.Page.Locator(".a-error__title").InnerTextAsync())
             .ShouldContain("apply would refuse");
         session.AssertConsoleClean();

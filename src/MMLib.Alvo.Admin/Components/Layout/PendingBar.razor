@@ -24,7 +24,7 @@
             <button type="button" class="a-btn a-btn--ghost a-btn--sm" data-testid="pending-discard"
                     @onclick="() => _discarding = true">Discard</button>
             <a class="a-btn a-btn--primary a-btn--sm" data-testid="pending-preview"
-               href="@($"{AlvoAdmin.BasePath}/schema/preview")">Preview</a>
+               href="@AdminPaths.Changes">Preview</a>
         </span>
     </div>
 }
@@ -38,8 +38,7 @@
 
     private int Pending => _copy?.PendingCount ?? 0;
 
-    private bool OnPreview => new Uri(Navigation.Uri).AbsolutePath.TrimEnd('/')
-        .EndsWith($"{AlvoAdmin.BasePath}/schema/preview", StringComparison.OrdinalIgnoreCase);
+    private bool OnPreview => AdminPaths.IsAt(Navigation.Uri, AdminPaths.Changes);
 
     /// <summary>
     /// Follows this operator's copy, and every navigation.
