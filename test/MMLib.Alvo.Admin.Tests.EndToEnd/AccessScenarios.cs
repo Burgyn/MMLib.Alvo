@@ -44,8 +44,8 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.Page.GetByText("dispatcher@alvo.test").First.WaitForAsync();
 
         /* Addressed by the person's own id rather than by a row that happens to contain their
-           address: `.a-row` nests, so a text-scoped locator can match an ancestor whose "Change"
-           button belongs to somebody else. */
+           address: rows nest inside the panel, so a text-scoped locator can match an ancestor whose
+           "Change" button belongs to somebody else. */
         var person = await IdOfAsync(session, "dispatcher@alvo.test");
         await session.Page.ClickAsync($"#change-{person}");
         await session.Page.Locator($"#issue-token-{person}").WaitForAsync();
@@ -150,7 +150,7 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
     private static async Task<string> IdOfAsync(AdminSession session, string email)
     {
         var id = await session.Page
-            .Locator($".a-row[id^='person-']:has-text('{email}')").First
+            .Locator($"[id^='person-']:has-text('{email}')").First
             .GetAttributeAsync("id");
 
         id.ShouldNotBeNull($"no person row carries {email}");

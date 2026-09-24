@@ -27,62 +27,58 @@
     *@
     @if (_adding)
     {
-        <div class="a-panel" style="padding:var(--space-5)" data-testid="new-entity">
-            <div class="a-section" style="padding:0 0 var(--space-3)">
-                <span class="a-section-title">New entity</span>
-                <span class="a-section-sub">
-                    It arrives with one required <code class="a-mono">name</code> field, the smallest entity
-                    the schema admits, and opens on its Fields tab to add the rest. Nothing reaches the
-                    database until you preview and apply.
+        <Panel Padded="true" data-testid="new-entity" Title="New entity">
+            <Subtitle>
+                It arrives with one required <code class="a-mono">name</code> field, the smallest entity
+                the schema admits, and opens on its Fields tab to add the rest. Nothing reaches the
+                database until you preview and apply.
+            </Subtitle>
+            <ChildContent>
+                @if (_refusal is { Length: > 0 })
+                {
+                    <ErrorPanel Title="That entity cannot be added" Fix="@_refusal" />
+                }
+
+                <Field Label="Name" For="new-entity-name">
+                    <input class="a-input" id="new-entity-name" value="@_name" placeholder="e.g. invoices" @ref="_nameInput"
+                           @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
+                    <span class="a-hint" title="@DescriptorNames.Member">@DescriptorNames.Hint</span>
+                    @* Opened from the palette or the header button, the form is filled from the keyboard. *@
+                    @FocusOnRender.On(() => _nameInput)
+                </Field>
+
+                <Field Label="Constraints">
+                    <div class="a-check-row">
+                        <label class="a-check">
+                            <input type="checkbox" checked="@_scoped" @onchange="args => _scoped = args.Value is true" />
+                            <span>tenant-scoped</span>
+                        </label>
+                        <label class="a-check">
+                            <input type="checkbox" checked="@_audited" @onchange="args => _audited = args.Value is true" />
+                            <span>audited</span>
+                        </label>
+                    </div>
+                </Field>
+                <span class="a-hint">
+                    Scoped means every row belongs to a tenant and a caller with none is refused with 403.
+                    Audited adds the four stamp columns and a version, which is what makes a conditional
+                    write possible.
                 </span>
-            </div>
 
-            @if (_refusal is { Length: > 0 })
-            {
-                <ErrorPanel Title="That entity cannot be added" Fix="@_refusal" />
-            }
-
-            <div class="a-field">
-                <label class="a-label" for="new-entity-name">Name</label>
-                <input class="a-input" id="new-entity-name" value="@_name" placeholder="e.g. invoices" @ref="_nameInput"
-                       @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
-                <span class="a-section-sub" title="@DescriptorNames.Member">@DescriptorNames.Hint</span>
-                @* Opened from the palette or the header button, the form is filled from the keyboard. *@
-                @FocusOnRender.On(() => _nameInput)
-            </div>
-
-            <div class="a-field">
-                <span class="a-label">Constraints</span>
-                <div class="a-check-row">
-                    <label class="a-check">
-                        <input type="checkbox" checked="@_scoped" @onchange="args => _scoped = args.Value is true" />
-                        <span>tenant-scoped</span>
-                    </label>
-                    <label class="a-check">
-                        <input type="checkbox" checked="@_audited" @onchange="args => _audited = args.Value is true" />
-                        <span>audited</span>
-                    </label>
+                <div class="a-row a-row--gap-2" style="margin-top:var(--space-4)">
+                    <button type="button" class="a-btn a-btn--primary" @onclick="AddEntity">
+                        Add to the working copy
+                    </button>
+                    <button type="button" class="a-btn a-btn--ghost" data-testid="new-entity-cancel"
+                            @onclick="CancelAdding">Cancel</button>
                 </div>
-            </div>
-            <span class="a-section-sub">
-                Scoped means every row belongs to a tenant and a caller with none is refused with 403.
-                Audited adds the four stamp columns and a version, which is what makes a conditional
-                write possible.
-            </span>
-
-            <div class="a-row" style="gap:var(--space-2);margin-top:var(--space-4)">
-                <button type="button" class="a-btn a-btn--primary" @onclick="AddEntity">
-                    Add to the working copy
-                </button>
-                <button type="button" class="a-btn a-btn--ghost" data-testid="new-entity-cancel"
-                        @onclick="CancelAdding">Cancel</button>
-            </div>
-        </div>
+            </ChildContent>
+        </Panel>
     }
 
     @if (_schema is null)
     {
-        <div class="a-skeleton" style="height:220px"></div>
+        <Skeleton Size="Skeleton.SkeletonSize.Lg" />
     }
     else if (_schema.Entities.Count == 0)
     {
@@ -93,55 +89,51 @@
     }
     else
     {
-        <div class="a-panel">
-            <div class="a-section">
-                <span class="a-section-title">@_schema.Entities.Count entities</span>
-                <span class="a-section-sub">
-                    What the Data API actually serves — the descriptor after everything that did not
-                    survive it. Where the two differ is where <em>declared but not honoured</em> lives.
-                </span>
-            </div>
+        <Panel Title="@($"{_schema.Entities.Count} entities")">
+            <Subtitle>
+                What the Data API actually serves — the descriptor after everything that did not
+                survive it. Where the two differ is where <em>declared but not honoured</em> lives.
+            </Subtitle>
+            <ChildContent>
+                @foreach (var pending in Pending)
+                {
+                    <ListRow class="a-listrow--accent" OnClick="() => Open(pending)">
+                        <Icon Path="@Icons.Schema" />
+                        <span style="flex:1;min-width:0">
+                            <span class="a-mono" style="font-size:var(--text-sm);font-weight:var(--weight-medium)">@pending</span>
+                            <span class="a-switcher-meta">In the working copy. It does not exist in the database until you apply.</span>
+                        </span>
+                        <span class="a-badge a-badge--warn" style="flex:none">not applied yet</span>
+                    </ListRow>
+                }
 
-            @foreach (var pending in Pending)
-            {
-                <button type="button" class="a-row" style="width:100%;text-align:left;padding:var(--space-4);border:0;border-bottom:1px solid var(--border);background:var(--accentSoft);cursor:pointer;gap:var(--space-4);align-items:flex-start"
-                        @onclick="() => Open(pending)">
-                    <Icon Path="@Icons.Schema" />
-                    <span style="flex:1;min-width:0">
-                        <span class="a-mono" style="font-size:var(--text-sm);font-weight:var(--weight-medium)">@pending</span>
-                        <span class="a-switcher-meta">In the working copy. It does not exist in the database until you apply.</span>
-                    </span>
-                    <span class="a-badge a-badge--warn" style="flex:none">not applied yet</span>
-                </button>
-            }
-
-            @foreach (var entity in _schema.Entities)
-            {
-                <button type="button" class="a-row" style="width:100%;text-align:left;padding:var(--space-4);border:0;border-bottom:1px solid var(--border);background:transparent;cursor:pointer;gap:var(--space-4);align-items:flex-start"
-                        @onclick="() => Open(entity.Name)">
-                    <Icon Path="@Icons.Schema" />
-                    <span style="flex:1;min-width:0">
-                        <span class="a-mono" style="font-size:var(--text-sm);font-weight:var(--weight-medium)">@entity.Name</span>
-                        <span class="a-switcher-meta">@(entity.Description ?? "No description in the descriptor")</span>
-                    </span>
-                    <span class="p-hstack" style="display:flex;gap:var(--space-2);flex:none">
-                        <span class="a-badge">@entity.Fields.Count fields</span>
-                        @if (entity.Tenancy == TenancyMode.Scoped)
-                        {
-                            <span class="a-badge a-badge--accent">scoped</span>
-                        }
-                        @if (entity.Audit)
-                        {
-                            <span class="a-badge">audited</span>
-                        }
-                        @if (entity.SoftDelete)
-                        {
-                            <span class="a-badge">soft delete</span>
-                        }
-                    </span>
-                </button>
-            }
-        </div>
+                @foreach (var entity in _schema.Entities)
+                {
+                    <ListRow OnClick="() => Open(entity.Name)">
+                        <Icon Path="@Icons.Schema" />
+                        <span style="flex:1;min-width:0">
+                            <span class="a-mono" style="font-size:var(--text-sm);font-weight:var(--weight-medium)">@entity.Name</span>
+                            <span class="a-switcher-meta">@(entity.Description ?? "No description in the descriptor")</span>
+                        </span>
+                        <span class="a-row a-row--gap-2" style="flex:none">
+                            <span class="a-badge">@entity.Fields.Count fields</span>
+                            @if (entity.Tenancy == TenancyMode.Scoped)
+                            {
+                                <span class="a-badge a-badge--accent">scoped</span>
+                            }
+                            @if (entity.Audit)
+                            {
+                                <span class="a-badge">audited</span>
+                            }
+                            @if (entity.SoftDelete)
+                            {
+                                <span class="a-badge">soft delete</span>
+                            }
+                        </span>
+                    </ListRow>
+                }
+            </ChildContent>
+        </Panel>
     }
 </div>
 

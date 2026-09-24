@@ -17,7 +17,7 @@
 
     @if (!Copy.Loaded)
     {
-        <div class="a-skeleton" style="height:180px"></div>
+        <Skeleton />
     }
     else if (!Copy.IsDirty)
     {
@@ -33,19 +33,16 @@
             <span class="a-ident" style="display:block;margin-top:var(--space-1)">API: PUT …/descriptor?dryRun=true</span>
         </p>
 
-        <div class="a-panel">
-            <div class="a-section">
-                <span class="a-section-title">What changed</span>
-                <span class="a-section-sub">
-                    The descriptor as it would be sent, against revision @Copy.Revision.
-                </span>
-            </div>
-            <DescriptorDiff Before="@Copy.AppliedJson" After="@Copy.Json" Revision="@Copy.Revision" />
-        </div>
+        <Panel Title="What changed">
+            <Subtitle>The descriptor as it would be sent, against revision @Copy.Revision.</Subtitle>
+            <ChildContent>
+                <DescriptorDiff Before="@Copy.AppliedJson" After="@Copy.Json" Revision="@Copy.Revision" />
+            </ChildContent>
+        </Panel>
 
         @if (_plan is null)
         {
-            <div class="a-panel a-row" style="padding:var(--space-5);gap:var(--space-3)">
+            <Panel Padded="true" class="a-row">
                 <button type="button" class="a-btn a-btn--primary" disabled="@_busy" @onclick="PlanAsync">
                     Plan this change
                 </button>
@@ -53,46 +50,40 @@
                         data-testid="discard" @onclick="() => _discarding = true">
                     Discard them
                 </button>
-            </div>
+            </Panel>
         }
         else
         {
-            <div class="a-panel">
-                <div class="a-section">
-                    <span class="a-section-title">
-                        @(_plan.Plan.IsEmpty
-                            ? "No migration — the schema is unchanged"
-                            : $"{_plan.Plan.Steps.Count} step{(_plan.Plan.Steps.Count == 1 ? string.Empty : "s")} against the database")
-                    </span>
-                    <span class="a-section-sub">
-                        @(_plan.Plan.IsEmpty
-                            ? "A rules-only or access-only edit changes no table. It is still an apply, and it still appends a revision."
-                            : "In this order, in one transaction.")
-                    </span>
-                </div>
-
-                @foreach (var step in _plan.Plan.Steps.Select(PlanStep.Parse))
-                {
-                    <div class="a-row" data-testid="plan-step" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4);align-items:flex-start">
-                        <span class="@($"a-badge {(step.Destructive ? "a-badge--danger" : "a-badge--ok")}")" style="flex:none">
-                            @(step.Destructive ? "destroys" : "safe")
-                        </span>
-                        <span style="flex:1;min-width:0;font-size:var(--text-sm)">
-                            @* One expression with its trailing space: a bare `@step.Verb` followed by the element on
-                               the next line lost the whitespace between them ("Drop columncustomers.notes"). *@
-                            @($"{step.Verb} ")
-                            @if (step.Target.Length > 0)
-                            {
-                                <code class="a-mono">@step.Target</code>
-                            }
-                            @if (step.Consequence is { } consequence)
-                            {
-                                <text> — @consequence</text>
-                            }
-                        </span>
-                    </div>
-                }
-            </div>
+            <Panel Title="@PlanTitle(_plan.Plan)">
+                <Subtitle>
+                    @(_plan.Plan.IsEmpty
+                        ? "A rules-only or access-only edit changes no table. It is still an apply, and it still appends a revision."
+                        : "In this order, in one transaction.")
+                </Subtitle>
+                <ChildContent>
+                    @foreach (var step in _plan.Plan.Steps.Select(PlanStep.Parse))
+                    {
+                        <ListRow data-testid="plan-step">
+                            <span class="@($"a-badge {(step.Destructive ? "a-badge--danger" : "a-badge--ok")}")" style="flex:none">
+                                @(step.Destructive ? "destroys" : "safe")
+                            </span>
+                            <span style="flex:1;min-width:0;font-size:var(--text-sm)">
+                                @* One expression with its trailing space: a bare `@step.Verb` followed by the element on
+                                   the next line lost the whitespace between them ("Drop columncustomers.notes"). *@
+                                @($"{step.Verb} ")
+                                @if (step.Target.Length > 0)
+                                {
+                                    <code class="a-mono">@step.Target</code>
+                                }
+                                @if (step.Consequence is { } consequence)
+                                {
+                                    <text> — @consequence</text>
+                                }
+                            </span>
+                        </ListRow>
+                    }
+                </ChildContent>
+            </Panel>
 
             @if (_plan.Plan.HasDestructiveChanges)
             {
@@ -102,14 +93,15 @@
                                OnConfirmedChanged="confirmed => _allowed = confirmed" />
             }
 
-            <div class="a-panel" style="padding:var(--space-5)">
-                <div class="a-field">
-                    <label class="a-label" for="apply-reason">Why</label>
-                    <input class="a-input" id="apply-reason" value="@_reason" placeholder="@ReasonPlaceholder"
-                           @oninput="args => _reason = args.Value?.ToString() ?? string.Empty" />
-                    <span class="a-section-sub">Configuration history shows this on the revision forever.</span>
-                </div>
-            </div>
+            <Panel Padded="true">
+                <Field Label="Why" For="apply-reason">
+                    <ChildContent>
+                        <input class="a-input" id="apply-reason" value="@_reason" placeholder="@ReasonPlaceholder"
+                               @oninput="args => _reason = args.Value?.ToString() ?? string.Empty" />
+                    </ChildContent>
+                    <Hint>Configuration history shows this on the revision forever.</Hint>
+                </Field>
+            </Panel>
 
             <div class="a-toolbar">
                 <a class="a-btn a-btn--ghost a-btn--sm" href="@AdminPaths.Schema">Back to the editor</a>
@@ -117,8 +109,8 @@
                         data-testid="discard" @onclick="() => _discarding = true">
                     Discard them
                 </button>
-                <span style="margin-left:auto"></span>
-                <span class="a-section-sub">
+                <span class="a-spacer"></span>
+                <span class="a-hint">
                     Applying as yourself, against revision @Copy.Revision. If somebody applies first, this is
                     refused rather than written over theirs.
                 </span>
@@ -135,7 +127,7 @@
 
     @if (_applied is { } result)
     {
-        <div class="a-panel" style="padding:var(--space-5);border-color:var(--accentBorder)">
+        <Panel Padded="true" class="a-panel--accent">
             <span class="a-section-title">Applied as revision @result.Revision</span>
             <p class="a-section-sub">
                 @(result.Replayed
@@ -143,7 +135,7 @@
                     : "The migration ran and the revision was appended.")
             </p>
             <a class="a-btn a-btn--sm" href="@AdminPaths.History">Open Configuration history</a>
-        </div>
+        </Panel>
     }
 </div>
 
@@ -202,6 +194,10 @@
         _applied = null;
         Navigation.NavigateTo(AdminPaths.Schema);
     }
+
+    private static string PlanTitle(ManagementPlanSummary plan) => plan.IsEmpty
+        ? "No migration — the schema is unchanged"
+        : $"{plan.Steps.Count} step{(plan.Steps.Count == 1 ? string.Empty : "s")} against the database";
 
     private Task PlanAsync() => SendAsync(dryRun: true);
 

@@ -19,40 +19,31 @@
 
     @if (_warning is { } warning)
     {
-        <div class="a-notyet-panel">
-            <div class="a-section">
-                <span class="a-section-title">Not yet</span>
-                <span class="a-section-sub">
-                    This build parses <code class="a-mono">@warning.Block</code> and honours it nowhere.
-                    A descriptor that declares it applies cleanly; nothing runs.
-                </span>
-            </div>
-            <div class="a-notyet-panel__body">
-                <span class="a-notyet-panel__consequence">@warning.Consequence</span>
-            </div>
-        </div>
+        <NotYetPanel Title="Not yet" Consequence="@warning.Consequence">
+            <Subtitle>
+                This build parses <code class="a-mono">@warning.Block</code> and honours it nowhere.
+                A descriptor that declares it applies cleanly; nothing runs.
+            </Subtitle>
+        </NotYetPanel>
     }
     else if (_capabilities is not null)
     {
-        <div class="a-notyet-panel">
-            <div class="a-section">
-                <span class="a-section-title">Not yet</span>
-                <span class="a-section-sub">
-                    This build does not report <code class="a-mono">@Block</code> among the blocks it
-                    warns about, which means it is not part of the descriptor at all yet.
-                </span>
-            </div>
-        </div>
+        <NotYetPanel Title="Not yet">
+            <Subtitle>
+                This build does not report <code class="a-mono">@Block</code> among the blocks it
+                warns about, which means it is not part of the descriptor at all yet.
+            </Subtitle>
+        </NotYetPanel>
     }
     else
     {
-        <div class="a-skeleton" style="height:140px"></div>
+        <Skeleton />
     }
 
-    <div class="a-panel" style="padding:var(--space-5)">
+    <Panel Padded="true">
         <span class="a-section-title">What is here instead</span>
         <p class="a-section-sub">@Alternative</p>
-    </div>
+    </Panel>
 </div>
 
 @code {
