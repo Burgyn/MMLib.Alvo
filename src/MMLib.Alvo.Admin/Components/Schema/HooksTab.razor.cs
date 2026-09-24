@@ -30,6 +30,11 @@ public partial class HooksTab
 
     private readonly HookBuilder _hook = new();
     private string? _refusal;
+    private int _refusals;
+    private bool _adding;
+    private HookAt? _removing;
+    private string? _reveal;
+    private int _reveals;
 
     /// <summary>The hooks, as the descriptor declares them: point to the raw JSON of its list.</summary>
     [Parameter, EditorRequired]
@@ -123,12 +128,42 @@ public partial class HooksTab
     {
         if (_hook.Build(out _refusal) is not { } action)
         {
+            _refusals++;
             return;
         }
 
-        await OnAdd.InvokeAsync(new NewHook(_hook.Point, _hook.Condition, action));
+        /* The working copy appends to the point's list, so the new hook lands after the ones drawn there now. */
+        var point = _hook.Point;
+        var position = Declared(Hooks.FirstOrDefault(declared => declared.Key == point).Value ?? "[]").Count;
+        await OnAdd.InvokeAsync(new NewHook(point, _hook.Condition, action));
+        _reveal = RowId(point, position);
+        _reveals++;
+        CloseAdding();
+    }
 
+    /// <summary>Closes the editor and forgets what was typed; the point and the kind stay for the next hook.</summary>
+    private void CloseAdding()
+    {
         _hook.Clear();
         _refusal = null;
+        _adding = false;
     }
+
+    /// <summary>Whether the editor holds anything typed, which closing would lose.</summary>
+    private bool Dirty => _hook.Condition.Length > 0 || _hook.RejectMessage.Length > 0 || _hook.MutateField.Length > 0
+        || _hook.MutateValue.Length > 0 || _hook.Endpoint.Length > 0 || _hook.Template.Length > 0 || _hook.To.Length > 0;
+
+    /// <summary>The confirm's verb: asks the entity screen to drop the hook that was asked about.</summary>
+    private async Task RemoveAsync()
+    {
+        if (_removing is { } at)
+        {
+            _removing = null;
+            await OnRemove.InvokeAsync(at);
+        }
+    }
+
+    /// <summary>One hook row's element id, by where it sits.</summary>
+    private static string RowId(string point, int position) => $"hook-{point}-{position}";
+
 }

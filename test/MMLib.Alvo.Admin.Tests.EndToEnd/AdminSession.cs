@@ -130,6 +130,34 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
             "() => { const e = document.activeElement; if (!e) return '';"
             + " return `${e.tagName.toLowerCase()}#${e.id}[${e.getAttribute('data-testid') ?? ''}]`; }");
 
+    /// <summary>
+    /// Waits for <paramref name="element"/> to be in view: its box inside the visible rectangle of the nearest
+    /// ancestor that scrolls, or of the window when none does (spec §3.5, a new item is scrolled to).
+    /// </summary>
+    /// <param name="element">The element, which must be attached.</param>
+    public async Task WaitForInViewAsync(ILocator element)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        var handle = await element.ElementHandleAsync().ConfigureAwait(false);
+        await Page.WaitForFunctionAsync(
+            """
+            el => {
+              const box = el.getBoundingClientRect();
+              let top = 0, bottom = window.innerHeight;
+              for (let p = el.parentElement; p; p = p.parentElement) {
+                const style = getComputedStyle(p);
+                if (/(auto|scroll)/.test(style.overflowY) && p.scrollHeight > p.clientHeight) {
+                  const frame = p.getBoundingClientRect();
+                  top = Math.max(top, frame.top);
+                  bottom = Math.min(bottom, frame.bottom);
+                  break;
+                }
+              }
+              return box.height > 0 && box.top >= top - 1 && box.bottom <= bottom + 1;
+            }
+            """, handle, _polling).ConfigureAwait(false);
+    }
+
     /// <summary>Whether focus is inside the element with <paramref name="testId"/>.</summary>
     /// <param name="testId">The container's test id.</param>
     /// <returns><see langword="true"/> when the focused element is it or inside it.</returns>

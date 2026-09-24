@@ -369,6 +369,31 @@
     }
   };
 
+  /* --- Tab strip names ---------------------------------------------------
+     MudTabs puts its own attributes on its outer frame and draws role=tablist a
+     level inside, where no parameter reaches, so the strip lost the name the
+     WAI-ARIA tabs pattern gives it ("work_orders sections"). A frame that says
+     data-alvo-tablist-label hands that name to its tablist, and again whenever
+     the circuit redraws the strip.
+     ---------------------------------------------------------------------- */
+
+  const nameTablists = () => {
+    document.querySelectorAll('[data-alvo-tablist-label]').forEach((frame) => {
+      const label = frame.getAttribute('data-alvo-tablist-label');
+      const list = frame.querySelector('[role="tablist"]');
+      if (list && list.getAttribute('aria-label') !== label) {
+        list.setAttribute('aria-label', label);
+      }
+    });
+  };
+
+  new MutationObserver(nameTablists).observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['data-alvo-tablist-label'],
+  });
+
   applyStored();
   followSystem();
   applyStoredAside();

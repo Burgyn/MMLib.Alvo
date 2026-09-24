@@ -784,11 +784,6 @@
     border-top: 1px solid var(--border);
   }
 
-  /* The buttons a padded panel's form ends with, a step below its last field. */
-  .a-panel__actions {
-    margin-top: var(--space-4);
-  }
-
   /* The controls under a block of prose, a line below it. */
   .a-actions {
     margin-top: var(--space-3);
@@ -1379,12 +1374,6 @@
     cursor: pointer;
   }
 
-  .a-check-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2) var(--space-5);
-  }
-
   /* What a record form could not read in a control, under the control. Only the text is red: the
      refusal from the engine is the panel at the top of the sheet, and this is not that. */
   .a-field__problem {
@@ -1694,10 +1683,12 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* The library's chip metrics (its 32 px height and pill), so a ChipGroup sits beside a Mud control as one family. */
   .a-chip {
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
+    min-height: var(--space-8);
     padding: var(--space-1) var(--space-3);
     border: 1px solid var(--border);
     border-radius: var(--radius-pill);
@@ -3051,6 +3042,21 @@
   .mud-tab {
     text-transform: none;
     letter-spacing: normal;
+  }
+
+  /* The entity's tab strip: a rule under it, as the hand-rolled strip had, and the open tab's panel a step below. */
+  .a-entitytabs .mud-tabs-tabbar {
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+  }
+
+  .a-entitytabs .mud-tabs-panels {
+    padding-top: var(--space-4);
+  }
+
+  /* The entity list's filter: as wide as a name needs, not the whole row. */
+  .a-filter {
+    max-width: 360px;
   }
 
   /* An outlined input draws its own focused border; a second ring inside it is noise, not a signal. */

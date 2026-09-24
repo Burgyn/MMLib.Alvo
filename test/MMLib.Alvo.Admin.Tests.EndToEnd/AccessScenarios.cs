@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Tests.EndToEnd;
+﻿using Microsoft.Playwright;
+
+namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
 /// Administering the people who can reach the project.
@@ -89,7 +91,7 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
 
         /* The administrator holds only the built-in `admin` role, so a declared role is known to be
            unassigned on their row. */
-        (await session.Page.Locator($"#person-{me} .a-choice button:has-text('dispatcher')")
+        (await session.Page.Locator($"#person-{me}").GetByRole(AriaRole.Button, new() { Name = "dispatcher", Exact = true })
             .GetAttributeAsync("aria-pressed")).ShouldBe("false");
 
         // --- another person's row keeps both tenant controls, and a role pressed there reads as assigned
@@ -104,11 +106,12 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
         (await session.Page.Locator($"#grant-tenant-{peer}").CountAsync()).ShouldBe(1);
         (await session.Page.Locator($"#clear-tenant-{peer}").CountAsync()).ShouldBe(1);
 
-        var dispatcher = session.Page.Locator($"#person-{peer} .a-choice button:has-text('dispatcher')");
+        var dispatcher = session.Page.Locator($"#person-{peer}")
+            .GetByRole(AriaRole.Button, new() { Name = "dispatcher", Exact = true });
         (await dispatcher.GetAttributeAsync("aria-pressed")).ShouldBe("false");
         await dispatcher.ClickAsync();
-        await session.Page.Locator(
-            $"#person-{peer} .a-choice button[aria-pressed='true']:has-text('dispatcher')").WaitForAsync();
+        await session.Page.Locator($"#person-{peer}")
+            .GetByRole(AriaRole.Button, new() { Name = "dispatcher", Exact = true, Pressed = true }).WaitForAsync();
 
         session.AssertConsoleClean();
     }

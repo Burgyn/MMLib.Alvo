@@ -19,7 +19,6 @@ public partial class Entity
     /// </remarks>
     private WorkingCopy Copy { get; set; } = new();
 
-    private readonly Dictionary<string, ElementReference> _tabRefs = new(StringComparer.Ordinal);
     private SchemaModel? _schema;
     private EntitySchema? _entity;
     private IReadOnlyList<KeyValuePair<string, string>> _rules = [];
@@ -55,6 +54,7 @@ public partial class Entity
     {
         FollowAddress();
         _tab = EntityTabs.FromUri(Navigation.Uri);
+        ForgetOtherEntitysRules();
 
         try
         {
@@ -179,11 +179,10 @@ public partial class Entity
 
     /// <summary>Opens a tab by putting it in the address, so a reload, a link and Back all agree.</summary>
     /// <remarks>
-    /// A click is a step in history; an arrow key <paramref name="replace"/>s it, because walking the
-    /// strip with the arrows is one visit, and six Back presses to leave it would be six too many. The tab
-    /// already open is left alone — a second click on it is not a second step either.
+    /// Opening a tab is a step in history. The arrows only move focus along the strip now (MudTabs), so a walk
+    /// along it adds no steps; the tab already open is left alone, so a second press on it is not a step either.
     /// </remarks>
-    private void Open(EntityTab tab, bool replace = false)
+    private void Open(EntityTab tab)
     {
         if (tab == _tab)
         {
@@ -191,25 +190,14 @@ public partial class Entity
         }
 
         _tab = tab;
-        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter(EntityTabs.Parameter, tab.Slug), replace: replace);
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter(EntityTabs.Parameter, tab.Slug));
     }
 
-    /// <summary>The arrows, Home and End on the strip: open the tab they reach and move focus onto it.</summary>
-    /// <remarks>
-    /// Every tab is always drawn, so the one being moved to already has its element and takes focus now;
-    /// the render that follows only moves the roving <c>tabindex</c> after it.
-    /// </remarks>
-    private async Task Move(string key)
-    {
-        if (EntityTabs.Move(_tab, key) is { } next)
-        {
-            Open(next, replace: true);
-            if (_tabRefs.TryGetValue(next.Slug, out var element))
-            {
-                await element.FocusAsync();
-            }
-        }
-    }
+    /// <summary>A tab chosen in the strip; the URL follows, exactly as a click on the old strip made it.</summary>
+    private void OpenAt(int index) => Open(EntityTabs.All[index]);
+
+    /// <summary>The open tab's position in the strip.</summary>
+    private int ActiveIndex => EntityTabs.All.ToList().IndexOf(_tab);
 
     /// <summary>An entity only the working copy declares, read again from it — gone once it is discarded.</summary>
     private void ReadPendingEntity()
@@ -299,6 +287,7 @@ public partial class Entity
     {
         Copy.SetRule(EntityName, change.Operation, change.Cel);
         ReadWorking();
+        Snackbar.Confirm("Rule saved to the working copy");
     }
 
     /// <summary>
@@ -394,6 +383,7 @@ public partial class Entity
     {
         Copy.AddIndex(EntityName, index.Fields, index.Unique);
         ReadWorking();
+        Snackbar.Confirm("Index added to the working copy");
     }
 
     /// <summary>
@@ -406,9 +396,9 @@ public partial class Entity
     private void RemoveIndex(int position)
     {
         /* Against the index this screen drew there, so a position another tab has since moved removes nothing. */
-        if (position >= 0 && position < _indexes.Count)
+        if (position >= 0 && position < _indexes.Count && Copy.RemoveIndex(EntityName, position, _indexes[position]))
         {
-            Copy.RemoveIndex(EntityName, position, _indexes[position]);
+            Snackbar.Confirm("Removed from the working copy");
         }
 
         ReadWorking();
@@ -425,6 +415,7 @@ public partial class Entity
     {
         Copy.AddHook(EntityName, added.Point, added.Condition, added.Action);
         ReadWorking();
+        Snackbar.Confirm("Hook added to the working copy");
     }
 
     /// <summary>Opens the rename sheet, prefilled with the name it has.</summary>
@@ -470,9 +461,9 @@ public partial class Entity
     {
         /* Against the list this screen drew, for RemoveIndex's reason. */
         var drawn = _hooks.FirstOrDefault(point => point.Key == at.Point).Value;
-        if (drawn is not null)
+        if (drawn is not null && Copy.RemoveHook(EntityName, at.Point, at.Position, drawn))
         {
-            Copy.RemoveHook(EntityName, at.Point, at.Position, drawn);
+            Snackbar.Confirm("Removed from the working copy");
         }
 
         ReadWorking();

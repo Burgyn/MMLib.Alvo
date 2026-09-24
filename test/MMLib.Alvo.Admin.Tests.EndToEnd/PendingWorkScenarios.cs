@@ -74,7 +74,9 @@ public sealed class PendingWorkScenarios(AdminWorld world) : IClassFixture<Admin
 
         /* And an index, so the discard is confirmed from a tab other than the one the page opens on. */
         await session.OpenTabAsync("Indexes");
-        await session.Page.ClickAsync("[data-testid='index-fields'] button:has-text('code')");
+        await session.Page.GetByTestId("index-new").ClickAsync();
+        await session.Dialog("index-editor").GetByTestId("index-fields")
+            .GetByRole(AriaRole.Button, new() { Name = "code", Exact = true }).ClickAsync();
         await session.Page.ClickAsync("[data-testid='index-add']");
         await session.Page.Locator("[data-testid='index-staged']").WaitForAsync();
 
@@ -91,7 +93,7 @@ public sealed class PendingWorkScenarios(AdminWorld world) : IClassFixture<Admin
 
         /* The screen followed the copy rather than being reloaded: still on the tab it was on — which the
            address carries now, so it is still the address the tab click left. */
-        (await session.Page.Locator("button.a-tab--active:has-text('Indexes')").CountAsync()).ShouldBe(1);
+        (await session.Page.GetByRole(AriaRole.Tab, new() { Name = "Indexes", Selected = true }).CountAsync()).ShouldBe(1);
         session.Page.Url.ShouldEndWith("/schema/regions?tab=indexes");
 
         await session.OpenTabAsync("Fields");

@@ -122,7 +122,8 @@ public sealed class IndexEditingScenarios(AdminWorld world) : IClassFixture<Admi
 
         var before = await session.Page.Locator("[data-testid='index-row']").CountAsync();
 
-        var fields = session.Page.GetByTestId("index-fields");
+        await session.Page.GetByTestId("index-new").ClickAsync();
+        var fields = session.Dialog("index-editor").GetByTestId("index-fields");
         await fields.GetByRole(AriaRole.Button, new() { Name = "scheduled_for", Exact = true }).ClickAsync();
         await fields.GetByRole(AriaRole.Button, new() { Name = "status", Exact = true }).ClickAsync();
         await session.Page.ClickAsync("[data-testid='index-add']");
@@ -154,15 +155,21 @@ public sealed class IndexEditingScenarios(AdminWorld world) : IClassFixture<Admi
 
         var before = await session.Page.Locator("[data-testid='index-row']").CountAsync();
 
-        await session.Page.ClickAsync("[data-testid='index-add']");
+        await session.Page.GetByTestId("index-new").ClickAsync();
 
-        /* Waited for rather than read: a click returns when it is dispatched, and the re-render that
-           carries the refusal arrives a circuit round trip later. Reading the page straight after the
-           click measures the frame before the one under test. */
-        await session.Page.Locator("[data-testid='index-refusal']").WaitForAsync();
+        /* Twice, because every refused submit moves focus to the alert (spec §3.3), not only the first; the add
+           button takes focus back in between, the way an operator presses it again. Waited for rather than read:
+           the re-render that carries the refusal arrives a circuit round trip after the key. */
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            await session.Page.GetByTestId("index-add").FocusAsync();
+            await session.Page.Keyboard.PressAsync("Enter");
+            await session.Page.WaitForFunctionAsync("() => document.activeElement?.dataset.testid === 'index-refusal'");
+        }
 
         (await session.Page.Locator("[data-testid='index-refusal']").InnerTextAsync())
             .ShouldContain("at least one field");
+        (await session.SnackbarCountAsync()).ShouldBe(0, "an error is never a snackbar");
         (await session.Page.Locator("[data-testid='index-row']").CountAsync()).ShouldBe(before);
 
         session.AssertConsoleClean();
@@ -190,6 +197,7 @@ public sealed class IndexEditingScenarios(AdminWorld world) : IClassFixture<Admi
         var went = await rows.First.InnerTextAsync();
 
         await session.Page.Locator("[data-testid='index-remove']").First.ClickAsync();
+        await session.Dialog("remove-index").GetByTestId("remove-index-run").ClickAsync();
 
         await rows.Nth(before - 1).WaitForAsync(
             new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
@@ -219,7 +227,7 @@ public sealed class IndexEditingScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Page.ClickAsync("[data-testid='edit-field-title']");
         await session.Page.GetByText("Edit title").WaitForAsync();
 
-        await session.Page.CheckAsync("[data-testid='field-index']");
+        await session.Dialog("field-sheet").GetByRole(AriaRole.Checkbox, new() { Name = "indexed", Exact = true }).CheckAsync();
         await session.Page.ClickAsync("[data-testid='field-save']");
 
         /* And then for something *on* the preview, which PreviewPendingAsync waits for. The URL moves before
@@ -230,7 +238,7 @@ public sealed class IndexEditingScenarios(AdminWorld world) : IClassFixture<Admi
 
         /* The preview's diff, not the export screen: export serves the *applied* document, and this
            change has deliberately not been applied. */
-        (await session.Page.Locator("main.a-content").InnerTextAsync())
+        (await session.Content.InnerTextAsync())
             .ShouldContain("\"index\": true");
 
         session.AssertConsoleClean();
@@ -268,6 +276,7 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
         await session.OpenTabAsync("On write");
+        await session.Page.GetByTestId("hook-new").ClickAsync();
 
         var before = await session.Page.Locator("[data-testid='hook-row']").CountAsync();
 
@@ -315,15 +324,16 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
         await session.OpenTabAsync("On write");
+        await session.Page.GetByTestId("hook-new").ClickAsync();
 
-        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('afterCreate')");
-        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('webhook')").WaitForAsync();
+        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "afterCreate", Exact = true }).ClickAsync();
+        await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "webhook", Exact = true }).WaitForAsync();
 
-        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeCreate')");
+        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeCreate", Exact = true }).ClickAsync();
 
-        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('webhook')").WaitForAsync(
+        await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "webhook", Exact = true }).WaitForAsync(
             new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
-        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('reject')").WaitForAsync();
+        await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "reject", Exact = true }).WaitForAsync();
 
         session.AssertConsoleClean();
     }
@@ -344,15 +354,16 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
         await session.OpenTabAsync("On write");
+        await session.Page.GetByTestId("hook-new").ClickAsync();
 
-        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeUpdate')");
-        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('mutate')").WaitForAsync();
+        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeUpdate", Exact = true }).ClickAsync();
+        await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "mutate", Exact = true }).WaitForAsync();
 
-        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeDelete')");
+        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeDelete", Exact = true }).ClickAsync();
 
-        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('mutate')").WaitForAsync(
+        await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "mutate", Exact = true }).WaitForAsync(
             new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
-        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('reject')").WaitForAsync();
+        await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "reject", Exact = true }).WaitForAsync();
 
         session.AssertConsoleClean();
     }
@@ -372,23 +383,24 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
         await session.OpenTabAsync("On write");
+        await session.Page.GetByTestId("hook-new").ClickAsync();
 
-        var guidance = session.Page.Locator("#hook-condition").Locator("xpath=following-sibling::span[1]");
+        var guidance = session.Page.GetByTestId("hook-condition-hint");
 
-        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeCreate')");
-        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('mutate')").WaitForAsync();
+        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeCreate", Exact = true }).ClickAsync();
+        await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "mutate", Exact = true }).WaitForAsync();
 
         var onCreate = await guidance.InnerTextAsync();
         onCreate.ShouldContain("new");
         onCreate.ShouldNotContain("old");
 
-        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeDelete')");
+        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeDelete", Exact = true }).ClickAsync();
 
         /* Waited on, not read straight after the click: `InnerTextAsync` does not retry, so reading here
            reads the frame the click has not yet replaced — which is what this scenario did first, and it
            reported the beforeCreate wording under beforeDelete. The mutate chip leaving is the signal that
            the re-render arrived. */
-        await session.Page.Locator("[data-testid='hook-actions'] button:has-text('mutate')").WaitForAsync(
+        await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "mutate", Exact = true }).WaitForAsync(
             new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
 
         var onDelete = await guidance.InnerTextAsync();
@@ -412,13 +424,15 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
         await session.OpenTabAsync("On write");
+        await session.Page.GetByTestId("hook-new").ClickAsync();
 
         var before = await session.Page.Locator("[data-testid='hook-row']").CountAsync();
 
-        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeDelete')");
+        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeDelete", Exact = true }).ClickAsync();
         await session.Page.ClickAsync("[data-testid='hook-add']");
 
         await session.Page.Locator("[data-testid='hook-refusal']").WaitForAsync();
+        await session.Page.WaitForFunctionAsync("() => document.activeElement?.dataset.testid === 'hook-refusal'");
         (await session.Page.Locator("[data-testid='hook-refusal']").InnerTextAsync())
             .ShouldContain("the message the caller reads");
         (await session.Page.Locator("[data-testid='hook-row']").CountAsync()).ShouldBe(before);
@@ -465,8 +479,9 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
         await session.GoAsync("/schema/work_orders");
         await session.OpenTabAsync("On write");
+        await session.Page.GetByTestId("hook-new").ClickAsync();
 
-        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeUpdate')");
+        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeUpdate", Exact = true }).ClickAsync();
         await session.Page.FillAsync("#hook-condition", "old.status == 'completed' && new.status != 'completed'");
         await session.Page.FillAsync("#hook-reject", "A completed work order cannot be reopened.");
         await session.Page.ClickAsync("[data-testid='hook-add']");
@@ -494,8 +509,9 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
         await session.OpenTabAsync("On write");
+        await session.Page.GetByTestId("hook-new").ClickAsync();
 
-        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeUpdate')");
+        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeUpdate", Exact = true }).ClickAsync();
         await session.Page.FillAsync("#hook-condition", "old.status == 'completed' && new.status != 'completed'");
         await session.Page.FillAsync("#hook-reject", "A completed work order cannot be reopened.");
         await session.Page.ClickAsync("[data-testid='hook-add']");
@@ -519,18 +535,28 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
         await session.OpenTabAsync("On write");
+        await session.Page.GetByTestId("hook-new").ClickAsync();
 
         var rows = session.Page.Locator("[data-testid='hook-row']");
         var before = await rows.CountAsync();
 
-        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('afterDelete')");
+        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "afterDelete", Exact = true }).ClickAsync();
         await session.Page.FillAsync("#hook-endpoint", "dispatch");
         await session.Page.ClickAsync("[data-testid='hook-add']");
         await rows.Nth(before).WaitForAsync();
 
+        /* Cancel keeps it; the verb removes it, once, however fast it is pressed twice (spec §3.2, §3.4). */
         await session.Page.Locator("[data-testid='hook-remove']").Last.ClickAsync();
+        await session.Dialog("remove-hook").GetByTestId("remove-hook-cancel").ClickAsync();
+        (await rows.CountAsync()).ShouldBe(before + 1);
+
+        await session.Page.Locator("[data-testid='hook-remove']").Last.ClickAsync();
+        await session.Dialog("remove-hook").GetByTestId("remove-hook-run").DblClickAsync();
         await rows.Nth(before).WaitForAsync(
             new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+        await session.SettleAsync();
+        (await rows.CountAsync()).ShouldBe(before);
+        (await session.SnackbarCountAsync("Removed from the working copy")).ShouldBe(1);
 
         session.AssertConsoleClean();
     }
@@ -599,7 +625,7 @@ public sealed class RenameScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.Page.ClickAsync("[data-testid='field-save']");
         await session.PreviewPendingAsync();
 
-        var previewed = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var previewed = await session.Content.InnerTextAsync();
         previewed.ShouldContain("contact_email");
         previewed.ShouldContain("\"renamedFrom\": \"email\"");
 

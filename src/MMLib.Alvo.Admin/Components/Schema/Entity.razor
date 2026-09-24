@@ -13,11 +13,13 @@
     <PageHeader Eyebrow="Schema" EyebrowHref="@AdminPaths.Schema" Title="@EntityName" Mono="true"
                 Subtitle="@(_entity is null ? null : _entity.Description ?? "This entity has no description in the descriptor.")">
         <Secondary>
-            <a class="a-btn a-btn--sm" href="@AdminPaths.Records(EntityName)">Browse records</a>
+            <AlvoButton Small="true" Href="@AdminPaths.Records(EntityName)">Browse records</AlvoButton>
             @if (Copy.Loaded)
             {
-                <button type="button" class="a-btn a-btn--sm" data-testid="rename-entity"
-                        @onclick="OpenRename">Rename</button>
+                @* ClickPropagation reaches the library's button through AlvoButton's attributes: the phone's overflow
+                   region closes and takes focus on the click, and the library's button stops a click by default. *@
+                <AlvoButton Small="true" data-testid="rename-entity" ClickPropagation="@true"
+                            OnClick="_ => OpenRename()">Rename</AlvoButton>
             }
         </Secondary>
     </PageHeader>
@@ -103,73 +105,28 @@
         </div>
 
         @*
-            The WAI-ARIA tabs pattern: one tab in the Tab order, the arrows move between them. The
-            selected state is spelled "true"/"false" because Blazor renders a bool attribute the HTML way.
+            MudTabs owns the WAI-ARIA tabs pattern now: the arrows move focus along the strip, Enter or Space opens
+            the focused tab. The open tab is still the address's ?tab=, so a reload, a link and Back all agree.
+            Only the open tab's body is drawn.
         *@
-        <div class="a-tabs" role="tablist" aria-label="@($"{EntityName} sections")">
+        <MudTabs ActivePanelIndex="@ActiveIndex" ActivePanelIndexChanged="OpenAt"
+                 Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-entitytabs"
+                 data-alvo-tablist-label="@($"{EntityName} sections")">
             @foreach (var tab in EntityTabs.All)
             {
-                var selected = tab == _tab;
-                <button type="button" role="tab" id="@($"entity-tab-{tab.Slug}")"
-                        aria-selected="@(selected ? "true" : "false")" aria-controls="entity-tabpanel"
-                        tabindex="@(selected ? 0 : -1)" @ref="_tabRefs[tab.Slug]"
-                        class="@($"a-tab{(selected ? " a-tab--active" : string.Empty)}")"
-                        @onclick="() => Open(tab)" @onkeydown="args => Move(args.Key)">@tab.Title</button>
+                <MudTabPanel Text="@tab.Title" ID="@tab.Slug">
+                    @if (tab == _tab)
+                    {
+                        @* The staged rows' badges reach the tabs as a cascade, which keeps their model internal. *@
+                        <CascadingValue Value="_staged">
+                            <CascadingValue Value="_ruleDrafts">
+                                <Panel data-testid="entity-tabpanel">@TabContent(tab)</Panel>
+                            </CascadingValue>
+                        </CascadingValue>
+                    }
+                </MudTabPanel>
             }
-        </div>
-
-        @* The staged rows' badges reach the tabs as a cascade, which keeps their model internal. *@
-        <CascadingValue Value="_staged">
-            <Panel role="tabpanel" id="entity-tabpanel" aria-labelledby="@($"entity-tab-{_tab.Slug}")">
-                @switch (_tab.Slug)
-                {
-                    case EntityTabs.Fields:
-                        @*
-                            The control sits with the list's own heading rather than as a green block above
-                            the first row, where it outweighed every field on the screen.
-                        *@
-                        <SectionHead Title="Declared fields">
-                            <Actions>
-                                @if (Copy.Loaded)
-                                {
-                                    <button type="button" class="a-btn a-btn--sm" data-testid="add-field"
-                                            @onclick="AddField">Add a field</button>
-                                }
-                            </Actions>
-                        </SectionHead>
-                        @if (_renameLeftovers is { Uncarried.Count: > 0 } leftovers)
-                        {
-                            <p class="a-note" data-testid="rename-leftovers">
-                                <code class="a-mono">@leftovers.From</code> is renamed, and these still name it — the
-                                rename could not rewrite them safely, and the apply refuses them until they are edited:
-                                <span class="a-mono">@string.Join(", ", leftovers.Uncarried.Select(reference => reference.Place))</span>
-                            </p>
-                        }
-                        <Fields Entity="@FieldsView(_entity)" Editable="DeclaredHere"
-                                OnEdit="EditField" OnRemove="RemoveField" />
-                        break;
-                    case EntityTabs.Relationships:
-                        <Relationships Entity="@_entity" Schema="_schema!"
-                                       DescriptorJson="@(Copy.Loaded ? Copy.Json : null)"
-                                       AppliedJson="@(Copy.Loaded ? Copy.AppliedJson : null)" />
-                        break;
-                    case EntityTabs.Rules:
-                        <RulesTab Rules="_working" Entity="@EntityName" Editable="true" OnChanged="SetRule" />
-                        break;
-                    case EntityTabs.OnWrite:
-                        <HooksTab Hooks="@_hooks" Editable="Copy.Loaded" Refused="_refused"
-                                  OnAdd="AddHook" OnRemove="RemoveHook" />
-                        break;
-                    case EntityTabs.Indexes:
-                        <Indexes Entity="@_entity" Declared="_indexes" Editable="Copy.Loaded"
-                                 OnAdd="AddIndex" OnRemove="RemoveIndex" />
-                        break;
-                    case EntityTabs.Api:
-                        <ApiTab Entity="@_entity" />
-                        break;
-                }
-            </Panel>
-        </CascadingValue>
+        </MudTabs>
 
         @*
             The editor is a sheet now, so it is on the page only while somebody is editing. As a
@@ -186,3 +143,70 @@
         }
     }
 </div>
+
+@*
+    Leaving the entity with a rule typed and not saved asks first (spec §3.1: nothing is saved on blur, so nothing is
+    saved on the way out either). Moving between this entity's tabs does not ask: the drafts belong to the screen, not
+    to the tab, and the Rules tab still shows them marked unsaved on the way back.
+*@
+<NavigationLock OnBeforeInternalNavigation="GuardRules" ConfirmExternalNavigation="@UnsavedRules" />
+<AlvoConfirm Open="_leavingTo is not null" TestId="unsaved-rules" ConfirmTestId="unsaved-rules-discard"
+             CancelTestId="unsaved-rules-keep" Title="Discard the unsaved rules?"
+             Consequence="A rule you typed on this entity has not been saved to the working copy, and leaving loses it."
+             Verb="Discard and leave" OnConfirm="LeaveDiscardingRules" OnCancel="() => _leavingTo = null" />
+
+@code {
+    /// <summary>The open tab's body.</summary>
+    private RenderFragment TabContent(EntityTab tab) => @<text>
+        @switch (tab.Slug)
+        {
+            case EntityTabs.Fields:
+                <text>@FieldsTab</text>
+                break;
+            case EntityTabs.Relationships:
+                <Relationships Entity="@(_entity!)" Schema="_schema!"
+                               DescriptorJson="@(Copy.Loaded ? Copy.Json : null)"
+                               AppliedJson="@(Copy.Loaded ? Copy.AppliedJson : null)" />
+                break;
+            case EntityTabs.Rules:
+                <RulesTab Rules="_working" Entity="@EntityName" Editable="true" OnChanged="SetRule" />
+                break;
+            case EntityTabs.OnWrite:
+                <HooksTab Hooks="@_hooks" Editable="Copy.Loaded" Refused="_refused"
+                          OnAdd="AddHook" OnRemove="RemoveHook" />
+                break;
+            case EntityTabs.Indexes:
+                <Indexes Entity="@(_entity!)" Declared="_indexes" Editable="Copy.Loaded"
+                         OnAdd="AddIndex" OnRemove="RemoveIndex" />
+                break;
+            case EntityTabs.Api:
+                <ApiTab Entity="@(_entity!)" />
+                break;
+        }
+    </text>;
+
+    /// <summary>The Fields tab: its head with the add control, a rename's leftovers, and the list.</summary>
+    /// <remarks>
+    /// The control sits with the list's own heading rather than as a green block above the first row, where it
+    /// outweighed every field on the screen.
+    /// </remarks>
+    private RenderFragment FieldsTab => @<text>
+        <SectionHead Title="Declared fields">
+            <Actions>
+                @if (Copy.Loaded)
+                {
+                    <AlvoButton Small="true" data-testid="add-field" OnClick="_ => AddField()">Add a field</AlvoButton>
+                }
+            </Actions>
+        </SectionHead>
+        @if (_renameLeftovers is { Uncarried.Count: > 0 } leftovers)
+        {
+            <p class="a-note" data-testid="rename-leftovers">
+                <code class="a-mono">@leftovers.From</code> is renamed, and these still name it — the
+                rename could not rewrite them safely, and the apply refuses them until they are edited:
+                <span class="a-mono">@string.Join(", ", leftovers.Uncarried.Select(reference => reference.Place))</span>
+            </p>
+        }
+        <Fields Entity="@FieldsView(_entity!)" Editable="DeclaredHere" OnEdit="EditField" OnRemove="RemoveField" />
+    </text>;
+}

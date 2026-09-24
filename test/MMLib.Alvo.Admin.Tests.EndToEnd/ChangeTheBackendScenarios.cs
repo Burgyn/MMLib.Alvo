@@ -53,8 +53,9 @@ public sealed class ChangeTheBackendScenarios(AdminWorld world) : IClassFixture<
         foreach (var operation in new[] { "list", "get", "create", "update", "delete" })
         {
             await session.Page.FillAsync($"#rule-{operation}", "'admin' in @user.roles");
-            await session.Page.Locator($"#rule-{operation}").BlurAsync();
-            await session.SettleAsync();
+            await session.Page.Locator($"#rule-{operation}").PressAsync("Control+Enter");
+            await session.Page.GetByTestId($"rule-dirty-{operation}")
+                .WaitForAsync(new() { State = WaitForSelectorState.Detached });
         }
 
         // --- the plan, then the apply

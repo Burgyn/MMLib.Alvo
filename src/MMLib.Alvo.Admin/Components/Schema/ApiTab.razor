@@ -25,15 +25,15 @@
     <div class="a-row a-row--inset">
         @if (Docs is { Length: > 0 } docs)
         {
-            <a class="a-btn a-btn--sm" href="@docs" target="_blank" rel="noopener"
-               data-testid="api-docs">Open the API documentation</a>
+            <AlvoButton Small="true" Href="@docs" target="_blank" rel="noopener"
+                        data-testid="api-docs">Open the API documentation</AlvoButton>
         }
         @if (Document is { Length: > 0 } document)
         {
-            <a class="a-btn a-btn--sm a-btn--ghost" href="@document" target="_blank" rel="noopener"
-               data-testid="api-document">
+            <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" Href="@document" target="_blank" rel="noopener"
+                        data-testid="api-document">
                 <code class="a-mono">@document</code>
-            </a>
+            </AlvoButton>
         }
     </div>
 }

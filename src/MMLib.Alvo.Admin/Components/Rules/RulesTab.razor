@@ -16,7 +16,7 @@
 {
     <EmptyState Title="This entity has no rules"
                 Body="Default-deny: with no rule for an operation, nobody reaches it through the Data API — not an empty page, a refusal.">
-        <a class="a-btn a-btn--sm" href="@AdminPaths.Rules(Entity)">Open Rules</a>
+        <AlvoButton Small="true" Href="@AdminPaths.Rules(Entity)">Open Rules</AlvoButton>
     </EmptyState>
 }
 else if (!Editable)
@@ -46,19 +46,32 @@ else
        rather than an omission — so the placeholder says that rather than being left blank. The CEL
        is not parsed here: the apply compiles it against the entity's own columns and refuses a
        reference to a column that does not exist, which is a fail-fast the client cannot reproduce
-       without a second compiler. *@
+       without a second compiler.
+
+       Nothing is staged when the box loses focus (inventory defect #7: tabbing away staged a change
+       nobody meant). A rule is staged by its Save or by Ctrl/Cmd+Enter in the box, and stays marked
+       unsaved until then; Escape puts back what the working copy declares. Enter is a newline. *@
     @foreach (var operation in _operations)
     {
+        var declared = Declared(operation);
         <ListRow class="a-listrow--roomy a-listrow--stacked">
             <div class="a-row">
-                <span class="@($"a-badge {(Declared(operation) is { Length: > 0 } ? "a-badge--accent" : string.Empty)}")">@operation</span>
+                <span class="@($"a-badge {(declared is { Length: > 0 } ? "a-badge--accent" : string.Empty)}")">@operation</span>
                 <code class="a-ident">@Route(operation)</code>
+                @if (Drafts.IsDirty(operation, declared))
+                {
+                    <span class="a-badge a-badge--warn" data-testid="@($"rule-dirty-{operation}")">unsaved</span>
+                }
             </div>
-            <textarea class="a-textarea a-mono a-then" rows="2" spellcheck="false"
-                      id="@($"rule-{operation}")"
-                      placeholder="No rule — refused for everyone. Try: 'dispatcher' in @@user.roles"
-                      value="@Declared(operation)"
-                      @onchange="args => Write(operation, args.Value?.ToString() ?? string.Empty)"></textarea>
+            <MudTextField T="string" Variant="Variant.Outlined" Lines="2" Immediate="true" id="@($"rule-{operation}")"
+                          Class="a-mono" spellcheck="false" Label="@($"{operation} rule")"
+                          Placeholder="@EmptyHint"
+                          Value="@Drafts.Text(operation, declared)" ValueChanged="text => Drafts.Set(operation, text ?? string.Empty)"
+                          OnKeyDown="args => KeyAsync(operation, args)" />
+            <div class="a-row">
+                <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" data-testid="@($"rule-save-{operation}")"
+                            Disabled="@(!Drafts.IsDirty(operation, declared))" OnClick="_ => SaveAsync(operation)">Save rule</AlvoButton>
+            </div>
         </ListRow>
     }
 
@@ -95,7 +108,39 @@ else
     private string? Declared(string operation) => Rules
         .FirstOrDefault(rule => string.Equals(rule.Key, operation, StringComparison.Ordinal)).Value;
 
-    private Task Write(string operation, string cel) => OnChanged.InvokeAsync((operation, cel.Trim()));
+    private const string EmptyHint = "No rule — refused for everyone. Try: 'dispatcher' in @user.roles";
+
+    private readonly RuleDrafts _own = new();
+
+    /// <summary>
+    /// The entity screen's drafts, cascaded so they outlive this tab's body; a tab of its own otherwise.
+    /// </summary>
+    [CascadingParameter]
+    private RuleDrafts? Cascaded { get; set; }
+
+    private RuleDrafts Drafts => Cascaded ?? _own;
+
+    /// <summary>Ctrl/Cmd+Enter saves the rule; Escape puts back what the working copy declares.</summary>
+    private async Task KeyAsync(string operation, KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && (args.CtrlKey || args.MetaKey))
+        {
+            await SaveAsync(operation);
+        }
+        else if (args.Key == "Escape")
+        {
+            Drafts.Revert(operation);
+        }
+    }
+
+    /// <summary>Stages what was typed, only when it differs from what the descriptor says.</summary>
+    private Task SaveAsync(string operation)
+    {
+        var declared = Declared(operation);
+        return Drafts.IsDirty(operation, declared)
+            ? OnChanged.InvokeAsync((operation, Drafts.Take(operation, declared)))
+            : Task.CompletedTask;
+    }
 
     private List<string> Missing => _operations
         .Where(operation => !Rules.Any(rule => string.Equals(rule.Key, operation, StringComparison.Ordinal)))

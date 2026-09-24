@@ -18,7 +18,7 @@ public partial class FieldEditor
     private static readonly FieldKind[] _kinds = Enum.GetValues<FieldKind>();
 
     private FieldFacets _facets = new();
-    private ElementReference _nameInput;
+    private MudBlazor.MudTextField<string>? _nameField;
     private string? _refusal;
     private string? _prefilled;
     private string _opened = string.Empty;
@@ -222,7 +222,10 @@ public partial class FieldEditor
             {
                 _facets = new FieldFacets { Type = _facets.Type, Kind = _facets.Kind, Sources = _facets.Sources };
                 _opened = Fingerprint();
-                await _nameInput.FocusAsync();
+                if (_nameField is not null)
+                {
+                    await _nameField.FocusAsync();
+                }
             }
         }
         finally

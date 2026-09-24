@@ -436,23 +436,27 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
 
         await session.Page.ReloadAsync();
         await session.SettleAsync();
-        var selected = session.Page.Locator("[role='tab'][aria-selected='true']");
-        await session.Page.Locator("[role='tab'][aria-selected='true']:has-text('Rules')").WaitForAsync();
+        var selected = session.Page.GetByRole(Microsoft.Playwright.AriaRole.Tab, new() { Selected = true });
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Tab, new() { Name = "Rules", Selected = true }).WaitForAsync();
         (await selected.CountAsync()).ShouldBe(1);
 
+        /* The strip is MudTabs: an arrow moves focus to the next tab, and Enter opens it. */
         await selected.FocusAsync();
         await session.Page.Keyboard.PressAsync("ArrowRight");
+        /* The move is the circuit's, so Enter waits for it: pressed at once, it would open the tab still focused. */
+        await session.Page.WaitForFunctionAsync("() => document.activeElement?.textContent?.trim() === 'On write'");
+        await session.Page.Keyboard.PressAsync("Enter");
         await session.Page.WaitForURLAsync("**/admin/schema/work_orders?tab=on-write");
-        await session.Page.Locator("[role='tab'][aria-selected='true']:has-text('On write')").WaitForAsync();
-        (await session.Page.EvaluateAsync<string>("document.activeElement.textContent")).ShouldBe("On write");
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Tab, new() { Name = "On write", Selected = true }).WaitForAsync();
+        (await session.Page.EvaluateAsync<string>("document.activeElement.textContent.trim()")).ShouldBe("On write");
 
-        /* The arrow replaced the entry, so the click is the one step Back undoes — to On write, not Rules. */
+        /* Each opened tab is one step, so Back from Indexes returns to On write, not Rules. */
         await session.OpenTabAsync("Indexes");
         await session.Page.WaitForURLAsync("**/admin/schema/work_orders?tab=indexes");
 
         await session.Page.GoBackAsync();
         await session.Page.WaitForURLAsync("**/admin/schema/work_orders?tab=on-write");
-        await session.Page.Locator("[role='tab'][aria-selected='true']:has-text('On write')").WaitForAsync();
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Tab, new() { Name = "On write", Selected = true }).WaitForAsync();
 
         session.AssertConsoleClean();
     }

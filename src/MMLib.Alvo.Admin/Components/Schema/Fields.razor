@@ -32,20 +32,17 @@
         @if (Editable && removed)
         {
             <span class="a-listrow__actions">
-                <button type="button" class="a-btn a-btn--ghost a-btn--sm"
-                        data-testid="@($"restore-field-{field.Name}")"
-                        @onclick="() => Staged.Restore.InvokeAsync(field.Name)">Undo</button>
+                <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="@($"restore-field-{field.Name}")"
+                            OnClick="_ => Staged.Restore.InvokeAsync(field.Name)">Undo</AlvoButton>
             </span>
         }
         else if (Editable)
         {
             <span class="a-listrow__actions">
-                <button type="button" class="a-btn a-btn--ghost a-btn--sm"
-                        data-testid="@($"edit-field-{field.Name}")"
-                        @onclick="() => OnEdit.InvokeAsync(field.Name)">Edit</button>
-                <button type="button" class="a-btn a-btn--ghost a-btn--sm"
-                        data-testid="@($"remove-field-{field.Name}")"
-                        @onclick="() => OnRemove.InvokeAsync(field.Name)">Remove</button>
+                <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="@($"edit-field-{field.Name}")"
+                            OnClick="_ => OnEdit.InvokeAsync(field.Name)">Edit</AlvoButton>
+                <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="@($"remove-field-{field.Name}")"
+                            OnClick="_ => OnRemove.InvokeAsync(field.Name)">Remove</AlvoButton>
             </span>
         }
     </ListRow>

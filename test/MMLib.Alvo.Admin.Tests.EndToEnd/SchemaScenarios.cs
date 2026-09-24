@@ -37,7 +37,7 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
         {
             await session.OpenTabAsync(tab);
 
-            var panel = await session.Page.Locator("main.a-content .a-panel").Last.InnerTextAsync();
+            var panel = await session.Page.GetByTestId("entity-tabpanel").InnerTextAsync();
             panel.Trim().ShouldNotBeEmpty($"the {tab} tab rendered nothing");
         }
 

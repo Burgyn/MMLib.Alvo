@@ -3,7 +3,7 @@
 namespace MMLib.Alvo.Admin.Tests.Schema;
 
 /// <summary>
-/// The entity screen's tab, read from and written to the address, and moved by the arrow keys.
+/// The entity screen's tab, read from and written to the address.
 /// </summary>
 public class EntityTabsTests
 {
@@ -28,21 +28,4 @@ public class EntityTabsTests
             EntityTabs.FromSlug(tab.Slug).ShouldBe(tab);
         }
     }
-
-    [Theory]
-    [InlineData("fields", "ArrowRight", "relationships")]
-    [InlineData("api", "ArrowRight", "fields")]
-    [InlineData("fields", "ArrowLeft", "api")]
-    [InlineData("rules", "ArrowLeft", "relationships")]
-    [InlineData("rules", "Home", "fields")]
-    [InlineData("rules", "End", "api")]
-    public void The_arrows_wrap_and_home_and_end_reach_the_ends(string from, string key, string to)
-        => EntityTabs.Move(EntityTabs.FromSlug(from), key).ShouldBe(EntityTabs.FromSlug(to));
-
-    [Theory]
-    [InlineData("Enter")]
-    [InlineData("ArrowDown")]
-    [InlineData("a")]
-    public void Any_other_key_moves_nothing(string key)
-        => EntityTabs.Move(EntityTabs.First, key).ShouldBeNull();
 }

@@ -41,11 +41,11 @@
 
         <Field Label="Name" For="new-field-name">
             <ChildContent>
-                <input class="a-input" id="new-field-name" value="@_facets.Name" placeholder="e.g. scheduled_for"
-                       @ref="_nameInput" @oninput="args => _facets.Name = args.Value?.ToString() ?? string.Empty"
-                       autocomplete="off" />
-                @* The sheet opens to be typed into: text typed before a click on the box was lost. *@
-                @FocusOnRender.On(() => _nameInput)
+                @* The hint carries markup, so the Field keeps it and names the box; the sheet's first field takes
+                   focus when it opens (DefaultFocus), so it is typed into straight away. *@
+                <MudTextField T="string" @ref="_nameField" Variant="Variant.Outlined" Immediate="true" id="new-field-name"
+                              Placeholder="e.g. scheduled_for" autocomplete="off" Class="a-mono"
+                              Value="_facets.Name" ValueChanged="name => _facets.Name = name ?? string.Empty" />
             </ChildContent>
             <Hint>
                 @if (IsEditing && !string.Equals(_facets.Name, Editing, StringComparison.Ordinal))
@@ -92,20 +92,14 @@
 
         <div class="a-field">
             <span class="a-label">Constraints</span>
-            <div class="a-check-row">
+            <div class="a-row a-row--wrap">
                 @if (_facets.RequiredOffered)
                 {
-                    <label class="a-check">
-                        <input type="checkbox" checked="@_facets.Required" @onchange="args => _facets.Required = args.Value is true" />
-                        <span>required</span>
-                    </label>
+                    <MudCheckBox T="bool" Value="_facets.Required" ValueChanged="on => _facets.Required = on" Label="required" />
                 }
                 @if (_facets.UniqueOffered)
                 {
-                    <label class="a-check">
-                        <input type="checkbox" checked="@_facets.Unique" @onchange="args => _facets.Unique = args.Value is true" />
-                        <span>unique</span>
-                    </label>
+                    <MudCheckBox T="bool" Value="_facets.Unique" ValueChanged="on => _facets.Unique = on" Label="unique" />
                 }
 
                 @*
@@ -116,11 +110,8 @@
                 *@
                 @if (!(_facets.UniqueOffered && _facets.Unique))
                 {
-                    <label class="a-check">
-                        <input type="checkbox" checked="@_facets.Indexed" data-testid="field-index"
-                               @onchange="args => _facets.Indexed = args.Value is true" />
-                        <span>indexed</span>
-                    </label>
+                    <MudCheckBox T="bool" Value="_facets.Indexed" ValueChanged="on => _facets.Indexed = on" Label="indexed"
+                                 data-testid="field-index" />
                 }
             </div>
             @if (_facets.UniqueOffered && _facets.Unique && _facets.Indexed)
@@ -138,40 +129,30 @@
             @switch (_facets.Type)
             {
                 case FieldType.String:
-                    <Field Label="Max length" For="new-field-max">
-                        <ChildContent>
-                            <input class="a-input" id="new-field-max" type="number" min="1" value="@_facets.MaxLength"
-                                   placeholder="no limit" @oninput="args => _facets.MaxLength = OptionalNumber(args.Value)" />
-                        </ChildContent>
-                        <Hint>Leave it empty for no limit — the schema's own default.</Hint>
-                    </Field>
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-max" Label="Max length"
+                                  InputType="InputType.Number" min="1" Placeholder="no limit"
+                                  HelperText="Leave it empty for no limit — the schema's own default."
+                                  Value="@_facets.MaxLength?.ToString(CultureInfo.InvariantCulture)"
+                                  ValueChanged="text => _facets.MaxLength = OptionalNumber(text)" />
                     break;
                 case FieldType.Decimal:
                     <div class="a-field-row">
-                        <Field Label="Precision" For="new-field-precision">
-                            <ChildContent>
-                                <input class="a-input" id="new-field-precision" type="number" value="@_facets.Precision"
-                                       @oninput="args => _facets.Precision = Number(args.Value, 10)" />
-                            </ChildContent>
-                            <Hint>Total digits, not the ones before the point.</Hint>
-                        </Field>
-                        <Field Label="Scale" For="new-field-scale">
-                            <ChildContent>
-                                <input class="a-input" id="new-field-scale" type="number" value="@_facets.Scale"
-                                       @oninput="args => _facets.Scale = Number(args.Value, 2)" />
-                            </ChildContent>
-                            <Hint>Digits after the point.</Hint>
-                        </Field>
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-precision"
+                                      Label="Precision" InputType="InputType.Number"
+                                      HelperText="Total digits, not the ones before the point."
+                                      Value="@_facets.Precision.ToString(CultureInfo.InvariantCulture)"
+                                      ValueChanged="text => _facets.Precision = Number(text, 10)" />
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-scale"
+                                      Label="Scale" InputType="InputType.Number" HelperText="Digits after the point."
+                                      Value="@_facets.Scale.ToString(CultureInfo.InvariantCulture)"
+                                      ValueChanged="text => _facets.Scale = Number(text, 2)" />
                     </div>
                     break;
                 case FieldType.Enum:
-                    <Field Label="Values" For="new-field-values">
-                        <ChildContent>
-                            <input class="a-input" id="new-field-values" value="@_facets.Values" placeholder="e.g. scheduled, in_progress, completed"
-                                   @oninput="args => _facets.Values = args.Value?.ToString() ?? string.Empty" />
-                        </ChildContent>
-                        <Hint>Comma separated. An enum with no values is refused by the schema.</Hint>
-                    </Field>
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-values" Label="Values"
+                                  Placeholder="e.g. scheduled, in_progress, completed"
+                                  HelperText="Comma separated. An enum with no values is refused by the schema."
+                                  Value="_facets.Values" ValueChanged="text => _facets.Values = text ?? string.Empty" />
                     break;
                 case FieldType.Ref:
                     <Field Label="Points at" LabelId="new-field-target">
@@ -232,27 +213,17 @@
             </Refusal>
             @if (_facets.DeclaresRollupFilter)
             {
-                <label class="a-check">
-                    <input type="checkbox" checked="@_facets.RemoveRollupFilter" data-testid="rollup-remove-where"
-                           @onchange="args => _facets.RemoveRollupFilter = args.Value is true" />
-                    <span>Remove the declared filter</span>
-                </label>
+                <MudCheckBox T="bool" Value="_facets.RemoveRollupFilter" ValueChanged="on => _facets.RemoveRollupFilter = on"
+                             Label="Remove the declared filter" data-testid="rollup-remove-where" />
             }
         }
 
         @if (_facets.Kind == FieldKind.Computed)
         {
-            <Field Label="Expression" For="new-field-computed">
-                <ChildContent>
-                    <textarea class="a-textarea a-mono" id="new-field-computed" rows="2" spellcheck="false"
-                              placeholder="e.g. unit_price * amount" value="@_facets.Computed"
-                              @oninput="args => _facets.Computed = args.Value?.ToString() ?? string.Empty"></textarea>
-                </ChildContent>
-                <Hint>
-                    CEL over this row's own fields — and its rollups. No constants: the column is DDL, which carries no bound
-                    value. The apply compiles it, and Preview shows its refusal in the framework's own words.
-                </Hint>
-            </Field>
+            <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" Lines="2" id="new-field-computed"
+                          Label="Expression" Class="a-mono" spellcheck="false" Placeholder="e.g. unit_price * amount"
+                          HelperText="CEL over this row's own fields — and its rollups. No constants: the column is DDL, which carries no bound value. The apply compiles it, and Preview shows its refusal in the framework's own words."
+                          Value="_facets.Computed" ValueChanged="text => _facets.Computed = text ?? string.Empty" />
         }
 
         @if (_facets.DrawsDefault)
@@ -271,9 +242,9 @@
                     }
                     else
                     {
-                        <input class="a-input" id="new-field-default" value="@_facets.Default"
-                               placeholder="@_facets.DefaultPlaceholder" autocomplete="off"
-                               @oninput="args => _facets.Default = args.Value?.ToString() ?? string.Empty" />
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-default"
+                                      Placeholder="@_facets.DefaultPlaceholder" autocomplete="off"
+                                      Value="_facets.Default" ValueChanged="text => _facets.Default = text ?? string.Empty" />
                     }
                 </ChildContent>
                 <Hint>
@@ -286,11 +257,8 @@
 
         @if (_facets.KeepsUndrawnDefault)
         {
-            <label class="a-check">
-                <input type="checkbox" checked="@_facets.RemoveUndrawnDefault" data-testid="field-remove-default"
-                       @onchange="args => _facets.RemoveUndrawnDefault = args.Value is true" />
-                <span>Remove the declared default</span>
-            </label>
+            <MudCheckBox T="bool" Value="_facets.RemoveUndrawnDefault" ValueChanged="on => _facets.RemoveUndrawnDefault = on"
+                         Label="Remove the declared default" data-testid="field-remove-default" />
         }
 
         @* Every facet this editor draws no control for, and what the save does to it. Before this, such a facet was

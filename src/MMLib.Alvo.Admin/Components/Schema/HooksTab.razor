@@ -73,7 +73,7 @@ else
                     at 375 px, the code block gave up a third of the row to one word and every condition
                     wrapped mid-token.
                 *@
-                <div class="a-hookrow" data-testid="hook-row">
+                <div class="a-hookrow" data-testid="hook-row" id="@RowId(name, at)">
                     @if (Staged.IsNewHook(name, at))
                     {
                         <span class="a-badge a-badge--accent a-hookrow__badge"
@@ -82,10 +82,9 @@ else
                     <CodeBlock Json="@hook" />
                     @if (Editable)
                     {
-                        <button type="button" class="a-btn a-btn--ghost a-btn--sm a-hookrow__remove"
-                                data-testid="hook-remove"
-                                aria-label="@($"Remove hook {at + 1} of {name}")"
-                                @onclick="() => OnRemove.InvokeAsync(new HookAt(name, at))">Remove</button>
+                        <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" class="a-hookrow__remove"
+                                    data-testid="hook-remove" aria-label="@($"Remove hook {at + 1} of {name}")"
+                                    OnClick="_ => _removing = new HookAt(name, at)">Remove</AlvoButton>
                     }
                 </div>
             }
@@ -93,20 +92,28 @@ else
     }
 }
 
+@if (_reveal is { } added)
+{
+    @RevealOnRender.On($"#{added}", _reveals)
+}
+
+@* Under the list, where a new hook appears, for the Indexes tab's reason. *@
 @if (Editable)
 {
-    <div class="a-stack a-stack--inset a-stack--gap-4">
-        <SectionHead Title="Add a hook">
-            <Subtitle>
-                The point decides what the action may be. A before-hook runs in the transaction and may
-                only refuse or patch the row; a <code class="a-mono">beforeDelete</code> may only refuse,
-                because the row is going and a patch against it would be discarded.
-            </Subtitle>
-        </SectionHead>
+    <div class="a-row a-row--inset">
+        <AlvoButton Small="true" data-testid="hook-new" OnClick="_ => _adding = true">Add a hook</AlvoButton>
+    </div>
+}
 
+@if (_adding)
+{
+    <AlvoEditor TestId="hook-editor" Title="New hook" SubmitText="Add the hook" SubmitTestId="hook-add"
+                Subtitle="The point decides what the action may be. A before-hook runs in the transaction and may only refuse or patch the row; a beforeDelete may only refuse, because the row is going."
+                Dirty="Dirty" OnSubmit="AddAsync" OnClose="CloseAdding">
         @if (_refusal is { Length: > 0 })
         {
-            <Refusal data-testid="hook-refusal">@_refusal</Refusal>
+            @* Keyed by the attempt, so every refused add draws a new alert that takes focus again. *@
+            <AlvoAlert @key="_refusals" Tone="AlvoAlert.AlertTone.Error" TakeFocus="true" TestId="hook-refusal">@_refusal</AlvoAlert>
         }
 
         <Field Label="When" LabelId="hook-points-label">
@@ -114,15 +121,18 @@ else
                        data-testid="hook-points" SelectedChanged="points => Choose(points[0])" />
         </Field>
 
+        @* The hint carries markup, so the Field keeps it and the box takes its name from the Field's label. *@
         <Field Label="Only when (optional)" For="hook-condition">
             <ChildContent>
-                <input class="a-input a-mono" id="hook-condition" value="@_hook.Condition" autocomplete="off"
-                       placeholder="@_hook.Example"
-                       @oninput="args => _hook.Condition = args.Value?.ToString() ?? string.Empty" />
+                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-condition" Class="a-mono"
+                              autocomplete="off" Placeholder="@_hook.Example" aria-describedby="hook-condition-hint"
+                              Value="_hook.Condition" ValueChanged="text => _hook.Condition = text ?? string.Empty" />
             </ChildContent>
             <Hint>
-                CEL over @((MarkupString)_hook.Images) and <code class="a-mono">@@user</code>. Left empty, the hook
-                runs on every write.
+                <span id="hook-condition-hint" data-testid="hook-condition-hint">
+                    CEL over @((MarkupString)_hook.Images) and <code class="a-mono">@@user</code>. Left empty, the hook
+                    runs on every write.
+                </span>
             </Hint>
         </Field>
 
@@ -131,14 +141,26 @@ else
                        data-testid="hook-actions" SelectedChanged="kinds => _hook.Kind = kinds[0]" />
         </Field>
 
+        @ActionFields
+    </AlvoEditor>
+}
+
+<AlvoConfirm Open="_removing is not null" TestId="remove-hook" ConfirmTestId="remove-hook-run"
+             CancelTestId="remove-hook-cancel" Title="Remove this hook?"
+             Consequence="It leaves the working copy now; writes stop running it when you apply."
+             Verb="Remove hook" OnConfirm="RemoveAsync" OnCancel="() => _removing = null" />
+
+@code {
+    /// <summary>The boxes the chosen action takes.</summary>
+    private RenderFragment ActionFields => @<text>
         @switch (_hook.Kind)
         {
             case HookBuilder.Reject:
                 <Field Label="Refuse with" For="hook-reject">
                     <ChildContent>
-                        <input class="a-input" id="hook-reject" value="@_hook.RejectMessage" autocomplete="off" maxlength="500"
-                               placeholder="A completed work order cannot be reopened."
-                               @oninput="args => _hook.RejectMessage = args.Value?.ToString() ?? string.Empty" />
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-reject" autocomplete="off"
+                                      MaxLength="500" Placeholder="A completed work order cannot be reopened."
+                                      Value="_hook.RejectMessage" ValueChanged="text => _hook.RejectMessage = text ?? string.Empty" />
                     </ChildContent>
                     <Hint>
                         Becomes the <code class="a-mono">detail</code> of the RFC 7807 problem the caller
@@ -148,16 +170,14 @@ else
                 break;
             case HookBuilder.Mutate:
                 <div class="a-field-row">
-                    <Field Label="Field" For="hook-mutate-field">
-                        <input class="a-input a-mono" id="hook-mutate-field" value="@_hook.MutateField" autocomplete="off"
-                               placeholder="completed_on"
-                               @oninput="args => _hook.MutateField = args.Value?.ToString() ?? string.Empty" />
-                    </Field>
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-mutate-field" Label="Field"
+                                  Class="a-mono" autocomplete="off" Placeholder="completed_on"
+                                  Value="_hook.MutateField" ValueChanged="text => _hook.MutateField = text ?? string.Empty" />
                     <Field Label="Set to" For="hook-mutate-value">
                         <ChildContent>
-                            <input class="a-input a-mono" id="hook-mutate-value" value="@_hook.MutateValue" autocomplete="off"
-                                   placeholder="now()"
-                                   @oninput="args => _hook.MutateValue = args.Value?.ToString() ?? string.Empty" />
+                            <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-mutate-value"
+                                          Class="a-mono" autocomplete="off" Placeholder="now()"
+                                          Value="_hook.MutateValue" ValueChanged="text => _hook.MutateValue = text ?? string.Empty" />
                         </ChildContent>
                         <Hint>
                             A CEL expression, stored as <code class="a-mono">{"$cel": "…"}</code>. Wrap it in
@@ -169,9 +189,9 @@ else
             case HookBuilder.Webhook:
                 <Field Label="Endpoint" For="hook-endpoint">
                     <ChildContent>
-                        <input class="a-input a-mono" id="hook-endpoint" value="@_hook.Endpoint" autocomplete="off"
-                               placeholder="dispatch"
-                               @oninput="args => _hook.Endpoint = args.Value?.ToString() ?? string.Empty" />
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-endpoint" Class="a-mono"
+                                      autocomplete="off" Placeholder="dispatch"
+                                      Value="_hook.Endpoint" ValueChanged="text => _hook.Endpoint = text ?? string.Empty" />
                     </ChildContent>
                     <Hint>
                         A name declared under <code class="a-mono">webhooks.endpoints</code>, not a URL — the
@@ -181,23 +201,14 @@ else
                 break;
             case HookBuilder.Email:
                 <div class="a-field-row">
-                    <Field Label="Template" For="hook-template">
-                        <input class="a-input a-mono" id="hook-template" value="@_hook.Template" autocomplete="off"
-                               placeholder="work_order_completed"
-                               @oninput="args => _hook.Template = args.Value?.ToString() ?? string.Empty" />
-                    </Field>
-                    <Field Label="To" For="hook-to">
-                        <input class="a-input a-mono" id="hook-to" value="@_hook.To" autocomplete="off"
-                               placeholder="{{new.contact_email}}"
-                               @oninput="args => _hook.To = args.Value?.ToString() ?? string.Empty" />
-                    </Field>
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-template" Label="Template"
+                                  Class="a-mono" autocomplete="off" Placeholder="work_order_completed"
+                                  Value="_hook.Template" ValueChanged="text => _hook.Template = text ?? string.Empty" />
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-to" Label="To"
+                                  Class="a-mono" autocomplete="off" Placeholder="{{new.contact_email}}"
+                                  Value="_hook.To" ValueChanged="text => _hook.To = text ?? string.Empty" />
                 </div>
                 break;
         }
-
-        <div class="a-row">
-            <button type="button" class="a-btn a-btn--primary a-btn--sm" data-testid="hook-add"
-                    @onclick="AddAsync">Add the hook</button>
-        </div>
-    </div>
+    </text>;
 }

@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Tests.EndToEnd;
+﻿using Microsoft.Playwright;
+
+namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
 /// Declaring what a create stores when the caller omits the field.
@@ -40,7 +42,7 @@ public sealed class FieldDefaultScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Page.Locator("[data-testid='field-sheet']").WaitForAsync();
 
         await session.Page.FillAsync("#new-field-name", "dispatch_note");
-        await session.Page.ClickAsync(".a-choice button:has-text('integer')");
+        await session.Page.GetByRole(AriaRole.Radio, new() { Name = "integer", Exact = true }).ClickAsync();
         await session.Page.FillAsync("#new-field-default", "not a number");
         await session.Page.ClickAsync("[data-testid='field-save']");
 
@@ -53,7 +55,7 @@ public sealed class FieldDefaultScenarios(AdminWorld world) : IClassFixture<Admi
         (session.Page.Url).ShouldContain("/schema/regions");
         await session.AssertNoHorizontalScrollAsync();
 
-        await session.Page.ClickAsync(".a-choice button:has-text('string')");
+        await session.Page.GetByRole(AriaRole.Radio, new() { Name = "string", Exact = true }).ClickAsync();
         await session.Page.FillAsync("#new-field-default", "unassigned");
         await session.Page.ClickAsync("[data-testid='field-save']");
         /* Waits for the plan rather than for the URL alone: the navigation resolves before the preview's own

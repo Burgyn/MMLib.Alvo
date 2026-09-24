@@ -45,8 +45,8 @@ public sealed class FieldReferenceScenarios(AdminWorld world) : IClassFixture<Ad
         await session.OpenTabAsync("Rules");
         var list = session.Page.GetByRole(AriaRole.Tabpanel).GetByRole(AriaRole.Textbox).First;
         await list.FillAsync("[code].exists(c, c != '')");
-        await list.BlurAsync();
-        await session.SettleAsync();
+        await list.PressAsync("Control+Enter");
+        await session.SnackbarAsync("Rule saved to the working copy");
 
         await session.OpenTabAsync("Fields");
         await session.Page.GetByTestId("edit-field-code").ClickAsync();

@@ -198,6 +198,7 @@ public sealed class SystemMapScenarios(AdminWorld world) : IClassFixture<AdminWo
         await session.OpenTabAsync("On write");
 
         var before = await session.Page.GetByTestId("hook-row").CountAsync();
+        await session.Page.GetByTestId("hook-new").ClickAsync();
         await session.Page.GetByTestId("hook-points")
             .GetByRole(AriaRole.Radio, new() { Name = "beforeUpdate", Exact = true }).ClickAsync();
         await session.Page.FillAsync("#hook-condition", "old.status == 'completed'");

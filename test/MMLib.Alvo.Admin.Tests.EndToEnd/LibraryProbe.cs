@@ -15,7 +15,8 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// </para>
 /// <para>
 /// An element is the library's when a class of its own starts with <c>mud-</c>, the same test alvo.css's base
-/// layer uses to scope its restore. Properties an element inherits are compared only where no ancestor is the
+/// layer uses to scope its restore, or when it is the <c>legend</c> of a Mud fieldset: an outlined input with a
+/// label draws its notch with a classless legend, which is the library's markup and never Alvo's. Properties an element inherits are compared only where no ancestor is the
 /// library's: inside a Mud component, disabling the sheet changes what the component passes down, and that is not a
 /// change to Alvo's rules. Chromium passes <c>user-select</c> down as well, so it is one of those. <c>display</c>
 /// is compared except on a direct child of a library element, which a flex or grid parent blockifies.
@@ -44,7 +45,8 @@ internal static class LibraryProbe
             'letter-spacing', 'text-transform', 'word-wrap', '-webkit-font-smoothing', '-webkit-tap-highlight-color',
             'user-select'];
           const computed = new Set(['width', 'height', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left']);
-          const isLibrary = e => (e.getAttribute('class') ?? '').split(/\s+/).some(c => c.startsWith('mud-'));
+          const isLibrary = e => (e.getAttribute('class') ?? '').split(/\s+/).some(c => c.startsWith('mud-'))
+            || (e.tagName === 'LEGEND' && !!e.parentElement?.closest('fieldset[class*=mud-]'));
           const underLibrary = e => { for (let p = e.parentElement; p; p = p.parentElement) if (isLibrary(p)) return true; return false; };
           const elements = [...document.querySelectorAll('body, body *')].filter(e => !isLibrary(e));
           const keys = elements.map(e => (underLibrary(e) ? own : own.concat(inherited))

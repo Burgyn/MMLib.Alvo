@@ -27,7 +27,7 @@ else
         var index = Declared[position];
         var at = position;
 
-        <ListRow class="a-listrow--inline a-listrow--center" data-testid="index-row">
+        <ListRow class="a-listrow--inline a-listrow--center" data-testid="index-row" id="@($"index-row-{at}")">
             @*
                 An entry the working copy could not read — an imported or proposed descriptor may carry one,
                 and the apply is what refuses it. Shown rather than hidden, and shown in its own position,
@@ -54,29 +54,39 @@ else
             }
             @if (Editable)
             {
-                <button type="button" class="a-btn a-btn--ghost a-btn--sm" data-testid="index-remove"
-                        aria-label="@($"Remove the index on {string.Join(", ", index.Fields)}")"
-                        @onclick="() => OnRemove.InvokeAsync(at)">Remove</button>
+                <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="index-remove"
+                            aria-label="@($"Remove the index on {string.Join(", ", index.Fields)}")"
+                            OnClick="_ => _removing = at">Remove</AlvoButton>
             }
         </ListRow>
     }
 }
 
+@if (_reveal is { } added)
+{
+    @RevealOnRender.On($"#index-row-{added}", _reveals)
+}
+
+@*
+    Under the list, where a new index appears: the editor hands focus back here on close, and the row it added is
+    right above it (spec §3.5).
+*@
 @if (Editable)
 {
-    <div class="a-stack a-stack--inset a-stack--gap-4">
-        <SectionHead Title="Add an index">
-            <Subtitle>
-                Pick the fields in the order a query filters on them. Order is not cosmetic: an index
-                on <code class="a-mono">(a, b)</code> serves a filter on <code class="a-mono">a</code>
-                and one on <code class="a-mono">a</code> and <code class="a-mono">b</code>, and does
-                nothing for a filter on <code class="a-mono">b</code> alone.
-            </Subtitle>
-        </SectionHead>
+    <div class="a-row a-row--inset">
+        <AlvoButton Small="true" data-testid="index-new" OnClick="_ => _adding = true">Add index</AlvoButton>
+    </div>
+}
 
+@if (_adding)
+{
+    <AlvoEditor TestId="index-editor" Title="New index" SubmitText="Add the index" SubmitTestId="index-add"
+                Subtitle="Pick the fields in the order a query filters on them: an index on (a, b) serves a filter on a, and on a and b, and does nothing for b alone."
+                Dirty="@(_chosen.Count > 0 || _unique)" OnSubmit="AddAsync" OnClose="CloseAdding">
         @if (_refusal is { Length: > 0 })
         {
-            <Refusal data-testid="index-refusal">@_refusal</Refusal>
+            @* Keyed by the attempt, so every refused add draws a new alert that takes focus again. *@
+            <AlvoAlert @key="_refusals" Tone="AlvoAlert.AlertTone.Error" TakeFocus="true" TestId="index-refusal">@_refusal</AlvoAlert>
         }
 
         @*
@@ -85,8 +95,9 @@ else
             pickable: a filter on created_at or tenant_id is exactly what an index serves.
         *@
         <div class="a-stack a-stack--gap-3" data-testid="index-fields">
+            <span class="a-label" id="index-fields-label">Fields</span>
             <ChipGroup TValue="string" Items="Names(Declarable)" Selected="_chosen" Multiple="true"
-                       aria-label="Fields" SelectedChanged="Choose" ChipContent="Chip" />
+                       aria-labelledby="index-fields-label" SelectedChanged="Choose" ChipContent="Chip" />
 
             @if (Maintained.Count > 0)
             {
@@ -97,18 +108,15 @@ else
             }
         </div>
 
-        <label class="a-row a-row--gap-2">
-            <input type="checkbox" checked="@_unique" data-testid="index-unique"
-                   @onchange="args => _unique = args.Value is true" />
-            <span>Enforce uniqueness across these fields</span>
-        </label>
-
-        <div class="a-row">
-            <button type="button" class="a-btn a-btn--primary a-btn--sm" data-testid="index-add"
-                    @onclick="AddAsync">Add the index</button>
-        </div>
-    </div>
+        <MudCheckBox T="bool" Value="_unique" ValueChanged="on => _unique = on" data-testid="index-unique"
+                     Label="Enforce uniqueness across these fields" />
+    </AlvoEditor>
 }
+
+<AlvoConfirm Open="_removing is not null" TestId="remove-index" ConfirmTestId="remove-index-run"
+             CancelTestId="remove-index-cancel" Title="Remove this index?"
+             Consequence="It leaves the working copy now; the database drops it when you apply."
+             Verb="Remove index" OnConfirm="RemoveAsync" OnCancel="() => _removing = null" />
 
 @code {
     /// <summary>One field to pick, with its position in the index while it is in it.</summary>
@@ -131,6 +139,11 @@ else
     private List<string> _chosen = [];
     private bool _unique;
     private string? _refusal;
+    private int _refusals;
+    private bool _adding;
+    private int? _removing;
+    private int? _reveal;
+    private int _reveals;
 
     /// <summary>The entity whose indexes these are — and whose fields an index may cover.</summary>
     [Parameter, EditorRequired]
@@ -203,13 +216,35 @@ else
         if (_chosen.Count == 0)
         {
             _refusal = "An index covers at least one field. Pick one above.";
+            _refusals++;
             return;
         }
 
+        /* The working copy appends, so the new index lands after every row drawn now. */
+        var position = Declared.Count;
         await OnAdd.InvokeAsync(new IndexSchema([.. _chosen], _unique));
+        _reveal = position;
+        _reveals++;
+        CloseAdding();
+    }
 
+    /// <summary>Closes the editor and forgets what was picked, so the next one starts empty.</summary>
+    private void CloseAdding()
+    {
         _chosen = [];
         _unique = false;
         _refusal = null;
+        _adding = false;
     }
+
+    /// <summary>The confirm's verb: asks the entity screen to drop the index that was asked about.</summary>
+    private async Task RemoveAsync()
+    {
+        if (_removing is { } position)
+        {
+            _removing = null;
+            await OnRemove.InvokeAsync(position);
+        }
+    }
+
 }

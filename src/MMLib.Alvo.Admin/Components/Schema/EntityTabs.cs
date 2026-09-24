@@ -68,40 +68,6 @@ internal static class EntityTabs
     /// <summary>The tab a slug names, case-insensitively, or the first one.</summary>
     public static EntityTab FromSlug(string? slug) =>
         All.FirstOrDefault(tab => string.Equals(tab.Slug, slug, StringComparison.OrdinalIgnoreCase)) ?? First;
-
-    /// <summary>
-    /// The tab an arrow, Home or End key moves to from <paramref name="current"/>, or
-    /// <see langword="null"/> for any other key.
-    /// </summary>
-    /// <remarks>
-    /// The WAI-ARIA tabs pattern: the arrows wrap, because a strip of six has no reason to stop at
-    /// either end, and Home and End reach the ends.
-    /// </remarks>
-    public static EntityTab? Move(EntityTab current, string key)
-    {
-        var at = IndexOf(current);
-        return key switch
-        {
-            "ArrowRight" => All[(at + 1) % All.Count],
-            "ArrowLeft" => All[(at - 1 + All.Count) % All.Count],
-            "Home" => All[0],
-            "End" => All[^1],
-            _ => null,
-        };
-    }
-
-    private static int IndexOf(EntityTab tab)
-    {
-        for (var index = 0; index < All.Count; index++)
-        {
-            if (All[index] == tab)
-            {
-                return index;
-            }
-        }
-
-        return 0;
-    }
 }
 
 /// <summary>One of the entity screen's tabs.</summary>
