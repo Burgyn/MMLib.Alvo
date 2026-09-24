@@ -10,8 +10,8 @@
     var staged = Staged.FieldChange(field.Name);
     var removed = staged == StagedChange.Removed;
 
-    <div class="@($"a-listrow{(removed ? " a-listrow--removed" : string.Empty)}")" data-testid="@($"field-row-{field.Name}")">
-        <span class="a-mono a-listrow__key" style="font-weight:var(--weight-medium)">@field.Name</span>
+    <ListRow class="@(removed ? "a-listrow--removed" : null)" data-testid="@($"field-row-{field.Name}")">
+        <span class="a-mono a-listrow__key a-listrow__key--strong">@field.Name</span>
         <span class="a-ident a-listrow__type">@Type(field)</span>
         <span class="a-listrow__rest">
             @if (staged != StagedChange.None)
@@ -48,10 +48,10 @@
                         @onclick="() => OnRemove.InvokeAsync(field.Name)">Remove</button>
             </span>
         }
-    </div>
+    </ListRow>
 }
 
-<div class="a-section" style="margin-top:var(--space-4)">
+<div class="a-section a-section--spaced">
     <span class="a-section-title">Maintained by Alvo</span>
     <span class="a-section-sub">
         Not declared in the descriptor and not writable by a caller — an audit trail a caller can
@@ -62,14 +62,14 @@
 
 @foreach (var field in Managed)
 {
-    <div class="a-listrow" style="color:var(--dim)">
+    <ListRow class="a-listrow--dim">
         <span class="a-mono a-listrow__key">@field.Name</span>
         <span class="a-ident a-listrow__type">@Type(field)</span>
         <span class="a-listrow__rest">
             <span class="a-badge">@(AlvoManagedColumns.IsCallerWritable(field.Name, isUpdate: false)
                 ? "supplied on create only" : "framework writes it")</span>
         </span>
-    </div>
+    </ListRow>
 }
 
 @code {

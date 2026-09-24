@@ -18,9 +18,9 @@
 
 <div class="a-switcher" data-testid="project-card">
     <span class="a-brand-mark">@Initial</span>
-    <span style="min-width:0">
+    <span class="a-item">
         <span class="a-switcher-name">@(_project?.Name ?? (_unread is null ? "…" : "No project"))</span>
-        <span class="a-switcher-meta">
+        <span class="a-meta">
             @Meta
             @* The same count as the pending bar, with the project as §4.5 draws it: "3 unapplied". *@
             @if (_copy?.PendingCount is > 0 and var pending)

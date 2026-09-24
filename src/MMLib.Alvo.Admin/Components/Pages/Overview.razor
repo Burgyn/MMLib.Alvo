@@ -15,16 +15,16 @@
     else if (_schema is null)
     {
         <div class="a-cards">
-            <div class="a-skeleton" style="height:96px"></div>
-            <div class="a-skeleton" style="height:96px"></div>
-            <div class="a-skeleton" style="height:96px"></div>
+            <Skeleton Size="Skeleton.SkeletonSize.Sm" />
+            <Skeleton Size="Skeleton.SkeletonSize.Sm" />
+            <Skeleton Size="Skeleton.SkeletonSize.Sm" />
         </div>
     }
     else
     {
         @if (_schema.Entities.Count == 0 || _revisions.Count == 0)
         {
-            <div class="a-panel" style="padding:var(--space-5);border-color:var(--accentBorder)">
+            <Panel Padded="true" class="a-panel--accent">
                 <span class="a-section-title">This project is new</span>
                 <p class="a-section-sub">
                     Three things make a backend: entities, the rules that guard them, and a tenant if
@@ -33,7 +33,7 @@
                 <a class="a-btn a-btn--primary a-btn--sm" href="@AdminPaths.Welcome">
                     Open the first run
                 </a>
-            </div>
+            </Panel>
         }
 
         @*
@@ -41,7 +41,7 @@
             The registered data provider's type name was a third chip here; it is an implementation
             name, and Settings is where it is shown with the sentence that explains it.
         *@
-        <div class="a-row" style="gap:var(--space-3);flex-wrap:wrap">
+        <div class="a-row a-row--wrap">
             <span class="a-badge a-badge--ok">Revision @_descriptor!.Revision applied</span>
             <span class="a-note" data-testid="overview-runtime">@Runtime(_info!)</span>
         </div>
@@ -63,19 +63,18 @@
         *@
         @if (Declared.Count > 0)
         {
-            <div class="a-panel" data-testid="overview-limits">
-                <div class="a-section">
-                    <span class="a-section-title">Declared, with limits in this build</span>
-                    <span class="a-section-sub">Parts of these blocks are not honoured yet — each says which.</span>
-                </div>
-                @foreach (var block in Declared)
-                {
-                    <div class="a-listrow" data-testid="@($"overview-limit-{block.Block}")">
-                        <span class="a-listrow__type"><span class="a-badge a-badge--warn a-mono">@block.Block</span></span>
-                        <p class="a-note">@block.Consequence</p>
-                    </div>
-                }
-            </div>
+            <Panel Title="Declared, with limits in this build" data-testid="overview-limits">
+                <Subtitle>Parts of these blocks are not honoured yet — each says which.</Subtitle>
+                <ChildContent>
+                    @foreach (var block in Declared)
+                    {
+                        <ListRow data-testid="@($"overview-limit-{block.Block}")">
+                            <span class="a-listrow__type"><span class="a-badge a-badge--warn a-mono">@block.Block</span></span>
+                            <p class="a-note">@block.Consequence</p>
+                        </ListRow>
+                    }
+                </ChildContent>
+            </Panel>
         }
 
         @*
@@ -102,26 +101,20 @@
             </a>
         </nav>
 
-        <div class="a-panel">
-            <div class="a-section">
-                <span class="a-section-title">Latest configuration change</span>
-                <span class="a-section-sub">The whole history is under Configuration history.</span>
-            </div>
-            @if (_revisions.Count == 0)
-            {
-                <div class="a-empty">
-                    <div class="a-empty__title">Nothing has been applied yet</div>
-                    <div class="a-empty__body">
-                        The descriptor this host booted from has not been through an apply.
-                        Open Schema to make the first change.
-                    </div>
-                </div>
-            }
-            else
-            {
-                <RevisionRow Revision="@_revisions[0]" />
-            }
-        </div>
+        <Panel Title="Latest configuration change">
+            <Subtitle>The whole history is under Configuration history.</Subtitle>
+            <ChildContent>
+                @if (_revisions.Count == 0)
+                {
+                    <EmptyState Title="Nothing has been applied yet"
+                                Body="The descriptor this host booted from has not been through an apply. Open Schema to make the first change." />
+                }
+                else
+                {
+                    <RevisionRow Revision="@_revisions[0]" />
+                }
+            </ChildContent>
+        </Panel>
     }
 </div>
 

@@ -17,53 +17,47 @@
         <ErrorPanel Problem="@_problem.Exception" />
     }
 
-    <div class="a-panel" style="padding:var(--space-5)">
-        <div class="a-section" style="padding:0 0 var(--space-3)">
-            <span class="a-section-title">Export</span>
-            <span class="a-section-sub">
-                The stored descriptor, byte for byte — exactly what was applied, not a copy rebuilt from it.
-            </span>
-        </div>
-        <div class="a-row" style="gap:var(--space-3)">
-            <button type="button" class="a-btn a-btn--sm" @onclick="DownloadAsync" disabled="@(_descriptor is null)">
-                Download @(Gateway.Project).alvo.json
+    <Panel Padded="true" Title="Export">
+        <Subtitle>The stored descriptor, byte for byte — exactly what was applied, not a copy rebuilt from it.</Subtitle>
+        <ChildContent>
+            <div class="a-row">
+                <button type="button" class="a-btn a-btn--sm" @onclick="DownloadAsync" disabled="@(_descriptor is null)">
+                    Download @(Gateway.Project).alvo.json
+                </button>
+                <span class="a-section-sub">revision @(_descriptor?.Revision.ToString(CultureInfo.InvariantCulture) ?? "…")</span>
+            </div>
+            @if (_descriptor is not null)
+            {
+                <CodeBlock Json="@_descriptor.DescriptorJson" />
+            }
+        </ChildContent>
+    </Panel>
+
+    <Panel Padded="true" Title="Import">
+        <Subtitle>
+            Paste a descriptor to work from. This does not apply anything — it loads the working
+            copy, and the next screen is the same dry run every other change goes through.
+        </Subtitle>
+        <ChildContent>
+            @if (_refusal is { Length: > 0 })
+            {
+                <ErrorPanel Title="The apply would refuse this descriptor"
+                            Slug="descriptor-invalid"
+                            Fix="@_refusal" />
+            }
+
+            <Field Label="Descriptor JSON" For="import-json">
+                <textarea class="a-textarea" id="import-json" rows="12" spellcheck="false"
+                          value="@_pasted"
+                          @oninput="args => _pasted = args.Value?.ToString() ?? string.Empty"></textarea>
+            </Field>
+
+            <button type="button" class="a-btn a-btn--primary" @onclick="Import"
+                    disabled="@(_pasted.Trim().Length == 0)">
+                Load it into the working copy
             </button>
-            <span class="a-section-sub">revision @(_descriptor?.Revision.ToString(CultureInfo.InvariantCulture) ?? "…")</span>
-        </div>
-        @if (_descriptor is not null)
-        {
-            <CodeBlock Json="@_descriptor.DescriptorJson" />
-        }
-    </div>
-
-    <div class="a-panel" style="padding:var(--space-5)">
-        <div class="a-section" style="padding:0 0 var(--space-3)">
-            <span class="a-section-title">Import</span>
-            <span class="a-section-sub">
-                Paste a descriptor to work from. This does not apply anything — it loads the working
-                copy, and the next screen is the same dry run every other change goes through.
-            </span>
-        </div>
-
-        @if (_refusal is { Length: > 0 })
-        {
-            <ErrorPanel Title="The apply would refuse this descriptor"
-                        Slug="descriptor-invalid"
-                        Fix="@_refusal" />
-        }
-
-        <div class="a-field">
-            <label class="a-label" for="import-json">Descriptor JSON</label>
-            <textarea class="a-textarea" id="import-json" rows="12" spellcheck="false"
-                      value="@_pasted"
-                      @oninput="args => _pasted = args.Value?.ToString() ?? string.Empty"></textarea>
-        </div>
-
-        <button type="button" class="a-btn a-btn--primary" @onclick="Import"
-                disabled="@(_pasted.Trim().Length == 0)">
-            Load it into the working copy
-        </button>
-    </div>
+        </ChildContent>
+    </Panel>
 </div>
 
 @code {

@@ -24,13 +24,13 @@ else if (!Editable)
 {
     @foreach (var rule in Rules)
     {
-        <div style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border)">
-            <div class="a-row" style="gap:var(--space-3)">
+        <ListRow class="a-listrow--roomy a-listrow--stacked">
+            <div class="a-row">
                 <span class="a-badge a-badge--accent">@rule.Key</span>
                 <code class="a-ident">@Route(rule.Key)</code>
             </div>
-            <pre class="a-code" style="margin-top:var(--space-2)"><code>@rule.Value</code></pre>
-        </div>
+            <pre class="a-code a-listrow__body"><code>@rule.Value</code></pre>
+        </ListRow>
     }
 
     @if (Missing.Count > 0)
@@ -50,18 +50,17 @@ else
        without a second compiler. *@
     @foreach (var operation in _operations)
     {
-        <div style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border)">
-            <div class="a-row" style="gap:var(--space-3)">
+        <ListRow class="a-listrow--roomy a-listrow--stacked">
+            <div class="a-row">
                 <span class="@($"a-badge {(Declared(operation) is { Length: > 0 } ? "a-badge--accent" : string.Empty)}")">@operation</span>
                 <code class="a-ident">@Route(operation)</code>
             </div>
-            <textarea class="a-textarea a-mono" rows="2" spellcheck="false"
+            <textarea class="a-textarea a-mono a-listrow__body" rows="2" spellcheck="false"
                       id="@($"rule-{operation}")"
-                      style="margin-top:var(--space-2)"
                       placeholder="No rule — refused for everyone. Try: 'dispatcher' in @@user.roles"
                       value="@Declared(operation)"
                       @onchange="args => Write(operation, args.Value?.ToString() ?? string.Empty)"></textarea>
-        </div>
+        </ListRow>
     }
 
     <p class="a-note">

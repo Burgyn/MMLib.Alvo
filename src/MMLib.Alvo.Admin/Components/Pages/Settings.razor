@@ -13,22 +13,21 @@
 
     @if (_info is null)
     {
-        <div class="a-skeleton" style="height:180px"></div>
+        <Skeleton />
     }
     else
     {
-        <div class="a-panel">
-            <div class="a-section">
-                <span class="a-section-title">This build</span>
-                <span class="a-section-sub">What is running, and how it starts.</span>
-            </div>
-            <Detail Label="Version" Value="@_info.Version" />
-            <Detail Label="Mode" Value="@_info.Mode"
-                    Note="Standalone is the container; embedded is Alvo inside your own host." />
-            <Detail Label="Data provider" Value="@_info.DataProvider"
-                    Note="The data layer this host registered. It is not the database engine, which Alvo does not report." />
-            <Detail Label="Startup mode" Value="@_info.StartupMode" />
-        </div>
+        <Panel Title="This build">
+            <Subtitle>What is running, and how it starts.</Subtitle>
+            <ChildContent>
+                <Detail Label="Version" Value="@_info.Version" />
+                <Detail Label="Mode" Value="@_info.Mode"
+                        Note="Standalone is the container; embedded is Alvo inside your own host." />
+                <Detail Label="Data provider" Value="@_info.DataProvider"
+                        Note="The data layer this host registered. It is not the database engine, which Alvo does not report." />
+                <Detail Label="Startup mode" Value="@_info.StartupMode" />
+            </ChildContent>
+        </Panel>
 
         @*
             The generated contract, where an operator who has just changed a schema looks for what changed.
@@ -37,136 +36,121 @@
         *@
         @if (Admin.Value.DocsPath is { Length: > 0 } || Admin.Value.OpenApiPath is { Length: > 0 })
         {
-            <div class="a-panel">
-                <div class="a-section">
-                    <span class="a-section-title">API documentation</span>
-                    <span class="a-section-sub">
-                        Generated from the applied descriptor, not hand-written — so it changes when the
-                        schema does.
-                    </span>
-                </div>
-
-                <div class="a-row" style="padding:var(--space-4) var(--space-5);gap:var(--space-3)">
-                    @if (Admin.Value.DocsPath is { Length: > 0 } docs)
-                    {
-                        <a class="a-btn a-btn--sm" href="@docs" target="_blank" rel="noopener"
-                           data-testid="settings-docs">Open the documentation</a>
-                    }
-                    @if (Admin.Value.OpenApiPath is { Length: > 0 } document)
-                    {
-                        <a class="a-btn a-btn--sm a-btn--ghost" href="@document" target="_blank" rel="noopener"
-                           data-testid="settings-document">
-                            <code class="a-mono">@document</code>
-                        </a>
-                    }
-                </div>
-            </div>
+            <Panel Title="API documentation">
+                <Subtitle>
+                    Generated from the applied descriptor, not hand-written — so it changes when the
+                    schema does.
+                </Subtitle>
+                <ChildContent>
+                    <div class="a-row a-row--inset">
+                        @if (Admin.Value.DocsPath is { Length: > 0 } docs)
+                        {
+                            <a class="a-btn a-btn--sm" href="@docs" target="_blank" rel="noopener"
+                               data-testid="settings-docs">Open the documentation</a>
+                        }
+                        @if (Admin.Value.OpenApiPath is { Length: > 0 } document)
+                        {
+                            <a class="a-btn a-btn--sm a-btn--ghost" href="@document" target="_blank" rel="noopener"
+                               data-testid="settings-document">
+                                <code class="a-mono">@document</code>
+                            </a>
+                        }
+                    </div>
+                </ChildContent>
+            </Panel>
         }
 
-        <div class="a-panel">
-            <div class="a-section">
-                <span class="a-section-title">AI assistant</span>
-                <span class="a-section-sub">
-                    The model the schema assistant talks to. It proposes changes; you apply them.
-                </span>
-            </div>
-
-            <Detail Label="Status" Value="@(_info.Ai.Configured ? "connected" : "not configured")" />
-            @if (_info.Ai.Configured)
-            {
-                <Detail Label="Model" Value="@_info.Ai.Model" />
-                <Detail Label="Kind" Value="@_info.Ai.Kind" />
-                <Detail Label="From" Value="@_info.Ai.Source"
-                        Note="“configuration” means this deployment pinned it and a save here cannot change it; “store” means somebody saved it from this screen." />
-            }
-
-            @if (!Assistant.IsInstalled)
-            {
-                <p class="a-note">
-                    No assistant is installed on this instance. The standalone image includes one; an
-                    embedded host adds the <code class="a-mono">MMLib.Alvo.Ai</code> package.
-                </p>
-            }
-            else if (!Assistant.CanWriteConnection)
-            {
-                <p class="a-note">
-                    This deployment sets the connection in its own configuration, under
-                    <code class="a-mono">Alvo:Ai</code>, and the dashboard cannot change it. To save one from
-                    here instead, give the host an encryption key file
-                    (<code class="a-mono">Alvo:Secrets:EncryptionKeyFile</code>).
-                </p>
-            }
-            else
-            {
-                @if (_saveRefusal is { Length: > 0 })
+        <Panel Title="AI assistant">
+            <Subtitle>The model the schema assistant talks to. It proposes changes; you apply them.</Subtitle>
+            <ChildContent>
+                <Detail Label="Status" Value="@(_info.Ai.Configured ? "connected" : "not configured")" />
+                @if (_info.Ai.Configured)
                 {
-                    <ErrorPanel Title="That connection could not be saved" Fix="@_saveRefusal" />
+                    <Detail Label="Model" Value="@_info.Ai.Model" />
+                    <Detail Label="Kind" Value="@_info.Ai.Kind" />
+                    <Detail Label="From" Value="@_info.Ai.Source"
+                            Note="“configuration” means this deployment pinned it and a save here cannot change it; “store” means somebody saved it from this screen." />
                 }
 
-                <div class="a-stack" style="padding:var(--space-5)">
-                    <div class="a-field">
-                        <span class="a-label">Kind</span>
-                        <div class="a-choice">
-                            @foreach (var kind in new[] { OpenAiCompatible, AzureOpenAi })
+                @if (!Assistant.IsInstalled)
+                {
+                    <p class="a-note">
+                        No assistant is installed on this instance. The standalone image includes one; an
+                        embedded host adds the <code class="a-mono">MMLib.Alvo.Ai</code> package.
+                    </p>
+                }
+                else if (!Assistant.CanWriteConnection)
+                {
+                    <p class="a-note">
+                        This deployment sets the connection in its own configuration, under
+                        <code class="a-mono">Alvo:Ai</code>, and the dashboard cannot change it. To save one from
+                        here instead, give the host an encryption key file
+                        (<code class="a-mono">Alvo:Secrets:EncryptionKeyFile</code>).
+                    </p>
+                }
+                else
+                {
+                    @if (_saveRefusal is { Length: > 0 })
+                    {
+                        <ErrorPanel Title="That connection could not be saved" Fix="@_saveRefusal" />
+                    }
+
+                    <div class="a-stack a-stack--inset">
+                        <Field Label="Kind" LabelId="ai-kind">
+                            <ChipGroup TValue="string" Items="_kinds" Selected="[_kind]" aria-labelledby="ai-kind"
+                                       SelectedChanged="kinds => _kind = kinds[0]" />
+                        </Field>
+
+                        <Field Label="Endpoint" For="ai-endpoint">
+                            <ChildContent>
+                                <input class="a-input" id="ai-endpoint" value="@_endpoint" autocomplete="off"
+                                       placeholder="e.g. http://localhost:11434/v1"
+                                       @oninput="args => _endpoint = args.Value?.ToString() ?? string.Empty" />
+                            </ChildContent>
+                            <Hint>The base address. It is never shown back, on this page or anywhere else.</Hint>
+                        </Field>
+
+                        <Field Label="Model" For="ai-model">
+                            <input class="a-input" id="ai-model" value="@_model" autocomplete="off"
+                                   placeholder="e.g. qwen3:8b"
+                                   @oninput="args => _model = args.Value?.ToString() ?? string.Empty" />
+                        </Field>
+
+                        <Field Label="API key" For="ai-key">
+                            <ChildContent>
+                                <input class="a-input" id="ai-key" type="password" value="@_apiKey" autocomplete="off"
+                                       placeholder="leave empty for a local model"
+                                       @oninput="args => _apiKey = args.Value?.ToString() ?? string.Empty" />
+                            </ChildContent>
+                            <Hint>
+                                Stored encrypted and never read back into this page. Saving replaces the whole
+                                connection, so type the key again if you change anything else.
+                            </Hint>
+                        </Field>
+
+                        <div class="a-row a-row--gap-2">
+                            <button type="button" class="a-btn a-btn--primary" data-testid="ai-save"
+                                    @onclick="SaveAsync">Save the connection</button>
+                            @if (_saved)
                             {
-                                <button type="button" id="@(kind == OpenAiCompatible ? "ai-kind" : null)"
-                                        class="@($"a-chip{(kind == _kind ? " a-chip--on" : string.Empty)}")"
-                                        @onclick="() => _kind = kind">@kind</button>
+                                <span class="a-section-sub">Saved.</span>
                             }
                         </div>
                     </div>
+                }
+            </ChildContent>
+        </Panel>
 
-                    <div class="a-field">
-                        <label class="a-label" for="ai-endpoint">Endpoint</label>
-                        <input class="a-input" id="ai-endpoint" value="@_endpoint" autocomplete="off"
-                               placeholder="e.g. http://localhost:11434/v1"
-                               @oninput="args => _endpoint = args.Value?.ToString() ?? string.Empty" />
-                        <span class="a-section-sub">
-                            The base address. It is never shown back, on this page or anywhere else.
-                        </span>
-                    </div>
-
-                    <div class="a-field">
-                        <label class="a-label" for="ai-model">Model</label>
-                        <input class="a-input" id="ai-model" value="@_model" autocomplete="off"
-                               placeholder="e.g. qwen3:8b"
-                               @oninput="args => _model = args.Value?.ToString() ?? string.Empty" />
-                    </div>
-
-                    <div class="a-field">
-                        <label class="a-label" for="ai-key">API key</label>
-                        <input class="a-input" id="ai-key" type="password" value="@_apiKey" autocomplete="off"
-                               placeholder="leave empty for a local model"
-                               @oninput="args => _apiKey = args.Value?.ToString() ?? string.Empty" />
-                        <span class="a-section-sub">
-                            Stored encrypted and never read back into this page. Saving replaces the whole
-                            connection, so type the key again if you change anything else.
-                        </span>
-                    </div>
-
-                    <div class="a-row" style="gap:var(--space-2)">
-                        <button type="button" class="a-btn a-btn--primary" data-testid="ai-save"
-                                @onclick="SaveAsync">Save the connection</button>
-                        @if (_saved)
-                        {
-                            <span class="a-section-sub">Saved.</span>
-                        }
-                    </div>
-                </div>
-            }
-        </div>
-
-        <div class="a-panel">
-            <div class="a-section">
-                <span class="a-section-title">API keys</span>
-                <span class="a-section-sub">Not managed from this dashboard.</span>
-            </div>
-            <p class="a-note">
-                Keys are issued and revoked where they were created — in this host's configuration, or by a
-                key store the host registered. The dashboard has no way to issue or revoke one, so it offers
-                no control for it.
-            </p>
-        </div>
+        <Panel Title="API keys">
+            <Subtitle>Not managed from this dashboard.</Subtitle>
+            <ChildContent>
+                <p class="a-note">
+                    Keys are issued and revoked where they were created — in this host's configuration, or by a
+                    key store the host registered. The dashboard has no way to issue or revoke one, so it offers
+                    no control for it.
+                </p>
+            </ChildContent>
+        </Panel>
     }
 </div>
 
@@ -181,6 +165,8 @@
 
     private const string OpenAiCompatible = "openai-compatible";
     private const string AzureOpenAi = "azure-openai";
+
+    private static readonly string[] _kinds = [OpenAiCompatible, AzureOpenAi];
 
     protected override async Task OnInitializedAsync()
         => _info = await Gateway.InfoAsync(CancellationToken.None);

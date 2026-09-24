@@ -15,42 +15,39 @@
     }
     else if (_schema is null)
     {
-        <div class="a-skeleton" style="height:200px"></div>
+        <Skeleton Size="Skeleton.SkeletonSize.Lg" />
     }
     else
     {
         @if (_tenant is null && _schema.Entities.Any(entity => entity.Tenancy == TenancyMode.Scoped))
         {
-            <div class="a-notyet-panel">
-                <div class="a-section">
-                    <span class="a-section-title">You hold no tenant</span>
-                    <span class="a-section-sub">
-                        The entities marked <em>scoped</em> below are refused with 403 before any rule
-                        is consulted — the tenant guard runs first. An administrator grants a tenant
-                        in Access; an API key carries the one it was issued for.
-                    </span>
-                </div>
-            </div>
+            <NotYetPanel Title="You hold no tenant">
+                <Subtitle>
+                    The entities marked <em>scoped</em> below are refused with 403 before any rule
+                    is consulted — the tenant guard runs first. An administrator grants a tenant
+                    in Access; an API key carries the one it was issued for.
+                </Subtitle>
+            </NotYetPanel>
         }
 
-        <div class="a-panel">
-            <div class="a-section">
-                <span class="a-section-title">Entities</span>
-                <span class="a-section-sub">Read and written through the Data API, under your own credential.</span>
-            </div>
-            @foreach (var entity in _schema.Entities)
-            {
-                <a class="a-row" style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4);text-decoration:none;color:inherit"
-                   href="@AdminPaths.Records(entity.Name)">
-                    <Icon Path="@Icons.Data" />
-                    <span class="a-mono" style="flex:1;font-size:var(--text-sm)">@entity.Name</span>
-                    @if (entity.Tenancy == TenancyMode.Scoped)
-                    {
-                        <span class="@($"a-badge {(_tenant is null ? "a-badge--warn" : "a-badge--accent")}")">scoped</span>
-                    }
-                </a>
-            }
-        </div>
+        <Panel Title="Entities">
+            <Subtitle>Read and written through the Data API, under your own credential.</Subtitle>
+            <ChildContent>
+                @* A link rather than ListRow's button: each row is an address. *@
+                @foreach (var entity in _schema.Entities)
+                {
+                    <a class="a-listrow a-listrow--roomy a-listrow--inline a-listrow--center"
+                       href="@AdminPaths.Records(entity.Name)">
+                        <Icon Path="@Icons.Data" />
+                        <span class="a-mono a-listrow__main">@entity.Name</span>
+                        @if (entity.Tenancy == TenancyMode.Scoped)
+                        {
+                            <span class="@($"a-badge {(_tenant is null ? "a-badge--warn" : "a-badge--accent")}")">scoped</span>
+                        }
+                    </a>
+                }
+            </ChildContent>
+        </Panel>
     }
 </div>
 

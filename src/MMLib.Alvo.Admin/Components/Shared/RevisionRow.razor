@@ -5,13 +5,13 @@
     with no author is a code-first or system apply, and that is information rather than a gap. The
     one exception is the initial descriptor, which RevisionHistory names for what it is.
 *@
-<div class="a-row" data-testid="revision-row" style="align-items:flex-start;padding:var(--space-4);gap:var(--space-4)">
+<div class="a-revision" data-testid="revision-row">
     <span class="a-badge a-badge--accent a-badge--rev">r@(Revision.Revision)</span>
-    <span style="flex:1;min-width:0">
-        <span style="font-size:var(--text-sm);font-weight:var(--weight-medium)">
+    <span class="a-item">
+        <span class="a-item__title">
             @RevisionHistory.Title(Revision)
         </span>
-        <span class="a-switcher-meta">
+        <span class="a-meta">
             @if (RevisionHistory.Author(Revision) is { } author)
             {
                 <text>@author · </text>

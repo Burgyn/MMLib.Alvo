@@ -30,7 +30,7 @@
     {
         <p class="a-note">
             Nothing below has run. Planning asks the database what this change would do, and changes nothing.
-            <span class="a-ident" style="display:block;margin-top:var(--space-1)">API: PUT …/descriptor?dryRun=true</span>
+            <span class="a-ident a-ident--block">API: PUT …/descriptor?dryRun=true</span>
         </p>
 
         <Panel Title="What changed">
@@ -64,10 +64,10 @@
                     @foreach (var step in _plan.Plan.Steps.Select(PlanStep.Parse))
                     {
                         <ListRow data-testid="plan-step" class="a-listrow--inline">
-                            <span class="@($"a-badge {(step.Destructive ? "a-badge--danger" : "a-badge--ok")}")" style="flex:none">
+                            <span class="@($"a-badge a-listrow__aside {(step.Destructive ? "a-badge--danger" : "a-badge--ok")}")">
                                 @(step.Destructive ? "destroys" : "safe")
                             </span>
-                            <span style="flex:1;min-width:0;font-size:var(--text-sm)">
+                            <span class="a-listrow__main">
                                 @* One expression with its trailing space: a bare `@step.Verb` followed by the element on
                                    the next line lost the whitespace between them ("Drop columncustomers.notes"). *@
                                 @($"{step.Verb} ")

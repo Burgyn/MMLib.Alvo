@@ -29,7 +29,7 @@
     {
         @if (_loading)
         {
-            <div class="a-skeleton" style="height:240px"></div>
+            <Skeleton Size="Skeleton.SkeletonSize.Lg" />
         }
         else if (_problem is null)
         {
@@ -100,7 +100,7 @@
 
             @if (_loading)
             {
-                <div class="a-skeleton" style="height:200px"></div>
+                <Skeleton Size="Skeleton.SkeletonSize.Lg" />
             }
             else if (_page is null)
             {
@@ -149,7 +149,7 @@
                                     {
                                         <td class="@CellClass(column, row)">@Value(column, row)</td>
                                     }
-                                    <td style="text-align:right;white-space:nowrap">
+                                    <td class="a-cell--actions">
                                         <button type="button" class="a-btn a-btn--ghost a-btn--sm"
                                                 @onclick="() => Open(row)" @onclick:stopPropagation="true">Edit</button>
                                     </td>
@@ -191,7 +191,7 @@
                     }
                 </div>
 
-                <div class="a-row" style="gap:var(--space-3);align-items:center">
+                <div class="a-row">
                     @*
                         The count is what a reader needs; how the paging works is a property of the
                         product, not of this screen's data, and at body weight it was the loudest text
@@ -201,7 +201,7 @@
                           title="Keyset paging over an opaque cursor, stable under concurrent writes.">
                         showing @_page.Items.Count@(_page.TotalCount is { } total ? $" of {total}" : string.Empty)
                     </span>
-                    <span style="margin-left:auto"></span>
+                    <span class="a-spacer"></span>
                     @if (_cursors.Count > 0)
                     {
                         <button type="button" class="a-btn a-btn--sm" @onclick="Previous">Previous</button>

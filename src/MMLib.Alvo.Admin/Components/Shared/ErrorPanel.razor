@@ -32,7 +32,7 @@
     @if (_classified?.OffersSignOut == true)
     {
         <form method="post" action="@AlvoAdmin.SignOutEndpoint" data-enhance="false"
-              style="margin-top:var(--space-3)">
+              class="a-error__actions">
             <AntiforgeryToken />
             <button type="submit" class="a-btn a-btn--sm" data-testid="forbidden-sign-out">
                 Sign out and sign in again
@@ -42,7 +42,7 @@
 
     @if (Actions is not null)
     {
-        <div class="a-row" style="margin-top:var(--space-3)">@Actions</div>
+        <div class="a-row a-error__actions">@Actions</div>
     }
 </div>
 

@@ -15,7 +15,7 @@
     }
     else if (_revisions is null)
     {
-        <div class="a-skeleton" style="height:200px"></div>
+        <Skeleton Size="Skeleton.SkeletonSize.Lg" />
     }
     else if (_revisions.Count == 0)
     {
@@ -25,15 +25,16 @@
     else
     {
         <div class="a-split">
-            <div class="a-panel" style="flex:1;min-width:0">
+            <Panel class="a-split__main">
                 @foreach (var revision in _revisions)
                 {
-                    <button type="button" style="width:100%;text-align:left;border:0;border-bottom:1px solid var(--border);background:@(revision.Revision == _selected?.Version.Revision ? "var(--accentSoft)" : "transparent");cursor:pointer"
-                            @onclick="() => OpenAsync(revision.Revision)">
+                    @* Flush: the revision draws its own inset, the one it has on Overview. *@
+                    <ListRow class="@($"a-listrow--stacked a-listrow--flush{(revision.Revision == _selected?.Version.Revision ? " a-listrow--accent" : string.Empty)}")"
+                             OnClick="() => OpenAsync(revision.Revision)">
                         <RevisionRow Revision="revision" />
-                    </button>
+                    </ListRow>
                 }
-            </div>
+            </Panel>
 
             <div class="a-split__aside">
                 @if (_selected is null)
@@ -45,8 +46,8 @@
                 }
                 else
                 {
-                    <div class="a-card" style="gap:var(--space-4)">
-                        <div class="a-row" style="gap:var(--space-3)">
+                    <div class="a-card a-card--roomy">
+                        <div class="a-row">
                             <span class="a-badge a-badge--accent a-badge--rev">r@(_selected.Version.Revision)</span>
                             <span class="a-section-sub">@RevisionHistory.Title(_selected.Version)</span>
                         </div>
@@ -62,7 +63,7 @@
                                                Detail="A reverse migration can discard data that was added after this revision. Permission to lose data is never implied."
                                                Expected="@Gateway.Project"
                                                OnConfirmedChanged="confirmed => _allowed = confirmed" />
-                                <button type="button" class="a-btn a-btn--danger" style="margin-top:var(--space-3)"
+                                <button type="button" class="a-btn a-btn--danger a-actions"
                                         disabled="@(!_allowed || _busy)" @onclick="RollbackAsync">
                                     Roll back to r@(_selected.Version.Revision)
                                 </button>

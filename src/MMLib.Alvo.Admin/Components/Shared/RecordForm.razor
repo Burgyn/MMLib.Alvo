@@ -38,10 +38,10 @@
                         @GridColumns.Header(column)
                         @if (column.Required)
                         {
-                            <span style="color:var(--accent)" aria-hidden="true"> *</span>
+                            <span class="a-label__required" aria-hidden="true"> *</span>
                         }
                     </label>
-                    <span class="a-section-sub" id="@HintId(column)">
+                    <span class="a-hint" id="@HintId(column)">
                         <span class="a-ident">@column.Name · @TypeOf(column)</span>@Hint(column)
                     </span>
                     @Control(column)
@@ -84,7 +84,7 @@
             {
                 <button type="button" class="a-btn a-btn--danger a-btn--sm" @onclick="Delete">Delete</button>
             }
-            <span style="margin-left:auto"></span>
+            <span class="a-spacer"></span>
             <button type="button" class="a-btn a-btn--primary" disabled="@_saving" @onclick="Save">
                 @(RecordId is null ? "Create" : "Save")
             </button>
@@ -225,17 +225,11 @@
                         @onclick="() => Toggle(column.Name)" aria-pressed="@on"></button>;
     }
 
-    private RenderFragment Choice(FieldSchema column) => @<div class="a-choice" id="@ControlId(column)" role="radiogroup"
-                                                               aria-labelledby="@LabelId(column)" aria-describedby="@HintId(column)"
-                                                               aria-required="@Required(column)">
-        @foreach (var option in column.EnumValues ?? [])
-        {
-            var on = string.Equals(_draft.Text(column.Name), option, StringComparison.Ordinal);
-            <button type="button" role="radio" aria-checked="@(on ? "true" : "false")"
-                    class="@($"a-chip{(on ? " a-chip--on" : string.Empty)}")"
-                    @onclick="() => Set(column.Name, option)">@option</button>
-        }
-    </div>;
+    private RenderFragment Choice(FieldSchema column) => @<ChipGroup TValue="string" Items="@(column.EnumValues ?? [])"
+                                                                     Selected="@([_draft.Text(column.Name)])"
+                                                                     id="@ControlId(column)" aria-labelledby="@LabelId(column)"
+                                                                     aria-describedby="@HintId(column)" aria-required="@Required(column)"
+                                                                     SelectedChanged="options => Set(column.Name, options[0])" />;
 
     /// <summary>
     /// A reference: a combobox over the target's labelled rows (<see cref="RefPicker"/>).

@@ -17,13 +17,13 @@
         if (Multiple)
         {
             <button type="button" aria-pressed="@(on ? "true" : "false")" class="@Chip(on)"
-                    @onclick="() => ToggleAsync(item)">@Text(item)</button>
+                    @onclick="() => ToggleAsync(item)">@Content(item)</button>
         }
         else
         {
             <button type="button" role="radio" aria-checked="@(on ? "true" : "false")" class="@Chip(on)"
                     tabindex="@(at == TabStop ? 0 : -1)" @ref="_chips[at]"
-                    @onclick="() => ChooseAsync(item)" @onkeydown="args => MoveAsync(at, args.Key)">@Text(item)</button>
+                    @onclick="() => ChooseAsync(item)" @onkeydown="args => MoveAsync(at, args.Key)">@Content(item)</button>
         }
     }
 </div>
@@ -51,6 +51,13 @@
     /// <summary>What a chip reads for its item; the item's own text when not given.</summary>
     [Parameter]
     public Func<TValue, string>? Label { get; set; }
+
+    /// <summary>
+    /// What a chip draws for its item when that is more than a word — an identifier with its position in
+    /// the selection; <see cref="Label"/> is used when not given.
+    /// </summary>
+    [Parameter]
+    public RenderFragment<TValue>? ChipContent { get; set; }
 
     /// <summary>
     /// Anything else, onto the group's element: the <c>aria-labelledby</c> that names it, an <c>id</c>,
@@ -89,6 +96,8 @@
     private bool IsSelected(TValue item) => Selected.Contains(item, EqualityComparer<TValue>.Default);
 
     private string Text(TValue item) => Label?.Invoke(item) ?? item?.ToString() ?? string.Empty;
+
+    private RenderFragment Content(TValue item) => ChipContent?.Invoke(item) ?? (builder => builder.AddContent(0, Text(item)));
 
     private static string Chip(bool on) => on ? "a-chip a-chip--on" : "a-chip";
 

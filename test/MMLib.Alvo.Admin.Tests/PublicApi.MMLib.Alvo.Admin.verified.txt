@@ -68,6 +68,8 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem
         public ChipGroup() { }
         [Microsoft.AspNetCore.Components.Parameter(CaptureUnmatchedValues=true)]
         public System.Collections.Generic.IReadOnlyDictionary<string, object>? Attributes { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment<TValue>? ChipContent { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<TValue> Items { get; set; }

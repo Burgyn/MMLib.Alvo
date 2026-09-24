@@ -28,11 +28,12 @@
                         Fix="@_refusal" />
         }
 
-        <div class="a-field">
-            <label class="a-label" for="new-field-name">Name</label>
-            <input class="a-input" id="new-field-name" value="@_name" placeholder="e.g. scheduled_for"
-                   @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
-            <span class="a-section-sub">
+        <Field Label="Name" For="new-field-name">
+            <ChildContent>
+                <input class="a-input" id="new-field-name" value="@_name" placeholder="e.g. scheduled_for"
+                       @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
+            </ChildContent>
+            <Hint>
                 @if (IsEditing && !string.Equals(_name, Editing, StringComparison.Ordinal))
                 {
                     <text>
@@ -45,19 +46,13 @@
                 {
                     <span title="@DescriptorNames.Member">@DescriptorNames.Hint</span>
                 }
-            </span>
-        </div>
+            </Hint>
+        </Field>
 
-        <div class="a-field">
-            <span class="a-label">Type</span>
-            <div class="a-choice">
-                @foreach (var type in Enum.GetValues<FieldType>())
-                {
-                    <button type="button" class="@($"a-chip{(type == _type ? " a-chip--on" : string.Empty)}")"
-                            @onclick="() => _type = type">@type.ToString().ToLowerInvariant()</button>
-                }
-            </div>
-        </div>
+        <Field Label="Type" LabelId="new-field-type">
+            <ChipGroup TValue="FieldType" Items="_types" Selected="[_type]" aria-labelledby="new-field-type"
+                       Label="Word" SelectedChanged="types => _type = types[0]" />
+        </Field>
 
         <div class="a-field">
             <span class="a-label">Constraints</span>
@@ -91,7 +86,7 @@
             </div>
             @if (_unique && _indexed)
             {
-                <span class="a-section-sub">
+                <span class="a-hint">
                     <code class="a-mono">index</code> is kept as declared and is redundant beside
                     <code class="a-mono">unique</code>, which already carries one. Clear
                     <code class="a-mono">unique</code> to change it.
@@ -102,77 +97,73 @@
         @switch (_type)
         {
             case FieldType.String:
-                <div class="a-field">
-                    <label class="a-label" for="new-field-max">Max length</label>
+                <Field Label="Max length" For="new-field-max">
                     <input class="a-input" id="new-field-max" type="number" value="@_maxLength"
                            @oninput="args => _maxLength = Number(args.Value, 120)" />
-                </div>
+                </Field>
                 break;
             case FieldType.Decimal:
                 <div class="a-field-row">
-                    <div class="a-field">
-                        <label class="a-label" for="new-field-precision">Precision</label>
-                        <input class="a-input" id="new-field-precision" type="number" value="@_precision"
-                               @oninput="args => _precision = Number(args.Value, 10)" />
-                        <span class="a-section-sub">Total digits, not the ones before the point.</span>
-                    </div>
-                    <div class="a-field">
-                        <label class="a-label" for="new-field-scale">Scale</label>
-                        <input class="a-input" id="new-field-scale" type="number" value="@_scale"
-                               @oninput="args => _scale = Number(args.Value, 2)" />
-                        <span class="a-section-sub">Digits after the point.</span>
-                    </div>
+                    <Field Label="Precision" For="new-field-precision">
+                        <ChildContent>
+                            <input class="a-input" id="new-field-precision" type="number" value="@_precision"
+                                   @oninput="args => _precision = Number(args.Value, 10)" />
+                        </ChildContent>
+                        <Hint>Total digits, not the ones before the point.</Hint>
+                    </Field>
+                    <Field Label="Scale" For="new-field-scale">
+                        <ChildContent>
+                            <input class="a-input" id="new-field-scale" type="number" value="@_scale"
+                                   @oninput="args => _scale = Number(args.Value, 2)" />
+                        </ChildContent>
+                        <Hint>Digits after the point.</Hint>
+                    </Field>
                 </div>
                 break;
             case FieldType.Enum:
-                <div class="a-field">
-                    <label class="a-label" for="new-field-values">Values</label>
-                    <input class="a-input" id="new-field-values" value="@_values" placeholder="e.g. scheduled, in_progress, completed"
-                           @oninput="args => _values = args.Value?.ToString() ?? string.Empty" />
-                    <span class="a-section-sub">Comma separated. An enum with no values is refused by the schema.</span>
-                </div>
+                <Field Label="Values" For="new-field-values">
+                    <ChildContent>
+                        <input class="a-input" id="new-field-values" value="@_values" placeholder="e.g. scheduled, in_progress, completed"
+                               @oninput="args => _values = args.Value?.ToString() ?? string.Empty" />
+                    </ChildContent>
+                    <Hint>Comma separated. An enum with no values is refused by the schema.</Hint>
+                </Field>
                 break;
             case FieldType.Ref:
-                <div class="a-field">
-                    <span class="a-label">Points at</span>
-                    <div class="a-choice">
-                        @foreach (var target in Targets)
-                        {
-                            <button type="button" class="@($"a-chip{(target == _target ? " a-chip--on" : string.Empty)}")"
-                                    @onclick="() => _target = target">@target</button>
-                        }
-                    </div>
-                </div>
+                <Field Label="Points at" LabelId="new-field-target">
+                    <ChipGroup TValue="string" Items="Targets" Selected="[_target]" aria-labelledby="new-field-target"
+                               SelectedChanged="targets => _target = targets[0]" />
+                </Field>
                 break;
         }
 
         @if (TakesADefault)
         {
-            <div class="a-field">
-                <label class="a-label" for="new-field-default">Default value</label>
-                @if (_type is FieldType.Boolean)
-                {
-                    <div class="a-choice">
-                        @foreach (var option in new[] { string.Empty, "false", "true" })
-                        {
-                            <button type="button" id="@(option.Length == 0 ? "new-field-default" : null)"
-                                    class="@($"a-chip{(option == _default ? " a-chip--on" : string.Empty)}")"
-                                    @onclick="() => _default = option">@(option.Length == 0 ? "none" : option)</button>
-                        }
-                    </div>
-                }
-                else
-                {
-                    <input class="a-input" id="new-field-default" value="@_default"
-                           placeholder="@DefaultPlaceholder" autocomplete="off"
-                           @oninput="args => _default = args.Value?.ToString() ?? string.Empty" />
-                }
-                <span class="a-section-sub">
+            @* A boolean's default is a group of chips, which a <label for> cannot name; the group names the
+               label by its id instead. *@
+            <Field Label="Default value" For="@(_type is FieldType.Boolean ? null : "new-field-default")"
+                   LabelId="new-field-default-label">
+                <ChildContent>
+                    @if (_type is FieldType.Boolean)
+                    {
+                        <ChipGroup TValue="string" Items="_flags" Selected="[_default]"
+                                   aria-labelledby="new-field-default-label"
+                                   Label="@(option => option.Length == 0 ? "none" : option)"
+                                   SelectedChanged="options => _default = options[0]" />
+                    }
+                    else
+                    {
+                        <input class="a-input" id="new-field-default" value="@_default"
+                               placeholder="@DefaultPlaceholder" autocomplete="off"
+                               @oninput="args => _default = args.Value?.ToString() ?? string.Empty" />
+                    }
+                </ChildContent>
+                <Hint>
                     What a create stores when the caller omits the field. It becomes a column
                     <code class="a-mono">DEFAULT</code> and is filled in on every write that composes a whole
                     row. Leave it empty for no default.
-                </span>
-            </div>
+                </Hint>
+            </Field>
         }
 
     @* The facets the frozen schema declares and this build refuses. Without this the editor's
@@ -197,13 +188,13 @@
 
             @foreach (var refusal in FieldRefusals)
             {
-                <div class="a-listrow" data-testid="@($"refused-{refusal.Slot}")">
+                <ListRow data-testid="@($"refused-{refusal.Slot}")">
                     <code class="a-mono a-listrow__key">@refusal.Slot</code>
-                    <span class="a-listrow__rest" style="flex-direction:column;align-items:flex-start;gap:var(--space-1)">
+                    <span class="a-listrow__rest a-listrow__rest--stacked">
                         <span class="a-section-sub">@refusal.Consequence</span>
                         <span class="a-section-sub">@refusal.Fix</span>
                     </span>
-                </div>
+                </ListRow>
             }
         </details>
     }
@@ -211,7 +202,7 @@
 
     <div class="a-sheet__actions">
         <button type="button" class="a-btn" @onclick="Cancel">Cancel</button>
-        <span style="margin-left:auto"></span>
+        <span class="a-spacer"></span>
         <button type="button" class="a-btn a-btn--primary" @onclick="Add" data-testid="field-save">
             @(IsEditing ? "Save to the working copy" : "Add to the working copy")
         </button>
@@ -220,6 +211,12 @@
 </Sheet>
 
 @code {
+    private static readonly FieldType[] _types = Enum.GetValues<FieldType>();
+    private static readonly string[] _flags = [string.Empty, "false", "true"];
+
+    /// <summary>A type as the descriptor spells it.</summary>
+    private static string Word(FieldType type) => type.ToString().ToLowerInvariant();
+
     private string _name = string.Empty;
     private string _default = string.Empty;
     private bool _maintainedElsewhere;

@@ -17,6 +17,9 @@
 
 @if (_open)
 {
+    @* The one inline style left in the package, on purpose: the palette's own overlay is to be rebuilt
+       on the shared scrim and scroll lock (docs/architecture/admin-dashboard-review.md, F-26), with its
+       z-index from a token (F-21) — a class named for it now would be renamed then. *@
     <div class="a-scrim" style="display:grid;place-items:start center;padding-top:12vh;z-index:40"
          @onclick="Close">
         <div class="a-palette" role="dialog" aria-modal="true" aria-label="Search"
@@ -26,7 +29,7 @@
             <div role="listbox" class="a-palette__list">
                 @if (Matches.Count == 0)
                 {
-                    <div class="a-palette__item" style="color:var(--dim)">
+                    <div class="a-palette__item a-palette__item--empty">
                         Nothing matches “@_query”. Sections, entities and actions are what this searches.
                     </div>
                 }
@@ -42,7 +45,7 @@
                             @onclick="() => Go(match)">
                         <Icon Path="@match.Icon" />
                         <span>@match.Title</span>
-                        <span style="margin-left:auto;color:var(--faint);font-size:var(--text-2xs)">@match.Kind</span>
+                        <span class="a-palette__kind">@match.Kind</span>
                         @if (match.Shortcut is { } shortcut)
                         {
                             <kbd class="a-kbd">@shortcut</kbd>

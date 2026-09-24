@@ -15,57 +15,51 @@
 *@
 <PageTitle>Sign in · Alvo</PageTitle>
 
-<div class="a-stack" style="max-width:380px;margin:12vh auto 0">
+<div class="a-stack a-signin">
     @* The mark and the name set in the page's own type, rather than the wordmark SVG: that file
        draws "Alvo" with `fill="currentColor"`, and an SVG loaded through <img> has no page to take
        a colour from — it would resolve to black and disappear in the dark theme. The wordmark is
        still published for a host that wants it on a light surface. *@
-    <div class="a-brand" style="justify-content:center;font-size:var(--text-xl)">
+    <div class="a-brand a-brand--hero">
         <img src="@AlvoAdminAssets.Mark" width="34" height="34" alt="" />
         <span>Alvo</span>
     </div>
 
-    <div class="a-panel" style="padding:var(--space-6)">
-        <div class="a-section" style="padding:0 0 var(--space-4)">
-            <span class="a-section-title">Sign in</span>
-            <span class="a-section-sub">
-                The administrator this host was configured with, or an account they created.
-            </span>
-        </div>
+    <Panel Title="Sign in" class="a-signin__panel">
+        <Subtitle>The administrator this host was configured with, or an account they created.</Subtitle>
+        <ChildContent>
+            @if (Failed)
+            {
+                <ErrorPanel Title="That email and password do not match"
+                            Fix="If this is a new deployment, the account is the one named by Alvo:Admin:BootstrapEmail, with the password in the file Alvo:Admin:BootstrapPasswordFile points at." />
+            }
 
-        @if (Failed)
-        {
-            <ErrorPanel Title="That email and password do not match"
-                        Fix="If this is a new deployment, the account is the one named by Alvo:Admin:BootstrapEmail, with the password in the file Alvo:Admin:BootstrapPasswordFile points at." />
-        }
+            @* data-enhance="false" — a real browser form post, not an enhanced one.
 
-        @* data-enhance="false" — a real browser form post, not an enhanced one.
+               Blazor's enhanced form handling posts through fetch and patches the DOM with the
+               response. That is right for a form whose answer is a page; it is wrong for this one,
+               whose answer is a Set-Cookie and a redirect: the cookie arrives, the redirect is applied
+               as a DOM patch, and the operator is left looking at the sign-in screen they just
+               completed. Opting out makes the browser navigate, which is what an authentication
+               handshake needs. *@
+            <form method="post" action="@AlvoAdmin.SignInEndpoint" class="a-stack" data-enhance="false">
+                <AntiforgeryToken />
+                <input type="hidden" name="returnUrl" value="@ReturnUrl" />
 
-           Blazor's enhanced form handling posts through fetch and patches the DOM with the
-           response. That is right for a form whose answer is a page; it is wrong for this one,
-           whose answer is a Set-Cookie and a redirect: the cookie arrives, the redirect is applied
-           as a DOM patch, and the operator is left looking at the sign-in screen they just
-           completed. Opting out makes the browser navigate, which is what an authentication
-           handshake needs. *@
-        <form method="post" action="@AlvoAdmin.SignInEndpoint" class="a-stack" data-enhance="false">
-            <AntiforgeryToken />
-            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+                <Field Label="Email" For="email">
+                    <input class="a-input" id="email" name="email" type="email" autocomplete="username"
+                           required autofocus />
+                </Field>
 
-            <div class="a-field">
-                <label class="a-label" for="email">Email</label>
-                <input class="a-input" id="email" name="email" type="email" autocomplete="username"
-                       required autofocus />
-            </div>
+                <Field Label="Password" For="password">
+                    <input class="a-input" id="password" name="password" type="password"
+                           autocomplete="current-password" required />
+                </Field>
 
-            <div class="a-field">
-                <label class="a-label" for="password">Password</label>
-                <input class="a-input" id="password" name="password" type="password"
-                       autocomplete="current-password" required />
-            </div>
-
-            <button class="a-btn a-btn--primary" type="submit">Sign in</button>
-        </form>
-    </div>
+                <button class="a-btn a-btn--primary" type="submit">Sign in</button>
+            </form>
+        </ChildContent>
+    </Panel>
 </div>
 
 @code {

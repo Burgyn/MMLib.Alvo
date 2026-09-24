@@ -10,43 +10,38 @@
 
     @if (_capabilities is null)
     {
-        <div class="a-skeleton" style="height:200px"></div>
+        <Skeleton />
     }
     else
     {
         @foreach (var block in new[] { "webhooks", "templates" })
         {
-            <div class="a-panel">
-                <div class="a-section">
-                    <span class="a-section-title">@block</span>
-                    <span class="a-section-sub">
-                        @(Declared(block) is null
-                            ? "Not declared by this descriptor."
-                            : "Declared, and served here exactly as stored.")
-                    </span>
-                </div>
+            <Panel Title="@block">
+                <Subtitle>
+                    @(Declared(block) is null
+                        ? "Not declared by this descriptor."
+                        : "Declared, and served here exactly as stored.")
+                </Subtitle>
+                <ChildContent>
+                    @if (Warned(block) is { } warning)
+                    {
+                        <div class="a-notyet-panel__body">
+                            <span class="a-badge a-badge--warn">not yet</span>
+                            <span class="a-notyet-panel__consequence">@warning.Consequence</span>
+                        </div>
+                    }
 
-                @if (Warned(block) is { } warning)
-                {
-                    <div class="a-notyet-panel__body">
-                        <span class="a-badge a-badge--warn">not yet</span>
-                        <span class="a-notyet-panel__consequence">@warning.Consequence</span>
-                    </div>
-                }
-
-                @if (Declared(block) is { Length: > 0 } json)
-                {
-                    <div style="padding:var(--space-4)">
-                        <CodeBlock Json="@json" />
-                    </div>
-                }
-            </div>
+                    @if (Declared(block) is { Length: > 0 } json)
+                    {
+                        <div class="a-panel__body">
+                            <CodeBlock Json="@json" />
+                        </div>
+                    }
+                </ChildContent>
+            </Panel>
         }
 
-        <div class="a-panel">
-            <div class="a-section">
-                <span class="a-section-title">Why there is no "new endpoint" button</span>
-            </div>
+        <Panel Title="@("Why there is no \"new endpoint\" button")">
             @if (Refusals.Count == 0)
             {
                 <p class="a-note">This build refuses nothing in these blocks.</p>
@@ -60,7 +55,7 @@
                     </p>
                 }
             }
-        </div>
+        </Panel>
     }
 </div>
 

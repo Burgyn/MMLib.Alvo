@@ -35,16 +35,17 @@
                 <ErrorPanel Title="That name cannot be used" Fix="@_renameRefusal" />
             }
 
-            <div class="a-field">
-                <label class="a-label" for="rename-entity-name">New name</label>
-                <input class="a-input a-mono" id="rename-entity-name" value="@_newName" autocomplete="off"
-                       @oninput="args => _newName = args.Value?.ToString() ?? string.Empty" />
-                <span class="a-section-sub">
+            <Field Label="New name" For="rename-entity-name">
+                <ChildContent>
+                    <input class="a-input a-mono" id="rename-entity-name" value="@_newName" autocomplete="off"
+                           @oninput="args => _newName = args.Value?.ToString() ?? string.Empty" />
+                </ChildContent>
+                <Hint>
                     <span title="@DescriptorNames.Member">@DescriptorNames.Hint</span>
                     The change is carried by <code class="a-mono">renamedFrom</code>, so the apply moves the
                     table instead of dropping it and creating a new one.
-                </span>
-            </div>
+                </Hint>
+            </Field>
 
             <div class="a-row">
                 <button type="button" class="a-btn a-btn--primary a-btn--sm" data-testid="rename-save"
@@ -61,7 +62,7 @@
     {
         @if (_schema is null)
         {
-            <div class="a-skeleton" style="height:240px"></div>
+            <Skeleton Size="Skeleton.SkeletonSize.Lg" />
         }
         else
         {
@@ -71,7 +72,7 @@
     }
     else
     {
-        <div style="display:flex;gap:var(--space-2);flex-wrap:wrap">
+        <div class="a-row a-row--gap-2 a-row--wrap">
             @if (_pending)
             {
                 <span class="a-badge a-badge--warn">not applied yet</span>

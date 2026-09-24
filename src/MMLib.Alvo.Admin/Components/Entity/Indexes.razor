@@ -28,8 +28,7 @@ else
         var index = Declared[position];
         var at = position;
 
-        <div class="a-row" style="padding:var(--space-3) var(--space-5);border-bottom:1px solid var(--border);gap:var(--space-4)"
-             data-testid="index-row">
+        <ListRow class="a-listrow--inline a-listrow--center" data-testid="index-row">
             @*
                 An entry the working copy could not read — an imported or proposed descriptor may carry one,
                 and the apply is what refuses it. Shown rather than hidden, and shown in its own position,
@@ -37,14 +36,14 @@ else
             *@
             @if (index.Fields.Count == 0)
             {
-                <span class="a-section-sub" style="flex:1" data-testid="index-unreadable">
+                <span class="a-section-sub a-listrow__main" data-testid="index-unreadable">
                     Declared in a shape this screen cannot read. The apply will refuse it — remove it here,
                     or fix it in the descriptor and import it again.
                 </span>
             }
             else
             {
-                <span class="a-mono" style="flex:1;font-size:var(--text-sm)">@string.Join(", ", index.Fields)</span>
+                <span class="a-mono a-listrow__main">@string.Join(", ", index.Fields)</span>
             }
             @if (index.Unique)
             {
@@ -60,13 +59,13 @@ else
                         aria-label="@($"Remove the index on {string.Join(", ", index.Fields)}")"
                         @onclick="() => OnRemove.InvokeAsync(at)">Remove</button>
             }
-        </div>
+        </ListRow>
     }
 }
 
 @if (Editable)
 {
-    <div class="a-stack" style="padding:var(--space-5);gap:var(--space-4)">
+    <div class="a-stack a-stack--inset a-stack--gap-4">
         <div class="a-section">
             <span class="a-section-title">Add an index</span>
             <span class="a-section-sub">
@@ -79,9 +78,7 @@ else
 
         @if (_refusal is { Length: > 0 })
         {
-            <div class="a-refused" data-testid="index-refusal">
-                <span class="a-refused__reason">@_refusal</span>
-            </div>
+            <Refusal data-testid="index-refusal">@_refusal</Refusal>
         }
 
         @*
@@ -89,27 +86,20 @@ else
             maintains after them under their own label, the way the Fields tab lists them. They stay
             pickable: a filter on created_at or tenant_id is exactly what an index serves.
         *@
-        <div class="a-stack" style="gap:var(--space-3)" data-testid="index-fields">
-            <div class="a-choice">
-                @foreach (var field in Declarable)
-                {
-                    @Chip(field.Name)
-                }
-            </div>
+        <div class="a-stack a-stack--gap-3" data-testid="index-fields">
+            <ChipGroup TValue="string" Items="Names(Declarable)" Selected="_chosen" Multiple="true"
+                       aria-label="Fields" SelectedChanged="Choose" ChipContent="Chip" />
 
             @if (Maintained.Count > 0)
             {
-                <span class="a-label">Maintained by Alvo</span>
-                <div class="a-choice" data-testid="index-fields-maintained">
-                    @foreach (var field in Maintained)
-                    {
-                        @Chip(field.Name)
-                    }
-                </div>
+                <span class="a-label" id="index-maintained-label">Maintained by Alvo</span>
+                <ChipGroup TValue="string" Items="Names(Maintained)" Selected="_chosen" Multiple="true"
+                           aria-labelledby="index-maintained-label" data-testid="index-fields-maintained"
+                           SelectedChanged="Choose" ChipContent="Chip" />
             }
         </div>
 
-        <label class="a-row" style="gap:var(--space-2)">
+        <label class="a-row a-row--gap-2">
             <input type="checkbox" checked="@_unique" data-testid="index-unique"
                    @onchange="args => _unique = args.Value is true" />
             <span>Enforce uniqueness across these fields</span>
@@ -123,17 +113,16 @@ else
 }
 
 @code {
-    /// <summary>One field to pick, pressed while it is in the index, with its position in it.</summary>
-    private RenderFragment Chip(string name) => @<button type="button"
-            class="@($"a-chip{(_chosen.Contains(name) ? " a-chip--on" : string.Empty)}")"
-            aria-pressed="@(_chosen.Contains(name) ? "true" : "false")"
-            @onclick="() => Toggle(name)">
+    /// <summary>One field to pick, with its position in the index while it is in it.</summary>
+    private RenderFragment Chip(string name) => @<text>
         <span class="a-mono">@name</span>
         @if (_chosen.IndexOf(name) is >= 0 and var order)
         {
             <span class="a-badge">@(order + 1)</span>
         }
-    </button>;
+    </text>;
+
+    private static List<string> Names(List<FieldSchema> fields) => [.. fields.Select(column => column.Name)];
 
     private List<FieldSchema> Declarable
         => Entity.Fields.Where(column => !AlvoManagedColumns.For(Entity).Contains(column.Name)).ToList();
@@ -141,7 +130,7 @@ else
     private List<FieldSchema> Maintained
         => Entity.Fields.Where(column => AlvoManagedColumns.For(Entity).Contains(column.Name)).ToList();
 
-    private readonly List<string> _chosen = [];
+    private List<string> _chosen = [];
     private bool _unique;
     private string? _refusal;
 
@@ -188,21 +177,18 @@ else
     public EventCallback<int> OnRemove { get; set; }
 
     /// <summary>
-    /// Adds or removes a field, keeping the order they were picked in.
+    /// Takes the fields as the chips now have them, in the order they were picked.
     /// </summary>
     /// <remarks>
     /// A list rather than a set: the schema's <c>fields</c> is ordered and the order is what the index
     /// is for, so the control has to record which was chosen first — which is also why each chip shows
-    /// its position rather than only whether it is on.
+    /// its position rather than only whether it is on. Both groups share the one list, so a maintained
+    /// column can follow a declared one.
     /// </remarks>
-    private void Toggle(string field)
+    private void Choose(IReadOnlyList<string> fields)
     {
         _refusal = null;
-
-        if (!_chosen.Remove(field))
-        {
-            _chosen.Add(field);
-        }
+        _chosen = [.. fields];
     }
 
     /// <summary>
@@ -224,7 +210,7 @@ else
 
         await OnAdd.InvokeAsync(new IndexSchema([.. _chosen], _unique));
 
-        _chosen.Clear();
+        _chosen = [];
         _unique = false;
         _refusal = null;
     }

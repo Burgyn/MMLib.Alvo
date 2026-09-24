@@ -82,7 +82,7 @@
                 }
                 else
                 {
-                    <div class="a-row" style="gap:var(--space-2);padding:var(--space-4)">
+                    <div class="a-row a-row--gap-2 a-assistant__review">
                         <button type="button" class="a-btn a-btn--primary" data-testid="assistant-review"
                                 @onclick="() => Review(proposal)">Review it in Preview</button>
                     </div>
@@ -95,7 +95,7 @@
             <textarea class="a-textarea" id="assistant-message" rows="3" disabled="@_busy"
                       placeholder="Add a nullable note column to work orders"
                       @oninput="args => _message = args.Value?.ToString() ?? string.Empty">@_message</textarea>
-            <div class="a-row" style="gap:var(--space-2)">
+            <div class="a-row a-row--gap-2">
                 <button type="button" class="a-btn a-btn--primary" data-testid="assistant-send"
                         disabled="@(_busy || _message.Trim().Length == 0)" @onclick="AskAsync">
                     @(_busy ? "Thinking…" : "Ask")

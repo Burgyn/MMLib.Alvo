@@ -18,7 +18,7 @@
 *@
 <PageTitle>First run · Alvo</PageTitle>
 
-<div class="a-stack" style="max-width:820px">
+<div class="a-stack a-stack--narrow">
     <PageHeader Title="Welcome to Alvo"
                 Subtitle="One descriptor drives everything here: entities, the rules that guard them, and what runs on a write. These are the three things a new project needs, in the order they make sense." />
 
@@ -33,7 +33,7 @@
     <Step Done="@(_entities > 0)" Title="@($"Define what the backend is — {_entities} entit{(_entities == 1 ? "y" : "ies")} so far")">
         An entity is a table Alvo creates and keeps in step with the descriptor. Add one in Schema,
         give it fields, and preview what the change does to the database before it runs.
-        <div style="margin-top:var(--space-3)">
+        <div class="a-actions">
             <a class="a-btn a-btn--sm" href="@AdminPaths.Schema">Open Schema</a>
             <a class="a-btn a-btn--ghost a-btn--sm" href="@AdminPaths.Transfer">Import a descriptor</a>
         </div>
@@ -43,7 +43,7 @@
         Nothing is reachable without an explicit rule — an entity with none refuses every caller,
         which is default-deny working rather than a gap. The Rules screen shows the predicate the
         engine compiled and answers <em>what would this caller get</em> with the engine's own verdict.
-        <div style="margin-top:var(--space-3)">
+        <div class="a-actions">
             <a class="a-btn a-btn--sm" href="@AdminPaths.Rules()">Open Rules</a>
         </div>
     </Step>
@@ -59,7 +59,7 @@
                 administrator in Access and have them grant you one, or keep this project's entities
                 global.
             </text>
-            <div style="margin-top:var(--space-3)">
+            <div class="a-actions">
                 <a class="a-btn a-btn--sm" href="@AdminPaths.Access">Open Access</a>
             </div>
         }
@@ -72,7 +72,7 @@
         }
     </Step>
 
-    <div class="a-panel" style="padding:var(--space-5)">
+    <Panel Padded="true">
         <span class="a-section-title">Everything here is a file</span>
         <p class="a-section-sub">
             The descriptor is the whole configuration, and it exports byte for byte. Commit it, apply
@@ -80,7 +80,7 @@
             can do something the descriptor cannot say.
         </p>
         <a class="a-btn a-btn--sm" href="@AdminPaths.Transfer">Export the descriptor</a>
-    </div>
+    </Panel>
 </div>
 
 @code {

@@ -65,7 +65,7 @@
                     write possible.
                 </span>
 
-                <div class="a-row a-row--gap-2" style="margin-top:var(--space-4)">
+                <div class="a-row a-row--gap-2 a-panel__actions">
                     <button type="button" class="a-btn a-btn--primary" @onclick="AddEntity">
                         Add to the working copy
                     </button>
@@ -99,11 +99,11 @@
                 {
                     <ListRow class="a-listrow--accent a-listrow--inline" OnClick="() => Open(pending)">
                         <Icon Path="@Icons.Schema" />
-                        <span style="flex:1;min-width:0">
-                            <span class="a-mono" style="font-size:var(--text-sm);font-weight:var(--weight-medium)">@pending</span>
-                            <span class="a-switcher-meta">In the working copy. It does not exist in the database until you apply.</span>
+                        <span class="a-item">
+                            <span class="a-mono a-item__title">@pending</span>
+                            <span class="a-meta">In the working copy. It does not exist in the database until you apply.</span>
                         </span>
-                        <span class="a-badge a-badge--warn" style="flex:none">not applied yet</span>
+                        <span class="a-badge a-badge--warn a-listrow__aside">not applied yet</span>
                     </ListRow>
                 }
 
@@ -111,11 +111,11 @@
                 {
                     <ListRow class="a-listrow--inline" OnClick="() => Open(entity.Name)">
                         <Icon Path="@Icons.Schema" />
-                        <span style="flex:1;min-width:0">
-                            <span class="a-mono" style="font-size:var(--text-sm);font-weight:var(--weight-medium)">@entity.Name</span>
-                            <span class="a-switcher-meta">@(entity.Description ?? "No description in the descriptor")</span>
+                        <span class="a-item">
+                            <span class="a-mono a-item__title">@entity.Name</span>
+                            <span class="a-meta">@(entity.Description ?? "No description in the descriptor")</span>
                         </span>
-                        <span class="a-row a-row--gap-2" style="flex:none">
+                        <span class="a-row a-row--gap-2 a-listrow__aside">
                             <span class="a-badge">@entity.Fields.Count fields</span>
                             @if (entity.Tenancy == TenancyMode.Scoped)
                             {

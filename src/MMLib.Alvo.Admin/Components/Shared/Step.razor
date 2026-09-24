@@ -1,17 +1,17 @@
 ﻿@*
     One step of the first run, reporting its own state.
 *@
-<div class="a-panel" style="padding:var(--space-5)">
-    <div class="a-row" style="gap:var(--space-3);align-items:flex-start">
-        <span class="@($"a-badge {(Done ? "a-badge--ok" : "a-badge--warn")}")" style="flex:none">
+<Panel Padded="true">
+    <div class="a-step">
+        <span class="@($"a-badge a-step__state {(Done ? "a-badge--ok" : "a-badge--warn")}")">
             @(Done ? "done" : "to do")
         </span>
-        <span style="flex:1;min-width:0">
-            <span style="font-size:var(--text-base);font-weight:var(--weight-medium)">@Title</span>
-            <p class="a-section-sub" style="margin-top:var(--space-2)">@ChildContent</p>
+        <span class="a-item">
+            <span class="a-section-title">@Title</span>
+            <p class="a-section-sub a-step__text">@ChildContent</p>
         </span>
     </div>
-</div>
+</Panel>
 
 @code {
     /// <summary>Whether the project is already in this state.</summary>

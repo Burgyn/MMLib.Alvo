@@ -51,8 +51,8 @@ else
 {
     @foreach (var point in Hooks)
     {
-        <div style="padding:var(--space-4) var(--space-5);border-bottom:1px solid var(--border)">
-            <div class="a-row" style="gap:var(--space-3)">
+        <ListRow class="a-listrow--roomy a-listrow--stacked">
+            <div class="a-row">
                 <span class="@($"a-badge {(IsBefore(point.Key) ? "a-badge--warn" : "a-badge--accent")}")">@point.Key</span>
                 <span class="a-section-sub">
                     @(IsBefore(point.Key)
@@ -79,7 +79,7 @@ else
                 <div class="a-hookrow" data-testid="hook-row">
                     @if (Staged.IsNewHook(name, at))
                     {
-                        <span class="a-badge a-badge--accent" style="flex:none;align-self:flex-start"
+                        <span class="a-badge a-badge--accent a-hookrow__badge"
                               data-testid="hook-staged">new</span>
                     }
                     <CodeBlock Json="@hook" />
@@ -92,13 +92,13 @@ else
                     }
                 </div>
             }
-        </div>
+        </ListRow>
     }
 }
 
 @if (Editable)
 {
-    <div class="a-stack" style="padding:var(--space-5);gap:var(--space-4)">
+    <div class="a-stack a-stack--inset a-stack--gap-4">
         <div class="a-section">
             <span class="a-section-title">Add a hook</span>
             <span class="a-section-sub">
@@ -110,104 +110,91 @@ else
 
         @if (_refusal is { Length: > 0 })
         {
-            <div class="a-refused" data-testid="hook-refusal">
-                <span class="a-refused__reason">@_refusal</span>
-            </div>
+            <Refusal data-testid="hook-refusal">@_refusal</Refusal>
         }
 
-        <div class="a-field">
-            <span class="a-label">When</span>
-            <div class="a-choice" data-testid="hook-points">
-                @foreach (var point in _points)
-                {
-                    <button type="button" class="@($"a-chip{(point == _point ? " a-chip--on" : string.Empty)}")"
-                            @onclick="() => Choose(point)">@point</button>
-                }
-            </div>
-        </div>
+        <Field Label="When" LabelId="hook-points-label">
+            <ChipGroup TValue="string" Items="_points" Selected="[_point]" aria-labelledby="hook-points-label"
+                       data-testid="hook-points" SelectedChanged="points => Choose(points[0])" />
+        </Field>
 
-        <div class="a-field">
-            <label class="a-label" for="hook-condition">Only when (optional)</label>
-            <input class="a-input a-mono" id="hook-condition" value="@_condition" autocomplete="off"
-                   placeholder="@Example"
-                   @oninput="args => _condition = args.Value?.ToString() ?? string.Empty" />
-            <span class="a-section-sub">
+        <Field Label="Only when (optional)" For="hook-condition">
+            <ChildContent>
+                <input class="a-input a-mono" id="hook-condition" value="@_condition" autocomplete="off"
+                       placeholder="@Example"
+                       @oninput="args => _condition = args.Value?.ToString() ?? string.Empty" />
+            </ChildContent>
+            <Hint>
                 CEL over @((MarkupString)Images) and <code class="a-mono">@@user</code>. Left empty, the hook
                 runs on every write.
-            </span>
-        </div>
+            </Hint>
+        </Field>
 
-        <div class="a-field">
-            <span class="a-label">Then</span>
-            <div class="a-choice" data-testid="hook-actions">
-                @foreach (var kind in Kinds)
-                {
-                    <button type="button" class="@($"a-chip{(kind == _kind ? " a-chip--on" : string.Empty)}")"
-                            @onclick="() => _kind = kind">@kind</button>
-                }
-            </div>
-        </div>
+        <Field Label="Then" LabelId="hook-actions-label">
+            <ChipGroup TValue="string" Items="Kinds" Selected="[_kind]" aria-labelledby="hook-actions-label"
+                       data-testid="hook-actions" SelectedChanged="kinds => _kind = kinds[0]" />
+        </Field>
 
         @switch (_kind)
         {
             case Reject:
-                <div class="a-field">
-                    <label class="a-label" for="hook-reject">Refuse with</label>
-                    <input class="a-input" id="hook-reject" value="@_reject" autocomplete="off" maxlength="500"
-                           placeholder="A completed work order cannot be reopened."
-                           @oninput="args => _reject = args.Value?.ToString() ?? string.Empty" />
-                    <span class="a-section-sub">
+                <Field Label="Refuse with" For="hook-reject">
+                    <ChildContent>
+                        <input class="a-input" id="hook-reject" value="@_reject" autocomplete="off" maxlength="500"
+                               placeholder="A completed work order cannot be reopened."
+                               @oninput="args => _reject = args.Value?.ToString() ?? string.Empty" />
+                    </ChildContent>
+                    <Hint>
                         Becomes the <code class="a-mono">detail</code> of the RFC 7807 problem the caller
                         reads, so write it for them rather than for the log.
-                    </span>
-                </div>
+                    </Hint>
+                </Field>
                 break;
             case Mutate:
                 <div class="a-field-row">
-                    <div class="a-field">
-                        <label class="a-label" for="hook-mutate-field">Field</label>
+                    <Field Label="Field" For="hook-mutate-field">
                         <input class="a-input a-mono" id="hook-mutate-field" value="@_mutateField" autocomplete="off"
                                placeholder="completed_on"
                                @oninput="args => _mutateField = args.Value?.ToString() ?? string.Empty" />
-                    </div>
-                    <div class="a-field">
-                        <label class="a-label" for="hook-mutate-value">Set to</label>
-                        <input class="a-input a-mono" id="hook-mutate-value" value="@_mutateValue" autocomplete="off"
-                               placeholder="now()"
-                               @oninput="args => _mutateValue = args.Value?.ToString() ?? string.Empty" />
-                        <span class="a-section-sub">
+                    </Field>
+                    <Field Label="Set to" For="hook-mutate-value">
+                        <ChildContent>
+                            <input class="a-input a-mono" id="hook-mutate-value" value="@_mutateValue" autocomplete="off"
+                                   placeholder="now()"
+                                   @oninput="args => _mutateValue = args.Value?.ToString() ?? string.Empty" />
+                        </ChildContent>
+                        <Hint>
                             A CEL expression, stored as <code class="a-mono">{"$cel": "…"}</code>. Wrap it in
                             quotes for a literal string.
-                        </span>
-                    </div>
+                        </Hint>
+                    </Field>
                 </div>
                 break;
             case Webhook:
-                <div class="a-field">
-                    <label class="a-label" for="hook-endpoint">Endpoint</label>
-                    <input class="a-input a-mono" id="hook-endpoint" value="@_endpoint" autocomplete="off"
-                           placeholder="dispatch"
-                           @oninput="args => _endpoint = args.Value?.ToString() ?? string.Empty" />
-                    <span class="a-section-sub">
+                <Field Label="Endpoint" For="hook-endpoint">
+                    <ChildContent>
+                        <input class="a-input a-mono" id="hook-endpoint" value="@_endpoint" autocomplete="off"
+                               placeholder="dispatch"
+                               @oninput="args => _endpoint = args.Value?.ToString() ?? string.Empty" />
+                    </ChildContent>
+                    <Hint>
                         A name declared under <code class="a-mono">webhooks.endpoints</code>, not a URL — the
                         managed path is the one this build delivers on.
-                    </span>
-                </div>
+                    </Hint>
+                </Field>
                 break;
             case Email:
                 <div class="a-field-row">
-                    <div class="a-field">
-                        <label class="a-label" for="hook-template">Template</label>
+                    <Field Label="Template" For="hook-template">
                         <input class="a-input a-mono" id="hook-template" value="@_template" autocomplete="off"
                                placeholder="work_order_completed"
                                @oninput="args => _template = args.Value?.ToString() ?? string.Empty" />
-                    </div>
-                    <div class="a-field">
-                        <label class="a-label" for="hook-to">To</label>
+                    </Field>
+                    <Field Label="To" For="hook-to">
                         <input class="a-input a-mono" id="hook-to" value="@_to" autocomplete="off"
                                placeholder="{{new.contact_email}}"
                                @oninput="args => _to = args.Value?.ToString() ?? string.Empty" />
-                    </div>
+                    </Field>
                 </div>
                 break;
         }

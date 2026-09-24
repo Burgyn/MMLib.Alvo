@@ -1,16 +1,16 @@
 ﻿@*
     One labelled fact, with the sentence that stops it being misread.
 *@
-<div class="a-listrow">
+<ListRow>
     <span class="a-label a-detail__label">@Label</span>
     <span class="a-detail__value">
-        <span class="a-mono" style="font-size:var(--text-sm)">@Value</span>
+        <span class="a-mono a-value">@Value</span>
         @if (Note is { Length: > 0 })
         {
             <span class="a-section-sub">@Note</span>
         }
     </span>
-</div>
+</ListRow>
 
 @code {
     /// <summary>What the value is.</summary>

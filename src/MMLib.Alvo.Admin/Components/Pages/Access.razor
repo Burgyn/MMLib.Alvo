@@ -51,9 +51,9 @@
                     @* A stable id per person, so a row can be addressed by who it is rather than by
                        where it sits in a list that reorders. *@
                     <ListRow id="@($"person-{person.Id.Value}")" class="a-listrow--roomy a-listrow--wrap a-listrow--inline">
-                        <span style="flex:1;min-width:220px">
-                            <span style="font-size:var(--text-sm);font-weight:var(--weight-medium)">@person.Email</span>
-                            <span class="a-switcher-meta">
+                        <span class="a-item a-item--wide">
+                            <span class="a-item__title">@person.Email</span>
+                            <span class="a-meta">
                                 @(person.RoleNames.Count == 0 ? "no roles" : string.Join(", ", person.RoleNames)) ·
                                 @(person.Tenant is { } tenant ? $"tenant {tenant.Value}" : "no tenant")
                                 @if (person.IsDisabled)
@@ -63,7 +63,7 @@
                             </span>
                         </span>
 
-                        <div class="a-row a-row--gap-2" style="flex-wrap:wrap">
+                        <div class="a-row a-row--gap-2 a-row--wrap">
                             <button type="button" class="a-btn a-btn--ghost a-btn--sm"
                                     id="@($"change-{person.Id.Value}")"
                                     @onclick="() => _editing = _editing == person.Id ? null : person.Id">
@@ -74,7 +74,7 @@
                         @if (_editing == person.Id)
                         {
                             var self = person.Id == _self;
-                            <div class="a-stack" style="flex-basis:100%;gap:var(--space-4)">
+                            <div class="a-stack a-stack--gap-4 a-listrow__under">
                                 <Field Label="Roles" LabelId="@($"roles-{person.Id.Value}")" class="a-field--spaced">
                                     <ChildContent>
                                         <ChipGroup TValue="string" Items="_roles" Selected="person.RoleNames" Multiple="true"
@@ -106,7 +106,7 @@
                                     *@
                                     @if (self)
                                     {
-                                        <span class="@(person.Tenant is null ? null : "a-mono")" style="font-size:var(--text-sm)">
+                                        <span class="@(person.Tenant is null ? "a-value" : "a-mono a-value")">
                                             @(person.Tenant?.Value.ToString() ?? "No tenant")
                                         </span>
                                         <span class="a-hint" data-testid="tenant-self">
@@ -116,7 +116,7 @@
                                     else
                                     {
                                         <div class="a-row a-row--gap-2">
-                                            <input class="a-input a-mono" id="@($"tenant-{person.Id.Value}")" style="flex:1"
+                                            <input class="a-input a-input--grow a-mono" id="@($"tenant-{person.Id.Value}")"
                                                    value="@(person.Tenant?.Value.ToString() ?? string.Empty)"
                                                    autocomplete="off" spellcheck="false"
                                                    @oninput="args => _tenantDraft = args.Value?.ToString() ?? string.Empty" />
@@ -134,7 +134,7 @@
                                     }
                                 </Field>
 
-                                <div class="a-row" style="flex-wrap:wrap;padding-top:var(--space-3);border-top:1px solid var(--border)">
+                                <div class="a-row a-row--wrap a-row--ruled">
                                     <button type="button" class="a-btn a-btn--sm"
                                             id="@($"issue-token-{person.Id.Value}")"
                                             @onclick="() => IssueTokenAsync(person)">
@@ -152,7 +152,7 @@
                     </ListRow>
                 }
 
-                <div style="padding:var(--space-5);border-top:1px solid var(--border)">
+                <div class="a-panel__foot">
                     <span class="a-section-title">Add a person</span>
                     <p class="a-section-sub">
                         No password field, deliberately: a credential that travels as a value is readable by
@@ -160,7 +160,7 @@
                         single-use token.
                     </p>
                     <div class="a-row a-row--gap-2">
-                        <input class="a-input" id="new-person-email" style="flex:1" type="email"
+                        <input class="a-input a-input--grow" id="new-person-email" type="email"
                                placeholder="dispatcher@example.com" value="@_newEmail"
                                @oninput="args => _newEmail = args.Value?.ToString() ?? string.Empty" />
                         <button type="button" class="a-btn a-btn--primary a-btn--sm" @onclick="CreateAsync"
@@ -189,7 +189,7 @@
                 {
                     <ListRow class="a-listrow--roomy a-listrow--stacked">
                         <span class="a-badge a-badge--accent">@level.Key</span>
-                        <pre class="a-code" style="margin-top:var(--space-2)"><code>@level.Value</code></pre>
+                        <pre class="a-code a-listrow__body"><code>@level.Value</code></pre>
                     </ListRow>
                 }
             }
@@ -202,7 +202,7 @@
             naming a role this list does not declare is never minted into a caller's context.
         </Subtitle>
         <ChildContent>
-            <div style="padding:var(--space-4) var(--space-5);display:flex;gap:var(--space-2);flex-wrap:wrap">
+            <div class="a-row a-row--gap-2 a-row--wrap a-row--inset">
                 @foreach (var role in _roles)
                 {
                     <span class="a-badge a-mono">@role</span>
@@ -211,7 +211,7 @@
                 <span class="a-badge">authenticated</span>
                 <span class="a-badge">admin</span>
             </div>
-            <span class="a-hint" style="padding:0 var(--space-5) var(--space-4);display:block">
+            <span class="a-hint a-hint--inset">
                 The last three are built in and never declared.
             </span>
         </ChildContent>

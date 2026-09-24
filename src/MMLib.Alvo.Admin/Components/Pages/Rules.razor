@@ -17,7 +17,7 @@
     }
     else if (_schema is null)
     {
-        <div class="a-skeleton" style="height:260px"></div>
+        <Skeleton Size="Skeleton.SkeletonSize.Lg" />
     }
     else
     {
@@ -28,8 +28,7 @@
         *@
         @if (_schema.Entities.Count > TabStripLimit)
         {
-            <div class="a-field" style="max-width:360px">
-                <label class="a-label" for="rules-entity">Entity</label>
+            <Field Label="Entity" For="rules-entity" class="a-field--narrow">
                 <select class="a-select a-mono" id="rules-entity" data-testid="rules-entity"
                         value="@Selected" @onchange="args => Choose(args.Value?.ToString() ?? string.Empty)">
                     @foreach (var entity in _schema.Entities)
@@ -37,7 +36,7 @@
                         <option value="@entity.Name">@entity.Name</option>
                     }
                 </select>
-            </div>
+            </Field>
         }
         else
         {
@@ -51,14 +50,14 @@
         }
 
         <div class="a-split">
-            <div class="a-panel" style="flex:1;min-width:0">
+            <Panel class="a-split__main">
                 <RulesTab Rules="_rules" Entity="@Selected" />
-            </div>
+            </Panel>
 
             @* The aside's own width, and full width once the split stacks — a fixed minimum here made the
                simulator narrower or wider than the rules card above it on a phone. *@
             <div class="a-split__aside">
-                <div class="a-card" style="gap:var(--space-4)">
+                <div class="a-card a-card--roomy">
                     <div>
                         <span class="a-section-title">Simulate a policy</span>
                         <p class="a-section-sub">
@@ -68,33 +67,21 @@
                         <span class="a-ident">API: POST …/policy/simulate</span>
                     </div>
 
-                    <div class="a-field">
-                        <span class="a-label">Signed in as</span>
-                        <div class="a-choice">
-                            @foreach (var caller in _callers)
-                            {
-                                <button type="button"
-                                        class="@($"a-chip{(caller.Label == _caller.Label ? " a-chip--on" : string.Empty)}")"
-                                        @onclick="() => Pick(caller)">@caller.Label</button>
-                            }
-                        </div>
-                        <span class="a-section-sub">
+                    <Field Label="Signed in as" LabelId="rules-caller">
+                        <ChildContent>
+                            <ChipGroup TValue="Caller" Items="_callers" Selected="[_caller]" aria-labelledby="rules-caller"
+                                       Label="caller => caller.Label" SelectedChanged="callers => Pick(callers[0])" />
+                        </ChildContent>
+                        <Hint>
                             roles: @(_caller.Roles.Count == 0 ? "none" : string.Join(", ", _caller.Roles)) ·
                             tenant: @(_caller.Tenant is { } tenant ? tenant.ToString() : "none")
-                        </span>
-                    </div>
+                        </Hint>
+                    </Field>
 
-                    <div class="a-field">
-                        <span class="a-label">Operation</span>
-                        <div class="a-choice">
-                            @foreach (var operation in _operations)
-                            {
-                                <button type="button"
-                                        class="@($"a-chip{(operation == _operation ? " a-chip--on" : string.Empty)}")"
-                                        @onclick="() => SetOperation(operation)">@operation</button>
-                            }
-                        </div>
-                    </div>
+                    <Field Label="Operation" LabelId="rules-operation">
+                        <ChipGroup TValue="string" Items="_operations" Selected="[_operation]" aria-labelledby="rules-operation"
+                                   SelectedChanged="operations => SetOperation(operations[0])" />
+                    </Field>
 
                     @if (_simulationProblem is not null)
                     {
@@ -105,12 +92,12 @@
                         <PolicyVerdictView Verdict="verdict" Operation="@_operation" Entity="@Selected" />
                     }
 
-                    <p class="a-note" style="border-top:1px solid var(--border);padding-top:var(--space-3)">
+                    <p class="a-note a-note--ruled">
                         <strong>Why there is no record picker.</strong>
                         Checking a rule against one stored row needs a read of that row, which this screen does
                         not make — scoring it here would make it a second policy evaluator that could disagree
                         with the engine. To check one row, open it in Data as yourself.
-                        <a class="a-btn a-btn--sm" style="margin-top:var(--space-3)"
+                        <a class="a-btn a-btn--sm a-actions"
                            href="@AdminPaths.Records(Selected)">Open @Selected in Data</a>
                     </p>
                 </div>
