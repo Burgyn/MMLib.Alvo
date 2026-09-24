@@ -1,8 +1,7 @@
 ﻿@page "/admin/schema/{EntityName}"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
-@inject WorkingCopyStore Copies
-@inject DataGateway Caller
+@inject AdminSession Session
 @inject NavigationManager Navigation
 @inject ILogger<Entity> Logger
 @implements IDisposable
@@ -182,8 +181,9 @@
     private IReadOnlyList<string> _fieldNames = [];
     private IReadOnlyList<StagedField> _fields = [];
     private StagedView _staged = StagedView.None;
+    private readonly ComponentLifetime _lifetime = new();
     private WorkingCopy? _followed;
-    private bool _disposed;
+    private IDisposable? _following;
     private bool _renaming;
     private string _newName = string.Empty;
     private string? _renameRefusal;
@@ -210,28 +210,24 @@
 
         _tab = EntityTabs.FromUri(Navigation.Uri);
 
-        /* Resolve this operator's working copy before anything reads it: the store is shared and
-           keyed by user, so a copy is never another administrator's. */
-        Follow(Copies.For((await Caller.ContextAsync(CancellationToken.None)).User));
+        var ct = _lifetime.Token;
         try
         {
-            _schema = await Gateway.SchemaAsync(CancellationToken.None);
+            /* Resolved before anything reads it, and followed before the reads that may fail: a screen that
+               could not read the schema still draws the copy the operator's other tabs are editing. */
+            Follow(await Session.CopyAsync(ct));
+
+            _schema = await Gateway.SchemaAsync(ct);
             _entity = _schema.Entities.FirstOrDefault(
                 entity => string.Equals(entity.Name, EntityName, StringComparison.Ordinal));
 
-            _refused = (await Gateway.CapabilitiesAsync(CancellationToken.None)).Refused;
+            _refused = (await Gateway.CapabilitiesAsync(ct)).Refused;
 
-            var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
+            var descriptor = await Gateway.DescriptorAsync(ct);
             _rules = DescriptorLens.Rules(descriptor.DescriptorJson, EntityName);
             _entities = [.. _schema.Entities.Select(entity => entity.Name)];
 
-            /* The working copy is taken from the applied descriptor the first time any screen
-               needs one, and never re-taken while it is dirty — re-taking it would discard the
-               operator's unapplied edits the moment they navigated. */
-            if (!Copy.Loaded)
-            {
-                Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
-            }
+            await Session.EnsureLoadedAsync(Copy, ct);
 
             ReadWorking();
 
@@ -260,50 +256,39 @@
     /// </para>
     /// <para>
     /// A redraw of the working-copy parts only: the tab, an open sheet and what was typed into it are left
-    /// as they are. The subscription is skipped when this screen was disposed during the await that resolved
-    /// the copy — nothing would unsubscribe it, and the copy outlives every circuit that shows it.
+    /// as they are. Re-followed only when the copy is a different one — the parameters are set again on every
+    /// move to another entity, and the operator's copy is the same across all of them.
     /// </para>
     /// </remarks>
     private void Follow(WorkingCopy copy)
     {
-        if (_disposed || ReferenceEquals(copy, _followed))
+        Copy = copy;
+        if (ReferenceEquals(copy, _followed))
         {
-            Copy = copy;
             return;
         }
 
-        Unfollow();
-        Copy = copy;
+        _following?.Dispose();
         _followed = copy;
-        _followed.Changed += OnCopyChanged;
+        _following = Session.Follow(copy, InvokeAsync, OnCopyChanged, _lifetime.Token);
     }
 
-    private void Unfollow()
-    {
-        if (_followed is not null)
-        {
-            _followed.Changed -= OnCopyChanged;
-            _followed = null;
-        }
-    }
-
-    /// <summary>Redraws on the renderer's thread — the edit that raised this may be another tab's.</summary>
-    private void OnCopyChanged() => _ = InvokeAsync(() =>
+    /// <summary>Redraws the working-copy parts; <see cref="AdminSession.Follow(WorkingCopy, Func{Func{Task}, Task}, Action, CancellationToken)"/> has put it on the renderer's thread.</summary>
+    private void OnCopyChanged()
     {
         ReadWorking();
         ReadPendingEntity();
         StateHasChanged();
-    });
+    }
 
     public void Dispose()
     {
-        _disposed = true;
         if (_followingAddress)
         {
             Navigation.LocationChanged -= OnLocationChanged;
         }
 
-        Unfollow();
+        _lifetime.Dispose();
     }
 
     /// <summary>

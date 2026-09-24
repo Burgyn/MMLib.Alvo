@@ -27,11 +27,11 @@ public static class AlvoAdminServiceCollectionExtensions
     /// </para>
     /// <para>
     /// What is registered below — <c>ManagementGateway</c>, <c>DataGateway</c>,
-    /// <c>AssistantGateway</c> and <c>WorkingCopyStore</c> — is internal, and every one of them is a
-    /// thin adapter over <c>IAlvoManagement</c> and the ports in <c>MMLib.Alvo.Abstractions</c>
-    /// rather than a service of the dashboard's own: a screen that needed one would be a screen
-    /// doing work the core should be doing. None of these four is public, and none is meant to be
-    /// resolved by host code.
+    /// <c>AssistantGateway</c>, <c>WorkingCopyStore</c> and <c>AdminSession</c> — is internal, and every
+    /// one of them is a thin adapter over <c>IAlvoManagement</c> and the ports in
+    /// <c>MMLib.Alvo.Abstractions</c> rather than a service of the dashboard's own: a screen that needed
+    /// one would be a screen doing work the core should be doing (<c>AdminSession</c> only composes the
+    /// others for a screen). None of these five is public, and none is meant to be resolved by host code.
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into.</param>
@@ -90,6 +90,9 @@ public static class AlvoAdminServiceCollectionExtensions
            never one shared between operators. */
         services.TryAddSingleton(provider => new WorkingCopyStore(
             provider.GetService<TimeProvider>() ?? TimeProvider.System));
+
+        /* Scoped like the gateways it composes: one circuit's caller and working copy. */
+        services.TryAddScoped<AdminSession>();
 
         return services;
     }

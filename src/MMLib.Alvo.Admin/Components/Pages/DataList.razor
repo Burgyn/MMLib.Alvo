@@ -1,7 +1,7 @@
 ﻿@page "/admin/data"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
-@inject DataGateway Data
+@inject AdminSession Session
 @inject ILogger<DataList> Logger
 
 <PageTitle>Data · Alvo</PageTitle>
@@ -64,7 +64,7 @@
         try
         {
             _schema = await Gateway.SchemaAsync(CancellationToken.None);
-            _tenant = (await Data.ContextAsync(CancellationToken.None)).Tenant;
+            _tenant = (await Session.CallerAsync(CancellationToken.None)).Tenant;
         }
         catch (Exception exception)
         {

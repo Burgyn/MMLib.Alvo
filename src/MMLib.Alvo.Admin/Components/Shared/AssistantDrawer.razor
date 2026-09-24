@@ -8,8 +8,7 @@
 *@
 @inject AssistantGateway Assistant
 @inject ManagementGateway Gateway
-@inject WorkingCopyStore Copies
-@inject DataGateway Caller
+@inject AdminSession Session
 @inject NavigationManager Navigation
 @implements IDisposable
 
@@ -110,7 +109,7 @@
     /* A turn runs for seconds across several tool calls and a streaming answer. Without a token tied to
        this component, an operator who navigates away leaves an outbound call to somebody else's endpoint
        running and StateHasChanged firing at a disposed component. */
-    private readonly CancellationTokenSource _turnsCancelled = new();
+    private readonly ComponentLifetime _lifetime = new();
     private readonly List<AssistantTurn> _turns = [];
     private readonly List<string> _tools = [];
     private string _message = string.Empty;
@@ -123,11 +122,7 @@
     private void Toggle() => _open = !_open;
 
     /// <summary>Cancels a turn still in flight when the operator leaves.</summary>
-    public void Dispose()
-    {
-        _turnsCancelled.Cancel();
-        _turnsCancelled.Dispose();
-    }
+    public void Dispose() => _lifetime.Dispose();
 
     /// <summary>
     /// Asks one turn, redrawing as the answer arrives.
@@ -147,11 +142,10 @@
 
         Begin(asked);
 
-        var request = new AssistantRequest(await ProjectAsync(), asked, [.. _turns]);
-
         try
         {
-            await foreach (var update in Assistant.AskAsync(request, _turnsCancelled.Token))
+            var request = new AssistantRequest(await ProjectAsync(), asked, [.. _turns]);
+            await foreach (var update in Assistant.AskAsync(request, _lifetime.Token))
             {
                 Apply(update);
                 StateHasChanged();
@@ -219,7 +213,7 @@
     /// </remarks>
     private async Task Review(AssistantUpdate.Proposal proposal)
     {
-        var copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
+        var copy = await Session.CopyAsync(_lifetime.Token);
         copy.Replace(proposal.DescriptorJson);
         copy.SuggestReason(ReasonFor());
 
@@ -244,5 +238,5 @@
     private const int ReasonLimit = 200;
 
     private async Task<string> ProjectAsync() =>
-        (await Gateway.ProjectsAsync(CancellationToken.None)).FirstOrDefault()?.Name ?? string.Empty;
+        (await Gateway.ProjectsAsync(_lifetime.Token)).FirstOrDefault()?.Name ?? string.Empty;
 }

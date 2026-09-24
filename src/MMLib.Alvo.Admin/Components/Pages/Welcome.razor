@@ -1,7 +1,7 @@
 ﻿@page "/admin/welcome"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
-@inject DataGateway Caller
+@inject AdminSession Session
 @inject ILogger<Welcome> Logger
 
 @*
@@ -91,7 +91,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var context = await Caller.ContextAsync(CancellationToken.None);
+        var context = await Session.CallerAsync(CancellationToken.None);
         _tenant = context.Tenant;
 
         try

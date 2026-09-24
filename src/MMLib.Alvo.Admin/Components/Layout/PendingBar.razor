@@ -9,8 +9,7 @@
     Hidden on Preview itself, where the same count is the whole page.
 *@
 @implements IDisposable
-@inject WorkingCopyStore Copies
-@inject DataGateway Caller
+@inject AdminSession Session
 @inject NavigationManager Navigation
 @inject ILogger<PendingBar> Logger
 
@@ -35,7 +34,7 @@
 @code {
     private WorkingCopy? _copy;
     private bool _discarding;
-    private bool _disposed;
+    private readonly ComponentLifetime _lifetime = new();
 
     private int Pending => _copy?.PendingCount ?? 0;
 
@@ -64,17 +63,8 @@
 
         try
         {
-            var copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
-
-            /* Disposed during the await — a navigation away mid-render — must not subscribe: nothing would
-               unsubscribe it, and the copy outlives every circuit that shows it. */
-            if (_disposed)
-            {
-                return;
-            }
-
-            _copy = copy;
-            _copy.Changed += OnChanged;
+            _copy = await Session.CopyAsync(_lifetime.Token);
+            Session.Follow(_copy, InvokeAsync, StateHasChanged, _lifetime.Token);
         }
         catch (Exception exception)
         {
@@ -85,18 +75,11 @@
 
     public void Dispose()
     {
-        _disposed = true;
         Navigation.LocationChanged -= OnLocationChanged;
-
-        if (_copy is not null)
-        {
-            _copy.Changed -= OnChanged;
-        }
+        _lifetime.Dispose();
     }
 
-    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
-
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => OnChanged();
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => _ = InvokeAsync(StateHasChanged);
 
     /// <summary>Closes the sheet; the discard itself was the copy's, and every screen showing it follows.</summary>
     /// <remarks>

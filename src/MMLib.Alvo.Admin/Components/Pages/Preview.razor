@@ -1,8 +1,7 @@
 ﻿@page "/admin/schema/preview"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
-@inject WorkingCopyStore Copies
-@inject DataGateway Caller
+@inject AdminSession Session
 @inject NavigationManager Navigation
 @inject ILogger<Preview> Logger
 
@@ -168,20 +167,14 @@
 
     protected override async Task OnInitializedAsync()
     {
-        /* Resolve this operator's working copy before anything reads it: the store is shared and
-           keyed by user, so a copy is never another administrator's. */
-        Copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
-        if (!Copy.Loaded)
+        try
         {
-            try
-            {
-                var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
-                Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
-            }
-            catch (Exception exception)
-            {
-                _problem = AdminProblem.From(exception, Logger);
-            }
+            Copy = await Session.CopyAsync(CancellationToken.None);
+            await Session.EnsureLoadedAsync(Copy, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            _problem = AdminProblem.From(exception, Logger);
         }
 
         /* A copy the assistant composed carries what it was asked for. Pre-filled rather than imposed: the

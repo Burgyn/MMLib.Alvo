@@ -2,7 +2,7 @@
 @page "/admin/rules/{EntityName}"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
-@inject DataGateway Records
+@inject AdminSession Session
 @inject NavigationManager Navigation
 @inject ILogger<Rules> Logger
 
@@ -173,7 +173,7 @@
     /// </remarks>
     private async Task BuildCallersAsync(string descriptorJson)
     {
-        var mine = await Records.ContextAsync(CancellationToken.None);
+        var mine = await Session.CallerAsync(CancellationToken.None);
         _caller = new Caller("you", mine.User == default ? null : mine.User.Value,
             [.. mine.Roles.Select(role => role.Name)], mine.Tenant?.Value);
 

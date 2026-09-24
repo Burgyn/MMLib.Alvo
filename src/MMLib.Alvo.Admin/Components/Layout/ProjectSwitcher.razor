@@ -13,8 +13,7 @@
 @implements IDisposable
 @inject ManagementGateway Gateway
 @inject NavigationManager Navigation
-@inject WorkingCopyStore Copies
-@inject DataGateway Caller
+@inject AdminSession Session
 @inject ILogger<ProjectSwitcher> Logger
 
 <div class="a-switcher" data-testid="project-card">
@@ -34,8 +33,8 @@
 
 @code {
     private ManagementProject? _project;
+    private readonly ComponentLifetime _lifetime = new();
     private WorkingCopy? _copy;
-    private bool _disposed;
     private int? _revision;
     private string? _unread;
 
@@ -102,16 +101,8 @@
     {
         try
         {
-            var copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
-
-            /* Disposed during the await must not subscribe — see PendingBar, which has the same wait. */
-            if (_disposed)
-            {
-                return;
-            }
-
-            _copy = copy;
-            _copy.Changed += Redraw;
+            _copy = await Session.CopyAsync(_lifetime.Token);
+            Session.Follow(_copy, InvokeAsync, StateHasChanged, _lifetime.Token);
         }
         catch (Exception exception)
         {
@@ -120,14 +111,11 @@
         }
     }
 
-    /// <summary>Redraws on the renderer's thread — the edit that raised this may be another tab's.</summary>
-    private void Redraw() => _ = InvokeAsync(StateHasChanged);
-
     private async Task LoadAsync()
     {
         try
         {
-            var projects = await Gateway.ProjectsAsync(CancellationToken.None);
+            var projects = await Gateway.ProjectsAsync(_lifetime.Token);
             _project = projects.Count > 0 ? projects[0] : null;
             _revision = _project is null ? null : await CurrentRevisionAsync(_project);
         }
@@ -167,7 +155,7 @@
     {
         try
         {
-            var revision = (await Gateway.DescriptorAsync(CancellationToken.None)).Revision;
+            var revision = (await Gateway.DescriptorAsync(_lifetime.Token)).Revision;
             return revision > 0 ? revision : null;
         }
         catch (ManagementForbiddenException)
@@ -178,13 +166,8 @@
 
     public void Dispose()
     {
-        _disposed = true;
         Navigation.LocationChanged -= Reload;
         Gateway.Applied -= Refresh;
-
-        if (_copy is not null)
-        {
-            _copy.Changed -= Redraw;
-        }
+        _lifetime.Dispose();
     }
 }

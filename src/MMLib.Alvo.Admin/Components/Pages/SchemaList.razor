@@ -1,8 +1,7 @@
 ﻿@page "/admin/schema"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
-@inject WorkingCopyStore Copies
-@inject DataGateway Caller
+@inject AdminSession Session
 @inject NavigationManager Navigation
 @inject ILogger<SchemaList> Logger
 @implements IDisposable
@@ -163,20 +162,13 @@
     private bool _adding;
     private bool _scoped;
     private bool _audited = true;
-    private bool _disposed;
-    private bool _following;
+    private readonly ComponentLifetime _lifetime = new();
     private ElementReference _nameInput;
-
-    private void OnCopyChanged() => _ = InvokeAsync(StateHasChanged);
 
     public void Dispose()
     {
-        _disposed = true;
         Navigation.LocationChanged -= OnLocationChanged;
-        if (_following)
-        {
-            Copy.Changed -= OnCopyChanged;
-        }
+        _lifetime.Dispose();
     }
 
     protected override async Task OnInitializedAsync()
@@ -184,27 +176,16 @@
         Navigation.LocationChanged += OnLocationChanged;
         OpenIfAsked(Navigation.Uri);
 
-        /* Resolve this operator's working copy before anything reads it: the store is shared and
-           keyed by user, so a copy is never another administrator's. */
-        Copy = Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
-
-        /* The pending rows are drawn from the copy, which the shell's Discard and the operator's other tabs
-           also change. Not subscribed when disposed during the await: nothing would unsubscribe it. */
-        if (!_disposed)
-        {
-            Copy.Changed += OnCopyChanged;
-            _following = true;
-        }
-
+        var ct = _lifetime.Token;
         try
         {
-            _schema = await Gateway.SchemaAsync(CancellationToken.None);
+            /* The pending rows are drawn from the copy, which the shell's Discard and the operator's other
+               tabs also change — so it is followed, and taken only once the schema has been read. */
+            Copy = await Session.CopyAsync(ct);
+            Session.Follow(Copy, InvokeAsync, StateHasChanged, ct);
 
-            if (!Copy.Loaded)
-            {
-                var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
-                Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
-            }
+            _schema = await Gateway.SchemaAsync(ct);
+            await Session.EnsureLoadedAsync(Copy, ct);
         }
         catch (Exception exception)
         {

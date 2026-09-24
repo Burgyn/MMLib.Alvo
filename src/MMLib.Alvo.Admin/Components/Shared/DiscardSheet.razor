@@ -10,8 +10,7 @@
     One component because there are two ways in, Preview and the shell's pending bar, and two copies of
     a destructive confirmation are two chances for one of them to drift back to green.
 *@
-@inject WorkingCopyStore Copies
-@inject DataGateway Caller
+@inject AdminSession Session
 
 <Sheet Open="Open" Title="Discard every unapplied change?"
        Subtitle="The working copy goes back to the applied revision. Nothing in the database changes."
@@ -49,17 +48,13 @@
     {
         if (Open)
         {
-            _revision = (await CopyAsync()).Revision;
+            _revision = (await Session.CopyAsync(CancellationToken.None)).Revision;
         }
     }
 
     private async Task DiscardAsync()
     {
-        (await CopyAsync()).Discard();
+        (await Session.CopyAsync(CancellationToken.None)).Discard();
         await OnDiscarded.InvokeAsync();
     }
-
-    /// <summary>This operator's copy — the store is keyed by user, so it is never another administrator's.</summary>
-    private async Task<WorkingCopy> CopyAsync()
-        => Copies.For((await Caller.ContextAsync(CancellationToken.None)).User);
 }
