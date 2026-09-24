@@ -3,6 +3,7 @@
 @inject ManagementGateway Gateway
 @inject AssistantGateway Assistant
 @inject Microsoft.Extensions.Options.IOptions<AlvoAdminOptions> Admin
+@inject ILogger<Settings> Logger
 @rendermode InteractiveServer
 
 <PageTitle>Settings · Alvo</PageTitle>
@@ -188,9 +189,11 @@
     /// Saves the connection, or shows why it could not be saved.
     /// </summary>
     /// <remarks>
-    /// The refusal a shadowing configuration raises is caught by name, because it is the one failure whose
+    /// The refusal a shadowing configuration raises must reach the screen, because it is the one failure whose
     /// silent version is the worst kind: the operator saves a key, the screen says saved, and every request
-    /// keeps using the one the deployment pinned.
+    /// keeps using the one the deployment pinned. Its sentence, and a read-only store's, are the framework's
+    /// and are shown as they are; any other exception is a fault, logged, and shown as the generic sentence
+    /// rather than a message written for a log.
     /// </remarks>
     private async Task SaveAsync()
     {
@@ -206,13 +209,9 @@
             _saved = true;
             _info = await Gateway.InfoAsync(CancellationToken.None);
         }
-        catch (MMLib.Alvo.Secrets.SecretShadowedException shadowed)
+        catch (Exception exception)
         {
-            _saveRefusal = shadowed.Message;
-        }
-        catch (InvalidOperationException refused)
-        {
-            _saveRefusal = refused.Message;
+            _saveRefusal = AdminProblem.From(exception, Logger)?.Detail;
         }
     }
 }

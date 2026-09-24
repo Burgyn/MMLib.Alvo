@@ -495,6 +495,7 @@ namespace MMLib.Alvo.Admin.Components.Shared
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Title { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
     }
     public class PageHeader : Microsoft.AspNetCore.Components.ComponentBase
     {

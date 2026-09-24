@@ -45,8 +45,19 @@ public class AdminProblemTests
         new OperationCanceledException(),
         new TaskCanceledException(),
         new JSDisconnectedException("gone"),
-        new ObjectDisposedException("IServiceProvider"),
     };
+
+    [Fact]
+    public void A_disposed_object_is_a_fault_because_it_may_be_a_use_after_dispose()
+    {
+        var logger = new RecordingLogger();
+
+        var problem = AdminProblem.From(new ObjectDisposedException("IServiceProvider"), logger)!;
+
+        problem.IsFault.ShouldBeTrue();
+        problem.Detail.ShouldBe(AdminProblem.FaultDetail);
+        logger.Entries.ShouldHaveSingleItem().Level.ShouldBe(LogLevel.Error);
+    }
 
     [Fact]
     public void Only_a_forbidden_refusal_offers_to_sign_out()
@@ -107,6 +118,17 @@ public class AdminProblemTests
     }
 
     [Fact]
+    public void A_null_argument_is_a_defect_even_where_the_data_port_was_called()
+    {
+        var missing = new ArgumentNullException("values");
+
+        var problem = AdminProblem.From(missing, ProblemSite.RecordWrite)!;
+
+        problem.IsFault.ShouldBeTrue();
+        problem.Detail.ShouldNotContain("values");
+    }
+
+    [Fact]
     public void An_unsupported_operation_is_a_refusal_only_on_access()
     {
         var unsupported = new NotSupportedException("no membership writes");
@@ -144,7 +166,7 @@ public class AdminProblemTests
     {
         var logger = new RecordingLogger();
 
-        AdminProblem.Absorb(new ObjectDisposedException("scope"), logger);
+        AdminProblem.Absorb(new OperationCanceledException(), logger);
 
         logger.Entries.ShouldHaveSingleItem().Level.ShouldBe(LogLevel.Debug);
     }

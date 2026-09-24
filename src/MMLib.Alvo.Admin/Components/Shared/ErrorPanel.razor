@@ -29,7 +29,7 @@
        is what a developer gets every time they delete the database and restart. The second is
        indistinguishable from the first from here, and it strands an operator on a screen with no
        control on it, so the way out is offered rather than left to be found in a menu. *@
-    @if (Classified?.OffersSignOut == true)
+    @if (_classified?.OffersSignOut == true)
     {
         <form method="post" action="@AlvoAdmin.SignOutEndpoint" data-enhance="false"
               style="margin-top:var(--space-3)">
@@ -70,11 +70,18 @@
     [Parameter]
     public RenderFragment? Actions { get; set; }
 
-    private AdminProblem? Classified => Problem is null ? null : AdminProblem.From(Problem);
+    private AdminProblem? _classified;
 
-    private string Headline => Title ?? Classified?.Title ?? AdminProblem.FaultTitle;
+    /// <summary>
+    /// Classified once per parameter set rather than per read. An exception the classifier drops still gets
+    /// the generic panel here: a panel was asked for, so it must say something.
+    /// </summary>
+    protected override void OnParametersSet()
+        => _classified = Problem is null ? null : AdminProblem.From(Problem) ?? AdminProblem.Fault(Problem);
 
-    private string Detail => Classified?.Detail ?? string.Empty;
+    private string Headline => Title ?? _classified?.Title ?? AdminProblem.FaultTitle;
 
-    private string? ShownFix => Fix ?? Classified?.Fix;
+    private string Detail => _classified?.Detail ?? string.Empty;
+
+    private string? ShownFix => Fix ?? _classified?.Fix;
 }

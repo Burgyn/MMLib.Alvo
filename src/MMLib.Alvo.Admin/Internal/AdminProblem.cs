@@ -49,16 +49,16 @@ internal enum ProblemSite
 /// <b>Three answers, and only three</b> (docs/architecture/admin-dashboard-review.md, F-9). A refusal the
 /// framework documents — the management exceptions, the data port's authorization, constraint, not-found and
 /// validation refusals — is expected: it gets a mapped title, the framework's own sentence as its detail, and
-/// the fix this site offers. A cancellation, a closed browser or a torn-down circuit is dropped: nobody is left
+/// the fix this site offers. A cancellation or a closed browser is dropped: nobody is left
 /// to read a panel about it. Anything else is a fault: it is logged with its stack, and the operator reads a
 /// generic sentence, because <see cref="Exception.Message"/> of an unexpected exception is written for a log
 /// and may carry what a log holds.
 /// </para>
 /// <para>
-/// <b>An <see cref="ObjectDisposedException"/> is dropped whoever raised it.</b> Reaching a screen's catch, it
-/// is the circuit's service scope being disposed under an await — the screen is going too — and telling that
-/// apart from a genuine use-after-dispose would need every screen to track its own disposal. It is still
-/// logged, at debug, so the second case stays findable.
+/// <b>An <see cref="ObjectDisposedException"/> is a fault, not a drop.</b> It is often the circuit's service
+/// scope being disposed under an await, but it is also what a genuine use-after-dispose throws, and the
+/// classifier cannot tell the two apart without every screen tracking its own disposal. Logging the first at
+/// error costs a line in a log; dropping the second would hide a bug.
 /// </para>
 /// </remarks>
 /// <param name="Title">The headline.</param>
@@ -93,8 +93,13 @@ internal sealed record AdminProblem(string Title, string Detail, string? Fix, Ex
 
         return RefusalTitle(exception, site) is { } title
             ? new AdminProblem(title, exception.Message, AdminProblemFixes.For(exception, site), exception, IsFault: false)
-            : new AdminProblem(FaultTitle, FaultDetail, null, exception, IsFault: true);
+            : Fault(exception);
     }
+
+    /// <summary>The generic answer for an exception nothing documents.</summary>
+    /// <param name="exception">What was thrown.</param>
+    public static AdminProblem Fault(Exception exception)
+        => new(FaultTitle, FaultDetail, null, exception, IsFault: true);
 
     /// <summary>Classifies an exception and logs it when it is a fault; <see langword="null"/> when it is dropped.</summary>
     /// <param name="exception">What a screen caught.</param>
@@ -127,7 +132,7 @@ internal sealed record AdminProblem(string Title, string Detail, string? Fix, Ex
         => _ = From(exception, logger, site);
 
     private static bool IsDropped(Exception exception)
-        => exception is OperationCanceledException or JSDisconnectedException or ObjectDisposedException;
+        => exception is OperationCanceledException or JSDisconnectedException;
 
     /// <summary>The headline of a documented refusal, or <see langword="null"/> for anything else.</summary>
     private static string? RefusalTitle(Exception exception, ProblemSite site) => exception switch
@@ -148,113 +153,18 @@ internal sealed record AdminProblem(string Title, string Detail, string? Fix, Ex
         AlvoRecordNotFoundException => "That record is not there",
         AlvoPreconditionFailedException => "The record changed since it was read",
         AlvoIdempotencyConflictException => "That request was already made with different content",
-        ArgumentException when IsDataSite(site) => "The values were refused",
+        ArgumentException and not ArgumentNullException when IsDataSite(site) => "The values were refused",
         NotSupportedException when site == ProblemSite.People => "This deployment does not support that",
         _ => null,
     };
 
     /// <summary>
     /// Whether the data port is what was called, where an <see cref="ArgumentException"/> is its documented
-    /// validation refusal rather than a bug in this assembly.
+    /// validation refusal rather than a bug in this assembly — except an <see cref="ArgumentNullException"/>,
+    /// which the port documents as a defect in the caller.
     /// </summary>
     private static bool IsDataSite(ProblemSite site)
         => site is ProblemSite.Records or ProblemSite.ScopedRecordsWithoutTenant or ProblemSite.RecordWrite;
-}
-
-/// <summary>
-/// The fix each site offers for each refusal — the five per-screen tables F-9 found, in one place.
-/// </summary>
-internal static class AdminProblemFixes
-{
-    /// <summary>What to do about a refusal at one site, or <see langword="null"/> when nothing better than the detail can be said.</summary>
-    /// <param name="exception">The refusal.</param>
-    /// <param name="site">Where it happened.</param>
-    public static string? For(Exception exception, ProblemSite site) => site switch
-    {
-        ProblemSite.SchemaApply => SchemaApply(exception),
-        ProblemSite.Rollback => Rollback(exception),
-        ProblemSite.People => People(exception),
-        ProblemSite.Records or ProblemSite.ScopedRecordsWithoutTenant => Records(exception, site),
-        ProblemSite.RecordWrite => RecordWrite(exception),
-        _ => null,
-    } ?? General(exception);
-
-    private static string? General(Exception exception) => exception switch
-    {
-        CelSyntaxException { FixSuggestion: { Length: > 0 } suggestion } => suggestion,
-        _ => null,
-    };
-
-    /// <summary>
-    /// The two concurrency answers are worth separating: an <em>absent</em> precondition is a 428 and a
-    /// <em>stale</em> one is a 412, and they send an operator to two different places — one is a bug in the
-    /// client, the other is somebody else having applied in between.
-    /// </summary>
-    private static string? SchemaApply(Exception exception) => exception switch
-    {
-        DescriptorConcurrencyException
-            => "Somebody applied a revision while this copy was open. Reload the descriptor, re-check the diff, and apply again — your edits are still here.",
-        DestructiveChangeNotAllowedException
-            => "The plan discards data and that was not confirmed. Type the project's name above to allow it.",
-        DescriptorValidationException
-            => "The descriptor does not satisfy schema/project.schema.json. The message names the pointer that failed.",
-        ManagementEscalationException
-            => "This change touches the access block, which re-qualifies the whole apply to admin. Your management level is lower.",
-        _ => null,
-    };
-
-    private static string? Rollback(Exception exception) => exception switch
-    {
-        DescriptorConcurrencyException => "Somebody applied a revision while this screen was open. Reload and try again.",
-        _ => null,
-    };
-
-    /// <summary>
-    /// The escalation refusals are the interesting ones and are worth telling apart from a plain "forbidden":
-    /// one of them means <em>you are not an administrator</em> and the other means <em>you are, and this is the
-    /// one thing an administrator may not do to themselves</em>.
-    /// </summary>
-    private static string? People(Exception exception) => exception switch
-    {
-        ManagementEscalationException => "Another administrator can make this change, or the access block can, through an apply — which records who made it.",
-        ManagementForbiddenException => "Administering people is an admin operation. Your management level is lower.",
-        NotSupportedException => "This deployment's membership store does not support that operation.",
-        _ => null,
-    };
-
-    /// <summary>
-    /// <see cref="AlvoAuthorizationException"/> is the tenant guard and the unconfigured-operation case — the two
-    /// that really are a 403 rather than an empty page — and the distinction is worth carrying into the wording,
-    /// because "you are refused" and "you match nothing" send an operator to two different screens.
-    /// </summary>
-    private static string? Records(Exception exception, ProblemSite site) => exception switch
-    {
-        AlvoAuthorizationException when site == ProblemSite.ScopedRecordsWithoutTenant
-            => "This entity is tenant-scoped and your account holds no tenant. An administrator grants one in Access.",
-        AlvoAuthorizationException
-            => "The descriptor configures no rule for this operation, or the tenant guard refused before any rule ran. The entity's Rules tab shows which operations are configured.",
-        AlvoConstraintViolationException violation
-            => $"A constraint refused the value: {violation.Kind}. The field's facets are on the entity's Fields tab.",
-        _ => null,
-    };
-
-    /// <summary>
-    /// A unique collision is a <c>409</c> with violation code <c>unique</c> — not a validation error and not an
-    /// "unknown field", neither of which the problem-type catalogue contains. The wording follows the catalogue
-    /// rather than inventing a friendlier one, because the operator may well be reading the same slug in a log.
-    /// </summary>
-    private static string? RecordWrite(Exception exception) => exception switch
-    {
-        AlvoConstraintViolationException { Kind: AlvoConstraintKind.Unique } violation
-            => $"Another record already has this value for {string.Join(", ", violation.Fields)}. The field is declared unique on the entity's Fields tab.",
-        AlvoConstraintViolationException violation
-            => $"The value does not satisfy {violation.Kind} on {string.Join(", ", violation.Fields)}.",
-        AlvoAuthorizationException
-            => "The write rule on this entity does not admit you, or the entity is tenant-scoped and you hold no tenant.",
-        AlvoRecordNotFoundException
-            => "The record is gone, or the read rule no longer admits it. Both answer 404, deliberately.",
-        _ => null,
-    };
 }
 
 /// <summary>The dashboard's log lines — the first it writes.</summary>
@@ -265,6 +175,6 @@ internal static partial class AdminProblemLog
     public static partial void Fault(ILogger logger, Exception exception);
 
     [LoggerMessage(EventId = 2, Level = LogLevel.Debug,
-        Message = "The admin dashboard dropped a {ExceptionType}: the screen or its circuit was already going.")]
+        Message = "The admin dashboard dropped a {ExceptionType}: the operation was cancelled or the browser had gone.")]
     public static partial void Dropped(ILogger logger, string exceptionType, Exception exception);
 }
