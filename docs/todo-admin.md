@@ -287,3 +287,303 @@ would reuse.
 sit on the row as before, below it the secondaries fold into an overflow menu built from `Sheet`, so
 it inherits the scrim, Escape, focus and scroll lock. One markup tree and one media query, for the
 reason the shell gives about a second navigation.
+
+## 7. A rollup (and a computed field) cannot be authored — and the editor hides that it is one
+
+Reported by the maintainer on 24 Sep 2026, editing `customers.bikes_count` in the bike-workshop demo.
+The Fields list badges it `rollup`, but **Edit** opens the ordinary field editor: `integer` selected
+among the eleven type chips, `required` / `unique` / `indexed`, and nothing about `rollup` at all — no
+`from`, no `op`, no `field`, no `via`, no `where`, and not even a sentence saying the value is
+maintained by Alvo. So:
+
+- **A rollup cannot be created from the dashboard.** `$defs/field.rollup` (`from` + `op`, `field` for
+  every op but `count`, `via` when the child has two refs to this parent, optional `where`) is plain
+  declarative configuration, not an expression — nothing about it needs a text editor. The same holds
+  for `computed`, which is one CEL string exactly like a rule's and could reuse the rules editor's CEL
+  input.
+- **An existing one can be broken from the dashboard.** The editor preserves the `rollup` key it does
+  not draw, but it still offers every type chip and every constraint. Switching `bikes_count` to
+  `string`, or ticking `required`, composes a declaration that contradicts its own rollup (a string
+  that holds a count; a value the caller must supply and may not write). Whether the apply refuses it
+  or keeps it is for §8 to establish — either way the operator was never told they were editing a
+  rollup.
+
+**Why the audit in §5 missed it.** §5c recorded `computed` and `rollup` as *"locked — read — right, it
+is an expression"*. Both halves are wrong: the editor does not lock them (only `default` is withheld,
+`FieldFacets.TakesADefault`), and a rollup is not an expression. The row judged the facet by its name
+rather than by opening the editor on a real one — the §5f lesson again: a walk over what a screen
+*declares* does not see what it *renders*.
+
+Probably: a **Maintained by Alvo** kind in the field editor, chosen instead of a type rather than
+beside one. `Rollup` offers `from` (the entities whose `ref` points here — the incoming list the
+Relationships tab already computes), `op`, `field` (that child's numeric fields, hidden for `count`),
+`via` (only when the child has more than one ref here) and `where` (CEL, marked `not yet` —
+`rollup.where` is in `UnhonouredFeatures`). `Computed` offers the CEL input. Either way the type is
+derived (`count` → `integer`; `sum`/`avg`/`min`/`max` → the child field's type), and `required`,
+`unique`, `default` are not offered.
+
+The wider question the maintainer asked — *how many more of these are there* — is §8.
+
+## 8. Full audit, 24 Sep 2026 — every schema key, what the build does, what the dashboard does
+
+Method: every property of `schema/project.schema.json` enumerated by a script walking `properties`,
+`additionalProperties`, `patternProperties`, `items`, `$ref`, every `oneOf` branch and every
+`if/then` (222 raw paths). The six hook points reuse two `$defs` and automation reuses `$defs/action`,
+so the raw paths collapse to **115 authorable keys**, one row each below. Build column from
+`UnhonouredFeatures`/`UnhonouredSubsystems` plus a grep of `src/` (Admin and Testing excluded) for a
+reader of the key; Dashboard column from the component code, not from §5. Audited at **`98849b6`**.
+Count: **115 keys — 34 edit / 23 read / 38 said / 20 gap; 14 keys where a screen contradicts or can
+break an existing declaration** (marked **contradicts**). Every key is also reachable *raw* by pasting
+a whole descriptor on Import (`Transfer.razor:120` `Copy.Replace`) or by an assistant proposal
+(`AssistantDrawer.razor:211`); that is not counted as edit.
+
+Legend — Build: **honoured** · **warned** (applies, runs nothing, logged + `capabilities.warned`) ·
+**refused** (apply error) · **ignored** (parsed, read by nothing, *not* warned). Dashboard: as §5
+(edit / read / said / gap). Evidence abbreviations: `UF` UnhonouredFeatures.cs, `US`
+UnhonouredSubsystems.cs, `Map` DescriptorToSchemaMapper.cs, `RR` RollupResolver.cs, `DV`
+DescriptorValidator.cs (all `src/MMLib.Alvo/Descriptor/…`); `AHC`/`BHC` After/BeforeHookCompiler.cs;
+`PCB` Rules/Internal/PolicyCatalogBuilder.cs; `FF` FieldFacets.cs, `FE` FieldEditor.razor, `EC`
+Entity.razor.cs, `PS` PendingSchema.cs, `WC*` WorkingCopy.*.cs (all `Admin/Components/Schema/`);
+`Lens` Admin/Internal/DescriptorLens.cs.
+
+### 8a. Schema keys
+
+**Project**
+
+| Key | Build | Dashboard | When it meets one it cannot draw | Evidence |
+|---|---|---|---|---|
+| `$schema` | ignored (editor hint) | read (raw only) | preserved | AlvoDescriptor.cs:22 |
+| `apiVersion` | honoured (const) | read (Preview raw) | preserved | schema const |
+| `name` | honoured | read (title, switcher) | — | |
+| `description` | ignored — no reader in `src/` | gap | preserved, never shown | grep `descriptor.Description`: none |
+| `branding.title` | ignored | gap | preserved | DescriptorBlocks.cs:4; no reader |
+| `branding.logoUrl` | ignored | gap | preserved | DescriptorBlocks.cs:10; no reader |
+| `revision` | honoured (concurrency) | read (History) | — | |
+| `tenancy.enabled` | honoured | gap | **contradicts**: a *pending* entity without `tenancy` is drawn `tenancy: global` even when enabled (it resolves scoped) | Map:36,385; PS:58 |
+
+**dynamicEntities** — the whole block is F7.
+
+| Key | Build | Dashboard | When it meets one | Evidence |
+|---|---|---|---|---|
+| `dynamicEntities.enabled` | warned when `true` | said (Overview "Declared, with limits") | shown on key presence, so also for `enabled: false` | US:122; DeclaredLimits.cs; Overview.razor:66-79 |
+| `.namePrefix` | ignored | said (block-level) | preserved | no reader |
+| `.defaultRules.list/get/create/update/delete` (5) | ignored | said (block-level) ×5 | preserved; Rules screen does not list them | no reader |
+| `.allowedFieldTypes` | ignored | said (block-level) | preserved | no reader |
+| `.maxFieldsPerEntity` | ignored | said (block-level) | preserved | no reader |
+| `.maxRecordsPerEntity` | ignored | said (block-level) | preserved | no reader |
+| `.maxEntitiesPerTenant` | ignored | said (block-level) | preserved | no reader |
+| `.defaultTenancy` | ignored | said (block-level) | preserved | no reader |
+
+**auth / access**
+
+| Key | Build | Dashboard | When it meets one | Evidence |
+|---|---|---|---|---|
+| `auth.providers` | **ignored** — no reader, no warning; providers are host config | gap | preserved | DescriptorBlocks.cs:55 only |
+| `auth.roles` | honoured | read (Access catalogue, Rules) | page says a change "waits for an apply", offers none (#270) | RoleCatalog.cs:49; PCB:249; Access.razor |
+| `access.admin` | honoured | read (Access levels) | as `auth.roles` (#270) | ManagementAccessEvaluator.cs:90; Lens:103 |
+| `access.developer` | honoured | read | as above | same |
+| `access.viewer` | honoured | read | as above | same |
+
+**Entity** (`entities.<name>.*`; `users` is reserved, not authorable)
+
+| Key | Build | Dashboard | When it meets one | Evidence |
+|---|---|---|---|---|
+| `description` | honoured (OpenAPI) | read (header, list) | not editable | Map:212; SchemaComponentBuilder.cs:325 |
+| `renamedFrom` | honoured | edit | carries refs to the entity | WC.Entities:65-90; EntityReferences.cs |
+| `storage` | `physical` honoured; **`dynamic`: entity silently dropped** from the applied schema (no warning unless `dynamicEntities.enabled`) | read | **contradicts**: a dynamic entity is listed "not applied yet — does not exist until you apply" forever, and its page badges it `physical table` (PS reads no `storage`) | Map:44-46,173; SchemaList.razor:106-116,204; Entity.razor:88 |
+| `tenancy` | honoured | edit once (Add entity), then read | pending-without-key drawn global (see `tenancy.enabled`) | WC.Entities:21; Entity.razor badge |
+| `softDelete` | refused | gap (#269) | **contradicts**: a pending entity declaring it gets a plain `soft delete` badge, no refusal | UF:101; PS:62; Entity.razor:86 |
+| `audit` | honoured | edit once, then read | — | Map:190; WC.Entities:22 |
+| `realtime` | **ignored** — no reader, no realtime channel in `src/` | gap | preserved | EntityDescriptor.cs:40 only |
+| `indexes[].fields` | honoured | edit (Indexes tab) | **contradicts**: candidates are the *applied* fields (a staged field cannot be picked, a staged-removed one can); a field rename/remove leaves the index naming a field that no longer exists — no validator check, outcome unverified (EF `HasIndex`) | Indexes.razor:125; Entity.razor:140; WC.Fields:19-68; DescriptorModelBuilder.cs:104 |
+| `indexes[].unique` | honoured | edit | — | WC.Indexes:46 |
+| `rules.list` | honoured | edit | rename of a referenced field not carried into CEL | RulesTab.razor:73; WC.Rules |
+| `rules.get` | honoured | edit | same | same |
+| `rules.create` | honoured | edit | same | same |
+| `rules.update` | honoured | edit | same | same |
+| `rules.delete` | honoured | edit | same | same |
+| `x-*` | preserved, not read | gap | preserved | EntityDescriptor.cs:47 |
+
+**Field** (`entities.<e>.fields.<f>.*`)
+
+| Key | Build | Dashboard | When it meets one it cannot draw | Evidence |
+|---|---|---|---|---|
+| `type` | honoured | edit | **contradicts**: all 11 chips offered on a rollup/computed (§7) | FE Type ChipGroup; FF:124 |
+| `description` | honoured (OpenAPI) | gap | preserved, never shown on Fields tab | Map:401; SchemaComponentBuilder.cs:666; Fields.razor Facets() |
+| `renamedFrom` | honoured | edit | **contradicts**: rename carries nothing — composite indexes, a child rollup's `field`/`via` (RR refuses), `computed`/rule/hook CEL, `mutate` keys (BHC refuses) all keep the old name | WC.Fields:19-49; RR:252-326 |
+| `required` | honoured | edit | **contradicts**: offered beside a `readOnly: true` it does not show → `required`+`readOnly:true` is refused at apply; offered on rollup/computed (accepted, RecordValidator skips it) | DV:438,504,635; RecordValidator.cs:156 |
+| `unique` | honoured | edit, 5 types only | **contradicts**: checkbox hidden for ref/enum/decimal/boolean/text/json but the prefilled value is still written — a unique ref cannot be un-uniqued, a string→boolean switch keeps `unique: true` invisibly; offered on a rollup (accepted, no check) | FF:68,118,186 |
+| `nullable` | honoured | gap | preserved | Map:405 |
+| `default` (literal) | honoured | edit | **contradicts**: kept when switching to `ref` (hidden, then refused at apply) or `json` (accepted, meaning changes); boolean default coerced — anything but `"true"` saved as `false` | FF:85,229,252; FieldDefault.cs:190-198 |
+| `default.$cel` | refused | said (editor refusal list) | **contradicts**: prefill puts the object's JSON text in the box (`not JsonArray` admits an object) and a string-typed save writes it back as the literal string `{"$cel":…}` — a refused declaration turned into an accepted wrong one | UF:63; FF:125,255 |
+| `maxLength` | honoured | edit | **contradicts**: cannot be absent — prefill defaults 120 and Build always writes it, so opening *Edit* on an unbounded string (even to rename) adds `maxLength: 120` and narrows the column | FF:47,120,290 |
+| `precision` | honoured | edit | — | FF:293 |
+| `scale` | honoured | edit | — | FF:294 |
+| `values` | honoured | edit | — | FF:305 |
+| `entity` | honoured | edit | targets are applied entities only — a pending entity (and `users`, unverified) cannot be pointed at | EC:95 |
+| `onDelete` | honoured (FK) | read (badges) — gap to author (#265) | preserved (`??=`); new refs get `restrict` | Map:510; FF:325; Relationships.razor:23 |
+| `format` | honoured | read (badge) | preserved while `string`, dropped on type change (correct) | Map:411,471; FF:280 |
+| `validation` | refused | said (editor only) | Fields list silent (#269) | UF:56; FE refused-facets |
+| `index` | honoured | edit | — | FF:187 |
+| `hidden` (bool) | honoured | read (Data screen masks) — gap on Schema | preserved | PCB:103; Lens:130; FieldMasks.cs |
+| `hidden` (CEL) | honoured | read (Data: never searched/sorted) — gap on Schema | preserved | same; GridQuery.cs Searchable/Sortable |
+| `readOnly` (bool) | honoured | read (Data: "Calculated") — gap on Schema | preserved; see `required` | PCB:104; Lens:143; FormFields.cs |
+| `readOnly` (CEL) | honoured | read (Data: stays a control) — gap on Schema | preserved | FieldLocks.cs |
+| `computed` | honoured | read (badge) — gap to author (§7) | **contradicts**: type chips/`unique` offered; badge vanishes once the field is staged-changed (PS drops it) | Map:418; FF:124; EC:279-286; PS:78-89 |
+| `rollup.from` | honoured | read (badge) — gap (§7) | **contradicts**: as `computed`; type change accepted by the apply — RR checks no parent type (a `count` rollup on a `string`) | RR:46-69 |
+| `rollup.op` | honoured | gap (§7) | same row | RR:334 |
+| `rollup.field` | honoured | gap (§7) | child field rename not carried | RR:304-327 |
+| `rollup.via` | honoured | gap (§7) | same | RR:252-279 |
+| `rollup.where` | refused | gap — its refusal slot is `rollup.where`, not `field.*`, so no screen renders it | preserved | UF:128; RR:107; FieldEditor.razor.cs:81 |
+| `x-*` | preserved, not read | gap | preserved | FieldDescriptor.cs:87 |
+
+**Hooks** (`entities.<e>.hooks.*`) — the six points share `$defs/beforeHookList` / `afterHookList`
+
+| Key | Build | Dashboard | When it meets one | Evidence |
+|---|---|---|---|---|
+| `beforeCreate` / `beforeUpdate` / `beforeDelete` / `afterCreate` / `afterUpdate` / `afterDelete` (6) | honoured | edit ×6 — add and remove only, no edit in place | existing entries rendered raw, removable | HookBuilder.cs:38; WC.Hooks:20,70 |
+| before `condition` | honoured | edit | — | HookBuilder.cs:93 |
+| before `reject` | honoured | edit | — | HookBuilder.cs:174 |
+| before `mutate.<f>` literal | honoured | gap — every value is wrapped in `$cel` | existing literal shown raw | BHC:298-300,392; HookBuilder.cs:177 |
+| before `mutate.<f>.$cel` | honoured (not under `beforeDelete`) | edit — one field per hook, field name free text | multi-field mutate shown raw | BHC:267; HookBuilder.cs:34,79 |
+| after `condition` | honoured | edit | — | |
+| `webhook.endpoint` | honoured | edit (free text; endpoints themselves unauthorable) | — | AHC:246 |
+| `webhook.payload` | `{{…}}` template honoured; raw JSONata refused | gap — §3 withheld it as "refused"; only raw JSONata is | JSONata refusal rendered nowhere | AHC:243,379,384 |
+| `email.template` | honoured | edit (free text; templates unauthorable) | — | AHC:297 |
+| `email.to` | honoured | edit | — | |
+| `email.data` | refused | said (Integrations "why no button" only) | not on the On-write tab | UF:210; AHC:306; Integrations.razor:71-77 |
+| `function.name` / `.input` (2) | refused | said ×2 (On-write tab) | — | AHC:226; HooksTab.razor.cs:86 |
+| `entity.update.entity` / `.recordId` / `.payload` (3) | refused | said ×3 | — | same |
+| `http.call.url` / `.method` / `.headersSecretRef` / `.payload` (4) | refused | said ×4 | — | same |
+
+**Automation / templates / formats / webhooks / functions**
+
+| Key | Build | Dashboard | When it meets one | Evidence |
+|---|---|---|---|---|
+| `automation.<r>.description` | warned (block) | said (Overview) | **contradicts**: the Automations page looks up block `automations`, the build names it `automation`, so it says "not part of the descriptor at all yet" | US:127; NotYet.razor:33,57 |
+| `.enabled` | warned | said (Overview) | same page | same |
+| `.trigger.event` | warned; **wildcard refused** | said (Overview) | wildcard refusal (`trigger.event`) rendered nowhere | Map:79-115; DV:211; UF:162 |
+| `.trigger.schedule` | warned | said (Overview) | — | |
+| `.condition` | warned | said | — | |
+| `.delivery` | warned | said | — | AutomationRule.cs:25 |
+| `.actions[]` (all 5 shapes) | warned; per-type refusals apply to after-hooks only | said | — | AHC:226 is the only caller |
+| `x-*` | preserved | gap | preserved | |
+| `templates.<t>.subject` | honoured for after-hook email; warned for automation | read (Integrations raw) | — | AHC:297; EventActionExecutor.cs:106 |
+| `templates.<t>.body` | same | read | — | same |
+| `templates.<t>.bodyFile` | refused when an after-hook references it, else warned | read (raw) | refusal (`bodyFile`) dropped by the Integrations prefix filter | UF:229; AHC:344; Integrations.razor:71-77 |
+| `formats.<f>.pattern` | honoured | gap | preserved | Map:128-153; RecordValidator.cs:195 |
+| `formats.<f>.description` | ignored (unverified — no reader found) | gap | preserved | |
+| `webhooks.endpoints.<n>.url` | honoured for after-hooks | read (Integrations raw) | — | AHC:246 |
+| `.secretRef` | warned — not read, no HMAC | said (Integrations warning) | — | US:138-143 |
+| `.description` | ignored (unverified) | read (raw) | — | |
+| `functions.<f>.script` | warned | said (Functions page, Overview) | — | US:145; NotYet.razor:57 |
+| `.trigger.http.route` | warned | said | — | |
+| `.trigger.http.method` | warned | said | — | |
+| `.trigger.schedule` | warned | said | — | |
+| `.trigger.event` | warned; wildcard refused | said | wildcard refusal rendered nowhere | Map:86 |
+| `.execution` | warned | said | — | |
+
+### 8b. Capabilities that are not descriptor keys
+
+| Capability | Where it lives | Dashboard | Evidence |
+|---|---|---|---|
+| 11 `IAlvoManagement` operations | port | all reached (§5d) | IAlvoManagement.cs:55-263 |
+| Rollback **dry run** | `ManagementRollbackRequest.DryRun` | **gap** — rollback runs blind: no plan, and `allowDestructive: true` is always sent after the typed-name confirm, beside text saying "permission to lose data is never implied" | History.razor:137-139 |
+| Apply idempotency key | `ManagementApplyRequest.IdempotencyKey` | gap (never sent; double-click safety rests on `ExpectedRevision`) | ManagementGateway.cs:177-183 |
+| People list | `IAlvoUserAdministration.ListAsync(search, limit=50, after)` | **partial** — first 50 only, no search, no next page | Access.razor:153; IAlvoUserAdministration.cs:125 |
+| Create / roles / tenant / disable / credential token | same port | reached | Access.razor, PersonRow.razor |
+| API keys | `IApiKeyStore` is Find/Touch only | said (Settings) — nothing to reach | IApiKeyStore.cs:10,16 |
+| Remove an entity | `WorkingCopy.RemoveEntity` | **gap** — written, **no caller** (the §5f `Discard` pattern again) | WC.Entities:93 |
+| Edit a hook in place | — | gap — remove + re-add, which also moves it to the end of an ordered list | WC.Hooks:20-51 |
+| Data API list: PostgREST filters, multi-sort, `select` | `GET /api/{e}` | partial — `ilike` over string fields only, one sort column, no projection | GridQuery.cs Search/Sort |
+| `POST …/query` | DataApiEndpoints.cs:335 | gap | |
+| `PUT` replace | DataApiEndpoints.cs:543 | gap (PATCH only) | DataGateway.cs:119-124 |
+| Conditional write (`If-Match`, version) | `AlvoPrecondition` | **gap** — update and delete send none: two operators overwrite each other silently on an audited entity | DataGateway.cs:123,130 |
+| Batch create/update/delete | DataApiEndpoints.cs:131-133 | gap (single-row selection) | RecordGrid.razor:122 |
+| Record history / versions | not in the build | said (History subtitle) | History.razor |
+| Realtime | not in the build | n/a | no SignalR/SSE/WebSocket in `src/` |
+| OpenAPI docs | host | reached (item 4) | |
+| Sign-in / sign-out | AlvoAdminSignIn.cs:54-55 | reached | SignIn.razor |
+| Export of the *working copy* | — | gap — Export is the applied descriptor, so hand-editing staged work means losing it | Transfer.razor Export panel |
+
+### 8c. Corrections to §5
+
+| §5 row | Said | Today |
+|---|---|---|
+| lead, 5d | "all twelve `IAlvoManagement` operations" | Eleven; the table lists eleven. |
+| 5a `automation` | said — Right | Wrong on its own page: `NotYet.razor:57` looks up `automations`; the build's block is `automation` (US:127). Overview does list it. |
+| 5a `dynamicEntities` | gap | Stale: Overview "Declared, with limits" lists it with the build's sentence (Overview.razor:66-79). |
+| 5a `templates` / `webhooks` | read — Right | The "Why there is no new endpoint button" panel's prefix filter admits only `email.data`; `bodyFile` and `JSONata` are dropped (Integrations.razor:71-77). |
+| 5a `auth.providers`, 5b `realtime`, 5a `description`/`branding` | gap | Also **ignored by the build** — no reader, no warning. A "not editable here" sentence would be false; the sentence owed is "this build does nothing with it". |
+| 5b `storage` | read — Right | Wrong for `dynamic`: dropped by the mapper, listed as not-applied forever, badged `physical table` (8a). |
+| 5b `hooks` | edit | Add/remove only; mutate literal and multi-field, and a `{{…}}` webhook `payload`, are honoured and not offered. §3's "`payload` and `data` are both JSONata slots this build refuses" is half wrong: `payload` as a template is honoured (AHC:379). |
+| 5b `indexes` | edit | Candidates are applied fields; field rename/remove is not carried into the index. |
+| 5c lead | "nothing below is destroyed by an edit — it is only unauthorable" | Wrong: `maxLength` is injected, a hidden `unique` is rewritten, a `default` survives into a type that refuses it, a `$cel` default is rewritten as a string (8a). |
+| 5c `maxLength`, `unique` | edit | Edit with a hidden write each (8a). |
+| 5c `hidden` / `readOnly` | "SchemaModel carries no Hidden, so the dashboard cannot read it even to display it" | Stale: `DescriptorLens.Masks/Locks` read both from the descriptor and the Data screen honours them. Only the Schema screen is silent — #267's "starts one layer down" premise no longer holds. |
+| 5c `computed` / `rollup` | locked — read — right | Already corrected by §7; also the badge disappears once the field is staged (PS drops both). |
+| 5c `entity` | edit | Applied targets only. |
+| 5d `RollbackAsync` | ✓ | Reached, but never dry-run and always destructive (8b). |
+| 5f | the pattern "written and no screen calls it" | Recurs: `WorkingCopy.RemoveEntity`. |
+
+### 8d. The queue (continues §5e)
+
+Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (premise stale — 8c),
+**#268** (identity — add that the build ignores these keys too), **#269** (extended by 19),
+**#270**, **#271** (extended by 27).
+
+14. **Rollup and computed cannot be authored, and the editor contradicts them** — §7. Add from this
+    audit: `unique` is offered on a rollup and accepted by the apply; the apply checks no parent type
+    (RR:46-69), so a `string` count rollup applies; the `rollup` / `computed` badge vanishes once the
+    field is staged. Answer as §7, and withhold `unique` alongside `required`/`default`.
+15. **Opening Edit on an unbounded string adds `maxLength: 120`.** FF:120 prefills 120 when absent and
+    FF:290 always writes it, so a rename or a `required` tick narrows the column — a DB change nobody
+    chose (destructive-plan guard catching it: unverified). Probably: prefill null, write only when set,
+    allow clearing; same for new fields rather than a silent 120.
+16. **A field rename or removal carries no references.** Composite indexes, a child rollup's
+    `field`/`via`, `computed`/rule/hook CEL and `mutate` keys keep the old name (WC.Fields:19-68).
+    Some are structured refusals (RR, BHC); an index naming a missing field has no validator check
+    (outcome unverified). Probably: an `EntityReferences`-style carry for fields, and a removal that
+    names what still points at the field before staging.
+17. **Hidden controls still write.** `unique` hidden for 6 types but rewritten (FF:68,186); `required`
+    offered beside an unseen `readOnly: true` → refused (DV:504); a `default` kept into `ref` (refused)
+    or `json` (accepted, new meaning) (FF:229); boolean default coerced to `false` (FF:252); a `$cel`
+    default rewritten as a string literal (FF:125). Probably: one rule in `FieldFacets.Build` — a facet
+    the current type/kind does not draw is either carried untouched and *shown*, or removed with a line
+    saying so; never rewritten from a stale prefill.
+18. **Rollback is blind and always destructive.** No dry-run plan, `allowDestructive: true` hard-coded
+    (History.razor:137-139). Probably: the Preview flow — dry run, show steps with `destroys`, destructive
+    permission as its own confirm.
+19. **Four refusals are rendered nowhere** — `rollup.where`, wildcard `trigger.event`, `JSONata`,
+    `bodyFile`. Each screen filters `capabilities.refused` by a prefix none of them match
+    (FieldEditor.razor.cs:81, HooksTab.razor.cs:86, Integrations.razor:71-77). Extends #269. Probably:
+    give refusals an explicit owner/area in `ManagementRefusedFeature` instead of prefix matching.
+20. **The Automations page denies the block exists.** `"automations"` vs `"automation"`
+    (NotYet.razor:57, US:127). One-word fix plus a fact asserting each NotYet page finds its warning.
+21. **`storage: dynamic` is mis-rendered, and the build drops it silently.** Listed as not-applied forever,
+    badged `physical table` (SchemaList.razor:204, PS). Core question first: an entity the mapper
+    discards without a warning (Map:44-46) is the silent case `UnhonouredSubsystems` exists to prevent.
+22. **The staged view of a field loses facets.** `PendingSchema` reads 11 facets; `rollup`, `computed`,
+    `index`, `default`, `nullable` vanish from a row the moment it is changed (EC:279-286, PS:78-89), and
+    a pending entity without `tenancy` is drawn global. Probably: map the staged field through the same
+    shape as the applied one, or badge from the JSON directly.
+23. **People beyond the first 50 are unreachable.** `new AlvoUserQuery()` — no search, no next page
+    (Access.razor:153). The port already takes `Search` and `After`.
+24. **An entity cannot be removed.** `WorkingCopy.RemoveEntity` has no caller (WC.Entities:93). Probably
+    a Remove beside Rename, behind `ConfirmByName`, naming the refs and rollups that point at it.
+25. **Data writes are last-writer-wins.** No precondition on update/delete although audited entities
+    carry a version (DataGateway.cs:123,130). Then the lesser gaps: structured filters beyond `ilike`,
+    multi-sort, batch, replace.
+26. **Hooks are half-authorable.** No edit in place; mutate literals and multi-field mutate not offered;
+    `{{…}}` webhook `payload` withheld as if refused; endpoint, template and mutate field are free text
+    while endpoints and templates cannot be declared here at all — so a webhook/email hook cannot be
+    completed from the dashboard alone. Probably pickers over declared names, and 13/#271's panel.
+27. **Keys the build ignores without a word** — `auth.providers`, `realtime`, `branding`, project
+    `description`, `formats.*.description`. Extends #271/#268: the core should warn (they belong in
+    `UnhonouredSubsystems` or a sibling), and the dashboard then renders that warning like the others.
+28. **Ref targets and index candidates are applied-only.** A pending entity cannot be a ref target
+    (EC:95); a staged field cannot join an index (Indexes.razor:125). Read both from the working copy.
+29. Cosmetic: `x-*` extensions never shown; `unique` not offered for `ref` (one-to-one), `enum`,
+    `decimal` with no reason given (FF:68); Add entity writes `audit: false` / `tenancy: global`
+    explicitly; Overview shows the `dynamicEntities` warning for `enabled: false`; apply sends no
+    idempotency key.
