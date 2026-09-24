@@ -20,7 +20,29 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 internal static class FieldServiceSeed
 {
     /// <summary>Gives the operator <paramref name="tenant"/>.</summary>
+    /// <remarks>
+    /// Tried again when SQLite answers "database is locked": the host's own background writers (the outbox
+    /// dispatcher among them) share the file, and a seed that lands on one of their writes is refused at once
+    /// rather than queued. Setting the same tenant twice is the same state, so a second try is safe; a third
+    /// refusal is a real fault and is thrown.
+    /// </remarks>
     public static async Task GrantTheOperatorAsync(IServiceProvider services, TenantId tenant)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await SetTheOperatorsTenantAsync(services, tenant);
+                return;
+            }
+            catch (Exception exception) when (attempt < 3 && Locked(exception))
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(250 * attempt));
+            }
+        }
+    }
+
+    private static async Task SetTheOperatorsTenantAsync(IServiceProvider services, TenantId tenant)
     {
         var people = services.GetRequiredKeyedService<IAlvoUserAdministration>(AlvoUserAdministration.UnguardedKey);
         var page = await people.ListAsync(new AlvoUserQuery());
@@ -29,6 +51,10 @@ internal static class FieldServiceSeed
 
         await people.SetTenantAsync(operatorAccount.Id, tenant);
     }
+
+    /// <summary>Whether SQLite refused the write because another connection held the file.</summary>
+    private static bool Locked(Exception exception)
+        => (exception.InnerException ?? exception).Message.Contains("database is locked", StringComparison.Ordinal);
 
     /// <summary>A region; <c>regions</c> is global, so its code must be unique across the world.</summary>
     public static Task<AlvoRecord> RegionAsync(IAlvoData data, AlvoContext context, string code)

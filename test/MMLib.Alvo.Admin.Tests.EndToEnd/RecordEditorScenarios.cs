@@ -9,16 +9,11 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// A record is created, edited and deleted under the pattern language (spec §3): the editor guards its changes, a
 /// save is a snackbar, and a delete cannot happen without its confirm (inventory defect #9).
 /// </summary>
-/// <remarks>
-/// Its own world: it writes and deletes rows whose keys another class also uses. Every <c>regions</c> row this class
-/// writes counts against one page of 25, which <see cref="A_created_record_is_selected_and_scrolled_into_view"/>
-/// needs to hold the whole entity.
-/// </remarks>
+/// <remarks>Its own world: it writes and deletes rows whose keys another class also uses.</remarks>
 /// <param name="world">The running host and browser.</param>
 public sealed class RecordEditorScenarios(AdminWorld world) : IClassFixture<AdminWorld>
 {
     private static readonly TenantId _tenant = TenantId.New();
-    private static readonly PageWaitForFunctionOptions _polling = new() { PollingInterval = 100 };
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task A_new_record_opens_on_its_first_field_and_a_double_click_creates_one()
@@ -31,7 +26,9 @@ public sealed class RecordEditorScenarios(AdminWorld world) : IClassFixture<Admi
         await editor.WaitForAsync();
         await EditorScenarios.WaitForFocusOnAsync(session, "rf-code");
         (await session.FocusedAsync()).ShouldStartWith("input#rf-code");
-        (await session.Page.GetAttributeAsync("#rf-code", "aria-required")).ShouldBe("true");
+        var code = session.Page.GetByLabel("Code", new() { Exact = true });
+        (await code.GetAttributeAsync("id")).ShouldBe("rf-code", "the label names the native input, without its mark");
+        (await code.GetAttributeAsync("aria-required")).ShouldBe("true");
 
         await session.Page.FillAsync("#rf-code", "NORTH-1");
         await session.Page.FillAsync("#rf-name", "North one");
@@ -42,30 +39,6 @@ public sealed class RecordEditorScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Page.WaitForTimeoutAsync(500);
         (await session.Page.GetByTestId("grid-row").Filter(new() { HasText = "NORTH-1" }).CountAsync()).ShouldBe(1);
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0, "the second click created nothing");
-        session.AssertConsoleClean();
-    }
-
-    /// <summary>A created record appears in place, drawn as selected and scrolled to (spec §3.5).</summary>
-    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task A_created_record_is_selected_and_scrolled_into_view()
-    {
-        await SeedRegionsAsync("FILL", 17);
-        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await session.GoAsync("/data/regions");
-        await session.Page.GetByTestId("grid-row").Nth(16).WaitForAsync();
-
-        await session.Button("New record", exact: true).ClickAsync();
-        var editor = session.Dialog("record-sheet");
-        await EditorScenarios.WaitForFocusOnAsync(session, "rf-code");
-        await session.Page.FillAsync("#rf-code", "PLACED");
-        await session.Page.FillAsync("#rf-name", "Placed in view");
-        await editor.GetByTestId("record-save").ClickAsync();
-        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
-
-        var created = session.Page.GetByTestId("grid-row").Filter(new() { HasText = "PLACED" });
-        await session.Page.GetByTestId("grid-row").And(session.Page.Locator("[aria-selected='true']"))
-            .Filter(new() { HasText = "PLACED" }).WaitForAsync();
-        await session.Page.WaitForFunctionAsync(InView, await created.ElementHandleAsync(), _polling);
         session.AssertConsoleClean();
     }
 
@@ -93,6 +66,12 @@ public sealed class RecordEditorScenarios(AdminWorld world) : IClassFixture<Admi
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/data/work_orders");
         await RowEditAsync(session, "WO-0102");
+
+        var flag = session.Page.GetByRole(AriaRole.Switch, new() { Name = "Is emergency", Exact = true });
+        (await flag.GetAttributeAsync("id")).ShouldBe("rf-is_emergency", "the id is the checkbox's, not the root's");
+        (await flag.GetAttributeAsync("aria-describedby")).ShouldBe("rf-is_emergency-hint");
+        (await flag.GetAttributeAsync("aria-required")).ShouldBeNull("is_emergency is optional");
+        await flag.CheckAsync();
 
         await session.Page.FillAsync("#rf-title", "Service call WO-0102 amended");
         await session.Page.Keyboard.PressAsync("Control+Enter");
@@ -213,6 +192,128 @@ public sealed class RecordEditorScenarios(AdminWorld world) : IClassFixture<Admi
         session.AssertConsoleClean();
     }
 
+    /// <summary>
+    /// A refused delete puts focus on its alert, every time, and the grid does not take it back for the row
+    /// (spec §3.3). <c>regions</c> declares no delete rule, so the engine refuses every delete of one.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_refused_delete_takes_focus_to_its_alert_every_time()
+    {
+        await SeedRegionsAsync("KEPT", 1);
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/data/regions");
+
+        var confirm = await AskToDeleteAsync(session, "KEPT-00");
+        await confirm.GetByTestId("delete-record-run").ClickAsync();
+        await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+        await session.Page.WaitForTimeoutAsync(500);
+        (await session.FocusIsInsideAsync("error-panel")).ShouldBeTrue("the row did not take focus back");
+
+        confirm = await AskToDeleteAsync(session, "KEPT-00");
+        await confirm.GetByTestId("delete-record-run").ClickAsync();
+        await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+        (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(1);
+        (await session.SnackbarCountAsync("Record deleted")).ShouldBe(0, "an error is never a snackbar");
+        await Row(session, "KEPT-00").WaitForAsync();
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>The Data list's rows open their entity, as their hover says.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_data_list_row_opens_its_entity()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/data");
+
+        await session.Page.GetByTestId("data-entity").Filter(new() { HasText = "regions" })
+            .GetByRole(AriaRole.Cell).Nth(1).ClickAsync();
+
+        await session.Page.WaitForURLAsync("**/data/regions");
+        session.AssertConsoleClean();
+    }
+
+    internal static ILocator Row(AdminSession session, string reference)
+        => session.Page.GetByTestId("grid-row").Filter(new() { HasText = reference });
+
+    internal static async Task RowEditAsync(AdminSession session, string reference)
+    {
+        await Row(session, reference).GetByRole(AriaRole.Button, new() { Name = "Edit", Exact = true }).ClickAsync();
+        await session.Dialog("record-sheet").WaitForAsync();
+    }
+
+    internal static async Task<ILocator> AskToDeleteAsync(AdminSession session, string reference)
+    {
+        await RowEditAsync(session, reference);
+        await session.Dialog("record-sheet").GetByTestId("record-delete").ClickAsync();
+        var confirm = session.Dialog("delete-record");
+        await confirm.WaitForAsync();
+        return confirm;
+    }
+
+    private Task SeedAsync(string reference) => SeedWorkOrderAsync(world, _tenant, reference);
+
+    private Task SeedRegionsAsync(string prefix, int count) => SeedRegionsAsync(world, prefix, count);
+
+    /// <summary>A work order of <paramref name="tenant"/>, with its own region and customer, and the tenant granted.</summary>
+    internal static async Task SeedWorkOrderAsync(AdminWorld world, TenantId tenant, string reference)
+    {
+        using var scope = world.Services.CreateScope();
+        await FieldServiceSeed.GrantTheOperatorAsync(scope.ServiceProvider, tenant);
+        var data = scope.ServiceProvider.GetRequiredService<IAlvoData>();
+        var system = AlvoContext.System(tenant);
+        var region = await FieldServiceSeed.RegionAsync(data, system, $"R-{reference}");
+        var customer = await FieldServiceSeed.CustomerAsync(data, system, tenant, $"Customer of {reference}");
+        await FieldServiceSeed.WorkOrderAsync(data, system, tenant, reference, customer, region);
+    }
+
+    /// <summary><paramref name="count"/> regions named <paramref name="prefix"/>-00, -01, ….</summary>
+    internal static async Task SeedRegionsAsync(AdminWorld world, string prefix, int count)
+    {
+        using var scope = world.Services.CreateScope();
+        var data = scope.ServiceProvider.GetRequiredService<IAlvoData>();
+        for (var index = 0; index < count; index++)
+        {
+            await FieldServiceSeed.RegionAsync(
+                data, AlvoContext.System(TenantId.New()), $"{prefix}-{index.ToString("00", CultureInfo.InvariantCulture)}");
+        }
+    }
+}
+
+/// <summary>A created record appears in place, drawn as selected and scrolled to (spec §3.5).</summary>
+/// <remarks>
+/// Its own world, so the entity holds exactly the rows this class wrote: more than a screen, fewer than a page.
+/// </remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class RecordPlacementScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+{
+    private static readonly PageWaitForFunctionOptions _polling = new() { PollingInterval = 100 };
+
+    /// <summary>A created record appears in place, drawn as selected and scrolled to (spec §3.5).</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_created_record_is_selected_and_scrolled_into_view()
+    {
+        await RecordEditorScenarios.SeedRegionsAsync(world, "FILL", 22);
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/data/regions");
+        await session.Page.GetByTestId("grid-row").Nth(21).WaitForAsync();
+
+        await session.Button("New record", exact: true).ClickAsync();
+        var editor = session.Dialog("record-sheet");
+        await EditorScenarios.WaitForFocusOnAsync(session, "rf-code");
+        await session.Page.FillAsync("#rf-code", "PLACED");
+        await session.Page.FillAsync("#rf-name", "Placed in view");
+        await editor.GetByTestId("record-save").ClickAsync();
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+
+        var created = session.Page.GetByTestId("grid-row").Filter(new() { HasText = "PLACED" });
+        await session.Page.GetByTestId("grid-row").And(session.Page.Locator("[aria-selected='true']"))
+            .Filter(new() { HasText = "PLACED" }).WaitForAsync();
+        await session.Page.WaitForFunctionAsync(InView, await created.ElementHandleAsync(), _polling);
+        session.AssertConsoleClean();
+    }
+
     /// <summary>Whether the row is inside the visible part of every box that scrolls it, and of the viewport.</summary>
     private const string InView = """
         row => {
@@ -226,44 +327,48 @@ public sealed class RecordEditorScenarios(AdminWorld world) : IClassFixture<Admi
           return true;
         }
         """;
+}
 
-    private static ILocator Row(AdminSession session, string reference)
-        => session.Page.GetByTestId("grid-row").Filter(new() { HasText = reference });
+/// <summary>
+/// After a delete, focus goes where the deleted row was: to the row that took its place, or to New record when
+/// none is left, never to the document.
+/// </summary>
+/// <remarks>Its own world, so the grid holds exactly the two rows this class writes.</remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class RecordDeleteFocusScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+{
+    private static readonly TenantId _tenant = TenantId.New();
+    private static readonly PageWaitForFunctionOptions _polling = new() { PollingInterval = 100 };
 
-    private static async Task RowEditAsync(AdminSession session, string reference)
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_delete_gives_focus_to_the_next_row_and_the_last_one_to_New_record()
     {
-        await Row(session, reference).GetByRole(AriaRole.Button, new() { Name = "Edit", Exact = true }).ClickAsync();
-        await session.Dialog("record-sheet").WaitForAsync();
+        await RecordEditorScenarios.SeedWorkOrderAsync(world, _tenant, "WO-0201");
+        await RecordEditorScenarios.SeedWorkOrderAsync(world, _tenant, "WO-0202");
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/data/work_orders");
+        var first = await session.Page.GetByTestId("grid-row").First.InnerTextAsync();
+        var (gone, kept) = first.Contains("WO-0201", StringComparison.Ordinal)
+            ? ("WO-0201", "WO-0202")
+            : ("WO-0202", "WO-0201");
+
+        await DeleteAsync(session, gone);
+        await session.Page.WaitForFunctionAsync(
+            "text => document.activeElement?.closest(\"[data-testid='grid-row']\")?.innerText.includes(text)",
+            kept, _polling);
+
+        await DeleteAsync(session, kept);
+        await session.Page.GetByTestId("record-grid").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.Page.WaitForFunctionAsync(
+            "() => document.activeElement?.textContent?.trim() === 'New record'", null, _polling);
+        session.AssertConsoleClean();
     }
 
-    private static async Task<ILocator> AskToDeleteAsync(AdminSession session, string reference)
+    private static async Task DeleteAsync(AdminSession session, string reference)
     {
-        await RowEditAsync(session, reference);
-        await session.Dialog("record-sheet").GetByTestId("record-delete").ClickAsync();
-        var confirm = session.Dialog("delete-record");
-        await confirm.WaitForAsync();
-        return confirm;
-    }
-
-    private async Task SeedAsync(string reference)
-    {
-        using var scope = world.Services.CreateScope();
-        await FieldServiceSeed.GrantTheOperatorAsync(scope.ServiceProvider, _tenant);
-        var data = scope.ServiceProvider.GetRequiredService<IAlvoData>();
-        var system = AlvoContext.System(_tenant);
-        var region = await FieldServiceSeed.RegionAsync(data, system, $"R-{reference}");
-        var customer = await FieldServiceSeed.CustomerAsync(data, system, _tenant, $"Customer of {reference}");
-        await FieldServiceSeed.WorkOrderAsync(data, system, _tenant, reference, customer, region);
-    }
-
-    private async Task SeedRegionsAsync(string prefix, int count)
-    {
-        using var scope = world.Services.CreateScope();
-        var data = scope.ServiceProvider.GetRequiredService<IAlvoData>();
-        for (var index = 0; index < count; index++)
-        {
-            await FieldServiceSeed.RegionAsync(
-                data, AlvoContext.System(_tenant), $"{prefix}-{index.ToString("00", CultureInfo.InvariantCulture)}");
-        }
+        var confirm = await RecordEditorScenarios.AskToDeleteAsync(session, reference);
+        await confirm.GetByTestId("delete-record-run").ClickAsync();
+        await session.SnackbarAsync("Record deleted");
+        await RecordEditorScenarios.Row(session, reference).WaitForAsync(new() { State = WaitForSelectorState.Detached });
     }
 }

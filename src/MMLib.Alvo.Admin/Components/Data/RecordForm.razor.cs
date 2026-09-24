@@ -272,12 +272,12 @@ public partial class RecordForm
     private static string? Required(FieldSchema column) => column.Required ? "true" : null;
 
     /// <summary>
-    /// A Mud input's label, marked when the field is required. The mark is text rather than the input's own
+    /// The class that draws a Mud input's required mark. The mark is visual only, the way the enum and reference
+    /// labels hide theirs: the name stays the header, and <c>aria-required</c> says it. Not the input's own
     /// <c>Required</c>, which sets the browser's <c>required</c>: that blocks the submit before the engine is asked,
     /// and a field never read back is legitimately empty on an edit (the class remarks: no second validator).
     /// </summary>
-    private static string FieldLabel(FieldSchema column)
-        => column.Required ? $"{GridColumns.Header(column)} *" : GridColumns.Header(column);
+    private static string? RequiredMark(FieldSchema column) => column.Required ? "a-required" : null;
 
     /// <summary>
     /// The control's type. A decimal is text, not <c>number</c>: a number input displays its value in the

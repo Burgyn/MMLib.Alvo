@@ -3064,6 +3064,15 @@
     box-sizing: content-box;
   }
 
+  /* A required field's mark, drawn and never read: the name stays the header and aria-required says the rest,
+     as .a-label__required does for Alvo's own labels. The legend sizes the outline's notch, so it carries the
+     mark too. */
+  .a-required .mud-input-label::after,
+  .a-required .mud-input-outlined-border legend::after,
+  .a-required .mud-switch > .mud-typography::after {
+    content: ' *' / '';
+  }
+
   /* Alvo puts an icon beside a button's label as content rather than through the library's icon slots, so
      the label spaces what it holds the way .a-btn did. */
   .mud-button-label {

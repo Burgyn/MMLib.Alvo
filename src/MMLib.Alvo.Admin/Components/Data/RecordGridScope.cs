@@ -20,6 +20,8 @@ namespace MMLib.Alvo.Admin.Components.Data;
 /// <param name="HasPrevious">Whether there is a page before this one.</param>
 /// <param name="SheetOpen">Whether a record's sheet is over the grid, so focus can return to its row on close.</param>
 /// <param name="Created">The record the operator just created, to select and scroll to (spec §3.5).</param>
+/// <param name="FocusRow">The row to give focus to once it is drawn, such as the one after a deleted record.</param>
+/// <param name="Refusals">How many write refusals the screen has drawn: a new one takes focus, so the grid gives none back.</param>
 internal sealed record RecordGridScope(
     AlvoPage Page,
     IReadOnlyList<FieldSchema> Columns,
@@ -29,4 +31,10 @@ internal sealed record RecordGridScope(
     GridSort? Sort,
     bool HasPrevious,
     bool SheetOpen,
-    Guid? Created);
+    Guid? Created,
+    RowFocus? FocusRow,
+    int Refusals);
+
+/// <summary>A row to focus, once; a new instance for every request, so the same row can be asked for twice.</summary>
+/// <param name="Id">The row's record id.</param>
+internal sealed record RowFocus(Guid Id);

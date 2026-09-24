@@ -102,14 +102,16 @@
         FieldType.Boolean => Flag(column),
         FieldType.Enum => Choice(column),
         FieldType.Text => @<MudTextField T="string" Variant="Variant.Outlined" Lines="4" Immediate="true"
-                                         id="@ControlId(column)" Label="@FieldLabel(column)"
-                                         aria-required="@Required(column)" aria-describedby="@HintId(column)"
+                                         id="@ControlId(column)" Label="@GridColumns.Header(column)"
+                                         Class="@RequiredMark(column)" aria-required="@Required(column)"
+                                         aria-describedby="@HintId(column)"
                                          Value="@_draft.Text(column.Name)"
                                          ValueChanged="text => Set(column.Name, text)" />,
         _ when _pickers.TryGetValue(column.Name, out var picker) => Reference(picker),
         _ => @<MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="@ControlId(column)"
                            InputType="@MudInputType(column)" InputMode="@MudInputMode(column)"
-                           Label="@FieldLabel(column)" aria-required="@Required(column)"
+                           Label="@GridColumns.Header(column)" Class="@RequiredMark(column)"
+                           aria-required="@Required(column)"
                            aria-describedby="@HintId(column)" Value="@_draft.Text(column.Name)"
                            ValueChanged="text => Set(column.Name, text)" />,
     };
@@ -118,7 +120,8 @@
     {
         var on = string.Equals(_draft.Text(column.Name), "true", StringComparison.Ordinal);
         return @<MudSwitch T="bool" Value="on" ValueChanged="_ => Toggle(column.Name)" Color="Color.Primary"
-                           Label="@GridColumns.Header(column)" id="@ControlId(column)"
+                           Label="@GridColumns.Header(column)" Class="@RequiredMark(column)"
+                           id="@ControlId(column)" aria-required="@Required(column)"
                            aria-describedby="@HintId(column)" />;
     }
 

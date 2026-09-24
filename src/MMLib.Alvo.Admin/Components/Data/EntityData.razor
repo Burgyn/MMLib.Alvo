@@ -16,7 +16,7 @@
         <Primary>
             @if (_entity is not null && !OutOfScope)
             {
-                <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" OnClick="_ => NewRecord()">New record</AlvoButton>
+                <AlvoButton @ref="_newRecord" Tone="AlvoButton.ButtonTone.Primary" Small="true" OnClick="_ => NewRecord()">New record</AlvoButton>
             }
         </Primary>
     </PageHeader>

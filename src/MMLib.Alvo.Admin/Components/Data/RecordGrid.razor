@@ -132,6 +132,8 @@
     private bool _focusPending;
     private Guid? _revealed;
     private bool _revealPending;
+    private RowFocus? _rowFocused;
+    private int _refusalsSeen;
 
     /// <summary>What to draw; see <see cref="RecordGridScope"/>.</summary>
     [CascadingParameter]
@@ -163,11 +165,7 @@
             StateHasChanged();
         }
 
-        if (_focusReturn.Observe(Scope.SheetOpen) || _focusPending)
-        {
-            _focusPending = false;
-            await Interop.FocusSelectedAsync(_body);
-        }
+        await ReturnFocusAsync();
 
         if (_revealPending)
         {
@@ -179,6 +177,41 @@
             _revealPending = true;
             StateHasChanged();
         }
+
+        if (SelectFocusRow())
+        {
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Focuses the selected row when its sheet or confirm has closed, or when a key or the screen asked for it. Not
+    /// after a refusal drawn in the same render: its alert takes focus (spec §3.3), and two claims on focus race.
+    /// </summary>
+    private async Task ReturnFocusAsync()
+    {
+        var refused = Scope.Refusals != _refusalsSeen;
+        _refusalsSeen = Scope.Refusals;
+        if ((_focusReturn.Observe(Scope.SheetOpen) && !refused) || _focusPending)
+        {
+            _focusPending = false;
+            await Interop.FocusSelectedAsync(_body);
+        }
+    }
+
+    /// <summary>Selects the row the screen asked to focus, once it is on the page; the focus follows the next render.</summary>
+    private bool SelectFocusRow()
+    {
+        if (Scope.FocusRow is not { } target || ReferenceEquals(target, _rowFocused)
+            || !Scope.Page.Items.Any(row => IdOf(row) == target.Id))
+        {
+            return false;
+        }
+
+        _rowFocused = target;
+        _selected = target.Id;
+        _focusPending = true;
+        return true;
     }
 
     /// <summary>

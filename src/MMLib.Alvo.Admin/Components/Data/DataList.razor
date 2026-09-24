@@ -3,6 +3,7 @@
 @inject ManagementGateway Gateway
 @inject AdminSession Session
 @inject ILogger<DataList> Logger
+@inject NavigationManager Navigation
 
 <PageTitle>Data · Alvo</PageTitle>
 
@@ -46,9 +47,12 @@
                     <tbody>
                         @foreach (var entity in _schema.Entities)
                         {
-                            <tr data-testid="data-entity">
+                            @* The whole row opens the entity, as its hover says; the link is the same action for Tab. *@
+                            <tr class="a-grid__row" data-testid="data-entity"
+                                @onclick="() => Navigation.NavigateTo(AdminPaths.Records(entity.Name))">
                                 <td>
-                                    <a class="a-link a-mono" href="@AdminPaths.Records(entity.Name)">@entity.Name</a>
+                                    <a class="a-link a-mono" href="@AdminPaths.Records(entity.Name)"
+                                       @onclick:stopPropagation="true">@entity.Name</a>
                                 </td>
                                 <td>
                                     @if (entity.Tenancy == TenancyMode.Scoped)

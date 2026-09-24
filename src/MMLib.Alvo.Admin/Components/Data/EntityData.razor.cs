@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Logging;
+using MMLib.Alvo.Admin.Components.DesignSystem;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Schema;
@@ -25,6 +26,8 @@ public partial class EntityData
     private PendingDelete? _deleting;
     private bool _deletingNow;
     private Guid? _created;
+    private RowFocus? _focusRow;
+    private AlvoButton? _newRecord;
     private int _problemsDrawn;
     private bool _problemFromWrite;
     private IReadOnlyDictionary<string, RowLabel> _targets = new Dictionary<string, RowLabel>(StringComparer.Ordinal);
@@ -116,7 +119,8 @@ public partial class EntityData
     /// </remarks>
     private RecordGridScope GridScope
         => new(_page!, _columns, _masks, _label, _labels, _sort, HasPrevious: _cursors.Count > 0,
-            SheetOpen: _form is not null || _deleting is not null, Created: _created);
+            SheetOpen: _form is not null || _deleting is not null, Created: _created, FocusRow: _focusRow,
+            Refusals: _problemsDrawn);
 
     /// <summary>
     /// Reads the entity when the route names a new one, then opens whatever record the query names.
@@ -170,6 +174,7 @@ public partial class EntityData
         _sort = null;
         _page = null;
         _created = null;
+        _focusRow = null;
         CloseSheet();
         ResetPaging();
     }
@@ -458,8 +463,8 @@ public partial class EntityData
     }
 
     /// <summary>
-    /// Deletes what the confirm named, says so, and reads the page again. The confirm stays up and busy until the
-    /// write answers, so a second press of its verb finds it busy rather than the grid underneath.
+    /// Deletes what the confirm named, and puts focus where the deleted row was. The confirm stays up and busy until
+    /// the write answers, so a second press of its verb finds it busy rather than the grid underneath.
     /// </summary>
     private async Task DeleteAsync()
     {
@@ -469,20 +474,51 @@ public partial class EntityData
         }
 
         _deletingNow = true;
+        var deleted = await TryDeleteAsync(target);
+        _deletingNow = false;
+        _deleting = null;
+        if (deleted && _focusRow is null)
+        {
+            await FocusNewRecordAsync();
+        }
+    }
+
+    /// <summary>Deletes, says so, reads the page again, and names the row that takes the deleted one's place.</summary>
+    private async Task<bool> TryDeleteAsync(PendingDelete target)
+    {
+        var at = _page?.Items.ToList().FindIndex(row => RefLabels.IdOf(row[AlvoManagedColumns.Id]) == target.Id) ?? -1;
         try
         {
             await Records.DeleteAsync(EntityName, target.Id, CancellationToken.None);
             Snackbar.Confirm("Record deleted");
             await LoadAsync();
+            _focusRow = RowAt(Math.Max(at, 0));
+            return true;
         }
         catch (Exception exception)
         {
             RefusedWrite(exception);
+            return false;
         }
-        finally
+    }
+
+    /// <summary>The row now at <paramref name="at"/>, or the last one when the deleted row was last; none when empty.</summary>
+    private RowFocus? RowAt(int at)
+        => _page is { Items.Count: > 0 } page
+           && RefLabels.IdOf(page.Items[Math.Min(at, page.Items.Count - 1)][AlvoManagedColumns.Id]) is { } id
+            ? new RowFocus(id)
+            : null;
+
+    /// <summary>
+    /// With no row left to take focus, it goes to New record, the one action the empty page offers — after the confirm
+    /// has closed, so its own focus return does not come last.
+    /// </summary>
+    private async Task FocusNewRecordAsync()
+    {
+        StateHasChanged();
+        if (_newRecord is not null)
         {
-            _deletingNow = false;
-            _deleting = null;
+            await _newRecord.FocusAsync();
         }
     }
 
