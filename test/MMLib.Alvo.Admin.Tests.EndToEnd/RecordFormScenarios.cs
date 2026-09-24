@@ -35,7 +35,7 @@ public sealed class RecordFormScenarios(AdminWorld world) : IClassFixture<AdminW
         await edit.ClickAsync();
 
         // --- the sheet is titled by the record, and the reference reads as the customer's name
-        var sheet = session.Page.Locator("[data-testid='record-sheet']");
+        var sheet = session.Dialog("record-sheet");
         await session.Page.Locator("#rf-customer_id").WaitForAsync();
         (await sheet.InnerTextAsync()).ShouldContain("Edit Service call WO-0001");
         await WaitForValueAsync(session, "#rf-customer_id", "Ada Lovelace");
@@ -43,6 +43,24 @@ public sealed class RecordFormScenarios(AdminWorld world) : IClassFixture<AdminW
         // --- a read-only field is shown, not offered: external_ref is readOnly in the descriptor
         (await session.Page.Locator("[data-testid='record-calculated']").InnerTextAsync()).ShouldContain("External ref");
         (await session.Page.Locator("#rf-external_ref").CountAsync()).ShouldBe(0);
+
+        /* --- Enter on an open list chooses the option and saves nothing: the form is an editor now, where Enter in
+               a single-line field is the browser's submit, and choosing is not saving. */
+        await session.Page.ClickAsync("#rf-customer_id");
+        await session.Page.FillAsync("#rf-customer_id", string.Empty);
+        await session.Page.Keyboard.TypeAsync("grac");
+        await session.Page.WaitForFunctionAsync(
+            "() => document.querySelectorAll(\"[data-testid='ref-option']\").length === 1",
+            null,
+            new() { PollingInterval = 100 });
+        await session.Page.Keyboard.PressAsync("ArrowDown");
+        await session.Page.Keyboard.PressAsync("Enter");
+        await WaitForValueAsync(session, "#rf-customer_id", "Grace Hopper");
+        await session.Page.WaitForTimeoutAsync(500);
+        (await sheet.CountAsync()).ShouldBe(1, "Enter on the list chose an option; it did not save the record");
+        await session.Page.FillAsync("#rf-customer_id", string.Empty);
+        await session.Page.Keyboard.PressAsync("Tab");
+        await session.Page.ClickAsync("#rf-customer_id");
 
         // --- typing part of a name lists the match; choosing it sets the reference
         await session.Page.ClickAsync("#rf-customer_id");
@@ -58,7 +76,7 @@ public sealed class RecordFormScenarios(AdminWorld world) : IClassFixture<AdminW
         await WaitForValueAsync(session, "#rf-customer_id", "Grace Hopper");
 
         // --- the save closes the sheet, says what it saved, and the grid shows the new customer
-        await session.Page.ClickAsync("[data-testid='record-sheet'] button:has-text('Save')");
+        await sheet.GetByTestId("record-save").ClickAsync();
         var status = session.Page.Locator("[data-testid='record-status']");
         await status.Locator("text=Saved Service call WO-0001").WaitForAsync();
         (await sheet.CountAsync()).ShouldBe(0);
@@ -69,7 +87,7 @@ public sealed class RecordFormScenarios(AdminWorld world) : IClassFixture<AdminW
         var before = await VersionAsync(order);
         await edit.ClickAsync();
         await WaitForValueAsync(session, "#rf-customer_id", "Grace Hopper");
-        await session.Page.ClickAsync("[data-testid='record-sheet'] button:has-text('Save')");
+        await sheet.GetByTestId("record-save").ClickAsync();
         await sheet.WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
         (await VersionAsync(order)).ShouldBe(before, "a no-op Save must not PATCH");
 

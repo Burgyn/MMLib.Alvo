@@ -15,16 +15,24 @@
 @inject ILogger<RecordForm> Logger
 
 @*
-    The chrome — the overlay, the title, the way out, the scroll lock — belongs to <Sheet>. This
-    component is the form, so the same markup reads as a bottom sheet on a phone and a centred
-    dialog on a desktop without knowing which it is in.
+    The chrome — the overlay, the title, the way out, the unsaved-changes guard, the one submit — belongs to
+    <AlvoEditor>. This component is the form. Delete sits left of Cancel, away from the primary action.
 *@
-<Sheet Open="true" TestId="record-sheet" Eyebrow="@Entity.Name" Title="@Title" OnClose="Cancel">
-
+<AlvoEditor TestId="record-sheet" Eyebrow="@Entity.Name" Title="@Title"
+            SubmitText="@(RecordId is null ? "Create record" : "Save record")" SubmitTestId="record-save"
+            Dirty="_draft.Dirty" Busy="_saving" OnSubmit="Save" OnClose="Cancel">
+    <ExtraActions>
+        @if (RecordId is not null)
+        {
+            <AlvoButton Tone="AlvoButton.ButtonTone.Danger" Small="true" data-testid="record-delete"
+                        Disabled="_saving" OnClick="_ => Delete()">Delete record</AlvoButton>
+        }
+    </ExtraActions>
+    <ChildContent>
         @if (_problem is not null)
         {
             <CascadingValue Value="_problem">
-                <ErrorPanel />
+                <ErrorPanel TakeFocus="true" />
             </CascadingValue>
         }
 
@@ -81,17 +89,8 @@
             <code class="a-ident">@Verb</code>
         </details>
 
-        <div class="a-sheet__actions">
-            @if (RecordId is { } id)
-            {
-                <button type="button" class="a-btn a-btn--danger a-btn--sm" @onclick="Delete">Delete</button>
-            }
-            <span class="a-spacer"></span>
-            <button type="button" class="a-btn a-btn--primary" disabled="@_saving" @onclick="Save">
-                @(RecordId is null ? "Create" : "Save")
-            </button>
-        </div>
-</Sheet>
+    </ChildContent>
+</AlvoEditor>
 
 @code {
     private RenderFragment Control(FieldSchema column) => column.Type switch

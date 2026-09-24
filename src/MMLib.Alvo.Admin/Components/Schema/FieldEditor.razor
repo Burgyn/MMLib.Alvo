@@ -10,21 +10,29 @@
     same dry run as every other change.
 *@
 @*
-    The chrome belongs to <Sheet>: one overlay that is a bottom sheet on a phone and a centred
-    dialog on a desktop. A field editor that sat permanently under the list was a panel the
-    operator scrolled past on every visit and a second thing competing for the screen on a phone.
+    The chrome belongs to <AlvoEditor>: the right-hand modal side sheet every multi-value edit uses (spec §3.1),
+    which guards what was typed, submits on Enter and Ctrl/Cmd+Enter, and cannot submit twice. A field editor that
+    sat permanently under the list was a panel the operator scrolled past on every visit.
 *@
-<Sheet Open="true" TestId="field-sheet"
-       Title="@(IsEditing ? $"Edit {Editing}" : "Add a field")"
-       Subtitle="@(IsEditing
-           ? "The change joins the working copy. Preview shows what it does to the table before anything runs."
-           : "It joins the working copy. Preview shows what it does to the table before anything runs.")"
-       OnClose="Cancel">
-
+<AlvoEditor TestId="field-sheet" Title="@(IsEditing ? $"Edit {Editing}" : "New field")"
+            Subtitle="@(IsEditing
+                ? "The change joins the working copy. Preview shows what it does to the table before anything runs."
+                : "It joins the working copy. Preview shows what it does to the table before anything runs.")"
+            SubmitText="Save to the working copy" SubmitTestId="field-save" Dirty="Dirty"
+            OnSubmit="Add" OnClose="Cancel">
+    <ExtraActions>
+        @* An entity is rarely one field short: the second action stages this one and leaves the sheet open for
+           the next, instead of a reopen per field. *@
+        @if (!IsEditing)
+        {
+            <AlvoButton data-testid="field-save-another" OnClick="_ => AddAnother()">Save and add another</AlvoButton>
+        }
+    </ExtraActions>
+    <ChildContent>
     <div class="a-stack">
         @if (_refusal is { Length: > 0 })
         {
-            <ErrorPanel Title="@(IsEditing ? "That change cannot be saved" : "That field cannot be added")"
+            <ErrorPanel TakeFocus="true" Title="@(IsEditing ? "That change cannot be saved" : "That field cannot be added")"
                         Fix="@_refusal" />
         }
 
@@ -331,20 +339,5 @@
     }
     </div>
 
-    <div class="a-sheet__actions">
-        <button type="button" class="a-btn" @onclick="Cancel">Cancel</button>
-        <span class="a-spacer"></span>
-        @* An entity is rarely one field short: the second action stages this one and leaves the sheet open for
-           the next, instead of a reopen per field. *@
-        @if (!IsEditing)
-        {
-            <button type="button" class="a-btn" @onclick="AddAnother" data-testid="field-save-another">
-                Add and add another
-            </button>
-        }
-        <button type="button" class="a-btn a-btn--primary" @onclick="Add" data-testid="field-save">
-            @(IsEditing ? "Save to the working copy" : "Add to the working copy")
-        </button>
-    </div>
-
-</Sheet>
+    </ChildContent>
+</AlvoEditor>

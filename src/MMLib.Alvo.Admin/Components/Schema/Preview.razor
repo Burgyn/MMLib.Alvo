@@ -121,7 +121,7 @@
         }
     }
 
-    <DiscardSheet Open="_discarding" OnClose="() => _discarding = false" OnDiscarded="Discarded" />
+    <DiscardConfirm Open="_discarding" OnClose="() => _discarding = false" OnDiscarded="Discarded" />
 
     @if (_applied is { } result)
     {

@@ -45,7 +45,7 @@ public sealed class FieldDefaultScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Page.ClickAsync("[data-testid='field-save']");
 
         await session.Page.GetByText("That field cannot be added").WaitForAsync();
-        (await session.Page.Locator("main.a-content").InnerTextAsync())
+        (await session.Dialog("field-sheet").GetByTestId("error-panel").InnerTextAsync())
             .ShouldContain("is not a number");
 
         /* Still on the entity: a refused default must not be a half-added field, and the editor is

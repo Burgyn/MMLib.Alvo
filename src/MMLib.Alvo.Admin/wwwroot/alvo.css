@@ -1123,6 +1123,39 @@
     display: contents;
   }
 
+  /* The overflow menu's activator: an icon the size of a small button. The library's wrapper around it is
+     the focusable control, so the ring is drawn on the wrapper. */
+  .a-pagehead__more-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    color: var(--dim);
+    cursor: pointer;
+  }
+
+  .a-pagehead__more-button:hover {
+    background: var(--panel2);
+    color: var(--text);
+  }
+
+  .a-pagehead__more .mud-menu-activator:focus-visible {
+    border-radius: var(--radius-sm);
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  /* The same controls in the phone's overflow menu: one under the other, each the menu's width. */
+  .a-pagehead__menu {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-1);
+    padding: var(--space-2);
+  }
+
   /* Fine print: provenance, counts, the sentence that explains a screen once. Dimmer and smaller
      than body text on purpose — these lines were set at body weight and became the loudest thing on
      several screens, above the data they describe. Neutral, never amber: an explanation set in the
@@ -2107,11 +2140,6 @@
     font-family: var(--font-mono);
     font-size: var(--text-2xs);
   }
-
-  /* The controls a problem offers — sign out, try again — a line under its wording. */
-  .a-error__actions {
-    margin-top: var(--space-3);
-  }
 }
 
 /* ===========================================================================
@@ -2725,16 +2753,6 @@
 
   /* The drag handle a phone sheet is recognised by. Decoration on a desktop dialog, so it is
      hidden there rather than drawn as a stray line. */
-  /* The row of controls a sheet ends with. Outside the scrolling body, so Save and Delete stay
-     reachable while a long form moves — the same reason the head stays put. */
-  .a-sheet__actions {
-    display: flex;
-    align-items: center;
-    gap: var(--space-2);
-    padding-top: var(--space-3);
-    border-top: 1px solid var(--border);
-  }
-
   .a-sheet__grip {
     display: none;
     width: 36px;

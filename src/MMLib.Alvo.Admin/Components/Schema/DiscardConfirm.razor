@@ -5,28 +5,19 @@
     from the usual reflex — deliberately. Every edit up to here wrote to a draft and touched no table,
     so staging one needs no ceremony; this is the only control that destroys work the operator did, and
     the one that cannot be undone. So it looks like what it does — the danger button, with a Cancel
-    beside it — rather than the green of every safe action on the screen.
+    beside it — rather than the green of every safe action on the screen. An AlvoConfirm: centred, no
+    light dismiss, Escape = Cancel (spec §3.2).
 
     One component because there are two ways in, Preview and the shell's pending bar, and two copies of
     a destructive confirmation are two chances for one of them to drift back to green.
 *@
 @inject AdminSession Session
+@inject ISnackbar Snackbar
 
-<Sheet Open="Open" Title="Discard every unapplied change?"
-       Subtitle="The working copy goes back to the applied revision. Nothing in the database changes."
-       TestId="discard-sheet" OnClose="OnClose">
-    <p class="a-section__sub">
-        Every edit made since revision @_revision is thrown away — across all screens, not only this
-        one, because there is one working copy and one apply. There is no undo.
-    </p>
-    <div class="a-sheet__actions">
-        <span class="a-spacer"></span>
-        <button type="button" class="a-btn a-btn--ghost a-btn--sm" data-testid="discard-cancel"
-                @onclick="OnClose">Cancel</button>
-        <button type="button" class="a-btn a-btn--danger a-btn--sm" data-testid="discard-confirm"
-                @onclick="DiscardAsync">Discard them</button>
-    </div>
-</Sheet>
+<AlvoConfirm Open="Open" TestId="discard-sheet" ConfirmTestId="discard-confirm" CancelTestId="discard-cancel"
+             Title="Discard every unapplied change?"
+             Consequence="@($"The working copy goes back to revision {_revision}. There is no undo.")"
+             Verb="Discard changes" OnConfirm="DiscardAsync" OnCancel="OnClose" />
 
 @code {
     private int _revision;
@@ -35,7 +26,7 @@
     [Parameter]
     public bool Open { get; set; }
 
-    /// <summary>Raised when the operator backs out — Cancel, the scrim, Escape or the close control.</summary>
+    /// <summary>Raised when the operator backs out — Cancel or Escape.</summary>
     [Parameter]
     public EventCallback OnClose { get; set; }
 
@@ -43,7 +34,7 @@
     [Parameter]
     public EventCallback OnDiscarded { get; set; }
 
-    /// <summary>Reads the revision the copy would go back to, each time the sheet opens.</summary>
+    /// <summary>Reads the revision the copy would go back to, each time the confirm opens.</summary>
     protected override async Task OnParametersSetAsync()
     {
         if (Open)
@@ -55,6 +46,7 @@
     private async Task DiscardAsync()
     {
         (await Session.CopyAsync(CancellationToken.None)).Discard();
+        Snackbar.Confirm("Discarded the working copy");
         await OnDiscarded.InvokeAsync();
     }
 }

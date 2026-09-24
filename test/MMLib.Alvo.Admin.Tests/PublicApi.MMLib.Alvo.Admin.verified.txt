@@ -365,6 +365,8 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Slug { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public bool TakeFocus { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string? Title { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnParametersSet() { }
@@ -684,9 +686,9 @@ namespace MMLib.Alvo.Admin.Components.Schema
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnParametersSet() { }
     }
-    public class DiscardSheet : Microsoft.AspNetCore.Components.ComponentBase
+    public class DiscardConfirm : Microsoft.AspNetCore.Components.ComponentBase
     {
-        public DiscardSheet() { }
+        public DiscardConfirm() { }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback OnClose { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]

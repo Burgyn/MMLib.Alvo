@@ -126,7 +126,7 @@ public sealed class DataGridScenarios(AdminWorld world) : IClassFixture<AdminWor
 
         /* --- while the sheet is open, k is the sheet's. From the second row a k that reached the grid would
                select the first, so an unchanged selection is the guard working, not a clamp at an end. */
-        await session.Page.Locator("[data-testid='record-sheet'] [role='dialog']").FocusAsync();
+        await session.Dialog("record-sheet").FocusAsync();
         await session.Page.Keyboard.PressAsync("k");
         await session.Page.WaitForTimeoutAsync(500);
         (await rows.Nth(1).GetAttributeAsync("aria-selected")).ShouldBe("true");

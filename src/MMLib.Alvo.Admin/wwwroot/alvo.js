@@ -135,6 +135,25 @@
     }
   };
 
+  /* --- Escape in an editor ----------------------------------------------
+     Presses the control that answers it: Cancel, or Keep editing while
+     "Discard your changes?" is asked. The library's dialog keeps Escape for
+     its own close and never hands it on, and an editor holding unsaved
+     changes must ask rather than close. From anywhere in the dialog, its
+     frame included, which is where a click on its whitespace leaves focus.
+     An open list answers Escape itself, so the editor does not.
+     ---------------------------------------------------------------------- */
+  const answerEscapeInDialog = (target) => {
+    if (!(target instanceof Element) || target.matches('[aria-expanded="true"]')) {
+      return;
+    }
+
+    const answer = target.closest('[role="dialog"]')?.querySelector('[data-alvo-escape]');
+    if (answer) {
+      answer.click();
+    }
+  };
+
   const onKeyDown = (event) => {
     /* ⌘K opens the palette, but never over another dialog (spec §3.1: never a dialog over a dialog), and a
        second ⌘K over the palette itself does nothing, so what was typed there stays. */
@@ -166,8 +185,17 @@
       }
     }
 
+    /* Enter in an open combobox chooses the option it points at. Inside an editor form it would
+       also be the browser's Enter-submit, and the record would be saved on the choice. */
+    if (event.key === 'Enter' && event.target instanceof Element
+      && event.target.matches('[role="combobox"][aria-expanded="true"]') && event.target.closest('form')) {
+      event.preventDefault();
+      return;
+    }
+
     if (event.key === 'Escape') {
       awaitingGoto = false;
+      answerEscapeInDialog(event.target);
       emit('dismiss');
       return;
     }

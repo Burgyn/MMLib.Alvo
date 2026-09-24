@@ -82,7 +82,7 @@ public sealed class ChangeTheBackendScenarios(AdminWorld world) : IClassFixture<
         await session.Button("New record").ClickAsync();
         await session.Page.Locator("#rf-name").WaitForAsync();
         await session.Page.FillAsync("#rf-name", "INV-1001");
-        await SheetButton(session, "Create").ClickAsync();
+        await session.Dialog("record-sheet").GetByTestId("record-save").ClickAsync();
         var rows = session.Page.GetByTestId("grid-row");
         await rows.First.WaitForAsync();
 
@@ -93,7 +93,7 @@ public sealed class ChangeTheBackendScenarios(AdminWorld world) : IClassFixture<
         await rows.First.GetByRole(AriaRole.Button, new() { Name = "Edit", Exact = true }).ClickAsync();
         await session.Page.Locator("#rf-name").WaitForAsync();
         await session.Page.FillAsync("#rf-name", "INV-1001-amended");
-        await SheetButton(session, "Save").ClickAsync();
+        await session.Dialog("record-sheet").GetByTestId("record-save").ClickAsync();
         await session.Page.GetByText("INV-1001-amended").First.WaitForAsync();
 
         // --- the descriptor carries what the editor sent, and the history says who and why
@@ -123,7 +123,4 @@ public sealed class ChangeTheBackendScenarios(AdminWorld world) : IClassFixture<
 
         session.AssertConsoleClean();
     }
-
-    private static ILocator SheetButton(AdminSession session, string name)
-        => session.Page.GetByTestId("record-sheet").GetByRole(AriaRole.Button, new() { Name = name, Exact = true });
 }

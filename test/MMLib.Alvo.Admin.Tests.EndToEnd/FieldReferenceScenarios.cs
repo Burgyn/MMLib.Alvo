@@ -71,12 +71,13 @@ public sealed class FieldReferenceScenarios(AdminWorld world) : IClassFixture<Ad
         await session.GoAsync("/schema/work_orders");
 
         await session.Page.GetByTestId("remove-field-status").ClickAsync();
-        var sheet = session.Page.GetByTestId("remove-field-sheet");
-        (await sheet.GetByTestId("field-reference").First.InnerTextAsync()).ShouldContain("work_orders.indexes[0]");
-        await sheet.GetByTestId("remove-field-blocked").WaitForAsync();
-        (await sheet.GetByTestId("remove-field-anyway").CountAsync()).ShouldBe(0);
+        var confirm = session.Dialog("remove-field-sheet");
+        (await confirm.GetByTestId("field-reference").First.InnerTextAsync()).ShouldContain("work_orders.indexes[0]");
+        await confirm.GetByTestId("remove-field-blocked").WaitForAsync();
+        (await confirm.GetByTestId("remove-field-anyway").IsDisabledAsync()).ShouldBeTrue("a blocked removal cannot run");
 
-        await session.Page.GetByTestId("sheet-close").ClickAsync();
+        await confirm.GetByTestId("remove-field-cancel").ClickAsync();
+        await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
         (await session.Page.GetByTestId("staged-status").CountAsync()).ShouldBe(0);
 
         session.AssertConsoleClean();

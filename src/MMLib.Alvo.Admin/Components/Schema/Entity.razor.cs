@@ -7,7 +7,7 @@ using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
-/// <summary>One entity's schema screen: its tabs, the field editor and the rename sheet.</summary>
+/// <summary>One entity's schema screen: its tabs, the field editor and the rename editor.</summary>
 public partial class Entity
 {
     /// <summary>
@@ -342,6 +342,7 @@ public partial class Entity
         }
 
         ReadWorking();
+        Snackbar.Confirm("Saved to the working copy");
     }
 
     /// <summary>Opens the editor over a field the descriptor already declares.</summary>
@@ -398,8 +399,8 @@ public partial class Entity
     /// Drops the index at one position, and stays on the tab.
     /// </summary>
     /// <remarks>
-    /// No confirmation, for <see cref="RemoveField"/>'s reason: nothing has happened to the database
-    /// yet, and the apply is where dropping something is stated as a cost.
+    /// Nothing has happened to the database yet, and the apply is where dropping something is stated as a
+    /// cost.
     /// </remarks>
     private void RemoveIndex(int position)
     {
@@ -458,6 +459,7 @@ public partial class Entity
 
         var renamed = _newName;
         CloseRename();
+        Snackbar.Confirm($"Renamed to {renamed} in the working copy");
         Navigation.NavigateTo(AdminPaths.Entity(renamed));
     }
 

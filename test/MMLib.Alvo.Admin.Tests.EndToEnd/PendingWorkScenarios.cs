@@ -117,15 +117,18 @@ public sealed class PendingWorkScenarios(AdminWorld world) : IClassFixture<Admin
         await session.GoAsync("/schema/customers");
 
         await session.Page.ClickAsync("[data-testid='remove-field-notes']");
+        await session.Dialog("remove-field-sheet").GetByTestId("remove-field-anyway").ClickAsync();
         await session.Page.Locator("[data-testid='staged-notes']").WaitForAsync();
         (await session.Page.Locator("[data-testid='staged-notes']").InnerTextAsync()).ShouldBe("removed");
 
         await session.Page.ClickAsync("[data-testid='pending-discard']");
         var confirm = session.Page.Locator("[data-testid='discard-confirm']");
         await confirm.WaitForAsync();
-        (await confirm.GetAttributeAsync("class") ?? string.Empty).ShouldContain("a-btn--danger");
+        /* The danger tone, which the button carries as the library's error colour. */
+        (await confirm.GetAttributeAsync("class") ?? string.Empty).ShouldContain("mud-button-filled-error");
+        (await confirm.InnerTextAsync()).ShouldBe("Discard changes", "the button names the verb");
 
-        await session.Page.ClickAsync("[data-testid='discard-cancel']");
+        await session.Dialog("discard-sheet").GetByTestId("discard-cancel").ClickAsync();
         await session.Page.Locator("[data-testid='discard-sheet']").WaitForAsync(
             new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
 
@@ -142,7 +145,7 @@ public sealed class PendingWorkScenarios(AdminWorld world) : IClassFixture<Admin
     }
 
     /// <summary>
-    /// The field sheet opens on its Name box, and "Add and add another" stages a field without closing it.
+    /// The field editor opens on its Name box, and "Save and add another" stages a field without closing it.
     /// </summary>
     /// <remarks>
     /// The usability re-run's T1 counted a reopen per field and a click into Name per field: text typed as the

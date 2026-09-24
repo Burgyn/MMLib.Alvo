@@ -8,29 +8,17 @@ public partial class Entity
     private RenameLeftovers? _renameLeftovers;
 
     /// <summary>
-    /// Drops a field from the working copy — at once when nothing names it, otherwise after a sheet has named
-    /// what does.
+    /// Asks before a field leaves the working copy, naming what names it.
     /// </summary>
     /// <remarks>
-    /// No confirmation for a field nothing names, and that is deliberate: nothing has happened to the database
-    /// yet, the preview states the cost as a plan, and the apply is where dropping a column is allowed. A field
-    /// something <em>does</em> name is different — removing it composes a descriptor the apply refuses (a
-    /// rollup, a mutate key, a rule compiled against a column that is gone), so the sheet refuses it until they
-    /// are changed (docs/todo-admin.md §8d item 16).
+    /// Every removal asks, a field nothing names included (spec §3.2): the confirm is where the operator reads that
+    /// the column and its data go at the apply. A field something <em>does</em> name is refused there as well —
+    /// removing it composes a descriptor the apply refuses (a rollup, a mutate key, a rule compiled against a column
+    /// that is gone), so the confirm refuses it until they are changed (docs/todo-admin.md §8d item 16).
     /// </remarks>
-    private void RemoveField(string field)
-    {
-        var references = Copy.ReferencesToField(EntityName, field);
-        if (references.Count > 0)
-        {
-            _removal = (field, references);
-            return;
-        }
+    private void RemoveField(string field) => _removal = (field, Copy.ReferencesToField(EntityName, field));
 
-        StageRemoval(field);
-    }
-
-    /// <summary>Removes the field the sheet named, when nothing it named blocks the removal.</summary>
+    /// <summary>Removes the field the confirm named, when nothing it named blocks the removal.</summary>
     private void RemoveAnyway()
     {
         if (_removal is { } removal && !removal.References.Any(reference => reference.Blocks))

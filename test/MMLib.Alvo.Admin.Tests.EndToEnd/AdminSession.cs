@@ -112,6 +112,17 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     public Task SnackbarAsync(string text)
         => Page.Locator(".mud-snackbar").Filter(new() { HasText = text }).First.WaitForAsync();
 
+    /// <summary>How many snackbars are on screen, or how many say <paramref name="text"/>.</summary>
+    /// <remarks>
+    /// For the two things a count proves and a wait cannot: an action that ran once said so once, and an error
+    /// said nothing in a snackbar at all. The same library class as <see cref="SnackbarAsync"/>, for its reason.
+    /// </remarks>
+    /// <param name="text">What they say, or part of it; every snackbar when <see langword="null"/>.</param>
+    /// <returns>The count.</returns>
+    public Task<int> SnackbarCountAsync(string? text = null)
+        => (text is null ? Page.Locator(".mud-snackbar") : Page.Locator(".mud-snackbar").Filter(new() { HasText = text }))
+            .CountAsync();
+
     /// <summary>The focused element, as <c>tag#id[test id]</c>, for the focus rules of spec §3.4.</summary>
     /// <returns>A short description of <c>document.activeElement</c>.</returns>
     public Task<string> FocusedAsync()

@@ -36,6 +36,7 @@ public sealed class DestructivePlanScenarios(AdminWorld world) : IClassFixture<A
         await session.GoAsync("/schema/regions");
 
         await session.Page.ClickAsync("[data-testid='remove-field-code']");
+        await session.Dialog("remove-field-sheet").GetByTestId("remove-field-anyway").ClickAsync();
         await session.PreviewPendingAsync();
         await session.Page.GetByText("against the database").First.WaitForAsync();
 

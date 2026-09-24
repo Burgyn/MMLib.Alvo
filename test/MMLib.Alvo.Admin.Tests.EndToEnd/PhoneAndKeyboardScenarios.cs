@@ -53,9 +53,10 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         var inline = session.Page.Locator(".a-pagehead__secondary a:has-text('Browse records')");
         await inline.WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Hidden });
 
-        await session.Page.ClickAsync("[data-testid='pagehead-overflow']");
-        await session.Page.Locator(
-            "[data-testid='pagehead-overflow-sheet'] a:has-text('Browse records')").WaitForAsync();
+        await session.Page.GetByTestId("pagehead-overflow").ClickAsync();
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Menuitem)
+            .GetByRole(Microsoft.Playwright.AriaRole.Link, new() { Name = "Browse records" })
+            .WaitForAsync();
 
         session.AssertConsoleClean();
     }

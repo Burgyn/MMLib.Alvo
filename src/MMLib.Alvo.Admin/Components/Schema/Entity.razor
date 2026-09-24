@@ -4,6 +4,7 @@
 @inject AdminSession Session
 @inject NavigationManager Navigation
 @inject ILogger<Entity> Logger
+@inject ISnackbar Snackbar
 @implements IDisposable
 
 <PageTitle>@EntityName · Schema · Alvo</PageTitle>
@@ -26,61 +27,46 @@
         the descriptor and the name in the database come apart, and it needs a sentence saying so before
         the operator commits to it.
     *@
-    <Sheet Open="_renaming" Title="@($"Rename {EntityName}")"
-           Subtitle="The apply moves the table. Its rows come with it."
-           TestId="rename-sheet" OnClose="CloseRename">
-        <div class="a-stack">
+    @if (_renaming)
+    {
+        <AlvoEditor TestId="rename-sheet" Title="@($"Rename {EntityName}")"
+                    Subtitle="The apply moves the table. Its rows come with it." SubmitText="Rename in the working copy"
+                    SubmitTestId="rename-save" Dirty="@(!string.Equals(_newName, EntityName, StringComparison.Ordinal))"
+                    OnSubmit="RenameAsync" OnClose="CloseRename">
             @if (_renameRefusal is { Length: > 0 })
             {
-                <ErrorPanel Title="That name cannot be used" Fix="@_renameRefusal" />
+                <ErrorPanel TakeFocus="true" Title="That name cannot be used" Fix="@_renameRefusal" />
             }
+            <MudTextField T="string" Value="_newName" ValueChanged="name => _newName = name ?? string.Empty"
+                          Immediate="true" Variant="Variant.Outlined" Label="New name" id="rename-entity-name"
+                          autocomplete="off" Class="a-mono"
+                          HelperText="@($"{DescriptorNames.Hint} The change is carried by renamedFrom, so the apply moves the table instead of dropping it.")" />
+        </AlvoEditor>
+    }
 
-            <Field Label="New name" For="rename-entity-name">
-                <ChildContent>
-                    <input class="a-input a-mono" id="rename-entity-name" value="@_newName" autocomplete="off"
-                           @oninput="args => _newName = args.Value?.ToString() ?? string.Empty" />
-                </ChildContent>
-                <Hint>
-                    <span title="@DescriptorNames.Member">@DescriptorNames.Hint</span>
-                    The change is carried by <code class="a-mono">renamedFrom</code>, so the apply moves the
-                    table instead of dropping it and creating a new one.
-                </Hint>
-            </Field>
-
-            <div class="a-row">
-                <button type="button" class="a-btn a-btn--primary a-btn--sm" data-testid="rename-save"
-                        @onclick="RenameAsync">Rename in the working copy</button>
-            </div>
-        </div>
-    </Sheet>
-
-    <Sheet Open="_removal is not null" Title="@($"Remove {_removal?.Field}")" TestId="remove-field-sheet"
-           Subtitle="These name the field. A removal that leaves one of the blocking ones behind is a descriptor the apply refuses."
-           OnClose="CloseRemoval">
-        <div class="a-stack">
-            @foreach (var reference in _removal?.References ?? [])
-            {
-                <ListRow data-testid="field-reference">
-                    <code class="a-mono a-listrow__key">@reference.Place</code>
-                    <span class="@($"a-badge {(reference.Blocks ? "a-badge--danger" : "a-badge--warn")}")">
-                        @(reference.Blocks ? "names it" : "may name it")
-                    </span>
-                </ListRow>
-            }
-
-            @if (_removal?.References.Any(reference => reference.Blocks) == true)
-            {
-                <Refusal data-testid="remove-field-blocked">Change or remove the places that name it first.</Refusal>
-            }
-            else
-            {
-                <div class="a-row">
-                    <button type="button" class="a-btn a-btn--danger a-btn--sm" data-testid="remove-field-anyway"
-                            @onclick="RemoveAnyway">Remove from the working copy</button>
-                </div>
-            }
-        </div>
-    </Sheet>
+    @*
+        Every removal asks, not only one something names (spec §3.2): the confirm lists what names the field, and
+        refuses while one of those would leave a descriptor the apply refuses.
+    *@
+    <AlvoConfirm Open="_removal is not null" TestId="remove-field-sheet" ConfirmTestId="remove-field-anyway"
+                 CancelTestId="remove-field-cancel" Title="@($"Remove {_removal?.Field}?")"
+                 Consequence="It leaves the working copy now; the column and its data are dropped only when you apply."
+                 Verb="Remove field" Allowed="@(_removal?.References.Any(reference => reference.Blocks) != true)"
+                 OnConfirm="RemoveAnyway" OnCancel="CloseRemoval">
+        @foreach (var reference in _removal?.References ?? [])
+        {
+            <ListRow data-testid="field-reference">
+                <code class="a-mono a-listrow__key">@reference.Place</code>
+                <span class="@($"a-badge {(reference.Blocks ? "a-badge--danger" : "a-badge--warn")}")">
+                    @(reference.Blocks ? "names it" : "may name it")
+                </span>
+            </ListRow>
+        }
+        @if (_removal?.References.Any(reference => reference.Blocks) == true)
+        {
+            <Refusal data-testid="remove-field-blocked">Change or remove the places that name it first.</Refusal>
+        }
+    </AlvoConfirm>
 
     @if (_problem is not null)
     {

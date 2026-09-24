@@ -35,7 +35,7 @@ public sealed class MaintainedFieldScenarios(AdminWorld world) : IClassFixture<A
 
         await session.Page.GetByTestId("edit-field-open_orders").ClickAsync();
         await sheet.GetByRole(AriaRole.Radio, new() { Name = "rollup", Exact = true, Checked = true }).WaitForAsync();
-        await session.Page.GetByTestId("sheet-close").ClickAsync();
+        await session.Dialog("field-sheet").GetByTestId("editor-cancel").ClickAsync();
 
         await session.PreviewPendingAsync();
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);

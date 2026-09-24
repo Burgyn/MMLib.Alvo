@@ -639,7 +639,7 @@ public sealed class RenameScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.Page.FillAsync("#rename-entity-name", "Service Areas");
         await session.Page.ClickAsync("[data-testid='rename-save']");
 
-        await session.Page.Locator("[data-testid='rename-sheet'] .a-error").WaitForAsync();
+        await session.Dialog("rename-sheet").GetByTestId("error-panel").WaitForAsync();
         session.Page.Url.ShouldContain("/schema/regions");
 
         session.AssertConsoleClean();
@@ -650,11 +650,9 @@ public sealed class RenameScenarios(AdminWorld world) : IClassFixture<AdminWorld
 /// Throwing away a draft, which the dashboard had no control for.
 /// </summary>
 /// <remarks>
-/// <b>Reported from the dashboard, and the two halves are one defect.</b> Removing a field stages the
-/// change immediately — deliberately, because nothing has touched the database and a confirmation in
-/// front of an edit to a draft trains an operator to click through the one that matters. That argument
-/// only holds while there is a way back, and there was none: <c>WorkingCopy.Discard</c> existed and no
-/// screen called it, so a staged change could only be applied or abandoned with the session.
+/// <b>Reported from the dashboard, and the two halves are one defect.</b> A staged change touches no
+/// table, which only reassures while there is a way back, and there was none: <c>WorkingCopy.Discard</c>
+/// existed and no screen called it, so a staged change could only be applied or abandoned with the session.
 /// </remarks>
 /// <param name="world">The running host and browser.</param>
 public sealed class DiscardScenarios(AdminWorld world) : IClassFixture<AdminWorld>
@@ -667,6 +665,7 @@ public sealed class DiscardScenarios(AdminWorld world) : IClassFixture<AdminWorl
         await session.GoAsync("/schema/customers");
 
         await session.Page.ClickAsync("[data-testid='remove-field-notes']");
+        await session.Dialog("remove-field-sheet").GetByTestId("remove-field-anyway").ClickAsync();
         await session.PreviewPendingAsync();
         await session.Page.Locator("[data-testid='discard']").First.WaitForAsync();
 
@@ -689,7 +688,7 @@ public sealed class DiscardScenarios(AdminWorld world) : IClassFixture<AdminWorl
     }
 
     /// <summary>
-    /// Discarding is confirmed; the sheet can be dismissed without losing the draft.
+    /// Discarding is confirmed; the confirm's Cancel keeps the draft.
     /// </summary>
     /// <remarks>
     /// The one control on this screen that destroys work the operator did, and the only one that cannot be
@@ -702,11 +701,12 @@ public sealed class DiscardScenarios(AdminWorld world) : IClassFixture<AdminWorl
         await session.GoAsync("/schema/regions");
 
         await session.Page.ClickAsync("[data-testid='remove-field-name']");
+        await session.Dialog("remove-field-sheet").GetByTestId("remove-field-anyway").ClickAsync();
         await session.PreviewPendingAsync();
 
         await session.Page.Locator("[data-testid='discard']").First.ClickAsync();
         await session.Page.Locator("[data-testid='discard-sheet']").WaitForAsync();
-        await session.Page.ClickAsync("[data-testid='sheet-close']");
+        await session.Dialog("discard-sheet").GetByTestId("discard-cancel").ClickAsync();
 
         await session.Page.Locator("[data-testid='discard-sheet']").WaitForAsync(
             new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });

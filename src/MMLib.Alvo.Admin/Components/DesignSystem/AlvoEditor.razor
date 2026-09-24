@@ -7,7 +7,9 @@
 
     The policy this adds on top of the dialog:
     * Escape and Cancel ask "Discard your changes?" when Dirty (EditorCloseGuard). The question replaces the form in
-      place instead of opening a second dialog (spec §3.1). The scrim never closes the editor.
+      place instead of opening a second dialog (spec §3.1). The scrim never closes the editor. Escape presses the
+      control marked data-alvo-escape, Cancel or, while the question is asked, Keep editing (alvo.js): the library's
+      dialog keeps Escape for its own close and never hands it to OnKeyDown, and a close must ask first.
     * Enter in a single-line field submits (a real form with a submit button), Ctrl/Cmd+Enter submits from anywhere,
       and the primary button is busy and disabled while OnSubmit runs (SubmitGate). Cancel stays enabled. The chord is
       alvo.js's (data-alvo-chord-submit), not a keydown handler here: the browser's own Enter-submit plus a server
@@ -23,7 +25,7 @@
 @inject AdminInterop Interop
 
 <MudDialog @ref="_dialog" Visible="true" Options="_options" Class="a-editor" ContentClass="a-editor__body"
-           ActionsClass="a-editor__actions" OnKeyDown="OnKeyDownAsync" data-testid="@TestId">
+           ActionsClass="a-editor__actions" data-testid="@TestId">
     <TitleContent>
         <div class="a-editor__head">
             @if (Eyebrow is { Length: > 0 })
@@ -46,7 +48,8 @@
                 <Actions>
                     <AlvoButton Tone="AlvoButton.ButtonTone.Danger" Small="true" data-testid="editor-discard"
                                 OnClick="DiscardAsync">Discard changes</AlvoButton>
-                    <AlvoButton Small="true" data-testid="editor-keep" OnClick="KeepEditing">Keep editing</AlvoButton>
+                    <AlvoButton Small="true" data-testid="editor-keep" data-alvo-escape
+                                OnClick="KeepEditing">Keep editing</AlvoButton>
                 </Actions>
             </AlvoAlert>
         }
@@ -60,7 +63,8 @@
         {
             @ExtraActions
             <span class="a-spacer"></span>
-            <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" data-testid="editor-cancel" OnClick="RequestCloseAsync">Cancel</AlvoButton>
+            <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" data-testid="editor-cancel" data-alvo-escape
+                        OnClick="RequestCloseAsync">Cancel</AlvoButton>
             <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" form="@_formId" Busy="@(Busy || _gate.Busy)"
                         Disabled="@(!CanSubmit)" data-testid="@SubmitTestId">@SubmitText</AlvoButton>
         }
@@ -181,20 +185,6 @@
     }
 
     private void KeepEditing() => _guard.KeepEditing();
-
-    private Task OnKeyDownAsync(KeyboardEventArgs args) => args.Key == "Escape" ? EscapeAsync() : Task.CompletedTask;
-
-    /// <summary>Escape answers the topmost thing: the question if one is asked, the editor otherwise.</summary>
-    private Task EscapeAsync()
-    {
-        if (!_guard.Asking)
-        {
-            return RequestCloseAsync();
-        }
-
-        KeepEditing();
-        return Task.CompletedTask;
-    }
 
     /// <summary>
     /// Closes the dialog, unless the circuit has already gone or the provider is already disposing it. The editor is

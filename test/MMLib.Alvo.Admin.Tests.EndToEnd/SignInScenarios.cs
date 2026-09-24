@@ -110,7 +110,7 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await page.ClickAsync("button[type=submit]");
         await page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}?**");
 
-        var message = await page.Locator(".a-error__title").InnerTextAsync();
+        var message = await page.GetByTestId("error-title").InnerTextAsync();
         message.ShouldContain("do not match");
         message.ShouldNotContain("password is", Case.Insensitive);
         message.ShouldNotContain("no such", Case.Insensitive);
@@ -130,7 +130,7 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await page.ClickAsync("button[type=submit]");
         await page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}?**");
 
-        (await page.Locator(".a-error__title").InnerTextAsync()).ShouldContain("do not match");
+        (await page.GetByTestId("error-title").InnerTextAsync()).ShouldContain("do not match");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]

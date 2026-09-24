@@ -14,8 +14,8 @@
     log. What is never rewritten is a framework sentence: a refusal's own `Consequence` and `Fix` are
     served verbatim (§4.1).
 *@
-<div class="a-error" role="alert" data-testid="error-panel">
-    <div class="a-error__title" data-testid="error-title">@_text.Headline</div>
+<AlvoAlert Tone="AlvoAlert.AlertTone.Error" Title="@_text.Headline" TakeFocus="TakeFocus"
+           TestId="error-panel" TitleTestId="error-title" Actions="ActionsFor()">
     <div class="a-error__detail">@_text.Detail</div>
     @if (_text.Fix is { Length: > 0 })
     {
@@ -25,29 +25,7 @@
     {
         <code class="a-error__type">@Slug</code>
     }
-
-    @* A caller the management surface does not admit sees this on every screen, and the two
-       reasons it happens need opposite answers. Either the account genuinely holds no level — the
-       sentence above is then the whole story — or the session outlived the account it names, which
-       is what a developer gets every time they delete the database and restart. The second is
-       indistinguishable from the first from here, and it strands an operator on a screen with no
-       control on it, so the way out is offered rather than left to be found in a menu. *@
-    @if (_text.OffersSignOut)
-    {
-        <form method="post" action="@AlvoAdmin.SignOutEndpoint" data-enhance="false"
-              class="a-error__actions">
-            <AntiforgeryToken />
-            <button type="submit" class="a-btn a-btn--sm" data-testid="forbidden-sign-out">
-                Sign out and sign in again
-            </button>
-        </form>
-    }
-
-    @if (Actions is not null)
-    {
-        <div class="a-row a-error__actions">@Actions</div>
-    }
-</div>
+</AlvoAlert>
 
 @code {
     /// <summary>
@@ -76,6 +54,13 @@
     [Parameter]
     public RenderFragment? Actions { get; set; }
 
+    /// <summary>
+    /// Whether the panel takes focus as it appears, which a failed submit asks for (spec §3.3). A panel that was
+    /// already on screen when the page loaded does not, because it would pull focus off the heading the router gave it.
+    /// </summary>
+    [Parameter]
+    public bool TakeFocus { get; set; }
+
     /// <summary>The screen's own classification, site and all; see <see cref="ErrorPanelText"/>.</summary>
     [CascadingParameter]
     private AdminProblem? Classified { get; set; }
@@ -87,4 +72,29 @@
     /// the generic panel here: a panel was asked for, so it must say something.
     /// </summary>
     protected override void OnParametersSet() => _text = ErrorPanelText.Of(Classified, Fault, Title, Fix);
+
+    /// <summary>
+    /// The panel's actions, or nothing when there are none: the alert draws its action row whenever it is handed a
+    /// fragment, and an empty row is a gap under the message.
+    /// </summary>
+    private RenderFragment? ActionsFor() => _text.OffersSignOut || Actions is not null ? AllActions : null;
+
+    /// <summary>The sign-out a refused caller is offered, then the screen's own actions.</summary>
+    /// <remarks>
+    /// A caller the management surface does not admit sees this on every screen, and the two reasons it happens
+    /// need opposite answers. Either the account genuinely holds no level — the sentence above is then the whole
+    /// story — or the session outlived the account it names, which is what a developer gets every time they delete
+    /// the database and restart. The second is indistinguishable from the first from here, and it strands an
+    /// operator on a screen with no control on it, so the way out is offered rather than left to be found in a menu.
+    /// </remarks>
+    private RenderFragment AllActions => @<text>
+        @if (_text.OffersSignOut)
+        {
+            <form method="post" action="@AlvoAdmin.SignOutEndpoint" data-enhance="false">
+                <AntiforgeryToken />
+                <AlvoButton Small="true" Submit="true" data-testid="forbidden-sign-out">Sign out and sign in again</AlvoButton>
+            </form>
+        }
+        @Actions
+    </text>;
 }

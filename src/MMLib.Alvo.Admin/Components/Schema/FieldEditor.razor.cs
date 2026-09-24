@@ -7,7 +7,7 @@ using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
-/// <summary>The sheet that adds a field to an entity, or edits one it declares.</summary>
+/// <summary>The editor that adds a field to an entity, or edits one it declares.</summary>
 public partial class FieldEditor
 {
     private const int NoteValueLimit = 40;
@@ -20,6 +20,7 @@ public partial class FieldEditor
     private ElementReference _nameInput;
     private string? _refusal;
     private string? _prefilled;
+    private string _opened = string.Empty;
 
     /// <summary>The entity the field is added to.</summary>
     [Parameter, EditorRequired]
@@ -96,6 +97,9 @@ public partial class FieldEditor
 
     private bool IsEditing => Editing is { Length: > 0 };
 
+    /// <summary>Whether the form differs from how it opened, which is what Escape must not throw away.</summary>
+    private bool Dirty => Fingerprint() != _opened;
+
     /// <summary>The build's refusal of a rollup filter, shown where the filter would be.</summary>
     private ManagementRefusedFeature? WhereRefusal => Refused.FirstOrDefault(refusal => refusal.Slot == "rollup.where");
 
@@ -126,11 +130,13 @@ public partial class FieldEditor
     {
         /* Prefilled only when the target changes: re-reading the parameters on every render would overwrite
            what the operator is in the middle of typing with what the document still says. */
+        var prefilledNow = false;
         if (IsEditing && _prefilled != Editing)
         {
             _prefilled = Editing;
             _refusal = null;
             _facets = FieldFacets.Prefill(Editing!, EditingJson);
+            prefilledNow = true;
         }
         else if (!IsEditing)
         {
@@ -138,7 +144,23 @@ public partial class FieldEditor
         }
 
         _facets.Sources = Sources ?? [];
+        if (_opened.Length == 0 || prefilledNow)
+        {
+            _opened = Fingerprint();
+        }
     }
+
+    /// <summary>
+    /// The field the form would stage, or, when it could not stage one yet, the choices that are made so far. Two
+    /// forms with the same fingerprint lose nothing by closing.
+    /// </summary>
+    /// <remarks>
+    /// The name leads, because the facets <see cref="FieldFacets.Build"/> returns are the ones written under the
+    /// name, and a rename changes the name alone.
+    /// </remarks>
+    private string Fingerprint()
+        => string.Join('|', _facets.Name, _facets.Build(Editing, EditingJson, Siblings, out _)?.ToJsonString()
+            ?? string.Join('|', "unbuilt", _facets.Kind, _facets.Type, _facets.Values, _facets.Computed));
 
     /// <summary>Switches the kind; a computed column keeps a type it can be, and decimal otherwise.</summary>
     private void ChooseKind(FieldKind kind)
@@ -188,6 +210,7 @@ public partial class FieldEditor
         }
 
         _facets = new FieldFacets { Type = _facets.Type, Kind = _facets.Kind, Sources = _facets.Sources };
+        _opened = Fingerprint();
         await _nameInput.FocusAsync();
     }
 
