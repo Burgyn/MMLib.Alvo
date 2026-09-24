@@ -9,7 +9,7 @@
 /// it, so a developer who deletes the SQLite file and restarts — which is the ordinary inner loop —
 /// comes back to a dashboard that renders its whole chrome and refuses every screen. The refusal is
 /// correct; what was missing was any way out of it, because the only sign-out control lives in the
-/// sidebar on a desktop and behind the sheet on a phone.
+/// shell's account menu, around the screen rather than on it.
 /// </para>
 /// <para>
 /// This scenario reaches the same state the supported way — disabling the operator — and asserts

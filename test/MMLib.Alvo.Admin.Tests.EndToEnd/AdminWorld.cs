@@ -226,14 +226,19 @@ public class AdminWorld : IAsyncLifetime
     /// time stops at the next one rather than at the end of the last wait.
     /// </param>
     /// <param name="width">The viewport width — 1400 for a desktop, 375 for the phone criterion.</param>
+    /// <param name="colorScheme">
+    /// The system theme the browser reports from its first request, for a scenario about a viewer who never chose
+    /// one; the browser's own default when <see langword="null"/>.
+    /// </param>
     /// <returns>The session.</returns>
-    public async Task<AdminSession> SignInAsync(CancellationToken cancel, int width = 1400)
+    public async Task<AdminSession> SignInAsync(CancellationToken cancel, int width = 1400, ColorScheme? colorScheme = null)
     {
         cancel.ThrowIfCancellationRequested();
 
         var context = await Browser.NewContextAsync(new()
         {
             ViewportSize = new ViewportSize { Width = width, Height = width < 720 ? 780 : 950 },
+            ColorScheme = colorScheme,
         }).ConfigureAwait(false);
 
         /* A minute, for the reason the sign-in wait below carries: a server-interactive circuit's

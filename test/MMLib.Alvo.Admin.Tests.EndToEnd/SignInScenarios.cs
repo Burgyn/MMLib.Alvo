@@ -207,7 +207,8 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.Page.GotoAsync($"{world.BaseAddress}{AlvoAdmin.BasePath}");
         session.Page.Url.ShouldEndWith(AlvoAdmin.BasePath);
 
-        await session.Page.ClickAsync("button:has-text('Sign out')");
+        await session.Page.GetByTestId("account-menu").ClickAsync();
+        await session.Page.GetByRole(AriaRole.Menuitem, new() { Name = "Sign out" }).ClickAsync();
         await session.Page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}");
 
         await session.Page.GotoAsync($"{world.BaseAddress}{AlvoAdmin.BasePath}");

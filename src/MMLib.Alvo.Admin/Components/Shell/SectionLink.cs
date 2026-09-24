@@ -9,7 +9,7 @@ namespace MMLib.Alvo.Admin.Components.Shell;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>One link for the sidebar, the phone's sheet and its bottom bar</b>, so the three cannot disagree about
+/// <b>One link for the nav drawer and the phone's bottom bar</b>, so the two cannot disagree about
 /// which entry is current (docs/architecture/admin-dashboard-review.md, F-26). Overview is the dashboard's
 /// root, so it matches its own address only — a prefix match would mark it active on every screen.
 /// </para>

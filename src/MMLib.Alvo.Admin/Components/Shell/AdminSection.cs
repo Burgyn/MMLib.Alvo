@@ -58,7 +58,7 @@ internal sealed record AdminSection(
 /// <para>
 /// <b>The separator is an acceptance criterion, not tidiness.</b> The phone bar holds about five
 /// items and must contain only what works, so <see cref="Live"/> is what the bar takes and the
-/// <c>Not yet</c> entries live below the rule in the sidebar and in the sheet. Interleaving them
+/// <c>Not yet</c> entries live below the rule in the nav drawer, at every width. Interleaving them
 /// would force a second navigation to be designed for the phone, which is how a navigation starts
 /// lying.
 /// </para>
@@ -100,16 +100,6 @@ internal static class AdminNavigation
 
     /// <summary>The five the phone's bottom bar carries.</summary>
     public static IEnumerable<AdminSection> Bar => Live.Take(5);
-
-    /// <summary>
-    /// The live sections the bar has no room for, which the phone reaches through the sheet.
-    /// </summary>
-    /// <remarks>
-    /// Derived from <see cref="Bar"/> rather than listed again: two lists would disagree the first
-    /// time a section was added, and the one that lost the argument would be the one nobody could
-    /// reach from a phone.
-    /// </remarks>
-    public static IEnumerable<AdminSection> BeyondTheBar => Live.Skip(5);
 
     /// <summary>
     /// The address that opens Schema with its New entity form already open — the palette's action.

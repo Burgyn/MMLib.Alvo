@@ -98,6 +98,23 @@ public sealed class FoundationScenarios(AdminWorld world) : IClassFixture<AdminW
         (await PrimaryAsync(session)).ShouldStartWith(LightAccent);
     }
 
+    /// <summary>
+    /// A browser that was dark from its first request, with nothing stored, is dark through sign-in and still dark
+    /// once the circuit is up: the interactive render does not put the light palette back.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_dark_system_is_dark_after_signing_in_with_nothing_stored()
+    {
+        await using var session = await world.SignInAsync(
+            TestContext.Current.CancellationToken, colorScheme: ColorScheme.Dark);
+        await session.GoAsync("");
+
+        (await session.Page.EvaluateAsync<string?>("() => localStorage.getItem('alvo.theme')")).ShouldBeNull();
+        (await ThemeAsync(session)).ShouldBe("dark");
+        (await PrimaryAsync(session)).ShouldStartWith(DarkAccent);
+        session.AssertConsoleClean();
+    }
+
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task The_theme_toggle_flips_the_library_palette_with_no_round_trip()
     {

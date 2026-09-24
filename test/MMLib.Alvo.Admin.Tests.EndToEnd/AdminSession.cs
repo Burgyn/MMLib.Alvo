@@ -56,9 +56,15 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
         => Page.GetByRole(AriaRole.Button, new() { Name = name, Exact = exact });
 
     /// <summary>A dialog by its test id: an <c>AlvoEditor</c>, an <c>AlvoConfirm</c> or the palette.</summary>
+    /// <remarks>
+    /// The <c>role=dialog</c> element that holds the test id, not the element that carries it: the library puts a
+    /// dialog's attributes on its content, a level inside the element that is the dialog, so the id alone finds an
+    /// element with no role, no <c>aria-modal</c> and none of the dialog's focus trap around it.
+    /// </remarks>
     /// <param name="testId">The dialog's test id.</param>
     /// <returns>The dialog.</returns>
-    public ILocator Dialog(string testId) => Page.GetByTestId(testId);
+    public ILocator Dialog(string testId)
+        => Page.GetByRole(AriaRole.Dialog).Filter(new() { Has = Page.GetByTestId(testId) });
 
     /// <summary>Picks an option of a <c>MudSelect</c> by its visible name.</summary>
     /// <remarks>

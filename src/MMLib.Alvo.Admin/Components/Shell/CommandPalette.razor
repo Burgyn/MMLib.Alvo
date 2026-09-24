@@ -15,15 +15,20 @@
 @inject NavigationManager Navigation
 @inject AdminInterop Interop
 
-@if (_open)
-{
-    @* The shared scrim and scroll lock, as the sheet has them (docs/architecture/admin-dashboard-review.md,
-       F-26): a palette with its own overlay was a second modal with its own rules. *@
-    <div class="a-scrim a-scrim--palette" @onclick="Close">
-        <div class="a-palette" role="dialog" aria-modal="true" aria-label="Search"
-             @onclick:stopPropagation="true" @onkeydown="OnKeyDown">
+@*
+    An inline dialog, so the focus trap, aria-modal, Escape and the return of focus to where it came from are the
+    library's, as every other dialog's are (inventory defect #11: the palette used to draw its own scrim and keep its
+    own rules). Opened near the top, where a query is typed, rather than centred.
+*@
+<MudDialog Visible="_open" VisibleChanged="OnVisibleChanged" Options="_options" Class="a-palette-dialog"
+           data-testid="palette">
+    <DialogContent>
+        @* The arrows and Enter are the list's, heard here as they bubble from the input: the dialog's own key
+           handler is its key interceptor's, which is wired for Escape and never saw an ArrowDown (measured). *@
+        <div @onkeydown="OnKeyDown">
             <input class="a-palette__input" placeholder="Go to a section or an entity, or run an action…"
-                   @ref="_input" @bind="_query" @bind:event="oninput" aria-label="Search" />
+                   @ref="_input" @bind="_query" @bind:event="oninput" aria-label="Search" data-testid="palette-input" />
+            @FocusOnRender.On(() => _input)
             <div role="listbox" class="a-palette__list">
                 @if (Matches.Count == 0)
                 {
@@ -52,16 +57,27 @@
                 }
             </div>
         </div>
-    </div>
-}
+    </DialogContent>
+</MudDialog>
 
 @code {
     private readonly List<Entry> _entries = [];
     private readonly List<IAsyncDisposable> _subscriptions = [];
+    private readonly DialogOptions _options = new()
+    {
+        Position = DialogPosition.TopCenter,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true,
+        NoHeader = true,
+        CloseOnEscapeKey = true,
+        BackdropClick = true,
+        CloseButton = false,
+        DefaultFocus = DefaultFocus.FirstChild,
+    };
+
     private ElementReference _input;
     private ScrollLock? _scrollLock;
     private bool _open;
-    private bool _focusPending;
     private string _query = string.Empty;
     private int _active;
 
@@ -78,44 +94,40 @@
             await ListenAsync();
         }
 
-        if (_focusPending)
-        {
-            _focusPending = false;
-            await Interop.FocusAndSelectAsync(_input);
-        }
-
+        /* The pane behind the dialog is what scrolls, and the library locks only the document. */
         await (_open ? Lock.HoldAsync() : Lock.ReleaseAsync());
     }
 
     private ScrollLock Lock => _scrollLock ??= new ScrollLock(Interop);
 
     /// <summary>
-    /// Takes ⌘K, <c>g</c> and Escape from alvo.js's map, then says the keyboard is live — only now, because a
-    /// keystroke before these subscriptions reaches nobody.
+    /// Takes ⌘K and <c>g</c> from alvo.js's map, then says the keyboard is live — only now, because a keystroke
+    /// before these subscriptions reaches nobody. Escape is the dialog's own.
     /// </summary>
     private async Task ListenAsync()
     {
         _subscriptions.Add(await Interop.SubscribeAsync("palette", _ => OpenAsync()));
         _subscriptions.Add(await Interop.SubscribeAsync("goto", OnGoto));
-        _subscriptions.Add(await Interop.SubscribeAsync("dismiss", OnDismiss));
         await Interop.MarkKeyboardReadyAsync();
     }
 
-    /// <summary>Opens the palette, from the header button or from ⌘K.</summary>
+    /// <summary>Opens the palette, empty, from the app bar's Search or from ⌘K.</summary>
     public async Task OpenAsync()
     {
         await LoadEntriesAsync();
+        _query = string.Empty;
         _open = true;
         _active = 0;
-        _focusPending = true;
         StateHasChanged();
     }
 
-    /// <summary>Escape, forwarded from alvo.js.</summary>
-    private Task OnDismiss(string? _)
+    /// <summary>Escape or a click on the scrim closed it: the same close a choice makes, so the query goes too.</summary>
+    private void OnVisibleChanged(bool visible)
     {
-        Close();
-        return Task.CompletedTask;
+        if (!visible)
+        {
+            Close();
+        }
     }
 
     /// <summary>
@@ -180,9 +192,6 @@
                 break;
             case "Enter" when Matches.Count > 0:
                 await Go(Matches[Math.Min(_active, Matches.Count - 1)]);
-                break;
-            case "Escape":
-                Close();
                 break;
             default:
                 _active = 0;

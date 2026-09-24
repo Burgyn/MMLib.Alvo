@@ -21,10 +21,10 @@
             unapplied change@(Pending == 1 ? string.Empty : "s")
         </span>
         <span class="a-pending__actions">
-            <button type="button" class="a-btn a-btn--ghost a-btn--sm" data-testid="pending-discard"
-                    @onclick="() => _discarding = true">Discard</button>
-            <a class="a-btn a-btn--primary a-btn--sm" data-testid="pending-preview"
-               href="@AdminPaths.Changes">Preview</a>
+            <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="pending-discard"
+                        OnClick="() => _discarding = true">Discard</AlvoButton>
+            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" data-testid="pending-preview"
+                        Href="@AdminPaths.Changes">Preview</AlvoButton>
         </span>
     </div>
 }

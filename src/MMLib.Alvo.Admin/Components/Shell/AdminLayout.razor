@@ -1,15 +1,18 @@
 ﻿@*
-    The shell: sidebar + header + content on a desktop, bottom bar under 720 px.
+    The shell (spec §3.7): one app bar, one nav drawer, the pending bar under the app bar, and the bottom bar under
+    720 px.
 
-    The two layouts are one markup tree and one media query, not two components. A second component
-    would be a second navigation — and §4.3 argues at length that a second navigation is how a
-    navigation starts lying about what works.
+    The two layouts are one markup tree, not two components. A second component would be a second navigation — and
+    §4.3 argues at length that a second navigation is how a navigation starts lying about what works. That is also
+    why the drawer's entries are SectionLink rather than the library's nav link (V8): a section here owns routes
+    beyond its own prefix (Schema owns /changes, Data the record routes), and the library's link cannot say so.
 *@
 @inherits LayoutComponentBase
 @implements IDisposable
 @inject AssistantGateway Assistant
 @inject ILogger<AdminLayout> Logger
 @inject AdminInterop Interop
+@inject IBrowserViewportService Viewport
 
 @*
     The library's four providers, in the interactive layout because the library does not render them statically
@@ -22,39 +25,41 @@
 <MudDialogProvider DefaultFocus="DefaultFocus.FirstChild" BackdropClick="false" CloseButton="false" />
 <MudSnackbarProvider />
 
-<div class="a-shell">
-    <nav class="a-sidebar" aria-label="Sections" data-testid="sidebar">
+<MudLayout Class="a-shell">
+    <MudAppBar Dense="true" Elevation="0" Class="a-appbar" data-testid="appbar">
+        <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" class="a-only-mobile" aria-label="Sections"
+                    aria-expanded="@(_navOpen ? "true" : "false")" data-testid="more-sections" OnClick="_ => ToggleNav()">
+            <Icon Path="@Icons.More" />
+        </AlvoButton>
         <a class="a-brand" href="@AdminPaths.Overview" aria-label="Alvo">
             <img src="@AlvoAdminAssets.Mark" width="26" height="26" alt="" />
             <span>Alvo</span>
         </a>
+        <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" aria-label="Search" OnClick="_ => OpenPalette()">
+            <Icon Path="@Icons.Search" />
+            <span>Search</span>
+            <kbd class="a-kbd">&#8984;K</kbd>
+        </AlvoButton>
+        <span class="a-spacer"></span>
+        <ThemeToggle />
+        <SignedInAs />
+    </MudAppBar>
 
-        <ProjectSwitcher />
+    @*
+        Responsive: the persistent drawer on a desktop, a temporary one over the page on a phone, where the
+        bottom bar carries the first five sections and the app bar's Sections button opens the rest.
+    *@
+    <MudDrawer @bind-Open="_navOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Sm"
+               ClipMode="DrawerClipMode.Always" Elevation="0" Class="a-navdrawer">
+        <nav aria-label="Sections" data-testid="sidebar" class="a-navdrawer__nav">
+            <ProjectSwitcher />
+            <MudNavMenu Dense="true">
+                <NavList OnNavigate="CloseNavOnPhone" />
+            </MudNavMenu>
+        </nav>
+    </MudDrawer>
 
-        <NavList />
-
-        <div class="a-sidebar__foot">
-            <SignedInAs />
-        </div>
-    </nav>
-
-    <div class="a-main">
-        <header class="a-header">
-            <button type="button" class="a-btn a-btn--ghost a-btn--sm" @onclick="OpenPalette"
-                    aria-label="Search and jump to a entry">
-                <Icon Path="@Icons.Search" />
-                <span>Search</span>
-                <kbd class="a-kbd">&#8984;K</kbd>
-            </button>
-            <span class="a-spacer"></span>
-            <ThemeToggle />
-            <button type="button" class="a-btn a-btn--ghost a-btn--sm a-only-mobile" @onclick="OpenSheet"
-                    aria-label="More sections" data-testid="more-sections"
-                    aria-expanded="@(_sheetOpen ? "true" : "false")">
-                <Icon Path="@Icons.More" />
-            </button>
-        </header>
-
+    <MudMainContent Class="a-main">
         <PendingBar />
 
         <main class="a-content" id="a-content">
@@ -70,8 +75,7 @@
                 <ErrorContent Context="fault">
                     <ErrorPanel Fault="@fault">
                         <Actions>
-                            <button type="button" class="a-btn a-btn--sm" data-testid="error-reload"
-                                    @onclick="Reload">Reload</button>
+                            <AlvoButton Small="true" data-testid="error-reload" OnClick="_ => Reload()">Reload</AlvoButton>
                         </Actions>
                     </ErrorPanel>
                 </ErrorContent>
@@ -88,34 +92,27 @@
         {
             <AssistantDrawer />
         }
-    </div>
 
-    <nav class="a-bottomnav" aria-label="Sections" data-testid="bottom-nav">
-        @foreach (var entry in AdminNavigation.Bar)
-        {
-            @SectionLink.For(entry, "a-bottomnav__item", "a-bottomnav__item--active", BarContent(entry))
-        }
-    </nav>
-
-    @if (_sheetOpen)
-    {
-        <div class="a-scrim a-sheet" @onclick="CloseSheet" data-testid="sections-sheet">
-            <div class="a-sheet__panel" @onclick:stopPropagation="true">
-                <NavList BeyondTheBar="true" OnNavigate="CloseSheet" />
-
-                <SignedInAs />
-            </div>
-        </div>
-    }
-</div>
+        @* The pane's last row rather than the layout's, so it sits under the content on a phone and needs no
+           height of its own subtracted anywhere. *@
+        <nav class="a-bottomnav" aria-label="Sections" data-testid="bottom-nav">
+            @foreach (var entry in AdminNavigation.Bar)
+            {
+                @SectionLink.For(entry, "a-bottomnav__item", "a-bottomnav__item--active", BarContent(entry))
+            }
+        </nav>
+    </MudMainContent>
+</MudLayout>
 
 <CommandPalette @ref="_palette" />
 
 @code {
     private CommandPalette? _palette;
     private ErrorBoundary? _boundary;
-    private bool _sheetOpen;
+    private readonly Guid _viewportWatch = Guid.NewGuid();
     private bool _assistant;
+    private bool _navOpen = true;
+    private bool _phone;
 
     /// <summary>
     /// Whether to mount the assistant, asked at boot and again whenever the connection is saved.
@@ -141,17 +138,48 @@
         await RefreshAssistantAsync();
     }
 
-    public void Dispose() => Assistant.ConnectionChanged -= OnConnectionChanged;
+    public void Dispose()
+    {
+        Assistant.ConnectionChanged -= OnConnectionChanged;
+        _ = StopWatchingViewportAsync();
+    }
 
     /// <summary>
-    /// Says the shell has rendered interactively, providers and all. It is the readiness signal a scenario waits
-    /// on before it opens a popover or a dialog (study §5.1 gotcha 2): a click before the circuit is live is lost.
+    /// Starts following the viewport, then says the shell has rendered interactively, providers and all. It is the
+    /// readiness signal a scenario waits on before it opens a popover or a dialog (study §5.1 gotcha 2): a click
+    /// before the circuit is live is lost, and so is a phone's first choice in the drawer made before the shell
+    /// knows it is on a phone.
     /// </summary>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
+            await Viewport.SubscribeAsync(_viewportWatch, OnViewportChanged, fireImmediately: true);
             await Interop.MarkShellReadyAsync();
+        }
+    }
+
+    /// <summary>Below the drawer's breakpoint the drawer is the temporary one, drawn over the page.</summary>
+    private Task OnViewportChanged(BrowserViewportEventArgs change) => InvokeAsync(() =>
+    {
+        _phone = change.Breakpoint <= Breakpoint.Xs;
+        StateHasChanged();
+    });
+
+    /// <summary>
+    /// Lets the viewport go, unless the circuit already has: a layout disposed with its circuit has no browser left
+    /// to stop listening in.
+    /// </summary>
+    private async Task StopWatchingViewportAsync()
+    {
+        try
+        {
+            await Viewport.UnsubscribeAsync(_viewportWatch);
+        }
+        catch (Exception exception) when (exception is JSDisconnectedException or ObjectDisposedException
+                                              or OperationCanceledException)
+        {
+            /* Nothing is left to unsubscribe from. */
         }
     }
 
@@ -191,9 +219,19 @@
 
     private Task OpenPalette() => _palette?.OpenAsync() ?? Task.CompletedTask;
 
-    private void OpenSheet() => _sheetOpen = true;
+    private void ToggleNav() => _navOpen = !_navOpen;
 
-    private void CloseSheet() => _sheetOpen = false;
+    /// <summary>
+    /// A choice in the drawer closes it on a phone, where it covers the page; on a desktop it is the persistent
+    /// sidebar and stays. Which one it is follows the viewport, below the drawer's own breakpoint.
+    /// </summary>
+    private void CloseNavOnPhone()
+    {
+        if (_phone)
+        {
+            _navOpen = false;
+        }
+    }
 
     /// <summary>A bottom-bar entry: a smaller icon over the section's short title.</summary>
     private static RenderFragment BarContent(AdminSection entry) => @<text>

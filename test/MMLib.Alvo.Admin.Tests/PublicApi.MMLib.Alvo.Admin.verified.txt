@@ -919,8 +919,6 @@ namespace MMLib.Alvo.Admin.Components.Shell
     {
         public NavList() { }
         [Microsoft.AspNetCore.Components.Parameter]
-        public bool BeyondTheBar { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback OnNavigate { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }

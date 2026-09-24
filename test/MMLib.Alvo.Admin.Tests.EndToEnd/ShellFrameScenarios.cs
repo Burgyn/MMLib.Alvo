@@ -11,8 +11,8 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 public sealed class ShellFrameScenarios(AdminWorld world) : IClassFixture<AdminWorld>
 {
     /// <summary>
-    /// Scrolled to the bottom of a screen taller than the window, the header, the brand and who is signed in
-    /// are all still on screen, and the document itself never scrolled.
+    /// Scrolled to the bottom of a screen taller than the window, the app bar's search, the brand and the
+    /// account menu are all still on screen, and the document itself never scrolled.
     /// </summary>
     /// <remarks>
     /// <b>The defect this pins</b>: the shell was <c>min-height: 100vh</c>, so the document scrolled and the
@@ -32,8 +32,8 @@ public sealed class ShellFrameScenarios(AdminWorld world) : IClassFixture<AdminW
 
         (await session.Page.EvaluateAsync<int>("() => document.scrollingElement.scrollTop")).ShouldBe(0);
         await AssertInViewAsync(session.Button("Search"));
-        await AssertInViewAsync(session.Page.GetByTestId("sidebar").GetByRole(AriaRole.Link, new() { Name = "Alvo" }));
-        await AssertInViewAsync(session.Page.GetByTestId("sidebar").GetByText(AdminWorld.AdminEmail));
+        await AssertInViewAsync(session.Page.GetByTestId("appbar").GetByRole(AriaRole.Link, new() { Name = "Alvo" }));
+        await AssertInViewAsync(session.Page.GetByTestId("account-menu"));
 
         session.AssertConsoleClean();
     }

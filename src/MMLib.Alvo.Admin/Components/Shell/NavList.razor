@@ -2,11 +2,11 @@
     The navigation's list: the live sections, the ones declared and not yet built, then Settings, each group
     under its own rule (docs/architecture/admin-dashboard-review.md, F-26).
 
-    Written once for the sidebar and for the phone's sheet, which were the same three loops twice. The
-    sheet leaves out what the bottom bar already carries, and closes itself on a choice.
+    The drawer lists every section at every width: on a phone it is the temporary drawer the app bar opens, and
+    it closes itself on a choice.
 *@
 <div class="a-nav">
-    @Group(BeyondTheBar ? AdminNavigation.BeyondTheBar : AdminNavigation.Live)
+    @Group(AdminNavigation.Live)
 
     <div class="a-nav-sep"></div>
 
@@ -18,13 +18,7 @@
 </div>
 
 @code {
-    /// <summary>
-    /// Whether the list is the phone sheet's, which leaves out the live sections the bottom bar carries.
-    /// </summary>
-    [Parameter]
-    public bool BeyondTheBar { get; set; }
-
-    /// <summary>Raised when an entry is chosen — how the sheet closes behind the navigation.</summary>
+    /// <summary>Raised when an entry is chosen — how the phone's drawer closes behind the navigation.</summary>
     [Parameter]
     public EventCallback OnNavigate { get; set; }
 

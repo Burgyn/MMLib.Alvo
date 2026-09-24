@@ -220,11 +220,11 @@
     --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 
     /* --- Stacking — named planes rather than a number each rule picks. A table's sticky head rides
-       over its own rows; a sheet and the palette share the overlay plane; the assistant floats above
-       it, so its launcher is not covered by a sheet's scrim. --- */
+       over its own rows; a sheet takes the overlay plane; the assistant floats above it, so its
+       launcher is not covered by a sheet's scrim. The palette is the library's dialog, on the
+       library's own dialog plane. --- */
     --z-raised: 1;
     --z-overlay: 40;
-    --z-palette: var(--z-overlay);
     --z-assistant: 45;
   }
 
@@ -403,10 +403,11 @@
 
 @layer layout {
   /* An application frame, not a document: the shell is exactly the viewport, and only the content pane
-     scrolls. With the document scrolling instead, the sidebar's brand and project card slid off the top,
-     the signed-in foot off the bottom, and the header with its search went with them — the chrome an
-     operator reaches for most was the part that scrolled away. dvh, so a phone's collapsing URL bar
-     does not hide the bottom bar under it; vh first for the browsers that predate it. */
+     scrolls. With the document scrolling instead, the brand and the project card slid off the top, who
+     is signed in off the bottom, and the search went with them — the chrome an operator reaches for most
+     was the part that scrolled away. dvh, so a phone's collapsing URL bar does not hide the bottom bar
+     under it; vh first for the browsers that predate it. On the dashboard this is the library's layout,
+     whose app bar and drawer are fixed, so the main column is the one child it lays out. */
   .a-shell {
     display: flex;
     height: 100vh;
@@ -415,6 +416,7 @@
     background: var(--bg);
   }
 
+  /* prototype-only: the F5 design prototype (docs/design/f5-admin) still draws its sidebar and header. */
   .a-sidebar {
     display: flex;
     flex-direction: column;
@@ -434,6 +436,9 @@
     overflow-y: auto;
   }
 
+  /* The column beside the drawer and under the app bar: the pending bar, the one scrolling pane, and on a
+     phone the bottom bar as its last row. The library's own rule keeps the room for the app bar and the
+     open drawer; this makes the column a flex container so the pane between them takes the rest. */
   .a-main {
     display: flex;
     flex: 1;
@@ -442,6 +447,7 @@
     flex-direction: column;
   }
 
+  /* prototype-only: the prototype's header row, where the dashboard has the app bar. */
   .a-header {
     display: flex;
     align-items: center;
@@ -451,6 +457,34 @@
     padding: 0 var(--space-6);
     border-bottom: 1px solid var(--border);
     background: var(--panel);
+  }
+
+  /* The app bar is the library's; the rule under it and the spacing between its controls are Alvo's. The
+     controls sit in the library's toolbar inside it, so that is the row the gap belongs to. */
+  .a-appbar {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .a-appbar .mud-toolbar {
+    gap: var(--space-2);
+  }
+
+  .a-navdrawer {
+    border-right: 1px solid var(--border);
+  }
+
+  /* A closed drawer is only moved off-screen by the library, so its links stayed in the tab order and in
+     front of a screen reader. Hidden once the slide out has finished, and at once on the way in. */
+  .a-navdrawer.mud-drawer--closed {
+    visibility: hidden;
+    transition: left 225ms cubic-bezier(0, 0, 0.2, 1), visibility 0s linear 225ms;
+  }
+
+  .a-navdrawer__nav {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    padding: var(--space-3);
   }
 
   /* The one scrolling pane. A size container too, so a pane inside it that must fit the visible
@@ -561,16 +595,49 @@
     overflow-wrap: anywhere;
   }
 
-  /* The card that says who is signed in: a label, never a control, so it draws no pointer and reads
-     from the top when the address wraps. The initial is quieter than the project's mark above it. */
-  .a-switcher--person {
-    align-items: flex-start;
-    cursor: default;
-  }
-
+  /* The account menu's initial, quieter than the project's mark in the drawer. */
   .a-brand-mark--quiet {
     background: var(--panel2);
     color: var(--dim);
+  }
+
+  /* --- Account menu --- the library's popover, holding who is signed in and the sign-out post. */
+
+  .a-account {
+    min-width: 240px;
+    max-width: min(320px, calc(100vw - var(--space-8)));
+  }
+
+  /* A label, never a control: it reads from the top when the address wraps. */
+  .a-account__who {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* A real submit button, drawn as the menu's one item: the sign-out is a form post (SignedInAs). */
+  .a-account__signout {
+    display: block;
+    width: 100%;
+    padding: var(--space-3) var(--space-4);
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: var(--text-sm);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .a-account__signout:hover {
+    background: var(--panel2);
+  }
+
+  .a-account__signout:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--accent);
   }
 
 
@@ -679,11 +746,6 @@
   .a-bare-shell {
     min-height: 100vh;
     background: var(--bg);
-  }
-
-  /* Who is signed in, at the foot of the sidebar however short the navigation above it is. */
-  .a-sidebar__foot {
-    margin-top: auto;
   }
 
   .a-cards {
@@ -1221,11 +1283,6 @@
   .a-btn--sm {
     padding: var(--space-1) var(--space-3);
     font-size: var(--text-xs);
-  }
-
-  /* The one control of a narrow column — signing in or out at the foot of the sidebar. */
-  .a-btn--block {
-    width: 100%;
   }
 
   .a-btn[disabled],
@@ -2244,15 +2301,6 @@
     background: color-mix(in srgb, var(--text) 40%, transparent);
   }
 
-  /* The command palette on the same scrim as the sheet, opened near the top where a query is typed rather
-     than centred like a dialog. */
-  .a-scrim--palette {
-    z-index: var(--z-palette);
-    display: grid;
-    place-items: start center;
-    padding-top: 12vh;
-  }
-
   /* prototype-only: the F5 design prototype (docs/design/f5-admin) links this file and still renders it. */
   .a-modal {
     width: min(560px, calc(100vw - var(--space-8)));
@@ -2388,6 +2436,7 @@
     margin-top: var(--space-3);
   }
 
+  /* prototype-only: the prototype's palette frame; the dashboard's is the library's dialog. */
   .a-palette {
     width: min(560px, calc(100vw - var(--space-8)));
     border: 1px solid var(--border);
@@ -2622,10 +2671,10 @@
     background: var(--panel);
   }
 
-  /* The bar carries five sections and the sidebar is gone under 720 px, so everything
-     else — history, integrations, the not-yet sections, settings, and signing out —
-     is reachable only through this sheet. Without it the phone layout is not a
-     narrower dashboard, it is a smaller one. */
+  /* The bar carries five sections and the drawer is closed under 720 px, so everything
+     else — history, integrations, the not-yet sections, settings — is reachable only
+     through the drawer the app bar's Sections button opens. Without it the phone layout
+     is not a narrower dashboard, it is a smaller one. */
   .a-only-mobile {
     display: none;
   }
@@ -2726,10 +2775,9 @@
   }
 
   @media (max-width: 720px) {
-    /* The bar is a sibling of .a-main inside a row-direction .a-shell, so making it
-       visible without turning the shell into a column lays it out BESIDE the content
-       — a second column that takes half the viewport and leaves the screen rendered,
-       legible and unusable. The stacking is what makes `bottom: 0` mean anything. */
+    /* The bar is the main column's last row, and the shell stacks as well: a bar laid
+       out BESIDE the content was once a second column that took half the viewport and
+       left the screen rendered, legible and unusable. */
     .a-shell {
       flex-direction: column;
     }
@@ -2739,6 +2787,7 @@
       min-height: 0;
     }
 
+    /* prototype-only: the prototype's sidebar gives way to its bottom bar here. */
     .a-sidebar {
       display: none;
     }
@@ -2747,6 +2796,7 @@
       padding: var(--space-4);
     }
 
+    /* prototype-only: the prototype's header row. */
     .a-header {
       padding: 0 var(--space-4);
     }
@@ -3016,6 +3066,18 @@
   /* An outlined input draws its own focused border; a second ring inside it is noise, not a signal. */
   .mud-input-slot:focus-visible {
     box-shadow: none;
+  }
+
+  /* Alvo puts an icon beside a button's label as content rather than through the library's icon slots, so
+     the label spaces what it holds the way .a-btn did. */
+  .mud-button-label {
+    gap: var(--space-2);
+  }
+
+  /* The palette's frame is the library's dialog, whose own content padding would inset the input and the
+     rows from its edges; they run edge to edge, the way the list's highlight reads as a row. */
+  .a-palette-dialog .mud-dialog-content {
+    padding: 0;
   }
 
   .a-editor {

@@ -15,10 +15,10 @@
 @implements IAsyncDisposable
 @inject AdminInterop Interop
 
-<button type="button" class="a-btn a-btn--ghost a-btn--sm" @onclick="Toggle"
-        aria-label="@Label" title="@Label" data-testid="theme-toggle">
+<AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" OnClick="_ => Toggle()" aria-label="@Label" title="@Label"
+            data-testid="theme-toggle">
     <Icon Path="@(_theme == "dark" ? Icons.Sun : Icons.Moon)" />
-</button>
+</AlvoButton>
 
 @code {
     private IAsyncDisposable? _subscription;

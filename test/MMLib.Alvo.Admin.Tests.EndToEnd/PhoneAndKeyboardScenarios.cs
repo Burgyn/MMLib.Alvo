@@ -176,14 +176,14 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
     }
 
     /// <summary>
-    /// Every section the sidebar offers is reachable from a phone, and so is signing out.
+    /// Every section the drawer offers is reachable from a phone, and so is signing out.
     /// </summary>
     /// <remarks>
-    /// The bar carries five entries and the sidebar is hidden under 720 px, so without the sheet
-    /// the phone reaches neither Configuration history, Integrations, Settings, the two "not yet"
-    /// sections, nor the way out. <c>AdminNavigation</c>'s own remarks already claimed those live
-    /// <em>"in the sidebar and in the sheet"</em> while the sheet did not exist — which is why the
-    /// claim is now a test rather than a sentence.
+    /// The bar carries five entries and the drawer is closed under 720 px, so without the app bar's
+    /// Sections button the phone reaches neither Configuration history, Integrations, Settings, nor the
+    /// two "not yet" sections, and without the account menu not the way out. <c>AdminNavigation</c>'s own
+    /// remarks once claimed those were reachable while nothing on a phone led to them — which is why the
+    /// claim is a test rather than a sentence.
     /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task Every_section_is_reachable_from_a_phone()
@@ -191,28 +191,30 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
         await session.GoAsync("");
 
-        await session.Page.Locator("[data-testid='more-sections']").ClickAsync();
-        var sheet = session.Page.Locator("[data-testid='sections-sheet']");
-        await sheet.WaitForAsync();
+        await session.Page.GetByTestId("more-sections").ClickAsync();
+        var drawer = session.Page.GetByTestId("sidebar");
+        await drawer.WaitForAsync();
 
         foreach (var route in new[] { "/history", "/integrations", "/automations", "/functions", "/settings" })
         {
-            (await sheet.Locator($"a[href$='{route}']").CountAsync())
-                .ShouldBe(1, $"the sheet is the only way to reach {route} on a phone");
+            (await drawer.Locator($"a[href$='{route}']").CountAsync())
+                .ShouldBe(1, $"the drawer is the only way to reach {route} on a phone");
         }
 
-        (await sheet.GetByText("Sign out").CountAsync()).ShouldBe(1);
-
-        await sheet.Locator("a[href$='/history']").ClickAsync();
+        await drawer.Locator("a[href$='/history']").ClickAsync();
         await session.Page.WaitForURLAsync("**/admin/history");
         await session.SettleAsync();
         await session.AssertRenderedAsync();
 
-        /* Waiting for it to leave rather than counting it: the sheet closes through the circuit, so
-           a count taken the instant the URL changed is a snapshot of a render that has not arrived —
-           the same impatience the goto-shortcut scenario records below. */
-        await session.Page.Locator("[data-testid='sections-sheet']")
-            .WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+        /* Waiting for it to leave rather than checking it: the drawer closes through the circuit, so a
+           check taken the instant the URL changed is a snapshot of a render that has not arrived — the
+           same impatience the goto-shortcut scenario records below. */
+        await drawer.WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Hidden });
+
+        await session.Page.GetByTestId("account-menu").ClickAsync();
+        var signOut = session.Page.GetByRole(Microsoft.Playwright.AriaRole.Menuitem, new() { Name = "Sign out" });
+        await signOut.WaitForAsync();
+        (await signOut.CountAsync()).ShouldBe(1);
 
         session.AssertConsoleClean();
     }
@@ -282,7 +284,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await session.GoAsync("");
 
         await session.Page.Keyboard.PressAsync("Meta+k");
-        await session.Page.Locator(".a-palette").WaitForAsync();
+        await session.Dialog("palette").WaitForAsync();
 
         await session.Page.Keyboard.TypeAsync("access");
 
@@ -323,10 +325,10 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
            over the circuit, so it is not in the DOM the instant the key is released. A count is a
            snapshot; WaitForAsync is the question actually being asked. */
         await session.Page.Keyboard.PressAsync("Meta+k");
-        await session.Page.Locator(".a-palette").WaitForAsync();
+        await session.Dialog("palette").WaitForAsync();
 
         await session.Page.Keyboard.PressAsync("Escape");
-        await session.Page.Locator(".a-palette")
+        await session.Dialog("palette")
             .WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
 
         session.AssertConsoleClean();
@@ -394,8 +396,8 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         var before = await Theme(session);
 
         await session.Page.Keyboard.PressAsync("Meta+k");
-        await session.Page.Locator(".a-palette").WaitForAsync();
-        await session.Page.WaitForFunctionAsync("document.activeElement?.classList.contains('a-palette__input')");
+        await session.Dialog("palette").WaitForAsync();
+        await session.Page.WaitForFunctionAsync("document.activeElement?.dataset.testid === 'palette-input'");
         await session.Page.Keyboard.TypeAsync("toggle theme");
         await session.Page.Locator("[role='option'][aria-selected='true']:has-text('Toggle theme')").WaitForAsync();
         await session.Page.Keyboard.PressAsync("Enter");
@@ -464,8 +466,9 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await session.GoAsync("");
 
         await session.Page.Keyboard.PressAsync("Meta+k");
-        await session.Page.Locator(".a-palette [role='option']:has-text('Data') kbd:has-text('g d')").WaitForAsync();
-        await session.Page.WaitForFunctionAsync("document.activeElement?.classList.contains('a-palette__input')");
+        await session.Dialog("palette").GetByRole(Microsoft.Playwright.AriaRole.Option, new() { Name = "Data" })
+            .Filter(new() { HasText = "g d" }).WaitForAsync();
+        await session.Page.WaitForFunctionAsync("document.activeElement?.dataset.testid === 'palette-input'");
 
         await session.Page.Keyboard.TypeAsync("new entity");
         await session.Page.Locator("[role='option'][aria-selected='true']:has-text('New entity')").WaitForAsync();
