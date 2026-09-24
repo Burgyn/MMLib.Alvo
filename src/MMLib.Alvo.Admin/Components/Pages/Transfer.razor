@@ -47,7 +47,7 @@
 
         @if (_refusal is { Length: > 0 })
         {
-            <ErrorPanel Heading="The apply would refuse this descriptor"
+            <ErrorPanel Title="The apply would refuse this descriptor"
                         Slug="descriptor-invalid"
                         Fix="@_refusal" />
         }

@@ -12,9 +12,14 @@
 /// and the compiler catches a rename.
 /// </para>
 /// <para>
-/// Nothing else on this assembly is public. The design system is CSS, the components are Razor,
-/// and neither is a type a consumer calls — so <c>public</c> stops here, which is
-/// <c>alvo-architecture-rules</c>' own default rather than an omission.
+/// The design system is CSS and the screens are Razor components, and neither is a type a consumer
+/// is meant to call — about forty component classes are technically <c>public</c> (the Razor SDK
+/// gives every one of them that accessibility; see <c>Properties/AssemblyInfo.cs</c>), but
+/// <c>[EditorBrowsable(Never)]</c> on the whole namespace keeps them out of a consumer's
+/// IntelliSense and out of the contract this package keeps stable. This type, alongside
+/// <see cref="AlvoAdminOptions"/>, <see cref="AlvoAdminClaims"/>,
+/// <see cref="IAlvoAdminCallerResolver"/> and the two registration/mapping extension methods, is
+/// what actually is.
 /// </para>
 /// </remarks>
 public static class AlvoAdminAssets

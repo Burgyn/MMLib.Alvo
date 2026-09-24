@@ -75,8 +75,6 @@ namespace MMLib.Alvo.Admin.Components.Entity
     {
         public FieldEditor() { }
         [Microsoft.AspNetCore.Components.Parameter]
-        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRefusedFeature> Capabilities { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
         public string? Editing { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? EditingJson { get; set; }
@@ -84,9 +82,11 @@ namespace MMLib.Alvo.Admin.Components.Entity
         [Microsoft.AspNetCore.Components.Parameter]
         public string Entity { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.FieldEditor.NewField> OnAdded { get; set; }
+        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.FieldEditor.NewField> OnAdd { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback OnCancelled { get; set; }
+        public Microsoft.AspNetCore.Components.EventCallback OnClose { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRefusedFeature> Refused { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<string> Siblings { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
@@ -119,8 +119,6 @@ namespace MMLib.Alvo.Admin.Components.Entity
     {
         public HooksTab() { }
         [Microsoft.AspNetCore.Components.Parameter]
-        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRefusedFeature> Capabilities { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
         public bool Editable { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
@@ -129,6 +127,8 @@ namespace MMLib.Alvo.Admin.Components.Entity
         public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.HooksTab.NewHook> OnAdd { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.HooksTab.HookAt> OnRemove { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRefusedFeature> Refused { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public sealed class HookAt : System.IEquatable<MMLib.Alvo.Admin.Components.Entity.HooksTab.HookAt>
         {
@@ -486,11 +486,11 @@ namespace MMLib.Alvo.Admin.Components.Shared
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Fix { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public string? Heading { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
         public System.Exception? Problem { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Slug { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Title { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     public class PageHeader : Microsoft.AspNetCore.Components.ComponentBase

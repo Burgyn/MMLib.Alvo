@@ -10,7 +10,7 @@
     framework sentence: a refusal's own `Consequence` and `Fix` are served verbatim (§4.1).
 *@
 <div class="a-error" role="alert">
-    <div class="a-error__title">@Title</div>
+    <div class="a-error__title">@Headline</div>
     <div class="a-error__detail">@Detail</div>
     @if (Fix is { Length: > 0 })
     {
@@ -45,8 +45,11 @@
     public Exception? Problem { get; set; }
 
     /// <summary>The headline, when the caller has a better one than the exception type gives.</summary>
+    /// <remarks>Named <c>Title</c> to match the vocabulary every other panel-like component uses
+    /// (docs/architecture/admin-dashboard-review.md, F-7), rather than this component's own
+    /// <c>Heading</c>.</remarks>
     [Parameter]
-    public string? Heading { get; set; }
+    public string? Title { get; set; }
 
     /// <summary>What to do about it — served verbatim when it came from the framework.</summary>
     [Parameter]
@@ -56,7 +59,7 @@
     [Parameter]
     public string? Slug { get; set; }
 
-    private string Title => Heading ?? Problem switch
+    private string Headline => Title ?? Problem switch
     {
         ManagementForbiddenException => "You are not allowed to do this",
         ManagementProjectNotFoundException => "That project does not exist",

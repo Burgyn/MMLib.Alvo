@@ -26,9 +26,12 @@ public static class AlvoAdminServiceCollectionExtensions
     /// browser origin before the first screen rendered.
     /// </para>
     /// <para>
-    /// Nothing else is registered here. The dashboard has no service of its own: it holds
-    /// <c>IAlvoManagement</c> and the ports in <c>MMLib.Alvo.Abstractions</c>, and a screen that
-    /// needed a service of its own would be a screen doing work the core should be doing.
+    /// What is registered below — <c>ManagementGateway</c>, <c>DataGateway</c>,
+    /// <c>AssistantGateway</c> and <c>WorkingCopyStore</c> — is internal, and every one of them is a
+    /// thin adapter over <c>IAlvoManagement</c> and the ports in <c>MMLib.Alvo.Abstractions</c>
+    /// rather than a service of the dashboard's own: a screen that needed one would be a screen
+    /// doing work the core should be doing. None of these four is public, and none is meant to be
+    /// resolved by host code.
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into.</param>

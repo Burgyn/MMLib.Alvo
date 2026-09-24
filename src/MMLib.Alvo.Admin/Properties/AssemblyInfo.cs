@@ -20,6 +20,13 @@
 // in that file is a type this package chose to publish — a gateway, an option bag, a helper — and
 // that is what a reviewer is looking for when the file grows.
 //
+// The policy this earns (docs/architecture/admin-dashboard-review.md, F-10): the seven types above
+// are the contract, and `Components.*` is implementation that may change in any minor version —
+// renamed, split, or removed without that being a breaking change. `_Imports.razor` carries
+// `[EditorBrowsable(Never)]` for the whole namespace so a consumer's IntelliSense reflects that,
+// and it is stated here (there is no package README to carry it instead) and in `AlvoAdmin`'s own
+// remarks, so it is findable from either the assembly-level or the type-level side.
+//
 // Its own suite is the only assembly that can see the internals. The same forgeability caveat as
 // every other InternalsVisibleTo in the family applies: the assemblies are unsigned, so this grants
 // access by name alone.

@@ -32,7 +32,7 @@
         <div class="a-stack">
             @if (_renameRefusal is { Length: > 0 })
             {
-                <ErrorPanel Heading="That name cannot be used" Fix="@_renameRefusal" />
+                <ErrorPanel Title="That name cannot be used" Fix="@_renameRefusal" />
             }
 
             <div class="a-field">
@@ -131,7 +131,7 @@
                         <RulesTab Rules="_working" Entity="@EntityName" Editable="true" OnChanged="SetRule" />
                         break;
                     case "On write":
-                        <HooksTab Hooks="@_hooks" Editable="Copy.Loaded" Capabilities="_refused"
+                        <HooksTab Hooks="@_hooks" Editable="Copy.Loaded" Refused="_refused"
                                   OnAdd="AddHook" OnRemove="RemoveHook" />
                         break;
                     case "Indexes":
@@ -152,9 +152,9 @@
         *@
         @if (_tab == EntityTabs.First && _editorOpen)
         {
-            <FieldEditor Entity="@EntityName" Targets="_entities" OnAdded="AddFieldAsync"
-                         Editing="@_editing" EditingJson="@EditedJson" OnCancelled="CloseEditor"
-                         Siblings="_fieldNames" Capabilities="_refused" />
+            <FieldEditor Entity="@EntityName" Targets="_entities" OnAdd="AddFieldAsync"
+                         Editing="@_editing" EditingJson="@EditedJson" OnClose="CloseEditor"
+                         Siblings="_fieldNames" Refused="_refused" />
         }
     }
 </div>

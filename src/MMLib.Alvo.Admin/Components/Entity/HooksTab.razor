@@ -28,14 +28,14 @@
     operator scrolled past a wall to reach what the entity actually declares. Shut, it is one line that
     still says the count and the names; the wording inside is the framework's own, unshortened.
 *@
-@if (Refused.Count > 0)
+@if (ActionRefusals.Count > 0)
 {
     <details class="a-refused a-refused--fold" data-testid="hooks-refused">
         <summary>
-            @Refused.Count action type@(Refused.Count == 1 ? "" : "s") this build declares and does not run —
-            <span class="a-mono">@string.Join(", ", Refused.Select(refusal => refusal.Slot))</span>
+            @ActionRefusals.Count action type@(ActionRefusals.Count == 1 ? "" : "s") this build declares and does not run —
+            <span class="a-mono">@string.Join(", ", ActionRefusals.Select(refusal => refusal.Slot))</span>
         </summary>
-        @foreach (var refusal in Refused)
+        @foreach (var refusal in ActionRefusals)
         {
             <span class="a-refused__reason">@refusal.Consequence</span>
         }
@@ -280,13 +280,14 @@ else
     /// What this build refuses that belongs on this tab.
     /// </summary>
     /// <remarks>
-    /// <b>Read from <c>capabilities</c>, not listed in the markup.</b> Three of the five action types are
-    /// declared by the schema and never run — and the tab said nothing about any of them, so the absence of
-    /// a control for <c>entity.update</c> read as an oversight rather than a refusal. <c>FieldEditor</c>
-    /// already does exactly this for its own half; this is the entity half the audit found nobody consuming.
+    /// <b>Read from <c>ManagementCapabilities.Refused</c>, not listed in the markup.</b> Three of the five
+    /// action types are declared by the schema and never run — and the tab said nothing about any of them,
+    /// so the absence of a control for <c>entity.update</c> read as an oversight rather than a refusal.
+    /// <c>FieldEditor</c> already does exactly this for its own half; this is the entity half the audit
+    /// found nobody consuming.
     /// </remarks>
     [Parameter]
-    public IReadOnlyList<ManagementRefusedFeature> Capabilities { get; set; } = [];
+    public IReadOnlyList<ManagementRefusedFeature> Refused { get; set; } = [];
 
     /// <summary>Raised with the hook to declare.</summary>
     [Parameter]
@@ -312,8 +313,8 @@ else
     /// Matched against the three discriminators rather than a prefix, because a refusal's slot is the
     /// feature's own name for an action — <c>entity.update</c>, not <c>action.entity.update</c>.
     /// </remarks>
-    private IReadOnlyList<ManagementRefusedFeature> Refused =>
-        [.. Capabilities.Where(refusal =>
+    private IReadOnlyList<ManagementRefusedFeature> ActionRefusals =>
+        [.. Refused.Where(refusal =>
             refusal.Slot is "function" or "http.call" or "entity.update")];
 
     /// <summary>
