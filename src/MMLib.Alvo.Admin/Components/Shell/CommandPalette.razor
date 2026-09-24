@@ -21,7 +21,7 @@
     own rules). Opened near the top, where a query is typed, rather than centred.
 *@
 <MudDialog Visible="_open" VisibleChanged="OnVisibleChanged" Options="_options" Class="a-palette-dialog"
-           data-testid="palette">
+           AriaLabel="Search" data-testid="palette">
     <DialogContent>
         @* The arrows and Enter are the list's, heard here as they bubble from the input: the dialog's own key
            handler is its key interceptor's, which is wired for Escape and never saw an ArrowDown (measured). *@
@@ -112,8 +112,17 @@
     }
 
     /// <summary>Opens the palette, empty, from the app bar's Search or from ⌘K.</summary>
+    /// <remarks>
+    /// Already open, it stays as it is: a second ⌘K must not throw away what the operator has typed. alvo.js does
+    /// not send ⌘K at all while another dialog is open, so the palette never stacks on one (spec §3.1).
+    /// </remarks>
     public async Task OpenAsync()
     {
+        if (_open)
+        {
+            return;
+        }
+
         await LoadEntriesAsync();
         _query = string.Empty;
         _open = true;

@@ -893,11 +893,11 @@ namespace MMLib.Alvo.Admin.Components.Settings
 }
 namespace MMLib.Alvo.Admin.Components.Shell
 {
-    public class AdminLayout : Microsoft.AspNetCore.Components.LayoutComponentBase, System.IDisposable
+    public class AdminLayout : Microsoft.AspNetCore.Components.LayoutComponentBase, System.IAsyncDisposable
     {
         public AdminLayout() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public void Dispose() { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
         protected override void OnParametersSet() { }

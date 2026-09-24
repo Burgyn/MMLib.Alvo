@@ -66,6 +66,29 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     public ILocator Dialog(string testId)
         => Page.GetByRole(AriaRole.Dialog).Filter(new() { Has = Page.GetByTestId(testId) });
 
+    /// <summary>
+    /// Loads the page as the server rendered it and holds it there: no circuit starts, so what is on screen is the
+    /// first paint, for as long as the scenario needs to measure it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why not read at DOMContentLoaded.</b> The circuit starts straight after it and draws the interactive tree
+    /// over the prerendered one; a reading taken then lands on whichever of the two is attached at that instant, and
+    /// was measured returning an empty computed style. The framework's script is answered with an empty one instead
+    /// of being refused, so the page logs no failed request.
+    /// </remarks>
+    /// <param name="page">The page.</param>
+    /// <param name="load">The navigation that loads it, such as a reload.</param>
+    public static async Task WithoutTheCircuitAsync(IPage page, Func<Task> load)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        ArgumentNullException.ThrowIfNull(load);
+        const string framework = "**/_framework/blazor.web.js";
+        await page.RouteAsync(framework, route => route.FulfillAsync(new() { ContentType = "text/javascript", Body = string.Empty }))
+            .ConfigureAwait(false);
+        await load().ConfigureAwait(false);
+        await page.UnrouteAsync(framework).ConfigureAwait(false);
+    }
+
     /// <summary>Picks an option of a <c>MudSelect</c> by its visible name.</summary>
     /// <remarks>
     /// Page-scoped on purpose: the library renders options in its popover provider under <c>body</c>, so an option is

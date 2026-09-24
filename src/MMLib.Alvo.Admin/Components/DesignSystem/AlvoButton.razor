@@ -4,7 +4,7 @@
     removed its global defaults and advises exactly this wrapper (study §1.2). The tone is Alvo's enum, never Mud's
     (spec D5). Anything else, such as data-testid, aria-label, id or form, passes through to the button.
 *@
-<MudButton Variant="_look.Variant" Color="_look.Color" Size="@(Small ? Size.Small : Size.Medium)"
+<MudButton @ref="_button" Variant="_look.Variant" Color="_look.Color" Size="@(Small ? Size.Small : Size.Medium)"
            Ripple="false" DropShadow="false" Disabled="@(Disabled || Busy)"
            ButtonType="@(Submit ? ButtonType.Submit : ButtonType.Button)" Href="@Href" OnClick="OnClick"
            aria-busy="@(Busy ? "true" : null)" @attributes="Attributes">
@@ -17,6 +17,7 @@
 
 @code {
     private ButtonLook _look = ButtonLook.Of(ButtonTone.Secondary);
+    private MudButton? _button;
 
     /// <summary>What the button is for, in the order a screen reaches for them.</summary>
     public enum ButtonTone
@@ -72,4 +73,10 @@
 
     /// <inheritdoc />
     protected override void OnParametersSet() => _look = ButtonLook.Of(Tone);
+
+    /// <summary>
+    /// Gives the button focus, for a surface that hands focus back to the control that opened it (spec §3.4).
+    /// Internal, so no member of the public component carries it.
+    /// </summary>
+    internal ValueTask FocusAsync() => _button?.FocusAsync() ?? ValueTask.CompletedTask;
 }

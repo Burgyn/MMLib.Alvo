@@ -108,10 +108,47 @@
 
   let awaitingGoto = false;
 
+  /* A dialog or a sheet is over the page. */
+  const underModal = () => document.querySelector('[aria-modal="true"]') !== null;
+
+  /* --- A menu item that is a form post -----------------------------------
+     The library's menu item is a div it focuses and moves between with the
+     arrows, not a button, so it cannot submit the form around it. The sign-out
+     must stay a real post (a GET sign-out is triggerable by an <img>), so a
+     click, an Enter or a Space on [data-alvo-submits] submits its form here,
+     once: the library may answer the same key with a click of its own.
+     ---------------------------------------------------------------------- */
+  const submitterOf = (target) => (target instanceof Element ? target.closest('[data-alvo-submits]') : null);
+
+  const submitFrom = (item) => {
+    const form = item.closest('form');
+    if (form && form.dataset.alvoSubmitted === undefined) {
+      form.dataset.alvoSubmitted = '';
+      form.requestSubmit();
+    }
+  };
+
+  const onSubmitterClick = (event) => {
+    const item = submitterOf(event.target);
+    if (item) {
+      submitFrom(item);
+    }
+  };
+
   const onKeyDown = (event) => {
+    /* ⌘K opens the palette, but never over another dialog (spec §3.1: never a dialog over a dialog), and a
+       second ⌘K over the palette itself does nothing, so what was typed there stays. */
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault();
-      emit('palette');
+      if (!underModal()) {
+        emit('palette');
+      }
+      return;
+    }
+
+    if ((event.key === 'Enter' || event.key === ' ') && submitterOf(event.target)) {
+      event.preventDefault();
+      submitFrom(submitterOf(event.target));
       return;
     }
 
@@ -144,11 +181,11 @@
 
     /* Nor while a dialog or a sheet is over the page: a jump would navigate out from under it, and
        whatever was half-done in it would be lost to a stray `g`. */
-    const underModal = document.querySelector('[aria-modal="true"]') !== null;
+    const modal = underModal();
 
     if (awaitingGoto) {
       awaitingGoto = false;
-      if (underModal) {
+      if (modal) {
         return;
       }
 
@@ -162,7 +199,7 @@
 
     /* The page's own keys are the page's, not the dialog's: `j` inside the record sheet must not move
        the selection behind it, and Enter there must not open a second record over the first. */
-    if (underModal) {
+    if (modal) {
       return;
     }
 
@@ -300,6 +337,7 @@
   followSystem();
   applyStoredAside();
   document.addEventListener('keydown', onKeyDown);
+  document.addEventListener('click', onSubmitterClick);
   document.addEventListener('pointerdown', onHandleDown);
   document.addEventListener('keydown', onHandleKey);
   document.addEventListener('dblclick', onHandleDoubleClick);

@@ -13,6 +13,9 @@ public sealed class FoundationScenarios(AdminWorld world) : IClassFixture<AdminW
     private const string LightAccent = "rgba(15,122,72,1)";
     private const string DarkAccent = "rgba(57,233,145,1)";
 
+    /* --panel's dark value, #262833, as a painted colour. */
+    private const string DarkPanel = "rgb(38, 40, 51)";
+
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task The_library_stylesheet_is_loaded_into_the_lowest_layer_and_Alvos_spacing_survives_it()
     {
@@ -99,20 +102,38 @@ public sealed class FoundationScenarios(AdminWorld world) : IClassFixture<AdminW
     }
 
     /// <summary>
-    /// A browser that was dark from its first request, with nothing stored, is dark through sign-in and still dark
-    /// once the circuit is up: the interactive render does not put the light palette back.
+    /// A browser that was dark from its first request, with nothing stored, paints the library's surfaces dark: the
+    /// app bar and the nav drawer are the dark <c>--panel</c> on the first paint and still after the circuit is up.
     /// </summary>
+    /// <remarks>
+    /// Painted colours rather than the palette variable: the variable can be right while a surface reads another
+    /// one, and a surface is what the operator sees. Without the dark-scoped theme provider both are white.
+    /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task A_dark_system_is_dark_after_signing_in_with_nothing_stored()
+    public async Task A_dark_system_paints_the_app_bar_and_drawer_dark_with_nothing_stored()
     {
         await using var session = await world.SignInAsync(
             TestContext.Current.CancellationToken, colorScheme: ColorScheme.Dark);
         await session.GoAsync("");
-
         (await session.Page.EvaluateAsync<string?>("() => localStorage.getItem('alvo.theme')")).ShouldBeNull();
-        (await ThemeAsync(session)).ShouldBe("dark");
-        (await PrimaryAsync(session)).ShouldStartWith(DarkAccent);
+
+        await AdminSession.WithoutTheCircuitAsync(session.Page, () => session.Page.ReloadAsync());
+        await AssertDarkSurfacesAsync(session, "on the first paint");
+
+        await session.Page.ReloadAsync();
+        await session.SettleAsync();
+        await AssertDarkSurfacesAsync(session, "after the circuit");
         session.AssertConsoleClean();
+    }
+
+    private static async Task AssertDarkSurfacesAsync(AdminSession session, string when)
+    {
+        foreach (var surface in new[] { "appbar", "sidebar" })
+        {
+            var painted = await session.Page.GetByTestId(surface).EvaluateAsync<string>(
+                "e => getComputedStyle(e.closest('aside') ?? e).backgroundColor");
+            painted.ShouldBe(DarkPanel, $"the {surface} {when}");
+        }
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]

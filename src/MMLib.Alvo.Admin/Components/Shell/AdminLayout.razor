@@ -8,7 +8,7 @@
     beyond its own prefix (Schema owns /changes, Data the record routes), and the library's link cannot say so.
 *@
 @inherits LayoutComponentBase
-@implements IDisposable
+@implements IAsyncDisposable
 @inject AssistantGateway Assistant
 @inject ILogger<AdminLayout> Logger
 @inject AdminInterop Interop
@@ -27,7 +27,7 @@
 
 <MudLayout Class="a-shell">
     <MudAppBar Dense="true" Elevation="0" Class="a-appbar" data-testid="appbar">
-        <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" class="a-only-mobile" aria-label="Sections"
+        <AlvoButton @ref="_sectionsButton" Tone="AlvoButton.ButtonTone.Ghost" Small="true" class="a-only-mobile" aria-label="Sections"
                     aria-expanded="@(_navOpen ? "true" : "false")" data-testid="more-sections" OnClick="_ => ToggleNav()">
             <Icon Path="@Icons.More" />
         </AlvoButton>
@@ -46,16 +46,20 @@
     </MudAppBar>
 
     @*
-        Responsive: the persistent drawer on a desktop, a temporary one over the page on a phone, where the
-        bottom bar carries the first five sections and the app bar's Sections button opens the rest.
+        The persistent drawer on a desktop, a temporary one over the page on a phone, where the bottom bar carries
+        the first five sections and the app bar's Sections button opens the rest. The variant follows Alvo's own
+        720 px phone width, not the library's responsive breakpoints (600 and 960 px): those would draw a third
+        layout between them and 720, which the stylesheet does not have.
+
+        No MudNavMenu around the list. Its entries are SectionLink (V8), so it added only a second, unlabelled
+        <nav> inside this one: a navigation landmark with no name, and nothing else.
     *@
-    <MudDrawer @bind-Open="_navOpen" Variant="DrawerVariant.Responsive" Breakpoint="Breakpoint.Sm"
+    <MudDrawer Open="_navOpen" OpenChanged="OnDrawerOpenChanged"
+               Variant="@(_phone ? DrawerVariant.Temporary : DrawerVariant.Persistent)"
                ClipMode="DrawerClipMode.Always" Elevation="0" Class="a-navdrawer">
-        <nav aria-label="Sections" data-testid="sidebar" class="a-navdrawer__nav">
+        <nav aria-label="Sections" data-testid="sidebar" class="a-navdrawer__nav" tabindex="-1" @ref="_drawerNav">
             <ProjectSwitcher />
-            <MudNavMenu Dense="true">
-                <NavList OnNavigate="CloseNavOnPhone" />
-            </MudNavMenu>
+            <NavList OnNavigate="CloseNavOnPhone" />
         </nav>
     </MudDrawer>
 
@@ -109,7 +113,23 @@
 @code {
     private CommandPalette? _palette;
     private ErrorBoundary? _boundary;
+    /// <summary>The widest viewport that is a phone: alvo.css's one phone breakpoint, and the drawer's.</summary>
+    private const int PhoneWidth = 720;
+
+    private static readonly string _phoneQuery = $"(max-width: {PhoneWidth}px)";
+
+    /// <summary>Two breakpoints, either side of the phone width, so the viewport reports crossing it and no other.</summary>
+    private static readonly MudBlazor.Services.ResizeOptions _phoneCrossing = new()
+    {
+        NotifyOnBreakpointOnly = true,
+        BreakpointDefinitions = new() { [Breakpoint.Xs] = 0, [Breakpoint.Sm] = PhoneWidth + 1 },
+    };
+
     private readonly Guid _viewportWatch = Guid.NewGuid();
+    private AlvoButton? _sectionsButton;
+    private ElementReference _drawerNav;
+    private IAsyncDisposable? _dismiss;
+    private FocusNext _focusNext;
     private bool _assistant;
     private bool _navOpen = true;
     private bool _phone;
@@ -138,33 +158,66 @@
         await RefreshAssistantAsync();
     }
 
-    public void Dispose()
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
     {
         Assistant.ConnectionChanged -= OnConnectionChanged;
-        _ = StopWatchingViewportAsync();
+
+        if (_dismiss is not null)
+        {
+            await _dismiss.DisposeAsync();
+        }
+
+        await StopWatchingViewportAsync();
     }
 
-    /// <summary>
-    /// Starts following the viewport, then says the shell has rendered interactively, providers and all. It is the
-    /// readiness signal a scenario waits on before it opens a popover or a dialog (study §5.1 gotcha 2): a click
-    /// before the circuit is live is lost, and so is a phone's first choice in the drawer made before the shell
-    /// knows it is on a phone.
-    /// </summary>
+    /// <inheritdoc />
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
-            await Viewport.SubscribeAsync(_viewportWatch, OnViewportChanged, fireImmediately: true);
-            await Interop.MarkShellReadyAsync();
+            await StartAsync();
         }
+
+        await MoveFocusAsync();
     }
 
-    /// <summary>Below the drawer's breakpoint the drawer is the temporary one, drawn over the page.</summary>
+    /// <summary>
+    /// Learns the width, follows it and Escape, then says the shell has rendered interactively, providers and all.
+    /// It is the readiness signal a scenario waits on before it opens a popover or a dialog (study §5.1 gotcha 2):
+    /// a click before the circuit is live is lost, and so is a phone's first choice in the drawer made before the
+    /// shell knows it is on a phone.
+    /// </summary>
+    private async Task StartAsync()
+    {
+        await Viewport.SubscribeAsync(_viewportWatch, OnViewportChanged, _phoneCrossing, fireImmediately: false);
+        ApplyWidth(await Viewport.IsMediaQueryMatchAsync(_phoneQuery));
+        _dismiss = await Interop.SubscribeAsync("dismiss", _ => InvokeAsync(DismissDrawer));
+        StateHasChanged();
+        await Interop.MarkShellReadyAsync();
+    }
+
+    /// <summary>The viewport crossed the phone width, one way or the other.</summary>
     private Task OnViewportChanged(BrowserViewportEventArgs change) => InvokeAsync(() =>
     {
-        _phone = change.Breakpoint <= Breakpoint.Xs;
+        ApplyWidth(change.BrowserWindowSize.Width <= PhoneWidth);
         StateHasChanged();
     });
+
+    /// <summary>
+    /// A phone's drawer is the temporary one and starts closed; a desktop's is the persistent sidebar and starts
+    /// open. Only a change of side resets it, so a resize within one side keeps what the operator chose.
+    /// </summary>
+    private void ApplyWidth(bool phone)
+    {
+        if (phone == _phone)
+        {
+            return;
+        }
+
+        _phone = phone;
+        _navOpen = !phone;
+    }
 
     /// <summary>
     /// Lets the viewport go, unless the circuit already has: a layout disposed with its circuit has no browser left
@@ -219,11 +272,16 @@
 
     private Task OpenPalette() => _palette?.OpenAsync() ?? Task.CompletedTask;
 
-    private void ToggleNav() => _navOpen = !_navOpen;
+    /// <summary>Opens or closes the phone's drawer; opening it takes focus into it (spec §3.4).</summary>
+    private void ToggleNav()
+    {
+        _navOpen = !_navOpen;
+        _focusNext = _phone && _navOpen ? FocusNext.Drawer : FocusNext.None;
+    }
 
     /// <summary>
     /// A choice in the drawer closes it on a phone, where it covers the page; on a desktop it is the persistent
-    /// sidebar and stays. Which one it is follows the viewport, below the drawer's own breakpoint.
+    /// sidebar and stays. Focus is the new screen's, which the router moves to its heading.
     /// </summary>
     private void CloseNavOnPhone()
     {
@@ -231,6 +289,58 @@
         {
             _navOpen = false;
         }
+    }
+
+    /// <summary>The library closed the phone's drawer, on a click on its scrim: focus goes back to Sections.</summary>
+    private void OnDrawerOpenChanged(bool open)
+    {
+        _navOpen = open;
+        _focusNext = !open && _phone ? FocusNext.Sections : FocusNext.None;
+    }
+
+    /// <summary>
+    /// Escape, forwarded from alvo.js: it closes the phone's drawer and gives focus back to Sections. The library's
+    /// temporary drawer does neither, and a drawer over the page is the topmost thing Escape closes (spec §3.4).
+    /// </summary>
+    private void DismissDrawer()
+    {
+        if (!_phone || !_navOpen)
+        {
+            return;
+        }
+
+        _navOpen = false;
+        _focusNext = FocusNext.Sections;
+        StateHasChanged();
+    }
+
+    /// <summary>Moves focus where the last open or close of the drawer said it goes, once the render has drawn it.</summary>
+    private async Task MoveFocusAsync()
+    {
+        var next = _focusNext;
+        _focusNext = FocusNext.None;
+
+        if (next == FocusNext.Drawer)
+        {
+            await _drawerNav.FocusAsync();
+        }
+        else if (next == FocusNext.Sections && _sectionsButton is not null)
+        {
+            await _sectionsButton.FocusAsync();
+        }
+    }
+
+    /// <summary>Where focus goes after the next render.</summary>
+    private enum FocusNext
+    {
+        /// <summary>It stays where it is.</summary>
+        None,
+
+        /// <summary>Into the drawer that just opened.</summary>
+        Drawer,
+
+        /// <summary>Back to the Sections button that opened the drawer that just closed.</summary>
+        Sections,
     }
 
     /// <summary>A bottom-bar entry: a smaller icon over the section's short title.</summary>

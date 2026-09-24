@@ -10,26 +10,21 @@
 *@
 <AuthorizeView Context="auth">
     <Authorized>
-        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Dense="true" PopoverClass="a-account">
-            <ActivatorContent>
-                <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" aria-label="Account" data-testid="account-menu"
-                            OnClick="@(click => context.ToggleAsync(click))">
-                    <span class="a-brand-mark a-brand-mark--quiet">@Initial(auth.User.Identity?.Name)</span>
-                </AlvoButton>
-            </ActivatorContent>
-            <ChildContent>
-                <div class="a-account__who">
-                    <span class="a-switcher-name">@auth.User.Identity?.Name</span>
-                    <span class="a-meta">@Roles(auth) · @Tenant(auth)</span>
-                </div>
-                @* data-enhance="false", for the reason the sign-in form carries: the answer to this post
-                   is a cleared cookie and a redirect, and an enhanced post would patch the DOM instead of
-                   navigating — leaving the operator on a dashboard they are no longer signed into. *@
-                <form method="post" action="@AlvoAdmin.SignOutEndpoint" data-enhance="false">
-                    <AntiforgeryToken />
-                    <button type="submit" role="menuitem" class="a-account__signout">Sign out</button>
-                </form>
-            </ChildContent>
+        <MudMenu Label="@Initial(auth.User.Identity?.Name)" AriaLabel="Account" Variant="Variant.Text" Size="Size.Small"
+                 Ripple="false" DropShadow="false" Dense="true" AnchorOrigin="Origin.BottomRight"
+                 TransformOrigin="Origin.TopRight" Class="a-account-menu" PopoverClass="a-account"
+                 data-testid="account-menu">
+            <div class="a-account__who" role="none">
+                <span class="a-switcher-name">@auth.User.Identity?.Name</span>
+                <span class="a-meta">@Roles(auth) · @Tenant(auth)</span>
+            </div>
+            @* data-enhance="false", for the reason the sign-in form carries: the answer to this post
+               is a cleared cookie and a redirect, and an enhanced post would patch the DOM instead of
+               navigating — leaving the operator on a dashboard they are no longer signed into. *@
+            <form method="post" action="@AlvoAdmin.SignOutEndpoint" data-enhance="false" role="none">
+                <AntiforgeryToken />
+                <MudMenuItem data-alvo-submits="true">Sign out</MudMenuItem>
+            </form>
         </MudMenu>
     </Authorized>
     <NotAuthorized>
