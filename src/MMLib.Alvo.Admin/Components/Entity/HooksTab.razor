@@ -12,8 +12,6 @@
     five *action types*, and those are read off `capabilities` rather than listed here, so the day
     one of them lands the tab stops warning about it without anybody editing this file.
 *@
-@using System.Text.Json
-@using System.Text.Json.Nodes
 
 <SectionHead Title="On write">
     <Subtitle>
@@ -52,9 +50,9 @@ else
     {
         <ListRow class="a-listrow--roomy a-listrow--stacked">
             <div class="a-row">
-                <span class="@($"a-badge {(IsBefore(point.Key) ? "a-badge--warn" : "a-badge--accent")}")">@point.Key</span>
+                <span class="@($"a-badge {(HookBuilder.IsBefore(point.Key) ? "a-badge--warn" : "a-badge--accent")}")">@point.Key</span>
                 <span class="a-section-sub">
-                    @(IsBefore(point.Key)
+                    @(HookBuilder.IsBefore(point.Key)
                         ? "in the transaction · may refuse or change the row · no network"
                         : "after the commit · may leave the process")
                 </span>
@@ -112,35 +110,35 @@ else
         }
 
         <Field Label="When" LabelId="hook-points-label">
-            <ChipGroup TValue="string" Items="_points" Selected="[_point]" aria-labelledby="hook-points-label"
+            <ChipGroup TValue="string" Items="HookBuilder.Points" Selected="[_hook.Point]" aria-labelledby="hook-points-label"
                        data-testid="hook-points" SelectedChanged="points => Choose(points[0])" />
         </Field>
 
         <Field Label="Only when (optional)" For="hook-condition">
             <ChildContent>
-                <input class="a-input a-mono" id="hook-condition" value="@_condition" autocomplete="off"
-                       placeholder="@Example"
-                       @oninput="args => _condition = args.Value?.ToString() ?? string.Empty" />
+                <input class="a-input a-mono" id="hook-condition" value="@_hook.Condition" autocomplete="off"
+                       placeholder="@_hook.Example"
+                       @oninput="args => _hook.Condition = args.Value?.ToString() ?? string.Empty" />
             </ChildContent>
             <Hint>
-                CEL over @((MarkupString)Images) and <code class="a-mono">@@user</code>. Left empty, the hook
+                CEL over @((MarkupString)_hook.Images) and <code class="a-mono">@@user</code>. Left empty, the hook
                 runs on every write.
             </Hint>
         </Field>
 
         <Field Label="Then" LabelId="hook-actions-label">
-            <ChipGroup TValue="string" Items="Kinds" Selected="[_kind]" aria-labelledby="hook-actions-label"
-                       data-testid="hook-actions" SelectedChanged="kinds => _kind = kinds[0]" />
+            <ChipGroup TValue="string" Items="_hook.Kinds" Selected="[_hook.Kind]" aria-labelledby="hook-actions-label"
+                       data-testid="hook-actions" SelectedChanged="kinds => _hook.Kind = kinds[0]" />
         </Field>
 
-        @switch (_kind)
+        @switch (_hook.Kind)
         {
-            case Reject:
+            case HookBuilder.Reject:
                 <Field Label="Refuse with" For="hook-reject">
                     <ChildContent>
-                        <input class="a-input" id="hook-reject" value="@_reject" autocomplete="off" maxlength="500"
+                        <input class="a-input" id="hook-reject" value="@_hook.RejectMessage" autocomplete="off" maxlength="500"
                                placeholder="A completed work order cannot be reopened."
-                               @oninput="args => _reject = args.Value?.ToString() ?? string.Empty" />
+                               @oninput="args => _hook.RejectMessage = args.Value?.ToString() ?? string.Empty" />
                     </ChildContent>
                     <Hint>
                         Becomes the <code class="a-mono">detail</code> of the RFC 7807 problem the caller
@@ -148,18 +146,18 @@ else
                     </Hint>
                 </Field>
                 break;
-            case Mutate:
+            case HookBuilder.Mutate:
                 <div class="a-field-row">
                     <Field Label="Field" For="hook-mutate-field">
-                        <input class="a-input a-mono" id="hook-mutate-field" value="@_mutateField" autocomplete="off"
+                        <input class="a-input a-mono" id="hook-mutate-field" value="@_hook.MutateField" autocomplete="off"
                                placeholder="completed_on"
-                               @oninput="args => _mutateField = args.Value?.ToString() ?? string.Empty" />
+                               @oninput="args => _hook.MutateField = args.Value?.ToString() ?? string.Empty" />
                     </Field>
                     <Field Label="Set to" For="hook-mutate-value">
                         <ChildContent>
-                            <input class="a-input a-mono" id="hook-mutate-value" value="@_mutateValue" autocomplete="off"
+                            <input class="a-input a-mono" id="hook-mutate-value" value="@_hook.MutateValue" autocomplete="off"
                                    placeholder="now()"
-                                   @oninput="args => _mutateValue = args.Value?.ToString() ?? string.Empty" />
+                                   @oninput="args => _hook.MutateValue = args.Value?.ToString() ?? string.Empty" />
                         </ChildContent>
                         <Hint>
                             A CEL expression, stored as <code class="a-mono">{"$cel": "…"}</code>. Wrap it in
@@ -168,12 +166,12 @@ else
                     </Field>
                 </div>
                 break;
-            case Webhook:
+            case HookBuilder.Webhook:
                 <Field Label="Endpoint" For="hook-endpoint">
                     <ChildContent>
-                        <input class="a-input a-mono" id="hook-endpoint" value="@_endpoint" autocomplete="off"
+                        <input class="a-input a-mono" id="hook-endpoint" value="@_hook.Endpoint" autocomplete="off"
                                placeholder="dispatch"
-                               @oninput="args => _endpoint = args.Value?.ToString() ?? string.Empty" />
+                               @oninput="args => _hook.Endpoint = args.Value?.ToString() ?? string.Empty" />
                     </ChildContent>
                     <Hint>
                         A name declared under <code class="a-mono">webhooks.endpoints</code>, not a URL — the
@@ -181,17 +179,17 @@ else
                     </Hint>
                 </Field>
                 break;
-            case Email:
+            case HookBuilder.Email:
                 <div class="a-field-row">
                     <Field Label="Template" For="hook-template">
-                        <input class="a-input a-mono" id="hook-template" value="@_template" autocomplete="off"
+                        <input class="a-input a-mono" id="hook-template" value="@_hook.Template" autocomplete="off"
                                placeholder="work_order_completed"
-                               @oninput="args => _template = args.Value?.ToString() ?? string.Empty" />
+                               @oninput="args => _hook.Template = args.Value?.ToString() ?? string.Empty" />
                     </Field>
                     <Field Label="To" For="hook-to">
-                        <input class="a-input a-mono" id="hook-to" value="@_to" autocomplete="off"
+                        <input class="a-input a-mono" id="hook-to" value="@_hook.To" autocomplete="off"
                                placeholder="{{new.contact_email}}"
-                               @oninput="args => _to = args.Value?.ToString() ?? string.Empty" />
+                               @oninput="args => _hook.To = args.Value?.ToString() ?? string.Empty" />
                     </Field>
                 </div>
                 break;
@@ -202,275 +200,4 @@ else
                     @onclick="AddAsync">Add the hook</button>
         </div>
     </div>
-}
-
-@code {
-    private const string Reject = "reject";
-    private const string Mutate = "mutate";
-    private const string Webhook = "webhook";
-    private const string Email = "email";
-
-    /// <summary>
-    /// How one hook is written for a person to read.
-    /// </summary>
-    /// <remarks>
-    /// <b>Both options earn their place, and the encoder is the one that was missing.</b> A bare
-    /// <c>ToJsonString()</c> takes the default encoder, which escapes anything that could be dangerous in
-    /// HTML — so a CEL condition reached this tab as
-    /// <c>old.status == \u0027completed\u0027 \u0026\u0026 …</c> and was rendered exactly like that.
-    /// It is the defect <c>WorkingCopy</c> documents at length for the document as a whole, arriving one
-    /// re-serialisation later. Safe because <c>CodeBlock</c> HTML-encodes before it highlights.
-    /// Indented because one long line is what pushed this row wider than a phone.
-    /// </remarks>
-    private static readonly JsonSerializerOptions _readable = new()
-    {
-        WriteIndented = true,
-        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
-
-    private static readonly string[] _points =
-        ["beforeCreate", "beforeUpdate", "beforeDelete", "afterCreate", "afterUpdate", "afterDelete"];
-
-    private static readonly string[] _beforeKinds = [Reject, Mutate];
-    private static readonly string[] _deleteKinds = [Reject];
-    private static readonly string[] _afterKinds = [Webhook, Email];
-
-    private string _point = _points[0];
-    private string _kind = Reject;
-    private string _condition = string.Empty;
-    private string _reject = string.Empty;
-    private string _mutateField = string.Empty;
-    private string _mutateValue = string.Empty;
-    private string _endpoint = string.Empty;
-    private string _template = string.Empty;
-    private string _to = string.Empty;
-    private string? _refusal;
-
-    /// <summary>The hooks, as the descriptor declares them: point to the raw JSON of its list.</summary>
-    [Parameter, EditorRequired]
-    public IReadOnlyList<KeyValuePair<string, string>> Hooks { get; set; } = [];
-
-    /// <summary>Whether this operator has a working copy to edit at all.</summary>
-    [Parameter]
-    public bool Editable { get; set; }
-
-    /// <summary>
-    /// What the working copy changed, cascaded by the entity screen — a hook only it declares is badged
-    /// <c>new</c>, because it does not run yet and must not read as if it did.
-    /// </summary>
-    [CascadingParameter]
-    private StagedView Staged { get; set; } = StagedView.None;
-
-    /// <summary>
-    /// What this build refuses that belongs on this tab.
-    /// </summary>
-    /// <remarks>
-    /// <b>Read from <c>ManagementCapabilities.Refused</c>, not listed in the markup.</b> Three of the five
-    /// action types are declared by the schema and never run — and the tab said nothing about any of them,
-    /// so the absence of a control for <c>entity.update</c> read as an oversight rather than a refusal.
-    /// <c>FieldEditor</c> already does exactly this for its own half; this is the entity half the audit
-    /// found nobody consuming.
-    /// </remarks>
-    [Parameter]
-    public IReadOnlyList<ManagementRefusedFeature> Refused { get; set; } = [];
-
-    /// <summary>Raised with the hook to declare.</summary>
-    [Parameter]
-    public EventCallback<NewHook> OnAdd { get; set; }
-
-    /// <summary>Raised with the hook to remove.</summary>
-    [Parameter]
-    public EventCallback<HookAt> OnRemove { get; set; }
-
-    /// <summary>A hook this editor built, in the schema's own shape.</summary>
-    /// <param name="Point">The hook point it belongs to.</param>
-    /// <param name="Condition">The CEL guard, or empty for a hook that always runs.</param>
-    /// <param name="Action">The action object.</param>
-    public sealed record NewHook(string Point, string? Condition, JsonObject Action);
-
-    /// <summary>One declared hook, by where it sits.</summary>
-    /// <param name="Point">The hook point.</param>
-    /// <param name="Position">Its position within that point's list.</param>
-    public sealed record HookAt(string Point, int Position);
-
-    /// <summary>The refusals that are about an action type, which is the only kind this tab can show.</summary>
-    /// <remarks>
-    /// Matched against the three discriminators rather than a prefix, because a refusal's slot is the
-    /// feature's own name for an action — <c>entity.update</c>, not <c>action.entity.update</c>.
-    /// </remarks>
-    private IReadOnlyList<ManagementRefusedFeature> ActionRefusals =>
-        [.. Refused.Where(refusal =>
-            refusal.Slot is "function" or "http.call" or "entity.update")];
-
-    /// <summary>
-    /// The action kinds this point admits.
-    /// </summary>
-    /// <remarks>
-    /// <b>Three answers, not two, and the third does not come from the schema.</b> <c>$defs/beforeHookList</c>
-    /// is one definition for all three before-points, so the schema alone would offer <c>mutate</c> at
-    /// <c>beforeDelete</c> — which <c>BeforeHookCompiler</c> refuses outright, because the row is being
-    /// removed and a patch against it is a slot that compiles cleanly and is then discarded. Reading the
-    /// split off <c>IsBefore</c> alone therefore let the editor compose a descriptor the apply refuses, which
-    /// is the trap <see cref="Choose"/> exists to close one case earlier.
-    /// </remarks>
-    private string[] Kinds => _point switch
-    {
-        "beforeDelete" => _deleteKinds,
-        _ => IsBefore(_point) ? _beforeKinds : _afterKinds,
-    };
-
-    private static bool IsBefore(string point)
-        => point.StartsWith("before", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// The row images a condition at this point may name.
-    /// </summary>
-    /// <remarks>
-    /// <b>Guidance that named both at every point was guidance to write a refused descriptor.</b> A create
-    /// has no pre-image and a delete produces no post-image, so <c>old.</c> under a <c>beforeCreate</c> and
-    /// <c>new.</c> under a <c>beforeDelete</c> are references the phase cannot answer — and
-    /// <c>BeforeHookCompiler</c> refuses both, because an unanswerable reference resolves to null and the
-    /// null rule collapses every comparison against it, including <c>!=</c>. A condition written as "every
-    /// row except…" would then fire for every row.
-    /// </remarks>
-    private string Images => _point switch
-    {
-        "beforeCreate" => "<code class=\"a-mono\">new</code>",
-        "beforeDelete" => "<code class=\"a-mono\">old</code>",
-        _ => "<code class=\"a-mono\">new</code>, <code class=\"a-mono\">old</code>",
-    };
-
-    /// <summary>A condition that is valid at this point, for the placeholder.</summary>
-    private string Example => _point switch
-    {
-        "beforeCreate" => "new.priority == 'high'",
-        "beforeDelete" => "old.status == 'completed'",
-        _ => "new.status == 'completed'",
-    };
-
-    /// <summary>
-    /// Switches the point, and the action kind with it when the current one no longer fits.
-    /// </summary>
-    /// <remarks>
-    /// Moving from <c>afterCreate</c> to <c>beforeCreate</c> with <c>webhook</c> still selected would leave
-    /// the editor holding a descriptor the apply refuses — a before-hook may not touch the network — and the
-    /// refusal would name a choice the operator never made.
-    /// </remarks>
-    private void Choose(string point)
-    {
-        _point = point;
-        _refusal = null;
-
-        if (!Kinds.Contains(_kind))
-        {
-            _kind = Kinds[0];
-        }
-    }
-
-    /// <summary>
-    /// The hooks declared at one point, each as its own JSON.
-    /// </summary>
-    /// <remarks>
-    /// Parsed here rather than upstream so the tab keeps taking the one shape both the applied descriptor
-    /// and the working copy are already read in. A point whose value is not an array renders as nothing
-    /// rather than throwing: the descriptor reaching this screen has been applied, but the working copy may
-    /// have been imported a moment ago and this tab is not the authority that refuses it.
-    /// </remarks>
-    private static List<string> Declared(string listJson)
-    {
-        try
-        {
-            var parsed = JsonNode.Parse(listJson);
-            return parsed is JsonArray list
-                ? [.. list.Select(hook => hook?.ToJsonString(_readable) ?? "{}")]
-                : [];
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
-    }
-
-    /// <summary>
-    /// Declares the hook, or says why it cannot.
-    /// </summary>
-    /// <remarks>
-    /// One refusal per action kind, and each is the schema's own <c>required</c>. Everything past that —
-    /// whether the CEL compiles, whether the endpoint or the template exists — is the apply's, which answers
-    /// it against the whole descriptor rather than against this one control.
-    /// </remarks>
-    private async Task AddAsync()
-    {
-        var action = Build();
-        if (action is null)
-        {
-            return;
-        }
-
-        await OnAdd.InvokeAsync(new NewHook(_point, _condition, action));
-
-        _condition = string.Empty;
-        _reject = string.Empty;
-        _mutateField = string.Empty;
-        _mutateValue = string.Empty;
-        _endpoint = string.Empty;
-        _template = string.Empty;
-        _to = string.Empty;
-        _refusal = null;
-    }
-
-    /// <summary>The action in the schema's shape, or nothing with <c>_refusal</c> set.</summary>
-    private JsonObject? Build()
-    {
-        _refusal = null;
-
-        switch (_kind)
-        {
-            case Reject:
-                if (Blank(_reject))
-                {
-                    return Refuse("A reject carries the message the caller reads. Write one.");
-                }
-
-                return new JsonObject { [Reject] = _reject };
-
-            case Mutate:
-                if (Blank(_mutateField) || Blank(_mutateValue))
-                {
-                    return Refuse("A mutate patches at least one field. Name the field and what to set it to.");
-                }
-
-                return new JsonObject
-                {
-                    [Mutate] = new JsonObject
-                    {
-                        [_mutateField] = new JsonObject { ["$cel"] = _mutateValue },
-                    },
-                };
-
-            case Webhook:
-                if (Blank(_endpoint))
-                {
-                    return Refuse("A webhook names an endpoint declared under 'webhooks.endpoints'.");
-                }
-
-                return new JsonObject { ["type"] = Webhook, ["endpoint"] = _endpoint };
-
-            default:
-                if (Blank(_template) || Blank(_to))
-                {
-                    return Refuse("An email names a template and who it goes to.");
-                }
-
-                return new JsonObject { ["type"] = Email, ["template"] = _template, ["to"] = _to };
-        }
-    }
-
-    private JsonObject? Refuse(string reason)
-    {
-        _refusal = reason;
-        return null;
-    }
-
-    private static bool Blank(string value) => string.IsNullOrWhiteSpace(value);
 }
