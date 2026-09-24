@@ -81,10 +81,7 @@ public class AdminSessionTests
     [Fact]
     public async Task An_unloaded_copy_is_taken_from_the_applied_descriptor()
     {
-        var management = Management();
-        var copy = new WorkingCopy();
-
-        await Session(management).EnsureLoadedAsync(copy, Ct);
+        var copy = await Session(Management()).WorkingCopyAsync(Ct);
 
         copy.Loaded.ShouldBeTrue();
         copy.Revision.ShouldBe(3);

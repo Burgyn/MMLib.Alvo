@@ -169,8 +169,7 @@
     {
         try
         {
-            Copy = await Session.CopyAsync(CancellationToken.None);
-            await Session.EnsureLoadedAsync(Copy, CancellationToken.None);
+            Copy = await Session.WorkingCopyAsync(CancellationToken.None);
         }
         catch (Exception exception)
         {
