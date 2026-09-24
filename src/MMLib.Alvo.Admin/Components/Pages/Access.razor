@@ -48,108 +48,14 @@
             {
                 @foreach (var person in _people.Users)
                 {
-                    @* A stable id per person, so a row can be addressed by who it is rather than by
-                       where it sits in a list that reorders. *@
-                    <ListRow id="@($"person-{person.Id.Value}")" class="a-listrow--roomy a-listrow--wrap a-listrow--inline">
-                        <span class="a-grow a-grow--wide">
-                            <span class="a-name">@person.Email</span>
-                            <span class="a-meta">
-                                @(person.RoleNames.Count == 0 ? "no roles" : string.Join(", ", person.RoleNames)) ·
-                                @(person.Tenant is { } tenant ? $"tenant {tenant.Value}" : "no tenant")
-                                @if (person.IsDisabled)
-                                {
-                                    <text> · disabled</text>
-                                }
-                            </span>
-                        </span>
-
-                        <div class="a-row a-row--gap-2 a-row--wrap">
-                            <button type="button" class="a-btn a-btn--ghost a-btn--sm"
-                                    id="@($"change-{person.Id.Value}")"
-                                    @onclick="() => _editing = _editing == person.Id ? null : person.Id">
-                                @(_editing == person.Id ? "Close" : "Change")
-                            </button>
-                        </div>
-
-                        @if (_editing == person.Id)
-                        {
-                            var self = person.Id == _self;
-                            <div class="a-stack a-stack--gap-4 a-listrow__under">
-                                <Field Label="Roles" LabelId="@($"roles-{person.Id.Value}")" class="a-field--spaced">
-                                    <ChildContent>
-                                        <ChipGroup TValue="string" Items="_roles" Selected="person.RoleNames" Multiple="true"
-                                                   aria-labelledby="@($"roles-{person.Id.Value}")"
-                                                   SelectedChanged="roles => SetRolesAsync(person, roles)" />
-                                    </ChildContent>
-                                    <Hint>
-                                        @if (_roles.Count == 0)
-                                        {
-                                            <text>
-                                                This descriptor declares no roles in <code class="a-mono">auth.roles</code>.
-                                                A role nothing declares is never minted, so assigning one would do nothing.
-                                            </text>
-                                        }
-                                        else
-                                        {
-                                            <text>A highlighted role is assigned. Press one to change it.</text>
-                                        }
-                                    </Hint>
-                                </Field>
-
-                                <Field Label="Tenant" For="@(self ? null : $"tenant-{person.Id.Value}")" class="a-field--spaced">
-                                    @*
-                                        The operator's own row offers no Grant and no Remove. The core refuses a
-                                        person granting themselves a tenant (§3.7 U3.2), and a control whose only
-                                        outcome is that refusal — shown at the top of the page, far from the
-                                        button — is worse than the sentence that says who can. Remove is allowed
-                                        by the core; it is hidden with Grant so the row carries no tenant control.
-                                    *@
-                                    @if (self)
-                                    {
-                                        <span class="@(person.Tenant is null ? "a-value" : "a-mono a-value")">
-                                            @(person.Tenant?.Value.ToString() ?? "No tenant")
-                                        </span>
-                                        <span class="a-hint" data-testid="tenant-self">
-                                            You cannot grant yourself a tenant — another administrator can.
-                                        </span>
-                                    }
-                                    else
-                                    {
-                                        <div class="a-row a-row--gap-2">
-                                            <input class="a-input a-input--grow a-mono" id="@($"tenant-{person.Id.Value}")"
-                                                   value="@(person.Tenant?.Value.ToString() ?? string.Empty)"
-                                                   autocomplete="off" spellcheck="false"
-                                                   @oninput="args => _tenantDraft = args.Value?.ToString() ?? string.Empty" />
-                                            <button type="button" class="a-btn a-btn--sm"
-                                                    id="@($"grant-tenant-{person.Id.Value}")"
-                                                    @onclick="() => SetTenantAsync(person)">Grant</button>
-                                            <button type="button" class="a-btn a-btn--ghost a-btn--sm"
-                                                    id="@($"clear-tenant-{person.Id.Value}")"
-                                                    @onclick="() => ClearTenantAsync(person)">Remove</button>
-                                        </div>
-                                        <span class="a-hint">
-                                            A tenant id (a uuid). One tenant, not a set: a tenant-scoped entity
-                                            refuses a person with none before any rule runs.
-                                        </span>
-                                    }
-                                </Field>
-
-                                <div class="a-row a-row--wrap a-row--ruled">
-                                    <button type="button" class="a-btn a-btn--sm"
-                                            id="@($"issue-token-{person.Id.Value}")"
-                                            @onclick="() => IssueTokenAsync(person)">
-                                        Issue a credential token
-                                    </button>
-                                    <span class="a-spacer"></span>
-                                    <button type="button" class="a-btn a-btn--danger a-btn--sm"
-                                            id="@($"disable-{person.Id.Value}")"
-                                            @onclick="() => SetDisabledAsync(person, !person.IsDisabled)">
-                                        @(person.IsDisabled ? "Let them back in" : "Disable")
-                                    </button>
-                                </div>
-                            </div>
-                        }
-                    </ListRow>
+                    <PersonRow @key="person.Id" Person="person" Roles="_roles" IsSelf="person.Id == _self"
+                               Expanded="_editing == person.Id"
+                               OnToggle="() => _editing = _editing == person.Id ? null : person.Id"
+                               OnSetRoles="roles => SetRolesAsync(person, roles)"
+                               OnSetTenant="draft => SetTenantAsync(person, draft)"
+                               OnClearTenant="() => ClearTenantAsync(person)"
+                               OnIssueToken="() => IssueTokenAsync(person)"
+                               OnSetDisabled="disabled => SetDisabledAsync(person, disabled)" />
                 }
 
                 <div class="a-panel__foot">
@@ -225,7 +131,6 @@
     private AlvoCredentialToken? _token;
     private AdminProblem? _problem;
     private string _tokenFor = string.Empty;
-    private string _tenantDraft = string.Empty;
     private string _newEmail = string.Empty;
     private UserId? _editing;
     private UserId? _self;
@@ -255,9 +160,9 @@
     private Task SetRolesAsync(AlvoUser person, IReadOnlyList<string> roles)
         => WriteAsync(() => Gateway.SetRolesAsync(person.Id, roles, CancellationToken.None));
 
-    private async Task SetTenantAsync(AlvoUser person)
+    private async Task SetTenantAsync(AlvoUser person, string draft)
     {
-        if (!TenantId.TryParse(_tenantDraft, null, out var tenant))
+        if (!TenantId.TryParse(draft, null, out var tenant))
         {
             _problem = AdminProblem.From(new ManagementRequestException("That is not a tenant id."))! with
             {

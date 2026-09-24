@@ -1,0 +1,152 @@
+﻿@*
+    One person on the Access screen: who they are, and — opened — their roles, their tenant, a credential
+    token and whether they may sign in (docs/architecture/admin-dashboard-review.md, F-13).
+
+    Every change is raised to the page, which writes it through the gateway and reads the list again; the
+    row holds only the tenant id being typed, which belongs to this row and no other.
+*@
+@* A stable id per person, so a row can be addressed by who it is rather than by where it sits in a list
+   that reorders. *@
+<ListRow id="@($"person-{Person.Id.Value}")" class="a-listrow--roomy a-listrow--wrap a-listrow--inline">
+    <span class="a-grow a-grow--wide">
+        <span class="a-name">@Person.Email</span>
+        <span class="a-meta">
+            @(Person.RoleNames.Count == 0 ? "no roles" : string.Join(", ", Person.RoleNames)) ·
+            @(Person.Tenant is { } tenant ? $"tenant {tenant.Value}" : "no tenant")
+            @if (Person.IsDisabled)
+            {
+                <text> · disabled</text>
+            }
+        </span>
+    </span>
+
+    <div class="a-row a-row--gap-2 a-row--wrap">
+        <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                id="@($"change-{Person.Id.Value}")"
+                @onclick="OnToggle">
+            @(Expanded ? "Close" : "Change")
+        </button>
+    </div>
+
+    @if (Expanded)
+    {
+        <div class="a-stack a-stack--gap-4 a-listrow__under">
+            <Field Label="Roles" LabelId="@($"roles-{Person.Id.Value}")" class="a-field--spaced">
+                <ChildContent>
+                    <ChipGroup TValue="string" Items="Roles" Selected="Person.RoleNames" Multiple="true"
+                               aria-labelledby="@($"roles-{Person.Id.Value}")"
+                               SelectedChanged="OnSetRoles" />
+                </ChildContent>
+                <Hint>
+                    @if (Roles.Count == 0)
+                    {
+                        <text>
+                            This descriptor declares no roles in <code class="a-mono">auth.roles</code>.
+                            A role nothing declares is never minted, so assigning one would do nothing.
+                        </text>
+                    }
+                    else
+                    {
+                        <text>A highlighted role is assigned. Press one to change it.</text>
+                    }
+                </Hint>
+            </Field>
+
+            <Field Label="Tenant" For="@(IsSelf ? null : $"tenant-{Person.Id.Value}")" class="a-field--spaced">
+                @*
+                    The operator's own row offers no Grant and no Remove. The core refuses a
+                    person granting themselves a tenant (§3.7 U3.2), and a control whose only
+                    outcome is that refusal — shown at the top of the page, far from the
+                    button — is worse than the sentence that says who can. Remove is allowed
+                    by the core; it is hidden with Grant so the row carries no tenant control.
+                *@
+                @if (IsSelf)
+                {
+                    <span class="@(Person.Tenant is null ? "a-value" : "a-mono a-value")">
+                        @(Person.Tenant?.Value.ToString() ?? "No tenant")
+                    </span>
+                    <span class="a-hint" data-testid="tenant-self">
+                        You cannot grant yourself a tenant — another administrator can.
+                    </span>
+                }
+                else
+                {
+                    <div class="a-row a-row--gap-2">
+                        <input class="a-input a-input--grow a-mono" id="@($"tenant-{Person.Id.Value}")"
+                               value="@(Person.Tenant?.Value.ToString() ?? string.Empty)"
+                               autocomplete="off" spellcheck="false"
+                               @oninput="args => _tenantDraft = args.Value?.ToString() ?? string.Empty" />
+                        <button type="button" class="a-btn a-btn--sm"
+                                id="@($"grant-tenant-{Person.Id.Value}")"
+                                @onclick="() => OnSetTenant.InvokeAsync(_tenantDraft)">Grant</button>
+                        <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                                id="@($"clear-tenant-{Person.Id.Value}")"
+                                @onclick="OnClearTenant">Remove</button>
+                    </div>
+                    <span class="a-hint">
+                        A tenant id (a uuid). One tenant, not a set: a tenant-scoped entity
+                        refuses a person with none before any rule runs.
+                    </span>
+                }
+            </Field>
+
+            <div class="a-row a-row--wrap a-row--ruled">
+                <button type="button" class="a-btn a-btn--sm"
+                        id="@($"issue-token-{Person.Id.Value}")"
+                        @onclick="OnIssueToken">
+                    Issue a credential token
+                </button>
+                <span class="a-spacer"></span>
+                <button type="button" class="a-btn a-btn--danger a-btn--sm"
+                        id="@($"disable-{Person.Id.Value}")"
+                        @onclick="() => OnSetDisabled.InvokeAsync(!Person.IsDisabled)">
+                    @(Person.IsDisabled ? "Let them back in" : "Disable")
+                </button>
+            </div>
+        </div>
+    }
+</ListRow>
+
+@code {
+    private string _tenantDraft = string.Empty;
+
+    /// <summary>The person this row is about.</summary>
+    [Parameter, EditorRequired]
+    public AlvoUser Person { get; set; } = default!;
+
+    /// <summary>The roles the descriptor declares, which are the only ones an assignment can name.</summary>
+    [Parameter]
+    public IReadOnlyList<string> Roles { get; set; } = [];
+
+    /// <summary>Whether this is the signed-in operator's own row, which offers no tenant control.</summary>
+    [Parameter]
+    public bool IsSelf { get; set; }
+
+    /// <summary>Whether the row is open on its controls.</summary>
+    [Parameter]
+    public bool Expanded { get; set; }
+
+    /// <summary>Raised by Change and Close.</summary>
+    [Parameter]
+    public EventCallback OnToggle { get; set; }
+
+    /// <summary>Raised with the roles the person should hold.</summary>
+    [Parameter]
+    public EventCallback<IReadOnlyList<string>> OnSetRoles { get; set; }
+
+    /// <summary>Raised with the tenant id as typed; the page parses it and says so when it is not one.</summary>
+    [Parameter]
+    public EventCallback<string> OnSetTenant { get; set; }
+
+    /// <summary>Raised to remove the person's tenant.</summary>
+    [Parameter]
+    public EventCallback OnClearTenant { get; set; }
+
+    /// <summary>Raised to issue the person a single-use credential token.</summary>
+    [Parameter]
+    public EventCallback OnIssueToken { get; set; }
+
+    /// <summary>Raised with whether the person should be disabled.</summary>
+    [Parameter]
+    public EventCallback<bool> OnSetDisabled { get; set; }
+}

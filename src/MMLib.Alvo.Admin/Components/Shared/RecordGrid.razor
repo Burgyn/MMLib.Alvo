@@ -1,0 +1,208 @@
+﻿@*
+    One page of records: a table on a desktop, a card per row on a phone, and the pager under both.
+
+    Out of the Data screen (docs/architecture/admin-dashboard-review.md, F-13), which keeps what it
+    reads and when; this draws a page it is handed. Deliberately not a generic grid: there is one grid,
+    and the review rejects generalising it before a second one exists.
+*@
+<div class="a-grid-wrap a-only-desktop-block">
+    <table class="a-grid">
+        <thead>
+            <tr>
+                @foreach (var column in Scope.Columns)
+                {
+                    <th class="@(IsNumeric(column) ? "a-num" : null)" title="@column.Name"
+                        aria-sort="@AriaSort(column)">
+                        @if (GridQuery.Sortable(column, Scope.Masks))
+                        {
+                            <button type="button" class="a-grid__sort" @onclick="() => OnSort.InvokeAsync(column)">
+                                @GridColumns.Header(column)<span class="a-grid__arrow" aria-hidden="true">@Arrow(column)</span>
+                            </button>
+                        }
+                        else
+                        {
+                            @GridColumns.Header(column)
+                        }
+                    </th>
+                }
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @*
+                The whole row opens the record, because that is what a reader reaching for a
+                row means; the Edit button stays as the same action for the keyboard, which a
+                clickable row alone does not give — a <tr> is not a control.
+            *@
+            @foreach (var row in Scope.Page.Items)
+            {
+                <tr class="a-grid__row" @onclick="() => OnOpen.InvokeAsync(row)">
+                    @foreach (var column in Scope.Columns)
+                    {
+                        <td class="@CellClass(column, row)">@Value(column, row)</td>
+                    }
+                    <td class="a-cell--actions">
+                        <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                                @onclick="() => OnOpen.InvokeAsync(row)" @onclick:stopPropagation="true">Edit</button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@*
+    The 375 px substitute for the table above, which the stylesheet hides at that width.
+    Both render the same rows from the same page — this is a second *layout*, never a second
+    query, and never a second idea of which rows exist.
+*@
+<div class="a-grid-wrap a-only-mobile-block">
+    @foreach (var row in Scope.Page.Items)
+    {
+        <div class="a-row-card" data-testid="row-card">
+            <div class="a-row-card__head">
+                <span class="a-row-card__title">@CardTitle(row)</span>
+                <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                        @onclick="() => OnOpen.InvokeAsync(row)">Edit</button>
+            </div>
+            @*
+                Label above value for every column the head does not already carry. The
+                label field is the card's title, so repeating it underneath would be the
+                same value twice with one of them labelled.
+            *@
+            <dl class="a-row-card__meta">
+                @foreach (var column in Scope.Columns.Where(column => Scope.Label?.Covers(column.Name) != true))
+                {
+                    <div class="a-row-card__pair">
+                        <dt title="@column.Name">@GridColumns.Header(column)</dt>
+                        <dd>@Value(column, row)</dd>
+                    </div>
+                }
+            </dl>
+        </div>
+    }
+</div>
+
+<div class="a-row">
+    @*
+        The count is what a reader needs; how the paging works is a property of the
+        product, not of this screen's data, and at body weight it was the loudest text
+        under the list. It is a title on the count now.
+    *@
+    <span class="a-note"
+          title="Keyset paging over an opaque cursor, stable under concurrent writes.">
+        showing @Scope.Page.Items.Count@(Scope.Page.TotalCount is { } total ? $" of {total}" : string.Empty)
+    </span>
+    <span class="a-spacer"></span>
+    @if (Scope.HasPrevious)
+    {
+        <button type="button" class="a-btn a-btn--sm" @onclick="OnPrevious">Previous</button>
+    }
+    @if (Scope.Page.NextCursor is { Length: > 0 })
+    {
+        <button type="button" class="a-btn a-btn--sm" @onclick="OnNext">Next</button>
+    }
+</div>
+@code {
+    /// <summary>What to draw; see <see cref="RecordGridScope"/>.</summary>
+    [CascadingParameter]
+    private RecordGridScope Scope { get; set; } = default!;
+
+    /// <summary>Raised with the row the operator opened.</summary>
+    [Parameter]
+    public EventCallback<AlvoRecord> OnOpen { get; set; }
+
+    /// <summary>Raised with the column whose header was pressed.</summary>
+    [Parameter]
+    public EventCallback<FieldSchema> OnSort { get; set; }
+
+    /// <summary>Raised to read the next page.</summary>
+    [Parameter]
+    public EventCallback OnNext { get; set; }
+
+    /// <summary>Raised to read the previous page.</summary>
+    [Parameter]
+    public EventCallback OnPrevious { get; set; }
+
+    private static bool IsNumeric(FieldSchema column)
+        => column.Type is FieldType.Integer or FieldType.Decimal;
+
+    private string? AriaSort(FieldSchema column)
+        => Scope.Sort is { } sort && string.Equals(sort.Field, column.Name, StringComparison.Ordinal)
+            ? sort.Descending ? "descending" : "ascending"
+            : null;
+
+    private string Arrow(FieldSchema column) => AriaSort(column) switch
+    {
+        "ascending" => "↑",
+        "descending" => "↓",
+        _ => string.Empty,
+    };
+
+    /// <summary>A cell's class: numbers right-aligned, and short values kept on one line.</summary>
+    private string? CellClass(FieldSchema column, AlvoRecord row)
+    {
+        var classes = new List<string>(2);
+        if (IsNumeric(column))
+        {
+            classes.Add("a-num");
+        }
+
+        if (Shown(column, row).Short)
+        {
+            classes.Add("a-cell--short");
+        }
+
+        return classes.Count == 0 ? null : string.Join(' ', classes);
+    }
+
+    /// <summary>What a reference cell reads as: its label when there is one, else the short id.</summary>
+    private GridCell Shown(FieldSchema column, AlvoRecord row)
+    {
+        var value = row[column.Name];
+        return column.Reference is not null && RefLabels.IdOf(value) is { } id && LabelOf(column, id) is { } label
+            ? GridCell.Plain(label)
+            : GridCell.Of(column, value);
+    }
+
+    private string? LabelOf(FieldSchema column, Guid id)
+        => column.Reference is { } reference
+            && Scope.Labels.TryGetValue(reference.TargetEntity, out var labels)
+            && labels.TryGetValue(id, out var label)
+                ? label
+                : null;
+
+    private RenderFragment Value(FieldSchema column, AlvoRecord row)
+        => column.Reference is not null && RefLabels.IdOf(row[column.Name]) is { } id
+            ? Reference(column, id)
+            : Drawn(GridCell.Of(column, row[column.Name]));
+
+    /// <summary>
+    /// A reference cell: the target row's label, linked to that row on its own Data screen.
+    /// </summary>
+    /// <remarks>
+    /// The link stops the click there, so following it does not also open the row it sits in.
+    /// </remarks>
+    private RenderFragment Reference(FieldSchema column, Guid id)
+    {
+        var href = AdminPaths.Records(column.Reference!.TargetEntity, id);
+        var cell = LabelOf(column, id) is { } label ? GridCell.Plain(label) : GridCell.Identifier(id);
+        var style = cell.Kind == CellKind.Identifier ? "a-link a-ident" : cell.Short ? "a-link" : "a-link a-cell__clip";
+        return @<a class="@style" href="@href" title="@(cell.Title ?? id.ToString())" data-testid="ref-cell"
+                   @onclick:stopPropagation="true">@cell.Text</a>;
+    }
+
+    private static RenderFragment Drawn(GridCell cell) => cell.Kind switch
+    {
+        CellKind.Value => @<span class="a-badge a-badge--value">@cell.Text</span>,
+        CellKind.Flag => @<span role="img" aria-label="@cell.Title" title="@cell.Title">@cell.Text</span>,
+        CellKind.Identifier => @<span class="a-ident" title="@cell.Title">@cell.Text</span>,
+        CellKind.Text when !cell.Short => @<span class="a-cell__clip" title="@cell.Title">@cell.Text</span>,
+        _ => @<text>@cell.Text</text>,
+    };
+
+    /// <summary>A phone card's title: the row's label, else its short id.</summary>
+    private RenderFragment CardTitle(AlvoRecord row) => Scope.Label?.Of(row) is { } label
+        ? Drawn(GridCell.Plain(label))
+        : Drawn(GridCell.Of(new FieldSchema { Name = AlvoManagedColumns.Id, Type = FieldType.Uuid }, row[AlvoManagedColumns.Id]));
+}

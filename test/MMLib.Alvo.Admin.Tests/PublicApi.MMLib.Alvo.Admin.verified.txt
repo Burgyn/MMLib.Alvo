@@ -650,6 +650,32 @@ namespace MMLib.Alvo.Admin.Components.Shared
         public string Title { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
+    public class PersonRow : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public PersonRow() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Expanded { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsSelf { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnClearTenant { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnIssueToken { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<bool> OnSetDisabled { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<System.Collections.Generic.IReadOnlyList<string>> OnSetRoles { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> OnSetTenant { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnToggle { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MMLib.Alvo.AlvoUser Person { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<string> Roles { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
     public class PolicyVerdictView : Microsoft.AspNetCore.Components.ComponentBase
     {
         public PolicyVerdictView() { }
@@ -683,6 +709,19 @@ namespace MMLib.Alvo.Admin.Components.Shared
         public System.Collections.Generic.Dictionary<string, object?> Values { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
+    }
+    public class RecordGrid : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public RecordGrid() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnNext { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Data.AlvoRecord> OnOpen { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnPrevious { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Schema.FieldSchema> OnSort { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     public class RedirectToSignIn : Microsoft.AspNetCore.Components.ComponentBase
     {
