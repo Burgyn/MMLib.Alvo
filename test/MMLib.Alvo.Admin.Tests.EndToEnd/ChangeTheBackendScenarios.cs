@@ -59,7 +59,7 @@ public sealed class ChangeTheBackendScenarios(AdminWorld world) : IClassFixture<
 
         // --- the plan, then the apply
         await session.GoAsync("/changes");
-        await session.Button("Plan this change").ClickAsync();
+        await session.WaitForPlanAsync();
         await session.Page.GetByText("against the database").First.WaitForAsync();
 
         var plan = await session.Content.InnerTextAsync();

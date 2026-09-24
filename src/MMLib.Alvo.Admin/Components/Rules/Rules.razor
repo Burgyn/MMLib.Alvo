@@ -13,7 +13,9 @@
 
     @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_problem.Exception" />
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
     }
     else if (_schema is null)
     {
@@ -59,8 +61,8 @@
             <div class="a-split__aside">
                 <div class="a-card a-card--roomy">
                     <div>
-                        <span class="a-section-title">Simulate a policy</span>
-                        <p class="a-section-sub">
+                        <span class="a-section__title">Simulate a policy</span>
+                        <p class="a-section__sub">
                             Pick a caller and an operation; the verdict comes from the same rule engine the
                             Data API uses.
                         </p>
@@ -85,12 +87,14 @@
 
                     @if (_simulationProblem is not null)
                     {
-                        <ErrorPanel Problem="@_simulationProblem.Exception">
-                            <Actions>
-                                <button type="button" class="a-btn a-btn--sm" data-testid="simulate-retry"
-                                        @onclick="SimulateAsync">Try again</button>
-                            </Actions>
-                        </ErrorPanel>
+                        <CascadingValue Value="_simulationProblem">
+                            <ErrorPanel>
+                                <Actions>
+                                    <button type="button" class="a-btn a-btn--sm" data-testid="simulate-retry"
+                                            @onclick="SimulateAsync">Try again</button>
+                                </Actions>
+                            </ErrorPanel>
+                        </CascadingValue>
                     }
                     else if (_verdict is { } verdict)
                     {

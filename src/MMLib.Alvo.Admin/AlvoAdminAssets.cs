@@ -13,7 +13,7 @@
 /// </para>
 /// <para>
 /// The design system is CSS and the screens are Razor components, and neither is a type a consumer
-/// is meant to call — about forty component classes are technically <c>public</c> (the Razor SDK
+/// is meant to call — some sixty component classes are technically <c>public</c> (the Razor SDK
 /// gives every one of them that accessibility; see <c>Properties/AssemblyInfo.cs</c>), but
 /// <c>[EditorBrowsable(Never)]</c> on the whole namespace keeps them out of a consumer's
 /// IntelliSense and out of the contract this package keeps stable. This type, alongside

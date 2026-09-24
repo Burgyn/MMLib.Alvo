@@ -11,7 +11,9 @@
 
     @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_problem.Exception" Fix="@_problem.Fix" />
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
     }
     else if (_revisions is null)
     {
@@ -40,8 +42,8 @@
                 @if (_selected is null)
                 {
                     <div class="a-card">
-                        <span class="a-section-title">Pick a revision</span>
-                        <span class="a-section-sub">Its descriptor is shown here, exactly as it was applied.</span>
+                        <span class="a-section__title">Pick a revision</span>
+                        <span class="a-section__sub">Its descriptor is shown here, exactly as it was applied.</span>
                     </div>
                 }
                 else
@@ -49,13 +51,13 @@
                     <div class="a-card a-card--roomy">
                         <div class="a-row">
                             <span class="a-badge a-badge--accent a-badge--rev">r@(_selected.Version.Revision)</span>
-                            <span class="a-section-sub">@RevisionHistory.Title(_selected.Version)</span>
+                            <span class="a-section__sub">@RevisionHistory.Title(_selected.Version)</span>
                         </div>
 
                         @if (_selected.Version.Revision != _current)
                         {
                             <div>
-                                <p class="a-section-sub">
+                                <p class="a-section__sub">
                                     Rolling back does not rewrite history — it appends the reverse migration as a
                                     new revision at the top of the list, and this one stays where it is.
                                 </p>

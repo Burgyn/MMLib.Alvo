@@ -36,7 +36,7 @@ public sealed class AssistantScenarios(AssistantWorld world) : IClassFixture<Ass
         await session.Page.ClickAsync("[data-testid='assistant-review']");
         await session.Page.WaitForURLAsync("**/changes");
 
-        await session.Button("Plan this change").ClickAsync();
+        await session.WaitForPlanAsync();
         await session.Page.GetByText("against the database").First.WaitForAsync();
 
         /* The reason box renders with the plan, not before it — so this is asserted here rather than on

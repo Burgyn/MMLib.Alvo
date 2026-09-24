@@ -63,7 +63,7 @@ public sealed class OtherCircuitApplyScenarios(AdminWorld world) : IClassFixture
         await session.Page.WaitForURLAsync($"**/schema/{name}");
 
         await session.GoAsync("/changes");
-        await session.Page.GetByRole(AriaRole.Button, new() { Name = "Plan this change" }).ClickAsync();
+        await session.WaitForPlanAsync();
         await session.Page.GetByText("against the database").First.WaitForAsync();
         await session.Page.FillAsync("#apply-reason", $"Add {name}");
         await session.Page.GetByRole(AriaRole.Button, new() { Name = "Apply these changes" }).ClickAsync();

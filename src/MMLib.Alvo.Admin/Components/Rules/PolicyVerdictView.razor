@@ -16,9 +16,9 @@
     <Panel class="a-panel--accent a-verdict">
         <div class="a-row">
             <span class="a-badge a-badge--ok">policy resolved</span>
-            <span class="a-section-sub">@Operation on @Entity</span>
+            <span class="a-section__sub">@Operation on @Entity</span>
         </div>
-        <p class="a-section-sub a-then">
+        <p class="a-section__sub a-then">
             The engine found a rule for this operation and compiled it. <strong>That is not the same
             as "this caller will see rows"</strong> — the predicate below is handed to the query, and
             whether any row satisfies it is decided per row, in the database.
@@ -50,7 +50,7 @@ else
     <div class="a-field">
         <span class="a-label">USING — the read predicate</span>
         <pre class="a-code"><code>@read</code></pre>
-        <span class="a-section-sub">@FailureShape</span>
+        <span class="a-section__sub">@FailureShape</span>
     </div>
 }
 
@@ -59,7 +59,7 @@ else
     <div class="a-field">
         <span class="a-label">WITH CHECK — the write predicate</span>
         <pre class="a-code"><code>@write</code></pre>
-        <span class="a-section-sub">
+        <span class="a-section__sub">
             Evaluated over the candidate row. A write that fails it is refused; it does not silently
             write a different row.
         </span>
@@ -76,7 +76,7 @@ else
                 <span class="a-badge a-badge--warn a-mono">@hidden</span>
             }
         </div>
-        <span class="a-section-sub">Absent from every response, and nameable in no filter.</span>
+        <span class="a-section__sub">Absent from every response, and nameable in no filter.</span>
     </div>
 }
 
@@ -90,7 +90,7 @@ else
                 <span class="a-badge a-mono">@readOnly</span>
             }
         </div>
-        <span class="a-section-sub">Readable; a write naming one is refused.</span>
+        <span class="a-section__sub">Readable; a write naming one is refused.</span>
     </div>
 }
 

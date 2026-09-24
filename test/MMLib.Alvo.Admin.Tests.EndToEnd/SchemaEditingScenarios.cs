@@ -55,8 +55,6 @@ public sealed class SchemaEditingScenarios(AdminWorld world) : IClassFixture<Adm
         await session.Page.ClickAsync("[data-testid='field-save']");
         await session.PreviewPendingAsync();
 
-        await session.Button("Plan this change").ClickAsync();
-
         /* Not "N steps against the database": on SQLite a longer maxLength is no DDL at all, because
            TEXT carries no length — so the honest signal that the plan came back is the apply control
            appearing, whether or not the plan has steps in it. */
@@ -223,12 +221,12 @@ public sealed class IndexEditingScenarios(AdminWorld world) : IClassFixture<Admi
 
         await session.Page.CheckAsync("[data-testid='field-index']");
         await session.Page.ClickAsync("[data-testid='field-save']");
-        await session.PreviewPendingAsync();
 
-        /* And then for something *on* the preview. The URL moves before the screen behind it does, so
-           a read taken on the URL alone reads the entity page it just left — which is what this fact
-           did on its first run, and it reported a facet as missing that had been written correctly. */
-        await session.Page.Locator("button:has-text('Plan this change')").WaitForAsync();
+        /* And then for something *on* the preview, which PreviewPendingAsync waits for. The URL moves before
+           the screen behind it does, so a read taken on the URL alone reads the entity page it just left —
+           which is what this fact did on its first run, and it reported a facet as missing that had been
+           written correctly. */
+        await session.PreviewPendingAsync();
 
         /* The preview's diff, not the export screen: export serves the *applied* document, and this
            change has deliberately not been applied. */
@@ -282,13 +280,13 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.Locator("[data-testid='hook-row']").Nth(before).WaitForAsync();
 
         await session.GoAsync("/changes");
-        await session.Button("Plan this change").WaitForAsync();
+        await session.WaitForPlanAsync();
 
         var previewed = await session.Content.InnerTextAsync();
         previewed.ShouldContain("beforeUpdate");
         previewed.ShouldContain("cannot be reopened");
 
-        /* And then plan it, which is the half worth the wall-clock: the dry run puts the composed
+        /* And the plan, which is the half worth the wall-clock: the dry run puts the composed
            descriptor through the core's own validator, so a hook written in a shape the apply refuses
            fails here rather than on somebody's deployment. Without this the scenario only proves the
            editor wrote *something* into the document.
@@ -296,7 +294,6 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
            The apply control appearing is the signal the plan came back — this screen renders it only
            then — and the error panel being absent is the signal it came back clean. Both, because a refused
            descriptor leaves the error panel on a screen that still has everything else on it. */
-        await session.Button("Plan this change").ClickAsync();
         await session.Page.Locator("#apply-reason").WaitForAsync();
 
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
@@ -569,8 +566,10 @@ public sealed class RenameScenarios(AdminWorld world) : IClassFixture<AdminWorld
 
         await session.Page.WaitForURLAsync("**/schema/service_areas");
 
+        /* The plan or its refusal, whichever the arrival's dry run comes back with: work_orders still points
+           at `regions`, which the validator refuses, and this fact is about the diff, not the plan. */
         await session.GoAsync("/changes");
-        await session.Button("Plan this change").WaitForAsync();
+        await session.Page.GetByTestId("plan").Or(session.Page.GetByTestId("error-panel")).WaitForAsync();
 
         var previewed = await session.Content.InnerTextAsync();
         previewed.ShouldContain("service_areas");
@@ -597,7 +596,6 @@ public sealed class RenameScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.Page.FillAsync("#new-field-name", "contact_email");
         await session.Page.ClickAsync("[data-testid='field-save']");
         await session.PreviewPendingAsync();
-        await session.Page.Locator("button:has-text('Plan this change')").WaitForAsync();
 
         var previewed = await session.Page.Locator("main.a-content").InnerTextAsync();
         previewed.ShouldContain("contact_email");

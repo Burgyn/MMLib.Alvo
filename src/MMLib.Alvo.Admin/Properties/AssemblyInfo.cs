@@ -9,7 +9,7 @@
 // The screens themselves are a different case, and the approval baseline states it plainly rather
 // than letting the sentence above imply otherwise: the Razor SDK emits every component class as
 // public, and there is no per-component accessibility to set — a `.razor` file cannot declare one,
-// and a partial declaration that tried would conflict with the generated one. So roughly forty
+// and a partial declaration that tried would conflict with the generated one. So some sixty
 // screen, shell and design-system component types appear in PublicApi.MMLib.Alvo.Admin.verified.txt, and
 // they are public because of how Blazor compiles, not because anybody decided they were contract.
 // That is the same position every shipped Razor Class Library is in, Microsoft's own included.

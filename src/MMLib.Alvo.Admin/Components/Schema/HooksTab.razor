@@ -51,7 +51,7 @@ else
         <ListRow class="a-listrow--roomy a-listrow--stacked">
             <div class="a-row">
                 <span class="@($"a-badge {(HookBuilder.IsBefore(point.Key) ? "a-badge--warn" : "a-badge--accent")}")">@point.Key</span>
-                <span class="a-section-sub">
+                <span class="a-section__sub">
                     @(HookBuilder.IsBefore(point.Key)
                         ? "in the transaction · may refuse or change the row · no network"
                         : "after the commit · may leave the process")

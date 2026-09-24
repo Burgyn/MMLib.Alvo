@@ -11,14 +11,16 @@
 
     @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_problem.Exception" Fix="@_problem.Fix" />
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
     }
 
     @if (_token is { } token)
     {
         <Panel Padded="true" class="a-panel--accent">
-            <span class="a-section-title">Credential token for @_tokenFor</span>
-            <p class="a-section-sub">
+            <span class="a-section__title">Credential token for @_tokenFor</span>
+            <p class="a-section__sub">
                 Hand this over out of band — this build sends no email. It works once, until
                 @token.ExpiresAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture).
             </p>
@@ -59,8 +61,8 @@
                 }
 
                 <div class="a-panel__foot">
-                    <span class="a-section-title">Add a person</span>
-                    <p class="a-section-sub">
+                    <span class="a-section__title">Add a person</span>
+                    <p class="a-section__sub">
                         No password field, deliberately: a credential that travels as a value is readable by
                         whoever handles it. The account is created without one and you hand over a
                         single-use token.

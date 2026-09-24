@@ -101,14 +101,19 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     /// <remarks>
     /// Staging a field used to jump to Preview by itself, and a scenario waited for the URL. It stays on the
     /// entity now (design pass §4.1), so a scenario that wants the diff takes the bar there — and waits for the
-    /// plan control rather than the URL alone, because the URL moves before the screen behind it does.
+    /// plan rather than the URL alone, because the URL moves before the screen behind it does.
     /// </remarks>
     public async Task PreviewPendingAsync()
     {
         await Page.ClickAsync("[data-testid='pending-preview']").ConfigureAwait(false);
         await Page.WaitForURLAsync("**/changes").ConfigureAwait(false);
-        await Button("Plan this change").WaitForAsync().ConfigureAwait(false);
+        await WaitForPlanAsync().ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Waits for the plan Preview asks for on arrival — a dry run, so the screen runs it without a click.
+    /// </summary>
+    public Task WaitForPlanAsync() => Page.GetByTestId("plan").WaitForAsync();
 
     /// <summary>
     /// Opens one of an entity's tabs and waits for it to actually be the open one.

@@ -12,7 +12,9 @@
 
     @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_problem.Exception" Fix="@_problem.Fix" />
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
     }
 
     @if (!Copy.Loaded)
@@ -40,8 +42,13 @@
             </ChildContent>
         </Panel>
 
-        @if (_plan is null)
+        @if (_plan is null && (_busy || !RendererInfo.IsInteractive))
         {
+            <Skeleton />
+        }
+        else if (_plan is null)
+        {
+            @* Reached only when the plan on arrival was refused: the panel above says why, and this asks again. *@
             <Panel Padded="true" class="a-row">
                 <button type="button" class="a-btn a-btn--primary" disabled="@_busy" @onclick="PlanAsync">
                     Plan this change
@@ -54,7 +61,18 @@
         }
         else
         {
-            <Panel Title="@PlanTitle(_plan.Plan)">
+            <Panel Title="@PlanTitle(_plan.Plan)" data-testid="plan">
+                @*
+                    The plan is of the working copy as it stood when it was asked, and the copy can move under
+                    this page — the assistant's drawer composes into it from here, and so does a second tab of
+                    the same operator. Asking again is the way to a plan of what the diff above now shows.
+                *@
+                <Actions>
+                    <button type="button" class="a-btn a-btn--ghost a-btn--sm" disabled="@_busy"
+                            data-testid="replan" @onclick="PlanAsync">
+                        Plan again
+                    </button>
+                </Actions>
                 <Subtitle>
                     @(_plan.Plan.IsEmpty
                         ? "A rules-only or access-only edit changes no table. It is still an apply, and it still appends a revision."
@@ -128,8 +146,8 @@
     @if (_applied is { } result)
     {
         <Panel Padded="true" class="a-panel--accent">
-            <span class="a-section-title">Applied as revision @result.Revision</span>
-            <p class="a-section-sub">
+            <span class="a-section__title">Applied as revision @result.Revision</span>
+            <p class="a-section__sub">
                 @(result.Replayed
                     ? "This request repeated one that had already run — the revision it names was applied by the earlier one."
                     : "The migration ran and the revision was appended.")
@@ -174,6 +192,14 @@
         if (_reason.Length == 0 && Copy.SuggestedReason is { Length: > 0 } suggested)
         {
             _reason = suggested;
+        }
+
+        /* Planned on arrival: a dry run changes nothing, so a button in front of it was a click every apply
+           paid for nothing. Not while prerendering — that render is thrown away, and the plan asks the
+           database; the skeleton stands in until the interactive render asks. */
+        if (Copy.IsDirty && RendererInfo.IsInteractive)
+        {
+            await PlanAsync();
         }
     }
 

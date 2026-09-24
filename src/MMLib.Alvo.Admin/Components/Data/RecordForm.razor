@@ -23,7 +23,9 @@
 
         @if (_problem is not null)
         {
-            <ErrorPanel Problem="@_problem.Exception" Fix="@_problem.Fix" />
+            <CascadingValue Value="_problem">
+                <ErrorPanel />
+            </CascadingValue>
         }
 
         <div class="a-stack">
@@ -41,7 +43,7 @@
                             <span class="a-label__required" aria-hidden="true"> *</span>
                         }
                     </label>
-                    <span class="a-hint" id="@HintId(column)">
+                    <span class="a-hint" id="@HintId(column)" title="@column.FormatPattern">
                         <span class="a-ident">@column.Name · @TypeOf(column)</span>@Hint(column)
                     </span>
                     @Control(column)
@@ -61,7 +63,7 @@
         @if (_calculated.Count > 0)
         {
             <section class="a-readout" aria-labelledby="rf-calculated" data-testid="record-calculated">
-                <span class="a-section-title" id="rf-calculated">Calculated</span>
+                <span class="a-section__title" id="rf-calculated">Calculated</span>
                 <dl class="a-readout__list">
                     @foreach (var column in _calculated)
                     {
@@ -113,7 +115,7 @@
         return @<button type="button" id="@ControlId(column)"
                         class="@($"a-toggle{(on ? " a-toggle--on" : string.Empty)}")"
                         aria-describedby="@HintId(column)"
-                        @onclick="() => Toggle(column.Name)" aria-pressed="@on"></button>;
+                        @onclick="() => Toggle(column.Name)" aria-pressed="@(on ? "true" : "false")"></button>;
     }
 
     private RenderFragment Choice(FieldSchema column) => @<ChipGroup TValue="string" Items="@(column.EnumValues ?? [])"

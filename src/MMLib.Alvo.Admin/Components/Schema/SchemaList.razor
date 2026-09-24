@@ -18,7 +18,9 @@
 
     @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_problem.Exception" />
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
     }
 
     @*
@@ -34,36 +36,42 @@
                 database until you preview and apply.
             </Subtitle>
             <ChildContent>
-                @if (_refusal is { Length: > 0 })
-                {
-                    <ErrorPanel Title="That entity cannot be added" Fix="@_refusal" />
-                }
+                @* Spaced as the field sheet is: the fields sat flush, and the constraints read as part of the
+                   name's hint. *@
+                <div class="a-stack">
+                    @if (_refusal is { Length: > 0 })
+                    {
+                        <ErrorPanel Title="That entity cannot be added" Fix="@_refusal" />
+                    }
 
-                <Field Label="Name" For="new-entity-name">
-                    <input class="a-input" id="new-entity-name" value="@_name" placeholder="e.g. invoices" @ref="_nameInput"
-                           @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
-                    <span class="a-hint" title="@DescriptorNames.Member">@DescriptorNames.Hint</span>
-                    @* Opened from the palette or the header button, the form is filled from the keyboard. *@
-                    @FocusOnRender.On(() => _nameInput)
-                </Field>
+                    <Field Label="Name" For="new-entity-name">
+                        <input class="a-input" id="new-entity-name" value="@_name" placeholder="e.g. invoices" @ref="_nameInput"
+                               @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
+                        <span class="a-hint" title="@DescriptorNames.Member">@DescriptorNames.Hint</span>
+                        @* Opened from the palette or the header button, the form is filled from the keyboard. *@
+                        @FocusOnRender.On(() => _nameInput)
+                    </Field>
 
-                <Field Label="Constraints">
-                    <div class="a-check-row">
-                        <label class="a-check">
-                            <input type="checkbox" checked="@_scoped" @onchange="args => _scoped = args.Value is true" />
-                            <span>tenant-scoped</span>
-                        </label>
-                        <label class="a-check">
-                            <input type="checkbox" checked="@_audited" @onchange="args => _audited = args.Value is true" />
-                            <span>audited</span>
-                        </label>
-                    </div>
-                </Field>
-                <span class="a-hint">
-                    Scoped means every row belongs to a tenant and a caller with none is refused with 403.
-                    Audited adds the four stamp columns and a version, which is what makes a conditional
-                    write possible.
-                </span>
+                    <Field Label="Constraints">
+                        <ChildContent>
+                            <div class="a-check-row">
+                                <label class="a-check">
+                                    <input type="checkbox" checked="@_scoped" @onchange="args => _scoped = args.Value is true" />
+                                    <span>tenant-scoped</span>
+                                </label>
+                                <label class="a-check">
+                                    <input type="checkbox" checked="@_audited" @onchange="args => _audited = args.Value is true" />
+                                    <span>audited</span>
+                                </label>
+                            </div>
+                        </ChildContent>
+                        <Hint>
+                            Scoped means every row belongs to a tenant and a caller with none is refused with 403.
+                            Audited adds the four stamp columns and a version, which is what makes a conditional
+                            write possible.
+                        </Hint>
+                    </Field>
+                </div>
 
                 <div class="a-row a-row--gap-2 a-panel__actions">
                     <button type="button" class="a-btn a-btn--primary" @onclick="AddEntity">

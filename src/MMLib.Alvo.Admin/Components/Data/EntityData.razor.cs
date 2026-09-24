@@ -245,6 +245,11 @@ public partial class EntityData
             {
                 Refused(exception);
             }
+            else
+            {
+                /* Nobody reads a superseded load's panel, but a fault in it still belongs in the log. */
+                AdminProblem.Absorb(exception, Logger, Site);
+            }
         }
     }
 

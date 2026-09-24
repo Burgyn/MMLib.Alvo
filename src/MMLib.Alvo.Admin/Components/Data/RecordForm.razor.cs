@@ -286,11 +286,11 @@ public partial class RecordForm
     /// <summary>What the field's declaration admits, whoever is writing.</summary>
     private static IEnumerable<string> DeclaredFacets(FieldSchema column)
     {
+        /* The format by name; its pattern is the hint's title (RecordForm.razor). A regular expression is
+           written for the validator, and printed inline it was the longest and least readable part of the line. */
         if (column.Format is { Length: > 0 } format)
         {
-            yield return column.FormatPattern is { Length: > 0 } pattern
-                ? $"must match {format} — {pattern}"
-                : $"must match {format}";
+            yield return $"must match the {format} format";
         }
 
         if (column.MaxLength is { } max)

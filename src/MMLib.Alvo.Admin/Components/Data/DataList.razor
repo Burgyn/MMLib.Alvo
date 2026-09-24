@@ -11,7 +11,9 @@
 
     @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_problem.Exception" />
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
     }
     else if (_schema is null)
     {

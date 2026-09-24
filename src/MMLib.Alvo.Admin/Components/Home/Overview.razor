@@ -10,7 +10,9 @@
 
     @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_problem.Exception" />
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
     }
     else if (_schema is null)
     {
@@ -25,8 +27,8 @@
         @if (_schema.Entities.Count == 0 || _revisions.Count == 0)
         {
             <Panel Padded="true" class="a-panel--accent">
-                <span class="a-section-title">This project is new</span>
-                <p class="a-section-sub">
+                <span class="a-section__title">This project is new</span>
+                <p class="a-section__sub">
                     Three things make a backend: entities, the rules that guard them, and a tenant if
                     the data is per-customer. The first run walks through them in that order.
                 </p>
@@ -84,20 +86,20 @@
         *@
         <nav class="a-cards" aria-label="Sections" data-testid="overview-links">
             <a class="a-card a-card--action" href="@AdminPaths.Schema" data-testid="overview-link-schema">
-                <span class="a-section-title">Schema</span>
-                <span class="a-section-sub">@Count(_schema.Entities.Count, "entity", "entities")</span>
+                <span class="a-section__title">Schema</span>
+                <span class="a-section__sub">@Count(_schema.Entities.Count, "entity", "entities")</span>
             </a>
             <a class="a-card a-card--action" href="@AdminPaths.Data" data-testid="overview-link-data">
-                <span class="a-section-title">Data</span>
-                <span class="a-section-sub">Browse the records of @Count(_schema.Entities.Count, "entity", "entities")</span>
+                <span class="a-section__title">Data</span>
+                <span class="a-section__sub">Browse the records of @Count(_schema.Entities.Count, "entity", "entities")</span>
             </a>
             <a class="a-card a-card--action" href="@AdminPaths.Rules()" data-testid="overview-link-rules">
-                <span class="a-section-title">Rules</span>
-                <span class="a-section-sub">@Count(_rules, "rule", "rules") declared</span>
+                <span class="a-section__title">Rules</span>
+                <span class="a-section__sub">@Count(_rules, "rule", "rules") declared</span>
             </a>
             <a class="a-card a-card--action" href="@AdminPaths.Access" data-testid="overview-link-access">
-                <span class="a-section-title">Access</span>
-                <span class="a-section-sub">@Count(_roles, "role", "roles") declared</span>
+                <span class="a-section__title">Access</span>
+                <span class="a-section__sub">@Count(_roles, "role", "roles") declared</span>
             </a>
         </nav>
 

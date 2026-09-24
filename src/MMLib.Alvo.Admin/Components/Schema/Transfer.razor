@@ -14,7 +14,9 @@
 
     @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_problem.Exception" />
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
     }
 
     <Panel Padded="true" Title="Export">
@@ -24,7 +26,7 @@
                 <button type="button" class="a-btn a-btn--sm" @onclick="DownloadAsync" disabled="@(_descriptor is null)">
                     Download @(Gateway.Project).alvo.json
                 </button>
-                <span class="a-section-sub">revision @(_descriptor?.Revision.ToString(CultureInfo.InvariantCulture) ?? "…")</span>
+                <span class="a-section__sub">revision @(_descriptor?.Revision.ToString(CultureInfo.InvariantCulture) ?? "…")</span>
             </div>
             @if (_descriptor is not null)
             {

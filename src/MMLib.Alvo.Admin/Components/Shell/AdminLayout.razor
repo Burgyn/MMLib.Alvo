@@ -56,7 +56,7 @@
             <ErrorBoundary @ref="_boundary">
                 <ChildContent>@Body</ChildContent>
                 <ErrorContent Context="fault">
-                    <ErrorPanel Problem="@fault">
+                    <ErrorPanel Fault="@fault">
                         <Actions>
                             <button type="button" class="a-btn a-btn--sm" data-testid="error-reload"
                                     @onclick="Reload">Reload</button>

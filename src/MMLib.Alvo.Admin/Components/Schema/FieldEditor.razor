@@ -31,7 +31,10 @@
         <Field Label="Name" For="new-field-name">
             <ChildContent>
                 <input class="a-input" id="new-field-name" value="@_facets.Name" placeholder="e.g. scheduled_for"
-                       @oninput="args => _facets.Name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
+                       @ref="_nameInput" @oninput="args => _facets.Name = args.Value?.ToString() ?? string.Empty"
+                       autocomplete="off" />
+                @* The sheet opens to be typed into: text typed before a click on the box was lost. *@
+                @FocusOnRender.On(() => _nameInput)
             </ChildContent>
             <Hint>
                 @if (IsEditing && !string.Equals(_facets.Name, Editing, StringComparison.Ordinal))
@@ -180,7 +183,7 @@
     {
         <details class="a-disclosure" data-testid="refused-facets">
             <summary>@FieldRefusals.Count facet@(FieldRefusals.Count == 1 ? " is" : "s are") not supported yet</summary>
-            <p class="a-section-sub">
+            <p class="a-section__sub">
                 Declared by the schema, refused at apply — a whole facet, or the one form of it named
                 here. A refused facet has no control above; a refused <em>form</em> of one does, and this
                 says which value it will not take.
@@ -191,8 +194,8 @@
                 <ListRow data-testid="@($"refused-{refusal.Slot}")">
                     <code class="a-mono a-listrow__key">@refusal.Slot</code>
                     <span class="a-listrow__rest a-listrow__rest--stacked">
-                        <span class="a-section-sub">@refusal.Consequence</span>
-                        <span class="a-section-sub">@refusal.Fix</span>
+                        <span class="a-section__sub">@refusal.Consequence</span>
+                        <span class="a-section__sub">@refusal.Fix</span>
                     </span>
                 </ListRow>
             }
@@ -203,6 +206,14 @@
     <div class="a-sheet__actions">
         <button type="button" class="a-btn" @onclick="Cancel">Cancel</button>
         <span class="a-spacer"></span>
+        @* An entity is rarely one field short: the second action stages this one and leaves the sheet open for
+           the next, instead of a reopen per field. *@
+        @if (!IsEditing)
+        {
+            <button type="button" class="a-btn" @onclick="AddAnother" data-testid="field-save-another">
+                Add and add another
+            </button>
+        }
         <button type="button" class="a-btn a-btn--primary" @onclick="Add" data-testid="field-save">
             @(IsEditing ? "Save to the working copy" : "Add to the working copy")
         </button>

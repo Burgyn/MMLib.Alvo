@@ -68,6 +68,21 @@ Severity key: **H** = will actively block or duplicate the next features. **M** 
   gallery-only rules are marked, and a test checks every class the prototype renders against the two files.
 - **F-22 — `.a-row--gap-3` was removed, not kept as half of a pair.** It restated `.a-row`'s own
   `gap: var(--space-3)`, and no screen, the gallery included, ever used it. `.a-row--gap-2` stays.
+- **F-9 — a screen cascades its `AdminProblem` to `ErrorPanel` rather than passing it.** The final review
+  asked for an `AdminProblem? Problem` parameter, so the panel prints what the screen classified (with its
+  site) instead of classifying the bare exception again. `AdminProblem` is internal and a component parameter
+  must be public (CS0053), so the screen wraps the panel in `<CascadingValue Value="_problem">` and the panel
+  reads it through a private `[CascadingParameter]`, the pattern `StagedView` and `RecordFormScope` already
+  use. The raw-exception parameter is renamed `Problem` → `Fault` and kept only for the layout's
+  `ErrorBoundary`; `ErrorPanelText` is the projection, and it is what the tests pin.
+- **F-3 / F-19 — the hand-written `a-section-title` / `a-section-sub` pairs moved to `__title` / `__sub` in
+  one pass, not to a new primitive.** They are title-over-sentence pairs in cards and callouts with no
+  section head around them, and the rule was already the same rule; a `<Heading>` component would have been a
+  public type for a two-span shape. The hyphenated spelling is kept only as a `/* prototype-only */` alias,
+  because the design prototype still renders it.
+- **Sheet focus — the panel's focus is sent before the scroll lock is awaited.** A field inside the sheet
+  that takes focus on its first render (`FocusOnRender`, reused for the field sheet's Name box) then gets it
+  second and keeps it; awaiting the lock first let the panel take focus back.
 
 ### What is good and must be kept
 

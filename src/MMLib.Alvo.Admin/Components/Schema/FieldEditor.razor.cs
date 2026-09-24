@@ -14,6 +14,7 @@ public partial class FieldEditor
     private static readonly string[] _flags = [string.Empty, "false", "true"];
 
     private FieldFacets _facets = new();
+    private ElementReference _nameInput;
     private string? _refusal;
     private string? _prefilled;
 
@@ -66,7 +67,11 @@ public partial class FieldEditor
     /// <summary>A field the editor built, in the schema's own shape.</summary>
     /// <param name="Name">The field's name.</param>
     /// <param name="Facets">Its type and facets.</param>
-    public sealed record NewField(string Name, JsonObject Facets);
+    public sealed record NewField(string Name, JsonObject Facets)
+    {
+        /// <summary>Whether the operator asked for another field after this one, so the sheet stays open.</summary>
+        public bool KeepOpen { get; init; }
+    }
 
     /// <summary>
     /// The refusals that belong to a field, which are the ones a reader of this panel is missing a
@@ -107,20 +112,41 @@ public partial class FieldEditor
 
     private Task Cancel() => OnClose.InvokeAsync();
 
-    /// <summary>Raises the field <see cref="FieldFacets.Build"/> makes, or shows why it cannot be made.</summary>
     private async Task Add()
     {
-        if (_facets.Build(Editing, EditingJson, Siblings, out _refusal) is not { } facets)
-        {
-            return;
-        }
-
-        await OnAdd.InvokeAsync(new NewField(_facets.Name, facets));
-
-        if (!IsEditing)
+        if (await StageAsync(keepOpen: false) && !IsEditing)
         {
             _facets.Name = string.Empty;
             _facets.Values = string.Empty;
         }
+    }
+
+    /// <summary>
+    /// Stages the field and clears the form for the next one, keeping the type: a run of fields added
+    /// together is most often a run of one type.
+    /// </summary>
+    private async Task AddAnother()
+    {
+        if (!await StageAsync(keepOpen: true))
+        {
+            return;
+        }
+
+        _facets = new FieldFacets { Type = _facets.Type };
+        await _nameInput.FocusAsync();
+    }
+
+    /// <summary>
+    /// Raises the field <see cref="FieldFacets.Build"/> makes and says it did, or shows why it cannot be made.
+    /// </summary>
+    private async Task<bool> StageAsync(bool keepOpen)
+    {
+        if (_facets.Build(Editing, EditingJson, Siblings, out _refusal) is not { } facets)
+        {
+            return false;
+        }
+
+        await OnAdd.InvokeAsync(new NewField(_facets.Name, facets) { KeepOpen = keepOpen });
+        return true;
     }
 }

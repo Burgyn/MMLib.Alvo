@@ -65,12 +65,8 @@ public partial class Entity
     }
 
     /// <summary>
-    /// Follows the address from the first parameters on, which is how Back and Forward reach the tab.
+    /// Follows the address from the first parameters on, once, which is how Back and Forward reach the tab.
     /// </summary>
-    /// <remarks>
-    /// Subscribed here, once, rather than in an OnInitialized override: an override is a member on this
-    /// public component's contract, and the screen already has the one lifecycle method it needs.
-    /// </remarks>
     private void FollowAddress()
     {
         if (!_followingAddress)
@@ -336,7 +332,11 @@ public partial class Entity
             Copy.AddField(EntityName, added.Name, added.Facets);
         }
 
-        CloseEditor();
+        if (!added.KeepOpen)
+        {
+            CloseEditor();
+        }
+
         ReadWorking();
     }
 

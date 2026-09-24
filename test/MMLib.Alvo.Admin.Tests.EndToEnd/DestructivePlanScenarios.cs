@@ -37,8 +37,6 @@ public sealed class DestructivePlanScenarios(AdminWorld world) : IClassFixture<A
 
         await session.Page.ClickAsync("[data-testid='remove-field-code']");
         await session.PreviewPendingAsync();
-
-        await session.Page.ClickAsync("button:has-text('Plan this change')");
         await session.Page.GetByText("against the database").First.WaitForAsync();
 
         var plan = await session.Page.Locator("main.a-content").InnerTextAsync();

@@ -56,16 +56,13 @@ public sealed class FieldDefaultScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Page.ClickAsync(".a-choice button:has-text('string')");
         await session.Page.FillAsync("#new-field-default", "unassigned");
         await session.Page.ClickAsync("[data-testid='field-save']");
+        /* Waits for the plan rather than for the URL alone: the navigation resolves before the preview's own
+           render arrives, and the diff below is what that render draws. */
         await session.PreviewPendingAsync();
-
-        /* Waiting for the plan control rather than for the URL alone: the navigation resolves before
-           the preview's own render arrives, and the diff below is what that render draws. */
-        await session.Page.Locator("button:has-text('Plan this change')").WaitForAsync();
 
         (await session.Page.Locator("main.a-content").InnerTextAsync())
             .ShouldContain("\"default\": \"unassigned\"");
 
-        await session.Page.ClickAsync("button:has-text('Plan this change')");
         await session.Page.Locator("#apply-reason").WaitForAsync();
         await session.Page.FillAsync("#apply-reason", "Give regions a dispatch note");
         await session.Page.ClickAsync("button:has-text('Apply these changes')");

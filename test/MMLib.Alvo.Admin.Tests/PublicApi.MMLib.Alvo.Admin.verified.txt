@@ -230,9 +230,9 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.RenderFragment? Actions { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public string? Fix { get; set; }
+        public System.Exception? Fault { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public System.Exception? Problem { get; set; }
+        public string? Fix { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Slug { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -597,6 +597,7 @@ namespace MMLib.Alvo.Admin.Components.Schema
         {
             public NewField(string Name, System.Text.Json.Nodes.JsonObject Facets) { }
             public System.Text.Json.Nodes.JsonObject Facets { get; init; }
+            public bool KeepOpen { get; init; }
             public string Name { get; init; }
         }
     }

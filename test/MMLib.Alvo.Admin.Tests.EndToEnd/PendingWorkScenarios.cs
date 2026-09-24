@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Tests.EndToEnd;
+﻿using Microsoft.Playwright;
+
+namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
 /// The shell says what is waiting for an apply, and the tab says what was staged on it.
@@ -137,5 +139,87 @@ public sealed class PendingWorkScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.Locator("[data-testid='remove-field-notes']").WaitForAsync();
 
         session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// The field sheet opens on its Name box, and "Add and add another" stages a field without closing it.
+    /// </summary>
+    /// <remarks>
+    /// The usability re-run's T1 counted a reopen per field and a click into Name per field: text typed as the
+    /// sheet opened went to the dialog, not the box. The first key is pressed on the keyboard, never filled,
+    /// because a fill focuses the box itself and would pass over a sheet that took focus back; the rest is a
+    /// fill, because keys typed faster than the circuit echoes them race the box's own value.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Add_and_add_another_keeps_the_sheet_open_on_an_empty_name_and_the_same_type()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/regions");
+
+        await session.Page.ClickAsync("[data-testid='add-field']");
+        var sheet = session.Page.Locator("[data-testid='field-sheet']");
+        await sheet.WaitForAsync();
+        await TypeIntoNameAsync(session, "depot_count");
+        await sheet.GetByRole(AriaRole.Radio, new() { Name = "integer", Exact = true }).ClickAsync();
+        await session.Page.ClickAsync("[data-testid='field-save-another']");
+
+        await session.Page.Locator("[data-testid='staged-depot_count']").WaitForAsync();
+        await NameHasFocusAsync(session);
+        (await session.Page.Locator("#new-field-name").InputValueAsync()).ShouldBeEmpty();
+        (await sheet.GetByRole(AriaRole.Radio, new() { Name = "integer", Exact = true })
+            .GetAttributeAsync("aria-checked")).ShouldBe("true");
+
+        await TypeIntoNameAsync(session, "depot_capacity");
+        await session.Page.ClickAsync("[data-testid='field-save']");
+
+        await sheet.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        (await session.Page.Locator("[data-testid='staged-depot_capacity']").InnerTextAsync()).ShouldBe("new");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// Preview plans on arrival: the dry run has no side effects, so no click stands in front of it.
+    /// </summary>
+    /// <remarks>
+    /// Reached by a full load rather than through the bar, so the prerender is part of what is measured: it must
+    /// draw no plan control of its own, and the interactive render then asks for the plan by itself.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Preview_plans_on_arrival_and_can_plan_again()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/regions");
+
+        await session.Page.ClickAsync("[data-testid='add-field']");
+        await session.Page.FillAsync("#new-field-name", "arrival_note");
+        await session.Page.ClickAsync("[data-testid='field-save']");
+        await session.Page.Locator("[data-testid='staged-arrival_note']").WaitForAsync();
+
+        await session.GoAsync("/changes");
+        await session.WaitForPlanAsync();
+
+        (await session.Button("Plan this change").CountAsync()).ShouldBe(0);
+        (await session.Content.InnerTextAsync()).ShouldContain("arrival_note");
+        await session.Page.Locator("#apply-reason").WaitForAsync();
+
+        await session.Page.ClickAsync("[data-testid='replan']");
+        await session.WaitForPlanAsync();
+        (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
+
+        session.AssertConsoleClean();
+    }
+
+    private static async Task NameHasFocusAsync(AdminSession session)
+        => await session.Page.WaitForFunctionAsync("() => document.activeElement?.id === 'new-field-name'");
+
+    /// <summary>Proves the key lands in Name without a click on it, then fills the rest.</summary>
+    private static async Task TypeIntoNameAsync(AdminSession session, string name)
+    {
+        await NameHasFocusAsync(session);
+        await session.Page.Keyboard.PressAsync(name[..1]);
+        await session.Page.WaitForFunctionAsync(
+            "first => document.getElementById('new-field-name')?.value === first", name[..1]);
+        await session.Page.FillAsync("#new-field-name", name);
     }
 }
