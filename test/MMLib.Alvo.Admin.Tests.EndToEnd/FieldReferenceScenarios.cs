@@ -32,6 +32,37 @@ public sealed class FieldReferenceScenarios(AdminWorld world) : IClassFixture<Ad
         session.AssertConsoleClean();
     }
 
+    /// <summary>
+    /// A rule the rename cannot rewrite (a binding macro) is named on the Fields tab, and the note goes with the
+    /// shell's Discard rather than outliving the edit it described.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_rename_names_what_it_could_not_carry_until_the_copy_is_discarded()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/regions");
+
+        await session.OpenTabAsync("Rules");
+        var list = session.Page.GetByRole(AriaRole.Tabpanel).GetByRole(AriaRole.Textbox).First;
+        await list.FillAsync("[code].exists(c, c != '')");
+        await list.BlurAsync();
+        await session.SettleAsync();
+
+        await session.OpenTabAsync("Fields");
+        await session.Page.GetByTestId("edit-field-code").ClickAsync();
+        var sheet = session.Page.GetByTestId("field-sheet");
+        await sheet.GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync("region_code");
+        await session.Page.GetByTestId("field-save").ClickAsync();
+        await session.Page.GetByTestId("field-row-region_code").WaitForAsync();
+        (await session.Page.GetByTestId("rename-leftovers").InnerTextAsync()).ShouldContain("regions.rules.list");
+
+        await session.Page.GetByTestId("pending-discard").ClickAsync();
+        await session.Page.GetByTestId("discard-confirm").ClickAsync();
+        await session.Page.GetByTestId("rename-leftovers").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+
+        session.AssertConsoleClean();
+    }
+
     /// <summary><c>work_orders.status</c> leads the composite index: the removal is named and refused, not staged.</summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task A_removal_of_an_indexed_field_names_the_index_and_stages_nothing()

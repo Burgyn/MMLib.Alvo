@@ -17,7 +17,13 @@ public class CelNamesTests
     [InlineData("statuses == 1 || status_code == 2", "statuses == 1 || status_code == 2")]
     [InlineData("status(1) == 2", "status(1) == 2")]
     [InlineData("status == 'it\\'s status'", "state == 'it\\'s status'")]
-    [InlineData("size(status) > 1e5", "size(state) > 1e5")]
+    [InlineData("lowerAscii(new.status) == 'x'", "lowerAscii(new.state) == 'x'")]
+    [InlineData("status+1 > 2", "state+1 > 2")]
+    [InlineData("!status", "!state")]
+    [InlineData("(status)", "(state)")]
+    [InlineData("new . status == old .status", "new . state == old .state")]
+    [InlineData("x.new.status == 1", "x.new.status == 1")]
+    [InlineData("status == '.all(x, x)'", "state == '.all(x, x)'")]
     public void Only_a_reference_to_the_column_is_renamed(string cel, string renamed)
         => CelNames.Rename(cel, "status", "state").ShouldBe(renamed);
 
@@ -27,9 +33,21 @@ public class CelNamesTests
     public void An_expression_whose_names_cannot_be_told_apart_is_declined(string cel)
         => CelNames.Rename(cel, "status", "state").ShouldBeNull();
 
-    [Fact]
-    public void A_field_named_like_a_reserved_word_is_declined()
-        => CelNames.Rename("true == in", "in", "inside").ShouldBeNull();
+    [Theory]
+    [InlineData("in")]
+    [InlineData("has")]
+    public void A_field_named_like_a_reserved_word_is_declined(string field)
+        => CelNames.Rename($"true == {field}", field, "inside").ShouldBeNull();
+
+    /// <summary>A keyword as the new name would turn <c>is_public || …</c> into <c>true || …</c> — a rule that still compiles.</summary>
+    [Theory]
+    [InlineData("true")]
+    [InlineData("false")]
+    [InlineData("null")]
+    [InlineData("in")]
+    [InlineData("has")]
+    public void A_rename_to_a_reserved_word_is_declined(string to)
+        => CelNames.Rename("is_public || owner_id == @user.id", "is_public", to).ShouldBeNull();
 
     [Theory]
     [InlineData("items.all(x, x.status)", true)]

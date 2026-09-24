@@ -214,8 +214,28 @@ internal static class FieldReferences
                 if (field?["rollup"] is JsonObject rollup && Is(rollup["from"], at.Entity))
                 {
                     Rollup(rollup, $"{parent}.fields.{name}.rollup", at);
+                    ImplicitVia(rollup, parent, entities, $"{parent}.fields.{name}.rollup.via", at);
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// A rollup with no <c>via</c> rolls up through the child's one ref to the parent, so removing that ref
+    /// leaves it nothing to roll up through.
+    /// </summary>
+    /// <remarks>
+    /// <c>RollupResolver.ResolveVia</c> (<c>src/MMLib.Alvo/Descriptor/Internal/RollupResolver.cs</c>) resolves an
+    /// absent <c>via</c> to the child's single field whose <c>entity</c> is the parent, and refuses the descriptor
+    /// when there is none. A rename needs nothing here: no key names the field, and the resolution follows it.
+    /// </remarks>
+    private static void ImplicitVia(JsonObject rollup, string parent, JsonObject entities, string place, Site at)
+    {
+        if (at.To is null && !rollup.ContainsKey("via")
+            && entities[at.Entity]?["fields"]?[at.Field] is JsonObject field
+            && Is(field["type"], "ref") && Is(field["entity"], parent))
+        {
+            at.Add(place, blocks: true);
         }
     }
 

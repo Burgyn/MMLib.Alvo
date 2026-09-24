@@ -79,6 +79,37 @@ public class WorkingCopyFieldReferenceTests
         => Copy().ReferencesToField("lines", "amount")
             .ShouldBe([new DescriptorReference("orders.fields.total.rollup.field", Blocks: true)]);
 
+    /// <summary>
+    /// With no <c>via</c>, the core resolves the child's single ref to the parent (<c>RollupResolver.ResolveVia</c>),
+    /// so removing that ref leaves the rollup nothing to roll up through.
+    /// </summary>
+    [Fact]
+    public void A_child_refs_removal_names_the_rollup_that_rolls_up_through_it_without_a_via()
+        => Copy(Descriptor.Replace(", \"via\": \"order_id\"", string.Empty, StringComparison.Ordinal))
+            .ReferencesToField("lines", "order_id")
+            .ShouldBe([new DescriptorReference("orders.fields.total.rollup.via", Blocks: true)]);
+
+    /// <summary>
+    /// <c>is_public</c> renamed to <c>true</c> would make <c>is_public || owner_id == @user.id</c> read
+    /// <c>true || …</c>: a rule that compiles and lets every row through. The keywords are the core's own.
+    /// </summary>
+    [Theory]
+    [InlineData("true")]
+    [InlineData("false")]
+    [InlineData("null")]
+    [InlineData("in")]
+    [InlineData("has")]
+    public void A_rename_to_a_CEL_keyword_is_refused_and_nothing_moves(string keyword)
+    {
+        var copy = Copy();
+        var before = copy.Json;
+
+        copy.RenameField("orders", "flag", keyword, out var uncarried).ShouldBe($"{keyword} is a CEL keyword, so no rule could name this field.");
+
+        uncarried.ShouldBeEmpty();
+        copy.Json.ShouldBe(before);
+    }
+
     [Fact]
     public void Asking_what_names_a_field_changes_nothing()
     {
@@ -94,10 +125,10 @@ public class WorkingCopyFieldReferenceTests
     public void A_field_nothing_names_has_no_references()
         => Copy().ReferencesToField("orders", "note").ShouldBeEmpty();
 
-    private static WorkingCopy Copy()
+    private static WorkingCopy Copy(string descriptor = Descriptor)
     {
         var copy = new WorkingCopy();
-        copy.Take(Descriptor, revision: 3);
+        copy.Take(descriptor, revision: 3);
         return copy;
     }
 

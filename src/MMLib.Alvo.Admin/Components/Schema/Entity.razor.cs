@@ -249,6 +249,7 @@ public partial class Entity
             Copy.StagedHooksOf(EntityName),
             EventCallback.Factory.Create<string>(this, RestoreField));
         _rollupSources = RollupSources.For(Copy.Json, EntityName);
+        ForgetStaleLeftovers();
     }
 
     /// <summary>
@@ -327,7 +328,7 @@ public partial class Entity
             if (!string.Equals(editing, added.Name, StringComparison.Ordinal))
             {
                 Copy.RenameField(EntityName, editing, added.Name, out var uncarried);
-                _renameLeftovers = (editing, uncarried);
+                _renameLeftovers = new(EntityName, editing, added.Name, uncarried);
             }
         }
         else

@@ -5,6 +5,9 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /* An entity's fields: adding, renaming, removing and restoring one, and the two readings the Fields tab draws. */
 internal sealed partial class WorkingCopy
 {
+    /// <summary>The core lexer's keywords (<c>CelLexer.KeywordKind</c>): CEL can never name a field by one.</summary>
+    private static readonly HashSet<string> _celKeywords = new(StringComparer.Ordinal) { "true", "false", "null", "in", "has" };
+
     /// <inheritdoc cref="RenameField(string, string, string, out IReadOnlyList{DescriptorReference})"/>
     public string? RenameField(string entity, string from, string to) => RenameField(entity, from, to, out _);
 
@@ -25,7 +28,11 @@ internal sealed partial class WorkingCopy
     {
         string? refusal = null;
         IReadOnlyList<DescriptorReference> left = [];
-        Edit(root => (refusal = RefuseFieldRename(root, entity, from, to)) is null && MoveField(root, entity, from, to, out left));
+        Edit(root =>
+        {
+            refusal = RefuseFieldRename(root, entity, from, to);
+            return refusal is null && MoveField(root, entity, from, to, out left);
+        });
 
         uncarried = left;
         return refusal;
@@ -36,10 +43,25 @@ internal sealed partial class WorkingCopy
         => Read<IReadOnlyList<DescriptorReference>>(
             () => _working is JsonObject root ? FieldReferences.Of(root, entity, field) : []);
 
+    /// <summary>Why this field rename cannot happen, or <see langword="null"/>.</summary>
+    /// <remarks>
+    /// <b>A CEL keyword is refused as a field's new name</b>, though <see cref="DescriptorNames.Member"/> matches
+    /// it: the core's lexer reads <c>true</c>, <c>false</c>, <c>null</c>, <c>in</c> and <c>has</c> as keywords,
+    /// never as a column (<c>src/MMLib.Alvo/Expressions/Internal/CelLexer.cs</c>, <c>KeywordKind</c>). A rule
+    /// <c>is_public || owner_id == @user.id</c> carried to <c>true || …</c> would still compile and let every
+    /// row through; <c>in</c> and <c>has</c> would stop it parsing.
+    /// </remarks>
     private static string? RefuseFieldRename(JsonObject root, string entity, string from, string to)
-        => root["entities"]?[entity]?["fields"] is JsonObject fields && fields[from] is JsonObject
-            ? Refusal(from, to, fields, "field")
-            : $"There is no field called {from} on {entity}.";
+    {
+        if (root["entities"]?[entity]?["fields"] is not JsonObject fields || fields[from] is not JsonObject)
+        {
+            return $"There is no field called {from} on {entity}.";
+        }
+
+        return _celKeywords.Contains(to)
+            ? $"{to} is a CEL keyword, so no rule could name this field."
+            : Refusal(from, to, fields, "field");
+    }
 
     private bool MoveField(JsonObject root, string entity, string from, string to, out IReadOnlyList<DescriptorReference> uncarried)
     {
