@@ -170,7 +170,7 @@ internal static partial class Stylesheet
 
         var group = new System.Text.StringBuilder();
 
-        foreach (var line in css.ReplaceLineEndings("\n").Split('\n'))
+        foreach (var line in Unlayered(css).Split('\n'))
         {
             /* A group's earlier lines end in a comma and carry no brace, so they are accumulated until
                the line that opens the block. An indented line resets: the run has left the top level. */
@@ -215,6 +215,59 @@ internal static partial class Stylesheet
         return order;
     }
 
+    /// <summary>
+    /// The stylesheet with its <c>@layer</c> blocks opened out: the wrapper lines dropped and what they held
+    /// moved back to the top level.
+    /// </summary>
+    /// <param name="css">The stylesheet's text.</param>
+    /// <returns>The same rules, each rule that was directly inside a layer now unindented, with LF endings.</returns>
+    /// <remarks>
+    /// <b>A rule directly inside a layer is still a top-level rule</b> — the layer decides which rule wins
+    /// between two, it does not make either of them a narrowing the way a media query does. The checks that
+    /// find "the" rule for a selector, or a selector defined twice, read indentation as nesting; without this
+    /// they would see every rule of a layered file as nested and pass by finding nothing.
+    /// </remarks>
+    internal static string Unlayered(string css)
+    {
+        ArgumentNullException.ThrowIfNull(css);
+
+        var lines = new List<string>();
+        var inLayer = false;
+
+        foreach (var line in css.ReplaceLineEndings("\n").Split('\n'))
+        {
+            if (LayerBlock().IsMatch(line) || (inLayer && line == "}"))
+            {
+                inLayer = !inLayer;
+                continue;
+            }
+
+            lines.Add(inLayer && line.StartsWith("  ", StringComparison.Ordinal) ? line[2..] : line);
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    /// <summary>
+    /// The lines at the file's own top level that open a block, other than a declared layer or a font face.
+    /// </summary>
+    /// <param name="css">The stylesheet's text.</param>
+    /// <param name="layers">The layer names the statement declares.</param>
+    /// <returns>Each offending line, in source order.</returns>
+    internal static IReadOnlyList<string> BlocksOutsideLayers(string css, IReadOnlyCollection<string> layers)
+    {
+        ArgumentNullException.ThrowIfNull(css);
+        ArgumentNullException.ThrowIfNull(layers);
+
+        return [.. css.ReplaceLineEndings("\n").Split('\n')
+            .Where(line => line.EndsWith('{') && line.Length > 0 && !char.IsWhiteSpace(line[0]))
+            .Where(line => line != "@font-face {"
+                && !(LayerBlock().Match(line) is { Success: true } layer && layers.Contains(layer.Groups["name"].Value)))];
+    }
+
     [GeneratedRegex(@"^(?<selector>[.#a-zA-Z][^{@]*)\{\s*$", RegexOptions.Compiled)]
     private static partial Regex TopLevelSelector();
+
+    [GeneratedRegex(@"^@layer (?<name>[a-z-]+) \{$", RegexOptions.Compiled)]
+    private static partial Regex LayerBlock();
 }

@@ -18,7 +18,11 @@ namespace MMLib.Alvo.Admin.Tests;
 /// </remarks>
 public sealed partial class ComponentLayerTests
 {
+    private const string LayerStatement = "@layer tokens, base, layout, components, utilities;";
+
     private static readonly string _css = File.ReadAllText(Stylesheet.AlvoCssPath);
+
+    private static readonly string[] _layers = LayerStatement["@layer ".Length..^1].Split(", ");
 
     [Fact]
     public void The_component_layer_uses_tokens_rather_than_literal_colours()
@@ -91,6 +95,33 @@ public sealed partial class ComponentLayerTests
     }
 
     /// <summary>
+    /// The cascade's order is one statement, and it names utilities last.
+    /// </summary>
+    /// <remarks>
+    /// Source order was the only policy before it (finding F-20), and D-1 is what that policy cost: a
+    /// utility that happened to be declared below a component's rule overrode it. The layer a rule sits in
+    /// now decides, whatever its specificity or position.
+    /// </remarks>
+    [Fact]
+    public void The_cascade_is_ordered_by_one_layer_statement()
+    {
+        _css.ShouldContain(LayerStatement);
+        _css.IndexOf(LayerStatement, StringComparison.Ordinal)
+            .ShouldBeLessThan(_css.IndexOf(":root {", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// No rule sits outside a layer.
+    /// </summary>
+    /// <remarks>
+    /// An unlayered rule outranks every layered one, so a single rule added at the top level would quietly
+    /// bring source order back for whatever it touches — and win over a utility it was meant to lose to.
+    /// </remarks>
+    [Fact]
+    public void Every_rule_sits_in_a_declared_layer()
+        => Stylesheet.BlocksOutsideLayers(_css, _layers).ShouldBeEmpty();
+
+    /// <summary>
     /// Every face the stylesheet declares has a file behind it.
     /// </summary>
     /// <remarks>
@@ -113,7 +144,7 @@ public sealed partial class ComponentLayerTests
     /// <returns>The declarations between its braces.</returns>
     private static string TopLevelRule(string selector)
     {
-        var css = _css.ReplaceLineEndings("\n");
+        var css = Stylesheet.Unlayered(_css);
         var start = css.IndexOf($"\n{selector} {{", StringComparison.Ordinal);
         start.ShouldBeGreaterThanOrEqualTo(0, $"{selector} has no top-level rule");
         var body = css[(start + selector.Length + 3)..];
