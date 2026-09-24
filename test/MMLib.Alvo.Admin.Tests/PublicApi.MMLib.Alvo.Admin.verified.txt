@@ -668,6 +668,14 @@ namespace MMLib.Alvo.Admin.Components.Schema
         public Microsoft.AspNetCore.Components.EventCallback<int> OnRemove { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
+    public class PlanSteps : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public PlanSteps() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<string> Steps { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
     [Microsoft.AspNetCore.Authorization.Authorize]
     [Microsoft.AspNetCore.Components.Route("/admin/changes")]
     public class Preview : Microsoft.AspNetCore.Components.ComponentBase

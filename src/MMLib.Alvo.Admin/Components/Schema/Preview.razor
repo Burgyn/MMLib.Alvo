@@ -79,27 +79,7 @@
                         : "In this order, in one transaction.")
                 </Subtitle>
                 <ChildContent>
-                    @foreach (var step in _plan.Plan.Steps.Select(PlanStep.Parse))
-                    {
-                        <ListRow data-testid="plan-step" class="a-listrow--inline">
-                            <span class="@($"a-badge a-listrow__aside {(step.Destructive ? "a-badge--danger" : "a-badge--ok")}")">
-                                @(step.Destructive ? "destroys" : "safe")
-                            </span>
-                            <span class="a-grow a-value">
-                                @* One expression with its trailing space: a bare `@step.Verb` followed by the element on
-                                   the next line lost the whitespace between them ("Drop columncustomers.notes"). *@
-                                @($"{step.Verb} ")
-                                @if (step.Target.Length > 0)
-                                {
-                                    <code class="a-mono">@step.Target</code>
-                                }
-                                @if (step.Consequence is { } consequence)
-                                {
-                                    <text> — @consequence</text>
-                                }
-                            </span>
-                        </ListRow>
-                    }
+                    <PlanSteps Steps="_plan.Plan.Steps" />
                 </ChildContent>
             </Panel>
 

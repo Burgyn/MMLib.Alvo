@@ -58,19 +58,40 @@
 
                         @if (_selected.Version.Revision != _current)
                         {
-                            <div>
+                            <div class="a-stack">
                                 <p class="a-section__sub">
                                     Rolling back does not rewrite history — it appends the reverse migration as a
                                     new revision at the top of the list, and this one stays where it is.
                                 </p>
-                                <ConfirmByName Title="@($"Restore revision {_selected.Version.Revision}")"
-                                               Detail="A reverse migration can discard data that was added after this revision. Permission to lose data is never implied."
-                                               Expected="@Gateway.Project"
-                                               OnConfirmedChanged="confirmed => _allowed = confirmed" />
-                                <button type="button" class="a-btn a-btn--danger a-actions"
-                                        disabled="@(!_allowed || _busy)" @onclick="RollbackAsync">
-                                    Roll back to r@(_selected.Version.Revision)
-                                </button>
+
+                                @if (_rollback is null)
+                                {
+                                    <button type="button" class="a-btn a-actions" data-testid="rollback-plan"
+                                            disabled="@_busy" @onclick="PlanRollbackAsync">
+                                        Plan the rollback to r@(_selected.Version.Revision)
+                                    </button>
+                                }
+                                else
+                                {
+                                    <div data-testid="rollback-plan-steps">
+                                        <span class="a-section__title">@RollbackTitle(_rollback)</span>
+                                        <PlanSteps Steps="_rollback.Steps" />
+                                    </div>
+
+                                    @if (_rollback.HasDestructiveChanges)
+                                    {
+                                        <ConfirmByName Title="This rollback destroys data"
+                                                       Detail="A reverse migration can discard data that was added after this revision. Permission to lose data is never implied — confirming here is what allows it."
+                                                       Expected="@Gateway.Project"
+                                                       OnConfirmedChanged="confirmed => _allowed = confirmed" />
+                                    }
+
+                                    <button type="button" class="a-btn a-btn--danger a-actions" data-testid="rollback-run"
+                                            disabled="@(!RollbackGate.CanRollBack(_rollback, _allowed) || _busy)"
+                                            @onclick="RollbackAsync">
+                                        Roll back to r@(_selected.Version.Revision)
+                                    </button>
+                                }
                             </div>
                         }
                         else
@@ -89,6 +110,7 @@
 @code {
     private IReadOnlyList<ManagementRevision>? _revisions;
     private ManagementRevisionDetail? _selected;
+    private ManagementPlanSummary? _rollback;
     private AdminProblem? _problem;
     private int _current;
     private bool _allowed;
@@ -112,6 +134,7 @@
     private async Task OpenAsync(int revision)
     {
         _allowed = false;
+        _rollback = null;
         try
         {
             _selected = await Gateway.RevisionAsync(revision, CancellationToken.None);
@@ -122,35 +145,47 @@
         }
     }
 
+    /// <summary>Asks the plan of the rollback as a dry run — Preview's rule: describing a drop destroys nothing.</summary>
+    private async Task PlanRollbackAsync()
+        => _rollback = (await SendRollbackAsync(dryRun: true, allowDestructive: true))?.Plan;
+
+    /// <summary>Runs the rollback the plan on screen describes, with the permission the operator gave.</summary>
     private async Task RollbackAsync()
     {
-        if (_selected is null)
+        if (_rollback is null || await SendRollbackAsync(dryRun: false, RollbackGate.AllowDestructive(_rollback, _allowed)) is null)
         {
             return;
         }
 
+        _selected = null;
+        _rollback = null;
+        _allowed = false;
+        await LoadAsync();
+    }
+
+    private async Task<ManagementApplyResult?> SendRollbackAsync(bool dryRun, bool allowDestructive)
+    {
         _busy = true;
         _problem = null;
-
         try
         {
-            await Gateway.RollbackAsync(
-                _selected.Version.Revision, _current, allowDestructive: true, dryRun: false,
-                author: await Gateway.AuthorAsync(),
-                reason: $"Restored r{_selected.Version.Revision}",
+            return await Gateway.RollbackAsync(
+                _selected!.Version.Revision, _current, allowDestructive, dryRun,
+                author: await Gateway.AuthorAsync(), reason: $"Restored r{_selected.Version.Revision}",
                 CancellationToken.None);
-
-            _selected = null;
-            _allowed = false;
-            await LoadAsync();
         }
         catch (Exception exception)
         {
             _problem = AdminProblem.From(exception, Logger, ProblemSite.Rollback);
+            return null;
         }
         finally
         {
             _busy = false;
         }
     }
+
+    private static string RollbackTitle(ManagementPlanSummary plan) => plan.IsEmpty
+        ? "No migration — the schema is the same"
+        : $"{plan.Steps.Count} step{(plan.Steps.Count == 1 ? string.Empty : "s")} against the database";
 }

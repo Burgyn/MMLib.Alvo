@@ -560,9 +560,13 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     boolean/uuid/date/enum/length defaults are refused as `FieldDefault` refuses them; a `$cel` default
     is kept and refused until removed; required beside `readOnly: true` is refused as `DescriptorValidator`
     refuses it.
-18. **Rollback is blind and always destructive.** No dry-run plan, `allowDestructive: true` hard-coded
+18. ✅ **Rollback is blind and always destructive.** No dry-run plan, `allowDestructive: true` hard-coded
     (History.razor:137-139). Probably: the Preview flow — dry run, show steps with `destroys`, destructive
     permission as its own confirm.
+    **Done:** History asks the rollback's plan as a dry run and shows it with Preview's own step rendering
+    (PlanSteps); a plan that destroys data asks its own typed confirm, and allowDestructive is sent only
+    then (RollbackGate). No e2e: two revisions need a second in-process apply, which does not finish
+    (ChangeTheBackendScenarios).
 19. **Four refusals are rendered nowhere** — `rollup.where`, wildcard `trigger.event`, `JSONata`,
     `bodyFile`. Each screen filters `capabilities.refused` by a prefix none of them match
     (FieldEditor.razor.cs:81, HooksTab.razor.cs:86, Integrations.razor:71-77). Extends #269. Probably:
