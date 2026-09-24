@@ -111,7 +111,13 @@ internal sealed record AdminProblem(string Title, string Detail, string? Fix, Ex
         var problem = From(exception, site);
         if (problem is null)
         {
-            AdminProblemLog.Dropped(logger, exception.GetType().Name, exception);
+            // Dropped logs at Debug; guard the type-name lookup so it is never paid at a higher level,
+            // and hoist it to a local so the call site itself hands the logger a plain value.
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                var exceptionType = exception.GetType().Name;
+                AdminProblemLog.Dropped(logger, exceptionType, exception);
+            }
         }
         else if (problem.IsFault)
         {
