@@ -89,6 +89,59 @@ public sealed class DataGridScenarios(AdminWorld world) : IClassFixture<AdminWor
     }
 
     /// <summary>
+    /// <c>j j Enter</c> opens the second row, and the keys stay with the sheet while it is open (design §5.5).
+    /// </summary>
+    /// <remarks>
+    /// Over <c>regions</c>, which is global, so no tenant is needed; its own two rows, because the grid's
+    /// order is the entity's and this asserts "the second row", whatever that is, rather than a name.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task J_moves_the_selected_row_and_enter_opens_it()
+    {
+        await SeedRegionsAsync("KEYS-A", "KEYS-B");
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/data/regions");
+
+        var rows = session.Page.Locator("table.a-grid tbody tr");
+        await rows.Nth(1).WaitForAsync();
+        await session.Page.Locator("table.a-grid[data-alvo-keyboard='ready']").WaitForAsync();
+
+        // --- j j selects the second row, focuses it, and draws it as selected
+        await session.Page.Keyboard.PressAsync("j");
+        await session.Page.Keyboard.PressAsync("j");
+        await session.Page.WaitForFunctionAsync(
+            "() => document.activeElement === document.querySelectorAll('table.a-grid tbody tr')[1]");
+        (await rows.Nth(1).GetAttributeAsync("aria-selected")).ShouldBe("true");
+        (await session.Page.Locator("table.a-grid tbody tr[aria-selected='true']").CountAsync()).ShouldBe(1);
+        (await rows.Nth(1).EvaluateAsync<string>("row => getComputedStyle(row).boxShadow"))
+            .ShouldNotBe("none", "the selected row carries the focus ring");
+
+        // --- Enter opens that row's sheet
+        var second = await rows.Nth(1).InnerTextAsync();
+        await session.Page.Keyboard.PressAsync("Enter");
+        await session.Page.Locator("#rf-name").WaitForAsync();
+        second.ShouldContain(await session.Page.InputValueAsync("#rf-name"));
+
+        // --- while the sheet is open, j is the sheet's: the selection behind it does not move
+        await session.Page.Keyboard.PressAsync("j");
+        await session.Page.WaitForTimeoutAsync(500);
+        (await rows.Nth(1).GetAttributeAsync("aria-selected")).ShouldBe("true");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>Writes two regions, each of which must be unique across the world.</summary>
+    private async Task SeedRegionsAsync(params string[] codes)
+    {
+        using var scope = world.Services.CreateScope();
+        var data = scope.ServiceProvider.GetRequiredService<IAlvoData>();
+        foreach (var code in codes)
+        {
+            await FieldServiceSeed.RegionAsync(data, AlvoContext.System(_tenant), code);
+        }
+    }
+
+    /// <summary>
     /// Gives the operator a tenant and writes two work orders into it, one per customer.
     /// </summary>
     /// <returns>The two customers' ids.</returns>

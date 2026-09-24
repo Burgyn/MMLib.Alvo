@@ -7,8 +7,10 @@
    imperative gestures a component cannot express declaratively — moving focus,
    and reading whether the viewport is the phone one.
 
-   It is an ES module, imported by the component that needs it and disposed with
-   that component, so a circuit that never opens the palette never loads it.
+   It is an ES module, imported once per circuit by AdminInterop — the one .NET
+   path into it — on the first call that needs it, and released with the circuit.
+   A module is evaluated once per document, so the state below (the handlers, the
+   scroll-lock count) is one per page however many components use it.
    =========================================================================== */
 
 const handlers = new Map();
@@ -37,7 +39,8 @@ export function markKeyboardReady() {
  * swallow Tab and Enter too — so the strip's or the group's own handler moves the choice and this
  * stops the browser from moving the page as well. A radio group takes the vertical arrows too,
  * because its chips wrap onto several lines. Registered once, when the module is first imported —
- * which the command palette does in the admin layout, so on every screen a ChipGroup can render on.
+ * which the command palette's keyboard wiring does in the admin layout, so on every screen a ChipGroup
+ * can render on.
  */
 const ROVING_KEYS = {
   '[role="tab"]': ['ArrowLeft', 'ArrowRight', 'Home', 'End'],
@@ -82,11 +85,33 @@ export function unsubscribe(token) {
   }
 }
 
-/** Moves focus to an element, after the render that created it. */
-export function focus(element) {
-  if (element && typeof element.focus === 'function') {
-    element.focus();
+/**
+ * Moves focus to the selected row inside a container and brings it into view — `j`/`k` on the data grid.
+ *
+ * Read from the rendered `aria-selected` rather than passed an element: the row is whichever one .NET just
+ * drew as selected, and there is one reference to hold (the table body) instead of one per row.
+ */
+export function focusSelected(container) {
+  const row = container?.querySelector?.('[aria-selected="true"]');
+  if (row instanceof HTMLElement) {
+    row.focus();
+    row.scrollIntoView({ block: 'nearest' });
   }
+}
+
+/**
+ * Holds the page still while a sheet or the palette is over it. Without this a drag near the panel's edge
+ * scrolls the list underneath and the sheet appears to float over a page that is still moving — the one
+ * thing that makes a bottom sheet read as a web page rather than a control.
+ *
+ * Counted rather than boolean: two overlays can be open at once (a sheet over the palette), and the first to
+ * close must not release the page for the second.
+ */
+let scrollLocks = 0;
+
+export function lockScroll(locked) {
+  scrollLocks = Math.max(0, scrollLocks + (locked ? 1 : -1));
+  document.body.style.overflow = scrollLocks > 0 ? 'hidden' : '';
 }
 
 /** Selects the text in an input, so a re-opened palette replaces rather than appends. */

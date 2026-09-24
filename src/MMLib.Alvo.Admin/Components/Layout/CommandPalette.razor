@@ -13,7 +13,7 @@
 @implements IAsyncDisposable
 @inject ManagementGateway Gateway
 @inject NavigationManager Navigation
-@inject IJSRuntime Js
+@inject AdminInterop Interop
 
 @if (_open)
 {
@@ -57,9 +57,7 @@
 
 @code {
     private readonly List<Entry> _entries = [];
-    private IJSObjectReference? _module;
-    private DotNetObjectReference<CommandPalette>? _self;
-    private readonly List<int> _subscriptions = [];
+    private readonly List<IAsyncDisposable> _subscriptions = [];
     private ElementReference _input;
     private ScrollLock? _scrollLock;
     private bool _open;
@@ -77,24 +75,31 @@
     {
         if (firstRender)
         {
-            _module = await Js.InvokeAsync<IJSObjectReference>("import", AlvoAdminAssets.Module);
-            _self = DotNetObjectReference.Create(this);
-            _subscriptions.Add(await _module.InvokeAsync<int>("subscribe", "palette", _self, nameof(OnPaletteRequested)));
-            _subscriptions.Add(await _module.InvokeAsync<int>("subscribe", "goto", _self, nameof(OnGoto)));
-            _subscriptions.Add(await _module.InvokeAsync<int>("subscribe", "dismiss", _self, nameof(OnDismiss)));
-            await _module.InvokeVoidAsync("markKeyboardReady");
+            await ListenAsync();
         }
 
-        if (_focusPending && _module is not null)
+        if (_focusPending)
         {
             _focusPending = false;
-            await _module.InvokeVoidAsync("focusAndSelect", _input);
+            await Interop.FocusAndSelectAsync(_input);
         }
 
         await (_open ? Lock.HoldAsync() : Lock.ReleaseAsync());
     }
 
-    private ScrollLock Lock => _scrollLock ??= new ScrollLock(Js);
+    private ScrollLock Lock => _scrollLock ??= new ScrollLock(Interop);
+
+    /// <summary>
+    /// Takes ⌘K, <c>g</c> and Escape from alvo.js's map, then says the keyboard is live — only now, because a
+    /// keystroke before these subscriptions reaches nobody.
+    /// </summary>
+    private async Task ListenAsync()
+    {
+        _subscriptions.Add(await Interop.SubscribeAsync("palette", _ => OpenAsync()));
+        _subscriptions.Add(await Interop.SubscribeAsync("goto", OnGoto));
+        _subscriptions.Add(await Interop.SubscribeAsync("dismiss", OnDismiss));
+        await Interop.MarkKeyboardReadyAsync();
+    }
 
     /// <summary>Opens the palette, from the header button or from ⌘K.</summary>
     public async Task OpenAsync()
@@ -106,13 +111,8 @@
         StateHasChanged();
     }
 
-    /// <summary>⌘K, forwarded from alvo.js.</summary>
-    [JSInvokable]
-    public Task OnPaletteRequested(string? _) => OpenAsync();
-
     /// <summary>Escape, forwarded from alvo.js.</summary>
-    [JSInvokable]
-    public Task OnDismiss(string? _)
+    private Task OnDismiss(string? _)
     {
         Close();
         return Task.CompletedTask;
@@ -122,8 +122,7 @@
     /// <c>g</c> then a letter. The letters are the navigation's own (§5.5), so the shortcut and the
     /// sidebar cannot disagree about where <c>g s</c> goes.
     /// </summary>
-    [JSInvokable]
-    public Task OnGoto(string? key)
+    private Task OnGoto(string? key)
     {
         if (AdminNavigation.GoTo(key) is { } target)
         {
@@ -199,11 +198,11 @@
         {
             Navigation.NavigateTo(path);
         }
-        else if (_module is not null)
+        else
         {
             /* The only entry without an address. alvo.js announces the flip, so the header's toggle
                redraws its icon without the palette knowing it exists. */
-            await _module.InvokeAsync<string>("toggleTheme");
+            await Interop.ToggleThemeAsync();
         }
     }
 
@@ -226,24 +225,10 @@
             await _scrollLock.ReleaseAsync();
         }
 
-        if (_module is not null)
+        foreach (var subscription in _subscriptions)
         {
-            try
-            {
-                foreach (var subscription in _subscriptions)
-                {
-                    await _module.InvokeVoidAsync("unsubscribe", subscription);
-                }
-
-                await _module.DisposeAsync();
-            }
-            catch (JSDisconnectedException)
-            {
-                /* The circuit is already gone; the listeners went with the document. */
-            }
+            await subscription.DisposeAsync();
         }
-
-        _self?.Dispose();
     }
 
     /// <summary>One row. <c>Path</c> is <see langword="null"/> for the one action that goes nowhere.</summary>

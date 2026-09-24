@@ -9,7 +9,7 @@
     would otherwise reach the scrim underneath.
 *@
 @implements IAsyncDisposable
-@inject IJSRuntime Js
+@inject AdminInterop Interop
 
 @if (Open)
 {
@@ -118,7 +118,7 @@
 
     private Task CloseAsync() => OnClose.InvokeAsync();
 
-    private ScrollLock Lock => _scrollLock ??= new ScrollLock(Js);
+    private ScrollLock Lock => _scrollLock ??= new ScrollLock(Interop);
 
     public async ValueTask DisposeAsync()
     {

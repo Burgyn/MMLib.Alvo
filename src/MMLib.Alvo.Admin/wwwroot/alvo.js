@@ -76,6 +76,14 @@
     element instanceof HTMLElement &&
     (element.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName));
 
+  /* What Enter already means something to. Enter on a button presses it and on a link follows it; the
+     grid's `open` is for Enter on a selected row, which is none of these, and must not fire as well. */
+  const CONTROL = 'a[href], button, input, select, textarea, summary, [contenteditable], [role="button"], ' +
+    '[role="link"], [role="tab"], [role="radio"], [role="option"], [role="checkbox"], [role="switch"], ' +
+    '[role="menuitem"]';
+
+  const isControl = (element) => element instanceof Element && element.closest(CONTROL) !== null;
+
   function emit(name, detail) {
     document.dispatchEvent(new CustomEvent(`alvo:${name}`, { detail, bubbles: true }));
   }
@@ -124,27 +132,35 @@
       return;
     }
 
+    /* The page's own keys are the page's, not the dialog's: `j` inside the record sheet must not move
+       the selection behind it, and Enter there must not open a second record over the first. */
+    if (underModal) {
+      return;
+    }
+
     switch (event.key) {
       case 'j':
         event.preventDefault();
-        emit('move', { by: 1 });
+        emit('move', { value: 'next' });
         break;
       case 'k':
         event.preventDefault();
-        emit('move', { by: -1 });
+        emit('move', { value: 'previous' });
         break;
       case 'g':
-        awaitingGoto = !underModal;
+        awaitingGoto = true;
         break;
       case '/':
         event.preventDefault();
         /* Focused here rather than from .NET: a screen's search box is plain markup, and moving
-           focus into it needs no round trip over the circuit — nor a public method on the page. */
+           focus into it needs no round trip over the circuit — nor a public method on the page. So
+           there is no `search` event: nothing on the circuit has anything to do. */
         document.querySelector('[data-alvo-search]')?.focus();
-        emit('search');
         break;
       case 'Enter':
-        emit('open');
+        if (!isControl(document.activeElement)) {
+          emit('open');
+        }
         break;
       default:
         break;
@@ -154,17 +170,5 @@
   applyStored();
   document.addEventListener('keydown', onKeyDown);
 
-  /* Holds the page still while a sheet is over it. Without this a drag near the panel's edge
-     scrolls the list underneath and the sheet appears to float over a page that is still
-     moving — the one thing that makes a bottom sheet read as a web page rather than a control.
-     Counted rather than boolean: two overlays can be open at once (a sheet over the palette),
-     and the first to close must not release the page for the second. */
-  let scrollLocks = 0;
-
-  const lockScroll = (locked) => {
-    scrollLocks = Math.max(0, scrollLocks + (locked ? 1 : -1));
-    document.body.style.overflow = scrollLocks > 0 ? 'hidden' : '';
-  };
-
-  window.alvo = { toggleTheme, toggleDensity, resolvedTheme, lockScroll };
+  window.alvo = { toggleTheme, toggleDensity, resolvedTheme };
 })();

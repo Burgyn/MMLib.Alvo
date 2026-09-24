@@ -340,12 +340,6 @@ namespace MMLib.Alvo.Admin.Components.Layout
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
-        [Microsoft.JSInterop.JSInvokable]
-        public System.Threading.Tasks.Task OnDismiss(string? _) { }
-        [Microsoft.JSInterop.JSInvokable]
-        public System.Threading.Tasks.Task OnGoto(string? key) { }
-        [Microsoft.JSInterop.JSInvokable]
-        public System.Threading.Tasks.Task OnPaletteRequested(string? _) { }
         public System.Threading.Tasks.Task OpenAsync() { }
     }
     public class Icon : Microsoft.AspNetCore.Components.ComponentBase
@@ -522,12 +516,11 @@ namespace MMLib.Alvo.Admin.Components.Pages
     }
     [Microsoft.AspNetCore.Authorization.Authorize]
     [Microsoft.AspNetCore.Components.Route("/admin/transfer")]
-    public class Transfer : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
+    public class Transfer : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public Transfer() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public System.Threading.Tasks.ValueTask DisposeAsync() { }
-        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+        public void Dispose() { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
     [Microsoft.AspNetCore.Authorization.Authorize]
@@ -720,7 +713,7 @@ namespace MMLib.Alvo.Admin.Components.Shared
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
     }
-    public class RecordGrid : Microsoft.AspNetCore.Components.ComponentBase
+    public class RecordGrid : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
     {
         public RecordGrid() { }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -732,6 +725,8 @@ namespace MMLib.Alvo.Admin.Components.Shared
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Schema.FieldSchema> OnSort { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
     }
     public class RedirectToSignIn : Microsoft.AspNetCore.Components.ComponentBase
     {

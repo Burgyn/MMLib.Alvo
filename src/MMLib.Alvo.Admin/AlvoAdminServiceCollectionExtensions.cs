@@ -27,11 +27,12 @@ public static class AlvoAdminServiceCollectionExtensions
     /// </para>
     /// <para>
     /// What is registered below — <c>ManagementGateway</c>, <c>DataGateway</c>,
-    /// <c>AssistantGateway</c>, <c>WorkingCopyStore</c> and <c>AdminSession</c> — is internal, and every
-    /// one of them is a thin adapter over <c>IAlvoManagement</c> and the ports in
-    /// <c>MMLib.Alvo.Abstractions</c> rather than a service of the dashboard's own: a screen that needed
-    /// one would be a screen doing work the core should be doing (<c>AdminSession</c> only composes the
-    /// others for a screen). None of these five is public, and none is meant to be resolved by host code.
+    /// <c>AssistantGateway</c>, <c>WorkingCopyStore</c>, <c>AdminSession</c> and <c>AdminInterop</c> — is
+    /// internal, and every one of them is a thin adapter over <c>IAlvoManagement</c>, the ports in
+    /// <c>MMLib.Alvo.Abstractions</c> or the browser rather than a service of the dashboard's own: a screen that
+    /// needed one would be a screen doing work the core should be doing (<c>AdminSession</c> only composes the
+    /// others for a screen, and <c>AdminInterop</c> is the one path into the dashboard's script). None of these
+    /// six is public, and none is meant to be resolved by host code.
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into.</param>
@@ -93,6 +94,9 @@ public static class AlvoAdminServiceCollectionExtensions
 
         /* Scoped like the gateways it composes: one circuit's caller and working copy. */
         services.TryAddScoped<AdminSession>();
+
+        /* Scoped for the same reason: one import of the dashboard's script per circuit. */
+        services.TryAddScoped<AdminInterop>();
 
         return services;
     }

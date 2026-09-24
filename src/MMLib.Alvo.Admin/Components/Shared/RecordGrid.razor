@@ -4,9 +4,17 @@
     Out of the Data screen (docs/architecture/admin-dashboard-review.md, F-13), which keeps what it
     reads and when; this draws a page it is handed. Deliberately not a generic grid: there is one grid,
     and the review rejects generalising it before a second one exists.
+
+    It owns the rows' keyboard (design §5.5): `j`/`k` move the selected row and Enter opens it. alvo.js
+    reads the keys and keeps them from a sheet or the palette; this keeps which row is selected.
 *@
+@implements IAsyncDisposable
+@inject AdminInterop Interop
+
 <div class="a-grid-wrap a-only-desktop-block">
-    <table class="a-grid">
+    @* `data-alvo-keyboard` says the rows' keys have a listener, for the markKeyboardReady reason: a `j` pressed
+       before this grid has subscribed reaches nobody. *@
+    <table class="a-grid" data-alvo-keyboard="@(_listening ? "ready" : null)">
         <thead>
             <tr>
                 @foreach (var column in Scope.Columns)
@@ -28,22 +36,24 @@
                 <th></th>
             </tr>
         </thead>
-        <tbody>
+        <tbody @ref="_body">
             @*
                 The whole row opens the record, because that is what a reader reaching for a
-                row means; the Edit button stays as the same action for the keyboard, which a
-                clickable row alone does not give — a <tr> is not a control.
+                row means; the Edit button stays as the same action for Tab, which a clickable
+                row alone does not give — a <tr> is not a control. The row takes focus only
+                from `j`/`k` (tabindex -1), so Tab still walks the controls and nothing else.
             *@
-            @foreach (var row in Scope.Page.Items)
+            @foreach (var (row, index) in Scope.Page.Items.Select((row, index) => (row, index)))
             {
-                <tr class="a-grid__row" @onclick="() => OnOpen.InvokeAsync(row)">
+                <tr class="a-grid__row" tabindex="-1" aria-selected="@(index == Selected ? "true" : null)"
+                    @onclick="() => OpenAsync(index)">
                     @foreach (var column in Scope.Columns)
                     {
                         <td class="@CellClass(column, row)">@Value(column, row)</td>
                     }
                     <td class="a-cell--actions">
                         <button type="button" class="a-btn a-btn--ghost a-btn--sm"
-                                @onclick="() => OnOpen.InvokeAsync(row)" @onclick:stopPropagation="true">Edit</button>
+                                @onclick="() => OpenAsync(index)" @onclick:stopPropagation="true">Edit</button>
                     </td>
                 </tr>
             }
@@ -104,6 +114,13 @@
     }
 </div>
 @code {
+    private readonly List<IAsyncDisposable> _subscriptions = [];
+    private ElementReference _body;
+    private AlvoPage? _selectedOn;
+    private int? _selected;
+    private bool _listening;
+    private bool _focusPending;
+
     /// <summary>What to draw; see <see cref="RecordGridScope"/>.</summary>
     [CascadingParameter]
     private RecordGridScope Scope { get; set; } = default!;
@@ -123,6 +140,62 @@
     /// <summary>Raised to read the previous page.</summary>
     [Parameter]
     public EventCallback OnPrevious { get; set; }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _subscriptions.Add(await Interop.SubscribeAsync("move", OnMove));
+            _subscriptions.Add(await Interop.SubscribeAsync("open", OnOpenSelected));
+            _listening = true;
+            StateHasChanged();
+        }
+
+        if (_focusPending)
+        {
+            _focusPending = false;
+            await Interop.FocusSelectedAsync(_body);
+        }
+    }
+
+    /// <summary>
+    /// The selected row on the page drawn now. A new page is new rows, so a selection made on the one before
+    /// means nothing on it.
+    /// </summary>
+    private int? Selected => ReferenceEquals(_selectedOn, Scope.Page) ? _selected : null;
+
+    private void Select(int? index)
+    {
+        _selectedOn = Scope.Page;
+        _selected = index;
+    }
+
+    /// <summary><c>j</c> or <c>k</c>: moves the selection, then focuses the row once it is drawn as selected.</summary>
+    private Task OnMove(string? direction) => InvokeAsync(() =>
+    {
+        Select(RowCursor.Move(Selected, direction, Scope.Page.Items.Count));
+        _focusPending = _selected is not null;
+        StateHasChanged();
+    });
+
+    /// <summary>Enter, when no control has focus: opens the selected row, if there is one.</summary>
+    private Task OnOpenSelected(string? _) => InvokeAsync(() =>
+        Selected is { } index && index < Scope.Page.Items.Count ? OpenAsync(index) : Task.CompletedTask);
+
+    /// <summary>Opens a row, and makes it the selected one, so <c>j</c> goes on from the row last opened.</summary>
+    private Task OpenAsync(int index)
+    {
+        Select(index);
+        return OnOpen.InvokeAsync(Scope.Page.Items[index]);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var subscription in _subscriptions)
+        {
+            await subscription.DisposeAsync();
+        }
+    }
 
     private static bool IsNumeric(FieldSchema column)
         => column.Type is FieldType.Integer or FieldType.Decimal;

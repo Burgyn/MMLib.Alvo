@@ -56,8 +56,8 @@ public static class AlvoAdminAssets
     /// <para>
     /// Separate from <see cref="Script"/> deliberately. That one runs before hydration and knows
     /// nothing about Blazor, which is what makes it correct for a theme applied before the first
-    /// paint. This one is an ES module, imported by the component that needs it and released with
-    /// that component, so a session that never opens the palette never loads it.
+    /// paint. This one is an ES module, imported once per circuit on the first call that needs it and
+    /// released with the circuit.
     /// </para>
     /// <para>
     /// <b>Rooted at the origin, unlike the other two, and it has to be.</b> Those are written into
@@ -65,7 +65,7 @@ public static class AlvoAdminAssets
     /// resolves a relative path. This one is handed to <c>import()</c>, and a specifier that starts
     /// with neither <c>/</c> nor <c>./</c> is a <em>bare specifier</em> — a package name, which a
     /// browser with no import map cannot resolve. The failure is not quiet: the import rejects, the
-    /// component's <c>OnAfterRenderAsync</c> throws, and Blazor <b>terminates the circuit</b>. The
+    /// calling component's <c>OnAfterRenderAsync</c> throws, and Blazor <b>terminates the circuit</b>. The
     /// page is then rendered and completely dead, which reads as a broken application rather than
     /// as a missing file.
     /// </para>
