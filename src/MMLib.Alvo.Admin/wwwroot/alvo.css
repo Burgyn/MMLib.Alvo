@@ -25,8 +25,8 @@
    Every rule sits in one of these; ComponentLayerTests refuses one that does
    not, because an unlayered rule outranks all five and would bring source order
    back. The @font-face rules stay outside: a face is not a declaration the
-   cascade chooses between. A host's own stylesheet, being unlayered, wins over
-   this whole file — which is the order a host overriding the dashboard wants. */
+   cascade chooses between. The dashboard's document links this one file and no
+   other stylesheet, so nothing unlayered competes with it there. */
 @layer tokens, base, layout, components, utilities;
 
 /* ===========================================================================
@@ -2185,13 +2185,18 @@
 
     /* A key beside its value needs a viewport wide enough for both. At this width the
        key wins the space and the value wraps to one word per line, so the pair stacks
-       instead — the same answer the row cards give the data grid. Only a row that has a
-       key: a row of items — a person and their Change button, a plan step and its badge —
-       has no pair to break, and keeps its line. */
-    .a-listrow:has(> .a-listrow__key, > .a-detail__label) {
+       instead — the same answer the row cards give the data grid. */
+    .a-listrow {
       flex-direction: column;
       align-items: flex-start;
       gap: var(--space-1);
+    }
+
+    /* A row of items rather than a key and its value — a person and their Change button,
+       a plan step and its badge — has no pair to break, and keeps its line. */
+    .a-listrow--inline {
+      flex-direction: row;
+      gap: var(--space-4);
     }
 
     /* The name of the thing you are looking at, at the size of a title rather than of a label. */

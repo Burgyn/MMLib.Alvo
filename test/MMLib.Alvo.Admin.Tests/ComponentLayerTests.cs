@@ -121,6 +121,16 @@ public sealed partial class ComponentLayerTests
     public void Every_rule_sits_in_a_declared_layer()
         => Stylesheet.BlocksOutsideLayers(_css, _layers).ShouldBeEmpty();
 
+    /// <summary>The check above is not blind to a rule written on one line, or to an undeclared layer.</summary>
+    [Fact]
+    public void The_layer_check_sees_a_one_line_rule_and_an_undeclared_layer()
+    {
+        const string css = "@layer components {\n  .a-ok {\n  }\n}\n.a-stray { color: inherit; }\n@layer extra {\n}\n";
+
+        Stylesheet.BlocksOutsideLayers(css, _layers)
+            .ShouldBe([".a-stray { color: inherit; }", "@layer extra {"]);
+    }
+
     /// <summary>
     /// The layout utilities are in the last layer, so they win over any component rule they are added to —
     /// the reason they can replace a <c>style</c> attribute, which won the same way.

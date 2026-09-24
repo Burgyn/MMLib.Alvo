@@ -63,7 +63,7 @@
                 <ChildContent>
                     @foreach (var step in _plan.Plan.Steps.Select(PlanStep.Parse))
                     {
-                        <ListRow data-testid="plan-step">
+                        <ListRow data-testid="plan-step" class="a-listrow--inline">
                             <span class="@($"a-badge {(step.Destructive ? "a-badge--danger" : "a-badge--ok")}")" style="flex:none">
                                 @(step.Destructive ? "destroys" : "safe")
                             </span>

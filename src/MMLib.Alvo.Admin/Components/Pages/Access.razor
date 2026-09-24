@@ -50,7 +50,7 @@
                 {
                     @* A stable id per person, so a row can be addressed by who it is rather than by
                        where it sits in a list that reorders. *@
-                    <ListRow id="@($"person-{person.Id.Value}")" class="a-listrow--roomy a-listrow--wrap">
+                    <ListRow id="@($"person-{person.Id.Value}")" class="a-listrow--roomy a-listrow--wrap a-listrow--inline">
                         <span style="flex:1;min-width:220px">
                             <span style="font-size:var(--text-sm);font-weight:var(--weight-medium)">@person.Email</span>
                             <span class="a-switcher-meta">

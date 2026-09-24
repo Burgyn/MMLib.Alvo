@@ -97,7 +97,7 @@
             <ChildContent>
                 @foreach (var pending in Pending)
                 {
-                    <ListRow class="a-listrow--accent" OnClick="() => Open(pending)">
+                    <ListRow class="a-listrow--accent a-listrow--inline" OnClick="() => Open(pending)">
                         <Icon Path="@Icons.Schema" />
                         <span style="flex:1;min-width:0">
                             <span class="a-mono" style="font-size:var(--text-sm);font-weight:var(--weight-medium)">@pending</span>
@@ -109,7 +109,7 @@
 
                 @foreach (var entity in _schema.Entities)
                 {
-                    <ListRow OnClick="() => Open(entity.Name)">
+                    <ListRow class="a-listrow--inline" OnClick="() => Open(entity.Name)">
                         <Icon Path="@Icons.Schema" />
                         <span style="flex:1;min-width:0">
                             <span class="a-mono" style="font-size:var(--text-sm);font-weight:var(--weight-medium)">@entity.Name</span>

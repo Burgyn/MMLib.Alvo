@@ -251,6 +251,10 @@ internal static partial class Stylesheet
     /// <summary>
     /// The lines at the file's own top level that open a block, other than a declared layer or a font face.
     /// </summary>
+    /// <remarks>
+    /// Any top-level line with a brace, not only one that ends in it, so a rule written on one line —
+    /// <c>.x { color: inherit; }</c> — is caught as well as one spread over several.
+    /// </remarks>
     /// <param name="css">The stylesheet's text.</param>
     /// <param name="layers">The layer names the statement declares.</param>
     /// <returns>Each offending line, in source order.</returns>
@@ -260,7 +264,8 @@ internal static partial class Stylesheet
         ArgumentNullException.ThrowIfNull(layers);
 
         return [.. css.ReplaceLineEndings("\n").Split('\n')
-            .Where(line => line.EndsWith('{') && line.Length > 0 && !char.IsWhiteSpace(line[0]))
+            .Where(line => line.Length > 0 && !char.IsWhiteSpace(line[0]) && line.Contains('{', StringComparison.Ordinal))
+            .Where(line => !line.StartsWith("/*", StringComparison.Ordinal))
             .Where(line => line != "@font-face {"
                 && !(LayerBlock().Match(line) is { Success: true } layer && layers.Contains(layer.Groups["name"].Value)))];
     }

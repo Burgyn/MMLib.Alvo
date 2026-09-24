@@ -30,16 +30,30 @@ export function markKeyboardReady() {
 }
 
 /**
- * Keeps the arrow keys on an entity's tab strip from also scrolling it.
+ * Keeps the arrow keys on an entity's tab strip, and on a one-of chip group, from also scrolling
+ * the page.
  *
  * Blazor cannot prevent a default for some keys and not others — `@onkeydown:preventDefault` would
- * swallow Tab and Enter too — so the strip's own handler moves the tab and this stops the browser
- * from moving the page as well. Registered once, when the module is first imported.
+ * swallow Tab and Enter too — so the strip's or the group's own handler moves the choice and this
+ * stops the browser from moving the page as well. A radio group takes the vertical arrows too,
+ * because its chips wrap onto several lines. Registered once, when the module is first imported —
+ * which the command palette does in the admin layout, so on every screen a ChipGroup can render on.
  */
+const ROVING_KEYS = {
+  '[role="tab"]': ['ArrowLeft', 'ArrowRight', 'Home', 'End'],
+  '[role="radio"]': ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'],
+};
+
 document.addEventListener('keydown', (event) => {
-  if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)
-      && event.target instanceof Element && event.target.closest('[role="tab"]')) {
-    event.preventDefault();
+  if (!(event.target instanceof Element)) {
+    return;
+  }
+
+  for (const [selector, keys] of Object.entries(ROVING_KEYS)) {
+    if (keys.includes(event.key) && event.target.closest(selector)) {
+      event.preventDefault();
+      return;
+    }
   }
 });
 
