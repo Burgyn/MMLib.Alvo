@@ -684,6 +684,7 @@ namespace MMLib.Alvo.Admin.Components.Shared
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<string> Roles { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
     }
     public class PolicyVerdictView : Microsoft.AspNetCore.Components.ComponentBase
     {

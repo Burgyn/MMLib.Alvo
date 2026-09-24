@@ -57,6 +57,15 @@ public class HookBuilderTests
     }
 
     [Fact]
+    public void A_kind_the_editor_does_not_know_cannot_build_an_empty_email()
+    {
+        var hook = new HookBuilder { Kind = "sms" };
+
+        hook.Build(out var refusal).ShouldBeNull();
+        refusal.ShouldBe("An email names a template and who it goes to.");
+    }
+
+    [Fact]
     public void A_reject_carries_its_message()
         => Built(new HookBuilder { RejectMessage = "No." }).ShouldBe("""{"reject":"No."}""");
 

@@ -109,6 +109,7 @@
 
 @code {
     private string _tenantDraft = string.Empty;
+    private TenantId? _shownTenant;
 
     /// <summary>The person this row is about.</summary>
     [Parameter, EditorRequired]
@@ -149,4 +150,22 @@
     /// <summary>Raised with whether the person should be disabled.</summary>
     [Parameter]
     public EventCallback<bool> OnSetDisabled { get; set; }
+
+    /// <summary>
+    /// Forgets the typed tenant when the row closes, and when the person's tenant changes under it — which is
+    /// what a grant that went through looks like from here.
+    /// </summary>
+    /// <remarks>
+    /// The box shows the person's tenant, not the draft, so a draft kept past either moment is text nobody can
+    /// see — and Grant would send it.
+    /// </remarks>
+    protected override void OnParametersSet()
+    {
+        if (!Expanded || Person.Tenant != _shownTenant)
+        {
+            _tenantDraft = string.Empty;
+        }
+
+        _shownTenant = Person.Tenant;
+    }
 }

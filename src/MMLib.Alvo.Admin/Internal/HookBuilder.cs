@@ -154,14 +154,19 @@ internal sealed class HookBuilder
         To = string.Empty;
     }
 
+    /// <summary>The schema's required facet the kind is missing, or nothing.</summary>
+    /// <remarks>
+    /// Anything that is not one of the first three is built as an email, so it is refused as one: a kind
+    /// this editor does not know can never build an email with no template and no recipient.
+    /// </remarks>
     private string? Missing() => Kind switch
     {
-        Reject when Blank(RejectMessage) => "A reject carries the message the caller reads. Write one.",
-        Mutate when Blank(MutateField) || Blank(MutateValue)
-            => "A mutate patches at least one field. Name the field and what to set it to.",
-        Webhook when Blank(Endpoint) => "A webhook names an endpoint declared under 'webhooks.endpoints'.",
-        Email when Blank(Template) || Blank(To) => "An email names a template and who it goes to.",
-        _ => null,
+        Reject => Blank(RejectMessage) ? "A reject carries the message the caller reads. Write one." : null,
+        Mutate => Blank(MutateField) || Blank(MutateValue)
+            ? "A mutate patches at least one field. Name the field and what to set it to."
+            : null,
+        Webhook => Blank(Endpoint) ? "A webhook names an endpoint declared under 'webhooks.endpoints'." : null,
+        _ => Blank(Template) || Blank(To) ? "An email names a template and who it goes to." : null,
     };
 
     private JsonObject Action() => Kind switch

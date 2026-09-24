@@ -114,6 +114,38 @@ public class FieldFacetsTests
     }
 
     [Fact]
+    public void A_decimal_carries_its_precision_and_scale()
+        => Built(new FieldFacets { Name = "rate", Type = FieldType.Decimal, Precision = 12, Scale = 4 })
+            .ToJsonString().ShouldBe("""{"type":"decimal","precision":12,"scale":4}""");
+
+    [Fact]
+    public void Clearing_unique_and_indexed_removes_the_declared_ones()
+    {
+        const string declared = """{"type":"string","maxLength":40,"unique":true,"index":true}""";
+        var editor = FieldFacets.Prefill("code", declared);
+        editor.Unique = false;
+        editor.Indexed = false;
+
+        editor.Build("code", declared, [], out _)!.ToJsonString()
+            .ShouldBe("""{"type":"string","maxLength":40}""");
+    }
+
+    [Fact]
+    public void Retyping_away_from_a_ref_drops_its_target_and_on_delete()
+    {
+        const string declared = """{"type":"ref","entity":"bikes","onDelete":"cascade"}""";
+        var editor = FieldFacets.Prefill("bike", declared);
+        editor.Type = FieldType.Uuid;
+
+        editor.Build("bike", declared, [], out _)!.ToJsonString().ShouldBe("""{"type":"uuid"}""");
+    }
+
+    [Fact]
+    public void A_boolean_default_of_false_is_the_literal_false()
+        => Built(new FieldFacets { Name = "active", Type = FieldType.Boolean, Default = "false" })
+            .ToJsonString().ShouldBe("""{"type":"boolean","default":false}""");
+
+    [Fact]
     public void Prefill_reads_every_facet_the_editor_draws()
     {
         var editor = FieldFacets.Prefill(
