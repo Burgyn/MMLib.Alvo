@@ -1,4 +1,5 @@
 ﻿using Microsoft.Playwright;
+using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
@@ -13,9 +14,12 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// the browser reloaded — however far the operator navigated.
 /// </para>
 /// <para>
-/// <b>Two browser contexts, so two circuits</b>, and the one that looks is moved by a click on its own
+/// <b>Two browser contexts, so two circuits</b>, and the one that looks is moved by one click on its own
 /// navigation rather than by <c>GoAsync</c>: a page load starts a new circuit, which never had the stale
-/// cache, and would pass with the defect in place. <b>Its own world</b>, because it applies, and the other
+/// cache, and would pass with the defect in place. It asserts the <em>page</em> it lands on as well as the
+/// card, because the router renders the destination inside its own <c>LocationChanged</c> handler — ahead
+/// of any handler the gateway could add to the same event — and an invalidation hung there fixed the card
+/// and left the page reading the old cache. <b>Its own world</b>, because it applies, and the other
 /// classes read the revision the world was seeded at.
 /// </para>
 /// </remarks>
@@ -27,7 +31,7 @@ public sealed class OtherCircuitApplyScenarios(AdminWorld world) : IClassFixture
     {
         var cancel = TestContext.Current.CancellationToken;
         await using var bystander = await world.SignInAsync(cancel);
-        await bystander.GoAsync("/schema");
+        await bystander.GoAsync("/history");
         var before = await Card(bystander).InnerTextAsync();
 
         await using var applier = await world.SignInAsync(cancel);
@@ -37,9 +41,10 @@ public sealed class OtherCircuitApplyScenarios(AdminWorld world) : IClassFixture
         (await Card(bystander).InnerTextAsync()).ShouldBe(before);
 
         await bystander.Page.Locator("nav.a-sidebar")
-            .GetByRole(AriaRole.Link, new() { Name = "Configuration history", Exact = true }).ClickAsync();
-        await bystander.Page.WaitForURLAsync("**/history");
+            .GetByRole(AriaRole.Link, new() { Name = "Overview", Exact = true }).ClickAsync();
+        await bystander.Page.WaitForURLAsync("**/admin");
 
+        await bystander.Page.Locator("main").GetByText($"Revision {applied} applied").WaitForAsync();
         await bystander.Page.Locator($"[data-testid='project-card']:has-text('revision {applied}')").WaitForAsync();
 
         bystander.AssertConsoleClean();
@@ -65,6 +70,8 @@ public sealed class OtherCircuitApplyScenarios(AdminWorld world) : IClassFixture
 
         var announced = session.Page.GetByText("Applied as revision").First;
         await announced.WaitForAsync();
-        return (await announced.InnerTextAsync()).Split(' ')[^1];
+        var revision = Regex.Match(await announced.InnerTextAsync(), @"Applied as revision (\d+)");
+        revision.Success.ShouldBeTrue();
+        return revision.Groups[1].Value;
     }
 }

@@ -46,12 +46,13 @@ internal sealed class ManagementGateway(
     AuthenticationStateProvider authentication,
     IAlvoContextAccessor ambient) : IDisposable
 {
-    private NavigationManager? _navigation;
-    private ManagementDescriptor? _descriptor;
-    private SchemaModel? _schema;
-    private ManagementCapabilities? _capabilities;
-    private ManagementInfo? _info;
-    private IReadOnlyList<ManagementProject>? _projects;
+    private readonly Slot<ManagementDescriptor> _descriptor = new();
+    private readonly Slot<SchemaModel> _schema = new();
+    private readonly Slot<ManagementCapabilities> _capabilities = new();
+    private readonly Slot<ManagementInfo> _info = new();
+    private readonly Slot<IReadOnlyList<ManagementProject>> _projects = new();
+    private IDisposable? _following;
+    private int _generation;
 
     /// <summary>The project this dashboard is looking at.</summary>
     /// <remarks>
@@ -82,34 +83,59 @@ internal sealed class ManagementGateway(
     public async ValueTask<ManagementDescriptor> DescriptorAsync(CancellationToken ct)
     {
         var project = await ProjectAsync(ct).ConfigureAwait(false);
-        return _descriptor ??= await AsOperatorAsync(
-            () => management.GetDescriptorAsync(project, ct), ct).ConfigureAwait(false);
+        return await CachedAsync(_descriptor, () => management.GetDescriptorAsync(project, ct), ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>The resolved schema — what the Data API actually serves.</summary>
     public async ValueTask<SchemaModel> SchemaAsync(CancellationToken ct)
     {
         var project = await ProjectAsync(ct).ConfigureAwait(false);
-        return _schema ??= await AsOperatorAsync(
-            () => management.GetSchemaAsync(project, ct), ct).ConfigureAwait(false);
+        return await CachedAsync(_schema, () => management.GetSchemaAsync(project, ct), ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>What this build honours, warns about and refuses.</summary>
     public async ValueTask<ManagementCapabilities> CapabilitiesAsync(CancellationToken ct)
     {
         var project = await ProjectAsync(ct).ConfigureAwait(false);
-        return _capabilities ??= await AsOperatorAsync(
-            () => management.GetCapabilitiesAsync(project, ct), ct).ConfigureAwait(false);
+        return await CachedAsync(_capabilities, () => management.GetCapabilitiesAsync(project, ct), ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Build, mode, data provider and startup mode.</summary>
-    public async ValueTask<ManagementInfo> InfoAsync(CancellationToken ct)
-        => _info ??= await AsOperatorAsync(() => management.GetInfoAsync(ct), ct).ConfigureAwait(false);
+    public ValueTask<ManagementInfo> InfoAsync(CancellationToken ct)
+        => CachedAsync(_info, () => management.GetInfoAsync(ct), ct);
 
     /// <summary>Every project this build manages — one, today (§2.6).</summary>
-    public async ValueTask<IReadOnlyList<ManagementProject>> ProjectsAsync(CancellationToken ct)
-        => _projects ??= await AsOperatorAsync(
-            () => management.ListProjectsAsync(ct), ct).ConfigureAwait(false);
+    public ValueTask<IReadOnlyList<ManagementProject>> ProjectsAsync(CancellationToken ct)
+        => CachedAsync(_projects, () => management.ListProjectsAsync(ct), ct);
+
+    /// <summary>A cached read, or the call that fills it.</summary>
+    /// <remarks>
+    /// <b>The answer is kept only if no <see cref="Invalidate"/> ran while it was on its way.</b> A read that
+    /// started before a navigation or an apply and finished after one carries the configuration as it was, and
+    /// storing it would put back exactly the stale value the invalidation had just dropped — so the generation
+    /// is taken before the await and compared after it. The caller still gets the answer it asked for.
+    /// </remarks>
+    private async ValueTask<T> CachedAsync<T>(Slot<T> slot, Func<Task<T>> call, CancellationToken ct)
+        where T : class
+    {
+        if (slot.Value is { } cached)
+        {
+            return cached;
+        }
+
+        var generation = Volatile.Read(ref _generation);
+        var fresh = await AsOperatorAsync(call, ct).ConfigureAwait(false);
+
+        if (generation == Volatile.Read(ref _generation))
+        {
+            slot.Value = fresh;
+        }
+
+        return fresh;
+    }
 
     /// <summary>The append-only configuration history, newest first.</summary>
     /// <remarks>
@@ -335,47 +361,75 @@ internal sealed class ManagementGateway(
     /// for a screen. No bus, no shared state: this circuit's own <see cref="NavigationManager"/>.
     /// </para>
     /// <para>
-    /// <b>Called by the registration, as the gateway is built, and the timing is the point.</b>
-    /// <see cref="NavigationManager.LocationChanged"/> runs its handlers in the order they subscribed, and the
-    /// project card re-reads the revision from its own handler. Every component that reads through this gateway
-    /// has it injected before its own <c>OnInitialized</c> can subscribe, so subscribing here, at construction,
-    /// puts the invalidation ahead of every re-read it has to precede.
+    /// <b>On the location <em>changing</em>, not changed, and the order is the point.</b> The router subscribes
+    /// to <see cref="NavigationManager.LocationChanged"/> before this gateway exists and renders the destination
+    /// page inside its own handler, so an invalidation hung on the same event ran after the new page had already
+    /// read the old cache. A location-changing handler runs before any <c>LocationChanged</c> handler — for a
+    /// link click, a <c>NavigateTo</c> (a query-only one too) and a step back or forward alike — so every
+    /// screen, and the project card, reads after the drop. It never cancels a navigation.
+    /// </para>
+    /// <para>
+    /// <b>A statically rendered pass has nothing to follow</b>: its navigation manager supports no
+    /// location-changing handlers, and its scope is one request that never navigates. The gateway then caches
+    /// for that request alone, which is what it did before.
+    /// </para>
+    /// <para>
+    /// The cost is a re-read of these four per navigation — including the query-only ones, an entity's tab or the
+    /// grid's filter — each an in-process call rather than a network round trip.
     /// </para>
     /// </remarks>
-    /// <param name="navigation">This circuit's navigation.</param>
+    /// <param name="navigation">This scope's navigation, initialised.</param>
     public void FollowNavigation(NavigationManager navigation)
     {
         ArgumentNullException.ThrowIfNull(navigation);
 
-        Dispose();
-        _navigation = navigation;
-        _navigation.LocationChanged += OnLocationChanged;
-    }
-
-    /// <summary>Stops following the circuit's navigation.</summary>
-    public void Dispose()
-    {
-        if (_navigation is not null)
+        Unfollow();
+        try
         {
-            _navigation.LocationChanged -= OnLocationChanged;
-            _navigation = null;
+            _following = navigation.RegisterLocationChangingHandler(OnLocationChanging);
+        }
+        catch (NotSupportedException)
+        {
+            _following = null;
         }
     }
 
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => Invalidate();
+    /// <summary>Stops following the scope's navigation, when the scope ends.</summary>
+    public void Dispose() => Unfollow();
+
+    private void Unfollow()
+    {
+        _following?.Dispose();
+        _following = null;
+    }
+
+    private ValueTask OnLocationChanging(LocationChangingContext context)
+    {
+        Invalidate();
+        return ValueTask.CompletedTask;
+    }
 
     /// <summary>Drops every cached read.</summary>
     /// <remarks>
     /// <c>info</c> is dropped too, because it now carries the AI connection — which a save from the settings
     /// screen changes, and a cache that outlived the save would report "not configured" to the operator who
-    /// had just configured it.
+    /// had just configured it. The project list is kept, as it always was; the project card reads the current
+    /// revision from the descriptor rather than from it.
     /// </remarks>
     public void Invalidate()
     {
-        _descriptor = null;
-        _schema = null;
-        _capabilities = null;
-        _info = null;
+        Interlocked.Increment(ref _generation);
+        _descriptor.Value = null;
+        _schema.Value = null;
+        _capabilities.Value = null;
+        _info.Value = null;
+    }
+
+    /// <summary>One cached read. A class, so <see cref="CachedAsync{T}"/> can fill it across an await.</summary>
+    private sealed class Slot<T>
+        where T : class
+    {
+        public T? Value { get; set; }
     }
 
     /// <summary>

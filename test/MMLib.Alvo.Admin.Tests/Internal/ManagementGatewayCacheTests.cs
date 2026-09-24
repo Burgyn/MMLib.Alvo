@@ -35,26 +35,55 @@ public class ManagementGatewayCacheTests
         using var gateway = Gateway(navigation, out _);
         await gateway.DescriptorAsync(Ct);
 
-        navigation.GoTo("http://alvo.test/admin/history");
+        await navigation.GoToAsync("http://alvo.test/admin/history");
 
         (await gateway.DescriptorAsync(Ct)).Revision.ShouldBe(2);
     }
 
     [Fact]
-    public async Task The_invalidation_runs_ahead_of_a_handler_that_subscribed_after_it()
+    public async Task A_query_only_navigation_reads_again_too()
     {
         var navigation = new TestNavigation();
         using var gateway = Gateway(navigation, out _);
         await gateway.DescriptorAsync(Ct);
 
-        /* The project card's shape: subscribed in OnInitialized, after the gateway was injected, and re-reading
-           synchronously inside the handler. The substitute's reads complete at once, as the in-process ones do. */
-        int? seen = null;
-        navigation.LocationChanged += (_, _) => seen = gateway.DescriptorAsync(Ct).AsTask().GetAwaiter().GetResult().Revision;
+        await navigation.GoToAsync("http://alvo.test/admin?tab=rules");
 
-        navigation.GoTo("http://alvo.test/admin/schema");
+        (await gateway.DescriptorAsync(Ct)).Revision.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_page_the_router_renders_on_location_changed_reads_after_the_drop()
+    {
+        /* The router's shape: subscribed before the gateway existed, and rendering the destination inside its
+           handler. The substitute's reads complete at once, as the in-process ones do. */
+        var navigation = new TestNavigation();
+        ManagementGateway? gateway = null;
+        int? seen = null;
+        navigation.LocationChanged += (_, _) => seen = gateway!.DescriptorAsync(Ct).AsTask().GetAwaiter().GetResult().Revision;
+
+        gateway = Gateway(navigation, out _);
+        await gateway.DescriptorAsync(Ct);
+        await navigation.GoToAsync("http://alvo.test/admin/schema");
 
         seen.ShouldBe(2);
+        gateway.Dispose();
+    }
+
+    [Fact]
+    public async Task A_read_in_flight_across_an_invalidation_is_not_kept()
+    {
+        using var gateway = Gateway(new TestNavigation(), out var management);
+        var slow = new TaskCompletionSource<ManagementDescriptor>();
+        management.GetDescriptorAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(slow.Task, Task.FromResult(new ManagementDescriptor("default", 2, "{}")));
+
+        var inFlight = gateway.DescriptorAsync(Ct).AsTask();
+        gateway.Invalidate();
+        slow.SetResult(new ManagementDescriptor("default", 1, "{}"));
+
+        (await inFlight).Revision.ShouldBe(1, "the caller still gets the answer it asked for");
+        (await gateway.DescriptorAsync(Ct)).Revision.ShouldBe(2, "the stale answer must not refill the cache");
     }
 
     [Fact]
@@ -65,10 +94,19 @@ public class ManagementGatewayCacheTests
         await gateway.DescriptorAsync(Ct);
 
         gateway.Dispose();
-        navigation.GoTo("http://alvo.test/admin/schema");
+        await navigation.GoToAsync("http://alvo.test/admin/schema");
 
         (await gateway.DescriptorAsync(Ct)).Revision.ShouldBe(1, "a scope that ended must not keep a handler on the navigation");
         await management.Received(1).GetDescriptorAsync(Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task A_static_render_caches_for_its_request()
+    {
+        using var gateway = Gateway(new StaticNavigation(), out _);
+
+        (await gateway.DescriptorAsync(Ct)).Revision.ShouldBe(1);
+        (await gateway.DescriptorAsync(Ct)).Revision.ShouldBe(1);
     }
 
     private static ManagementGateway Gateway(NavigationManager navigation, out IAlvoManagement management)
@@ -95,17 +133,32 @@ public class ManagementGatewayCacheTests
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    /// <summary>A circuit's navigation, moved by the test rather than by a browser.</summary>
+    /// <summary>
+    /// A circuit's navigation, moved by the test rather than by a browser: changing handlers first, then
+    /// <see cref="NavigationManager.LocationChanged"/>, as the framework raises them.
+    /// </summary>
     private sealed class TestNavigation : NavigationManager
     {
         public TestNavigation() => Initialize("http://alvo.test/", "http://alvo.test/admin");
 
-        public void GoTo(string uri)
+        public async Task GoToAsync(string uri)
         {
+            (await NotifyLocationChangingAsync(uri, state: null, isNavigationIntercepted: true)).ShouldBeTrue();
             Uri = uri;
             NotifyLocationChanged(isInterceptedLink: true);
         }
 
-        protected override void NavigateToCore(string uri, bool forceLoad) => GoTo(ToAbsoluteUri(uri).ToString());
+        protected override void SetNavigationLockState(bool value)
+        {
+        }
+
+        protected override void NavigateToCore(string uri, bool forceLoad)
+            => throw new NotSupportedException("The tests move this with GoToAsync.");
+    }
+
+    /// <summary>A statically rendered request's navigation, which supports no location-changing handlers.</summary>
+    private sealed class StaticNavigation : NavigationManager
+    {
+        public StaticNavigation() => Initialize("http://alvo.test/", "http://alvo.test/admin");
     }
 }

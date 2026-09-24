@@ -68,7 +68,7 @@
     /// <remarks>
     /// Without it the revision in the sidebar is whatever it was when the session started, and an
     /// operator who has just applied a change reads a number that contradicts the screen they are
-    /// looking at. The gateway drops its cache on the same navigation, and ahead of this handler, so the
+    /// looking at. The gateway dropped its cache while the location was changing, before this handler, so the
     /// re-read is of the revision as it is now — including one another tab or another operator applied,
     /// which this circuit's <see cref="ManagementGateway.Applied"/> never hears about.
     /// </remarks>

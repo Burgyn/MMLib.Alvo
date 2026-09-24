@@ -67,8 +67,9 @@ public static class AlvoAdminServiceCollectionExtensions
            a membership store, and a nullable constructor parameter is not an optional dependency
            to the container. The same shape the core already uses for an optional data port. */
         /* And it follows the circuit's navigation from the moment it exists, which is what keeps its cache
-           from outliving an apply made in another circuit — ManagementGateway.FollowNavigation says why the
-           timing matters. */
+           from outliving an apply made in another circuit — ManagementGateway.FollowNavigation says how. The
+           price: the gateway can be resolved only where the NavigationManager is initialised, inside a
+           component's render. Resolving it from an endpoint, a middleware or a CircuitHandler throws. */
         services.TryAddScoped(provider =>
         {
             var gateway = new ManagementGateway(
