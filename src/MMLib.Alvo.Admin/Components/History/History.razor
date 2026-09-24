@@ -38,7 +38,9 @@
                 }
             </Panel>
 
-            <div class="a-split__aside">
+            <SplitHandle Controls="history-revision" />
+
+            <div class="a-split__aside" id="history-revision">
                 @if (_selected is null)
                 {
                     <div class="a-card">

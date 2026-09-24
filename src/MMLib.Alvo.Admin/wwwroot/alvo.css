@@ -319,9 +319,16 @@
    =========================================================================== */
 
 @layer layout {
+  /* An application frame, not a document: the shell is exactly the viewport, and only the content pane
+     scrolls. With the document scrolling instead, the sidebar's brand and project card slid off the top,
+     the signed-in foot off the bottom, and the header with its search went with them — the chrome an
+     operator reaches for most was the part that scrolled away. dvh, so a phone's collapsing URL bar
+     does not hide the bottom bar under it; vh first for the browsers that predate it. */
   .a-shell {
     display: flex;
-    min-height: 100vh;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
     background: var(--bg);
   }
 
@@ -336,10 +343,19 @@
     background: var(--panel);
   }
 
+  /* The list is what gives way on a short window: brand and project above, who is signed in below,
+     and the sections between them scroll. */
+  .a-sidebar .a-nav {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
   .a-main {
     display: flex;
     flex: 1;
     min-width: 0;
+    min-height: 0;
     flex-direction: column;
   }
 
@@ -354,11 +370,20 @@
     background: var(--panel);
   }
 
+  /* The one scrolling pane. A size container too, so a pane inside it that must fit the visible
+     height — the split's aside — can say so in cqh instead of guessing the header's height in vh. */
   .a-content {
     flex: 1;
     min-width: 0;
+    min-height: 0;
     padding: var(--space-6);
     overflow: auto;
+    container-type: size;
+  }
+
+  /* An overlay is open: the pane behind it holds still (admin.js, lockScroll). */
+  :root[data-scroll-locked] .a-content {
+    overflow: hidden;
   }
 
   /* What is waiting for an apply, under the header on every screen (design §4.5). Slim and in the accent
@@ -2158,17 +2183,66 @@
     font-weight: var(--weight-medium);
   }
 
+  /* Master–detail: the list, a handle, and a reading pane that stays in view while the list scrolls.
+     The pane's width is the operator's — dragged on the handle, stored by alvo.js as --a-aside-w, one
+     width for every split the way a mail client has one reading pane — and clamped here, so a width
+     stored on a wide monitor cannot squeeze the list to nothing on a laptop. */
   .a-split {
     display: flex;
-    gap: var(--space-5);
     align-items: flex-start;
   }
 
+  .a-split__main {
+    min-width: 0;
+  }
+
   .a-split__aside {
+    position: sticky;
+    top: 0;
     flex: none;
-    width: 380px;
-    max-height: calc(100vh - 180px);
+    width: clamp(280px, var(--a-aside-w, 380px), 65%);
+    max-height: 100cqh;
     overflow-y: auto;
+  }
+
+  /* The gap between the two is the handle: 20 px to grab, a 2 px rule that lights on hover, focus and
+     drag. A separator with a value, so arrow keys resize it as well (alvo.js). */
+  .a-split__handle {
+    position: sticky;
+    top: 0;
+    flex: none;
+    align-self: stretch;
+    width: var(--space-5);
+    max-height: 100cqh;
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  .a-split__handle::before {
+    content: '';
+    display: block;
+    width: 2px;
+    height: 100%;
+    margin-inline: auto;
+    border-radius: 1px;
+    background: transparent;
+    transition: background 0.14s ease;
+  }
+
+  .a-split__handle:hover::before,
+  .a-split__handle:focus-visible::before,
+  :root[data-resizing] .a-split__handle::before {
+    background: var(--accentBorder);
+  }
+
+  .a-split__handle:focus-visible {
+    outline: none;
+  }
+
+  :root[data-resizing],
+  :root[data-resizing] * {
+    cursor: col-resize !important;
+    user-select: none;
   }
 
   @media (max-width: 1100px) {
@@ -2176,9 +2250,18 @@
       flex-direction: column;
     }
 
+    .a-split {
+      gap: var(--space-5);
+    }
+
     .a-split__aside {
+      position: static;
       width: 100%;
       max-height: none;
+    }
+
+    .a-split__handle {
+      display: none;
     }
 
     /* Full width once stacked, like the aside under it. The split's own flex-start left it as wide
@@ -2292,10 +2375,12 @@
    =========================================================================== */
 
 @layer components {
+  /* The shell's last row on a phone — beneath the scrolling pane rather than over it, so it needs no
+     position of its own and never covers the last line of a screen. */
   .a-bottomnav {
     display: none;
-    position: sticky;
-    bottom: 0;
+    flex: none;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
     border-top: 1px solid var(--border);
     background: var(--panel);
   }
@@ -2413,6 +2498,7 @@
     }
 
     .a-main {
+      flex: 1;
       min-height: 0;
     }
 

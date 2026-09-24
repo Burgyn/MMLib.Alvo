@@ -111,7 +111,9 @@ let scrollLocks = 0;
 
 export function lockScroll(locked) {
   scrollLocks = Math.max(0, scrollLocks + (locked ? 1 : -1));
+  /* The shell's content pane is what scrolls, and the body under a bare page such as sign-in. */
   document.body.style.overflow = scrollLocks > 0 ? 'hidden' : '';
+  document.documentElement.toggleAttribute('data-scroll-locked', scrollLocks > 0);
 }
 
 /** Selects the text in an input, so a re-opened palette replaces rather than appends. */

@@ -1,0 +1,15 @@
+﻿@*
+    The handle between a split's list and its reading pane. Markup only: alvo.js drags it, answers its
+    arrow keys and stores the width, by delegation on the document — so it works from the first paint and
+    needs no circuit round trip per pixel. A separator with a value (WAI-ARIA window splitter), which is
+    what lets a keyboard resize the pane at all; the value is the pane's width in pixels.
+*@
+<div class="a-split__handle" role="separator" tabindex="0" aria-orientation="vertical"
+     aria-label="Resize the side panel" aria-valuemin="280" aria-controls="@Controls"
+     title="Drag to resize · double-click to reset" data-testid="split-handle"></div>
+
+@code {
+    /// <summary>The id of the pane the handle resizes.</summary>
+    [Parameter, EditorRequired]
+    public string Controls { get; set; } = string.Empty;
+}

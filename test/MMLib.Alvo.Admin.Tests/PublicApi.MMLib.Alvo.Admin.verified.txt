@@ -401,6 +401,14 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem
             Lg = 2,
         }
     }
+    public class SplitHandle : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public SplitHandle() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Controls { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
 }
 namespace MMLib.Alvo.Admin.Components.History
 {

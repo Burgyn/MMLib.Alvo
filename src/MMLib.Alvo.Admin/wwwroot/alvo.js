@@ -1,5 +1,5 @@
 /* ===========================================================================
-   Alvo Admin — the three browser concerns the design system owns.
+   Alvo Admin — the browser concerns the design system owns.
 
    No framework. Blazor owns rendering and state; this owns only what has to
    exist before hydration (the theme) or below it (the keyboard map).
@@ -80,7 +80,7 @@
      grid's `open` is for Enter on a selected row, which is none of these, and must not fire as well. */
   const CONTROL = 'a[href], button, input, select, textarea, summary, [contenteditable], [role="button"], ' +
     '[role="link"], [role="tab"], [role="radio"], [role="option"], [role="checkbox"], [role="switch"], ' +
-    '[role="menuitem"]';
+    '[role="menuitem"], [role="separator"]';
 
   const isControl = (element) => element instanceof Element && element.closest(CONTROL) !== null;
 
@@ -167,8 +167,114 @@
     }
   };
 
+  /* --- The split's reading pane ------------------------------------------
+     A master–detail screen's aside is as wide as the operator drags it. One
+     width for every split, applied before paint like the theme so a revision's
+     descriptor does not open narrow and then jump. The stylesheet clamps it; this
+     only stores what was chosen. Wired by delegation, so a handle Blazor renders
+     later needs nothing registered.
+     ---------------------------------------------------------------------- */
+
+  const ASIDE_KEY = 'alvo.aside';
+  const ASIDE_STEP = 24;
+
+  const setAside = (width) => {
+    const px = Math.round(width);
+    document.documentElement.style.setProperty('--a-aside-w', `${px}px`);
+    writeStored(ASIDE_KEY, String(px));
+  };
+
+  const applyStoredAside = () => {
+    const stored = Number(readStored(ASIDE_KEY));
+    if (Number.isFinite(stored) && stored > 0) {
+      document.documentElement.style.setProperty('--a-aside-w', `${stored}px`);
+    }
+  };
+
+  const asideOf = (handle) => handle.parentElement?.querySelector(':scope > .a-split__aside');
+
+  /* What the pane actually is after the clamp, which is what the separator reports as its value. */
+  const syncValue = (handle) => {
+    const aside = asideOf(handle);
+    if (aside) {
+      handle.setAttribute('aria-valuenow', String(Math.round(aside.getBoundingClientRect().width)));
+    }
+  };
+
+  const onHandleDown = (event) => {
+    const handle = event.target instanceof Element ? event.target.closest('.a-split__handle') : null;
+    if (!handle || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    document.documentElement.dataset.resizing = '';
+    const right = handle.parentElement.getBoundingClientRect().right;
+
+    const move = (e) => setAside(right - e.clientX);
+    const up = () => {
+      delete document.documentElement.dataset.resizing;
+      handle.removeEventListener('pointermove', move);
+      syncValue(handle);
+    };
+
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up, { once: true });
+    handle.addEventListener('pointercancel', up, { once: true });
+  };
+
+  /* Left widens the pane — the handle moves the way the arrow points — and a double-click or Enter
+     gives the stored width back to the stylesheet's default. */
+  const onHandleKey = (event) => {
+    const handle = event.target instanceof Element ? event.target.closest('.a-split__handle') : null;
+    const aside = handle && asideOf(handle);
+    if (!aside) {
+      return;
+    }
+
+    const width = aside.getBoundingClientRect().width;
+    const next = { ArrowLeft: width + ASIDE_STEP, ArrowRight: width - ASIDE_STEP }[event.key];
+    if (next !== undefined) {
+      event.preventDefault();
+      setAside(next);
+      syncValue(handle);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      resetAside(handle);
+    }
+  };
+
+  const resetAside = (handle) => {
+    document.documentElement.style.removeProperty('--a-aside-w');
+    try {
+      localStorage.removeItem(ASIDE_KEY);
+    } catch {
+      /* Nothing stored to forget. */
+    }
+    syncValue(handle);
+  };
+
+  const onHandleDoubleClick = (event) => {
+    const handle = event.target instanceof Element ? event.target.closest('.a-split__handle') : null;
+    if (handle) {
+      resetAside(handle);
+    }
+  };
+
+  const onHandleFocus = (event) => {
+    if (event.target instanceof Element && event.target.matches('.a-split__handle')) {
+      syncValue(event.target);
+    }
+  };
+
   applyStored();
+  applyStoredAside();
   document.addEventListener('keydown', onKeyDown);
+  document.addEventListener('pointerdown', onHandleDown);
+  document.addEventListener('keydown', onHandleKey);
+  document.addEventListener('dblclick', onHandleDoubleClick);
+  document.addEventListener('focusin', onHandleFocus);
 
   window.alvo = { toggleTheme, toggleDensity, resolvedTheme };
 })();

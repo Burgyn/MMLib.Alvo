@@ -56,9 +56,11 @@
                 <RulesTab Rules="_rules" Entity="@Selected" />
             </Panel>
 
+            <SplitHandle Controls="rules-simulator" />
+
             @* The aside's own width, and full width once the split stacks — a fixed minimum here made the
                simulator narrower or wider than the rules card above it on a phone. *@
-            <div class="a-split__aside">
+            <div class="a-split__aside" id="rules-simulator">
                 <div class="a-card a-card--roomy">
                     <div>
                         <span class="a-section__title">Simulate a policy</span>
