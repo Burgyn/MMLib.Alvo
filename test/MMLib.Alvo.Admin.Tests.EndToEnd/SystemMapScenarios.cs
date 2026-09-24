@@ -151,6 +151,30 @@ public sealed class SystemMapScenarios(AdminWorld world) : IClassFixture<AdminWo
         session.AssertConsoleClean();
     }
 
+    /// <summary>
+    /// The Relationships tab draws a small map focused on the entity — itself and its one hop, never the
+    /// whole graph — with a link to the whole map, centred the same way.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_relationships_tab_draws_the_entity_and_its_neighbours()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/customers?tab=relationships");
+
+        var map = session.Page.GetByTestId("system-map");
+        await map.WaitForAsync();
+
+        await Box(session, "customers").WaitForAsync();
+        await Box(session, "work_orders").WaitForAsync();
+        (await Box(session, "regions").CountAsync()).ShouldBe(0, "regions is two hops from customers");
+
+        var whole = await session.Page.GetByRole(AriaRole.Link, new() { Name = "Open the whole map" })
+            .GetAttributeAsync("href") ?? string.Empty;
+        whole.ShouldContain("/schema?view=map");
+        whole.ShouldContain("centre=customers");
+        session.AssertConsoleClean();
+    }
+
     private static ILocator Box(AdminSession session, string entity)
         => session.Page.GetByTestId("system-map").GetByRole(AriaRole.Link, new() { Name = entity, Exact = false });
 

@@ -1,10 +1,20 @@
-﻿@*
+﻿@using MMLib.Alvo.Admin.Components.Schema.Map
+@*
     What this entity points at, and what points back at it.
 
     Both directions, because only one of them is visible from the entity's own fields — and the
     incoming one is what an operator needs before deleting anything.
 *@
-<SectionHead Title="Points at">
+@if (DescriptorJson is not null)
+{
+    <SectionHead Title="Around this entity">
+        <Subtitle>This entity, what it points at and what points at it, with what they send out. The whole project is on the Schema map.</Subtitle>
+    </SectionHead>
+    <SystemMap DescriptorJson="@DescriptorJson" AppliedJson="@AppliedJson" Reactions="true" Centre="@Entity.Name" />
+    <p class="a-row"><a class="a-link" href="@AdminPaths.SchemaMap(reactions: true, centre: Entity.Name)">Open the whole map</a></p>
+}
+
+<SectionHead Title="Points at" class="@(DescriptorJson is not null ? "a-section--spaced" : null)">
     <Subtitle>A ref field carries another entity's id, and its on-delete rule decides what happens when that row goes.</Subtitle>
 </SectionHead>
 
@@ -60,6 +70,14 @@ else
     /// <summary>The whole schema, because the incoming half cannot be read from one entity.</summary>
     [Parameter, EditorRequired]
     public SchemaModel Schema { get; set; } = default!;
+
+    /// <summary>The working copy's descriptor, for the focused map above the two lists; null draws no map.</summary>
+    [Parameter]
+    public string? DescriptorJson { get; set; }
+
+    /// <summary>The applied descriptor, to mark what the map draws as not applied yet.</summary>
+    [Parameter]
+    public string? AppliedJson { get; set; }
 
     /* `column` rather than `field`: C# 14 makes `field` a contextual keyword inside a property
        accessor, where it binds to the synthesized backing field. A lambda parameter of that name

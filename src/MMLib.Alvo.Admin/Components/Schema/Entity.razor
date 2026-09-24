@@ -127,7 +127,9 @@
                                 OnEdit="EditField" OnRemove="RemoveField" />
                         break;
                     case EntityTabs.Relationships:
-                        <Relationships Entity="@_entity" Schema="_schema!" />
+                        <Relationships Entity="@_entity" Schema="_schema!"
+                                       DescriptorJson="@(Copy.Loaded ? Copy.Json : null)"
+                                       AppliedJson="@(Copy.Loaded ? Copy.AppliedJson : null)" />
                         break;
                     case EntityTabs.Rules:
                         <RulesTab Rules="_working" Entity="@EntityName" Editable="true" OnChanged="SetRule" />

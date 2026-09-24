@@ -679,6 +679,10 @@ namespace MMLib.Alvo.Admin.Components.Schema
     public class Relationships : Microsoft.AspNetCore.Components.ComponentBase
     {
         public Relationships() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? AppliedJson { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? DescriptorJson { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public MMLib.Alvo.Schema.EntitySchema Entity { get; set; }
