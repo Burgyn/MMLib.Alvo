@@ -25,6 +25,7 @@ public class AdminPathsTests
         { AdminPaths.Overview, typeof(Components.Home.Overview) },
         { AdminPaths.Welcome, typeof(Components.Home.Welcome) },
         { AdminPaths.Schema, typeof(Components.Schema.SchemaList) },
+        { AdminPaths.SchemaMap(true, "work_orders"), typeof(Components.Schema.SchemaList) },
         { AdminPaths.Entity("work_orders"), typeof(Components.Schema.Entity) },
         { AdminPaths.Entity("work_orders", EntityTabs.FromSlug(EntityTabs.Rules)), typeof(Components.Schema.Entity) },
         /* F-12: the two names that used to be screens are entities like any other. */
@@ -81,6 +82,15 @@ public class AdminPathsTests
             .Slug.ShouldBe(EntityTabs.OnWrite);
         AdminPaths.Records("work_orders", _record).ShouldBe($"/admin/data/work_orders?record={_record}");
     }
+
+    [Theory]
+    [InlineData(false, null, "/admin/schema?view=map")]
+    [InlineData(true, null, "/admin/schema?view=map&layers=reactions")]
+    [InlineData(true, "bikes", "/admin/schema?view=map&layers=reactions&centre=bikes")]
+    [InlineData(false, "bikes", "/admin/schema?view=map&centre=bikes")]
+    [InlineData(false, "a b&c", "/admin/schema?view=map&centre=a%20b%26c")]
+    public void The_map_address_carries_its_layer_and_its_centre(bool reactions, string? centre, string address)
+        => AdminPaths.SchemaMap(reactions, centre).ShouldBe(address);
 
     [Theory]
     [InlineData("https://host/admin/changes", true)]

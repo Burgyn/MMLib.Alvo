@@ -2370,6 +2370,147 @@
 }
 
 /* ===========================================================================
+   The system map — the descriptor drawn as boxes and wires, read only. A
+   relation in Alvo is a ref field, so a line dragged here would have nowhere
+   to be written; what the drawing is for is seeing a model you did not write.
+   Server-rendered SVG, so every colour is a token and both themes hold.
+   =========================================================================== */
+
+@layer components {
+  /* The one element on a page allowed to be wider than a phone: it scrolls inside itself. */
+  .a-map {
+    padding: 0 var(--space-5) var(--space-5);
+    overflow-x: auto;
+  }
+
+  .a-map__svg {
+    display: block;
+    max-width: none;
+  }
+
+  .a-map__box {
+    cursor: pointer;
+  }
+
+  .a-map__plate {
+    fill: var(--panel);
+    stroke: var(--border);
+  }
+
+  .a-map__box:hover .a-map__plate,
+  .a-map__box:focus-visible .a-map__plate {
+    stroke: var(--accent);
+    stroke-width: 2;
+  }
+
+  /* Not applied yet: tinted like the Schema list's pending rows. */
+  .a-map__box--pending .a-map__plate {
+    stroke: var(--accentBorder);
+  }
+
+  .a-map__head {
+    fill: var(--panel2);
+    stroke: var(--border);
+  }
+
+  .a-map__name {
+    fill: var(--text);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .a-map__meta {
+    fill: var(--faint);
+    font-family: var(--font-ui);
+    font-size: 11px;
+  }
+
+  .a-map__badge {
+    fill: var(--accent);
+    font-family: var(--font-ui);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  /* What the entity's before-hooks do to a write: "2 refuse · 1 sets". */
+  .a-map__guard {
+    fill: var(--warn-fg);
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .a-map__field {
+    fill: var(--dim);
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  .a-map__field--ref {
+    fill: var(--accent);
+  }
+
+  /* Computed, not stored: set apart from a plain field by its slant, its Σ detail by the accent. */
+  .a-map__field--rollup {
+    fill: var(--dim);
+    font-style: italic;
+  }
+
+  .a-map__type {
+    fill: var(--faint);
+    font-family: var(--font-mono);
+    font-size: 10px;
+  }
+
+  .a-map__type--rollup {
+    fill: var(--accent);
+  }
+
+  .a-map__wire {
+    fill: none;
+    stroke: var(--border2);
+    stroke-width: 1.5;
+  }
+
+  .a-map__wire--hook {
+    stroke: var(--accentBorder);
+  }
+
+  /* Declared and not run by this build (capabilities.warned): drawn, and drawn as inert. */
+  .a-map__wire--automation {
+    stroke: var(--warn-fg);
+    stroke-dasharray: 5 4;
+  }
+
+  .a-map__dot {
+    fill: var(--accent);
+  }
+
+  /* The word on a wire, haloed in the panel's colour so the wire does not strike through it. */
+  .a-map__label {
+    fill: var(--faint);
+    font-family: var(--font-ui);
+    font-size: 10px;
+    paint-order: stroke;
+    stroke: var(--panel);
+    stroke-width: 3px;
+  }
+
+  .a-map__outside .a-map__plate {
+    fill: var(--panel2);
+  }
+
+  .a-map__outside--unused {
+    opacity: 0.6;
+  }
+
+  .a-map__glyph {
+    fill: var(--dim);
+    font-size: 15px;
+  }
+}
+
+/* ===========================================================================
    Mobile — the acceptance criterion is 375 px with no horizontal scroll.
    The bottom bar takes the live sections only; "not yet" lives in the sheet.
    =========================================================================== */
@@ -2798,5 +2939,19 @@
   /* A short step below what precedes it: a predicate under its heading, a reason under its verdict. */
   .a-then {
     margin-top: var(--space-2);
+  }
+
+  /* Read by a screen reader and not drawn: what a picture says, in words. The standard clip pattern. */
+  .a-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
   }
 }

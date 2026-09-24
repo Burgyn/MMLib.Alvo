@@ -706,6 +706,24 @@ namespace MMLib.Alvo.Admin.Components.Schema
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
 }
+namespace MMLib.Alvo.Admin.Components.Schema.Map
+{
+    public class SystemMap : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public SystemMap() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? AppliedJson { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Centre { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string DescriptorJson { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Reactions { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
+}
 namespace MMLib.Alvo.Admin.Components.Settings
 {
     public class Detail : Microsoft.AspNetCore.Components.ComponentBase

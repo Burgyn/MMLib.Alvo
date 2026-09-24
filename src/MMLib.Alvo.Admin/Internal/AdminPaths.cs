@@ -67,6 +67,33 @@ internal static class AdminPaths
         ? $"{Schema}/{Segment(name)}"
         : $"{Schema}/{Segment(name)}?{EntityTabs.Parameter}={tab.Slug}";
 
+    /// <summary>The query parameter the Schema screen's view is carried in.</summary>
+    public const string ViewParameter = "view";
+
+    /// <summary>The query parameter the map's drawn layers are carried in.</summary>
+    public const string LayersParameter = "layers";
+
+    /// <summary>The query parameter the map's focused entity is carried in.</summary>
+    public const string CentreParameter = "centre";
+
+    /// <summary>The Schema screen's map view, with the reactions layer and a focused entity when asked.</summary>
+    /// <remarks>
+    /// Both in the address for <see cref="EntityTabs"/>' reason: "look at what work_orders reacts to" is a
+    /// link somebody sends, and a reload must draw what was on the screen.
+    /// </remarks>
+    /// <param name="reactions">Whether the reactions layer is drawn.</param>
+    /// <param name="centre">The entity to centre on, or null for the default.</param>
+    public static string SchemaMap(bool reactions = false, string? centre = null)
+    {
+        var address = $"{Schema}?{ViewParameter}=map";
+        if (reactions)
+        {
+            address += $"&{LayersParameter}=reactions";
+        }
+
+        return centre is null ? address : $"{address}&{CentreParameter}={Segment(centre)}";
+    }
+
     /// <summary>An entity's records, with <paramref name="record"/>'s form open over them when one is named.</summary>
     public static string Records(string entity, Guid? record = null) => record is { } id
         ? $"{Data}/{Segment(entity)}?record={id}"

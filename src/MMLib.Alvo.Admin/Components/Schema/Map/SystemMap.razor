@@ -1,0 +1,206 @@
+﻿@*
+    The system map: the descriptor drawn as boxes and wires, read only.
+
+    Server-rendered SVG, laid out in C# (MapLayout) and drawn here as-is — so the picture exists before the
+    circuit connects and is the same picture every time for the same descriptor. Each box is an SVG link to
+    its entity, which is the one thing the drawing does; a relation is added as a ref field in the entity's
+    own editor, never by drawing a line here, because a line would have nowhere to be written.
+
+    Wires come first so the boxes sit over them. The list after the drawing says every wire in words, for a
+    screen reader: one aria-label sentence stops scaling at about eight entities.
+*@
+
+@if (_picture.Boxes.Count == 0)
+{
+    <EmptyState Title="Nothing to draw yet"
+                Body="The map draws entities and the references between them. Add an entity and it appears here." />
+}
+else
+{
+    <div class="a-map" data-testid="system-map">
+        <svg class="a-map__svg" viewBox="@ViewBox" width="@N(_picture.Width + _left + Margin)"
+             height="@N(_picture.Height + 2 * Margin)" role="group" aria-label="System map">
+            @foreach (var wire in _picture.Wires)
+            {
+                @Wire(wire)
+            }
+            @foreach (var box in _picture.Boxes)
+            {
+                @Box(box)
+            }
+            @foreach (var node in _picture.Outside)
+            {
+                @Node(node)
+            }
+        </svg>
+        <ul class="a-sr-only">
+            @foreach (var wire in _picture.Wires)
+            {
+                <li>@MapWords.Of(wire.Edge)</li>
+            }
+        </ul>
+    </div>
+}
+
+@code {
+    /// <summary>The blank band the drawing keeps around its extent, so a plate's stroke is not clipped.</summary>
+    private const double Margin = 8;
+
+    /// <summary>How far a self-reference's loop bulges left of its box — see <c>MapLayout.SelfCurve</c>.</summary>
+    private const double LoopRoom = 44;
+
+    /// <summary>The descriptor to draw — the working copy's JSON.</summary>
+    [Parameter, EditorRequired]
+    public string DescriptorJson { get; set; } = "{}";
+
+    /// <summary>The applied descriptor, to mark what is not applied yet; null marks nothing.</summary>
+    [Parameter]
+    public string? AppliedJson { get; set; }
+
+    /// <summary>Whether the reactions layer is drawn.</summary>
+    [Parameter]
+    public bool Reactions { get; set; }
+
+    /// <summary>The entity to centre on with one hop; null draws the whole graph.</summary>
+    [Parameter]
+    public string? Centre { get; set; }
+
+    private MapPicture _picture = MapPicture.Empty;
+    private (string Json, string? Applied, bool Reactions, string? Centre)? _drawn;
+    private double _left = Margin;
+
+    /// <summary>Draws the picture again only when one of the four inputs changed.</summary>
+    /// <remarks>
+    /// The Schema screen follows the working copy and re-renders on every edit anywhere in it, and a parse,
+    /// a layout and four sweeps per keystroke is work for a picture that has not changed.
+    /// </remarks>
+    protected override void OnParametersSet()
+    {
+        var inputs = (DescriptorJson, AppliedJson, Reactions, Centre);
+        if (_drawn == inputs)
+        {
+            return;
+        }
+
+        var graph = SystemGraph.From(DescriptorJson, AppliedJson);
+        _picture = MapLayout.Arrange(Centre is null ? graph : graph.Focus(Centre), Reactions);
+        _left = _picture.Wires.Any(wire => wire.Edge.From == wire.Edge.To && wire.StartX < LoopRoom) ? LoopRoom : Margin;
+        _drawn = inputs;
+    }
+
+    /// <summary>
+    /// The drawing's extent plus the margin — wider on the left when a self-reference on the first column
+    /// would loop out of the picture.
+    /// </summary>
+    private string ViewBox
+        => $"{N(-_left)} {N(-Margin)} {N(_picture.Width + _left + Margin)} {N(_picture.Height + 2 * Margin)}";
+
+    /// <summary>A layout number as an attribute, invariantly, whatever the circuit's culture.</summary>
+    private static string N(double value) => value.ToString("0.#", CultureInfo.InvariantCulture);
+
+    private RenderFragment Wire(PlacedWire wire) => @<g>
+        <path class="@WireClass(wire.Edge.Kind)" d="@wire.Path" data-from="@wire.Edge.From" data-to="@wire.Edge.To">
+            <title>@Tooltip(wire.Edge)</title>
+        </path>
+        @if (wire.Edge.Kind == MapEdgeKind.Reference)
+        {
+            <circle class="a-map__dot" cx="@N(wire.StartX)" cy="@N(wire.StartY)" r="3" />
+        }
+        @if (MidPoint(wire) is { } mid)
+        {
+            <g><text class="a-map__label" x="@N(mid.X)" y="@N(mid.Y - 4)" text-anchor="middle">@wire.Edge.Label</text></g>
+        }
+    </g>;
+
+    private RenderFragment Box(PlacedBox box) => @<a class="@(box.Entity.Pending ? "a-map__box a-map__box--pending" : "a-map__box")"
+                                                     href="@AdminPaths.Entity(box.Entity.Name)" data-entity="@box.Entity.Name"
+                                                     aria-label="@BoxLabel(box.Entity)">
+        <rect class="a-map__plate" x="@N(box.X)" y="@N(box.Y)" width="@N(MapLayout.BoxWidth)" height="@N(box.Height)" rx="10" />
+        <path class="a-map__head" d="@HeadPath(box)" />
+        <text class="a-map__name" x="@N(box.X + 12)" y="@N(box.Y + 18)">@box.Entity.Name</text>
+        <text class="a-map__meta" x="@N(box.X + 12)" y="@N(box.Y + 33)">@Meta(box.Entity)</text>
+        @if (box.Entity.Pending)
+        {
+            <g><text class="a-map__badge" x="@N(box.X + MapLayout.BoxWidth - 12)" y="@N(box.Y + 33)" text-anchor="end">not applied</text></g>
+        }
+        @if (box.Guard is { } guard)
+        {
+            <g><text class="a-map__guard" x="@N(box.X + 12)" y="@N(box.Y + MapLayout.Head + 12)">@guard</text></g>
+        }
+        @for (var index = 0; index < box.Shown.Count; index++)
+        {
+            @Row(box, index)
+        }
+        @if (box.More > 0)
+        {
+            <g><text class="a-map__type" x="@N(box.X + 12)" y="@N(box.RowY(box.Shown.Count) + 2)">+@box.More more</text></g>
+        }
+    </a>;
+
+    private RenderFragment Row(PlacedBox box, int index) => @<g>
+        <text class="@FieldClass(box.Shown[index].Kind)" x="@N(box.X + 12)" y="@N(box.RowY(index) + 4)">@box.Shown[index].Name</text>
+        <text class="@(box.Shown[index].Kind == MapFieldKind.Rollup ? "a-map__type a-map__type--rollup" : "a-map__type")"
+              x="@N(box.X + MapLayout.BoxWidth - 12)" y="@N(box.RowY(index) + 4)" text-anchor="end">@box.Shown[index].Detail</text>
+    </g>;
+
+    private RenderFragment Node(PlacedOutside node) => @<g class="@(node.Node.Used ? "a-map__outside" : "a-map__outside a-map__outside--unused")"
+                                                          data-node="@node.Node.Id">
+        <rect class="a-map__plate" x="@N(node.X)" y="@N(node.Y)" width="@N(MapLayout.OutsideWidth)" height="@N(MapLayout.OutsideHeight)" rx="8" />
+        <text class="a-map__glyph" x="@N(node.X + 12)" y="@N(node.Y + 27)">@(node.Node.Kind == OutsideKind.Template ? "✉" : "↗")</text>
+        <text class="a-map__name" x="@N(node.X + 34)" y="@N(node.Y + 19)">@node.Node.Name</text>
+        <text class="a-map__meta" x="@N(node.X + 34)" y="@N(node.Y + 34)">@NodeMeta(node.Node)</text>
+    </g>;
+
+    /// <summary>A box's header band: rounded at the top to match the plate, square where the rows begin.</summary>
+    private static string HeadPath(PlacedBox box)
+        => $"M{N(box.X)} {N(box.Y + 10)}a10 10 0 0 1 10-10h{N(MapLayout.BoxWidth - 20)}a10 10 0 0 1 10 10"
+            + $"v{N(MapLayout.Head - 10)}h-{N(MapLayout.BoxWidth)}z";
+
+    private static string Meta(MapEntity entity)
+        => $"{(entity.Scoped ? "tenant" : "global")} · {entity.Fields.Count.ToString(CultureInfo.InvariantCulture)} fields";
+
+    private static string BoxLabel(MapEntity entity)
+        => $"{entity.Name}, {entity.Fields.Count.ToString(CultureInfo.InvariantCulture)} fields{(entity.Pending ? ", not applied" : string.Empty)}";
+
+    private static string NodeMeta(MapOutside node)
+        => $"{(node.Kind == OutsideKind.Template ? "template" : "webhook")}{(node.Used ? string.Empty : " · unused")}";
+
+    private static string Tooltip(MapEdge edge)
+        => edge.Condition is { Length: > 0 } condition ? $"{edge.Label} — {condition}" : edge.Label;
+
+    private static string WireClass(MapEdgeKind kind) => kind switch
+    {
+        MapEdgeKind.Hook => "a-map__wire a-map__wire--hook",
+        MapEdgeKind.Automation => "a-map__wire a-map__wire--automation",
+        _ => "a-map__wire",
+    };
+
+    private static string FieldClass(MapFieldKind kind) => kind switch
+    {
+        MapFieldKind.Reference => "a-map__field a-map__field--ref",
+        MapFieldKind.Rollup => "a-map__field a-map__field--rollup",
+        _ => "a-map__field",
+    };
+
+    /// <summary>
+    /// Where a wire's word sits: halfway between its ends, which for the layout's S-curve is on the curve.
+    /// </summary>
+    /// <remarks>
+    /// Read back from the path's last point rather than recomputed, so the word follows the wire whatever the
+    /// layout does. None for a self-reference: its loop's midpoint is left of the box, where the column
+    /// before it would draw over the word; its tooltip and the list in words still say it.
+    /// </remarks>
+    private static (double X, double Y)? MidPoint(PlacedWire wire)
+    {
+        if (wire.Edge.From == wire.Edge.To)
+        {
+            return null;
+        }
+
+        var numbers = wire.Path.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
+        var x2 = double.Parse(numbers[^2], CultureInfo.InvariantCulture);
+        var y2 = double.Parse(numbers[^1], CultureInfo.InvariantCulture);
+
+        return ((wire.StartX + x2) / 2, (wire.StartY + y2) / 2);
+    }
+}

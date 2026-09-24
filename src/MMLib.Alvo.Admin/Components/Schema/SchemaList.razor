@@ -5,12 +5,16 @@
 @inject NavigationManager Navigation
 @inject ILogger<SchemaList> Logger
 @implements IDisposable
+@using MMLib.Alvo.Admin.Components.Schema.Map
+@using Microsoft.AspNetCore.WebUtilities
 
 <PageTitle>Schema · Alvo</PageTitle>
 
 <div class="a-stack">
     <PageHeader Title="Schema">
         <Secondary>
+            <ChipGroup TValue="string" Items="_views" Selected="@(new[] { _map ? MapView : ListView })"
+                       SelectedChanged="ChooseView" aria-label="View" />
             <button type="button" class="a-btn a-btn--sm" @onclick="ToggleAdding">New entity</button>
             <a class="a-btn a-btn--sm" href="@AdminPaths.Transfer">Import / export</a>
         </Secondary>
@@ -84,7 +88,11 @@
         </Panel>
     }
 
-    @if (_schema is null)
+    @if (_map)
+    {
+        @MapPanel
+    }
+    else if (_schema is null)
     {
         <Skeleton Size="Skeleton.SkeletonSize.Lg" />
     }
@@ -155,8 +163,20 @@
     /// </remarks>
     private WorkingCopy Copy { get; set; } = new();
 
+    /// <summary>How many entities the Schema map draws whole; past this it draws one and its neighbours.</summary>
+    private const int WholeGraphLimit = 12;
+
+    private const string ListView = "List";
+    private const string MapView = "Map";
+
+    private static readonly IReadOnlyList<string> _views = [ListView, MapView];
+
     private SchemaModel? _schema;
     private AdminProblem? _problem;
+    private bool _map;
+    private bool _reactions;
+    private string? _centre;
+    private (string Json, string Centre, int Count)? _focusCount;
     private string _name = string.Empty;
     private string? _refusal;
     private bool _adding;
@@ -174,6 +194,7 @@
     protected override async Task OnInitializedAsync()
     {
         Navigation.LocationChanged += OnLocationChanged;
+        ReadView(Navigation.Uri);
         OpenIfAsked(Navigation.Uri);
 
         var ct = _lifetime.Token;
@@ -253,19 +274,128 @@
     }
 
     /// <summary>
-    /// The palette's New entity, which arrives as an address — from another screen, or from this one.
+    /// The palette's New entity, and the view the switch and the map's controls choose — each arrives as an
+    /// address, from another screen or from this one, which the router answers with this same instance.
     /// </summary>
     private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
     {
-        if (IsNewEntityRequest(args.Location))
+        if (AdminPaths.IsAt(args.Location, AdminPaths.Schema))
         {
             _ = InvokeAsync(() =>
             {
+                ReadView(args.Location);
                 OpenIfAsked(args.Location);
                 StateHasChanged();
             });
         }
     }
+
+    /// <summary>Which view, which layers and which centre the address asks for.</summary>
+    /// <remarks>
+    /// In the address rather than in the component, for the entity tabs' reason: "look at the map" is a link
+    /// somebody sends, and a reload must draw what was on the screen.
+    /// </remarks>
+    private void ReadView(string uri)
+    {
+        var query = QueryHelpers.ParseQuery(new Uri(uri).Query);
+
+        _map = query.TryGetValue(AdminPaths.ViewParameter, out var view)
+            && string.Equals(view.ToString(), "map", StringComparison.OrdinalIgnoreCase);
+        _reactions = query.TryGetValue(AdminPaths.LayersParameter, out var layers)
+            && string.Equals(layers.ToString(), "reactions", StringComparison.OrdinalIgnoreCase);
+        _centre = query.TryGetValue(AdminPaths.CentreParameter, out var centre) && centre.ToString() is { Length: > 0 } name
+            ? name
+            : null;
+    }
+
+    /// <summary>The switch between the list and the map: a history step, so Back returns to the other view.</summary>
+    private void ChooseView(IReadOnlyList<string> chosen)
+        => Navigation.NavigateTo(chosen is [MapView] ? AdminPaths.SchemaMap(_reactions, _centre) : AdminPaths.Schema);
+
+    private void ToggleReactions() => Navigation.NavigateTo(AdminPaths.SchemaMap(!_reactions, _centre));
+
+    private void ChooseCentre(IReadOnlyList<string> chosen)
+    {
+        if (chosen is [var centre])
+        {
+            Navigation.NavigateTo(AdminPaths.SchemaMap(_reactions, centre));
+        }
+    }
+
+    /// <summary>
+    /// The entity the Schema map is focused on — the address's, or the first — or null while it draws whole.
+    /// </summary>
+    /// <remarks>
+    /// A centre the working copy no longer declares (a link sent before a rename) falls back to the first
+    /// entity rather than drawing nothing.
+    /// </remarks>
+    private string? Centre
+    {
+        get
+        {
+            var entities = Copy.Entities;
+            if (entities.Count <= WholeGraphLimit)
+            {
+                return null;
+            }
+
+            return _centre is not null && entities.Contains(_centre, StringComparer.Ordinal) ? _centre : entities[0];
+        }
+    }
+
+    /// <summary>How many entities the focused map draws, parsed again only when the copy or the centre moved.</summary>
+    private int FocusedCount(string centre)
+    {
+        var json = Copy.Json;
+        if (_focusCount is not { } known || known.Centre != centre || !string.Equals(known.Json, json, StringComparison.Ordinal))
+        {
+            _focusCount = (json, centre, SystemGraph.From(json).Focus(centre).Entities.Count);
+        }
+
+        return _focusCount.Value.Count;
+    }
+
+    /// <summary>The map view: its controls over the drawing, drawn from the working copy once it is loaded.</summary>
+    private RenderFragment MapPanel => @<Panel Title="Map">
+        <Subtitle>
+            Every relation is many-to-one and starts at the ref field that makes it; the word on the wire is what
+            a delete on the other side does. Read only — a relation is added as a ref field in the entity's own
+            editor.
+        </Subtitle>
+        <ChildContent>
+            @if (!Copy.Loaded)
+            {
+                <div class="a-panel__body"><Skeleton Size="Skeleton.SkeletonSize.Lg" /></div>
+            }
+            else
+            {
+                <div class="a-row a-row--wrap a-row--inset">
+                    <label class="a-check">
+                        <input type="checkbox" checked="@_reactions" @onchange="ToggleReactions" />
+                        <span>Show reactions</span>
+                    </label>
+                    <span class="a-hint">✉ template · ↗ webhook · dashed: automation, declared and not run by this build</span>
+                </div>
+                @if (Centre is { } centre)
+                {
+                    @CentrePicker(centre)
+                }
+                <SystemMap DescriptorJson="@Copy.Json" AppliedJson="@Copy.AppliedJson" Reactions="_reactions" Centre="@Centre" />
+            }
+        </ChildContent>
+    </Panel>;
+
+    /// <summary>Past <see cref="WholeGraphLimit"/> entities: the picker of the centre, and what it leaves out.</summary>
+    private RenderFragment CentrePicker(string centre) => @<div>
+        <div class="a-row a-row--wrap a-row--inset">
+            <span class="a-hint" id="map-centre">Centre on</span>
+            <ChipGroup TValue="string" Items="Copy.Entities" Selected="@(new[] { centre })"
+                       SelectedChanged="ChooseCentre" aria-labelledby="map-centre" />
+        </div>
+        <span class="a-hint a-hint--inset">
+            Showing @FocusedCount(centre) of @Copy.Entities.Count — @centre and one hop in each direction.
+        </span>
+    </div>;
 
     private void OpenIfAsked(string uri)
     {
