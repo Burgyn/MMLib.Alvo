@@ -44,7 +44,7 @@
 
 @code {
     private ElementReference _panel;
-    private bool _locked;
+    private ScrollLock? _scrollLock;
 
     /// <summary>Whether the sheet is on the page at all.</summary>
     /// <remarks>
@@ -91,23 +91,20 @@
     /// Takes focus and stops the page behind from scrolling, each time it opens.
     /// </summary>
     /// <remarks>
-    /// <b>The scroll lock is what makes a bottom sheet feel like one.</b> Without it a drag near
-    /// the panel's edge scrolls the list underneath, and the sheet appears to float over a page
-    /// that is still moving. Focus moves to the panel so the first Tab lands inside the dialog
-    /// rather than on whatever the operator last touched behind it.
+    /// The scroll lock is <see cref="ScrollLock"/>'s, shared with the command palette. Focus moves to the
+    /// panel so the first Tab lands inside the dialog rather than on whatever the operator last touched
+    /// behind it.
     /// </remarks>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (Open && !_locked)
+        if (Open && !Lock.Held)
         {
-            _locked = true;
-            await LockAsync(true);
+            await Lock.HoldAsync();
             await _panel.FocusAsync();
         }
-        else if (!Open && _locked)
+        else if (!Open)
         {
-            _locked = false;
-            await LockAsync(false);
+            await Lock.ReleaseAsync();
         }
     }
 
@@ -121,39 +118,13 @@
 
     private Task CloseAsync() => OnClose.InvokeAsync();
 
-    /// <summary>
-    /// Holds or releases the page behind the sheet.
-    /// </summary>
-    /// <remarks>
-    /// Guarded because a circuit can be disposed mid-call — a reload, a navigation, a dropped
-    /// connection — and a JS call on a dead circuit throws where nobody can act on it.
-    /// </remarks>
-    private async Task LockAsync(bool locked)
-    {
-        try
-        {
-            await Js.InvokeVoidAsync("alvo.lockScroll", locked);
-        }
-        catch (JSDisconnectedException)
-        {
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-        catch (OperationCanceledException)
-        {
-            /* The same death, reported by the call rather than the circuit: a reload tears the circuit
-               down while the release is in flight, and the canceled call surfaced as an unhandled circuit
-               error on the way out. */
-        }
-    }
+    private ScrollLock Lock => _scrollLock ??= new ScrollLock(Js);
 
     public async ValueTask DisposeAsync()
     {
-        if (_locked)
+        if (_scrollLock is not null)
         {
-            _locked = false;
-            await LockAsync(false);
+            await _scrollLock.ReleaseAsync();
         }
     }
 }

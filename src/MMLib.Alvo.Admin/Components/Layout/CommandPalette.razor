@@ -17,11 +17,9 @@
 
 @if (_open)
 {
-    @* The one inline style left in the package, on purpose: the palette's own overlay is to be rebuilt
-       on the shared scrim and scroll lock (docs/architecture/admin-dashboard-review.md, F-26), with its
-       z-index from a token (F-21) — a class named for it now would be renamed then. *@
-    <div class="a-scrim" style="display:grid;place-items:start center;padding-top:12vh;z-index:40"
-         @onclick="Close">
+    @* The shared scrim and scroll lock, as the sheet has them (docs/architecture/admin-dashboard-review.md,
+       F-26): a palette with its own overlay was a second modal with its own rules. *@
+    <div class="a-scrim a-scrim--palette" @onclick="Close">
         <div class="a-palette" role="dialog" aria-modal="true" aria-label="Search"
              @onclick:stopPropagation="true" @onkeydown="OnKeyDown">
             <input class="a-palette__input" placeholder="Go to a section or an entity, or run an action…"
@@ -63,6 +61,7 @@
     private DotNetObjectReference<CommandPalette>? _self;
     private readonly List<int> _subscriptions = [];
     private ElementReference _input;
+    private ScrollLock? _scrollLock;
     private bool _open;
     private bool _focusPending;
     private string _query = string.Empty;
@@ -91,7 +90,11 @@
             _focusPending = false;
             await _module.InvokeVoidAsync("focusAndSelect", _input);
         }
+
+        await (_open ? Lock.HoldAsync() : Lock.ReleaseAsync());
     }
+
+    private ScrollLock Lock => _scrollLock ??= new ScrollLock(Js);
 
     /// <summary>Opens the palette, from the header button or from ⌘K.</summary>
     public async Task OpenAsync()
@@ -144,6 +147,12 @@
         _entries.Add(new Entry("New entity", AdminNavigation.NewEntity, Icons.Schema, "action"));
         _entries.Add(new Entry("Toggle theme", null, Icons.Moon, "action"));
 
+        await LoadEntitiesAsync();
+    }
+
+    /// <summary>Every entity in the schema, as a place to go.</summary>
+    private async Task LoadEntitiesAsync()
+    {
         try
         {
             var schema = await Gateway.SchemaAsync(CancellationToken.None);
@@ -212,6 +221,11 @@
 
     public async ValueTask DisposeAsync()
     {
+        if (_scrollLock is not null)
+        {
+            await _scrollLock.ReleaseAsync();
+        }
+
         if (_module is not null)
         {
             try

@@ -19,37 +19,7 @@
 
         <ProjectSwitcher />
 
-        <div class="a-nav">
-            @foreach (var entry in AdminNavigation.Live)
-            {
-                <NavLink class="a-nav-item" ActiveClass="a-nav-item--active" href="@entry.Path"
-                         Match="@MatchFor(entry)">
-                    <Icon Path="@entry.Icon" />
-                    <span>@entry.Title</span>
-                </NavLink>
-            }
-
-            <div class="a-nav-sep"></div>
-
-            @foreach (var entry in AdminNavigation.NotYet)
-            {
-                <NavLink class="a-nav-item" ActiveClass="a-nav-item--active" href="@entry.Path">
-                    <Icon Path="@entry.Icon" />
-                    <span>@entry.Title</span>
-                    <span class="a-badge a-nav-item__trail">Not yet</span>
-                </NavLink>
-            }
-
-            <div class="a-nav-sep"></div>
-
-            @foreach (var entry in AdminNavigation.Footer)
-            {
-                <NavLink class="a-nav-item" ActiveClass="a-nav-item--active" href="@entry.Path">
-                    <Icon Path="@entry.Icon" />
-                    <span>@entry.Title</span>
-                </NavLink>
-            }
-        </div>
+        <NavList />
 
         <div class="a-sidebar__foot">
             <SignedInAs />
@@ -111,11 +81,7 @@
     <nav class="a-bottomnav" aria-label="Sections">
         @foreach (var entry in AdminNavigation.Bar)
         {
-            <NavLink class="a-bottomnav__item" ActiveClass="a-bottomnav__item--active"
-                     href="@entry.Path" Match="@MatchFor(entry)">
-                <Icon Path="@entry.Icon" Size="18" />
-                <span>@Short(entry.Title)</span>
-            </NavLink>
+            @SectionLink.For(entry, "a-bottomnav__item", "a-bottomnav__item--active", BarContent(entry))
         }
     </nav>
 
@@ -123,39 +89,7 @@
     {
         <div class="a-scrim a-sheet" @onclick="CloseSheet" data-testid="sections-sheet">
             <div class="a-sheet__panel" @onclick:stopPropagation="true">
-                <div class="a-nav">
-                    @foreach (var entry in AdminNavigation.BeyondTheBar)
-                    {
-                        <NavLink class="a-nav-item" ActiveClass="a-nav-item--active" href="@entry.Path"
-                                 @onclick="CloseSheet">
-                            <Icon Path="@entry.Icon" />
-                            <span>@entry.Title</span>
-                        </NavLink>
-                    }
-
-                    <div class="a-nav-sep"></div>
-
-                    @foreach (var entry in AdminNavigation.NotYet)
-                    {
-                        <NavLink class="a-nav-item" ActiveClass="a-nav-item--active" href="@entry.Path"
-                                 @onclick="CloseSheet">
-                            <Icon Path="@entry.Icon" />
-                            <span>@entry.Title</span>
-                            <span class="a-badge a-nav-item__trail">Not yet</span>
-                        </NavLink>
-                    }
-
-                    <div class="a-nav-sep"></div>
-
-                    @foreach (var entry in AdminNavigation.Footer)
-                    {
-                        <NavLink class="a-nav-item" ActiveClass="a-nav-item--active" href="@entry.Path"
-                                 @onclick="CloseSheet">
-                            <Icon Path="@entry.Icon" />
-                            <span>@entry.Title</span>
-                        </NavLink>
-                    }
-                </div>
+                <NavList BeyondTheBar="true" OnNavigate="CloseSheet" />
 
                 <SignedInAs />
             </div>
@@ -237,19 +171,9 @@
 
     private void CloseSheet() => _sheetOpen = false;
 
-    /// <summary>
-    /// Overview is the dashboard's root, so a prefix match would mark it active on every screen.
-    /// </summary>
-    private static NavLinkMatch MatchFor(AdminSection entry)
-        => entry.Path == AdminPaths.Overview ? NavLinkMatch.All : NavLinkMatch.Prefix;
-
-    /// <summary>
-    /// The bar is five items wide at 375 px, so a label that wraps pushes the bar over the fold.
-    /// Only one live entry has a name longer than its slot, and this is it.
-    /// </summary>
-    private static string Short(string title) => title switch
-    {
-        "Configuration history" => "History",
-        _ => title,
-    };
+    /// <summary>A bottom-bar entry: a smaller icon over the section's short title.</summary>
+    private static RenderFragment BarContent(AdminSection entry) => @<text>
+        <Icon Path="@entry.Icon" Size="18" />
+        <span>@entry.ShortTitle</span>
+    </text>;
 }

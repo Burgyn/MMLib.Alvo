@@ -20,12 +20,9 @@
 @if (_open)
 {
     <div class="a-assistant" data-testid="assistant-drawer">
-        <div class="a-assistant__head">
-            <span class="a-section-title">Ask Alvo</span>
-            <span class="a-section-sub">
-                It reads this project and proposes a descriptor. You apply it, from Preview.
-            </span>
-        </div>
+        <SectionHead Title="Ask Alvo" class="a-assistant__head">
+            <Subtitle>It reads this project and proposes a descriptor. You apply it, from Preview.</Subtitle>
+        </SectionHead>
 
         <div class="a-assistant__thread" data-testid="assistant-thread">
             @foreach (var turn in _turns)

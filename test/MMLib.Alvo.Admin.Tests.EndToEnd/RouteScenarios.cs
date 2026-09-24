@@ -43,6 +43,34 @@ public sealed class RouteScenarios(AdminWorld world) : IClassFixture<AdminWorld>
         session.AssertConsoleClean();
     }
 
+    /// <summary>
+    /// Changes and Transfer are schema screens with addresses of their own, and the navigation still says
+    /// Schema is where the operator is — in the sidebar and in the phone's bottom bar alike.
+    /// </summary>
+    [Theory(Timeout = AdminWorld.ScenarioTimeout)]
+    [InlineData("/changes")]
+    [InlineData("/transfer")]
+    public async Task Schema_stays_current_on_the_schema_screens_with_addresses_of_their_own(string route)
+    {
+        var cancel = TestContext.Current.CancellationToken;
+        await using var desktop = await world.SignInAsync(cancel);
+        await desktop.GoAsync(route);
+
+        (await Link(desktop, "nav.a-sidebar").GetAttributeAsync("aria-current")).ShouldBe("page");
+        (await desktop.Page.Locator("nav.a-sidebar [aria-current='page']").CountAsync()).ShouldBe(1);
+
+        await using var phone = await world.SignInAsync(cancel, 375);
+        await phone.GoAsync(route);
+
+        (await Link(phone, "nav.a-bottomnav").GetAttributeAsync("aria-current")).ShouldBe("page");
+
+        desktop.AssertConsoleClean();
+        phone.AssertConsoleClean();
+    }
+
+    private static ILocator Link(AdminSession session, string navigation)
+        => session.Page.Locator(navigation).GetByRole(AriaRole.Link, new() { Name = "Schema", Exact = true });
+
     private static async Task AddEntityAsync(AdminSession session, string name)
     {
         await session.GoAsync("/schema");

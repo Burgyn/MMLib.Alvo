@@ -18,7 +18,32 @@ namespace MMLib.Alvo.Admin.Components.Layout;
 /// operator who cannot find Automations at all has no way to learn that Alvo means to have them.
 /// </param>
 internal sealed record AdminSection(
-    string Title, string Path, string Icon, char? GoKey = null, bool NotYet = false);
+    string Title, string Path, string Icon, char? GoKey = null, bool NotYet = false)
+{
+    private readonly string? _shortTitle;
+
+    /// <summary>What the phone's bottom bar reads: <see cref="Title"/>, unless one is given for it.</summary>
+    /// <remarks>
+    /// The bar is five items wide at 375 px, so a label that wraps pushes the bar over the fold. Said by the
+    /// section rather than by the bar, so a new long title cannot slip past a switch nobody updated.
+    /// </remarks>
+    public string ShortTitle
+    {
+        get => _shortTitle ?? Title;
+        init => _shortTitle = value;
+    }
+
+    /// <summary>The other screens this section's entry stays active on, by their path.</summary>
+    /// <remarks>
+    /// Changes and Transfer are schema screens with addresses of their own
+    /// (docs/architecture/admin-dashboard-review.md, F-12); an operator on either is still in Schema, and a
+    /// navigation that highlighted nothing there would say they had left it.
+    /// </remarks>
+    public IReadOnlyList<string> AlsoActiveUnder { get; init; } = [];
+
+    /// <summary>Whether an absolute address is one of <see cref="AlsoActiveUnder"/>, or under one.</summary>
+    public bool OwnsAlso(string uri) => AlsoActiveUnder.Any(path => AdminPaths.IsUnder(uri, path));
+}
 
 /// <summary>
 /// The navigation, in the order design §4.3 fixes.
@@ -43,11 +68,11 @@ internal static class AdminNavigation
     public static IReadOnlyList<AdminSection> Live { get; } =
     [
         new("Overview", AdminPaths.Overview, Icons.Overview, 'o'),
-        new("Schema", AdminPaths.Schema, Icons.Schema, 's'),
+        new("Schema", AdminPaths.Schema, Icons.Schema, 's') { AlsoActiveUnder = [AdminPaths.Changes, AdminPaths.Transfer] },
         new("Data", AdminPaths.Data, Icons.Data, 'd'),
         new("Rules", AdminPaths.Rules(), Icons.Rules, 'r'),
         new("Access", AdminPaths.Access, Icons.Access, 'a'),
-        new("Configuration history", AdminPaths.History, Icons.History, 'h'),
+        new("Configuration history", AdminPaths.History, Icons.History, 'h') { ShortTitle = "History" },
         new("Integrations", AdminPaths.Integrations, Icons.Integrations, 'i'),
     ];
 

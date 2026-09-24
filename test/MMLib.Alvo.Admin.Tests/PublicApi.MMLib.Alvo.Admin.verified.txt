@@ -358,6 +358,15 @@ namespace MMLib.Alvo.Admin.Components.Layout
         public int Size { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
+    public class NavList : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public NavList() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool BeyondTheBar { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnNavigate { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
     public class PendingBar : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public PendingBar() { }

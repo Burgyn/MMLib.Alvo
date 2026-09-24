@@ -83,6 +83,19 @@ internal static class AdminPaths
     public static bool IsAt(string uri, string path) => new Uri(uri).AbsolutePath.TrimEnd('/')
         .EndsWith(path, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Whether an absolute address is <paramref name="path"/> or a screen beneath it, whatever its query.</summary>
+    /// <remarks>
+    /// The navigation's prefix match, for <see cref="IsAt"/>'s reasons: a path base still matches, and so does
+    /// any case. A whole segment, so <c>/admin/changes</c> does not claim <c>/admin/changeset</c>.
+    /// </remarks>
+    public static bool IsUnder(string uri, string path)
+    {
+        var absolute = new Uri(uri).AbsolutePath.TrimEnd('/');
+
+        return absolute.EndsWith(path, StringComparison.OrdinalIgnoreCase)
+            || absolute.Contains($"{path}/", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// A name as one path segment. The schema's name pattern makes this the identity for every name it
     /// admits; the escape is for the one it does not, so a bad name breaks its own link and nothing else.
