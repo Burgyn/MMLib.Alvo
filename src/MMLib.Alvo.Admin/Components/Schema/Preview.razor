@@ -15,7 +15,7 @@
     {
         @* Keyed per refusal, so every refused attempt draws a new panel and takes focus again (spec §3.3). *@
         <CascadingValue Value="_problem">
-            <ErrorPanel @key="_problemsDrawn" TakeFocus="_problemFromSubmit" />
+            <ErrorPanel @key="_problemsDrawn" TakeFocus="_problemFromSubmit" Title="@_problemTitle" />
         </CascadingValue>
     }
 
@@ -168,6 +168,9 @@
     /// <summary>Whether the refusal on screen answered a press rather than the page's own load.</summary>
     private bool _problemFromSubmit;
 
+    /// <summary>A headline that says more than the refusal's type, for the one failure that follows a success.</summary>
+    private string? _problemTitle;
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -265,6 +268,7 @@
 
         _busy = true;
         _problem = null;
+        _problemTitle = null;
 
         try
         {
@@ -303,16 +307,32 @@
     }
 
     /// <summary>
-    /// Says the apply happened twice over: briefly in a snackbar, and in the panel that stays because it links onward
-    /// (spec §3.3). The copy then starts again from the revision just written.
+    /// Keeps the result in the panel that stays because it links onward, restarts the copy from the revision just
+    /// written, and only then says so in a snackbar (spec §3.3).
     /// </summary>
+    /// <remarks>
+    /// The re-read is caught here rather than by the apply's own handler: the apply has run, so its failure is not a
+    /// refused apply, and the snackbar would be the one message on screen claiming everything worked.
+    /// </remarks>
     private async Task TakeAppliedAsync(ManagementApplyResult result)
     {
         _applied = result;
         _plan = null;
+        try
+        {
+            var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
+            Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
+        }
+        catch (Exception exception)
+        {
+            _problem = AdminProblem.From(exception, Logger);
+            _problemTitle = $"Applied as revision {result.Revision}; the screen could not reload it";
+            _problemsDrawn++;
+            _problemFromSubmit = true;
+            return;
+        }
+
         Snackbar.Confirm($"Applied as revision {result.Revision}");
-        var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
-        Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
     }
 
     /// <summary>

@@ -100,6 +100,7 @@ public sealed class RefusedApplyScenarios(AdminWorld world) : IClassFixture<Admi
 
         /* Counted by what they say: the staging's own snackbar may still be on screen, and rightly. */
         var headline = await session.Page.GetByTestId("error-title").InnerTextAsync();
+        headline.ShouldBe("Somebody applied a revision in between", "the refusal is the revision conflict, not any refusal");
         (await session.SnackbarCountAsync(headline)).ShouldBe(0, "no error is ever a snackbar");
         (await session.Page.GetByText("Applied as revision").CountAsync()).ShouldBe(0);
     }

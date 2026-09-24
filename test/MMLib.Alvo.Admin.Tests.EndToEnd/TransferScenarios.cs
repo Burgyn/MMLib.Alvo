@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Tests.EndToEnd;
+﻿using System.Text.Json.Nodes;
+
+namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>The import box submits on Ctrl/Cmd+Enter, and a refusal is an alert that takes focus (spec §3.3, §3.4).</summary>
 /// <remarks>
@@ -15,10 +17,14 @@ public sealed class TransferScenarios(AdminWorld world) : IClassFixture<AdminWor
         await session.Page.Locator("#import-json").FocusAsync();
 
         await session.Page.Keyboard.TypeAsync("{ \"not\": ");
+        await session.Page.GetByText("1 line.").WaitForAsync();
         await session.Page.Keyboard.PressAsync("Enter");
+
+        /* The line count is drawn from the circuit's copy of the text, so two lines is the Enter handled there. */
+        await session.Page.GetByText("2 lines.").WaitForAsync();
         (await session.Page.InputValueAsync("#import-json")).ShouldContain("\n");
-        await ServerHoldsTheTextAsync(session);
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0, "Enter alone does not import");
+        session.Page.Url.ShouldEndWith("/transfer");
 
         for (var attempt = 1; attempt <= 2; attempt++)
         {
@@ -32,29 +38,24 @@ public sealed class TransferScenarios(AdminWorld world) : IClassFixture<AdminWor
         session.Page.Url.ShouldEndWith("/transfer");
     }
 
+    /// <summary>
+    /// Pasted and submitted in one breath, with nothing waited for in between: the key must import what was pasted,
+    /// not what the circuit had heard of so far. field-service with a new description, so the planner can plan it.
+    /// </summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task A_good_import_goes_to_preview_on_Meta_Enter()
+    public async Task A_pasted_import_goes_to_its_plan_on_Meta_Enter()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/transfer");
+        var descriptor = JsonNode.Parse(Descriptors.FieldService)!.AsObject();
+        descriptor["description"] = "Imported through the box.";
 
-        await session.Page.FillAsync("#import-json", Descriptors.ComplexCrm);
-        await ServerHoldsTheTextAsync(session);
+        await session.Page.FillAsync("#import-json", descriptor.ToJsonString());
         await session.Page.Locator("#import-json").PressAsync("Meta+Enter");
 
-        /* The preview of the imported document, not its plan: complex-crm declares CEL defaults this build's
-           planner refuses, which the preview then says in place. What this measures is that the key imported. */
         await session.Page.WaitForURLAsync("**/changes");
-        await session.Content.GetByText("\"name\": \"crm\"").First.WaitForAsync();
+        await session.WaitForPlanAsync();
+        (await session.Content.InnerTextAsync()).ShouldContain("Imported through the box.");
         session.AssertConsoleClean();
     }
-
-    /// <summary>
-    /// Waits until the circuit holds what was typed, which the Import button's enabling says. The key is its own
-    /// event, and the library's text update is asynchronous, so a key pressed within the same instant as the fill can
-    /// be handled before the text it should submit.
-    /// </summary>
-    private static async Task ServerHoldsTheTextAsync(AdminSession session)
-        => await session.Page.WaitForFunctionAsync(
-            "() => document.querySelector(\"[data-testid='import-run']\")?.disabled === false");
 }

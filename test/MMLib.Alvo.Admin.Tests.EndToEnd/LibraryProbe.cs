@@ -16,7 +16,9 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// <para>
 /// An element is the library's when a class of its own starts with <c>mud-</c>, the same test alvo.css's base
 /// layer uses to scope its restore, or when it is the <c>legend</c> of Mud's outline notch (<c>fieldset.mud-input-outlined-border</c>): an outlined input with a
-/// label draws its notch with a classless legend, which is the library's markup and never Alvo's. Properties an element inherits are compared only where no ancestor is the
+/// label draws its notch with a classless legend, which is the library's markup and never Alvo's. So is everything inside
+/// an input's helper-text row (<c>.mud-input-helper-text</c>), which Mud builds from its own utility classes (<c>d-flex</c>,
+/// <c>me-auto</c>) rather than <c>mud-</c> ones. Properties an element inherits are compared only where no ancestor is the
 /// library's: inside a Mud component, disabling the sheet changes what the component passes down, and that is not a
 /// change to Alvo's rules. Chromium passes <c>user-select</c> down as well, so it is one of those. <c>display</c>
 /// is compared except on a direct child of a library element, which a flex or grid parent blockifies.
@@ -46,7 +48,8 @@ internal static class LibraryProbe
             'user-select'];
           const computed = new Set(['width', 'height', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left']);
           const isLibrary = e => (e.getAttribute('class') ?? '').split(/\s+/).some(c => c.startsWith('mud-'))
-            || (e.tagName === 'LEGEND' && !!e.parentElement?.matches('fieldset.mud-input-outlined-border'));
+            || (e.tagName === 'LEGEND' && !!e.parentElement?.matches('fieldset.mud-input-outlined-border'))
+            || !!e.parentElement?.closest('.mud-input-helper-text');
           const underLibrary = e => { for (let p = e.parentElement; p; p = p.parentElement) if (isLibrary(p)) return true; return false; };
           const elements = [...document.querySelectorAll('body, body *')].filter(e => !isLibrary(e));
           const keys = elements.map(e => (underLibrary(e) ? own : own.concat(inherited))

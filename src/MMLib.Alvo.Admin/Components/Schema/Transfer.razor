@@ -51,7 +51,7 @@
             }
 
             <MudTextField T="string" Variant="Variant.Outlined" Lines="12" Immediate="true" id="import-json" Class="a-mono"
-                          spellcheck="false" Label="Descriptor JSON"
+                          spellcheck="false" Label="Descriptor JSON" HelperText="@ImportHint"
                           Value="_pasted" ValueChanged="text => _pasted = text ?? string.Empty" OnKeyDown="ImportKeyAsync" />
 
             <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Disabled="@(_pasted.Trim().Length == 0)"
@@ -124,7 +124,12 @@
             return Task.CompletedTask;
         }
 
-        _refusal = DescriptorNames.FirstRefusal(_pasted) ?? (Copy.Replace(_pasted) ? null : "That is not a JSON object.");
+        _refusal = DescriptorNames.FirstRefusal(_pasted);
+        if (_refusal is null && !Copy.Replace(_pasted))
+        {
+            _refusal = "That is not a JSON object.";
+        }
+
         if (_refusal is not null)
         {
             _refusals++;
@@ -133,6 +138,20 @@
 
         Navigation.NavigateTo(AdminPaths.Changes);
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The shortcut, which nothing else on the page names, and the size of what the circuit holds: the count is drawn
+    /// from the server's copy of the text, so it is also where a newline typed into it shows it arrived.
+    /// </summary>
+    private string ImportHint
+    {
+        get
+        {
+            var lines = _pasted.Length == 0 ? 0 : _pasted.Count(c => c == '\n') + 1;
+            var size = lines == 1 ? "1 line" : $"{lines.ToString(CultureInfo.InvariantCulture)} lines";
+            return $"{size}. Ctrl+Enter or ⌘+Enter loads it.";
+        }
     }
 
     /// <summary>Ctrl/Cmd+Enter imports; Enter alone is a newline in a JSON document (spec §3.4).</summary>
