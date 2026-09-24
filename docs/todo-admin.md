@@ -600,3 +600,15 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     `decimal` with no reason given (FF:68); Add entity writes `audit: false` / `tenancy: global`
     explicitly; Overview shows the `dynamicEntities` warning for `enabled: false`; apply sends no
     idempotency key.
+30. **A person the dashboard creates can never sign in.** Access → *Add a person* creates the account
+    **without a password** (deliberately — `IAlvoUserAdministration.CreateAsync` remarks), and *Issue a
+    credential token* mints a single-use token (`IssueCredentialTokenAsync`, ASP.NET Identity's reset
+    token) "for them to set their own password" — but **nothing in the build redeems it**: no endpoint, no
+    screen, no CLI (grep for a `ResetPasswordAsync` caller: none; the only `MapPost`s are sign-in and
+    sign-out, `AlvoAdminSignIn.cs:54-55`). So only the bootstrap administrator can ever sign in. Found by
+    the maintainer asking "how does a user get in?", 24 Sep 2026 — the §5f pattern a third time (written,
+    tested by contract, reached by no one). Probably: an unauthenticated *Set your password* screen at
+    `{admin}/set-password` (email + token + new password twice, antiforgery and the same rate limit as
+    sign-in, the token consumed through `UserManager.ResetPasswordAsync`, the refusal wording not saying
+    which half was wrong), and the Access token panel showing the link to it. Security-sensitive — the
+    `alvo-security-core-review` checklist and `/security-review` apply.
