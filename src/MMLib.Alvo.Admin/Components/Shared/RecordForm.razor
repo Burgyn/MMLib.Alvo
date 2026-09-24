@@ -12,6 +12,7 @@
     is not one it can send (FormValue).
 *@
 @inject DataGateway Data
+@inject ILogger<RecordForm> Logger
 
 @*
     The chrome — the overlay, the title, the way out, the scroll lock — belongs to <Sheet>. This
@@ -20,9 +21,9 @@
 *@
 <Sheet Open="true" TestId="record-sheet" Eyebrow="@Entity.Name" Title="@Title" OnClose="Cancel">
 
-        @if (_error is not null)
+        @if (_problem is not null)
         {
-            <ErrorPanel Problem="@_error" Fix="@_fix" />
+            <ErrorPanel Problem="@_problem.Exception" Fix="@_problem.Fix" />
         }
 
         <div class="a-stack">
@@ -94,8 +95,7 @@
     /// <summary>How long typing into a reference has to pause before it searches.</summary>
     private static readonly TimeSpan _searchDelay = TimeSpan.FromMilliseconds(250);
 
-    private Exception? _error;
-    private string? _fix;
+    private AdminProblem? _problem;
     private bool _saving;
     private Dictionary<string, object?>? _opened;
     private RecordDraft _draft = new([], new Dictionary<string, object?>());
@@ -304,10 +304,12 @@
                     picker.Target!.Name, picker.Label!, [known], context, CancellationToken.None);
                 picker.Chosen = labels.TryGetValue(known, out var label) ? label : null;
             }
-            catch (Exception)
+            catch (Exception exception)
             {
                 /* A label masked from this caller, a target they hold no tenant for, or a read that
-                   failed outright: the id is still the value, so it is what the box shows. */
+                   failed outright: the id is still the value, so it is what the box shows. Only the
+                   last is logged — the classifier tells a refusal from a fault. */
+                AdminProblem.Absorb(exception, Logger, ProblemSite.Records);
             }
         }
 
@@ -412,8 +414,9 @@
                 picker.Show(picker.OptionsOf(page));
             }
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            AdminProblem.Absorb(exception, Logger, ProblemSite.Records);
             if (version == picker.Version)
             {
                 picker.Show([]);
@@ -506,8 +509,7 @@
     /// <summary>Writes what changed; with nothing changed, closes without a write at all.</summary>
     private async Task Save()
     {
-        _error = null;
-        _fix = null;
+        _problem = null;
         if (!Creating && !_draft.Dirty)
         {
             await OnCancel.InvokeAsync();
@@ -584,29 +586,7 @@
         }
     }
 
-    /// <summary>
-    /// Renders the refusal where it happened, with the fix.
-    /// </summary>
-    /// <remarks>
-    /// A unique collision is a <c>409</c> with violation code <c>unique</c> — not a validation
-    /// error and not an "unknown field", neither of which the problem-type catalogue contains. The
-    /// wording follows the catalogue rather than inventing a friendlier one, because the operator
-    /// may well be reading the same slug in a log.
-    /// </remarks>
+    /// <summary>Renders the refusal where it happened, with the fix a write refusal calls for.</summary>
     private void Refused(Exception exception)
-    {
-        _error = exception;
-        _fix = exception switch
-        {
-            AlvoConstraintViolationException { Kind: AlvoConstraintKind.Unique } violation
-                => $"Another record already has this value for {string.Join(", ", violation.Fields)}. The field is declared unique on the entity's Fields tab.",
-            AlvoConstraintViolationException violation
-                => $"The value does not satisfy {violation.Kind} on {string.Join(", ", violation.Fields)}.",
-            AlvoAuthorizationException
-                => "The write rule on this entity does not admit you, or the entity is tenant-scoped and you hold no tenant.",
-            AlvoRecordNotFoundException
-                => "The record is gone, or the read rule no longer admits it. Both answer 404, deliberately.",
-            _ => null,
-        };
-    }
+        => _problem = AdminProblem.From(exception, Logger, ProblemSite.RecordWrite);
 }

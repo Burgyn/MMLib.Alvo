@@ -5,6 +5,7 @@
 @inject DataGateway Caller
 @inject NavigationManager Navigation
 @inject IJSRuntime Js
+@inject ILogger<Transfer> Logger
 @implements IAsyncDisposable
 
 <PageTitle>Import and export · Alvo</PageTitle>
@@ -12,9 +13,9 @@
 <div class="a-stack">
     <PageHeader Eyebrow="Schema" EyebrowHref="@($"{AlvoAdmin.BasePath}/schema")" Title="Import and export" />
 
-    @if (_error is not null)
+    @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_error" />
+        <ErrorPanel Problem="@_problem.Exception" />
     }
 
     <div class="a-panel" style="padding:var(--space-5)">
@@ -78,7 +79,7 @@
 
     private IJSObjectReference? _module;
     private ManagementDescriptor? _descriptor;
-    private Exception? _error;
+    private AdminProblem? _problem;
     private string _pasted = string.Empty;
     private string? _refusal;
 
@@ -95,10 +96,9 @@
                 Copy.Take(_descriptor.DescriptorJson, _descriptor.Revision);
             }
         }
-        catch (Exception exception) when (exception is ManagementForbiddenException
-            or ManagementProjectNotFoundException or ManagementRequestException)
+        catch (Exception exception)
         {
-            _error = exception;
+            _problem = AdminProblem.From(exception, Logger);
         }
     }
 

@@ -4,15 +4,16 @@
 @inject ManagementGateway Gateway
 @inject DataGateway Records
 @inject NavigationManager Navigation
+@inject ILogger<Rules> Logger
 
 <PageTitle>Rules · Alvo</PageTitle>
 
 <div class="a-stack">
     <PageHeader Title="Rules" />
 
-    @if (_error is not null)
+    @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_error" />
+        <ErrorPanel Problem="@_problem.Exception" />
     }
     else if (_schema is null)
     {
@@ -95,9 +96,9 @@
                         </div>
                     </div>
 
-                    @if (_simulationError is not null)
+                    @if (_simulationProblem is not null)
                     {
-                        <ErrorPanel Problem="@_simulationError" />
+                        <ErrorPanel Problem="@_simulationProblem.Exception" />
                     }
                     else if (_verdict is { } verdict)
                     {
@@ -128,8 +129,8 @@
     private SchemaModel? _schema;
     private IReadOnlyList<KeyValuePair<string, string>> _rules = [];
     private ManagementPolicyVerdict? _verdict;
-    private Exception? _error;
-    private Exception? _simulationError;
+    private AdminProblem? _problem;
+    private AdminProblem? _simulationProblem;
     private Caller _caller = new("anonymous", null, [], null);
     private string _operation = "list";
 
@@ -154,10 +155,9 @@
 
             await SimulateAsync();
         }
-        catch (Exception exception) when (exception is ManagementForbiddenException
-            or ManagementProjectNotFoundException or ManagementRequestException)
+        catch (Exception exception)
         {
-            _error = exception;
+            _problem = AdminProblem.From(exception, Logger);
         }
     }
 
@@ -214,17 +214,16 @@
 
         try
         {
-            _simulationError = null;
+            _simulationProblem = null;
             _verdict = await Gateway.SimulateAsync(
                 new ManagementPolicySimulation(
                     Selected, _operation,
                     new ManagementSimulatedCaller(_caller.User, _caller.Roles, _caller.Tenant)),
                 CancellationToken.None);
         }
-        catch (Exception exception) when (exception is ManagementSimulationException
-            or ManagementForbiddenException or ManagementRequestException)
+        catch (Exception exception)
         {
-            _simulationError = exception;
+            _simulationProblem = AdminProblem.From(exception, Logger);
             _verdict = null;
         }
     }

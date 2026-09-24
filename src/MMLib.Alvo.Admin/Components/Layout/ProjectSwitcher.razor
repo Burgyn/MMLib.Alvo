@@ -15,11 +15,12 @@
 @inject NavigationManager Navigation
 @inject WorkingCopyStore Copies
 @inject DataGateway Caller
+@inject ILogger<ProjectSwitcher> Logger
 
 <div class="a-switcher" data-testid="project-card">
     <span class="a-brand-mark">@Initial</span>
     <span style="min-width:0">
-        <span class="a-switcher-name">@(_project?.Name ?? (_refused ? "No project" : "…"))</span>
+        <span class="a-switcher-name">@(_project?.Name ?? (_unread is null ? "…" : "No project"))</span>
         <span class="a-switcher-meta">
             @Meta
             @* The same count as the pending bar, with the project as §4.5 draws it: "3 unapplied". *@
@@ -36,7 +37,7 @@
     private WorkingCopy? _copy;
     private bool _disposed;
     private int? _revision;
-    private bool _refused;
+    private string? _unread;
 
     private string Initial => (_project?.Name is { Length: > 0 } name ? name[..1] : "?").ToUpperInvariant();
 
@@ -44,7 +45,7 @@
     {
         ({ }, { } revision) => $"revision {revision}",
         ({ }, null) => "not applied yet",
-        _ => _refused ? "not admitted to this project" : "loading",
+        _ => _unread ?? "loading",
     };
 
     /// <summary>
@@ -112,8 +113,9 @@
             _copy = copy;
             _copy.Changed += Redraw;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            AdminProblem.Absorb(exception, Logger);
             _copy = null;
         }
     }
@@ -129,12 +131,27 @@
             _project = projects.Count > 0 ? projects[0] : null;
             _revision = _project is null ? null : await CurrentRevisionAsync(_project);
         }
-        catch (Exception exception) when (exception is ManagementForbiddenException
-            or ManagementRequestException or ManagementProjectNotFoundException)
+        catch (Exception exception)
         {
-            _refused = true;
+            _unread = Unread(AdminProblem.From(exception, Logger));
         }
     }
+
+    /// <summary>
+    /// Why there is no project to show, in the card's one line — or nothing, while the circuit is going.
+    /// </summary>
+    /// <remarks>
+    /// "Not admitted" is said only when the management surface said it. A read that failed for any other
+    /// reason used to say it too, which sent an operator to their access level over what was a fault — and
+    /// the fault, unlike the refusal, is in the server log.
+    /// </remarks>
+    private static string? Unread(AdminProblem? problem) => problem?.Exception switch
+    {
+        null => null,
+        ManagementForbiddenException => "not admitted to this project",
+        ManagementProjectNotFoundException => "no project is served",
+        _ => "could not be read",
+    };
 
     /// <summary>
     /// The revision the history is at now, rather than the one the project list reports.

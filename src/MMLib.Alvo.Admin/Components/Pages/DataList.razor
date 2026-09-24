@@ -2,15 +2,16 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
 @inject DataGateway Data
+@inject ILogger<DataList> Logger
 
 <PageTitle>Data · Alvo</PageTitle>
 
 <div class="a-stack">
     <PageHeader Title="Data" />
 
-    @if (_error is not null)
+    @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_error" />
+        <ErrorPanel Problem="@_problem.Exception" />
     }
     else if (_schema is null)
     {
@@ -56,7 +57,7 @@
 @code {
     private SchemaModel? _schema;
     private TenantId? _tenant;
-    private Exception? _error;
+    private AdminProblem? _problem;
 
     protected override async Task OnInitializedAsync()
     {
@@ -65,10 +66,9 @@
             _schema = await Gateway.SchemaAsync(CancellationToken.None);
             _tenant = (await Data.ContextAsync(CancellationToken.None)).Tenant;
         }
-        catch (Exception exception) when (exception is ManagementForbiddenException
-            or ManagementProjectNotFoundException or ManagementRequestException)
+        catch (Exception exception)
         {
-            _error = exception;
+            _problem = AdminProblem.From(exception, Logger);
         }
     }
 }

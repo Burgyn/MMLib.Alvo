@@ -1,6 +1,7 @@
 ﻿@page "/admin/history"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
+@inject ILogger<History> Logger
 
 <PageTitle>Configuration history · Alvo</PageTitle>
 
@@ -8,9 +9,9 @@
     <PageHeader Title="Configuration history"
                 Subtitle="Every apply appends a revision and none is ever rewritten. This is the audit trail of configuration — who changed what the backend is, when, and why. An audit trail of the data is a different thing and does not exist yet." />
 
-    @if (_error is not null)
+    @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_error" Fix="@_fix" />
+        <ErrorPanel Problem="@_problem.Exception" Fix="@_problem.Fix" />
     }
     else if (_revisions is null)
     {
@@ -83,8 +84,7 @@
 @code {
     private IReadOnlyList<ManagementRevision>? _revisions;
     private ManagementRevisionDetail? _selected;
-    private Exception? _error;
-    private string? _fix;
+    private AdminProblem? _problem;
     private int _current;
     private bool _allowed;
     private bool _busy;
@@ -98,10 +98,9 @@
             _revisions = await Gateway.RevisionsAsync(CancellationToken.None);
             _current = (await Gateway.DescriptorAsync(CancellationToken.None)).Revision;
         }
-        catch (Exception exception) when (exception is ManagementForbiddenException
-            or ManagementProjectNotFoundException or ManagementRequestException)
+        catch (Exception exception)
         {
-            _error = exception;
+            _problem = AdminProblem.From(exception, Logger);
         }
     }
 
@@ -112,9 +111,9 @@
         {
             _selected = await Gateway.RevisionAsync(revision, CancellationToken.None);
         }
-        catch (ManagementRevisionNotFoundException exception)
+        catch (Exception exception)
         {
-            _error = exception;
+            _problem = AdminProblem.From(exception, Logger);
         }
     }
 
@@ -126,8 +125,7 @@
         }
 
         _busy = true;
-        _error = null;
-        _fix = null;
+        _problem = null;
 
         try
         {
@@ -143,10 +141,7 @@
         }
         catch (Exception exception)
         {
-            _error = exception;
-            _fix = exception is Migrations.DescriptorConcurrencyException
-                ? "Somebody applied a revision while this screen was open. Reload and try again."
-                : null;
+            _problem = AdminProblem.From(exception, Logger, ProblemSite.Rollback);
         }
         finally
         {

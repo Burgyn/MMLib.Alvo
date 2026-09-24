@@ -4,6 +4,7 @@
 @inject WorkingCopyStore Copies
 @inject DataGateway Caller
 @inject NavigationManager Navigation
+@inject ILogger<SchemaList> Logger
 @implements IDisposable
 
 <PageTitle>Schema · Alvo</PageTitle>
@@ -16,9 +17,9 @@
         </Secondary>
     </PageHeader>
 
-    @if (_error is not null)
+    @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_error" />
+        <ErrorPanel Problem="@_problem.Exception" />
     }
 
     @*
@@ -156,7 +157,7 @@
     private WorkingCopy Copy { get; set; } = new();
 
     private SchemaModel? _schema;
-    private Exception? _error;
+    private AdminProblem? _problem;
     private string _name = string.Empty;
     private string? _refusal;
     private bool _adding;
@@ -205,10 +206,9 @@
                 Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
             }
         }
-        catch (Exception exception) when (exception is ManagementForbiddenException
-            or ManagementProjectNotFoundException or ManagementRequestException)
+        catch (Exception exception)
         {
-            _error = exception;
+            _problem = AdminProblem.From(exception, Logger);
         }
     }
 

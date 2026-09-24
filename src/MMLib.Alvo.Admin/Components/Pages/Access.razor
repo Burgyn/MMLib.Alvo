@@ -2,6 +2,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
 @inject DataGateway Records
+@inject ILogger<Access> Logger
 
 <PageTitle>Access · Alvo</PageTitle>
 
@@ -9,9 +10,9 @@
     <PageHeader Title="Access"
                 Subtitle="Two different things live here and they take effect at different times. Membership — who exists, what roles they have, which tenant they act in — is the identity store, and a change applies at once. The role catalogue and the three management levels are the descriptor, and a change to either waits for an apply." />
 
-    @if (_error is not null)
+    @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_error" Fix="@_fix" />
+        <ErrorPanel Problem="@_problem.Exception" Fix="@_problem.Fix" />
     }
 
     @if (_token is { } token)
@@ -241,8 +242,7 @@
     private IReadOnlyList<string> _roles = [];
     private IReadOnlyList<KeyValuePair<string, string>> _levels = [];
     private AlvoCredentialToken? _token;
-    private Exception? _error;
-    private string? _fix;
+    private AdminProblem? _problem;
     private string _tokenFor = string.Empty;
     private string _tenantDraft = string.Empty;
     private string _newEmail = string.Empty;
@@ -284,8 +284,10 @@
     {
         if (!TenantId.TryParse(_tenantDraft, null, out var tenant))
         {
-            _error = new ManagementRequestException("That is not a tenant id.");
-            _fix = "A tenant is a uuid. Copy it from a row's tenant_id, or from the caller you are modelling.";
+            _problem = AdminProblem.From(new ManagementRequestException("That is not a tenant id."))! with
+            {
+                Fix = "A tenant is a uuid. Copy it from a row's tenant_id, or from the caller you are modelling.",
+            };
             return;
         }
 
@@ -304,8 +306,7 @@
         {
             _token = await Gateway.IssueCredentialTokenAsync(person.Id, CancellationToken.None);
             _tokenFor = person.Email;
-            _error = null;
-            _fix = null;
+            _problem = null;
         }
         catch (Exception exception)
         {
@@ -333,8 +334,7 @@
         try
         {
             await write();
-            _error = null;
-            _fix = null;
+            _problem = null;
             await LoadAsync();
         }
         catch (Exception exception)
@@ -343,23 +343,7 @@
         }
     }
 
-    /// <summary>
-    /// Renders the refusal, and says which of the guards produced it.
-    /// </summary>
-    /// <remarks>
-    /// The escalation refusals are the interesting ones and are worth telling apart from a plain
-    /// "forbidden": one of them means <em>you are not an administrator</em> and the other means
-    /// <em>you are, and this is the one thing an administrator may not do to themselves</em>.
-    /// </remarks>
+    /// <summary>Renders the refusal, with the fix that says which of the guards produced it.</summary>
     private void Refused(Exception exception)
-    {
-        _error = exception;
-        _fix = exception switch
-        {
-            ManagementEscalationException => "Another administrator can make this change, or the access block can, through an apply — which records who made it.",
-            ManagementForbiddenException => "Administering people is an admin operation. Your management level is lower.",
-            NotSupportedException => "This deployment's membership store does not support that operation.",
-            _ => null,
-        };
-    }
+        => _problem = AdminProblem.From(exception, Logger, ProblemSite.People);
 }

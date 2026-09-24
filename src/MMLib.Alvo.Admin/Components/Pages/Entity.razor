@@ -4,6 +4,7 @@
 @inject WorkingCopyStore Copies
 @inject DataGateway Caller
 @inject NavigationManager Navigation
+@inject ILogger<Entity> Logger
 @implements IDisposable
 
 <PageTitle>@EntityName · Schema · Alvo</PageTitle>
@@ -53,9 +54,9 @@
         </div>
     </Sheet>
 
-    @if (_error is not null)
+    @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_error" />
+        <ErrorPanel Problem="@_problem.Exception" />
     }
     else if (_entity is null)
     {
@@ -186,7 +187,7 @@
     private bool _renaming;
     private string _newName = string.Empty;
     private string? _renameRefusal;
-    private Exception? _error;
+    private AdminProblem? _problem;
     private EntityTab _tab = EntityTabs.First;
     private bool _followingAddress;
     private string? _editing;
@@ -241,10 +242,9 @@
             _pending = _entity is null;
             ReadPendingEntity();
         }
-        catch (Exception exception) when (exception is ManagementForbiddenException
-            or ManagementProjectNotFoundException or ManagementRequestException)
+        catch (Exception exception)
         {
-            _error = exception;
+            _problem = AdminProblem.From(exception, Logger);
         }
     }
 

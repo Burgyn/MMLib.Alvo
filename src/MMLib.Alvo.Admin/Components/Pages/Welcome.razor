@@ -2,6 +2,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
 @inject DataGateway Caller
+@inject ILogger<Welcome> Logger
 
 @*
     The first run.
@@ -110,9 +111,10 @@
                 .FirstOrDefault(person => person.Id == context.User)?.Email
                 ?? context.User.ToString();
         }
-        catch (Exception exception) when (exception is ManagementForbiddenException
-            or ManagementProjectNotFoundException or ManagementRequestException)
+        catch (Exception exception)
         {
+            /* The page is a greeting: whatever was refused or failed, it greets the caller by id. */
+            AdminProblem.Absorb(exception, Logger);
             _email = context.User.ToString();
         }
     }

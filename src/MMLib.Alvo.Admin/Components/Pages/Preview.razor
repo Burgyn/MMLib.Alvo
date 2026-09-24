@@ -4,15 +4,16 @@
 @inject WorkingCopyStore Copies
 @inject DataGateway Caller
 @inject NavigationManager Navigation
+@inject ILogger<Preview> Logger
 
 <PageTitle>Preview changes · Alvo</PageTitle>
 
 <div class="a-stack">
     <PageHeader Eyebrow="Schema" EyebrowHref="@($"{AlvoAdmin.BasePath}/schema")" Title="Preview changes" />
 
-    @if (_error is not null)
+    @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_error" Fix="@_fix" />
+        <ErrorPanel Problem="@_problem.Exception" Fix="@_problem.Fix" />
     }
 
     @if (!Copy.Loaded)
@@ -159,8 +160,7 @@
 
     private ManagementApplyResult? _plan;
     private ManagementApplyResult? _applied;
-    private Exception? _error;
-    private string? _fix;
+    private AdminProblem? _problem;
     private string _reason = string.Empty;
     private bool _allowed;
     private bool _busy;
@@ -178,10 +178,9 @@
                 var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
                 Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
             }
-            catch (Exception exception) when (exception is ManagementForbiddenException
-                or ManagementProjectNotFoundException or ManagementRequestException)
+            catch (Exception exception)
             {
-                _error = exception;
+                _problem = AdminProblem.From(exception, Logger);
             }
         }
 
@@ -219,8 +218,7 @@
     private async Task SendAsync(bool dryRun)
     {
         _busy = true;
-        _error = null;
-        _fix = null;
+        _problem = null;
 
         try
         {
@@ -250,35 +248,13 @@
         }
         catch (Exception exception)
         {
-            _error = exception;
-            _fix = Fix(exception);
+            _problem = AdminProblem.From(exception, Logger, ProblemSite.SchemaApply);
         }
         finally
         {
             _busy = false;
         }
     }
-
-    /// <summary>
-    /// What to do about the refusal, in the words the API itself uses.
-    /// </summary>
-    /// <remarks>
-    /// The two concurrency answers are worth separating: an <em>absent</em> precondition is a 428
-    /// and a <em>stale</em> one is a 412, and they send an operator to two different places — one
-    /// is a bug in the client, the other is somebody else having applied in between.
-    /// </remarks>
-    private static string? Fix(Exception exception) => exception switch
-    {
-        Migrations.DescriptorConcurrencyException
-            => "Somebody applied a revision while this copy was open. Reload the descriptor, re-check the diff, and apply again — your edits are still here.",
-        Migrations.DestructiveChangeNotAllowedException
-            => "The plan discards data and that was not confirmed. Type the project's name above to allow it.",
-        Descriptor.DescriptorValidationException
-            => "The descriptor does not satisfy schema/project.schema.json. The message names the pointer that failed.",
-        ManagementEscalationException
-            => "This change touches the access block, which re-qualifies the whole apply to admin. Your management level is lower.",
-        _ => null,
-    };
 
     /// <summary>
     /// What the "Why" box offers before anything is typed: a sentence about this change, when one can be said.

@@ -5,16 +5,18 @@
     `type` slug, and `UnhonouredFeatures` adds a `fix` — a toast that disappears in three seconds
     throws all four away, in a tool whose whole job is configuration.
 
-    The exception type is mapped to a sentence here rather than printed, because `Exception.Message`
-    is written for a log and an operator is not reading a log. What is never rewritten is a
-    framework sentence: a refusal's own `Consequence` and `Fix` are served verbatim (§4.1).
+    The exception is classified by `AdminProblem` rather than printed: a documented refusal gets a
+    mapped headline over the framework's own sentence, and anything else gets a generic one, because
+    the `Exception.Message` of an unexpected exception is written for a log and an operator is not
+    reading a log. What is never rewritten is a framework sentence: a refusal's own `Consequence`
+    and `Fix` are served verbatim (§4.1).
 *@
 <div class="a-error" role="alert">
     <div class="a-error__title">@Headline</div>
     <div class="a-error__detail">@Detail</div>
-    @if (Fix is { Length: > 0 })
+    @if (ShownFix is { Length: > 0 })
     {
-        <div class="a-error__fix">@Fix</div>
+        <div class="a-error__fix">@ShownFix</div>
     }
     @if (Slug is { Length: > 0 })
     {
@@ -27,7 +29,7 @@
        is what a developer gets every time they delete the database and restart. The second is
        indistinguishable from the first from here, and it strands an operator on a screen with no
        control on it, so the way out is offered rather than left to be found in a menu. *@
-    @if (Problem is ManagementForbiddenException)
+    @if (Classified?.OffersSignOut == true)
     {
         <form method="post" action="@AlvoAdmin.SignOutEndpoint" data-enhance="false"
               style="margin-top:var(--space-3)">
@@ -36,6 +38,11 @@
                 Sign out and sign in again
             </button>
         </form>
+    }
+
+    @if (Actions is not null)
+    {
+        <div class="a-row" style="margin-top:var(--space-3)">@Actions</div>
     }
 </div>
 
@@ -59,18 +66,15 @@
     [Parameter]
     public string? Slug { get; set; }
 
-    private string Headline => Title ?? Problem switch
-    {
-        ManagementForbiddenException => "You are not allowed to do this",
-        ManagementProjectNotFoundException => "That project does not exist",
-        ManagementRevisionNotFoundException => "That revision does not exist",
-        ManagementEscalationException => "This change needs a higher management level",
-        ManagementSimulationException => "That policy question cannot be answered",
-        ManagementRequestException => "The request was refused",
-        Data.AlvoAuthorizationException => "The rules did not admit this",
-        null => "Something went wrong",
-        _ => "Something went wrong",
-    };
+    /// <summary>What the operator can do from here, drawn under the panel's text.</summary>
+    [Parameter]
+    public RenderFragment? Actions { get; set; }
 
-    private string Detail => Problem?.Message ?? string.Empty;
+    private AdminProblem? Classified => Problem is null ? null : AdminProblem.From(Problem);
+
+    private string Headline => Title ?? Classified?.Title ?? AdminProblem.FaultTitle;
+
+    private string Detail => Classified?.Detail ?? string.Empty;
+
+    private string? ShownFix => Fix ?? Classified?.Fix;
 }

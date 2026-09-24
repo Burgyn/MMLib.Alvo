@@ -1,15 +1,16 @@
 ﻿@page "/admin"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
+@inject ILogger<Overview> Logger
 
 <PageTitle>Overview · Alvo</PageTitle>
 
 <div class="a-stack">
     <PageHeader Title="@(_descriptor is null ? "Overview" : Gateway.Project)" />
 
-    @if (_error is not null)
+    @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_error" />
+        <ErrorPanel Problem="@_problem.Exception" />
     }
     else if (_schema is null)
     {
@@ -132,7 +133,7 @@
     private IReadOnlyList<ManagementRevision> _revisions = [];
     private int _rules;
     private int _roles;
-    private Exception? _error;
+    private AdminProblem? _problem;
 
     /// <summary>The warned blocks this descriptor declares (§4.2) — see <see cref="DeclaredLimits"/>.</summary>
     private IReadOnlyList<ManagementWarnedBlock> Declared { get; set; } = [];
@@ -150,10 +151,9 @@
             _rules = DescriptorLens.RuleCount(_descriptor.DescriptorJson);
             _roles = DescriptorLens.DeclaredRoles(_descriptor.DescriptorJson).Count;
         }
-        catch (Exception exception) when (exception is ManagementForbiddenException
-            or ManagementProjectNotFoundException or ManagementRequestException)
+        catch (Exception exception)
         {
-            _error = exception;
+            _problem = AdminProblem.From(exception, Logger);
         }
     }
 

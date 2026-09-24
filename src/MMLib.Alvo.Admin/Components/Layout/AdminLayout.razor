@@ -8,6 +8,7 @@
 @inherits LayoutComponentBase
 @implements IDisposable
 @inject AssistantGateway Assistant
+@inject ILogger<AdminLayout> Logger
 
 <div class="a-shell">
     <nav class="a-sidebar" aria-label="Sections">
@@ -75,7 +76,24 @@
         <PendingBar />
 
         <main class="a-content" id="a-content">
-            @Body
+            @*
+                A screen that throws while rendering takes this panel instead of the circuit. Without the
+                boundary a render bug ends the session: the shell, the working copy's pending count and every
+                other screen go with it, and the operator reads the framework's reconnect banner. The
+                boundary's own logger writes the exception to the server log, so the panel can say "in the
+                server log" and mean it.
+            *@
+            <ErrorBoundary @ref="_boundary">
+                <ChildContent>@Body</ChildContent>
+                <ErrorContent Context="fault">
+                    <ErrorPanel Problem="@fault">
+                        <Actions>
+                            <button type="button" class="a-btn a-btn--sm" data-testid="error-reload"
+                                    @onclick="Reload">Reload</button>
+                        </Actions>
+                    </ErrorPanel>
+                </ErrorContent>
+            </ErrorBoundary>
         </main>
 
         @*
@@ -149,6 +167,7 @@
 
 @code {
     private CommandPalette? _palette;
+    private ErrorBoundary? _boundary;
     private bool _sheetOpen;
     private bool _assistant;
 
@@ -179,6 +198,15 @@
     public void Dispose() => Assistant.ConnectionChanged -= OnConnectionChanged;
 
     /// <summary>
+    /// Clears a caught fault on every navigation — the layout's parameters are set again with each new page —
+    /// so the panel belongs to the screen that threw rather than to the session.
+    /// </summary>
+    protected override void OnParametersSet() => _boundary?.Recover();
+
+    /// <summary>Draws the screen again from scratch, which re-reads everything it shows.</summary>
+    private void Reload() => _boundary?.Recover();
+
+    /// <summary>
     /// Re-asks, then redraws — on the renderer's thread, because the save that raised this ran on the
     /// settings page's own.
     /// </summary>
@@ -196,8 +224,9 @@
         {
             _assistant = await Assistant.IsConfiguredAsync(CancellationToken.None);
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            AdminProblem.Absorb(exception, Logger);
             _assistant = false;
         }
     }

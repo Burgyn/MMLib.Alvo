@@ -3,6 +3,7 @@
 @inject ManagementGateway Gateway
 @inject DataGateway Records
 @inject NavigationManager Navigation
+@inject ILogger<EntityData> Logger
 
 <PageTitle>@EntityName · Data · Alvo</PageTitle>
 
@@ -19,9 +20,9 @@
         </Primary>
     </PageHeader>
 
-    @if (_error is not null)
+    @if (_problem is not null)
     {
-        <ErrorPanel Problem="@_error" Fix="@_fix" />
+        <ErrorPanel Problem="@_problem.Exception" Fix="@_problem.Fix" />
     }
 
     @if (_entity is null)
@@ -30,7 +31,7 @@
         {
             <div class="a-skeleton" style="height:240px"></div>
         }
-        else if (_error is null)
+        else if (_problem is null)
         {
             <EmptyState Title="@($"There is no entity called {EntityName}")"
                         Body="The schema this project serves does not declare it." />
@@ -246,8 +247,7 @@
     private AlvoContext? _context;
     private Dictionary<string, object?>? _form;
     private Guid? _editing;
-    private Exception? _error;
-    private string? _fix;
+    private AdminProblem? _problem;
     private string? _cursor;
     private string? _opened;
     private string _search = string.Empty;
@@ -342,8 +342,7 @@
     private async Task OpenEntityAsync()
     {
         _loading = true;
-        _error = null;
-        _fix = null;
+        _problem = null;
         _opened = EntityName;
         _search = string.Empty;
         _sort = null;
@@ -442,8 +441,7 @@
 
             _page = page;
             _labels = labels;
-            _error = null;
-            _fix = null;
+            _problem = null;
         }
         catch (Exception exception)
         {
@@ -521,29 +519,18 @@
         }
     }
 
-    /// <summary>
-    /// Turns a refusal into the panel, with the fix when the framework supplied one.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="AlvoAuthorizationException"/> is the tenant guard and the unconfigured-operation
-    /// case — the two that really are a 403 rather than an empty page — and the distinction is
-    /// worth carrying into the wording, because "you are refused" and "you match nothing" send an
-    /// operator to two different screens.
-    /// </remarks>
+    /// <summary>Turns a refusal into the panel, with the fix this entity's state calls for.</summary>
     private void Refused(Exception exception)
-    {
-        _error = exception;
-        _fix = exception switch
-        {
-            AlvoAuthorizationException when _entity?.Tenancy == TenancyMode.Scoped && _context?.Tenant is null
-                => "This entity is tenant-scoped and your account holds no tenant. An administrator grants one in Access.",
-            AlvoAuthorizationException
-                => "The descriptor configures no rule for this operation, or the tenant guard refused before any rule ran. The entity's Rules tab shows which operations are configured.",
-            AlvoConstraintViolationException violation
-                => $"A constraint refused the value: {violation.Kind}. The field's facets are on the entity's Fields tab.",
-            _ => null,
-        };
-    }
+        => _problem = AdminProblem.From(exception, Logger, Site);
+
+    /// <summary>
+    /// A scoped entity read with no tenant is refused by the tenant guard, and the fix says so rather than
+    /// sending the operator to the entity's rules.
+    /// </summary>
+    private ProblemSite Site
+        => _entity?.Tenancy == TenancyMode.Scoped && _context?.Tenant is null
+            ? ProblemSite.ScopedRecordsWithoutTenant
+            : ProblemSite.Records;
 
     /// <summary>Runs the search once typing pauses, from the first page.</summary>
     private async Task SearchChanged()

@@ -12,6 +12,7 @@
 @inject WorkingCopyStore Copies
 @inject DataGateway Caller
 @inject NavigationManager Navigation
+@inject ILogger<PendingBar> Logger
 
 @if (Pending > 0 && !OnPreview)
 {
@@ -75,8 +76,9 @@
             _copy = copy;
             _copy.Changed += OnChanged;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
+            AdminProblem.Absorb(exception, Logger);
             _copy = null;
         }
     }

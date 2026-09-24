@@ -199,6 +199,7 @@ namespace MMLib.Alvo.Admin.Components.Layout
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+        protected override void OnParametersSet() { }
     }
     public class CommandPalette : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
     {
@@ -483,6 +484,8 @@ namespace MMLib.Alvo.Admin.Components.Shared
     public class ErrorPanel : Microsoft.AspNetCore.Components.ComponentBase
     {
         public ErrorPanel() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? Actions { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Fix { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
