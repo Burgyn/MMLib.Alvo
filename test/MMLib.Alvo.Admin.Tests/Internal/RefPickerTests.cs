@@ -71,12 +71,40 @@ public class RefPickerTests
             .ShouldBe([new RefOption(_ada, "Ada Lovelace"), new RefOption(_grace, RefLabels.ShortId(_grace))]);
     }
 
+    /// <summary>
+    /// A search names only the label's searchable fields, and still reads the whole label back (final review M-2).
+    /// </summary>
+    [Fact]
+    public void A_search_skips_a_label_field_a_cel_mask_may_withhold()
+    {
+        var query = Customers(new RowLabel(["first_name", "last_name"]) { Searchable = ["first_name"] }).Query("ada");
+
+        var filter = query.Filter.ShouldBeOfType<AlvoOr>().Filters.ShouldHaveSingleItem().ShouldBeOfType<AlvoComparison>();
+        filter.Field.ShouldBe("first_name");
+        query.Select.ShouldBe(["id", "first_name", "last_name"]);
+    }
+
+    [Fact]
+    public void A_label_every_field_of_which_is_masked_reads_out_the_chosen_row_and_is_not_searched()
+    {
+        var picker = Customers(new RowLabel(["name"]) { Searchable = [] });
+
+        picker.Labelled.ShouldBeTrue();
+        picker.Searchable.ShouldBeFalse();
+        Should.Throw<InvalidOperationException>(() => picker.Query("ada"));
+    }
+
+    [Fact]
+    public void A_masked_first_field_is_not_sorted_by()
+        => Customers(new RowLabel(["name", "nickname"]) { Searchable = ["nickname"] }).Query(null).Sort.ShouldBeEmpty();
+
     [Fact]
     public void A_target_with_no_label_cannot_be_searched_only_pasted_into()
     {
         var picker = Customers(null);
 
         picker.Searchable.ShouldBeFalse();
+        picker.Labelled.ShouldBeFalse();
         RefPicker.Pasted($" {_ada} ").ShouldBe(_ada);
         RefPicker.Pasted("Ada").ShouldBeNull();
     }

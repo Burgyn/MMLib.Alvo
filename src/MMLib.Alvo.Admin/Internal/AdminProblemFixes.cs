@@ -42,7 +42,7 @@ internal static class AdminProblemFixes
         DestructiveChangeNotAllowedException
             => "The plan discards data and that was not confirmed. Type the project's name above to allow it.",
         DescriptorValidationException
-            => "The descriptor does not satisfy schema/project.schema.json. The message names the pointer that failed.",
+            => "The descriptor breaks a rule every Alvo descriptor must follow. The message above says where in it.",
         ManagementEscalationException
             => "This change touches the access block, which re-qualifies the whole apply to admin. Your management level is lower.",
         _ => null,

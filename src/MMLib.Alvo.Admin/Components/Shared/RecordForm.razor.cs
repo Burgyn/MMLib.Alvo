@@ -133,7 +133,7 @@ public partial class RecordForm
     {
         var id = RefLabels.IdOf(_draft.Text(picker.Field.Name));
         picker.Chosen = null;
-        if (picker.Searchable && id is { } known)
+        if (picker.Labelled && id is { } known)
         {
             try
             {
@@ -236,10 +236,11 @@ public partial class RecordForm
     /// One search of the target, as the operator.
     /// </summary>
     /// <remarks>
-    /// A refusal — a label field masked from this caller, a scoped target and no tenant, a query the port
-    /// will not run — or a read that failed outright is an empty list rather than a red panel, the way the
-    /// grid never turns red over a column it could draw anyway: pasting the id still works, and the list
-    /// says so. A search is a convenience; the circuit must not end over one.
+    /// A refusal — a scoped target and no tenant, a query the port will not run — or a read that failed
+    /// outright is an empty list rather than a red panel, the way the grid never turns red over a column it
+    /// could draw anyway: pasting the id still works, and the list says so. A search is a convenience; the
+    /// circuit must not end over one. A label field a CEL mask may withhold is not searched at all
+    /// (<see cref="RowLabel.Searchable"/>), so that refusal no longer reaches here.
     /// </remarks>
     private async Task SearchAsync(RefPicker picker, string? term, int version)
     {

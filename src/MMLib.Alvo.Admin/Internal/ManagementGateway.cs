@@ -371,12 +371,23 @@ internal sealed class ManagementGateway(
     /// <para>
     /// <b>A statically rendered pass has nothing to follow</b>: its navigation manager supports no
     /// location-changing handlers, and its scope is one request that never navigates. The gateway then caches
-    /// for that request alone, which is what it did before.
+    /// for that request alone, which is what it did before. The registration throws after the handler has been
+    /// added, so the handler stays on that request's navigation manager with no registration to dispose — which
+    /// is harmless: the manager lives for the one request, and nothing there ever raises it.
     /// </para>
     /// <para>
-    /// The cost is a re-read of these four per navigation — including the query-only ones, an entity's tab or the
-    /// grid's filter — each an in-process call rather than a network round trip.
+    /// The cost, per navigation of an interactive circuit:
     /// </para>
+    /// <list type="bullet">
+    /// <item><description>A re-read of these four — including the query-only navigations, an entity's tab or
+    /// the grid's filter — each an in-process call rather than a network round trip.</description></item>
+    /// <item><description>One circuit round trip before the browser commits the navigation. A registered
+    /// handler is a navigation lock to the framework, so the browser asks the server first, where it used to
+    /// navigate and tell it afterwards.</description></item>
+    /// <item><description>A replayed step for back and forward. The browser has already moved through its
+    /// history when the lock hears of it, so the framework steps back to where it was, asks the handler, and
+    /// then repeats the step.</description></item>
+    /// </list>
     /// </remarks>
     /// <param name="navigation">This scope's navigation, initialised.</param>
     public void FollowNavigation(NavigationManager navigation)

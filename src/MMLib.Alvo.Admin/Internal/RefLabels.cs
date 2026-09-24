@@ -96,17 +96,21 @@ internal static class RefLabels
             ?? strings.FirstOrDefault(field => field.Name.EndsWith(NumberSuffix, StringComparison.Ordinal))?.Name;
         if (named is not null)
         {
-            return new RowLabel([named]);
+            return Label([named], masks);
         }
 
         if (byName.ContainsKey("first_name") && byName.ContainsKey("last_name"))
         {
-            return new RowLabel(["first_name", "last_name"]);
+            return Label(["first_name", "last_name"], masks);
         }
 
         var first = strings.FirstOrDefault(field => field.Required) ?? strings.FirstOrDefault();
-        return first is null ? null : new RowLabel([first.Name]);
+        return first is null ? null : Label([first.Name], masks);
     }
+
+    /// <summary>A label over <paramref name="fields"/>, searchable by those no mask may withhold.</summary>
+    private static RowLabel Label(IReadOnlyList<string> fields, FieldMasks masks)
+        => new(fields) { Searchable = [.. fields.Where(field => !masks.MayBeHidden(field))] };
 
     /// <summary>The read that fetches one batch's labels from <paramref name="entity"/>.</summary>
     public static AlvoQuery Query(string entity, RowLabel label, IReadOnlyList<Guid> ids)
@@ -128,6 +132,14 @@ internal static class RefLabels
 /// <param name="Fields">The label's fields, in the order they are read out.</param>
 internal sealed record RowLabel(IReadOnlyList<string> Fields)
 {
+    /// <summary>The label's fields a search or a sort may name: all of them, less any a CEL mask may withhold.</summary>
+    /// <remarks>
+    /// A CEL-masked field can still be read out — a caller it hides from gets the short id — but it is never put
+    /// in a filter or a sort, because the data port refuses the whole query for a caller the field is hidden
+    /// from (the rule <see cref="GridQuery.Searchable"/> keeps for the grid; <see cref="FieldMasks"/> says why).
+    /// </remarks>
+    public IReadOnlyList<string> Searchable { get; init; } = Fields;
+
     /// <summary>Whether <paramref name="field"/> is part of the label.</summary>
     public bool Covers(string field) => Fields.Contains(field, StringComparer.Ordinal);
 

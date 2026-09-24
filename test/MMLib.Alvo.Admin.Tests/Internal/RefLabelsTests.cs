@@ -130,6 +130,22 @@ public class RefLabelsTests
         => RefLabels.For(Entity(Strings("name")), Masks(conditional: ["name"]))!
             .Fields.ShouldBe(["name"], "it comes back for some callers, and the others get the short id");
 
+    /// <summary>A label field a CEL mask may withhold is read out, never searched or sorted by (final review M-2).</summary>
+    [Fact]
+    public void A_field_masked_by_cel_is_not_one_the_label_is_searched_by()
+    {
+        var label = RefLabels.For(
+            Entity(Strings("first_name"), Strings("last_name")), Masks(conditional: ["last_name"]))!;
+
+        label.Fields.ShouldBe(["first_name", "last_name"]);
+        label.Searchable.ShouldBe(["first_name"], "the port refuses the whole search for a caller the mask hides it from");
+    }
+
+    [Fact]
+    public void An_unmasked_label_is_searched_by_every_field_it_reads()
+        => RefLabels.For(Entity(Strings("first_name"), Strings("last_name")), FieldMasks.None)!
+            .Searchable.ShouldBe(["first_name", "last_name"]);
+
     [Fact]
     public void A_managed_column_is_never_the_label()
         => RefLabels.For(Entity(Strings("created_by"), Strings("brand")) with { Audit = true }, FieldMasks.None)!

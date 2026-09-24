@@ -29,6 +29,12 @@ internal sealed record RefOption(Guid Id, string Label);
 /// or a row the search does not reach still leaves the operator a way to set the reference: a full uuid
 /// typed into the box sets it, and the engine decides whether it resolves.
 /// </para>
+/// <para>
+/// <b>It searches only the label's <see cref="RowLabel.Searchable"/> fields.</b> A label field hidden by a CEL
+/// mask would have the port refuse every search for a caller it hides from, and the control reported that as
+/// "Nothing matches" — which reads as "no such row" rather than "you cannot search this". A label whose every
+/// field is so masked is not searchable at all, and the box asks for a pasted id instead.
+/// </para>
 /// </remarks>
 internal sealed class RefPicker
 {
@@ -57,8 +63,11 @@ internal sealed class RefPicker
     /// <summary>The target's label, or nothing when it has none and only a pasted id works.</summary>
     public RowLabel? Label { get; }
 
-    /// <summary>Whether the control can search at all.</summary>
-    public bool Searchable => Target is not null && Label is not null;
+    /// <summary>Whether the chosen row can be read out by its label.</summary>
+    public bool Labelled => Target is not null && Label is not null;
+
+    /// <summary>Whether the control can search at all: a label with a field no mask may withhold.</summary>
+    public bool Searchable => Labelled && Label!.Searchable.Count > 0;
 
     /// <summary>What the box shows: the chosen row's label, or what is being typed.</summary>
     public string Term { get; set; } = string.Empty;
@@ -113,27 +122,27 @@ internal sealed class RefPicker
         Term = Chosen ?? id?.ToString() ?? string.Empty;
     }
 
-    /// <summary>The read one search makes: the label's fields matched per word, limited to <see cref="Limit"/>.</summary>
+    /// <summary>The read one search makes: the label's searchable fields matched per word, limited to <see cref="Limit"/>.</summary>
     /// <remarks>
-    /// Sorted by the label's first field only when that field is required: the data port refuses a sort
-    /// on a nullable field under keyset paging, and an unsorted list is better than a refused one.
+    /// Sorted by the label's first searchable field only when that field is required: the data port refuses a
+    /// sort on a nullable field under keyset paging, and an unsorted list is better than a refused one.
     /// </remarks>
     public AlvoQuery Query(string? term)
     {
-        if (Target is null || Label is null)
+        if (Target is not { } target || Label is not { Searchable.Count: > 0 } label)
         {
-            throw new InvalidOperationException($"{Field.Name} has no labelled target to search.");
+            throw new InvalidOperationException($"{Field.Name} has no labelled target this caller can search.");
         }
 
         var words = (term ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Take(MaxWords);
-        List<AlvoFilter> filters = [.. words.Select(word => GridQuery.Search(Label.Fields, word)).OfType<AlvoFilter>()];
-        var first = Target.Fields.FirstOrDefault(field => string.Equals(field.Name, Label.Fields[0], StringComparison.Ordinal));
+        List<AlvoFilter> filters = [.. words.Select(word => GridQuery.Search(label.Searchable, word)).OfType<AlvoFilter>()];
+        var first = target.Fields.FirstOrDefault(field => string.Equals(field.Name, label.Searchable[0], StringComparison.Ordinal));
 
         return new AlvoQuery
         {
-            Entity = Target.Name,
+            Entity = target.Name,
             Filter = filters.Count switch { 0 => null, 1 => filters[0], _ => new AlvoAnd(filters) },
-            Select = [AlvoManagedColumns.Id, .. Label.Fields],
+            Select = [AlvoManagedColumns.Id, .. label.Fields],
             Sort = first is { Required: true } ? [new AlvoSort(first.Name, Descending: false)] : [],
             Limit = Limit,
         };
