@@ -150,6 +150,12 @@ public partial class HooksTab
     }
 
     /// <summary>Whether the editor holds anything typed, which closing would lose.</summary>
+    /// <remarks>
+    /// The point and the kind are not counted. They are two clicks to choose again, and the builder keeps them from
+    /// the last hook on purpose (<see cref="HookBuilder.Clear"/>), so counting them would ask "Discard your changes?"
+    /// of an editor the operator has not touched since it opened. A stated deviation from the brief's
+    /// <c>Point is not null || Kind is not null</c>, which is always true.
+    /// </remarks>
     private bool Dirty => _hook.Condition.Length > 0 || _hook.RejectMessage.Length > 0 || _hook.MutateField.Length > 0
         || _hook.MutateValue.Length > 0 || _hook.Endpoint.Length > 0 || _hook.Template.Length > 0 || _hook.To.Length > 0;
 
@@ -159,11 +165,12 @@ public partial class HooksTab
         if (_removing is { } at)
         {
             _removing = null;
+            /* The rows after it move up, so the lit one would be a different hook. */
+            _reveal = null;
             await OnRemove.InvokeAsync(at);
         }
     }
 
     /// <summary>One hook row's element id, by where it sits.</summary>
     private static string RowId(string point, int position) => $"hook-{point}-{position}";
-
 }

@@ -1,11 +1,13 @@
 ﻿@*
     A button with Alvo's defaults set once: no ripple, no shadow, no uppercase (the theme), and a busy state that
     disables the button and shows progress in it (spec §3.4, so there is no double submit anywhere). MudBlazor 9
-    removed its global defaults and advises exactly this wrapper (study §1.2). The tone is Alvo's enum, never Mud's
+    removed its global defaults and advises exactly this wrapper (study §1.2). A press bubbles the way a native button's
+    does: the library stops it by default, and a container that closes on a click inside it (the page header's phone
+    overflow) then never hears it. StopClickPropagation is the opt-out for a button inside a clickable container. The tone is Alvo's enum, never Mud's
     (spec D5). Anything else, such as data-testid, aria-label, id or form, passes through to the button.
 *@
 <MudButton @ref="_button" Variant="_look.Variant" Color="_look.Color" Size="@(Small ? Size.Small : Size.Medium)"
-           Ripple="false" DropShadow="false" Disabled="@(Disabled || Busy)"
+           Ripple="false" DropShadow="false" Disabled="@(Disabled || Busy)" ClickPropagation="@(!StopClickPropagation)"
            ButtonType="@(Submit ? ButtonType.Submit : ButtonType.Button)" Href="@Href" OnClick="OnClick"
            aria-busy="@(Busy ? "true" : null)" @attributes="Attributes">
     @if (Busy)
@@ -54,6 +56,13 @@
     /// <summary>The dense size a row or an app bar uses.</summary>
     [Parameter]
     public bool Small { get; set; }
+
+    /// <summary>
+    /// Whether a press stops at the button instead of bubbling to its container, for a button inside something that
+    /// has a click of its own. Off by default, as for a native button.
+    /// </summary>
+    [Parameter]
+    public bool StopClickPropagation { get; set; }
 
     /// <summary>A link target, which makes it a link drawn as a button.</summary>
     [Parameter]

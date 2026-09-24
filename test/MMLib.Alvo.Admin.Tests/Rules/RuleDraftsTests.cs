@@ -66,6 +66,22 @@ public sealed class RuleDraftsTests
     }
 
     [Fact]
+    public void Every_change_to_a_draft_is_announced_so_the_owner_redraws_its_guard()
+    {
+        var drafts = new RuleDrafts();
+        var raised = 0;
+        drafts.Changed += () => raised++;
+
+        drafts.Set("list", "true");
+        drafts.Revert("list");
+        drafts.Set("get", "true");
+        drafts.Take("get", null);
+        drafts.Clear();
+
+        raised.ShouldBe(5);
+    }
+
+    [Fact]
     public void An_operation_with_no_rule_reads_empty()
         => new RuleDrafts().Text("create", null).ShouldBe(string.Empty);
 }

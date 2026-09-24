@@ -89,8 +89,14 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
         await session.Page.GetByTestId("entity-row-customers").WaitForAsync(new() { State = WaitForSelectorState.Detached });
         (await session.Page.GetByTestId("entity-row-work_orders").IsVisibleAsync()).ShouldBeTrue();
 
+        (await session.Page.GetByTestId("entity-list").InnerTextAsync()).ShouldMatch(@"\d+ of \d+ entities", "the title says the list is filtered");
+
         await session.Page.GetByLabel("Filter entities").FillAsync("zzz");
         await session.Content.GetByText("Nothing matches").WaitForAsync();
+
+        await session.Page.GetByTestId("entity-filter-clear").ClickAsync();
+        await session.Page.GetByTestId("entity-row-customers").WaitForAsync();
+        (await session.Page.GetByLabel("Filter entities").InputValueAsync()).ShouldBeEmpty();
     }
 
     /// <summary>
@@ -112,6 +118,28 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
         var row = session.Page.GetByTestId("entity-row-depots");
         await row.WaitForAsync();
         await session.WaitForInViewAsync(row);
+        (await row.GetAttributeAsync("data-alvo-new")).ShouldBe("true", "a created item is highlighted as well as shown");
+    }
+
+    /// <summary>
+    /// A secondary action in the phone's overflow closes the disclosure when pressed, with no attribute of its own
+    /// asking for it, and the editor it opened hands focus back to the overflow's trigger.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_secondary_action_closes_the_phone_overflow_and_focus_comes_back_to_it()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
+        await session.GoAsync("/schema");
+        await session.Page.GetByTestId("pagehead-overflow").ClickAsync();
+        var region = session.Page.GetByTestId("pagehead-overflow-region");
+
+        await region.GetByRole(AriaRole.Button, new() { Name = "New entity", Exact = true }).ClickAsync();
+
+        await session.Dialog("new-entity").WaitForAsync();
+        (await region.IsHiddenAsync()).ShouldBeTrue("pressing an action in the disclosure closes it");
+        await session.Page.Keyboard.PressAsync("Escape");
+        await session.Page.GetByTestId("new-entity").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.Page.WaitForFunctionAsync("() => document.activeElement?.dataset.testid === 'pagehead-overflow'");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -166,7 +194,30 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
         var added = session.Page.GetByTestId("index-row").Nth(before);
         await added.WaitForAsync();
         await session.WaitForInViewAsync(added);
+        (await added.GetAttributeAsync("data-alvo-new")).ShouldBe("true");
         await session.Page.WaitForFunctionAsync("() => document.activeElement?.dataset.testid === 'index-new'");
+    }
+
+    /// <summary>A new hook appears in place, scrolled to and highlighted, like a new index (spec §3.5).</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_new_hook_is_scrolled_into_view_and_highlighted()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
+        await session.Page.SetViewportSizeAsync(375, 420);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("On write");
+
+        await session.Page.GetByTestId("hook-new").ClickAsync();
+        var editor = session.Dialog("hook-editor");
+        await editor.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "afterDelete", Exact = true }).ClickAsync();
+        await session.Page.FillAsync("#hook-endpoint", "dispatch");
+        await editor.GetByTestId("hook-add").ClickAsync();
+        await session.SnackbarAsync("Hook added to the working copy");
+
+        var added = session.Page.Locator("[data-testid='hook-row'][data-alvo-new]");
+        await added.WaitForAsync();
+        await session.WaitForInViewAsync(added);
+        await session.Page.WaitForFunctionAsync("() => document.activeElement?.dataset.testid === 'hook-new'");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]

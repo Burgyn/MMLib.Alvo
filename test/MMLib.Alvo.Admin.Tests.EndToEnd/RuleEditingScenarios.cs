@@ -99,6 +99,106 @@ public sealed class RuleEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await session.GoAsync("/schema/work_orders?tab=rules");
         (await session.Page.InputValueAsync("#rule-update")).ShouldBe(declared, "discarding a draft stages nothing");
     }
+
+    /// <summary>A reload with a rule typed and not saved asks first; staying keeps the text.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_reload_with_an_unsaved_rule_asks_first_and_staying_keeps_the_text()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/regions?tab=rules");
+        await session.Page.Locator("#rule-create").ClickAsync();
+        await session.Page.Keyboard.TypeAsync("false");
+        await session.Page.GetByTestId("rule-dirty-create").WaitForAsync();
+        await session.SettleAsync();
+
+        var asked = await ReloadAsync(session);
+
+        asked.ShouldBe(["beforeunload"]);
+        (await session.Page.InputValueAsync("#rule-create")).ShouldEndWith("false");
+        await session.Page.GetByTestId("rule-dirty-create").WaitForAsync();
+    }
+
+    /// <summary>A rule Escape put back is nothing to lose, and a reload no longer asks.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_reload_after_Escape_reverted_the_rule_does_not_ask()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/regions?tab=rules");
+        await session.Page.Locator("#rule-update").ClickAsync();
+        await session.Page.Keyboard.TypeAsync("x");
+        await session.Page.GetByTestId("rule-dirty-update").WaitForAsync();
+        await session.Page.Keyboard.PressAsync("Escape");
+        await session.Page.GetByTestId("rule-dirty-update").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.SettleAsync();
+
+        (await ReloadAsync(session)).ShouldBeEmpty("nothing is unsaved");
+    }
+
+    /// <summary>The browser's Back from an entity with an unsaved rule asks first; Keep stays, with the text.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Back_from_an_entity_with_an_unsaved_rule_asks_first()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema");
+        await session.Page.GetByTestId("entity-row-customers").ClickAsync();
+        await session.Page.WaitForURLAsync("**/schema/customers");
+        await session.OpenTabAsync("Rules");
+        await session.Page.FillAsync("#rule-delete", "false");
+        await session.Page.GetByTestId("rule-dirty-delete").WaitForAsync();
+
+        /* The first Back only leaves the Rules tab, which is this entity still: it passes, and the draft stays. */
+        await session.Page.GoBackAsync();
+        await session.Page.GetByRole(AriaRole.Tab, new() { Name = "Fields", Selected = true }).WaitForAsync();
+        await BackWithoutWaitingAsync(session);
+
+        await session.Dialog("unsaved-rules").GetByTestId("unsaved-rules-keep").ClickAsync();
+        await session.Page.GetByTestId("unsaved-rules").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        session.Page.Url.ShouldContain("/schema/customers");
+        await session.OpenTabAsync("Rules");
+        (await session.Page.InputValueAsync("#rule-delete")).ShouldBe("false");
+    }
+
+    /// <summary>Reloads, dismissing any "leave the page?" question; answers the questions the browser asked.</summary>
+    /// <remarks>A dismissed question cancels the reload, so the reload's own wait is cut short on purpose.</remarks>
+    private static async Task<List<string>> ReloadAsync(AdminSession session)
+    {
+        var asked = new List<string>();
+        void Answer(object? sender, IDialog dialog)
+        {
+            asked.Add(dialog.Type);
+            _ = dialog.DismissAsync();
+        }
+
+        session.Page.Dialog += Answer;
+        try
+        {
+            await session.Page.ReloadAsync(new() { Timeout = 5000 });
+            await session.SettleAsync();
+        }
+        catch (TimeoutException)
+        {
+            /* The dismissed question kept the page, so the reload never loaded. */
+        }
+        finally
+        {
+            session.Page.Dialog -= Answer;
+        }
+
+        return asked;
+    }
+
+    /// <summary>Presses Back, whose navigation the screen may hold, without waiting for a load that never comes.</summary>
+    private static async Task BackWithoutWaitingAsync(AdminSession session)
+    {
+        try
+        {
+            await session.Page.GoBackAsync(new() { WaitUntil = WaitUntilState.Commit, Timeout = 3000 });
+        }
+        catch (TimeoutException)
+        {
+            /* Held by the screen: the question below is what answers it. */
+        }
+    }
 }
 
 /// <summary>The Save rule button stages the rule, and is only offered while there is something to save.</summary>

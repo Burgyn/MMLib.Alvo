@@ -16,10 +16,7 @@
             <AlvoButton Small="true" Href="@AdminPaths.Records(EntityName)">Browse records</AlvoButton>
             @if (Copy.Loaded)
             {
-                @* ClickPropagation reaches the library's button through AlvoButton's attributes: the phone's overflow
-                   region closes and takes focus on the click, and the library's button stops a click by default. *@
-                <AlvoButton Small="true" data-testid="rename-entity" ClickPropagation="@true"
-                            OnClick="_ => OpenRename()">Rename</AlvoButton>
+                <AlvoButton Small="true" data-testid="rename-entity" OnClick="_ => OpenRename()">Rename</AlvoButton>
             }
         </Secondary>
     </PageHeader>
@@ -32,12 +29,21 @@
     @if (_renaming)
     {
         <AlvoEditor TestId="rename-sheet" Title="@($"Rename {EntityName}")"
-                    Subtitle="The apply moves the table. Its rows come with it." SubmitText="Rename in the working copy"
+                    Subtitle="The apply moves the table. Its rows come with it."
+                    SubmitText="@(UnsavedRules ? "Discard the unsaved rule and rename" : "Rename in the working copy")"
                     SubmitTestId="rename-save" Dirty="@(!string.Equals(_newName, EntityName, StringComparison.Ordinal))"
                     OnSubmit="RenameAsync" OnClose="CloseRename">
             @if (_renameRefusal is { Length: > 0 })
             {
                 <ErrorPanel @key="_renameRefusals" TakeFocus="true" Title="That name cannot be used" Fix="@_renameRefusal" />
+            }
+            @* Asked here, before anything is staged: the rename moves this screen to a new address, and a rule typed on
+               the Rules tab and not saved would not come with it. *@
+            @if (UnsavedRules)
+            {
+                <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" Title="A rule on this entity is not saved" TestId="rename-unsaved-rules">
+                    Renaming discards it. Cancel and save it first to keep it.
+                </AlvoAlert>
             }
             <MudTextField T="string" Value="_newName" ValueChanged="name => _newName = name ?? string.Empty"
                           Immediate="true" Variant="Variant.Outlined" Label="New name" id="rename-entity-name"
@@ -111,7 +117,7 @@
         *@
         <MudTabs ActivePanelIndex="@ActiveIndex" ActivePanelIndexChanged="OpenAt"
                  Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-entitytabs"
-                 data-alvo-tablist-label="@($"{EntityName} sections")">
+                 id="entity-tabs">
             @foreach (var tab in EntityTabs.All)
             {
                 <MudTabPanel Text="@tab.Title" ID="@tab.Slug">
@@ -127,6 +133,7 @@
                 </MudTabPanel>
             }
         </MudTabs>
+        @TablistName.On("#entity-tabs", $"{EntityName} sections")
 
         @*
             The editor is a sheet now, so it is on the page only while somebody is editing. As a

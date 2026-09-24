@@ -73,7 +73,8 @@ else
                     at 375 px, the code block gave up a third of the row to one word and every condition
                     wrapped mid-token.
                 *@
-                <div class="a-hookrow" data-testid="hook-row" id="@RowId(name, at)">
+                <div class="a-hookrow" data-testid="hook-row" id="@RowId(name, at)"
+                     data-alvo-new="@(RowId(name, at) == _reveal ? "true" : null)">
                     @if (Staged.IsNewHook(name, at))
                     {
                         <span class="a-badge a-badge--accent a-hookrow__badge"

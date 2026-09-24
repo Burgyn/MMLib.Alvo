@@ -11,12 +11,22 @@ internal sealed class RuleDrafts
 {
     private readonly Dictionary<string, string> _drafts = new(StringComparer.Ordinal);
 
+    /// <summary>
+    /// Raised whenever a draft is typed, taken, reverted or dropped, so the screen that owns the drafts redraws what
+    /// depends on them: its leave guard, which a keystroke in the Rules tab alone never reaches.
+    /// </summary>
+    public event Action? Changed;
+
     /// <summary>What the box shows: the draft, or what the descriptor declares.</summary>
     public string Text(string operation, string? declared)
         => _drafts.TryGetValue(operation, out var draft) ? draft : declared ?? string.Empty;
 
     /// <summary>Holds what was typed.</summary>
-    public void Set(string operation, string text) => _drafts[operation] = text;
+    public void Set(string operation, string text)
+    {
+        _drafts[operation] = text;
+        Changed?.Invoke();
+    }
 
     /// <summary>Whether saving would change the descriptor; surrounding space is not a change.</summary>
     public bool IsDirty(string operation, string? declared)
@@ -27,12 +37,12 @@ internal sealed class RuleDrafts
     public string Take(string operation, string? declared)
     {
         var text = Text(operation, declared).Trim();
-        _drafts.Remove(operation);
+        Forget(operation);
         return text;
     }
 
     /// <summary>Drops the draft, so the box reads the descriptor again.</summary>
-    public void Revert(string operation) => _drafts.Remove(operation);
+    public void Revert(string operation) => Forget(operation);
 
     /// <summary>Whether any operation holds a draft that saving would stage, given what each one declares.</summary>
     /// <remarks>What leaving the entity asks about: an unsaved rule is lost with the screen.</remarks>
@@ -43,5 +53,15 @@ internal sealed class RuleDrafts
     }
 
     /// <summary>Drops every draft: the screen moved to another entity, or the operator chose to discard them.</summary>
-    public void Clear() => _drafts.Clear();
+    public void Clear()
+    {
+        _drafts.Clear();
+        Changed?.Invoke();
+    }
+
+    private void Forget(string operation)
+    {
+        _drafts.Remove(operation);
+        Changed?.Invoke();
+    }
 }

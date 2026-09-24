@@ -3054,6 +3054,25 @@
     padding-top: var(--space-4);
   }
 
+  /* An item just created, scrolled to and lit for two seconds (spec §3.5): the accent wash fades back to the row.
+     With reduced motion the base layer stops the fade, so the row carries a still accent edge instead. */
+  [data-alvo-new] {
+    animation: a-new-item 2s ease-out;
+  }
+
+  @keyframes a-new-item {
+    from {
+      background-color: var(--accentSoft);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    [data-alvo-new] {
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+  }
+
   /* The entity list's filter: as wide as a name needs, not the whole row. */
   .a-filter {
     max-width: 360px;

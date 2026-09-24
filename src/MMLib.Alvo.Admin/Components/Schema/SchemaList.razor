@@ -16,8 +16,7 @@
         <Secondary>
             <ChipGroup TValue="string" Items="_views" Selected="@(new[] { _map ? MapView : ListView })"
                        SelectedChanged="ChooseView" aria-label="View" />
-            @* ClickPropagation for Entity's Rename reason: the phone's overflow region closes on the click. *@
-            <AlvoButton Small="true" ClickPropagation="@true" OnClick="_ => OpenAdding()">New entity</AlvoButton>
+            <AlvoButton Small="true" OnClick="_ => OpenAdding()">New entity</AlvoButton>
             <AlvoButton Small="true" Href="@AdminPaths.Transfer">Import / export</AlvoButton>
         </Secondary>
     </PageHeader>
@@ -80,25 +79,27 @@
                       Variant="Variant.Outlined" Label="Filter entities" Clearable="true" id="entity-filter"
                       data-testid="entity-filter" autocomplete="off" Class="a-filter" />
 
-        <Panel Title="@($"{_schema.Entities.Count} entities")" data-testid="entity-list">
+        var pending = EntityFilter.Apply(Pending, _filter);
+        var applied = EntityFilter.Apply(_schema.Entities.Select(entity => entity.Name), _filter);
+        <Panel Title="@ListTitle(pending.Count + applied.Count)" data-testid="entity-list">
             <Subtitle>
                 What the Data API actually serves — the descriptor after everything that did not
                 survive it. Where the two differ is where <em>declared but not honoured</em> lives.
             </Subtitle>
             <ChildContent>
-                @{
-                    var pending = EntityFilter.Apply(Pending, _filter);
-                    var applied = EntityFilter.Apply(_schema.Entities.Select(entity => entity.Name), _filter);
-                }
                 @if (pending.Count == 0 && applied.Count == 0)
                 {
-                    <EmptyState Title="@($"Nothing matches “{_filter.Trim()}”")" Body="The filter looks at entity names." />
+                    <EmptyState Title="@($"Nothing matches “{_filter.Trim()}”")" Body="The filter looks at entity names.">
+                        <AlvoButton Small="true" data-testid="entity-filter-clear" OnClick="_ => _filter = string.Empty">
+                            Clear filter
+                        </AlvoButton>
+                    </EmptyState>
                 }
 
                 @foreach (var name in pending)
                 {
                     <ListRow class="a-listrow--accent a-listrow--inline" data-testid="@($"entity-row-{name}")"
-                             OnClick="() => Open(name)">
+                             data-alvo-new="@(name == _arrived ? "true" : null)" OnClick="() => Open(name)">
                         <Icon Path="@Icons.Schema" />
                         <span class="a-grow">
                             <span class="a-mono a-name">@name</span>
@@ -110,7 +111,12 @@
 
                 @foreach (var name in applied)
                 {
-                    @EntityRow(_schema.Entities.First(entity => string.Equals(entity.Name, name, StringComparison.Ordinal)))
+                    @EntityRow(_byName[name])
+                }
+
+                @if (_arrived is { } arrived && pending.Contains(arrived))
+                {
+                    @RevealOnRender.On($"[data-testid='entity-row-{arrived}']", 0)
                 }
             </ChildContent>
         </Panel>
@@ -150,6 +156,11 @@
     private bool _adding;
     private bool _scoped;
     private bool _audited = true;
+    private IReadOnlyDictionary<string, EntitySchema> _byName = new Dictionary<string, EntitySchema>();
+    private string? _arrived;
+
+    /// <summary>What a back step to this list carries, to say which entity was just created from it.</summary>
+    private const string ArrivedPrefix = "alvo-new:";
     private readonly ComponentLifetime _lifetime = new();
 
     public void Dispose()
@@ -162,6 +173,7 @@
     {
         Navigation.LocationChanged += OnLocationChanged;
         ReadView(Navigation.Uri);
+        ReadArrival();
         OpenIfAsked(Navigation.Uri);
 
         var ct = _lifetime.Token;
@@ -173,6 +185,7 @@
             Session.Follow(Copy, InvokeAsync, StateHasChanged, ct);
 
             _schema = await Gateway.SchemaAsync(ct);
+            _byName = _schema.Entities.ToDictionary(entity => entity.Name, StringComparer.Ordinal);
             await Session.EnsureLoadedAsync(Copy, ct);
         }
         catch (Exception exception)
@@ -241,7 +254,31 @@
         var name = _name;
         Copy.AddEntity(name, _scoped, _audited);
         Snackbar.Confirm($"Added {name} to the working copy");
+        RememberCreated(name);
         Navigation.NavigateTo(AdminPaths.Entity(name));
+    }
+
+    /// <summary>
+    /// Writes the new entity's name into this list's own history entry, so Back to it lights and shows the row
+    /// (spec §3.5) — and only a Back to this entry, not every later visit to the list.
+    /// </summary>
+    /// <remarks>The palette's <c>?new=entity</c> is dropped on the way, for <see cref="CancelAdding"/>'s reason.</remarks>
+    private void RememberCreated(string name)
+        => Navigation.NavigateTo(
+            Navigation.GetUriWithQueryParameter(AdminNavigation.NewEntityParameter, (string?)null),
+            new NavigationOptions { ReplaceHistoryEntry = true, HistoryEntryState = ArrivedPrefix + name });
+
+    /// <summary>The entity a Back to this list arrived from creating, when the history entry says so.</summary>
+    private void ReadArrival()
+        => _arrived = Navigation.HistoryEntryState is { } state && state.StartsWith(ArrivedPrefix, StringComparison.Ordinal)
+            ? state[ArrivedPrefix.Length..]
+            : null;
+
+    /// <summary>The list's title: every entity, or how many of them the filter keeps.</summary>
+    private string ListTitle(int shown)
+    {
+        var total = _schema!.Entities.Count + Pending.Count();
+        return _filter.Trim().Length == 0 ? $"{_schema.Entities.Count} entities" : $"{shown} of {total} entities";
     }
 
     /// <summary>Why <paramref name="name"/> cannot be added, or <see langword="null"/> when it can.</summary>

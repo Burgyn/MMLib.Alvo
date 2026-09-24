@@ -17,7 +17,14 @@ public partial class Entity
     private readonly RuleDrafts _ruleDrafts = new();
 
     private string? _draftsFor;
-    private string? _leavingTo;
+    private (string Target, bool Replace)? _leavingTo;
+
+    /// <summary>Redraws the screen on every change to a draft, so the leave guard follows each keystroke.</summary>
+    /// <remarks>
+    /// A keystroke re-renders only the Rules tab. Without this the reload prompt (<c>ConfirmExternalNavigation</c>)
+    /// kept the value of the last time the screen drew: off for a rule just typed, on for one Escape had reverted.
+    /// </remarks>
+    public Entity() => _ruleDrafts.Changed += StateHasChanged;
 
     /// <summary>Whether a rule on this entity holds text that saving would stage.</summary>
     private bool UnsavedRules => _ruleDrafts.AnyDirty(Declared);
@@ -50,7 +57,9 @@ public partial class Entity
         }
 
         context.PreventNavigation();
-        _leavingTo = context.TargetLocation;
+        /* A link the router intercepted is a step forward; anything else (Back, Forward, a navigation from code) has
+           no step of its own to add, so leaving replaces this entry rather than pushing one after it. */
+        _leavingTo = (context.TargetLocation, !context.IsNavigationIntercepted);
     }
 
     /// <summary>Whether <paramref name="location"/> is this entity's own screen, whatever its query.</summary>
@@ -63,13 +72,13 @@ public partial class Entity
     /// <summary>The confirm's verb: drops the drafts and goes where the operator was going.</summary>
     private void LeaveDiscardingRules()
     {
-        var target = _leavingTo;
+        var leaving = _leavingTo;
         _leavingTo = null;
         _ruleDrafts.Clear();
 
-        if (target is not null)
+        if (leaving is { } to)
         {
-            Navigation.NavigateTo(target);
+            Navigation.NavigateTo(to.Target, replace: to.Replace);
         }
     }
 }

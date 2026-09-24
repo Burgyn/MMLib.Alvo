@@ -27,7 +27,8 @@ else
         var index = Declared[position];
         var at = position;
 
-        <ListRow class="a-listrow--inline a-listrow--center" data-testid="index-row" id="@($"index-row-{at}")">
+        <ListRow class="a-listrow--inline a-listrow--center" data-testid="index-row" id="@($"index-row-{at}")"
+                 data-alvo-new="@(at == _reveal ? "true" : null)">
             @*
                 An entry the working copy could not read — an imported or proposed descriptor may carry one,
                 and the apply is what refuses it. Shown rather than hidden, and shown in its own position,
@@ -243,8 +244,9 @@ else
         if (_removing is { } position)
         {
             _removing = null;
+            /* The rows after it move up, so the lit one would be a different index. */
+            _reveal = null;
             await OnRemove.InvokeAsync(position);
         }
     }
-
 }

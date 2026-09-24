@@ -287,7 +287,12 @@ public partial class Entity
     {
         Copy.SetRule(EntityName, change.Operation, change.Cel);
         ReadWorking();
-        Snackbar.Confirm("Rule saved to the working copy");
+
+        /* Said only when the write landed: the copy refuses a rule for an entity it no longer declares. */
+        if (string.Equals(Declared(change.Operation) ?? string.Empty, change.Cel, StringComparison.Ordinal))
+        {
+            Snackbar.Confirm("Rule saved to the working copy");
+        }
     }
 
     /// <summary>
@@ -451,6 +456,8 @@ public partial class Entity
         }
 
         var renamed = _newName;
+        /* The operator was told in the editor that the unsaved rules go; dropping them lets the move pass the guard. */
+        _ruleDrafts.Clear();
         CloseRename();
         Snackbar.Confirm($"Renamed to {renamed} in the working copy");
         Navigation.NavigateTo(AdminPaths.Entity(renamed));

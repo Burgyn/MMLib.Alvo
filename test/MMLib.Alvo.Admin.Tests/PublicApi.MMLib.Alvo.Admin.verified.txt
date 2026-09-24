@@ -212,6 +212,8 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem
         [Microsoft.AspNetCore.Components.Parameter]
         public bool Small { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
+        public bool StopClickPropagation { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public bool Submit { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public MMLib.Alvo.Admin.Components.DesignSystem.AlvoButton.ButtonTone Tone { get; set; }
