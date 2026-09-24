@@ -41,37 +41,43 @@ public sealed class AssistantOperatorTests
     {
         await using var world = await AlvoHostWorld.StartAsync(ManagedDescriptor);
         var model = new TextThenSchemaClient();
+        var ambient = world.Services.GetRequiredService<IAlvoContextAccessor>();
 
-        var updates = await AskAsync(world, model);
+        var (updates, seenByConsumer) = await AskAsync(world, model, ambient);
 
         updates.OfType<AssistantUpdate.ToolInvoked>().Select(update => update.Tool).ShouldBe(["get_schema"]);
         var result = model.ToolResult.ShouldNotBeNull("the loop must hand the tool's answer back to the model");
         result.ShouldNotContain("forbidden");
         result.ShouldContain("warehouses");
-        world.Services.GetRequiredService<IAlvoContextAccessor>().Principal
-            .ShouldBeNull("the operator is published for the turn's own steps, never left behind");
+        seenByConsumer.ShouldAllBe(
+            principal => principal == null,
+            "the consumer — what renders an update — never runs as the operator, only the stream's own steps "
+            + "do; asserted after the whole turn instead, this would hold on the leaking code too, since the "
+            + "operator is restored once the turn's own async iterator has finished either way");
     }
 
-    /// <summary>One turn through the dashboard's gateways, collected.</summary>
-    private static async Task<List<AssistantUpdate>> AskAsync(AlvoHostWorld world, IChatClient model)
+    /// <summary>
+    /// One turn through the dashboard's gateways, collected alongside who the consumer — this loop's own
+    /// body, standing in for whatever renders an update on a real circuit — saw published between two steps.
+    /// </summary>
+    private static async Task<(List<AssistantUpdate> Updates, List<AlvoPrincipal?> SeenByConsumer)> AskAsync(
+        AlvoHostWorld world, IChatClient model, IAlvoContextAccessor ambient)
     {
         var management = world.Services.GetRequiredService<IAlvoManagement>();
         var assistant = new AlvoAssistant(
             management, new Connected(), _ => model, NullLogger<AlvoAssistant>.Instance);
         var gateway = new AssistantGateway(assistant, secrets: null, new ManagementGateway(
-            management,
-            people: null,
-            new AdminCaller(),
-            new SignedIn(),
-            world.Services.GetRequiredService<IAlvoContextAccessor>()));
+            management, people: null, new AdminCaller(), new SignedIn(), ambient));
 
         var updates = new List<AssistantUpdate>();
+        var seenByConsumer = new List<AlvoPrincipal?>();
         await foreach (var update in gateway.AskAsync(new AssistantRequest(Project, "which entities do I have?", []), Ct))
         {
             updates.Add(update);
+            seenByConsumer.Add(ambient.Principal);
         }
 
-        return updates;
+        return (updates, seenByConsumer);
     }
 
     /// <summary>The descriptor whose <c>access</c> block admits an <c>admin</c> to the management surface.</summary>

@@ -70,11 +70,17 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
 
         await page.GetByRole(AriaRole.Button, new() { Name = "Sign in", Exact = true }).WaitForAsync();
 
-        var hit = await page.EvaluateAsync<bool>(
-            "() => { const b = document.querySelector('button[type=submit]'); const r = b.getBoundingClientRect();"
+        /* A one-shot EvaluateAsync races Blazor boot and the stylesheet load: on a slow run it could sample
+           the button's box before layout settled and pass regardless of what the page looked like once it
+           had. Polling the same predicate gives layout the time it needs — and still fails, by timing out,
+           on a pane that is genuinely collapsed, because the predicate then never becomes true at all. */
+        await page.WaitForFunctionAsync(
+            "() => { const b = document.querySelector('button[type=submit]'); if (!b) { return false; }"
+            + " const r = b.getBoundingClientRect();"
             + " const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);"
-            + " return r.height > 0 && !!e && b.contains(e); }");
-        hit.ShouldBeTrue("the Sign in button is covered or clipped where it is drawn");
+            + " return r.height > 0 && !!e && b.contains(e); }",
+            arg: null,
+            new PageWaitForFunctionOptions { PollingInterval = 100, Timeout = 10_000 });
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]

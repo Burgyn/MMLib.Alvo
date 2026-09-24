@@ -622,3 +622,16 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     (present / missing / not applicable for a keyless endpoint), which is an Abstractions change and was out
     of scope for that task. Probably: a third field beside `Configured` and `Source`, and a Settings badge
     that reads it the way the connection badges already read `Source`.
+32. **`AlvoContextAccessor`'s box makes nesting through it unsafe, and it fails silently rather than
+    refusing.** Found writing the exit-path facts for `ManagementGateway.AsCallerAsync` (24 Sep 2026): the
+    core accessor's setter always nulls the box the *previous* published principal lives in, whether or not
+    it is about to install a new one — so a scope that starts publishing while an outer scope already has
+    (a Blazor static-rendered pass inside an HTTP request that had already published one, say) loses the
+    outer publication the instant the nested scope's first assignment runs, and gets back a box the outer
+    scope was never pointed at once the nested scope "restores". It fails safe — to no principal, which the
+    core then refuses — rather than composing or silently keeping the wrong identity, so nothing in this
+    build has ever misbehaved from it that testing has found; but the failure is silent (no exception, no
+    log) and would be confusing to debug from a report of "it refused me and I don't know why". Probably: a
+    core-side guard that either supports real nesting (a stack rather than one box) or throws when a second
+    publication is attempted while one is already active, so a future nested caller gets a clear answer
+    instead of a lost principal.

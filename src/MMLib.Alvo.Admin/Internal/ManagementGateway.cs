@@ -477,8 +477,14 @@ internal sealed class ManagementGateway(
     /// cached; what repeats is only publishing it.
     /// </para>
     /// <para>
-    /// The previous value is restored rather than cleared, because during a statically rendered
-    /// pass this runs inside an HTTP request that may already have published one.
+    /// The previous value is restored rather than cleared, but that is not the same as nesting safely under
+    /// an outer publication. The core accessor's setter always <em>nulls the box the previous value lives
+    /// in</em>, whether or not it is about to install a new one, so a scope that had already published a
+    /// principal before reaching here — an HTTP request during a statically rendered pass, say — loses it the
+    /// instant the first assignment below runs, and the restore in the <c>finally</c> never gets it back: it
+    /// builds a fresh box the outer scope was never pointed at. Nesting two calls through this accessor is
+    /// therefore unsupported, not merely untested — it fails safe (to no principal) rather than silently —
+    /// and <c>docs/todo-admin.md</c> §8d tracks the core-side fix.
     /// </para>
     /// </remarks>
     /// <typeparam name="T">What the call answers with.</typeparam>
@@ -504,8 +510,11 @@ internal sealed class ManagementGateway(
     /// <para>
     /// The restore is still needed, and not for the method's caller: it clears the holder the step's context
     /// captured, so work the step started and left running stops seeing the operator. It restores the
-    /// previous value rather than clearing it because a statically rendered pass runs inside an HTTP request
-    /// that may already have published one.
+    /// previous value rather than clearing it outright, but that is not real nesting support: the accessor's
+    /// setter nulls the box a value lives in on every assignment, so a caller that had already published a
+    /// principal before reaching this method loses it the moment <paramref name="caller"/> is published below,
+    /// and the <c>finally</c> hands the current context a new box rather than the outer scope's own —
+    /// <c>docs/todo-admin.md</c> §8d tracks the core-side fix this is waiting on.
     /// </para>
     /// </remarks>
     /// <typeparam name="TResult">What the step answers with.</typeparam>
