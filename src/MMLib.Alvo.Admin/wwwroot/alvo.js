@@ -12,9 +12,10 @@
   const DENSITY_KEY = 'alvo.density';
 
   /* --- Theme -------------------------------------------------------------
-     Applied from storage synchronously, before paint. The stylesheet's
-     color-scheme carries the system preference on its own, so a viewer who has
-     never chosen gets the right theme with nothing stored and nothing to flash.
+     Applied synchronously, before paint, and ALWAYS resolved to light or dark.
+     The component library's dark palette is scoped to [data-theme=dark] (see
+     AlvoTheme.razor), and a scoped variable cannot follow prefers-color-scheme on
+     its own, so a viewer who never chose gets the system's answer written down.
      ---------------------------------------------------------------------- */
 
   const readStored = (key) => {
@@ -33,11 +34,17 @@
     }
   };
 
-  const applyStored = () => {
+  const DARK = '(prefers-color-scheme: dark)';
+
+  const systemTheme = () => (window.matchMedia(DARK).matches ? 'dark' : 'light');
+
+  const storedTheme = () => {
     const theme = readStored(THEME_KEY);
-    if (theme === 'light' || theme === 'dark') {
-      document.documentElement.dataset.theme = theme;
-    }
+    return theme === 'light' || theme === 'dark' ? theme : null;
+  };
+
+  const applyStored = () => {
+    document.documentElement.dataset.theme = storedTheme() ?? systemTheme();
 
     const density = readStored(DENSITY_KEY);
     if (density === 'comfortable' || density === 'compact') {
@@ -45,9 +52,16 @@
     }
   };
 
-  const resolvedTheme = () =>
-    document.documentElement.dataset.theme ??
-    (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  /* Nothing stored means "follow the system", and the system can change under an open page. */
+  const followSystem = () =>
+    window.matchMedia(DARK).addEventListener('change', () => {
+      if (storedTheme() === null) {
+        document.documentElement.dataset.theme = systemTheme();
+        emit('theme', { value: document.documentElement.dataset.theme });
+      }
+    });
+
+  const resolvedTheme = () => document.documentElement.dataset.theme ?? systemTheme();
 
   /* Announced as well as returned: the palette can flip the theme too, and the header's toggle has
      to redraw its icon for a flip it did not make. `emit` is a hoisted function below. */
@@ -269,6 +283,7 @@
   };
 
   applyStored();
+  followSystem();
   applyStoredAside();
   document.addEventListener('keydown', onKeyDown);
   document.addEventListener('pointerdown', onHandleDown);

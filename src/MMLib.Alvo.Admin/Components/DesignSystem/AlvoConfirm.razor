@@ -1,0 +1,132 @@
+﻿@*
+    Confirming a destructive action (spec §3.2): a centred dialog, no light dismiss, Escape = Cancel.
+
+    Title = the action; the first sentence is the consequence; the button names the verb ("Delete record"). An
+    irreversible, wide-blast-radius action (a destructive apply, a rollback) sets TypeToConfirm: the button stays
+    disabled until the name is typed exactly. A checkbox is one click from the button beside it, and the click that
+    matters looks like the one that does not (design §5.5, kept from ConfirmByName).
+
+    Opened after any editor closed: never over a dialog (spec §3.1). The first focusable element takes focus, which
+    is the typed-name field when there is one and Cancel when there is not, the safe choice either way.
+*@
+<MudDialog Visible="Open" VisibleChanged="OnVisibleChangedAsync" Options="_options" Class="a-confirm-dialog"
+           data-testid="@TestId">
+    <TitleContent><span class="a-editor__title">@Title</span></TitleContent>
+    <DialogContent>
+        <div class="a-stack">
+            <p class="a-confirm-dialog__consequence">@Consequence</p>
+            @ChildContent
+            @if (TypeToConfirm is { } expected)
+            {
+                <MudTextField T="string" Value="_typed" ValueChanged="Typed" Immediate="true" Variant="Variant.Outlined"
+                              Label="@($"Type {expected} to allow it")" id="confirm-name" autocomplete="off" spellcheck="false" />
+            }
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" data-testid="@CancelTestId" OnClick="CancelAsync">Cancel</AlvoButton>
+        <AlvoButton Tone="AlvoButton.ButtonTone.Danger" Busy="@(Busy || _gate.Busy)" data-testid="@ConfirmTestId"
+                    Disabled="@(!ConfirmGate.CanConfirm(TypeToConfirm, _typed, Busy, Allowed))"
+                    OnClick="ConfirmAsync">@Verb</AlvoButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private readonly SubmitGate _gate = new();
+    private readonly DialogOptions _options = new()
+    {
+        Position = DialogPosition.Center,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true,
+        CloseOnEscapeKey = true,
+        BackdropClick = false,
+        CloseButton = false,
+        DefaultFocus = DefaultFocus.FirstChild,
+    };
+
+    private string _typed = string.Empty;
+
+    /// <summary>Whether it is on screen.</summary>
+    [Parameter]
+    public bool Open { get; set; }
+
+    /// <summary>The action, as a question or a verb phrase: "Delete WO-0001?".</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>What is lost, concretely, first.</summary>
+    [Parameter, EditorRequired]
+    public string Consequence { get; set; } = string.Empty;
+
+    /// <summary>The button's label, naming the verb.</summary>
+    [Parameter, EditorRequired]
+    public string Verb { get; set; } = string.Empty;
+
+    /// <summary>The name to type before it may run, for an irreversible, wide-blast-radius action.</summary>
+    [Parameter]
+    public string? TypeToConfirm { get; set; }
+
+    /// <summary>Whether the action is possible at all, such as a removal nothing still names.</summary>
+    [Parameter]
+    public bool Allowed { get; set; } = true;
+
+    /// <summary>Whether the owner is still running the action.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    /// <summary>What else the operator must read first: the references, the plan's steps.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Raised on the verb.</summary>
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    /// <summary>Raised on Cancel and on Escape.</summary>
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    /// <summary>The dialog's test id.</summary>
+    [Parameter]
+    public string TestId { get; set; } = "confirm-dialog";
+
+    /// <summary>The verb button's test id.</summary>
+    [Parameter]
+    public string ConfirmTestId { get; set; } = "confirm-run";
+
+    /// <summary>The Cancel button's test id.</summary>
+    [Parameter]
+    public string CancelTestId { get; set; } = "confirm-cancel";
+
+    /// <summary>A closed confirm forgets what was typed, so the next one starts empty.</summary>
+    protected override void OnParametersSet()
+    {
+        if (!Open)
+        {
+            _typed = string.Empty;
+        }
+    }
+
+    private void Typed(string? typed) => _typed = typed ?? string.Empty;
+
+    private async Task ConfirmAsync()
+    {
+        if (!ConfirmGate.CanConfirm(TypeToConfirm, _typed, Busy, Allowed) || !_gate.TryBegin())
+        {
+            return;
+        }
+
+        try
+        {
+            await OnConfirm.InvokeAsync();
+        }
+        finally
+        {
+            _gate.End();
+        }
+    }
+
+    private Task CancelAsync() => OnCancel.InvokeAsync();
+
+    private Task OnVisibleChangedAsync(bool visible) => visible ? Task.CompletedTask : OnCancel.InvokeAsync();
+}

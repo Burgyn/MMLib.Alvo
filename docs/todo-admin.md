@@ -635,3 +635,17 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     core-side guard that either supports real nesting (a stack rather than one box) or throws when a second
     publication is attempted while one is already active, so a future nested caller gets a clear answer
     instead of a lost principal.
+33. ([#272](https://github.com/Burgyn/MMLib.Alvo/issues/272)) **A host cannot register its own functions for CEL.** A developer
+    wants to write a function in their own code — a name, typed parameters, a typed result — register it at
+    startup and use it in a `computed` field, a rule, a hook condition or a `mutate` value. Today the CEL subset
+    is closed (a fixed call allow-list in `CelParser`, no registry, nothing on `IAlvoBuilder`); the descriptor's
+    `functions` block is csx and warned; after-hooks refuse the `function` action. The issue records the design
+    questions — `computed` is a DB generated column and rules are SQL predicates, so a .NET delegate needs a
+    per-engine SQL translation or a new "computed at write" rung; hooks and `mutate` run in memory and can call
+    one directly. Raised by the maintainer, 24 Sep 2026.
+34. ([#273](https://github.com/Burgyn/MMLib.Alvo/issues/273)) **An expression editor and evaluator for computed fields** — and
+    the same component for rules, hook conditions and `mutate` values: completion for the entity's fields,
+    `new`/`old`/`@user`, the profile's built-ins and #272's registered functions; diagnostics from the core as you
+    type; "what would this give?" over sample values. The core stays the only CEL authority (check / scope /
+    evaluate endpoints on the Management API; a stored row is read through the Data API, never by Management).
+    Raised by the maintainer, 24 Sep 2026.

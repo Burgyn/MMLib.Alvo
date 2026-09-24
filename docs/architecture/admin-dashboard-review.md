@@ -112,7 +112,12 @@ Each step is its own PR and keeps `scripts/test-admin-e2e` green. The order is c
 
 ### Considered and rejected (deliberately not to do)
 
-- **A component library** (MudBlazor, Fluent UI). Design D1 rules it out, and the token system and tests are the asset. A library would bring a second theme to keep in step.
+- ~~**A component library** (MudBlazor, Fluent UI).~~ **Reversed 24 Sep 2026 by the maintainer**
+  (`docs/superpowers/specs/2026-09-24-f5-admin-mudblazor-design.md`, D1): the hand-rolled primitives are where the
+  dashboard failed. There were four patterns for editing an item and a delete with no confirm, and nothing asserted
+  behaviour (`evidence/2026-09-24-admin-ui-inventory.md`). MudBlazor 9.10.0 now draws the screens. The tokens stay
+  the one source of the identity, mapped into its theme and pinned equal by `AlvoMudThemeTests`, so the "second
+  theme" this bullet feared is a test, not a drift. Fluent UI Blazor v5 stays rejected (spec D2).
 - **Blazor CSS isolation (`.razor.css`) or any CSS build step** (Sass, Tailwind, PostCSS). The gallery and hosts depend on global `a-*` class names, and `AlvoAdminAssets.StyleSheet` promises one file. Isolation rewrites selectors with scope attributes and adds a second bundle a host must link.
 - **Splitting `alvo.css` into several `<link>`ed files.** Load order would become a host concern, and three tests parse the one file. `@layer` inside one file gives the ordering guarantee without that cost. Revisit at about 3k lines using `@import`.
 - **An `AdminPageBase` base class for the lifecycle plumbing.** The base class would have to be **public** (an internal base class of a public Razor component is CS0060), which turns the plumbing into contract. Use an injected service plus small `IDisposable` helpers instead.

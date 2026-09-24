@@ -1,0 +1,15 @@
+/* ===========================================================================
+   MudBlazor, beneath every rule of the design system.
+
+   Mud's stylesheet is unlayered and opens with a global reset, and an unlayered
+   rule beats every layered one: linked as it ships, it would strip the spacing
+   and the focus ring from every screen alvo.css draws. Imported into the first
+   layer of the order below instead, it loses to all five of Alvo's.
+
+   The order restates alvo.css's own statement with `mud` in front, so whichever
+   file the browser reads first, the order is the same. This file is linked only
+   by the dashboard's own document, never by alvo.css: the design prototype links
+   alvo.css from the repository, where no MudBlazor file exists to import.
+   =========================================================================== */
+@layer mud, tokens, base, layout, components, utilities;
+@import url('../MudBlazor/MudBlazor.min.css') layer(mud);

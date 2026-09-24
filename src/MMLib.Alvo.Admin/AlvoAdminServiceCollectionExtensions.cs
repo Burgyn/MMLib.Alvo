@@ -6,6 +6,8 @@ using MMLib.Alvo.Admin.Components.Schema;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Management;
+using MudBlazor;
+using MudBlazor.Services;
 
 namespace MMLib.Alvo.Admin;
 
@@ -34,7 +36,8 @@ public static class AlvoAdminServiceCollectionExtensions
     /// <c>MMLib.Alvo.Abstractions</c> or the browser rather than a service of the dashboard's own: a screen that
     /// needed one would be a screen doing work the core should be doing (<c>AdminSession</c> only composes the
     /// others for a screen, and <c>AdminInterop</c> is the one path into the dashboard's script). None of these
-    /// six is public, and none is meant to be resolved by host code.
+    /// six is public, and none is meant to be resolved by host code. Beside them it registers the component library
+    /// the screens are drawn with: MudBlazor's own services, through <c>AddLibrary</c>.
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into.</param>
@@ -60,6 +63,7 @@ public static class AlvoAdminServiceCollectionExtensions
            checking: the call is idempotent, so a host that already called AddAuthorization keeps
            its own policies. */
         services.AddAuthorizationCore();
+        AddLibrary(services);
 
         /* Scoped: in Blazor Server a scope is a circuit, so one operator's session holds one
            gateway and its cache never crosses to another's. Its remarks argue why that cache is a
@@ -111,4 +115,32 @@ public static class AlvoAdminServiceCollectionExtensions
 
         return services;
     }
+
+    /// <summary>
+    /// The component library's services, configured for the dashboard's feedback rules.
+    /// </summary>
+    /// <remarks>
+    /// Registered here so an embedded host never learns the library exists (study §1.3). The snackbar settings
+    /// are spec §3.3: bottom-right, a few seconds, at most two, and never a duplicate. The breakpoint is Alvo's
+    /// one phone width (720 px, pinned by StylesheetHygieneTests), so the responsive drawer turns temporary where
+    /// the bottom bar appears rather than at Mud's own 600.
+    /// </remarks>
+    private static void AddLibrary(IServiceCollection services)
+        => services.AddMudServices(library =>
+        {
+            library.SnackbarConfiguration.PositionClass = Defaults.Classes.Position.BottomRight;
+            library.SnackbarConfiguration.VisibleStateDuration = 5000;
+            library.SnackbarConfiguration.MaxDisplayedSnackbars = 2;
+            library.SnackbarConfiguration.PreventDuplicates = true;
+            library.SnackbarConfiguration.ShowCloseIcon = true;
+            library.ResizeOptions.BreakpointDefinitions = new Dictionary<Breakpoint, int>
+            {
+                [Breakpoint.Xs] = 0,
+                [Breakpoint.Sm] = 720,
+                [Breakpoint.Md] = 960,
+                [Breakpoint.Lg] = 1280,
+                [Breakpoint.Xl] = 1920,
+                [Breakpoint.Xxl] = 2560,
+            };
+        });
 }

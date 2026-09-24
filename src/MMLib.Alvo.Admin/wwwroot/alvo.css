@@ -2916,6 +2916,87 @@
       border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     }
   }
+
+  /* ===========================================================================
+     Library seams: MudBlazor's own classes, overridden once, and the wrappers'
+     frames. MudBlazor sits in the lowest layer (alvo-mud.css), so these win over
+     it whatever its specificity. The base layer's :focus-visible ring already
+     reaches every Mud button, link and tab for the same reason.
+     =========================================================================== */
+
+  /* Tabs are not covered by the theme's button typography; the library uppercases them itself. */
+  .mud-tab {
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  /* An outlined input draws its own focused border; a second ring inside it is noise, not a signal. */
+  .mud-input-slot:focus-visible {
+    box-shadow: none;
+  }
+
+  .a-editor {
+    width: min(560px, 100vw);
+    max-width: 100vw;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    border-radius: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .a-editor__head {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+  }
+
+  .a-editor__title {
+    font-size: var(--text-lg);
+    font-weight: var(--weight-bold);
+    color: var(--text);
+  }
+
+  .a-editor__body {
+    flex: 1;
+    overflow: auto;
+  }
+
+  .a-editor__actions {
+    gap: var(--space-2);
+    border-top: 1px solid var(--border);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .a-confirm-dialog {
+    /* The confirm's frame is Mud's own dialog; the class is its handle. */
+  }
+
+  .a-confirm-dialog__consequence {
+    margin: 0;
+    color: var(--text);
+  }
+
+  .a-alert:focus-visible {
+    box-shadow: var(--focus-ring);
+  }
+
+  .a-alert__body {
+    /* The alert's body is Mud's own; the class is its handle, and the frame around it carries the role. */
+  }
+
+  .a-alert__title {
+    font-weight: var(--weight-bold);
+  }
+
+  .a-alert__actions {
+    margin-top: var(--space-2);
+  }
+
+  .a-busy {
+    margin-right: var(--space-2);
+  }
 }
 
 /* ===========================================================================

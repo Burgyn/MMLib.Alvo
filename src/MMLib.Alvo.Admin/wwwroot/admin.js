@@ -32,6 +32,17 @@ export function markKeyboardReady() {
 }
 
 /**
+ * Marks the shell as rendered over the circuit, with the component library's providers mounted.
+ *
+ * The keyboard mark says the palette is listening; this one says a popover or a dialog can open. They are two
+ * marks because they are two components' first renders, and a scenario that waited on the first and then opened a
+ * select raced the second.
+ */
+export function markShellReady() {
+  document.documentElement.dataset.alvoShell = 'ready';
+}
+
+/**
  * Keeps the arrow keys on an entity's tab strip, and on a one-of chip group, from also scrolling
  * the page.
  *

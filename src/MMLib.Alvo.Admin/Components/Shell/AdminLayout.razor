@@ -9,6 +9,18 @@
 @implements IDisposable
 @inject AssistantGateway Assistant
 @inject ILogger<AdminLayout> Logger
+@inject AdminInterop Interop
+
+@*
+    The library's four providers, in the interactive layout because the library does not render them statically
+    (study §1.3). Exactly one popover provider: a second throws. Dialog defaults are the pattern language's:
+    focus lands on the first field, and a click on the scrim never dismisses (spec §3.1-3.2). Each wrapper still
+    states its own options.
+*@
+<AlvoTheme />
+<MudPopoverProvider />
+<MudDialogProvider DefaultFocus="DefaultFocus.FirstChild" BackdropClick="false" CloseButton="false" />
+<MudSnackbarProvider />
 
 <div class="a-shell">
     <nav class="a-sidebar" aria-label="Sections" data-testid="sidebar">
@@ -130,6 +142,18 @@
     }
 
     public void Dispose() => Assistant.ConnectionChanged -= OnConnectionChanged;
+
+    /// <summary>
+    /// Says the shell has rendered interactively, providers and all. It is the readiness signal a scenario waits
+    /// on before it opens a popover or a dialog (study §5.1 gotcha 2): a click before the circuit is live is lost.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await Interop.MarkShellReadyAsync();
+        }
+    }
 
     /// <summary>
     /// Clears a caught fault on every navigation — the layout's parameters are set again with each new page —

@@ -67,6 +67,9 @@ internal sealed partial class AdminInterop(IJSRuntime js, ILogger<AdminInterop> 
     /// <summary>Says the keyboard map now has a listener; see <c>markKeyboardReady</c> in admin.js.</summary>
     public Task MarkKeyboardReadyAsync() => QuietlyAsync(module => module.InvokeVoidAsync("markKeyboardReady"));
 
+    /// <summary>Says the shell rendered interactively, providers included; see <c>markShellReady</c> in admin.js.</summary>
+    public Task MarkShellReadyAsync() => QuietlyAsync(module => module.InvokeVoidAsync("markShellReady"));
+
     /// <summary>Moves focus into an input and selects its text, so what is typed next replaces it.</summary>
     public Task FocusAndSelectAsync(ElementReference input)
         => QuietlyAsync(module => module.InvokeVoidAsync("focusAndSelect", input));

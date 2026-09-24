@@ -109,6 +109,16 @@ public class AdminInteropTests
         await Should.ThrowAsync<JSException>(() => interop.LockScrollAsync(true));
     }
 
+    [Fact]
+    public async Task The_shell_says_when_it_is_ready()
+    {
+        var interop = new AdminInterop(_js, _logger);
+
+        await interop.MarkShellReadyAsync();
+
+        await _module.Received(1).InvokeAsync<IJSVoidResult>("markShellReady", Arg.Any<object?[]?>());
+    }
+
     /// <summary>
     /// A module that did not load is reported, and the next call tries again rather than inheriting the failure.
     /// </summary>

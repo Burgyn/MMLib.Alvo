@@ -55,6 +55,48 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     public ILocator Button(string name, bool exact = false)
         => Page.GetByRole(AriaRole.Button, new() { Name = name, Exact = exact });
 
+    /// <summary>A dialog by its test id: an <c>AlvoEditor</c>, an <c>AlvoConfirm</c> or the palette.</summary>
+    /// <param name="testId">The dialog's test id.</param>
+    /// <returns>The dialog.</returns>
+    public ILocator Dialog(string testId) => Page.GetByTestId(testId);
+
+    /// <summary>Picks an option of a <c>MudSelect</c> by its visible name.</summary>
+    /// <remarks>
+    /// Page-scoped on purpose: the library renders options in its popover provider under <c>body</c>, so an option is
+    /// never a descendant of the select, nor of the dialog the select sits in (study §5.1 gotcha 1).
+    /// </remarks>
+    /// <param name="combobox">The select, found by role and name.</param>
+    /// <param name="option">The option's name, exactly.</param>
+    public async Task ChooseAsync(ILocator combobox, string option)
+    {
+        await combobox.ClickAsync().ConfigureAwait(false);
+        await Page.GetByRole(AriaRole.Option, new() { Name = option, Exact = true }).ClickAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Waits for the snackbar that says <paramref name="text"/>.</summary>
+    /// <remarks>
+    /// The library's own class is the handle: a snackbar is <c>role=alert</c>, and so is every error panel, and the
+    /// difference between those two is exactly what a scenario asserts (spec §3.3). This is the one library class the
+    /// suite names, here and nowhere in a scenario.
+    /// </remarks>
+    /// <param name="text">What it says, or part of it.</param>
+    public Task SnackbarAsync(string text)
+        => Page.Locator(".mud-snackbar").Filter(new() { HasText = text }).First.WaitForAsync();
+
+    /// <summary>The focused element, as <c>tag#id[test id]</c>, for the focus rules of spec §3.4.</summary>
+    /// <returns>A short description of <c>document.activeElement</c>.</returns>
+    public Task<string> FocusedAsync()
+        => Page.EvaluateAsync<string>(
+            "() => { const e = document.activeElement; if (!e) return '';"
+            + " return `${e.tagName.toLowerCase()}#${e.id}[${e.getAttribute('data-testid') ?? ''}]`; }");
+
+    /// <summary>Whether focus is inside the element with <paramref name="testId"/>.</summary>
+    /// <param name="testId">The container's test id.</param>
+    /// <returns><see langword="true"/> when the focused element is it or inside it.</returns>
+    public Task<bool> FocusIsInsideAsync(string testId)
+        => Page.EvaluateAsync<bool>(
+            "id => !!document.activeElement?.closest(`[data-testid='${id}']`)", testId);
+
     /// <summary>Starts watching the console. Called by the world before it navigates anywhere.</summary>
     /// <remarks>
     /// Before the first navigation rather than after it, because the errors worth catching are the
@@ -180,6 +222,12 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
                 $"The keyboard at {Page.Url} never became live. "
                 + $"The console said: {(_noise.Count == 0 ? "nothing" : string.Join(" | ", _noise))}");
         }
+
+        /* And wait for the shell, which the keyboard does NOT imply: the keyboard is the palette's first render and
+           the popover and dialog providers are the layout's. A select opened between the two opened nothing. */
+        await Page.WaitForFunctionAsync(
+            "() => document.documentElement.dataset.alvoShell === 'ready'", null, _polling).ConfigureAwait(false);
+
         await Page.EvaluateAsync(
             "() => Promise.all(document.getAnimations().map(a => a.finished.catch(() => {})))")
             .ConfigureAwait(false);

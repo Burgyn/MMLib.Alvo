@@ -1,0 +1,219 @@
+﻿@*
+    Creating or editing one item with more than one value (spec §3.1): a right-hand modal side sheet.
+
+    A right-positioned MudDialog rather than a MudDrawer, because the dialog brings role=dialog, aria-modal, a focus
+    trap, Escape and focus return, and the drawer brings none of them (study §4.1, verified in the spike). Full height
+    and 560 px wide, so on a phone it is the whole screen (plan V4).
+
+    The policy this adds on top of the dialog:
+    * Escape and Cancel ask "Discard your changes?" when Dirty (EditorCloseGuard). The question replaces the form in
+      place instead of opening a second dialog (spec §3.1). The scrim never closes the editor.
+    * Enter in a single-line field submits (a real form with a submit button), Ctrl/Cmd+Enter submits from anywhere,
+      and the primary button is busy and disabled while OnSubmit runs (SubmitGate). Cancel stays enabled.
+
+    Closed means absent: the owner removes this component, and disposing it closes the dialog, so focus goes back to
+    the trigger.
+
+    The content renders inside MudDialogProvider, not under the page. A cascade from the page does not reach it, so
+    a CascadingValue the content needs (an AdminProblem for ErrorPanel) goes inside ChildContent.
+*@
+@implements IAsyncDisposable
+@inject AdminInterop Interop
+
+<MudDialog @ref="_dialog" Visible="true" Options="_options" Class="a-editor" ContentClass="a-editor__body"
+           ActionsClass="a-editor__actions" OnKeyDown="OnKeyDownAsync" data-testid="@TestId">
+    <TitleContent>
+        <div class="a-editor__head">
+            @if (Eyebrow is { Length: > 0 })
+            {
+                <span class="a-pagehead__eyebrow">@Eyebrow</span>
+            }
+            <span class="a-editor__title">@Title</span>
+            @if (Subtitle is { Length: > 0 })
+            {
+                <span class="a-section__sub">@Subtitle</span>
+            }
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_guard.Asking)
+        {
+            <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" Title="Discard your changes?" TakeFocus="true"
+                       TestId="editor-discard-question">
+                <ChildContent>What you changed here has not been saved, and closing loses it.</ChildContent>
+                <Actions>
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Danger" Small="true" data-testid="editor-discard"
+                                OnClick="DiscardAsync">Discard changes</AlvoButton>
+                    <AlvoButton Small="true" data-testid="editor-keep" OnClick="KeepEditing">Keep editing</AlvoButton>
+                </Actions>
+            </AlvoAlert>
+        }
+        <form id="@_formId" class="a-stack" hidden="@_guard.Asking" @onsubmit="SubmitAsync">
+            @ChildContent
+        </form>
+    </DialogContent>
+    <DialogActions>
+        @if (!_guard.Asking)
+        {
+            @ExtraActions
+            <span class="a-spacer"></span>
+            <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" data-testid="editor-cancel" OnClick="RequestCloseAsync">Cancel</AlvoButton>
+            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" form="@_formId" Busy="@(Busy || _gate.Busy)"
+                        Disabled="@(!CanSubmit)" data-testid="@SubmitTestId">@SubmitText</AlvoButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static int _editors;
+    private readonly string _formId = $"alvo-editor-{Interlocked.Increment(ref _editors)}";
+    private readonly EditorCloseGuard _guard = new();
+    private readonly SubmitGate _gate = new();
+    private readonly DialogOptions _options = new()
+    {
+        Position = DialogPosition.CenterRight,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true,
+        CloseOnEscapeKey = false,
+        BackdropClick = false,
+        CloseButton = false,
+        DefaultFocus = DefaultFocus.FirstChild,
+    };
+
+    private MudDialog? _dialog;
+    private ScrollLock? _scrollLock;
+
+    /// <summary>"New …" or "Edit …" (spec §3.1).</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>What the subject belongs to, set above the title the way a page header sets its section.</summary>
+    [Parameter]
+    public string? Eyebrow { get; set; }
+
+    /// <summary>One line under the title, or nothing.</summary>
+    [Parameter]
+    public string? Subtitle { get; set; }
+
+    /// <summary>The primary action's label: "Save to the working copy", "Save record", "Create person".</summary>
+    [Parameter, EditorRequired]
+    public string SubmitText { get; set; } = string.Empty;
+
+    /// <summary>The primary action's test id.</summary>
+    [Parameter]
+    public string SubmitTestId { get; set; } = "editor-submit";
+
+    /// <summary>The dialog's test id.</summary>
+    [Parameter]
+    public string TestId { get; set; } = "editor";
+
+    /// <summary>Whether the form holds something closing would lose.</summary>
+    [Parameter]
+    public bool Dirty { get; set; }
+
+    /// <summary>Whether the owner is still busy with something the form started, beyond the submit itself.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    /// <summary>Whether the primary action is available.</summary>
+    [Parameter]
+    public bool CanSubmit { get; set; } = true;
+
+    /// <summary>Raised on the primary action, on Enter in a single-line field, and on Ctrl/Cmd+Enter.</summary>
+    [Parameter]
+    public EventCallback OnSubmit { get; set; }
+
+    /// <summary>Raised when the operator closes it, once any discard question has been answered.</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    /// <summary>The fields.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Actions left of Cancel, such as "Save and add another" or "Delete record".</summary>
+    [Parameter]
+    public RenderFragment? ExtraActions { get; set; }
+
+    private ScrollLock Lock => _scrollLock ??= new ScrollLock(Interop);
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await Lock.HoldAsync();
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (!CanSubmit || Busy || !_gate.TryBegin())
+        {
+            return;
+        }
+
+        try
+        {
+            await OnSubmit.InvokeAsync();
+        }
+        finally
+        {
+            _gate.End();
+        }
+    }
+
+    private async Task RequestCloseAsync()
+    {
+        if (_guard.RequestClose(Dirty))
+        {
+            await OnClose.InvokeAsync();
+        }
+    }
+
+    private Task DiscardAsync()
+    {
+        _guard.Discard();
+        return OnClose.InvokeAsync();
+    }
+
+    private void KeepEditing() => _guard.KeepEditing();
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape")
+        {
+            await EscapeAsync();
+        }
+        else if (args.Key == "Enter" && (args.CtrlKey || args.MetaKey))
+        {
+            await SubmitAsync();
+        }
+    }
+
+    /// <summary>Escape answers the topmost thing: the question if one is asked, the editor otherwise.</summary>
+    private Task EscapeAsync()
+    {
+        if (!_guard.Asking)
+        {
+            return RequestCloseAsync();
+        }
+
+        KeepEditing();
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        if (_dialog is not null)
+        {
+            await _dialog.CloseAsync();
+        }
+
+        if (_scrollLock is not null)
+        {
+            await _scrollLock.ReleaseAsync();
+        }
+    }
+}

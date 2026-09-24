@@ -5,6 +5,9 @@
     links to five refusals.
 *@
 @inherits LayoutComponentBase
+@* The sign-in page is static, so only the theme provider is mounted here, never the popover, dialog or snackbar
+   providers, which are interactive-only (study §2.3). *@
+<AlvoTheme />
 
 <div class="a-bare-shell">
     <div class="a-content">

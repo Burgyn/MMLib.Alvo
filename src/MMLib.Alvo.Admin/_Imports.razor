@@ -26,6 +26,16 @@
 @using MMLib.Alvo.Management
 @using MMLib.Alvo.Data
 @using MMLib.Alvo.Schema
+@using MudBlazor
+@*
+    Two names both namespaces declare. MudBlazor has an `Icons` (Material paths) and a `FieldType`; Alvo's are
+    the stroked 20×20 set and the schema's field type, and every screen means Alvo's. A using alias outranks a
+    namespace import, so these keep every existing `Icons.Search` and `FieldType.Enum` meaning what it meant.
+    Inside Components.DesignSystem, which declares Alvo's `Icons`, the alias collides with the type itself
+    (CS0576), so a component there writes `DesignSystem.Icons.More`.
+*@
+@using Icons = MMLib.Alvo.Admin.Components.DesignSystem.Icons
+@using FieldType = MMLib.Alvo.Schema.FieldType
 @using static Microsoft.AspNetCore.Components.Web.RenderMode
 
 @*

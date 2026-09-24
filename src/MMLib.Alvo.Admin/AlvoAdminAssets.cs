@@ -31,8 +31,9 @@ public static class AlvoAdminAssets
     /// The design system — tokens, both themes, and every component class.
     /// </summary>
     /// <remarks>
-    /// This is the one stylesheet. There is no second sheet to load in a particular order, and no
-    /// component library beneath it (design deviation D1), so a host links exactly this.
+    /// The one stylesheet a host that styles its own page with Alvo's look links. The dashboard's own document also
+    /// links its component library through an internal, layered sheet beneath this one; that is the document's
+    /// business, not a host's, so it is not listed here.
     /// </remarks>
     public static string StyleSheet { get; } = $"{ContentRoot}/alvo.css";
 
