@@ -1123,37 +1123,26 @@
     display: contents;
   }
 
-  /* The overflow menu's activator: an icon the size of a small button. The library's wrapper around it is
-     the focusable control, so the ring is drawn on the wrapper. */
-  .a-pagehead__more-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    border-radius: var(--radius-sm);
-    color: var(--dim);
-    cursor: pointer;
+  /* The phone's overflow: the region hangs under its trigger, the controls one under the other. */
+  .a-pagehead__more {
+    position: relative;
   }
 
-  .a-pagehead__more-button:hover {
-    background: var(--panel2);
-    color: var(--text);
-  }
-
-  .a-pagehead__more .mud-menu-activator:focus-visible {
-    border-radius: var(--radius-sm);
-    outline: none;
-    box-shadow: var(--focus-ring);
-  }
-
-  /* The same controls in the phone's overflow menu: one under the other, each the menu's width. */
   .a-pagehead__menu {
+    position: absolute;
+    top: calc(100% + var(--space-1));
+    right: 0;
+    z-index: var(--z-overlay);
     display: flex;
     flex-direction: column;
     align-items: stretch;
     gap: var(--space-1);
+    min-width: 200px;
     padding: var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel);
+    box-shadow: var(--shadow-pop);
   }
 
   /* Fine print: provenance, counts, the sentence that explains a screen once. Dimmer and smaller

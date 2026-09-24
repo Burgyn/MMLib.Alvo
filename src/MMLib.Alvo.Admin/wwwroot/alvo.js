@@ -143,14 +143,18 @@
      frame included, which is where a click on its whitespace leaves focus.
      An open list answers Escape itself, so the editor does not.
      ---------------------------------------------------------------------- */
-  const answerEscapeInDialog = (target) => {
-    if (!(target instanceof Element) || target.matches('[aria-expanded="true"]')) {
+  const answerEscapeInDialog = (event) => {
+    const target = event.target;
+    if (event.isComposing || event.defaultPrevented || !(target instanceof Element)
+      || target.matches('[aria-expanded="true"]')) {
       return;
     }
 
-    const answer = target.closest('[role="dialog"]')?.querySelector('[data-alvo-escape]');
-    if (answer) {
-      answer.click();
+    /* The last one: an editor draws one answer at a time (Cancel, or Keep editing over it), and were a
+       question ever drawn beside the actions it is drawn after them, as the topmost thing asked. */
+    const answers = target.closest('[role="dialog"]')?.querySelectorAll('[data-alvo-escape]') ?? [];
+    if (answers.length > 0) {
+      answers[answers.length - 1].click();
     }
   };
 
@@ -176,7 +180,8 @@
        handler as well would make that one chord two submits, and the second would land after an
        owner that saves synchronously had reopened its gate. So the default is cancelled and
        this is the only path. A textarea, where Enter is a newline, gets the same submit. */
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && event.target instanceof Element) {
+    if (event.key === 'Enter' && !event.isComposing && (event.metaKey || event.ctrlKey)
+      && event.target instanceof Element) {
       const form = event.target.closest('form[data-alvo-chord-submit]');
       if (form) {
         event.preventDefault();
@@ -186,8 +191,11 @@
     }
 
     /* Enter in an open combobox chooses the option it points at. Inside an editor form it would
-       also be the browser's Enter-submit, and the record would be saved on the choice. */
-    if (event.key === 'Enter' && event.target instanceof Element
+       also be the browser's Enter-submit, and the record would be saved on the choice. With the
+       list open and nothing highlighted, Enter does nothing at all: the operator is choosing, and a
+       save then would be the surprise this guard exists to prevent. An IME's Enter commits the
+       composition and is the IME's. */
+    if (event.key === 'Enter' && !event.isComposing && event.target instanceof Element
       && event.target.matches('[role="combobox"][aria-expanded="true"]') && event.target.closest('form')) {
       event.preventDefault();
       return;
@@ -195,7 +203,7 @@
 
     if (event.key === 'Escape') {
       awaitingGoto = false;
-      answerEscapeInDialog(event.target);
+      answerEscapeInDialog(event);
       emit('dismiss');
       return;
     }

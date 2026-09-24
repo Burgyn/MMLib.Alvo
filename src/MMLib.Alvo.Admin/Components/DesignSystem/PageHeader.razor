@@ -14,10 +14,10 @@
 
     One markup tree and one media query — not two components — for the reason the shell gives about
     a second navigation. The secondary fragment is rendered twice, inline and in the menu, and CSS
-    decides which of the two is on the screen; the overflow is a MudMenu, so it brings the popover,
-    Escape and focus rather than reimplementing behaviours nobody notices until one is missing. A
-    click inside closes it, because every control that folds in here either navigates or opens
-    something, and a menu that stayed open would sit over what the operator just asked for.
+    decides which of the two is on the screen. The overflow is a disclosure: a button with
+    aria-expanded and the region it controls, which Escape closes and a click inside closes, because
+    every control that folds in here either navigates or opens something, and a region that stayed
+    open would sit over what the operator just asked for.
 *@
 
 <header class="a-pagehead">
@@ -46,23 +46,26 @@
                         @Secondary
                     </div>
 
-                    <MudMenu @ref="_menu" Class="a-only-mobile a-pagehead__more" AnchorOrigin="Origin.BottomRight"
-                             TransformOrigin="Origin.TopRight" Dense="true">
-                        @* The library wraps the activator in its own role=button with aria-expanded, which is
-                           the one control here; a button inside it would be a second tab stop for one action. *@
-                        <ActivatorContent>
-                            <span class="a-pagehead__more-button" data-testid="pagehead-overflow"
-                                  @onclick="args => context.ToggleAsync(args)">
-                                <Icon Path="@DesignSystem.Icons.More" />
-                                <span class="a-sr-only">More actions</span>
-                            </span>
-                        </ActivatorContent>
-                        <ChildContent>
-                            @* The menu is a role=menu list, and the screen's controls are its one item: the
-                               fragment is the screen's, and this component cannot split it into one per control. *@
-                            <div class="a-pagehead__menu" role="menuitem" @onclick="CloseMenuAsync">@Secondary</div>
-                        </ChildContent>
-                    </MudMenu>
+                    @* A disclosure, not a menu: what folds in here is links and buttons, which a role=menu would
+                       have to turn into menu items. The region is drawn right after its trigger, so Tab from the
+                       trigger goes into it. *@
+                    <div class="a-only-mobile a-pagehead__more" @onkeydown="OnOverflowKeyAsync">
+                        <AlvoButton @ref="_trigger" Tone="AlvoButton.ButtonTone.Ghost" Small="true"
+                                    aria-label="More actions" aria-expanded="@(_overflow ? "true" : "false")"
+                                    aria-controls="@_regionId" data-testid="pagehead-overflow"
+                                    OnClick="_ => ToggleOverflow()">
+                            <Icon Path="@DesignSystem.Icons.More" />
+                        </AlvoButton>
+                        <div id="@_regionId" class="a-pagehead__menu" role="group" aria-label="More actions"
+                             hidden="@(!_overflow)" data-testid="pagehead-overflow-region"
+                             @onclick="CloseOverflowAsync">
+                            @* Drawn only while open, so a closed region holds no second copy of every control. *@
+                            @if (_overflow)
+                            {
+                                @Secondary
+                            }
+                        </div>
+                    </div>
                 }
 
                 @Primary
@@ -126,9 +129,28 @@
     [Parameter]
     public RenderFragment? Secondary { get; set; }
 
-    /// <summary>The phone's overflow menu, closed by a click on anything in it.</summary>
-    private MudMenu? _menu;
+    private static int _headers;
+    private readonly string _regionId = $"pagehead-overflow-{Interlocked.Increment(ref _headers)}";
+    private AlvoButton? _trigger;
+    private bool _overflow;
 
-    /// <summary>Closes the overflow menu once one of its controls has been used.</summary>
-    private Task CloseMenuAsync() => _menu?.CloseMenuAsync() ?? Task.CompletedTask;
+    /// <summary>Opens or closes the phone's overflow region.</summary>
+    private void ToggleOverflow() => _overflow = !_overflow;
+
+    /// <summary>
+    /// Closes the region once one of its controls was used, with focus on the trigger: a control that opens an editor
+    /// is hidden by then, and the editor gives focus back to what had it when it opened.
+    /// </summary>
+    private async Task CloseOverflowAsync()
+    {
+        _overflow = false;
+        if (_trigger is not null)
+        {
+            await _trigger.FocusAsync();
+        }
+    }
+
+    /// <summary>Escape closes an open region and gives focus back to its trigger.</summary>
+    private Task OnOverflowKeyAsync(KeyboardEventArgs args)
+        => _overflow && args.Key == "Escape" ? CloseOverflowAsync() : Task.CompletedTask;
 }

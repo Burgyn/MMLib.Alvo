@@ -54,7 +54,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await inline.WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Hidden });
 
         await session.Page.GetByTestId("pagehead-overflow").ClickAsync();
-        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Menuitem)
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Group, new() { Name = "More actions" })
             .GetByRole(Microsoft.Playwright.AriaRole.Link, new() { Name = "Browse records" })
             .WaitForAsync();
 

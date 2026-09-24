@@ -16,7 +16,7 @@
 
 <AlvoConfirm Open="Open" TestId="discard-sheet" ConfirmTestId="discard-confirm" CancelTestId="discard-cancel"
              Title="Discard every unapplied change?"
-             Consequence="@($"The working copy goes back to revision {_revision}. There is no undo.")"
+             Consequence="@($"The working copy goes back to revision {_revision}, across all screens, not only this one. There is no undo.")"
              Verb="Discard changes" OnConfirm="DiscardAsync" OnCancel="OnClose" />
 
 @code {

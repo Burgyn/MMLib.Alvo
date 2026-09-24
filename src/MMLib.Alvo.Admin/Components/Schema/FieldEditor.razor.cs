@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Components;
+using MMLib.Alvo.Admin.Components.DesignSystem;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;
@@ -21,6 +22,8 @@ public partial class FieldEditor
     private string? _refusal;
     private string? _prefilled;
     private string _opened = string.Empty;
+    private int _refusals;
+    private readonly SubmitGate _another = new();
 
     /// <summary>The entity the field is added to.</summary>
     [Parameter, EditorRequired]
@@ -202,16 +205,30 @@ public partial class FieldEditor
     /// Stages the field and clears the form for the next one, keeping the type: a run of fields added
     /// together is most often a run of one type.
     /// </summary>
+    /// <remarks>
+    /// Behind a gate of its own, and a no-op on an untouched form: the second click of a double click lands on the form
+    /// the first one cleared, and staging that would be a refusal of a field nobody asked for.
+    /// </remarks>
     private async Task AddAnother()
     {
-        if (!await StageAsync(keepOpen: true))
+        if (!Dirty || !_another.TryBegin())
         {
             return;
         }
 
-        _facets = new FieldFacets { Type = _facets.Type, Kind = _facets.Kind, Sources = _facets.Sources };
-        _opened = Fingerprint();
-        await _nameInput.FocusAsync();
+        try
+        {
+            if (await StageAsync(keepOpen: true))
+            {
+                _facets = new FieldFacets { Type = _facets.Type, Kind = _facets.Kind, Sources = _facets.Sources };
+                _opened = Fingerprint();
+                await _nameInput.FocusAsync();
+            }
+        }
+        finally
+        {
+            _another.End();
+        }
     }
 
     /// <summary>
@@ -221,6 +238,7 @@ public partial class FieldEditor
     {
         if (_facets.Build(Editing, EditingJson, Siblings, out _refusal) is not { } facets)
         {
+            _refusals++;
             return false;
         }
 

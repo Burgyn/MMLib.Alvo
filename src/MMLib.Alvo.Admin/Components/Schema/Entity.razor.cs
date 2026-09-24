@@ -38,6 +38,7 @@ public partial class Entity
     private bool _renaming;
     private string _newName = string.Empty;
     private string? _renameRefusal;
+    private int _renameRefusals;
     private AdminProblem? _problem;
     private EntityTab _tab = EntityTabs.First;
     private bool _followingAddress;
@@ -454,6 +455,7 @@ public partial class Entity
         if (Copy.RenameEntity(EntityName, _newName) is { } refusal)
         {
             _renameRefusal = refusal;
+            _renameRefusals++;
             return;
         }
 

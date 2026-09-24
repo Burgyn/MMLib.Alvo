@@ -32,7 +32,7 @@
         @if (_problem is not null)
         {
             <CascadingValue Value="_problem">
-                <ErrorPanel TakeFocus="true" />
+                <ErrorPanel @key="_problemsDrawn" TakeFocus="true" />
             </CascadingValue>
         }
 

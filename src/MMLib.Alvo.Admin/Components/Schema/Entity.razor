@@ -35,7 +35,7 @@
                     OnSubmit="RenameAsync" OnClose="CloseRename">
             @if (_renameRefusal is { Length: > 0 })
             {
-                <ErrorPanel TakeFocus="true" Title="That name cannot be used" Fix="@_renameRefusal" />
+                <ErrorPanel @key="_renameRefusals" TakeFocus="true" Title="That name cannot be used" Fix="@_renameRefusal" />
             }
             <MudTextField T="string" Value="_newName" ValueChanged="name => _newName = name ?? string.Empty"
                           Immediate="true" Variant="Variant.Outlined" Label="New name" id="rename-entity-name"

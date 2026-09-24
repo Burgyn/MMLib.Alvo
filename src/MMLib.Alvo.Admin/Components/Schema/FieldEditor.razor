@@ -25,14 +25,17 @@
            the next, instead of a reopen per field. *@
         @if (!IsEditing)
         {
-            <AlvoButton data-testid="field-save-another" OnClick="_ => AddAnother()">Save and add another</AlvoButton>
+            <AlvoButton data-testid="field-save-another" Busy="_another.Busy" OnClick="_ => AddAnother()">
+                Save and add another
+            </AlvoButton>
         }
     </ExtraActions>
     <ChildContent>
     <div class="a-stack">
         @if (_refusal is { Length: > 0 })
         {
-            <ErrorPanel TakeFocus="true" Title="@(IsEditing ? "That change cannot be saved" : "That field cannot be added")"
+            @* Keyed by the attempt, so every refused save draws a new alert: it takes focus and is announced again. *@
+            <ErrorPanel @key="_refusals" TakeFocus="true" Title="@(IsEditing ? "That change cannot be saved" : "That field cannot be added")"
                         Fix="@_refusal" />
         }
 

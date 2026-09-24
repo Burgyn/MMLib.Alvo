@@ -17,6 +17,7 @@ public partial class RecordForm
     private static readonly TimeSpan _searchDelay = TimeSpan.FromMilliseconds(250);
 
     private AdminProblem? _problem;
+    private int _problemsDrawn;
     private bool _saving;
     private Dictionary<string, object?>? _opened;
     private RecordDraft _draft = new([], new Dictionary<string, object?>());
@@ -423,6 +424,10 @@ public partial class RecordForm
     }
 
     /// <summary>Renders the refusal where it happened, with the fix a write refusal calls for.</summary>
+    /// <remarks>Counted, so a second refusal draws a new panel, which takes focus and is announced again.</remarks>
     private void Refused(Exception exception)
-        => _problem = AdminProblem.From(exception, Logger, ProblemSite.RecordWrite);
+    {
+        _problem = AdminProblem.From(exception, Logger, ProblemSite.RecordWrite);
+        _problemsDrawn++;
+    }
 }
