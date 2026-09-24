@@ -33,6 +33,15 @@ namespace MMLib.Alvo.Admin.Components.Schema.Map;
 /// single Bézier straight across the intervening layer reads at least as clearly, and dummy nodes
 /// would cost a second box kind the renderer has to special-case for no visible benefit here.
 /// </para>
+/// <para>
+/// <b>5. Lanes for the outside wires.</b> The exception to 4 is a hook or automation wire whose entity is
+/// not in the last column: a Bézier straight across to the outside column runs through the headers of every
+/// column in between — under their plates if drawn first, striking through their names if drawn last — and
+/// where it comes out again it reads as the last box's own wire (<c>examples/complex-crm</c>: <c>deals</c>'
+/// automation looked like <c>invoice_items</c>'). So such a wire climbs, in the gap right of its box, to a
+/// lane above every box, runs along it, and comes down in the gap before its node. Each crossing wire has
+/// its own lane, <see cref="LaneStep"/> apart, and the whole picture moves down to make room for them.
+/// </para>
 /// </remarks>
 internal static class MapLayout
 {
@@ -65,6 +74,15 @@ internal static class MapLayout
     /// <summary>An outside node's fixed height.</summary>
     public const double OutsideHeight = 44;
 
+    /// <summary>The y of the first lane an outside wire rides above the boxes (see remark 5).</summary>
+    public const double LaneTop = 10;
+
+    /// <summary>The vertical step between two lanes, so two crossing wires do not merge into one.</summary>
+    public const double LaneStep = 8;
+
+    /// <summary>The clearance between the lowest lane and the top of every box and node.</summary>
+    public const double LaneClear = 18;
+
     /// <summary>How many Plain fields a box shows before the rest fold into <see cref="PlacedBox.More"/>.</summary>
     public const int PlainRows = 6;
 
@@ -80,14 +98,38 @@ internal static class MapLayout
 
         var layer = Layers(graph);
         var byLayer = Order(graph, layer);
-        var boxes = Place(graph, byLayer, reactions);
+        var lanes = reactions ? Lanes(graph, layer) : new Dictionary<int, int>();
+        var top = lanes.Count == 0 ? 0 : LaneTop + (lanes.Count - 1) * LaneStep + LaneClear;
+        var boxes = Place(graph, byLayer, reactions, top);
         var outside = reactions
-            ? PlaceOutside(graph, boxes, (layer.Values.Max() + 1) * (BoxWidth + LayerGap))
+            ? PlaceOutside(graph, boxes, (layer.Values.Max() + 1) * (BoxWidth + LayerGap), top)
             : [];
-        var wires = Wire(graph, boxes, outside, reactions);
+        var wires = Wire(graph, boxes, outside, reactions, lanes);
 
         return new MapPicture(boxes, outside, wires, Extent(boxes, outside, box => box.X + BoxWidth, node => node.X + OutsideWidth),
             Extent(boxes, outside, box => box.Y + box.Height, node => node.Y + OutsideHeight));
+    }
+
+    /// <summary>
+    /// The lane each crossing outside wire rides — keyed by the edge's index in <see cref="SystemGraph.Edges"/>,
+    /// numbered in edge order: every hook or automation edge whose entity is not in the last column.
+    /// </summary>
+    /// <param name="graph">The graph being laid out.</param>
+    /// <param name="layer">Every entity's layer, from <see cref="Layers"/>.</param>
+    private static Dictionary<int, int> Lanes(SystemGraph graph, Dictionary<string, int> layer)
+    {
+        var last = layer.Values.Max();
+        var lanes = new Dictionary<int, int>();
+        for (var index = 0; index < graph.Edges.Count; index++)
+        {
+            var edge = graph.Edges[index];
+            if (edge.Kind != MapEdgeKind.Reference && layer.TryGetValue(edge.From, out var from) && from < last)
+            {
+                lanes[index] = lanes.Count;
+            }
+        }
+
+        return lanes;
     }
 
     /// <summary>Every entity's layer: 0 for a leaf, else one past the deepest entity it references.</summary>
@@ -196,14 +238,15 @@ internal static class MapLayout
     /// <param name="graph">The graph being laid out.</param>
     /// <param name="byLayer">Every layer's entities, in final order.</param>
     /// <param name="reactions">Whether guard rows are drawn.</param>
-    private static List<PlacedBox> Place(SystemGraph graph, Dictionary<int, List<string>> byLayer, bool reactions)
+    /// <param name="top">Where every column starts — below the lanes, when there are any.</param>
+    private static List<PlacedBox> Place(SystemGraph graph, Dictionary<int, List<string>> byLayer, bool reactions, double top)
     {
         var entities = graph.Entities.ToDictionary(e => e.Name, StringComparer.Ordinal);
         var boxes = new List<PlacedBox>();
 
         foreach (var i in byLayer.Keys.OrderBy(k => k))
         {
-            var y = 0.0;
+            var y = top;
             foreach (var name in byLayer[i])
             {
                 var box = PlaceBox(entities[name], i, y, reactions);
@@ -262,7 +305,8 @@ internal static class MapLayout
     /// <param name="graph">The graph being laid out.</param>
     /// <param name="boxes">Every placed box, to read a wire's source row from.</param>
     /// <param name="x">The outside column's left edge, one layer gap past the rightmost box.</param>
-    private static List<PlacedOutside> PlaceOutside(SystemGraph graph, IReadOnlyList<PlacedBox> boxes, double x)
+    /// <param name="top">Where the column starts, level with the entity columns.</param>
+    private static List<PlacedOutside> PlaceOutside(SystemGraph graph, IReadOnlyList<PlacedBox> boxes, double x, double top)
     {
         var boxByName = boxes.ToDictionary(b => b.Entity.Name, StringComparer.Ordinal);
         var wired = graph.Edges.Where(e => e.Kind != MapEdgeKind.Reference).ToLookup(e => e.To, StringComparer.Ordinal);
@@ -272,7 +316,7 @@ internal static class MapLayout
             .ThenBy(node => node.Name, StringComparer.Ordinal)
             .ToList();
 
-        var y = 0.0;
+        var y = top;
         var placed = new List<PlacedOutside>();
         foreach (var node in ordered)
         {
@@ -299,21 +343,24 @@ internal static class MapLayout
     /// <param name="boxes">Every placed box, by which a Reference or Hook/Automation wire is anchored.</param>
     /// <param name="outside">Every placed outside node, a Hook/Automation wire's far end.</param>
     /// <param name="reactions">Whether Hook/Automation wires are drawn at all.</param>
-    private static List<PlacedWire> Wire(SystemGraph graph, List<PlacedBox> boxes, List<PlacedOutside> outside, bool reactions)
+    /// <param name="lanes">The lane of every crossing outside wire, by edge index, from <see cref="Lanes"/>.</param>
+    private static List<PlacedWire> Wire(
+        SystemGraph graph, List<PlacedBox> boxes, List<PlacedOutside> outside, bool reactions, Dictionary<int, int> lanes)
     {
         var boxByName = boxes.ToDictionary(b => b.Entity.Name, StringComparer.Ordinal);
         var outsideById = outside.ToDictionary(o => o.Node.Id, StringComparer.Ordinal);
         var wires = new List<PlacedWire>();
 
-        foreach (var edge in graph.Edges)
+        for (var index = 0; index < graph.Edges.Count; index++)
         {
+            var edge = graph.Edges[index];
             if (edge.Kind == MapEdgeKind.Reference)
             {
                 wires.Add(ReferenceWire(edge, boxByName));
             }
             else if (reactions && boxByName.TryGetValue(edge.From, out var source) && outsideById.TryGetValue(edge.To, out var node))
             {
-                wires.Add(OutsideWire(edge, source, node));
+                wires.Add(lanes.TryGetValue(index, out var lane) ? LaneWire(edge, source, node, lane) : OutsideWire(edge, source, node));
             }
         }
 
@@ -339,7 +386,7 @@ internal static class MapLayout
         return new PlacedWire(edge, Curve(x1, y1, x2, y2), x1, y1, x2, y2);
     }
 
-    /// <summary>A Hook/Automation wire: from an entity's right edge to the outside node it reaches.</summary>
+    /// <summary>A Hook/Automation wire from the last column: from the entity's right edge straight to its outside node.</summary>
     /// <param name="edge">The Hook or Automation edge to place.</param>
     /// <param name="source">The placed box the edge starts at.</param>
     /// <param name="node">The placed outside node the edge reaches.</param>
@@ -348,6 +395,27 @@ internal static class MapLayout
         var (x1, y1) = (source.X + BoxWidth, source.Y + 19);
         var (x2, y2) = (node.X, node.Y + OutsideHeight / 2);
         return new PlacedWire(edge, Curve(x1, y1, x2, y2), x1, y1, x2, y2);
+    }
+
+    /// <summary>
+    /// A Hook/Automation wire from an earlier column: up to its lane in the gap right of its box, along the lane
+    /// over every column in between, and down to its node in the gap before the outside column.
+    /// </summary>
+    /// <param name="edge">The Hook or Automation edge to place.</param>
+    /// <param name="source">The placed box the edge starts at.</param>
+    /// <param name="node">The placed outside node the edge reaches.</param>
+    /// <param name="lane">The wire's lane number, from <see cref="Lanes"/>.</param>
+    private static PlacedWire LaneWire(MapEdge edge, PlacedBox source, PlacedOutside node, int lane)
+    {
+        var (x1, y1) = (source.X + BoxWidth, source.Y + 19);
+        var (x2, y2) = (node.X, node.Y + OutsideHeight / 2);
+        var y = LaneTop + lane * LaneStep;
+        var (up, down) = (x1 + LayerGap, x2 - LayerGap);
+        var (m1, m2) = ((x1 + up) / 2, (down + x2) / 2);
+
+        var path = $"M {Fmt(x1)} {Fmt(y1)} C {Fmt(m1)} {Fmt(y1)}, {Fmt(m1)} {Fmt(y)}, {Fmt(up)} {Fmt(y)} H {Fmt(down)}"
+            + $" C {Fmt(m2)} {Fmt(y)}, {Fmt(m2)} {Fmt(y2)}, {Fmt(x2)} {Fmt(y2)}";
+        return new PlacedWire(edge, path, x1, y1, x2, y2, y);
     }
 
     /// <summary>An S-curve between two points, its control points at their horizontal midpoint.</summary>

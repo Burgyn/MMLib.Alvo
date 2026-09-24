@@ -42,10 +42,57 @@ public sealed class MapLayoutTests
         }
     }
 
+    /// <summary>Two reads of one file, not one graph twice — a read that shuffled would pass the latter.</summary>
     [Fact]
     public void The_same_descriptor_draws_the_same_picture()
-        => JsonSerializer.Serialize(MapLayout.Arrange(_bikes, true))
-            .ShouldBe(JsonSerializer.Serialize(MapLayout.Arrange(_bikes, true)));
+    {
+        var json = Example("bike-workshop", "bike-workshop.alvo.json");
+
+        JsonSerializer.Serialize(MapLayout.Arrange(SystemGraph.From(json), true))
+            .ShouldBe(JsonSerializer.Serialize(MapLayout.Arrange(SystemGraph.From(json), true)));
+    }
+
+    /// <summary>
+    /// crm is five ref layers deep and its automation starts at <c>deals</c>, two columns short of the outside
+    /// one: a wire straight across would run under (or over) <c>invoices</c> and <c>invoice_items</c> and read
+    /// as theirs. It rides a lane above every box instead, one lane per wire.
+    /// </summary>
+    [Fact]
+    public void An_outside_wire_that_crosses_a_column_rides_a_lane_above_every_box()
+    {
+        var picture = MapLayout.Arrange(SystemGraph.From(Example("complex-crm", "crm.alvo.json")), reactions: true);
+        var last = picture.Boxes.Max(b => b.Layer);
+        var outsideWires = picture.Wires.Where(w => w.Edge.Kind != MapEdgeKind.Reference).ToList();
+        var crossing = outsideWires.Where(w => picture.Boxes.Single(b => b.Entity.Name == w.Edge.From).Layer < last).ToList();
+
+        crossing.Select(w => w.Edge.From).ShouldBe(["deals", "deals"]);
+        crossing.ShouldAllBe(w => w.Lane < picture.Boxes.Min(b => b.Y));
+        crossing.Select(w => w.Lane).Distinct().Count().ShouldBe(crossing.Count);
+        outsideWires.Except(crossing).ShouldAllBe(w => w.Lane == null);
+    }
+
+    [Fact]
+    public void A_wire_from_the_last_column_goes_straight_to_its_node()
+        => MapLayout.Arrange(SystemGraph.From("""
+            {"templates":{"t":{}},"entities":{"a":{"fields":{},"hooks":{"afterCreate":[{"action":{"type":"email","template":"t"}}]}}}}
+            """), reactions: true).Wires.ShouldHaveSingleItem().Lane.ShouldBeNull();
+
+    [Fact]
+    public void An_unused_outside_node_is_placed_last()
+    {
+        var graph = SystemGraph.From("""
+            {"templates":{"spare":{},"used":{}},
+             "entities":{"a":{"fields":{},"hooks":{"afterCreate":[{"action":{"type":"email","template":"used"}}]}}}}
+            """);
+
+        var outside = MapLayout.Arrange(graph, reactions: true).Outside;
+
+        outside.Select(o => o.Node.Name).ShouldBe(["used", "spare"]);
+        outside[1].Y.ShouldBeGreaterThan(outside[0].Y);
+    }
+
+    private static string Example(string folder, string file)
+        => File.ReadAllText(Path.Combine(RepositoryRoot.Find(), "examples", folder, file));
 
     [Fact]
     public void A_cycle_of_references_terminates_and_every_box_is_placed()

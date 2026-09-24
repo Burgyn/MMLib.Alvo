@@ -6,8 +6,11 @@
     its entity, which is the one thing the drawing does; a relation is added as a ref field in the entity's
     own editor, never by drawing a line here, because a line would have nowhere to be written.
 
-    Wires come first so the boxes sit over them. The list after the drawing says every wire in words, for a
-    screen reader: one aria-label sentence stops scaling at about eight entities.
+    References come first so the boxes sit over them — a reference ends at a box's edge, so nothing of it is
+    hidden. Hook and automation wires come last, over every box and node: one from an earlier column rides a
+    lane above the boxes (MapLayout, remark 5), and drawn under them its descent into the outside column read as
+    the last box's own. The list after the drawing says every wire in words, for a screen reader: one aria-label
+    sentence stops scaling at about eight entities.
 *@
 
 @if (_picture.Boxes.Count == 0)
@@ -20,9 +23,9 @@ else
     <div class="@(ActualSize ? "a-map" : "a-map a-map--fit")" data-testid="system-map">
         <svg class="a-map__svg" viewBox="@ViewBox" width="@N(_picture.Width + _left + Margin)"
              height="@N(_picture.Height + 2 * Margin)" role="group" aria-label="System map">
-            @for (var index = 0; index < _picture.Wires.Count; index++)
+            @foreach (var wire in _picture.Wires.Where(wire => wire.Edge.Kind == MapEdgeKind.Reference))
             {
-                @Wire(_picture.Wires[index], _labelRank[index])
+                @ReferenceWire(wire)
             }
             @foreach (var box in _picture.Boxes)
             {
@@ -31,6 +34,13 @@ else
             @foreach (var node in _picture.Outside)
             {
                 @Node(node)
+            }
+            @for (var index = 0; index < _picture.Wires.Count; index++)
+            {
+                if (_picture.Wires[index].Edge.Kind != MapEdgeKind.Reference)
+                {
+                    @ReactionWire(_picture.Wires[index], _labelRank[index])
+                }
             }
         </svg>
         <ul class="a-sr-only">
@@ -129,22 +139,27 @@ else
     private static string N(double value) => value.ToString("0.#", CultureInfo.InvariantCulture);
 
     /// <summary>
-    /// A wire, under the boxes. A reference carries no word on the canvas — its row already says
-    /// <c>→ customers · restrict</c> — while a hook's or an automation's word sits just before the node it
-    /// reaches, where the wires into one node are told apart by their stacked words.
+    /// A reference, under the boxes. It carries no word on the canvas — its row already says
+    /// <c>→ customers · restrict</c> — only the dot where it leaves its field.
     /// </summary>
-    private RenderFragment Wire(PlacedWire wire, int rank) => @<g>
-        <path class="@WireClass(wire.Edge.Kind)" d="@wire.Path" data-from="@wire.Edge.From" data-to="@wire.Edge.To">
+    private RenderFragment ReferenceWire(PlacedWire wire) => @<g>
+        <path class="a-map__wire" d="@wire.Path">
             <title>@MapWords.Tooltip(wire.Edge)</title>
         </path>
-        @if (wire.Edge.Kind == MapEdgeKind.Reference)
-        {
-            <circle class="a-map__dot" cx="@N(wire.StartX)" cy="@N(wire.StartY)" r="3" />
-        }
-        else
-        {
-            <g><text class="a-map__label" x="@N(wire.EndX - 6)" y="@N(wire.EndY - 5 - rank * LabelStep)" text-anchor="end">@wire.Edge.Label</text></g>
-        }
+        <circle class="a-map__dot" cx="@N(wire.StartX)" cy="@N(wire.StartY)" r="3" />
+    </g>;
+
+    /// <summary>
+    /// A hook's or an automation's wire, over the boxes, with its word just before the node it reaches — where
+    /// the wires into one node are told apart by their stacked words. The word is haloed in the panel's colour,
+    /// so it stays legible wherever a wire runs under it.
+    /// </summary>
+    private RenderFragment ReactionWire(PlacedWire wire, int rank) => @<g data-testid="map-reaction">
+        <path class="@WireClass(wire.Edge.Kind)" d="@wire.Path">
+            <title>@MapWords.Tooltip(wire.Edge)</title>
+        </path>
+        <g><text class="a-map__label" x="@N(wire.EndX - 6)" y="@N(wire.EndY - 5 - rank * LabelStep)" text-anchor="end"
+                 data-testid="map-reaction-word">@MapWords.OnWire(wire.Edge)</text></g>
     </g>;
 
     private RenderFragment Box(PlacedBox box) => @<a class="@(box.Entity.Pending ? "a-map__box a-map__box--pending" : "a-map__box")"
@@ -184,7 +199,7 @@ else
     </g>;
 
     private RenderFragment Node(PlacedOutside node) => @<g class="@(node.Node.Used ? "a-map__outside" : "a-map__outside a-map__outside--unused")"
-                                                          data-node="@node.Node.Id">
+                                                          data-testid="map-node">
         <rect class="a-map__plate" x="@N(node.X)" y="@N(node.Y)" width="@N(MapLayout.OutsideWidth)" height="@N(MapLayout.OutsideHeight)" rx="8" />
         <text class="a-map__glyph" x="@N(node.X + 12)" y="@N(node.Y + 27)">@(node.Node.Kind == OutsideKind.Template ? "✉" : "↗")</text>
         <text class="a-map__name" x="@N(node.X + 34)" y="@N(node.Y + 19)">@node.Node.Name</text>

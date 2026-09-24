@@ -88,6 +88,56 @@ public sealed class SystemGraphTests
         crm.Edges.Where(edge => edge.Kind != MapEdgeKind.Automation).ShouldAllBe(edge => edge.Rule == null);
     }
 
+    /// <summary>The schema's <c>eventPattern</c> admits the coalesced <c>.batch</c> shape; it names its entity too.</summary>
+    [Fact]
+    public void A_batch_trigger_wires_the_entity_it_names()
+    {
+        var graph = SystemGraph.From("""
+            {"entities":{"orders":{"fields":{}}},
+             "automation":{"r":{"trigger":{"event":"entity.orders.created.batch"},"actions":[{"type":"webhook","endpoint":"w"}]}}}
+            """);
+
+        graph.Edges.ShouldHaveSingleItem().From.ShouldBe("orders");
+        graph.Undrawn.ShouldBe(0);
+    }
+
+    /// <summary>
+    /// crm declares three rules: <c>deal-won</c> draws two wires, <c>bulk-import-index</c> only calls
+    /// <c>http.call</c> and <c>stale-deal-reminder</c> runs on a schedule — two that the map has to own up to.
+    /// </summary>
+    [Fact]
+    public void A_rule_that_draws_no_wire_is_counted_rather_than_lost()
+    {
+        SystemGraph.From(Example("complex-crm", "crm.alvo.json")).Undrawn.ShouldBe(2);
+        _bikes.Undrawn.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Undrawn_counts_rules_not_actions_and_survives_a_focus()
+    {
+        var graph = SystemGraph.From("""
+            {"entities":{"a":{"fields":{}}},"automation":{
+              "scheduled":{"trigger":{"schedule":"0 8 * * MON"},"actions":[{"type":"webhook","endpoint":"w"}]},
+              "wildcard":{"trigger":{"event":"entity.*.created"},"actions":[{"type":"email","template":"t"}]},
+              "calls":{"trigger":{"event":"entity.a.updated"},"actions":[{"type":"function","name":"f"},{"type":"http.call","url":"u"}]},
+              "mixed":{"trigger":{"event":"entity.a.updated"},"actions":[{"type":"function","name":"f"},{"type":"webhook","endpoint":"w"}]}}}
+            """);
+
+        graph.Undrawn.ShouldBe(3);
+        graph.Focus("a").Undrawn.ShouldBe(3);
+    }
+
+    [Fact]
+    public void A_declared_template_no_action_uses_is_drawn_unused()
+    {
+        var graph = SystemGraph.From("""
+            {"templates":{"used":{},"spare":{}},
+             "entities":{"a":{"fields":{},"hooks":{"afterCreate":[{"action":{"type":"email","template":"used"}}]}}}}
+            """);
+
+        graph.Outside.Select(node => (node.Name, node.Used)).ShouldBe([("used", true), ("spare", false)]);
+    }
+
     [Fact]
     public void An_entity_the_applied_descriptor_lacks_or_differs_on_is_pending()
     {

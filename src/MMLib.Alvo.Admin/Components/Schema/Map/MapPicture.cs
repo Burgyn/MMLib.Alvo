@@ -31,7 +31,12 @@ internal sealed record PlacedOutside(MapOutside Node, double X, double Y);
 /// <param name="StartY">Where the wire leaves its source, y.</param>
 /// <param name="EndX">Where the wire reaches its target, x — a hook's word is drawn just before it.</param>
 /// <param name="EndY">Where the wire reaches its target, y.</param>
-internal sealed record PlacedWire(MapEdge Edge, string Path, double StartX, double StartY, double EndX, double EndY);
+/// <param name="Lane">
+/// The y a hook or automation wire runs at above every box, over the columns between its entity and the outside
+/// column; null for a wire that goes straight to its end (see <see cref="MapLayout"/>, remark 5).
+/// </param>
+internal sealed record PlacedWire(
+    MapEdge Edge, string Path, double StartX, double StartY, double EndX, double EndY, double? Lane = null);
 
 /// <summary>The whole placed picture <see cref="MapLayout.Arrange"/> produces.</summary>
 /// <param name="Boxes">Every entity box, placed.</param>

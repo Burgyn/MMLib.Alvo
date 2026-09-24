@@ -37,6 +37,29 @@ internal static class MapWords
         return rule.Length > 0 ? $"{edge.Label}{rule}: {condition}" : $"{edge.Label} — {condition}";
     }
 
+    /// <summary>
+    /// The word drawn on the canvas before the node a hook or automation wire reaches: the hook point, or
+    /// <c>not yet</c> for an automation.
+    /// </summary>
+    /// <remarks>
+    /// Shorter than <see cref="MapEdge.Label"/> for an automation because the gap before a node is
+    /// <see cref="MapLayout.LayerGap"/> wide and <c>automation · not yet</c> ran under the last box. Nothing is
+    /// lost: the dash and the legend say automation, and the tooltip and the sentence keep the whole label.
+    /// </remarks>
+    /// <param name="edge">The edge the wire draws.</param>
+    public static string OnWire(MapEdge edge) => edge.Kind == MapEdgeKind.Automation ? "not yet" : edge.Label;
+
+    /// <summary>
+    /// What the map says about the automation rules it draws no wire for, or null when there are none.
+    /// </summary>
+    /// <param name="undrawn">The graph's <see cref="SystemGraph.Undrawn"/>.</param>
+    public static string? Undrawn(int undrawn) => undrawn switch
+    {
+        <= 0 => null,
+        1 => "1 automation rule draws no wire: it runs on a schedule, matches no single entity, or calls something other than a template or webhook.",
+        _ => $"{undrawn.ToString(System.Globalization.CultureInfo.InvariantCulture)} automation rules draw no wire: they run on a schedule, match no single entity, or call something other than a template or webhook.",
+    };
+
     /// <summary>"sends the order-ready template" / "posts to rental-desk", from an outside node's id.</summary>
     /// <param name="id">A <see cref="MapOutside.Id"/>: <c>template:name</c> or <c>endpoint:name</c>.</param>
     private static string Reaches(string id)

@@ -163,9 +163,6 @@
     /// </remarks>
     private WorkingCopy Copy { get; set; } = new();
 
-    /// <summary>How many entities the Schema map draws whole; past this it draws one and its neighbours.</summary>
-    private const int WholeGraphLimit = 12;
-
     private const string ListView = "List";
     private const string MapView = "Map";
 
@@ -181,7 +178,7 @@
     private bool _reactions;
     private bool _actual;
     private string? _centre;
-    private (string Json, string Centre, int Count)? _focusCount;
+    private (string Json, SystemGraph Graph)? _parsed;
     private string _name = string.Empty;
     private string? _refusal;
     private bool _adding;
@@ -351,42 +348,33 @@
     /// <summary>
     /// The entity the Schema map is focused on — the address's, or the first — or null while it draws whole.
     /// </summary>
+    private string? Centre => MapCentre.Choose(Copy.Entities, _centre);
+
+    /// <summary>The working copy read as the map reads it, parsed again only when the copy moved.</summary>
     /// <remarks>
-    /// A centre the working copy no longer declares (a link sent before a rename) falls back to the first
-    /// entity rather than drawing nothing.
+    /// The panel needs two facts from it the drawing does not hand back — how many entities a focus keeps, and
+    /// how many rules draw no wire — and the screen re-renders on every edit anywhere in the copy.
     /// </remarks>
-    private string? Centre
+    private SystemGraph Graph
     {
         get
         {
-            var entities = Copy.Entities;
-            if (entities.Count <= WholeGraphLimit)
+            var json = Copy.Json;
+            if (_parsed is not { } known || !string.Equals(known.Json, json, StringComparison.Ordinal))
             {
-                return null;
+                _parsed = (json, SystemGraph.From(json));
             }
 
-            return _centre is not null && entities.Contains(_centre, StringComparer.Ordinal) ? _centre : entities[0];
+            return _parsed.Value.Graph;
         }
-    }
-
-    /// <summary>How many entities the focused map draws, parsed again only when the copy or the centre moved.</summary>
-    private int FocusedCount(string centre)
-    {
-        var json = Copy.Json;
-        if (_focusCount is not { } known || known.Centre != centre || !string.Equals(known.Json, json, StringComparison.Ordinal))
-        {
-            _focusCount = (json, centre, SystemGraph.From(json).Focus(centre).Entities.Count);
-        }
-
-        return _focusCount.Value.Count;
     }
 
     /// <summary>The map view: its controls over the drawing, drawn from the working copy once it is loaded.</summary>
     private RenderFragment MapPanel => @<Panel Title="Map">
         <Subtitle>
-            Every relation is many-to-one and starts at the ref field that makes it; the word on the wire is what
-            a delete on the other side does. Read only — a relation is added as a ref field in the entity's own
-            editor.
+            Every relation is many-to-one and starts at the ref field that makes it; the row it starts at says
+            what a delete on the other side does (<code class="a-mono">→ customers · restrict</code>). Read only — a
+            relation is added as a ref field in the entity's own editor.
         </Subtitle>
         <ChildContent>
             @if (!Copy.Loaded)
@@ -410,11 +398,15 @@
                 }
                 <SystemMap DescriptorJson="@Copy.Json" AppliedJson="@Copy.AppliedJson" Reactions="_reactions" Centre="@Centre"
                            ActualSize="_actual" />
+                @if (_reactions && MapWords.Undrawn(Graph.Undrawn) is { } undrawn)
+                {
+                    <p class="a-hint a-hint--inset" data-testid="map-undrawn">@undrawn</p>
+                }
             }
         </ChildContent>
     </Panel>;
 
-    /// <summary>Past <see cref="WholeGraphLimit"/> entities: the picker of the centre, and what it leaves out.</summary>
+    /// <summary>Past <see cref="MapCentre.WholeGraphLimit"/> entities: the picker of the centre, and what it leaves out.</summary>
     private RenderFragment CentrePicker(string centre) => @<div>
         <div class="a-row a-row--wrap a-row--inset">
             <span class="a-hint" id="map-centre">Centre on</span>
@@ -422,7 +414,7 @@
                        SelectedChanged="ChooseCentre" aria-labelledby="map-centre" />
         </div>
         <span class="a-hint a-hint--inset">
-            Showing @FocusedCount(centre) of @Copy.Entities.Count — @centre and one hop in each direction.
+            Showing @Graph.Focus(centre).Entities.Count of @Copy.Entities.Count — @centre and one hop in each direction.
         </span>
     </div>;
 

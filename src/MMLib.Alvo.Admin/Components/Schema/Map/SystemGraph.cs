@@ -98,7 +98,14 @@ internal sealed record MapEdge(
 /// <param name="Entities">Every declared entity, in descriptor order.</param>
 /// <param name="Outside">Every template and webhook endpoint the graph reaches, in descriptor order.</param>
 /// <param name="Edges">Every wire the map draws, in the order the descriptor was read.</param>
-internal sealed partial record SystemGraph(IReadOnlyList<MapEntity> Entities, IReadOnlyList<MapOutside> Outside, IReadOnlyList<MapEdge> Edges)
+/// <param name="Undrawn">
+/// How many declared automation rules draw no wire at all — they run on a <c>schedule</c>, match no single
+/// declared entity (<c>entity.*.created</c>), or only call a <c>function</c>, an <c>http.call</c> or an
+/// <c>entity.update</c>, none of which reaches a node this map draws. Counted so the map can say so, rather
+/// than let a declared rule vanish from the picture without a word.
+/// </param>
+internal sealed partial record SystemGraph(
+    IReadOnlyList<MapEntity> Entities, IReadOnlyList<MapOutside> Outside, IReadOnlyList<MapEdge> Edges, int Undrawn = 0)
 {
     /// <summary>The graph of nothing — a descriptor that failed to parse, or declares no entities.</summary>
     public static SystemGraph Empty { get; } = new([], [], []);
@@ -111,6 +118,8 @@ internal sealed partial record SystemGraph(IReadOnlyList<MapEntity> Entities, IR
     /// A reference edge is kept only when both ends survive the cut — a wire to an entity the focus dropped
     /// would point off the edge of the drawing. A hook or automation edge only needs its entity end to
     /// survive: its other end is never one of the entities being cut in the first place.
+    /// <see cref="Undrawn"/> is kept whole: it is a fact about the descriptor's rules, most of which (a
+    /// schedule) start at no entity a focus could keep or drop.
     /// </remarks>
     /// <param name="centre">The entity to focus the map on.</param>
     public SystemGraph Focus(string centre)
@@ -137,6 +146,6 @@ internal sealed partial record SystemGraph(IReadOnlyList<MapEntity> Entities, IR
             .Select(edge => edge.To)
             .ToHashSet(StringComparer.Ordinal);
 
-        return new SystemGraph(entities, [.. Outside.Where(node => outsideIds.Contains(node.Id))], edges);
+        return new SystemGraph(entities, [.. Outside.Where(node => outsideIds.Contains(node.Id))], edges, Undrawn);
     }
 }

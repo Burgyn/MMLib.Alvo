@@ -32,4 +32,21 @@ public sealed class MapWordsTests
     [InlineData(nameof(MapEdgeKind.Automation), "automation · not yet", null, "welcome", "automation · not yet — welcome")]
     public void A_wire_s_tooltip_names_its_rule_and_its_condition(string kind, string label, string? condition, string? rule, string tooltip)
         => MapWords.Tooltip(new MapEdge(Enum.Parse<MapEdgeKind>(kind), "a", "b", label, null, condition, rule)).ShouldBe(tooltip);
+
+    /// <summary>
+    /// The word drawn on the canvas: an automation's is <c>not yet</c> — its dash and the legend already say
+    /// automation, and the full label did not fit the gap before its node.
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(MapEdgeKind.Automation), "automation · not yet", "not yet")]
+    [InlineData(nameof(MapEdgeKind.Hook), "afterUpdate", "afterUpdate")]
+    public void A_wire_s_word_on_the_canvas_is_short(string kind, string label, string word)
+        => MapWords.OnWire(new MapEdge(Enum.Parse<MapEdgeKind>(kind), "a", "b", label, null, null, "r")).ShouldBe(word);
+
+    [Theory]
+    [InlineData(0, null)]
+    [InlineData(1, "1 automation rule draws no wire: it runs on a schedule, matches no single entity, or calls something other than a template or webhook.")]
+    [InlineData(2, "2 automation rules draw no wire: they run on a schedule, match no single entity, or call something other than a template or webhook.")]
+    public void Rules_the_map_cannot_draw_are_owned_up_to(int undrawn, string? sentence)
+        => MapWords.Undrawn(undrawn).ShouldBe(sentence);
 }

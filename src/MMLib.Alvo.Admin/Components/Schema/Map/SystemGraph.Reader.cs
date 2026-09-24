@@ -45,9 +45,9 @@ internal sealed partial record SystemGraph
             }
         }
 
-        ReadAutomation(working, entityNames, edges);
+        var undrawn = ReadAutomation(working, entityNames, edges);
 
-        return new SystemGraph(entities, ReadOutside(working, edges), edges);
+        return new SystemGraph(entities, ReadOutside(working, edges), edges, undrawn);
     }
 
     /// <summary>
@@ -199,46 +199,71 @@ internal sealed partial record SystemGraph
 
     /// <summary>
     /// Reads automation rules into Automation edges, one per email/webhook action of a rule whose trigger
-    /// names a declared entity.
+    /// names a declared entity, and counts the rules that draw none.
     /// </summary>
     /// <remarks>
-    /// A rule on <c>schedule</c>, or on an <c>entity.&lt;name&gt;.&lt;op&gt;</c> pattern naming an entity
-    /// this descriptor does not declare, draws no edge — there is no box on this map for it to start at.
+    /// A rule on <c>schedule</c>, on a pattern naming no single declared entity (<c>entity.*.created</c>, or an
+    /// entity this descriptor does not declare), or whose actions are only <c>function</c>, <c>http.call</c> or
+    /// <c>entity.update</c> draws no edge — there is no box for it to start at, or no node for it to reach. The
+    /// count is returned so the map says so instead of dropping a declared rule without a word.
     /// </remarks>
     /// <param name="working">The descriptor root.</param>
     /// <param name="entityNames">Every declared entity name.</param>
     /// <param name="edges">The edge list to append to.</param>
-    private static void ReadAutomation(JsonObject working, IReadOnlySet<string> entityNames, List<MapEdge> edges)
+    /// <returns>How many declared rules drew no edge.</returns>
+    private static int ReadAutomation(JsonObject working, IReadOnlySet<string> entityNames, List<MapEdge> edges)
     {
         if (working["automation"] is not JsonObject rules)
         {
-            return;
+            return 0;
         }
 
+        var undrawn = 0;
         foreach (var pair in rules)
         {
-            if (pair.Value is not JsonObject rule
-                || TriggerEntity(rule, entityNames) is not { } source
-                || rule["actions"] is not JsonArray actions)
+            if (pair.Value is JsonObject rule && !ReadRule(pair.Key, rule, entityNames, edges))
             {
-                continue;
-            }
-
-            var condition = StringOrNull(rule["condition"]);
-            foreach (var action in actions)
-            {
-                if (action is JsonObject declared && ActionTarget(declared) is { } to)
-                {
-                    edges.Add(new MapEdge(MapEdgeKind.Automation, source, to, "automation · not yet", null, condition, pair.Key));
-                }
+                undrawn++;
             }
         }
+
+        return undrawn;
+    }
+
+    /// <summary>Reads one automation rule into its Automation edges.</summary>
+    /// <param name="name">The rule's name, the edge's <see cref="MapEdge.Rule"/>.</param>
+    /// <param name="rule">The rule's declaration.</param>
+    /// <param name="entityNames">Every declared entity name.</param>
+    /// <param name="edges">The edge list to append to.</param>
+    /// <returns>Whether the rule drew at least one edge.</returns>
+    private static bool ReadRule(string name, JsonObject rule, IReadOnlySet<string> entityNames, List<MapEdge> edges)
+    {
+        if (TriggerEntity(rule, entityNames) is not { } source || rule["actions"] is not JsonArray actions)
+        {
+            return false;
+        }
+
+        var before = edges.Count;
+        var condition = StringOrNull(rule["condition"]);
+        foreach (var action in actions)
+        {
+            if (action is JsonObject declared && ActionTarget(declared) is { } to)
+            {
+                edges.Add(new MapEdge(MapEdgeKind.Automation, source, to, "automation · not yet", null, condition, name));
+            }
+        }
+
+        return edges.Count > before;
     }
 
     /// <summary>
     /// The entity a rule's trigger names, or null when the trigger is not <c>entity.&lt;name&gt;.&lt;op&gt;</c>
-    /// for a declared entity.
+    /// (or its coalesced <c>entity.&lt;name&gt;.&lt;op&gt;.batch</c> shape) for a declared entity.
     /// </summary>
+    /// <remarks>
+    /// The schema's <c>eventPattern</c> admits both shapes; a <c>.batch</c> rule still fires on that one
+    /// entity's writes, only coalesced, so it starts at the same box.
+    /// </remarks>
     /// <param name="rule">The automation rule.</param>
     /// <param name="entityNames">Every declared entity name.</param>
     private static string? TriggerEntity(JsonObject rule, IReadOnlySet<string> entityNames)
@@ -249,14 +274,18 @@ internal sealed partial record SystemGraph
         }
 
         var parts = pattern.Split('.');
-        return parts.Length == 3 && parts[0] == "entity" && entityNames.Contains(parts[1]) ? parts[1] : null;
+        var shaped = parts.Length == 3 || (parts.Length == 4 && parts[3] == "batch");
+        return shaped && parts[0] == "entity" && entityNames.Contains(parts[1]) ? parts[1] : null;
     }
 
     /// <summary>The outside id an email or webhook action names, or null for any other action type.</summary>
     /// <remarks>
-    /// Other action types are refused at apply (before points take <c>reject</c>/<c>mutate</c>, after points
-    /// take <c>email</c>/<c>webhook</c>), so a descriptor with one is malformed rather than a shape the map
-    /// still has to draw — it is simply ignored.
+    /// Two different reasons for the null. On an after-hook, any other type is refused at apply (before
+    /// points take <c>reject</c>/<c>mutate</c>, after points take <c>email</c>/<c>webhook</c>), so one here is a
+    /// malformed descriptor and is simply ignored. On an automation rule, <c>function</c>, <c>http.call</c> and
+    /// <c>entity.update</c> are accepted — the block is warned, not refused — but none reaches a template or
+    /// endpoint, so it has no node to draw a wire to; a rule left with no wire is counted in
+    /// <see cref="Undrawn"/>.
     /// </remarks>
     /// <param name="action">The action object.</param>
     private static string? ActionTarget(JsonObject action) => StringOrNull(action["type"]) switch
