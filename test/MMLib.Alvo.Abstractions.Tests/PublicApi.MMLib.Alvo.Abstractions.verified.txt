@@ -9,6 +9,110 @@
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Testing")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
+namespace MMLib.Alvo.Ai
+{
+    public enum AiConnectionKind
+    {
+        OpenAiCompatible = 0,
+        AzureOpenAi = 1,
+    }
+    public readonly struct AiConnectionResolution : System.IEquatable<MMLib.Alvo.Ai.AiConnectionResolution>
+    {
+        public AiConnectionResolution(MMLib.Alvo.Ai.AlvoAiConnection? Connection, MMLib.Alvo.Ai.AiConnectionSource Source) { }
+        public MMLib.Alvo.Ai.AlvoAiConnection? Connection { get; init; }
+        public MMLib.Alvo.Ai.AiConnectionSource Source { get; init; }
+    }
+    public enum AiConnectionSource
+    {
+        None = 0,
+        Configuration = 1,
+        Store = 2,
+    }
+    public sealed class AlvoAiConnection : System.IEquatable<MMLib.Alvo.Ai.AlvoAiConnection>
+    {
+        public AlvoAiConnection(MMLib.Alvo.Ai.AiConnectionKind Kind, System.Uri Endpoint, string Model, string? ApiKey) { }
+        public string? ApiKey { get; init; }
+        public System.Uri Endpoint { get; init; }
+        public MMLib.Alvo.Ai.AiConnectionKind Kind { get; init; }
+        public string Model { get; init; }
+        public override string ToString() { }
+    }
+    public sealed class AssistantRequest : System.IEquatable<MMLib.Alvo.Ai.AssistantRequest>
+    {
+        public AssistantRequest(string Project, string Message, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Ai.AssistantTurn> History) { }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Ai.AssistantTurn> History { get; init; }
+        public string Message { get; init; }
+        public string Project { get; init; }
+    }
+    public enum AssistantRole
+    {
+        Operator = 0,
+        Assistant = 1,
+    }
+    public sealed class AssistantTurn : System.IEquatable<MMLib.Alvo.Ai.AssistantTurn>
+    {
+        public AssistantTurn(MMLib.Alvo.Ai.AssistantRole Role, string Text) { }
+        public MMLib.Alvo.Ai.AssistantRole Role { get; init; }
+        public string Text { get; init; }
+    }
+    public abstract class AssistantUpdate : System.IEquatable<MMLib.Alvo.Ai.AssistantUpdate>
+    {
+        public sealed class Failed : MMLib.Alvo.Ai.AssistantUpdate, System.IEquatable<MMLib.Alvo.Ai.AssistantUpdate.Failed>
+        {
+            public Failed(string Reason) { }
+            public string Reason { get; init; }
+        }
+        public sealed class Proposal : MMLib.Alvo.Ai.AssistantUpdate, System.IEquatable<MMLib.Alvo.Ai.AssistantUpdate.Proposal>
+        {
+            public Proposal(string DescriptorJson, int ExpectedRevision, string Summary, System.Collections.Generic.IReadOnlyList<string> Refusals) { }
+            public string DescriptorJson { get; init; }
+            public int ExpectedRevision { get; init; }
+            public System.Collections.Generic.IReadOnlyList<string> Refusals { get; init; }
+            public string Summary { get; init; }
+        }
+        public sealed class Text : MMLib.Alvo.Ai.AssistantUpdate, System.IEquatable<MMLib.Alvo.Ai.AssistantUpdate.Text>
+        {
+            public Text(string Delta) { }
+            public string Delta { get; init; }
+        }
+        public sealed class ToolInvoked : MMLib.Alvo.Ai.AssistantUpdate, System.IEquatable<MMLib.Alvo.Ai.AssistantUpdate.ToolInvoked>
+        {
+            public ToolInvoked(string Tool) { }
+            public string Tool { get; init; }
+        }
+    }
+    public interface IAiConnectionResolver
+    {
+        System.Threading.Tasks.ValueTask<MMLib.Alvo.Ai.AiConnectionResolution> ResolveAsync(System.Threading.CancellationToken ct = default);
+    }
+    public interface IAlvoAssistant
+    {
+        System.Collections.Generic.IAsyncEnumerable<MMLib.Alvo.Ai.AssistantUpdate> AskAsync(MMLib.Alvo.Ai.AssistantRequest request, System.Threading.CancellationToken ct = default);
+    }
+    public sealed class StoredAiConnection : System.IEquatable<MMLib.Alvo.Ai.StoredAiConnection>
+    {
+        public const string AzureOpenAiKind = "azure-openai";
+        public const string OpenAiCompatibleKind = "openai-compatible";
+        public const string SecretName = "alvo.ai.connection";
+        public StoredAiConnection(string? Kind, string? Endpoint, string? Model, string? ApiKey) { }
+        public string? ApiKey { get; init; }
+        public string? Endpoint { get; init; }
+        public string? Kind { get; init; }
+        public string? Model { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonSerializable(typeof(MMLib.Alvo.Ai.StoredAiConnection))]
+    [System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy=System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)]
+    public sealed class StoredAiConnectionJsonContext : System.Text.Json.Serialization.JsonSerializerContext, System.Text.Json.Serialization.Metadata.IJsonTypeInfoResolver
+    {
+        public StoredAiConnectionJsonContext() { }
+        public StoredAiConnectionJsonContext(System.Text.Json.JsonSerializerOptions options) { }
+        protected override System.Text.Json.JsonSerializerOptions? GeneratedSerializerOptions { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<MMLib.Alvo.Ai.StoredAiConnection> StoredAiConnection { get; }
+        public System.Text.Json.Serialization.Metadata.JsonTypeInfo<string> String { get; }
+        public static MMLib.Alvo.Ai.StoredAiConnectionJsonContext Default { get; }
+        public override System.Text.Json.Serialization.Metadata.JsonTypeInfo? GetTypeInfo(System.Type type) { }
+    }
+}
 namespace MMLib.Alvo
 {
     public sealed class AlvoContext : System.IEquatable<MMLib.Alvo.AlvoContext>
@@ -1146,12 +1250,21 @@ namespace MMLib.Alvo.Management
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementProject>> ListProjectsAsync(System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRevision>> ListRevisionsAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementApplyResult> RollbackAsync(string project, int targetRevision, MMLib.Alvo.Management.ManagementRollbackRequest request, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task SetAiConnectionAsync(MMLib.Alvo.Ai.StoredAiConnection connection, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementPolicyVerdict> SimulatePolicyAsync(string project, MMLib.Alvo.Management.ManagementPolicySimulation simulation, System.Threading.CancellationToken ct = default);
     }
     public interface IManagementIdempotencyStore
     {
         System.Threading.Tasks.Task<int?> FindAsync(string key, string scope, string fingerprint, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task RecordAsync(string key, string scope, string fingerprint, int revision, System.Threading.CancellationToken ct = default);
+    }
+    public sealed class ManagementAi : System.IEquatable<MMLib.Alvo.Management.ManagementAi>
+    {
+        public ManagementAi(bool Configured, string? Kind, string? Model, string? Source) { }
+        public bool Configured { get; init; }
+        public string? Kind { get; init; }
+        public string? Model { get; init; }
+        public string? Source { get; init; }
     }
     public sealed class ManagementApplyRequest : System.IEquatable<MMLib.Alvo.Management.ManagementApplyRequest>
     {
@@ -1200,7 +1313,8 @@ namespace MMLib.Alvo.Management
     }
     public sealed class ManagementInfo : System.IEquatable<MMLib.Alvo.Management.ManagementInfo>
     {
-        public ManagementInfo(string Version, string Mode, string DataProvider, string StartupMode) { }
+        public ManagementInfo(string Version, string Mode, string DataProvider, string StartupMode, MMLib.Alvo.Management.ManagementAi Ai) { }
+        public MMLib.Alvo.Management.ManagementAi Ai { get; init; }
         public string DataProvider { get; init; }
         public string Mode { get; init; }
         public string StartupMode { get; init; }
@@ -1601,5 +1715,45 @@ namespace MMLib.Alvo.Schema
     {
         Scoped = 0,
         Global = 1,
+    }
+}
+namespace MMLib.Alvo.Secrets
+{
+    public sealed class AlvoSecretOptions
+    {
+        public const string ConfigurationSection = "Alvo:Secrets";
+        public AlvoSecretOptions() { }
+        public string? EncryptionKeyFile { get; set; }
+        public System.Collections.Generic.IDictionary<string, string> Values { get; }
+    }
+    public interface ISecretStore
+    {
+        bool CanWrite { get; }
+        System.Threading.Tasks.ValueTask<bool> DeleteAsync(MMLib.Alvo.Secrets.SecretName name, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.ValueTask<string?> GetAsync(MMLib.Alvo.Secrets.SecretName name, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Secrets.SecretName>> ListNamesAsync(System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.ValueTask SetAsync(MMLib.Alvo.Secrets.SecretName name, string value, System.Threading.CancellationToken ct = default);
+    }
+    public interface IWritableSecretStore : MMLib.Alvo.Secrets.ISecretStore { }
+    public sealed class SecretName : System.IEquatable<MMLib.Alvo.Secrets.SecretName>
+    {
+        public string Value { get; }
+        public override string ToString() { }
+        public static MMLib.Alvo.Secrets.SecretName Parse(string candidate) { }
+        public static bool TryParse(string? candidate, out MMLib.Alvo.Secrets.SecretName? name) { }
+    }
+    public sealed class SecretShadowedException : System.InvalidOperationException
+    {
+        public SecretShadowedException() { }
+        public SecretShadowedException(string message) { }
+        public SecretShadowedException(MMLib.Alvo.Secrets.SecretName name, string source) { }
+        public SecretShadowedException(string message, System.Exception innerException) { }
+        public MMLib.Alvo.Secrets.SecretName Name { get; }
+    }
+    public sealed class SecretStoreReadOnlyException : System.InvalidOperationException
+    {
+        public SecretStoreReadOnlyException() { }
+        public SecretStoreReadOnlyException(string message) { }
+        public SecretStoreReadOnlyException(string message, System.Exception innerException) { }
     }
 }

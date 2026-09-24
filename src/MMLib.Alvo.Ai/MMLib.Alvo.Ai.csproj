@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The AI agent: the Microsoft Agent Framework loop, the tool set it may call, and the chat client
+    each connection kind is dialled through. Its own package by package-boundary.md rule (a) — an
+    embedded host that wants only the Data API must not acquire an agent runtime and an OpenAI client
+    — and rule (b): the assistant is a real swap point, reached through IAlvoAssistant in
+    Abstractions, which is what lets the dashboard call it without seeing this package at all.
+
+    It references Abstractions and never MMLib.Alvo: everything it needs from the core arrives as
+    IAlvoManagement and IAiConnectionResolver (§0 principle 2), and an architecture test in
+    MMLib.Alvo.Ai.Tests holds that line.
+
+    Both dependency families are MIT and first-party Microsoft, so neither touches the licensing
+    bans in alvo-dotnet-conventions.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Agents.AI" />
+    <PackageReference Include="Microsoft.Extensions.AI" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
+  </ItemGroup>
+
+</Project>

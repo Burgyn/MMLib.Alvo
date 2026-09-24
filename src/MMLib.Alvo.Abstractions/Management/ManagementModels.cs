@@ -11,7 +11,36 @@
 /// <b>Not the database engine:</b> the core may not reference the adapter that knows one.
 /// </param>
 /// <param name="StartupMode">The <c>Alvo:Schema:Startup</c> mode this process booted under, lower-cased.</param>
-public sealed record ManagementInfo(string Version, string Mode, string DataProvider, string StartupMode);
+/// <param name="Ai">What this instance can say about its AI connection, without saying where it dials.</param>
+public sealed record ManagementInfo(
+    string Version, string Mode, string DataProvider, string StartupMode, ManagementAi Ai);
+
+/// <summary>
+/// Whether this instance has an AI connection, and enough about it to be recognised — never enough to be
+/// used.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>No endpoint, ever, and that is the field this record deliberately does not have.</b> The same
+/// reasoning <c>WebhookDelivery</c> records about a target URL: an address is a place a credential ends up
+/// in practice — in a query string, in a userinfo segment — and an internal host name is reconnaissance on
+/// its own. What a reader needs is "is it on, is it the model I meant, and did my deployment or the
+/// dashboard decide that", which is exactly what is here.
+/// </para>
+/// <para>
+/// <b>Always present rather than <see langword="null"/> when unconfigured.</b> A screen that has to
+/// distinguish "no AI" from "an older instance that does not report AI" is a screen with two empty states;
+/// <see cref="Configured"/> answers the first and the field's presence answers the second.
+/// </para>
+/// </remarks>
+/// <param name="Configured">Whether a connection resolves at all.</param>
+/// <param name="Kind">The wire spelling of the protocol, or <see langword="null"/> when unconfigured.</param>
+/// <param name="Model">The model or deployment name, or <see langword="null"/> when unconfigured.</param>
+/// <param name="Source">
+/// <c>configuration</c>, <c>store</c>, or <see langword="null"/> when unconfigured — which is what tells an
+/// operator whether their deployment pinned this or somebody saved it from the dashboard.
+/// </param>
+public sealed record ManagementAi(bool Configured, string? Kind, string? Model, string? Source);
 
 /// <summary>One project this instance serves.</summary>
 /// <param name="Name">The project name — the descriptor's own <c>name</c>.</param>

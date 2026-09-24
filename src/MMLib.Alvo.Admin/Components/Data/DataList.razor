@@ -1,0 +1,73 @@
+﻿@page "/admin/data"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject AdminSession Session
+@inject ILogger<DataList> Logger
+
+<PageTitle>Data · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Title="Data" />
+
+    @if (_problem is not null)
+    {
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
+    }
+    else if (_schema is null)
+    {
+        <Skeleton Size="Skeleton.SkeletonSize.Lg" />
+    }
+    else
+    {
+        @if (_tenant is null && _schema.Entities.Any(entity => entity.Tenancy == TenancyMode.Scoped))
+        {
+            <NotYetPanel Title="You hold no tenant">
+                <Subtitle>
+                    The entities marked <em>scoped</em> below are refused with 403 before any rule
+                    is consulted — the tenant guard runs first. An administrator grants a tenant
+                    in Access; an API key carries the one it was issued for.
+                </Subtitle>
+            </NotYetPanel>
+        }
+
+        <Panel Title="Entities">
+            <Subtitle>Read and written through the Data API, under your own credential.</Subtitle>
+            <ChildContent>
+                @* A link rather than ListRow's button: each row is an address. *@
+                @foreach (var entity in _schema.Entities)
+                {
+                    <a class="a-listrow a-listrow--roomy a-listrow--inline a-listrow--center"
+                       href="@AdminPaths.Records(entity.Name)">
+                        <Icon Path="@Icons.Data" />
+                        <span class="a-mono a-grow a-value">@entity.Name</span>
+                        @if (entity.Tenancy == TenancyMode.Scoped)
+                        {
+                            <span class="@($"a-badge {(_tenant is null ? "a-badge--warn" : "a-badge--accent")}")">scoped</span>
+                        }
+                    </a>
+                }
+            </ChildContent>
+        </Panel>
+    }
+</div>
+
+@code {
+    private SchemaModel? _schema;
+    private TenantId? _tenant;
+    private AdminProblem? _problem;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _schema = await Gateway.SchemaAsync(CancellationToken.None);
+            _tenant = (await Session.CallerAsync(CancellationToken.None)).Tenant;
+        }
+        catch (Exception exception)
+        {
+            _problem = AdminProblem.From(exception, Logger);
+        }
+    }
+}

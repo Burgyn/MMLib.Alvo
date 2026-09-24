@@ -1,0 +1,236 @@
+﻿@*
+    The schema assistant, as a drawer.
+
+    It is mounted only when a connection resolves, so a deployment with no AI has no launcher, no
+    badge and no explanation to read — spec §3.3. What it can do is ask and propose; the one control
+    it offers on a proposal opens the existing preview, where the operator applies with the same
+    button they use for their own edits. There is deliberately no apply here.
+*@
+@inject AssistantGateway Assistant
+@inject ManagementGateway Gateway
+@inject AdminSession Session
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<button type="button" class="a-assistant__launch" data-testid="assistant-launch"
+        aria-expanded="@_open.ToString().ToLowerInvariant()" @onclick="Toggle">
+    @(_open ? "Close assistant" : "Ask Alvo")
+</button>
+
+@if (_open)
+{
+    <div class="a-assistant" data-testid="assistant-drawer">
+        <SectionHead Title="Ask Alvo" class="a-assistant__head">
+            <Subtitle>It reads this project and proposes a descriptor. You apply it, from Preview.</Subtitle>
+        </SectionHead>
+
+        <div class="a-assistant__thread" data-testid="assistant-thread">
+            @foreach (var turn in _turns)
+            {
+                <div class="a-assistant__turn">
+                    <span class="a-assistant__who">@(turn.Role is AssistantRole.Operator ? "You" : "Alvo")</span>
+                    <span class="a-assistant__text">@turn.Text</span>
+                </div>
+            }
+
+            @if (_tools.Count > 0)
+            {
+                <div class="a-assistant__tools" data-testid="assistant-tools">
+                    @foreach (var tool in _tools)
+                    {
+                        <span class="a-badge a-mono">@tool</span>
+                    }
+                </div>
+            }
+
+            @if (_streaming is { Length: > 0 })
+            {
+                <div class="a-assistant__turn">
+                    <span class="a-assistant__who">Alvo</span>
+                    <span class="a-assistant__text">@_streaming</span>
+                </div>
+            }
+
+            @if (_failure is { Length: > 0 })
+            {
+                <ErrorPanel Title="That turn could not be answered" Fix="@_failure" />
+            }
+        </div>
+
+        @if (_proposal is { } proposal)
+        {
+            <div class="a-assistant__proposal" data-testid="assistant-proposal">
+                <SectionHead Title="A proposed change">
+                    <Subtitle>Written against revision @proposal.ExpectedRevision. Nothing has been applied.</Subtitle>
+                </SectionHead>
+
+                @if (proposal.Refusals.Count > 0)
+                {
+                    <div class="a-refused" data-testid="assistant-refusals">
+                        <span class="a-refused__reason">Alvo refused this draft:</span>
+                        @foreach (var refusal in proposal.Refusals)
+                        {
+                            <span class="a-refused__reason a-mono">@refusal</span>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="a-row a-row--gap-2 a-assistant__review">
+                        <button type="button" class="a-btn a-btn--primary" data-testid="assistant-review"
+                                @onclick="() => Review(proposal)">Review it in Preview</button>
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="a-assistant__ask">
+            <label class="a-label" for="assistant-message">Your question</label>
+            <textarea class="a-textarea" id="assistant-message" rows="3" disabled="@_busy"
+                      placeholder="Add a nullable note column to work orders"
+                      @oninput="args => _message = args.Value?.ToString() ?? string.Empty">@_message</textarea>
+            <div class="a-row a-row--gap-2">
+                <button type="button" class="a-btn a-btn--primary" data-testid="assistant-send"
+                        disabled="@(_busy || _message.Trim().Length == 0)" @onclick="AskAsync">
+                    @(_busy ? "Thinking…" : "Ask")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    /* A turn runs for seconds across several tool calls and a streaming answer. Without a token tied to
+       this component, an operator who navigates away leaves an outbound call to somebody else's endpoint
+       running and StateHasChanged firing at a disposed component. */
+    private readonly ComponentLifetime _lifetime = new();
+    private readonly List<AssistantTurn> _turns = [];
+    private readonly List<string> _tools = [];
+    private string _message = string.Empty;
+    private string _streaming = string.Empty;
+    private string? _failure;
+    private bool _busy;
+    private bool _open;
+    private AssistantUpdate.Proposal? _proposal;
+
+    private void Toggle() => _open = !_open;
+
+    /// <summary>Cancels a turn still in flight when the operator leaves.</summary>
+    public void Dispose() => _lifetime.Dispose();
+
+    /// <summary>
+    /// Asks one turn, redrawing as the answer arrives.
+    /// </summary>
+    /// <remarks>
+    /// The whole conversation is sent every time: the assistant holds no session, so this screen is the one
+    /// authority on what the conversation was — which is also why a reload starts a new one rather than
+    /// resurrecting a thread nobody can see.
+    /// </remarks>
+    private async Task AskAsync()
+    {
+        var asked = _message.Trim();
+        if (asked.Length == 0 || _busy)
+        {
+            return;
+        }
+
+        Begin(asked);
+
+        try
+        {
+            var request = new AssistantRequest(await ProjectAsync(), asked, [.. _turns]);
+            await foreach (var update in Assistant.AskAsync(request, _lifetime.Token))
+            {
+                Apply(update);
+                StateHasChanged();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            /* The operator left. There is nothing to draw and nobody to draw it for. */
+            return;
+        }
+
+        End();
+    }
+
+    /// <summary>Puts the question in the thread and clears what the last turn left behind.</summary>
+    private void Begin(string asked)
+    {
+        _busy = true;
+        _failure = null;
+        _proposal = null;
+        _streaming = string.Empty;
+        _tools.Clear();
+        _message = string.Empty;
+        _turns.Add(new AssistantTurn(AssistantRole.Operator, asked));
+    }
+
+    /// <summary>Files the answer as a turn, so the next question carries it.</summary>
+    private void End()
+    {
+        if (_streaming.Length > 0)
+        {
+            _turns.Add(new AssistantTurn(AssistantRole.Assistant, _streaming));
+            _streaming = string.Empty;
+        }
+
+        _busy = false;
+    }
+
+    private void Apply(AssistantUpdate update)
+    {
+        switch (update)
+        {
+            case AssistantUpdate.Text text:
+                _streaming += text.Delta;
+                break;
+            case AssistantUpdate.ToolInvoked tool:
+                _tools.Add(tool.Tool);
+                break;
+            case AssistantUpdate.Proposal proposal:
+                _proposal = proposal;
+                break;
+            case AssistantUpdate.Failed failed:
+                _failure = failed.Reason;
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Puts the proposal in the working copy and opens the diff.
+    /// </summary>
+    /// <remarks>
+    /// <b>This is the whole path from a draft to the database, and it goes through the operator.</b> The
+    /// drawer writes a candidate and navigates; Preview shows the diff, runs the dry run, and applies with
+    /// the same button and the same confirmation an operator's own edit gets.
+    /// </remarks>
+    private async Task Review(AssistantUpdate.Proposal proposal)
+    {
+        var copy = await Session.CopyAsync(_lifetime.Token);
+        copy.Replace(proposal.DescriptorJson);
+        copy.SuggestReason(ReasonFor());
+
+        Navigation.NavigateTo(AdminPaths.Changes);
+    }
+
+    /// <summary>
+    /// The reason an apply carries when it came from the assistant.
+    /// </summary>
+    /// <remarks>
+    /// The operator's own request rather than the agent's summary, and prefixed rather than parsed: the
+    /// history renders it verbatim, so what a later reader sees is what somebody actually asked for.
+    /// </remarks>
+    private string ReasonFor()
+    {
+        var asked = _turns.LastOrDefault(turn => turn.Role is AssistantRole.Operator)?.Text ?? string.Empty;
+
+        return "assistant: " + (asked.Length <= ReasonLimit ? asked : asked[..ReasonLimit]);
+    }
+
+    /// <summary>How much of the request the reason carries.</summary>
+    private const int ReasonLimit = 200;
+
+    private async Task<string> ProjectAsync() =>
+        (await Gateway.ProjectsAsync(_lifetime.Token)).FirstOrDefault()?.Name ?? string.Empty;
+}

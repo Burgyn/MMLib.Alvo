@@ -283,6 +283,40 @@ seam now keeps the bootstrap account, its tables and its validation on one sched
 arriving with the dashboard as a migration; it is stated here because "seeds an account nobody
 can sign in as" reads as a defect if you do not know it is the plan.
 
+## Secrets, and the AI connection
+
+Two more families of `Alvo:*` keys, and both follow the bootstrap password's rule rather than inventing
+one.
+
+**The secret store is two layers.** `Alvo__Secrets__Values__<name>` is the deployment's own configuration —
+and it is one adapter for four stores, because Azure Key Vault, a mounted Kubernetes secret, a user-secrets
+file and an environment variable all reach `IConfiguration` through a provider the host adds. Behind it,
+`Alvo__Secrets__EncryptionKeyFile` points at a *mounted* file holding 32 bytes of base64, which is the key
+the database-backed store encrypts rows with. Configuration **wins**, and a write to a name it carries is
+refused by name rather than stored and never read — the one failure this layering can produce, and its
+silent version is an operator saving a key while every request keeps using the old one.
+
+`Alvo__Secrets__EncryptionKey` — the key directly, no file — is **refused at startup**, for the reason
+`Alvo__Admin__BootstrapPassword` is, only sharper: that value decrypts every secret the deployment holds.
+With no key file mounted there is no writable store at all rather than a fallback key, so a deployment that
+lost its mount cannot silently re-encrypt under one nobody can restore from. The dashboard asks before it
+offers a save.
+
+**The AI connection is infrastructure too** (`docs/PLAN.md` invariant 4 again): a model name and an endpoint
+belong to the deployment, and a descriptor that carried them would stop applying the day the operator
+changed providers.
+
+- `Alvo__Ai__Kind` — `openai-compatible` or `azure-openai`.
+- `Alvo__Ai__Endpoint` — the base address, e.g. `http://localhost:11434/v1`.
+- `Alvo__Ai__Model` — the model or deployment name.
+- `Alvo__Ai__ApiKeySecretRef` — the **name** of a secret holding the key, resolved through the store above.
+  A name rather than a value, so the credential still comes from wherever that deployment keeps credentials.
+
+A connection pinned here wins over one saved from the dashboard, which is the same precedence the secret
+store itself uses — one rule to learn rather than two — and `GET {m}/info` reports which of the two answered.
+Configuring nothing is the supported default: the assistant then answers "not configured" and the dashboard
+renders no launcher at all.
+
 ## The startup mode, and what production should set
 
 `Alvo:Schema:Startup` (`Alvo__Schema__Startup`) decides what a boot may do when the

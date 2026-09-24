@@ -1,0 +1,90 @@
+﻿@*
+    A refusal, rendered where it happened and left there.
+
+    Design §5.5: errors are not toasts. The Data API answers RFC 7807 with `title`, `detail` and a
+    `type` slug, and `UnhonouredFeatures` adds a `fix` — a toast that disappears in three seconds
+    throws all four away, in a tool whose whole job is configuration.
+
+    A screen hands over the `AdminProblem` it already classified, by cascading it around the panel:
+    the classification needs the site the screen caught it at, and `AdminProblem` is internal, which a
+    component's public parameter may not be. Only a raw exception — what the layout's `ErrorBoundary`
+    catches while rendering — is classified here. Either way a documented refusal gets a mapped headline
+    over the framework's own sentence, and anything else gets a generic one, because the
+    `Exception.Message` of an unexpected exception is written for a log and an operator is not reading a
+    log. What is never rewritten is a framework sentence: a refusal's own `Consequence` and `Fix` are
+    served verbatim (§4.1).
+*@
+<div class="a-error" role="alert" data-testid="error-panel">
+    <div class="a-error__title" data-testid="error-title">@_text.Headline</div>
+    <div class="a-error__detail">@_text.Detail</div>
+    @if (_text.Fix is { Length: > 0 })
+    {
+        <div class="a-error__fix">@_text.Fix</div>
+    }
+    @if (Slug is { Length: > 0 })
+    {
+        <code class="a-error__type">@Slug</code>
+    }
+
+    @* A caller the management surface does not admit sees this on every screen, and the two
+       reasons it happens need opposite answers. Either the account genuinely holds no level — the
+       sentence above is then the whole story — or the session outlived the account it names, which
+       is what a developer gets every time they delete the database and restart. The second is
+       indistinguishable from the first from here, and it strands an operator on a screen with no
+       control on it, so the way out is offered rather than left to be found in a menu. *@
+    @if (_text.OffersSignOut)
+    {
+        <form method="post" action="@AlvoAdmin.SignOutEndpoint" data-enhance="false"
+              class="a-error__actions">
+            <AntiforgeryToken />
+            <button type="submit" class="a-btn a-btn--sm" data-testid="forbidden-sign-out">
+                Sign out and sign in again
+            </button>
+        </form>
+    }
+
+    @if (Actions is not null)
+    {
+        <div class="a-row a-error__actions">@Actions</div>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// An exception nothing has classified — what an <c>ErrorBoundary</c> caught while rendering. A screen
+    /// that caught and classified its own cascades the <c>AdminProblem</c> instead.
+    /// </summary>
+    [Parameter]
+    public Exception? Fault { get; set; }
+
+    /// <summary>The headline, when the caller has a better one than the exception type gives.</summary>
+    /// <remarks>Named <c>Title</c> to match the vocabulary every other panel-like component uses
+    /// (docs/architecture/admin-dashboard-review.md, F-7), rather than this component's own
+    /// <c>Heading</c>.</remarks>
+    [Parameter]
+    public string? Title { get; set; }
+
+    /// <summary>What to do about it — served verbatim when it came from the framework.</summary>
+    [Parameter]
+    public string? Fix { get; set; }
+
+    /// <summary>The problem-type slug, when one applies.</summary>
+    [Parameter]
+    public string? Slug { get; set; }
+
+    /// <summary>What the operator can do from here, drawn under the panel's text.</summary>
+    [Parameter]
+    public RenderFragment? Actions { get; set; }
+
+    /// <summary>The screen's own classification, site and all; see <see cref="ErrorPanelText"/>.</summary>
+    [CascadingParameter]
+    private AdminProblem? Classified { get; set; }
+
+    private ErrorPanelText _text = ErrorPanelText.Of(null, null, null, null);
+
+    /// <summary>
+    /// Projected once per parameter set rather than per read. An exception the classifier drops still gets
+    /// the generic panel here: a panel was asked for, so it must say something.
+    /// </summary>
+    protected override void OnParametersSet() => _text = ErrorPanelText.Of(Classified, Fault, Title, Fix);
+}

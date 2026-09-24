@@ -793,3 +793,28 @@ namespace MMLib.Alvo.Testing.Rules
         public void Update_carries_both_using_and_with_check_from_updates_own_distinctive_source() { }
     }
 }
+namespace MMLib.Alvo.Testing.Secrets
+{
+    public sealed class InMemorySecretStore : MMLib.Alvo.Secrets.ISecretStore
+    {
+        public InMemorySecretStore() { }
+        public bool CanWrite { get; }
+        public System.Threading.Tasks.ValueTask<bool> DeleteAsync(MMLib.Alvo.Secrets.SecretName name, System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.ValueTask<string?> GetAsync(MMLib.Alvo.Secrets.SecretName name, System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Secrets.SecretName>> ListNamesAsync(System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.ValueTask SetAsync(MMLib.Alvo.Secrets.SecretName name, string value, System.Threading.CancellationToken ct = default) { }
+    }
+    public abstract class SecretStoreContractTests
+    {
+        protected SecretStoreContractTests() { }
+        protected virtual bool SupportsWriting { get; }
+        public System.Threading.Tasks.Task A_store_that_cannot_write_says_so_and_refuses() { }
+        public System.Threading.Tasks.Task CanWrite_agrees_with_what_a_write_does() { }
+        protected abstract MMLib.Alvo.Secrets.ISecretStore CreateStore();
+        public System.Threading.Tasks.Task Delete_reports_whether_it_removed_anything() { }
+        public System.Threading.Tasks.Task Get_returns_what_Set_wrote() { }
+        public System.Threading.Tasks.Task ListNames_returns_names_and_no_values() { }
+        public System.Threading.Tasks.Task Set_replaces_an_existing_value() { }
+        public System.Threading.Tasks.Task Unknown_name_is_null_rather_than_an_exception() { }
+    }
+}

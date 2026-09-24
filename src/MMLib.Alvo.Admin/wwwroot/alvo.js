@@ -49,10 +49,13 @@
     document.documentElement.dataset.theme ??
     (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 
+  /* Announced as well as returned: the palette can flip the theme too, and the header's toggle has
+     to redraw its icon for a flip it did not make. `emit` is a hoisted function below. */
   const toggleTheme = () => {
     const next = resolvedTheme() === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = next;
     writeStored(THEME_KEY, next);
+    emit('theme', { value: next });
     return next;
   };
 
@@ -73,8 +76,21 @@
     element instanceof HTMLElement &&
     (element.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName));
 
-  const emit = (name, detail) =>
+  /* What Enter already means something to. Enter on a button presses it and on a link follows it; the
+     grid's `open` is for Enter on a selected row, which is none of these, and must not fire as well. */
+  const CONTROL = 'a[href], button, input, select, textarea, summary, [contenteditable], [role="button"], ' +
+    '[role="link"], [role="tab"], [role="radio"], [role="option"], [role="checkbox"], [role="switch"], ' +
+    '[role="menuitem"]';
+
+  const isControl = (element) => element instanceof Element && element.closest(CONTROL) !== null;
+
+  function emit(name, detail) {
     document.dispatchEvent(new CustomEvent(`alvo:${name}`, { detail, bubbles: true }));
+  }
+
+  /* The keys that may follow `g`: the sections' letters, and the comma Settings takes from the
+     convention of ⌘, for preferences. Which key reaches which section is AdminNavigation's to say. */
+  const GOTO_KEY = /^[a-z,]$/;
 
   let awaitingGoto = false;
 
@@ -91,13 +107,24 @@
       return;
     }
 
-    if (isTypingTarget(document.activeElement)) {
+    /* A chord with a modifier belongs to the browser or the operating system — ⌥D, ⌘R — and a
+       half-typed `g` must not turn the next one into a jump. */
+    if (isTypingTarget(document.activeElement) || event.metaKey || event.ctrlKey || event.altKey) {
+      awaitingGoto = false;
       return;
     }
 
+    /* Nor while a dialog or a sheet is over the page: a jump would navigate out from under it, and
+       whatever was half-done in it would be lost to a stray `g`. */
+    const underModal = document.querySelector('[aria-modal="true"]') !== null;
+
     if (awaitingGoto) {
       awaitingGoto = false;
-      if (/^[a-z]$/.test(event.key)) {
+      if (underModal) {
+        return;
+      }
+
+      if (GOTO_KEY.test(event.key)) {
         event.preventDefault();
         emit('goto', { key: event.key });
       }
@@ -105,24 +132,35 @@
       return;
     }
 
+    /* The page's own keys are the page's, not the dialog's: `j` inside the record sheet must not move
+       the selection behind it, and Enter there must not open a second record over the first. */
+    if (underModal) {
+      return;
+    }
+
     switch (event.key) {
       case 'j':
         event.preventDefault();
-        emit('move', { by: 1 });
+        emit('move', { value: 'next' });
         break;
       case 'k':
         event.preventDefault();
-        emit('move', { by: -1 });
+        emit('move', { value: 'previous' });
         break;
       case 'g':
         awaitingGoto = true;
         break;
       case '/':
         event.preventDefault();
-        emit('search');
+        /* Focused here rather than from .NET: a screen's search box is plain markup, and moving
+           focus into it needs no round trip over the circuit — nor a public method on the page. So
+           there is no `search` event: nothing on the circuit has anything to do. */
+        document.querySelector('[data-alvo-search]')?.focus();
         break;
       case 'Enter':
-        emit('open');
+        if (!isControl(document.activeElement)) {
+          emit('open');
+        }
         break;
       default:
         break;

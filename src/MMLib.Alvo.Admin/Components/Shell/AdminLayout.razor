@@ -1,0 +1,179 @@
+﻿@*
+    The shell: sidebar + header + content on a desktop, bottom bar under 720 px.
+
+    The two layouts are one markup tree and one media query, not two components. A second component
+    would be a second navigation — and §4.3 argues at length that a second navigation is how a
+    navigation starts lying about what works.
+*@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject AssistantGateway Assistant
+@inject ILogger<AdminLayout> Logger
+
+<div class="a-shell">
+    <nav class="a-sidebar" aria-label="Sections" data-testid="sidebar">
+        <a class="a-brand" href="@AdminPaths.Overview" aria-label="Alvo">
+            <img src="@AlvoAdminAssets.Mark" width="26" height="26" alt="" />
+            <span>Alvo</span>
+        </a>
+
+        <ProjectSwitcher />
+
+        <NavList />
+
+        <div class="a-sidebar__foot">
+            <SignedInAs />
+        </div>
+    </nav>
+
+    <div class="a-main">
+        <header class="a-header">
+            <button type="button" class="a-btn a-btn--ghost a-btn--sm" @onclick="OpenPalette"
+                    aria-label="Search and jump to a entry">
+                <Icon Path="@Icons.Search" />
+                <span>Search</span>
+                <kbd class="a-kbd">&#8984;K</kbd>
+            </button>
+            <span class="a-spacer"></span>
+            <ThemeToggle />
+            <button type="button" class="a-btn a-btn--ghost a-btn--sm a-only-mobile" @onclick="OpenSheet"
+                    aria-label="More sections" data-testid="more-sections"
+                    aria-expanded="@(_sheetOpen ? "true" : "false")">
+                <Icon Path="@Icons.More" />
+            </button>
+        </header>
+
+        <PendingBar />
+
+        <main class="a-content" id="a-content">
+            @*
+                A screen that throws while rendering takes this panel instead of the circuit. Without the
+                boundary a render bug ends the session: the shell, the working copy's pending count and every
+                other screen go with it, and the operator reads the framework's reconnect banner. The
+                boundary's own logger writes the exception to the server log, so the panel can say "in the
+                server log" and mean it.
+            *@
+            <ErrorBoundary @ref="_boundary">
+                <ChildContent>@Body</ChildContent>
+                <ErrorContent Context="fault">
+                    <ErrorPanel Fault="@fault">
+                        <Actions>
+                            <button type="button" class="a-btn a-btn--sm" data-testid="error-reload"
+                                    @onclick="Reload">Reload</button>
+                        </Actions>
+                    </ErrorPanel>
+                </ErrorContent>
+            </ErrorBoundary>
+        </main>
+
+        @*
+            Mounted only when a connection resolves. A deployment with no AI gets no launcher, no badge
+            and no explanation to read — spec §3.3: a control whose only possible outcome is "not
+            configured" is worse than its absence, which is the argument Settings already makes about
+            issuing an API key.
+        *@
+        @if (_assistant)
+        {
+            <AssistantDrawer />
+        }
+    </div>
+
+    <nav class="a-bottomnav" aria-label="Sections" data-testid="bottom-nav">
+        @foreach (var entry in AdminNavigation.Bar)
+        {
+            @SectionLink.For(entry, "a-bottomnav__item", "a-bottomnav__item--active", BarContent(entry))
+        }
+    </nav>
+
+    @if (_sheetOpen)
+    {
+        <div class="a-scrim a-sheet" @onclick="CloseSheet" data-testid="sections-sheet">
+            <div class="a-sheet__panel" @onclick:stopPropagation="true">
+                <NavList BeyondTheBar="true" OnNavigate="CloseSheet" />
+
+                <SignedInAs />
+            </div>
+        </div>
+    }
+</div>
+
+<CommandPalette @ref="_palette" />
+
+@code {
+    private CommandPalette? _palette;
+    private ErrorBoundary? _boundary;
+    private bool _sheetOpen;
+    private bool _assistant;
+
+    /// <summary>
+    /// Whether to mount the assistant, asked at boot and again whenever the connection is saved.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Every refusal is "no launcher", never a failed page.</b> The shell renders for a caller the
+    /// project names nowhere and for one whose account has been deleted since they signed in — and both
+    /// reach this call. A layout that let either throw would replace the screen that says what happened
+    /// with a 500, which is measured rather than imagined: it took out the revoked-session scenario.
+    /// </para>
+    /// <para>
+    /// <b>Asked again, because once per circuit was a bug rather than a simplification.</b> An operator who
+    /// configured the connection on Settings got a panel reporting <c>configured</c> and a shell with no
+    /// launcher in it, for the rest of the session and with nothing on screen suggesting a reload. The
+    /// subscription is to <see cref="AssistantGateway.ConnectionChanged"/>, which the save raises — see the
+    /// argument for the event there.
+    /// </para>
+    /// </remarks>
+    protected override async Task OnInitializedAsync()
+    {
+        Assistant.ConnectionChanged += OnConnectionChanged;
+        await RefreshAssistantAsync();
+    }
+
+    public void Dispose() => Assistant.ConnectionChanged -= OnConnectionChanged;
+
+    /// <summary>
+    /// Clears a caught fault on every navigation — the layout's parameters are set again with each new page —
+    /// so the panel belongs to the screen that threw rather than to the session.
+    /// </summary>
+    protected override void OnParametersSet() => _boundary?.Recover();
+
+    /// <summary>Draws the screen again from scratch, which re-reads everything it shows.</summary>
+    private void Reload() => _boundary?.Recover();
+
+    /// <summary>
+    /// Re-asks, then redraws — on the renderer's thread, because the save that raised this ran on the
+    /// settings page's own.
+    /// </summary>
+    private void OnConnectionChanged() =>
+        _ = InvokeAsync(async () =>
+        {
+            await RefreshAssistantAsync();
+            StateHasChanged();
+        });
+
+    /// <summary>The one place the question is asked, so the boot and the re-ask cannot answer it differently.</summary>
+    private async Task RefreshAssistantAsync()
+    {
+        try
+        {
+            _assistant = await Assistant.IsConfiguredAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            AdminProblem.Absorb(exception, Logger);
+            _assistant = false;
+        }
+    }
+
+    private Task OpenPalette() => _palette?.OpenAsync() ?? Task.CompletedTask;
+
+    private void OpenSheet() => _sheetOpen = true;
+
+    private void CloseSheet() => _sheetOpen = false;
+
+    /// <summary>A bottom-bar entry: a smaller icon over the section's short title.</summary>
+    private static RenderFragment BarContent(AdminSection entry) => @<text>
+        <Icon Path="@entry.Icon" Size="18" />
+        <span>@entry.ShortTitle</span>
+    </text>;
+}

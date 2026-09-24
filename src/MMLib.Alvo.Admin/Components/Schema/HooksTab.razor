@@ -1,0 +1,203 @@
+﻿@*
+    What runs on a write.
+
+    A before-hook and an after-hook are not the same editor and must not look like one: the frozen
+    schema's `$defs/beforeHookList` admits `reject` and `mutate` only — "no network, no external
+    calls" — because a before-hook runs inside the write's own transaction. An after-hook is where
+    a webhook or an email belongs. The point's name is therefore shown with what it may contain,
+    rather than the two being flattened into one list of "actions".
+
+    All six points are honoured by this build — PR5a landed the three `after*`, PR5b the three
+    `before*` — which is what unblocked editing them at all. What is still refused is three of the
+    five *action types*, and those are read off `capabilities` rather than listed here, so the day
+    one of them lands the tab stops warning about it without anybody editing this file.
+*@
+
+<SectionHead Title="On write">
+    <Subtitle>
+        Before-hooks run inside the transaction and can only refuse or change the row.
+        After-hooks run once it is committed and are where anything that leaves the process belongs.
+    </Subtitle>
+</SectionHead>
+
+@*
+    Folded by default. Three refusals at full length were the first screen of this tab on a phone — the
+    operator scrolled past a wall to reach what the entity actually declares. Shut, it is one line that
+    still says the count and the names; the wording inside is the framework's own, unshortened.
+*@
+@if (ActionRefusals.Count > 0)
+{
+    <details class="a-refused a-refused--fold" data-testid="hooks-refused">
+        <summary>
+            @ActionRefusals.Count action type@(ActionRefusals.Count == 1 ? "" : "s") this build declares and does not run —
+            <span class="a-mono">@string.Join(", ", ActionRefusals.Select(refusal => refusal.Slot))</span>
+        </summary>
+        @foreach (var refusal in ActionRefusals)
+        {
+            <span class="a-refused__reason">@refusal.Consequence</span>
+        }
+    </details>
+}
+
+@if (Hooks.Count == 0)
+{
+    <EmptyState Title="Nothing runs on a write to this entity"
+                Body="No hooks are declared. Writes are validated against the field facets and the rules, and nothing else happens." />
+}
+else
+{
+    @foreach (var point in Hooks)
+    {
+        <ListRow class="a-listrow--roomy a-listrow--stacked">
+            <div class="a-row">
+                <span class="@($"a-badge {(HookBuilder.IsBefore(point.Key) ? "a-badge--warn" : "a-badge--accent")}")">@point.Key</span>
+                <span class="a-section__sub">
+                    @(HookBuilder.IsBefore(point.Key)
+                        ? "in the transaction · may refuse or change the row · no network"
+                        : "after the commit · may leave the process")
+                </span>
+            </div>
+
+            @{
+                var declared = Declared(point.Value);
+                var name = point.Key;
+            }
+
+            @for (var position = 0; position < declared.Count; position++)
+            {
+                var hook = declared[position];
+                var at = position;
+
+                @*
+                    The control sits under the declaration on a phone and beside it on a desktop. Beside it
+                    at 375 px, the code block gave up a third of the row to one word and every condition
+                    wrapped mid-token.
+                *@
+                <div class="a-hookrow" data-testid="hook-row">
+                    @if (Staged.IsNewHook(name, at))
+                    {
+                        <span class="a-badge a-badge--accent a-hookrow__badge"
+                              data-testid="hook-staged">new</span>
+                    }
+                    <CodeBlock Json="@hook" />
+                    @if (Editable)
+                    {
+                        <button type="button" class="a-btn a-btn--ghost a-btn--sm a-hookrow__remove"
+                                data-testid="hook-remove"
+                                aria-label="@($"Remove hook {at + 1} of {name}")"
+                                @onclick="() => OnRemove.InvokeAsync(new HookAt(name, at))">Remove</button>
+                    }
+                </div>
+            }
+        </ListRow>
+    }
+}
+
+@if (Editable)
+{
+    <div class="a-stack a-stack--inset a-stack--gap-4">
+        <SectionHead Title="Add a hook">
+            <Subtitle>
+                The point decides what the action may be. A before-hook runs in the transaction and may
+                only refuse or patch the row; a <code class="a-mono">beforeDelete</code> may only refuse,
+                because the row is going and a patch against it would be discarded.
+            </Subtitle>
+        </SectionHead>
+
+        @if (_refusal is { Length: > 0 })
+        {
+            <Refusal data-testid="hook-refusal">@_refusal</Refusal>
+        }
+
+        <Field Label="When" LabelId="hook-points-label">
+            <ChipGroup TValue="string" Items="HookBuilder.Points" Selected="[_hook.Point]" aria-labelledby="hook-points-label"
+                       data-testid="hook-points" SelectedChanged="points => Choose(points[0])" />
+        </Field>
+
+        <Field Label="Only when (optional)" For="hook-condition">
+            <ChildContent>
+                <input class="a-input a-mono" id="hook-condition" value="@_hook.Condition" autocomplete="off"
+                       placeholder="@_hook.Example"
+                       @oninput="args => _hook.Condition = args.Value?.ToString() ?? string.Empty" />
+            </ChildContent>
+            <Hint>
+                CEL over @((MarkupString)_hook.Images) and <code class="a-mono">@@user</code>. Left empty, the hook
+                runs on every write.
+            </Hint>
+        </Field>
+
+        <Field Label="Then" LabelId="hook-actions-label">
+            <ChipGroup TValue="string" Items="_hook.Kinds" Selected="[_hook.Kind]" aria-labelledby="hook-actions-label"
+                       data-testid="hook-actions" SelectedChanged="kinds => _hook.Kind = kinds[0]" />
+        </Field>
+
+        @switch (_hook.Kind)
+        {
+            case HookBuilder.Reject:
+                <Field Label="Refuse with" For="hook-reject">
+                    <ChildContent>
+                        <input class="a-input" id="hook-reject" value="@_hook.RejectMessage" autocomplete="off" maxlength="500"
+                               placeholder="A completed work order cannot be reopened."
+                               @oninput="args => _hook.RejectMessage = args.Value?.ToString() ?? string.Empty" />
+                    </ChildContent>
+                    <Hint>
+                        Becomes the <code class="a-mono">detail</code> of the RFC 7807 problem the caller
+                        reads, so write it for them rather than for the log.
+                    </Hint>
+                </Field>
+                break;
+            case HookBuilder.Mutate:
+                <div class="a-field-row">
+                    <Field Label="Field" For="hook-mutate-field">
+                        <input class="a-input a-mono" id="hook-mutate-field" value="@_hook.MutateField" autocomplete="off"
+                               placeholder="completed_on"
+                               @oninput="args => _hook.MutateField = args.Value?.ToString() ?? string.Empty" />
+                    </Field>
+                    <Field Label="Set to" For="hook-mutate-value">
+                        <ChildContent>
+                            <input class="a-input a-mono" id="hook-mutate-value" value="@_hook.MutateValue" autocomplete="off"
+                                   placeholder="now()"
+                                   @oninput="args => _hook.MutateValue = args.Value?.ToString() ?? string.Empty" />
+                        </ChildContent>
+                        <Hint>
+                            A CEL expression, stored as <code class="a-mono">{"$cel": "…"}</code>. Wrap it in
+                            quotes for a literal string.
+                        </Hint>
+                    </Field>
+                </div>
+                break;
+            case HookBuilder.Webhook:
+                <Field Label="Endpoint" For="hook-endpoint">
+                    <ChildContent>
+                        <input class="a-input a-mono" id="hook-endpoint" value="@_hook.Endpoint" autocomplete="off"
+                               placeholder="dispatch"
+                               @oninput="args => _hook.Endpoint = args.Value?.ToString() ?? string.Empty" />
+                    </ChildContent>
+                    <Hint>
+                        A name declared under <code class="a-mono">webhooks.endpoints</code>, not a URL — the
+                        managed path is the one this build delivers on.
+                    </Hint>
+                </Field>
+                break;
+            case HookBuilder.Email:
+                <div class="a-field-row">
+                    <Field Label="Template" For="hook-template">
+                        <input class="a-input a-mono" id="hook-template" value="@_hook.Template" autocomplete="off"
+                               placeholder="work_order_completed"
+                               @oninput="args => _hook.Template = args.Value?.ToString() ?? string.Empty" />
+                    </Field>
+                    <Field Label="To" For="hook-to">
+                        <input class="a-input a-mono" id="hook-to" value="@_hook.To" autocomplete="off"
+                               placeholder="{{new.contact_email}}"
+                               @oninput="args => _hook.To = args.Value?.ToString() ?? string.Empty" />
+                    </Field>
+                </div>
+                break;
+        }
+
+        <div class="a-row">
+            <button type="button" class="a-btn a-btn--primary a-btn--sm" data-testid="hook-add"
+                    @onclick="AddAsync">Add the hook</button>
+        </div>
+    </div>
+}

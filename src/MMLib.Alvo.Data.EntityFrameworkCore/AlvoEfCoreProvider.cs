@@ -11,6 +11,7 @@ using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Secrets;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
@@ -84,6 +85,7 @@ public static class AlvoEfCoreProvider
         builder.Services.TryAddSingleton<IAlvoData>(CreateData);
         builder.Services.TryAddSingleton<IAlvoDataReachability>(CreateReachability);
         builder.Services.TryAddSingleton<IOutboxStore>(CreateOutboxStore);
+        AddSecretStore(builder.Services);
 
         return builder;
     }
@@ -116,6 +118,45 @@ public static class AlvoEfCoreProvider
     /// <c>MMLib.Alvo.Abstractions</c> alone. This is the port <c>docs/architecture/package-boundary.md</c>
     /// predicted would be earned by the first framework table no store call touches.
     /// </remarks>
+    /// <summary>
+    /// Registers the encrypted secret store, <b>and only when this deployment mounted a key to encrypt
+    /// with</b>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>No key, no registration — rather than a store with a key of its own.</b> §7.1's answer to the
+    /// bootstrap paradox is that the credential for the secret store comes from the platform, so a
+    /// deployment that mounted nothing has a layered store answering <c>CanWrite == false</c> and a settings
+    /// screen that knows not to offer a save. A generated or derived fallback key would make a deployment
+    /// that later lost its mount unable to read back what it wrote, silently.
+    /// </para>
+    /// <para>
+    /// The factory runs once, at first resolution, so a key file mounted after start is picked up on the
+    /// next boot rather than mid-process — which is what a rotation is, and what an operator expects of one.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The application's services.</param>
+    private static void AddSecretStore(IServiceCollection services) =>
+        services.TryAddSingleton<IWritableSecretStore>(provider =>
+            new EfCoreSecretStore(
+                provider.GetRequiredService<RelationalConnectionFactory>(),
+                provider.GetRequiredService<IOptions<AlvoOptions>>().Value,
+                Cipher(provider),
+                provider.GetRequiredService<TimeProvider>()));
+
+    /// <summary>
+    /// The cipher this deployment's key file yields, or <see langword="null"/> when it mounted none.
+    /// </summary>
+    /// <remarks>
+    /// <b>Null rather than a refusal here, and the store carries the consequence.</b> Registering the store
+    /// unconditionally is what keeps <c>AddAlvo</c> resolvable in every composition; the store then answers
+    /// <c>CanWrite == false</c> and refuses a save by naming the file to mount — which is the message an
+    /// operator can act on, raised at the moment they tried to act.
+    /// </remarks>
+    private static SecretCipher? Cipher(IServiceProvider provider) =>
+        SecretCipher.FromKeyFile(
+            provider.GetRequiredService<IOptions<AlvoSecretOptions>>().Value.EncryptionKeyFile);
+
     private static EfCoreOutboxStore CreateOutboxStore(IServiceProvider services) => new(
         services.GetRequiredService<RelationalConnectionFactory>(),
         services.GetRequiredService<IOptions<AlvoOptions>>().Value,

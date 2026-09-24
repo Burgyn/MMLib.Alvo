@@ -1,5 +1,7 @@
 ﻿using Microsoft.AspNetCore.Components.Authorization;
+using MMLib.Alvo.Admin.Components.Data;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Admin.Internal;
 
@@ -51,15 +53,45 @@ internal sealed class DataGateway(
         return principal?.Context ?? AlvoContext.Anonymous;
     }
 
-    /// <summary>One page of records.</summary>
-    public async Task<AlvoPage> PageAsync(
-        string entity, int limit, string? after, bool total, CancellationToken ct)
+    /// <summary>One page of records, read as <paramref name="context"/>.</summary>
+    /// <remarks>
+    /// The caller is passed in rather than resolved here so a screen that reads a page and then its
+    /// labels resolves the operator once, and both reads are made as the same caller.
+    /// </remarks>
+    public Task<AlvoPage> PageAsync(AlvoQuery query, AlvoContext context, CancellationToken ct)
+        => data.QueryAsync(query, context, ct);
+
+    /// <summary>The label of each row of <paramref name="entity"/> that <paramref name="values"/> point at.</summary>
+    /// <remarks>
+    /// An id with no entry is a row this caller cannot read, or one with no label; the screen draws
+    /// both as the short id. A refusal — a label field masked from this caller, a scoped target and
+    /// no tenant — is left to the caller, which knows what to fall back to.
+    /// </remarks>
+    /// <param name="entity">The target of the reference.</param>
+    /// <param name="label">The target's label.</param>
+    /// <param name="values">The reference values on the page, from every column pointing at this target.</param>
+    /// <param name="context">The caller the page itself was read as.</param>
+    /// <param name="ct">The cancellation token.</param>
+    public async Task<IReadOnlyDictionary<Guid, string>> LabelsAsync(
+        string entity, RowLabel label, IEnumerable<object?> values, AlvoContext context, CancellationToken ct)
     {
-        var context = await ContextAsync(ct).ConfigureAwait(false);
-        return await data.QueryAsync(
-            new AlvoQuery { Entity = entity, Limit = limit, After = after, IncludeTotalCount = total },
-            context,
-            ct).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(label);
+
+        var labels = new Dictionary<Guid, string>();
+        foreach (var batch in RefLabels.Batches(values))
+        {
+            var page = await data.QueryAsync(RefLabels.Query(entity, label, batch), context, ct)
+                .ConfigureAwait(false);
+            foreach (var row in page.Items)
+            {
+                if (RefLabels.IdOf(row[AlvoManagedColumns.Id]) is { } id && label.Of(row) is { } text)
+                {
+                    labels[id] = text;
+                }
+            }
+        }
+
+        return labels;
     }
 
     /// <summary>One record, or nothing.</summary>

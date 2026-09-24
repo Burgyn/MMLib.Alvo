@@ -31,6 +31,14 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> ApplyAsync(MMLib.Alvo.Migrations.MigrationPlan plan, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationPlan> PlanAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
     }
+    public sealed class EfCoreSecretStore : MMLib.Alvo.Secrets.ISecretStore, MMLib.Alvo.Secrets.IWritableSecretStore
+    {
+        public bool CanWrite { get; }
+        public System.Threading.Tasks.ValueTask<bool> DeleteAsync(MMLib.Alvo.Secrets.SecretName name, System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.ValueTask<string?> GetAsync(MMLib.Alvo.Secrets.SecretName name, System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Secrets.SecretName>> ListNamesAsync(System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.ValueTask SetAsync(MMLib.Alvo.Secrets.SecretName name, string value, System.Threading.CancellationToken ct = default) { }
+    }
     public interface IAlvoSqlDialect
     {
         MMLib.Alvo.Data.EntityFrameworkCore.MigrationBatchFraming MigrationFraming { get; }

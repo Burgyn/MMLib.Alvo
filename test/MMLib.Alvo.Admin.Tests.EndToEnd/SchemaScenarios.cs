@@ -82,8 +82,12 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
 
+        await session.Page.ClickAsync("[data-testid='add-field']");
         await session.Page.Locator("#new-field-default").WaitForAsync();
 
+        /* The refusals are folded into one line at the end of the sheet, so the operator adding a field
+           is not reading them first; the one who asks where the default went opens it. */
+        await session.Page.ClickAsync("[data-testid='refused-facets'] > summary");
         var refusal = session.Page.Locator("[data-testid='refused-field.default']");
         await refusal.WaitForAsync();
 
@@ -128,15 +132,61 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
     }
 
     /// <summary>
+    /// The API tab links the generated contract, and the link resolves.
+    /// </summary>
+    /// <remarks>
+    /// <b>The route is asserted by fetching it, not by comparing two constants.</b> The dashboard cannot see
+    /// the host's route — it references Abstractions alone — so the path arrives through
+    /// <c>AlvoAdminOptions</c>, and the failure this guards against is exactly that the two halves drift
+    /// into a link the screen offers and the host answers 404 for. Which is what the tab did before: it
+    /// named <c>/openapi/v1.json</c> in prose, on every deployment, whether or not one was served.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_api_tab_links_documentation_the_host_actually_serves()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+        await session.OpenTabAsync("API");
+
+        foreach (var control in new[] { "api-docs", "api-document" })
+        {
+            var href = await session.Page.Locator($"[data-testid='{control}']").GetAttributeAsync("href");
+            href.ShouldNotBeNullOrEmpty();
+
+            var served = await session.Page.APIRequest.GetAsync($"{world.BaseAddress}{href}");
+            served.Status.ShouldBe(200, $"{control} points at {href}, which this host does not serve.");
+        }
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// Settings links it too, because that is the other place an operator looks for it.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Settings_links_the_documentation_as_well()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/settings");
+
+        (await session.Page.Locator("[data-testid='settings-docs']").GetAttributeAsync("href"))
+            .ShouldNotBeNullOrEmpty();
+        (await session.Page.Locator("[data-testid='settings-document']").GetAttributeAsync("href"))
+            .ShouldNotBeNullOrEmpty();
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
     /// Exporting is the stored document, not a re-serialisation of it.
     /// </summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task The_export_screen_shows_the_descriptor_as_stored()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await session.GoAsync("/schema/transfer");
+        await session.GoAsync("/transfer");
 
-        var text = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var text = await session.Content.InnerTextAsync();
         text.ShouldContain("byte for byte");
         text.ShouldContain("field-service");
         session.AssertConsoleClean();
@@ -155,16 +205,16 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
     public async Task An_imported_descriptor_with_a_name_the_schema_refuses_is_refused()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await session.GoAsync("/schema/transfer");
+        await session.GoAsync("/transfer");
 
         await session.Page.FillAsync(
             "#import-json",
             """{"name":"borrowed","entities":{"Things":{"fields":{"a":{"type":"string"}}}}}""");
-        await session.Page.ClickAsync("button:has-text('Load it into the working copy')");
+        await session.Button("Load it into the working copy").ClickAsync();
         await session.SettleAsync();
 
-        session.Page.Url.ShouldContain("/schema/transfer");
-        (await session.Page.Locator(".a-error__title").InnerTextAsync())
+        session.Page.Url.ShouldContain("/transfer");
+        (await session.Page.GetByTestId("error-title").InnerTextAsync())
             .ShouldContain("apply would refuse");
         session.AssertConsoleClean();
     }

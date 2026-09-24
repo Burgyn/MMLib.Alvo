@@ -1,0 +1,145 @@
+﻿@*
+    The engine's verdict, rendered as what it is.
+
+    The one sentence this component exists to prevent somebody skipping: `Allowed` means the engine
+    RESOLVED A POLICY, not that this caller will see rows. A rule over @user.roles is a predicate
+    the engine hands back rather than evaluates, so a caller no rule admits still earns `true` here
+    together with a `Using` none of their rows satisfies. A screen that rendered `Allowed` alone as
+    "permitted" would be wrong exactly where it matters.
+
+    So the four things it says are true for every caller at once: which 403 cause applies if any,
+    what the predicate is, what failing it looks like for THIS operation, and which fields drop out.
+    There is no per-record badge, at any width — that is §6.3 criterion 4 as a UI rule.
+*@
+@if (Verdict.Allowed)
+{
+    <Panel class="a-panel--accent a-verdict">
+        <div class="a-row">
+            <span class="a-badge a-badge--ok">policy resolved</span>
+            <span class="a-section__sub">@Operation on @Entity</span>
+        </div>
+        <p class="a-section__sub a-then">
+            The engine found a rule for this operation and compiled it. <strong>That is not the same
+            as "this caller will see rows"</strong> — the predicate below is handed to the query, and
+            whether any row satisfies it is decided per row, in the database.
+        </p>
+    </Panel>
+}
+else
+{
+    <div class="a-error" role="status">
+        <div class="a-error__title">403 — refused outright</div>
+        <div class="a-error__detail">@Cause</div>
+        @if (Verdict.DenyReason is { Length: > 0 } reason)
+        {
+            <pre class="a-code a-then"><code>@reason</code></pre>
+        }
+    </div>
+}
+
+@if (Verdict.TenantScope is { Length: > 0 } tenantScope)
+{
+    <div class="a-field">
+        <span class="a-label">Tenant scope</span>
+        <pre class="a-code"><code>@tenantScope</code></pre>
+    </div>
+}
+
+@if (Verdict.Using is { Length: > 0 } read)
+{
+    <div class="a-field">
+        <span class="a-label">USING — the read predicate</span>
+        <pre class="a-code"><code>@read</code></pre>
+        <span class="a-section__sub">@FailureShape</span>
+    </div>
+}
+
+@if (Verdict.WithCheck is { Length: > 0 } write)
+{
+    <div class="a-field">
+        <span class="a-label">WITH CHECK — the write predicate</span>
+        <pre class="a-code"><code>@write</code></pre>
+        <span class="a-section__sub">
+            Evaluated over the candidate row. A write that fails it is refused; it does not silently
+            write a different row.
+        </span>
+    </div>
+}
+
+@if (Verdict.HiddenFields.Count > 0)
+{
+    <div class="a-field">
+        <span class="a-label">Hidden from this caller</span>
+        <div class="a-choice">
+            @foreach (var hidden in Verdict.HiddenFields)
+            {
+                <span class="a-badge a-badge--warn a-mono">@hidden</span>
+            }
+        </div>
+        <span class="a-section__sub">Absent from every response, and nameable in no filter.</span>
+    </div>
+}
+
+@if (Verdict.ReadOnlyFields.Count > 0)
+{
+    <div class="a-field">
+        <span class="a-label">Read-only for this caller</span>
+        <div class="a-choice">
+            @foreach (var readOnly in Verdict.ReadOnlyFields)
+            {
+                <span class="a-badge a-mono">@readOnly</span>
+            }
+        </div>
+        <span class="a-section__sub">Readable; a write naming one is refused.</span>
+    </div>
+}
+
+@code {
+    /// <summary>The verdict the engine returned.</summary>
+    [Parameter, EditorRequired]
+    public ManagementPolicyVerdict Verdict { get; set; } = default!;
+
+    /// <summary>The operation it was asked about.</summary>
+    [Parameter, EditorRequired]
+    public string Operation { get; set; } = string.Empty;
+
+    /// <summary>The entity it was asked about.</summary>
+    [Parameter, EditorRequired]
+    public string Entity { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Which of the four refusal causes this is.
+    /// </summary>
+    /// <remarks>
+    /// The decision procedure's own order: no descriptor, an unknown entity, the tenant guard, an
+    /// unconfigured operation, a missing required context value. The wording is derived from the
+    /// engine's reason rather than guessed, and falls back to naming the procedure so an operator
+    /// knows where to look rather than being told nothing.
+    /// </remarks>
+    private string Cause => Verdict.DenyReason switch
+    {
+        { } reason when reason.Contains("tenant", StringComparison.OrdinalIgnoreCase)
+            => "The caller carries no tenant and this entity is tenant-scoped. The guard refuses before any rule is consulted — this is a 403, not an empty page.",
+        { } reason when reason.Contains("unknown", StringComparison.OrdinalIgnoreCase)
+            => "The schema declares no such entity.",
+        { } reason when reason.Contains("context", StringComparison.OrdinalIgnoreCase)
+            => "A value the rule needs is absent from the caller's context.",
+        _ => $"No rule configures {Operation} on {Entity}, so it is refused for everyone. That is default-deny working rather than a gap.",
+    };
+
+    /// <summary>
+    /// What failing the read predicate looks like for this operation.
+    /// </summary>
+    /// <remarks>
+    /// The single most confusing thing about a rule-guarded API, and the reason it is spelled out
+    /// here: failing <c>USING</c> is never a 403. On a list it is 200 with a shorter page; on
+    /// anything addressing one row it is 404 — the same answer as a row that does not exist,
+    /// deliberately, because telling them apart would let a caller enumerate rows they may not read.
+    /// </remarks>
+    private string FailureShape => Operation switch
+    {
+        "list" => "A row that fails this is absent from the page. The response is 200 with fewer rows — never a refusal.",
+        "create" => "Rows are not read on a create; this predicate governs what a later read returns.",
+        _ => "A row that fails this answers 404 — the same answer as a row that does not exist. That is deliberate: telling them apart would let a caller enumerate rows they may not read.",
+    };
+}

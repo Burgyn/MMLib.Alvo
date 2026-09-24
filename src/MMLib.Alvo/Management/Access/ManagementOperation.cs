@@ -59,6 +59,9 @@ internal enum ManagementOperation
     /// <summary>Administer users and their role memberships.</summary>
     ManageUsers,
 
+    /// <summary>Write the instance's AI connection, including its API key.</summary>
+    SetAiConnection,
+
     /// <summary>The danger zone: delete the project.</summary>
     DeleteProject,
 }

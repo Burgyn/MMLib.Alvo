@@ -1,0 +1,77 @@
+﻿@*
+    What this entity points at, and what points back at it.
+
+    Both directions, because only one of them is visible from the entity's own fields — and the
+    incoming one is what an operator needs before deleting anything.
+*@
+<SectionHead Title="Points at">
+    <Subtitle>A ref field carries another entity's id, and its on-delete rule decides what happens when that row goes.</Subtitle>
+</SectionHead>
+
+@if (Outgoing.Count == 0)
+{
+    <EmptyState Title="This entity references nothing"
+                Body="No field on it is of type ref, so nothing here depends on another entity's rows." />
+}
+else
+{
+    @foreach (var field in Outgoing)
+    {
+        <ListRow>
+            <span class="a-mono a-listrow__key">@field.Name</span>
+            <span class="a-listrow__rest">→ <a class="a-mono a-link" href="@(AdminPaths.Entity(field.Reference!.TargetEntity))">@field.Reference!.TargetEntity</a></span>
+            <span class="a-badge">on delete @field.Reference!.OnDelete.ToString().ToLowerInvariant()</span>
+            @if (field.Required)
+            {
+                <span class="a-badge">required</span>
+            }
+        </ListRow>
+    }
+}
+
+<SectionHead Title="Pointed at by" class="a-section--spaced">
+    <Subtitle>Deleting one of this entity's rows is decided by these rules, not by this entity's own.</Subtitle>
+</SectionHead>
+
+@if (Incoming.Count == 0)
+{
+    <EmptyState Title="Nothing references this entity"
+                Body="No ref field anywhere in the schema targets it, so its rows have no dependants." />
+}
+else
+{
+    @foreach (var (entity, field) in Incoming)
+    {
+        <ListRow>
+            <span class="a-listrow__rest">
+                <a class="a-mono a-link" href="@AdminPaths.Entity(entity.Name)">@entity.Name</a>
+                <span class="a-mono a-mono--dim">.@field.Name</span>
+            </span>
+            <span class="a-badge">on delete @field.Reference!.OnDelete.ToString().ToLowerInvariant()</span>
+        </ListRow>
+    }
+}
+
+@code {
+    /// <summary>The entity whose relationships these are.</summary>
+    [Parameter, EditorRequired]
+    public EntitySchema Entity { get; set; } = default!;
+
+    /// <summary>The whole schema, because the incoming half cannot be read from one entity.</summary>
+    [Parameter, EditorRequired]
+    public SchemaModel Schema { get; set; } = default!;
+
+    /* `column` rather than `field`: C# 14 makes `field` a contextual keyword inside a property
+       accessor, where it binds to the synthesized backing field. A lambda parameter of that name
+       in an expression-bodied property does not compile. */
+    private List<FieldSchema> Outgoing
+        => Entity.Fields.Where(column => column.Reference is not null).ToList();
+
+    private List<(EntitySchema Entity, FieldSchema Field)> Incoming => Schema.Entities
+        .Where(entity => !string.Equals(entity.Name, Entity.Name, StringComparison.Ordinal))
+        .SelectMany(entity => entity.Fields
+            .Where(column => column.Reference is { } reference
+                && string.Equals(reference.TargetEntity, Entity.Name, StringComparison.Ordinal))
+            .Select(column => (entity, column)))
+        .ToList();
+}

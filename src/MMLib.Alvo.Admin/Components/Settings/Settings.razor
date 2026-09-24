@@ -1,0 +1,203 @@
+﻿@page "/admin/settings"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject AssistantGateway Assistant
+@inject Microsoft.Extensions.Options.IOptions<AlvoAdminOptions> Admin
+@inject ILogger<Settings> Logger
+@rendermode InteractiveServer
+
+<PageTitle>Settings · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Title="Settings" />
+
+    @if (_info is null)
+    {
+        <Skeleton />
+    }
+    else
+    {
+        <Panel Title="This build">
+            <Subtitle>What is running, and how it starts.</Subtitle>
+            <ChildContent>
+                <Detail Label="Version" Value="@_info.Version" />
+                <Detail Label="Mode" Value="@_info.Mode"
+                        Note="Standalone is the container; embedded is Alvo inside your own host." />
+                <Detail Label="Data provider" Value="@_info.DataProvider"
+                        Note="The data layer this host registered. It is not the database engine, which Alvo does not report." />
+                <Detail Label="Startup mode" Value="@_info.StartupMode" />
+            </ChildContent>
+        </Panel>
+
+        @*
+            The generated contract, where an operator who has just changed a schema looks for what changed.
+            Rendered only when the host says it maps one: an embedded host may mount it elsewhere or serve
+            none, and a link on the assumption is a 404 reached from the screen that promised it.
+        *@
+        @if (Admin.Value.DocsPath is { Length: > 0 } || Admin.Value.OpenApiPath is { Length: > 0 })
+        {
+            <Panel Title="API documentation">
+                <Subtitle>
+                    Generated from the applied descriptor, not hand-written — so it changes when the
+                    schema does.
+                </Subtitle>
+                <ChildContent>
+                    <div class="a-row a-row--inset">
+                        @if (Admin.Value.DocsPath is { Length: > 0 } docs)
+                        {
+                            <a class="a-btn a-btn--sm" href="@docs" target="_blank" rel="noopener"
+                               data-testid="settings-docs">Open the documentation</a>
+                        }
+                        @if (Admin.Value.OpenApiPath is { Length: > 0 } document)
+                        {
+                            <a class="a-btn a-btn--sm a-btn--ghost" href="@document" target="_blank" rel="noopener"
+                               data-testid="settings-document">
+                                <code class="a-mono">@document</code>
+                            </a>
+                        }
+                    </div>
+                </ChildContent>
+            </Panel>
+        }
+
+        <Panel Title="AI assistant">
+            <Subtitle>The model the schema assistant talks to. It proposes changes; you apply them.</Subtitle>
+            <ChildContent>
+                <Detail Label="Status" Value="@(_info.Ai.Configured ? "connected" : "not configured")" />
+                @if (_info.Ai.Configured)
+                {
+                    <Detail Label="Model" Value="@_info.Ai.Model" />
+                    <Detail Label="Kind" Value="@_info.Ai.Kind" />
+                    <Detail Label="From" Value="@_info.Ai.Source"
+                            Note="“configuration” means this deployment pinned it and a save here cannot change it; “store” means somebody saved it from this screen." />
+                }
+
+                @if (!Assistant.IsInstalled)
+                {
+                    <p class="a-note">
+                        No assistant is installed on this instance. The standalone image includes one; an
+                        embedded host adds the <code class="a-mono">MMLib.Alvo.Ai</code> package.
+                    </p>
+                }
+                else if (!Assistant.CanWriteConnection)
+                {
+                    <p class="a-note">
+                        This deployment sets the connection in its own configuration, under
+                        <code class="a-mono">Alvo:Ai</code>, and the dashboard cannot change it. To save one from
+                        here instead, give the host an encryption key file
+                        (<code class="a-mono">Alvo:Secrets:EncryptionKeyFile</code>).
+                    </p>
+                }
+                else
+                {
+                    @if (_saveRefusal is { Length: > 0 })
+                    {
+                        <ErrorPanel Title="That connection could not be saved" Fix="@_saveRefusal" />
+                    }
+
+                    <div class="a-stack a-stack--inset">
+                        <Field Label="Kind" LabelId="ai-kind">
+                            <ChipGroup TValue="string" Items="_kinds" Selected="[_kind]" aria-labelledby="ai-kind"
+                                       SelectedChanged="kinds => _kind = kinds[0]" />
+                        </Field>
+
+                        <Field Label="Endpoint" For="ai-endpoint">
+                            <ChildContent>
+                                <input class="a-input" id="ai-endpoint" value="@_endpoint" autocomplete="off"
+                                       placeholder="e.g. http://localhost:11434/v1"
+                                       @oninput="args => _endpoint = args.Value?.ToString() ?? string.Empty" />
+                            </ChildContent>
+                            <Hint>The base address. It is never shown back, on this page or anywhere else.</Hint>
+                        </Field>
+
+                        <Field Label="Model" For="ai-model">
+                            <input class="a-input" id="ai-model" value="@_model" autocomplete="off"
+                                   placeholder="e.g. qwen3:8b"
+                                   @oninput="args => _model = args.Value?.ToString() ?? string.Empty" />
+                        </Field>
+
+                        <Field Label="API key" For="ai-key">
+                            <ChildContent>
+                                <input class="a-input" id="ai-key" type="password" value="@_apiKey" autocomplete="off"
+                                       placeholder="leave empty for a local model"
+                                       @oninput="args => _apiKey = args.Value?.ToString() ?? string.Empty" />
+                            </ChildContent>
+                            <Hint>
+                                Stored encrypted and never read back into this page. Saving replaces the whole
+                                connection, so type the key again if you change anything else.
+                            </Hint>
+                        </Field>
+
+                        <div class="a-row a-row--gap-2">
+                            <button type="button" class="a-btn a-btn--primary" data-testid="ai-save"
+                                    @onclick="SaveAsync">Save the connection</button>
+                            @if (_saved)
+                            {
+                                <span class="a-section__sub">Saved.</span>
+                            }
+                        </div>
+                    </div>
+                }
+            </ChildContent>
+        </Panel>
+
+        <Panel Title="API keys">
+            <Subtitle>Not managed from this dashboard.</Subtitle>
+            <ChildContent>
+                <p class="a-note">
+                    Keys are issued and revoked where they were created — in this host's configuration, or by a
+                    key store the host registered. The dashboard has no way to issue or revoke one, so it offers
+                    no control for it.
+                </p>
+            </ChildContent>
+        </Panel>
+    }
+</div>
+
+@code {
+    private ManagementInfo? _info;
+    private string _kind = OpenAiCompatible;
+    private string _endpoint = string.Empty;
+    private string _model = string.Empty;
+    private string _apiKey = string.Empty;
+    private string? _saveRefusal;
+    private bool _saved;
+
+    private const string OpenAiCompatible = "openai-compatible";
+    private const string AzureOpenAi = "azure-openai";
+
+    private static readonly string[] _kinds = [OpenAiCompatible, AzureOpenAi];
+
+    protected override async Task OnInitializedAsync()
+        => _info = await Gateway.InfoAsync(CancellationToken.None);
+
+    /// <summary>
+    /// Saves the connection, or shows why it could not be saved.
+    /// </summary>
+    /// <remarks>
+    /// The refusal a shadowing configuration raises must reach the screen, because it is the one failure whose
+    /// silent version is the worst kind: the operator saves a key, the screen says saved, and every request
+    /// keeps using the one the deployment pinned. Its sentence, and a read-only store's, are the framework's
+    /// and are shown as they are; any other exception is a fault, logged, and shown as the generic sentence
+    /// rather than a message written for a log.
+    /// </remarks>
+    private async Task SaveAsync()
+    {
+        _saveRefusal = null;
+        _saved = false;
+
+        try
+        {
+            await Assistant.SaveConnectionAsync(
+                new AiConnectionForm(_kind, _endpoint, _model, _apiKey), CancellationToken.None);
+
+            _apiKey = string.Empty;
+            _saved = true;
+            _info = await Gateway.InfoAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            _saveRefusal = AdminProblem.From(exception, Logger)?.Detail;
+        }
+    }
+}

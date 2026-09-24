@@ -1,0 +1,121 @@
+﻿@page "/admin/welcome"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject AdminSession Session
+@inject ILogger<Welcome> Logger
+
+@*
+    The first run.
+
+    It does NOT create an account, and that is the whole shape of it: the bootstrap administrator
+    exists before this screen can be reached at all — the deployment supplied an address and a
+    password file, and without them nobody signs in. So the first step is already done by the time
+    anybody reads this, and what remains is the three things a new project actually needs.
+
+    Each step reports its own state rather than being ticked off a stored checklist. A checklist
+    that remembered would be a second source of truth about the project, and would be wrong the
+    first time somebody changed something through the API instead.
+*@
+<PageTitle>First run · Alvo</PageTitle>
+
+<div class="a-stack a-stack--narrow">
+    <PageHeader Title="Welcome to Alvo"
+                Subtitle="One descriptor drives everything here: entities, the rules that guard them, and what runs on a write. These are the three things a new project needs, in the order they make sense." />
+
+    <Step Done="true" Title="You are signed in as the administrator this host was configured with">
+        <code class="a-mono">@_email</code> — seeded from
+        <code class="a-mono">Alvo:Admin:BootstrapEmail</code> and the password file beside it. This
+        account holds full management access independently of the descriptor's
+        <code class="a-mono">access</code> block, which is what makes a project whose rules admit
+        nobody recoverable.
+    </Step>
+
+    <Step Done="@(_entities > 0)" Title="@($"Define what the backend is — {_entities} entit{(_entities == 1 ? "y" : "ies")} so far")">
+        An entity is a table Alvo creates and keeps in step with the descriptor. Add one in Schema,
+        give it fields, and preview what the change does to the database before it runs.
+        <div class="a-actions">
+            <a class="a-btn a-btn--sm" href="@AdminPaths.Schema">Open Schema</a>
+            <a class="a-btn a-btn--ghost a-btn--sm" href="@AdminPaths.Transfer">Import a descriptor</a>
+        </div>
+    </Step>
+
+    <Step Done="@_hasRules" Title="Say who may read and write each one">
+        Nothing is reachable without an explicit rule — an entity with none refuses every caller,
+        which is default-deny working rather than a gap. The Rules screen shows the predicate the
+        engine compiled and answers <em>what would this caller get</em> with the engine's own verdict.
+        <div class="a-actions">
+            <a class="a-btn a-btn--sm" href="@AdminPaths.Rules()">Open Rules</a>
+        </div>
+    </Step>
+
+    <Step Done="@(_tenant is not null)" Title="@(_tenant is null ? "You hold no tenant, and tenant-scoped entities are closed to you" : "You act in one tenant")">
+        @if (_tenant is null)
+        {
+            <text>
+                An entity marked <code class="a-mono">tenancy: scoped</code> refuses a caller with no
+                tenant — with a 403, before any rule is consulted. <strong>You cannot grant one to
+                yourself</strong>: that is a deliberate refusal, because widening your own reach
+                should go through the route that records who did it. Either create a second
+                administrator in Access and have them grant you one, or keep this project's entities
+                global.
+            </text>
+            <div class="a-actions">
+                <a class="a-btn a-btn--sm" href="@AdminPaths.Access">Open Access</a>
+            </div>
+        }
+        else
+        {
+            <text>
+                Tenant <code class="a-mono">@_tenant.Value.Value</code>. Scoped entities show you the
+                rows of this tenant and no other — and a row can never move between tenants.
+            </text>
+        }
+    </Step>
+
+    <Panel Padded="true">
+        <span class="a-section__title">Everything here is a file</span>
+        <p class="a-section__sub">
+            The descriptor is the whole configuration, and it exports byte for byte. Commit it, apply
+            it somewhere else, and you have the same backend — which is why nothing in this dashboard
+            can do something the descriptor cannot say.
+        </p>
+        <a class="a-btn a-btn--sm" href="@AdminPaths.Transfer">Export the descriptor</a>
+    </Panel>
+</div>
+
+@code {
+    private TenantId? _tenant;
+    private string _email = string.Empty;
+    private int _entities;
+    private bool _hasRules;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var context = await Session.CallerAsync(CancellationToken.None);
+        _tenant = context.Tenant;
+
+        try
+        {
+            var schema = await Gateway.SchemaAsync(CancellationToken.None);
+            _entities = schema.Entities.Count;
+
+            var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
+            _hasRules = schema.Entities.Any(
+                entity => DescriptorLens.Rules(descriptor.DescriptorJson, entity.Name).Count > 0);
+
+            var people = Gateway.CanAdministerPeople
+                ? await Gateway.PeopleAsync(new AlvoUserQuery(), CancellationToken.None)
+                : null;
+
+            _email = people?.Users
+                .FirstOrDefault(person => person.Id == context.User)?.Email
+                ?? context.User.ToString();
+        }
+        catch (Exception exception)
+        {
+            /* The page is a greeting: whatever was refused or failed, it greets the caller by id. */
+            AdminProblem.Absorb(exception, Logger);
+            _email = context.User.ToString();
+        }
+    }
+}

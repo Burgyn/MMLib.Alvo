@@ -75,6 +75,17 @@
   component class `public` and a `.razor` file cannot declare otherwise; the baseline
   is what keeps the question asked. Details in
   [`2026-09-18-f5-admin-dashboard-design.md`](../superpowers/specs/2026-09-18-f5-admin-dashboard-design.md).
+- `src/MMLib.Alvo.Ai` — the schema assistant: the Microsoft Agent Framework loop, the five tools it
+  may call, and the chat client each connection kind is dialled through (#29). Earned by **(a)** — an
+  embedded host serving a Data API must not acquire an agent runtime and an OpenAI client — and by
+  **(b)**: the assistant is a real swap point, reached through `IAlvoAssistant` in
+  `MMLib.Alvo.Abstractions`, which is what lets the dashboard call it without referencing this package.
+  It references **`MMLib.Alvo.Abstractions` only**, never the core: everything it needs arrives as
+  `IAlvoManagement` and `IAiConnectionResolver` (§0 principle 2), and
+  `MMLib.Alvo.Ai.Tests/BoundaryArchitectureTests` reads both the loaded assembly's references and the
+  project file to hold that line. Referenced by `MMLib.Alvo.Host` only. Its dependencies —
+  `Microsoft.Agents.AI` and the two `Microsoft.Extensions.AI` packages — are MIT and first-party, so
+  none of them touches the licensing bans in `alvo-dotnet-conventions`.
 - `src/MMLib.Alvo.Identity` — ASP.NET Core Identity + its EF stores: administrator accounts, role
   membership, the cookie `IAlvoContextResolver`, and the bootstrap administrator. Earned by **(a)**
   (a heavy dependency an embedded host that wants only the Data API must not acquire) and **(b)**

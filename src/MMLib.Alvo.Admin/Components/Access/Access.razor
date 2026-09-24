@@ -1,0 +1,231 @@
+﻿@page "/admin/access"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject ILogger<Access> Logger
+
+<PageTitle>Access · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Title="Access"
+                Subtitle="Two different things live here and they take effect at different times. Membership — who exists, what roles they have, which tenant they act in — is the identity store, and a change applies at once. The role catalogue and the three management levels are the descriptor, and a change to either waits for an apply." />
+
+    @if (_problem is not null)
+    {
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
+    }
+
+    @if (_token is { } token)
+    {
+        <Panel Padded="true" class="a-panel--accent">
+            <span class="a-section__title">Credential token for @_tokenFor</span>
+            <p class="a-section__sub">
+                Hand this over out of band — this build sends no email. It works once, until
+                @token.ExpiresAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture).
+            </p>
+            <pre class="a-code"><code>@token.Token</code></pre>
+        </Panel>
+    }
+
+    <Panel Title="People">
+        <Subtitle>
+            @(Gateway.CanAdministerPeople
+                ? "From the identity store. Changes here take effect on the next request."
+                : "This deployment registered no membership store.")
+        </Subtitle>
+        <ChildContent>
+            @if (!Gateway.CanAdministerPeople)
+            {
+                <Refusal>
+                    This deployment has no membership store, so there is nobody to administer here. An
+                    embedded host provides one over its own directory; the standalone image ships with one.
+                </Refusal>
+            }
+            else if (_people is null)
+            {
+                <Skeleton />
+            }
+            else
+            {
+                @foreach (var person in _people.Users)
+                {
+                    <PersonRow @key="person.Id" Person="person" Roles="_roles" IsSelf="person.Id == _self"
+                               Expanded="_editing == person.Id"
+                               OnToggle="() => _editing = _editing == person.Id ? null : person.Id"
+                               OnSetRoles="roles => SetRolesAsync(person, roles)"
+                               OnSetTenant="draft => SetTenantAsync(person, draft)"
+                               OnClearTenant="() => ClearTenantAsync(person)"
+                               OnIssueToken="() => IssueTokenAsync(person)"
+                               OnSetDisabled="disabled => SetDisabledAsync(person, disabled)" />
+                }
+
+                <div class="a-panel__foot">
+                    <span class="a-section__title">Add a person</span>
+                    <p class="a-section__sub">
+                        No password field, deliberately: a credential that travels as a value is readable by
+                        whoever handles it. The account is created without one and you hand over a
+                        single-use token.
+                    </p>
+                    <div class="a-row a-row--gap-2">
+                        <input class="a-input a-input--grow" id="new-person-email" type="email"
+                               placeholder="dispatcher@example.com" value="@_newEmail"
+                               @oninput="args => _newEmail = args.Value?.ToString() ?? string.Empty" />
+                        <button type="button" class="a-btn a-btn--primary a-btn--sm" @onclick="CreateAsync"
+                                disabled="@(_newEmail.Trim().Length == 0)">Create</button>
+                    </div>
+                </div>
+            }
+        </ChildContent>
+    </Panel>
+
+    <Panel Title="Management levels">
+        <Subtitle>
+            From the descriptor's <code class="a-mono">access</code> block. Three independent
+            predicates, not a hierarchy: all three are evaluated and the highest match wins.
+            Changing one is an apply, and an apply that touches this block re-qualifies to admin.
+        </Subtitle>
+        <ChildContent>
+            @if (_levels.Count == 0)
+            {
+                <EmptyState Title="This descriptor declares no access block"
+                            Body="Only the bootstrap administrator can manage the project — which is default-deny working, and is usable: the first-run flow needs nobody else." />
+            }
+            else
+            {
+                @foreach (var level in _levels)
+                {
+                    <ListRow class="a-listrow--roomy a-listrow--stacked">
+                        <span class="a-badge a-badge--accent">@level.Key</span>
+                        <pre class="a-code a-then"><code>@level.Value</code></pre>
+                    </ListRow>
+                }
+            }
+        </ChildContent>
+    </Panel>
+
+    <Panel Title="Role catalogue">
+        <Subtitle>
+            <code class="a-mono">auth.roles</code> — the names a rule may name. A membership row
+            naming a role this list does not declare is never minted into a caller's context.
+        </Subtitle>
+        <ChildContent>
+            <div class="a-row a-row--gap-2 a-row--wrap a-row--inset">
+                @foreach (var role in _roles)
+                {
+                    <span class="a-badge a-mono">@role</span>
+                }
+                <span class="a-badge">anon</span>
+                <span class="a-badge">authenticated</span>
+                <span class="a-badge">admin</span>
+            </div>
+            <span class="a-hint a-hint--inset">
+                The last three are built in and never declared.
+            </span>
+        </ChildContent>
+    </Panel>
+</div>
+
+@code {
+    private AlvoUserPage? _people;
+    private IReadOnlyList<string> _roles = [];
+    private IReadOnlyList<KeyValuePair<string, string>> _levels = [];
+    private AlvoCredentialToken? _token;
+    private AdminProblem? _problem;
+    private string _tokenFor = string.Empty;
+    private string _newEmail = string.Empty;
+    private UserId? _editing;
+    private UserId? _self;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
+            _roles = DescriptorLens.DeclaredRoles(descriptor.DescriptorJson);
+            _levels = DescriptorLens.AccessLevels(descriptor.DescriptorJson);
+            _self ??= await Gateway.SelfAsync(CancellationToken.None);
+
+            if (Gateway.CanAdministerPeople)
+            {
+                _people = await Gateway.PeopleAsync(new AlvoUserQuery(), CancellationToken.None);
+            }
+        }
+        catch (Exception exception)
+        {
+            Refused(exception);
+        }
+    }
+
+    private Task SetRolesAsync(AlvoUser person, IReadOnlyList<string> roles)
+        => WriteAsync(() => Gateway.SetRolesAsync(person.Id, roles, CancellationToken.None));
+
+    private async Task SetTenantAsync(AlvoUser person, string draft)
+    {
+        if (!TenantId.TryParse(draft, null, out var tenant))
+        {
+            _problem = AdminProblem.From(new ManagementRequestException("That is not a tenant id."))! with
+            {
+                Fix = "A tenant is a uuid. Copy it from a row's tenant_id, or from the caller you are modelling.",
+            };
+            return;
+        }
+
+        await WriteAsync(() => Gateway.SetTenantAsync(person.Id, tenant, CancellationToken.None));
+    }
+
+    private Task ClearTenantAsync(AlvoUser person)
+        => WriteAsync(() => Gateway.SetTenantAsync(person.Id, null, CancellationToken.None));
+
+    private Task SetDisabledAsync(AlvoUser person, bool disabled)
+        => WriteAsync(() => Gateway.SetDisabledAsync(person.Id, disabled, CancellationToken.None));
+
+    private async Task IssueTokenAsync(AlvoUser person)
+    {
+        try
+        {
+            _token = await Gateway.IssueCredentialTokenAsync(person.Id, CancellationToken.None);
+            _tokenFor = person.Email;
+            _problem = null;
+        }
+        catch (Exception exception)
+        {
+            Refused(exception);
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        try
+        {
+            await Gateway.CreatePersonAsync(
+                new AlvoUserCreation(_newEmail.Trim(), []), CancellationToken.None);
+            _newEmail = string.Empty;
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            Refused(exception);
+        }
+    }
+
+    private async Task WriteAsync(Func<Task<AlvoUser>> write)
+    {
+        try
+        {
+            await write();
+            _problem = null;
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            Refused(exception);
+        }
+    }
+
+    /// <summary>Renders the refusal, with the fix that says which of the guards produced it.</summary>
+    private void Refused(Exception exception)
+        => _problem = AdminProblem.From(exception, Logger, ProblemSite.People);
+}

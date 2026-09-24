@@ -1,0 +1,101 @@
+﻿@*
+    The routes this entity already publishes.
+
+    A rendering of what the Data API serves, not a second document (§4.2). The shapes come from the
+    entity itself, so an entity with no rule for an operation still shows the route — and says that
+    the route answers 403 for everyone, which is the fact an operator is actually looking for.
+*@
+@inject Microsoft.Extensions.Options.IOptions<AlvoAdminOptions> Options
+
+<SectionHead Title="Generated API">
+    <Subtitle>
+        Alvo generates exactly these five from the entity. The OpenAPI document this host serves is the
+        same thing, formally.
+    </Subtitle>
+</SectionHead>
+
+@*
+    The contract, one click from the schema that changed it — and only where it exists. The route comes
+    from the host through AlvoAdminOptions, because serving a document is a hosting decision and this
+    package cannot see the host's constants. Before this the sentence above named `/openapi/v1.json` in
+    prose on every deployment, including those that serve nothing there.
+*@
+@if (Docs is { Length: > 0 } || Document is { Length: > 0 })
+{
+    <div class="a-row a-row--inset">
+        @if (Docs is { Length: > 0 } docs)
+        {
+            <a class="a-btn a-btn--sm" href="@docs" target="_blank" rel="noopener"
+               data-testid="api-docs">Open the API documentation</a>
+        }
+        @if (Document is { Length: > 0 } document)
+        {
+            <a class="a-btn a-btn--sm a-btn--ghost" href="@document" target="_blank" rel="noopener"
+               data-testid="api-document">
+                <code class="a-mono">@document</code>
+            </a>
+        }
+    </div>
+}
+
+@foreach (var route in Routes)
+{
+    @* One line at every width: the verb, its route and its note are one fact. *@
+    <ListRow class="a-listrow--inline a-listrow--center">
+        <span class="@($"a-badge a-badge--verb {VerbTone(route.Method)}")">@route.Method</span>
+        <code class="a-mono a-grow a-value">@route.Path</code>
+        <span class="a-section__sub a-listrow__aside">@route.Note</span>
+    </ListRow>
+}
+
+<NotYetPanel Title="An entity added at runtime is served after a restart" class="a-notyet-panel--inset">
+    <Subtitle>
+        The Data API's route literals are the entity names, and the endpoint table materialises
+        on the first request a host serves. An apply takes effect immediately for policy and
+        validation — and for this dashboard, which reaches rows through the data port — but it
+        cannot add a route to a table that has already materialised (#103). So an entity created
+        here answers <code class="a-mono">404</code> on <code class="a-mono">/api</code> until
+        the host restarts, and the Data screen keeps working in the meantime.
+    </Subtitle>
+</NotYetPanel>
+
+<p class="a-note">
+    @(Entity.Tenancy == TenancyMode.Scoped
+        ? "This entity is tenancy: scoped, so a caller with no tenant is refused with 403 before any rule is consulted."
+        : "This entity is global, so no tenant is required to reach it.")
+</p>
+
+@code {
+    /// <summary>The entity whose routes these are.</summary>
+    [Parameter, EditorRequired]
+    public EntitySchema Entity { get; set; } = default!;
+
+    /// <summary>Where this host's documentation UI is, when it maps one.</summary>
+    private string? Docs => Options.Value.DocsPath;
+
+    /// <summary>Where this host's OpenAPI document is, when it serves one.</summary>
+    private string? Document => Options.Value.OpenApiPath;
+
+    /// <summary>The tone a method is drawn in: reads neutral, a create ok, a patch warn, a delete danger.</summary>
+    /// <param name="method">The HTTP method.</param>
+    /// <returns>The badge modifier, or nothing for a read.</returns>
+    private static string VerbTone(string method) => method switch
+    {
+        "POST" => "a-badge--ok",
+        "PATCH" => "a-badge--warn",
+        "DELETE" => "a-badge--danger",
+        _ => string.Empty,
+    };
+
+    private IEnumerable<(string Method, string Path, string Note)> Routes
+    {
+        get
+        {
+            yield return ("GET", $"/api/{Entity.Name}", "keyset paged");
+            yield return ("GET", $"/api/{Entity.Name}/{{id}}", "one record");
+            yield return ("POST", $"/api/{Entity.Name}", "create");
+            yield return ("PATCH", $"/api/{Entity.Name}/{{id}}", Entity.Audit ? "If-Match honoured" : "partial update");
+            yield return ("DELETE", $"/api/{Entity.Name}/{{id}}", Entity.SoftDelete ? "soft delete" : "removes the row");
+        }
+    }
+}

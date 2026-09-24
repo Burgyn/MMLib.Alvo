@@ -1,0 +1,249 @@
+﻿@page "/admin/rules"
+@page "/admin/rules/{EntityName}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject AdminSession Session
+@inject NavigationManager Navigation
+@inject ILogger<Rules> Logger
+
+<PageTitle>Rules · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Title="Rules" />
+
+    @if (_problem is not null)
+    {
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
+    }
+    else if (_schema is null)
+    {
+        <Skeleton Size="Skeleton.SkeletonSize.Lg" />
+    }
+    else
+    {
+        @*
+            A strip reads at a glance while it fits; past a handful of entities it scrolls sideways and
+            the one somebody wants is off the edge, so it becomes a select — which a phone also draws as
+            its own picker.
+        *@
+        @if (_schema.Entities.Count > TabStripLimit)
+        {
+            <Field Label="Entity" For="rules-entity" class="a-field--narrow">
+                <select class="a-select a-mono" id="rules-entity" data-testid="rules-entity"
+                        value="@Selected" @onchange="args => Choose(args.Value?.ToString() ?? string.Empty)">
+                    @foreach (var entity in _schema.Entities)
+                    {
+                        <option value="@entity.Name">@entity.Name</option>
+                    }
+                </select>
+            </Field>
+        }
+        else
+        {
+            <div class="a-tabs">
+                @foreach (var entity in _schema.Entities)
+                {
+                    <button type="button" class="@($"a-tab{(entity.Name == Selected ? " a-tab--active" : string.Empty)}")"
+                            @onclick="() => Choose(entity.Name)">@entity.Name</button>
+                }
+            </div>
+        }
+
+        <div class="a-split">
+            <Panel class="a-split__main a-grow">
+                <RulesTab Rules="_rules" Entity="@Selected" />
+            </Panel>
+
+            @* The aside's own width, and full width once the split stacks — a fixed minimum here made the
+               simulator narrower or wider than the rules card above it on a phone. *@
+            <div class="a-split__aside">
+                <div class="a-card a-card--roomy">
+                    <div>
+                        <span class="a-section__title">Simulate a policy</span>
+                        <p class="a-section__sub">
+                            Pick a caller and an operation; the verdict comes from the same rule engine the
+                            Data API uses.
+                        </p>
+                        <span class="a-ident">API: POST …/policy/simulate</span>
+                    </div>
+
+                    <Field Label="Signed in as" LabelId="rules-caller">
+                        <ChildContent>
+                            <ChipGroup TValue="Caller" Items="_callers" Selected="[_caller]" aria-labelledby="rules-caller"
+                                       Label="caller => caller.Label" SelectedChanged="callers => Pick(callers[0])" />
+                        </ChildContent>
+                        <Hint>
+                            roles: @(_caller.Roles.Count == 0 ? "none" : string.Join(", ", _caller.Roles)) ·
+                            tenant: @(_caller.Tenant is { } tenant ? tenant.ToString() : "none")
+                        </Hint>
+                    </Field>
+
+                    <Field Label="Operation" LabelId="rules-operation">
+                        <ChipGroup TValue="string" Items="_operations" Selected="[_operation]" aria-labelledby="rules-operation"
+                                   SelectedChanged="operations => SetOperation(operations[0])" />
+                    </Field>
+
+                    @if (_simulationProblem is not null)
+                    {
+                        <CascadingValue Value="_simulationProblem">
+                            <ErrorPanel>
+                                <Actions>
+                                    <button type="button" class="a-btn a-btn--sm" data-testid="simulate-retry"
+                                            @onclick="SimulateAsync">Try again</button>
+                                </Actions>
+                            </ErrorPanel>
+                        </CascadingValue>
+                    }
+                    else if (_verdict is { } verdict)
+                    {
+                        <PolicyVerdictView Verdict="verdict" Operation="@_operation" Entity="@Selected" />
+                    }
+
+                    <p class="a-note a-note--ruled">
+                        <strong>Why there is no record picker.</strong>
+                        Checking a rule against one stored row needs a read of that row, which this screen does
+                        not make — scoring it here would make it a second policy evaluator that could disagree
+                        with the engine. To check one row, open it in Data as yourself.
+                        <a class="a-btn a-btn--sm a-actions"
+                           href="@AdminPaths.Records(Selected)">Open @Selected in Data</a>
+                    </p>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private static readonly string[] _operations = ["list", "get", "create", "update", "delete"];
+
+    /// <summary>The most entities the picker draws as a tab strip before it becomes a select.</summary>
+    private const int TabStripLimit = 6;
+
+    private readonly List<Caller> _callers = [];
+    private SchemaModel? _schema;
+    private IReadOnlyList<KeyValuePair<string, string>> _rules = [];
+    private ManagementPolicyVerdict? _verdict;
+    private AdminProblem? _problem;
+    private AdminProblem? _simulationProblem;
+    private int _simulation;
+    private Caller _caller = new("anonymous", null, [], null);
+    private string _operation = "list";
+
+    /// <summary>The entity whose rules are shown, from the route.</summary>
+    [Parameter]
+    public string? EntityName { get; set; }
+
+    private string Selected => EntityName ?? _schema?.Entities.FirstOrDefault()?.Name ?? string.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try
+        {
+            _schema = await Gateway.SchemaAsync(CancellationToken.None);
+            var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
+            _rules = DescriptorLens.Rules(descriptor.DescriptorJson, Selected);
+
+            if (_callers.Count == 0)
+            {
+                await BuildCallersAsync(descriptor.DescriptorJson);
+            }
+
+            await SimulateAsync();
+        }
+        catch (Exception exception)
+        {
+            _problem = AdminProblem.From(exception, Logger);
+        }
+    }
+
+    /// <summary>
+    /// The callers worth asking about.
+    /// </summary>
+    /// <remarks>
+    /// <b>You, anonymous, and one caller per declared role.</b> "You" is the honest default because
+    /// it is the only caller whose answer an operator can go and verify in Data; anonymous is the
+    /// one every default-deny argument turns on; and the per-role callers come from
+    /// <c>auth.roles</c> rather than from a list here, so a role added to the descriptor appears
+    /// without anybody editing this screen.
+    /// </remarks>
+    private async Task BuildCallersAsync(string descriptorJson)
+    {
+        var mine = await Session.CallerAsync(CancellationToken.None);
+        _caller = new Caller("you", mine.User == default ? null : mine.User.Value,
+            [.. mine.Roles.Select(role => role.Name)], mine.Tenant?.Value);
+
+        _callers.Add(_caller);
+        _callers.Add(new Caller("anonymous", null, [], null));
+
+        /* A synthetic id per role, because a rule can name @user.id and the engine needs *a*
+           subject to compile against. It is not a real account and cannot be: the point of these
+           callers is the predicate they produce, and a predicate over @user.id renders with
+           whatever id it was given. Your own caller, above, is the one whose answer can be checked
+           against Data. */
+        foreach (var role in DescriptorLens.DeclaredRoles(descriptorJson))
+        {
+            _callers.Add(new Caller(role, Guid.NewGuid(), [role, "authenticated"], mine.Tenant?.Value));
+        }
+    }
+
+    private void Choose(string entity) => Navigation.NavigateTo(AdminPaths.Rules(entity));
+
+    private async Task Pick(Caller caller)
+    {
+        _caller = caller;
+        await SimulateAsync();
+    }
+
+    private async Task SetOperation(string operation)
+    {
+        _operation = operation;
+        await SimulateAsync();
+    }
+
+    /// <summary>
+    /// Asks the engine for the verdict on the caller and operation chosen now.
+    /// </summary>
+    /// <remarks>
+    /// <b>Only the latest question is answered.</b> The arrow keys choose as they move, so three chips
+    /// can be passed in as many keystrokes and the answers can arrive in any order; an answer to a
+    /// question that is no longer the one on screen is dropped rather than drawn under the wrong chips.
+    /// </remarks>
+    private async Task SimulateAsync()
+    {
+        if (Selected.Length == 0)
+        {
+            return;
+        }
+
+        var asked = ++_simulation;
+
+        try
+        {
+            var verdict = await Gateway.SimulateAsync(
+                new ManagementPolicySimulation(
+                    Selected, _operation,
+                    new ManagementSimulatedCaller(_caller.User, _caller.Roles, _caller.Tenant)),
+                CancellationToken.None);
+
+            if (asked == _simulation)
+            {
+                _simulationProblem = null;
+                _verdict = verdict;
+            }
+        }
+        catch (Exception exception)
+        {
+            var problem = AdminProblem.From(exception, Logger);
+            if (asked == _simulation)
+            {
+                _simulationProblem = problem;
+                _verdict = null;
+            }
+        }
+    }
+
+    /// <summary>One caller to ask the engine about.</summary>
+    private sealed record Caller(string Label, Guid? User, IReadOnlyList<string> Roles, Guid? Tenant);
+}

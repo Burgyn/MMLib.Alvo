@@ -1,0 +1,69 @@
+﻿@page "/admin/automations"
+@page "/admin/functions"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject NavigationManager Navigation
+
+@*
+    A section that is declared and does not run.
+
+    Design §4.1: a WARNED subsystem and a REFUSED feature are two different states and must not
+    look alike. This is the warned one — the descriptor may declare it, the apply accepts it, and
+    nothing happens. The consequence is served verbatim from `capabilities`, never reworded here:
+    it is the framework's own sentence, and a second wording is a third spelling of one truth.
+*@
+<PageTitle>@Title · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Title="@Title" />
+
+    @if (_warning is { } warning)
+    {
+        <NotYetPanel Title="Not yet" Consequence="@warning.Consequence">
+            <Subtitle>
+                This build parses <code class="a-mono">@warning.Block</code> and honours it nowhere.
+                A descriptor that declares it applies cleanly; nothing runs.
+            </Subtitle>
+        </NotYetPanel>
+    }
+    else if (_capabilities is not null)
+    {
+        <NotYetPanel Title="Not yet">
+            <Subtitle>
+                This build does not report <code class="a-mono">@Block</code> among the blocks it
+                warns about, which means it is not part of the descriptor at all yet.
+            </Subtitle>
+        </NotYetPanel>
+    }
+    else
+    {
+        <Skeleton />
+    }
+
+    <Panel Padded="true">
+        <span class="a-section__title">What is here instead</span>
+        <p class="a-section__sub">@Alternative</p>
+    </Panel>
+</div>
+
+@code {
+    private ManagementCapabilities? _capabilities;
+    private ManagementWarnedBlock? _warning;
+
+    private bool IsFunctions => Navigation.Uri.EndsWith("functions", StringComparison.Ordinal);
+
+    private string Title => IsFunctions ? "Functions" : "Automations";
+
+    private string Block => IsFunctions ? "functions" : "automations";
+
+    private string Alternative => IsFunctions
+        ? "Nothing. A code editor designed before the runtime exists is a guess, so none is drawn."
+        : "An entity's hooks already do the narrow version of this — before a write, and after one. They are on the entity's On write tab.";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _capabilities = await Gateway.CapabilitiesAsync(CancellationToken.None);
+        _warning = _capabilities.Warned.FirstOrDefault(
+            block => string.Equals(block.Block, Block, StringComparison.Ordinal));
+    }
+}

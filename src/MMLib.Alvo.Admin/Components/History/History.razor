@@ -1,0 +1,154 @@
+﻿@page "/admin/history"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject ILogger<History> Logger
+
+<PageTitle>Configuration history · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Title="Configuration history"
+                Subtitle="Every apply appends a revision and none is ever rewritten. This is the audit trail of configuration — who changed what the backend is, when, and why. An audit trail of the data is a different thing and does not exist yet." />
+
+    @if (_problem is not null)
+    {
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
+    }
+    else if (_revisions is null)
+    {
+        <Skeleton Size="Skeleton.SkeletonSize.Lg" />
+    }
+    else if (_revisions.Count == 0)
+    {
+        <EmptyState Title="Nothing has been applied through this API yet"
+                    Body="The descriptor this host booted from was mounted rather than applied. The first change you make here becomes revision 1." />
+    }
+    else
+    {
+        <div class="a-split">
+            <Panel class="a-split__main a-grow">
+                @foreach (var revision in _revisions)
+                {
+                    @* Flush: the revision draws its own inset, the one it has on Overview. *@
+                    <ListRow class="@($"a-listrow--stacked a-listrow--flush{(revision.Revision == _selected?.Version.Revision ? " a-listrow--accent" : string.Empty)}")"
+                             OnClick="() => OpenAsync(revision.Revision)">
+                        <RevisionRow Revision="revision" />
+                    </ListRow>
+                }
+            </Panel>
+
+            <div class="a-split__aside">
+                @if (_selected is null)
+                {
+                    <div class="a-card">
+                        <span class="a-section__title">Pick a revision</span>
+                        <span class="a-section__sub">Its descriptor is shown here, exactly as it was applied.</span>
+                    </div>
+                }
+                else
+                {
+                    <div class="a-card a-card--roomy">
+                        <div class="a-row">
+                            <span class="a-badge a-badge--accent a-badge--rev">r@(_selected.Version.Revision)</span>
+                            <span class="a-section__sub">@RevisionHistory.Title(_selected.Version)</span>
+                        </div>
+
+                        @if (_selected.Version.Revision != _current)
+                        {
+                            <div>
+                                <p class="a-section__sub">
+                                    Rolling back does not rewrite history — it appends the reverse migration as a
+                                    new revision at the top of the list, and this one stays where it is.
+                                </p>
+                                <ConfirmByName Title="@($"Restore revision {_selected.Version.Revision}")"
+                                               Detail="A reverse migration can discard data that was added after this revision. Permission to lose data is never implied."
+                                               Expected="@Gateway.Project"
+                                               OnConfirmedChanged="confirmed => _allowed = confirmed" />
+                                <button type="button" class="a-btn a-btn--danger a-actions"
+                                        disabled="@(!_allowed || _busy)" @onclick="RollbackAsync">
+                                    Roll back to r@(_selected.Version.Revision)
+                                </button>
+                            </div>
+                        }
+                        else
+                        {
+                            <span class="a-badge a-badge--ok">this is the current revision</span>
+                        }
+
+                        <CodeBlock Json="@_selected.DescriptorJson" />
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<ManagementRevision>? _revisions;
+    private ManagementRevisionDetail? _selected;
+    private AdminProblem? _problem;
+    private int _current;
+    private bool _allowed;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _revisions = await Gateway.RevisionsAsync(CancellationToken.None);
+            _current = (await Gateway.DescriptorAsync(CancellationToken.None)).Revision;
+        }
+        catch (Exception exception)
+        {
+            _problem = AdminProblem.From(exception, Logger);
+        }
+    }
+
+    private async Task OpenAsync(int revision)
+    {
+        _allowed = false;
+        try
+        {
+            _selected = await Gateway.RevisionAsync(revision, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            _problem = AdminProblem.From(exception, Logger);
+        }
+    }
+
+    private async Task RollbackAsync()
+    {
+        if (_selected is null)
+        {
+            return;
+        }
+
+        _busy = true;
+        _problem = null;
+
+        try
+        {
+            await Gateway.RollbackAsync(
+                _selected.Version.Revision, _current, allowDestructive: true, dryRun: false,
+                author: await Gateway.AuthorAsync(),
+                reason: $"Restored r{_selected.Version.Revision}",
+                CancellationToken.None);
+
+            _selected = null;
+            _allowed = false;
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            _problem = AdminProblem.From(exception, Logger, ProblemSite.Rollback);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

@@ -1,0 +1,75 @@
+@*
+    What is about to change, line by line.
+
+    Design §4.6 binds the editor to showing the document it produces with the changed lines marked,
+    and §6.3-3 — everything clickable is exportable as code — is only believable if an operator can
+    read the change before applying it. The plan above answers "what does this do to the database";
+    this answers "what did I actually change", and a rules-only edit has an answer here and none
+    there.
+
+    The text is the working copy's own, never a re-serialisation: the same string that will be sent.
+*@
+@if (_lines.Count == 0)
+{
+    <div class="a-section__sub a-panel__body">
+        The working copy is identical to revision @Revision.
+    </div>
+}
+else
+{
+    <div class="a-diff">
+        @foreach (var line in _lines)
+        {
+            <div class="@ClassFor(line)">
+                <span class="a-diff__gutter">@Gutter(line)</span>
+                <span>@Sign(line)@line.Text</span>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private IReadOnlyList<DiffLine> _lines = [];
+
+    /// <summary>The descriptor as it stands, applied.</summary>
+    [Parameter, EditorRequired]
+    public string Before { get; set; } = string.Empty;
+
+    /// <summary>The descriptor as the working copy has it.</summary>
+    [Parameter, EditorRequired]
+    public string After { get; set; } = string.Empty;
+
+    /// <summary>The revision <see cref="Before"/> came from, named when there is nothing to show.</summary>
+    [Parameter]
+    public int Revision { get; set; }
+
+    protected override void OnParametersSet() => _lines = LineDiff.Between(Before, After);
+
+    private static string ClassFor(DiffLine line) => line.Change switch
+    {
+        LineChange.Added => "a-diff__line a-diff__line--add",
+        LineChange.Removed => "a-diff__line a-diff__line--del",
+        _ => "a-diff__line",
+    };
+
+    /// <summary>
+    /// The line's number in the document it is being applied to, and nothing for a line that is
+    /// leaving.
+    /// </summary>
+    /// <remarks>
+    /// A removed line's number belongs to the <em>old</em> document, and printing both in one column
+    /// puts two numbering systems in the same gutter — the numbers then run 29, 30, …, 35, 29, which
+    /// reads as a rendering fault. The sign already says which document a line belongs to.
+    /// </remarks>
+    private static string Gutter(DiffLine line)
+        => line.Number == 0 || line.Change == LineChange.Removed
+            ? string.Empty
+            : line.Number.ToString(CultureInfo.InvariantCulture);
+
+    private static string Sign(DiffLine line) => line.Change switch
+    {
+        LineChange.Added => "+ ",
+        LineChange.Removed => "- ",
+        _ => line.Text == LineDiff.Elision ? string.Empty : "  ",
+    };
+}

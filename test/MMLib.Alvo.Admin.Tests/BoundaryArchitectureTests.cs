@@ -1,5 +1,5 @@
 ﻿using Microsoft.AspNetCore.Components;
-using MMLib.Alvo.Admin.Components.Layout;
+using MMLib.Alvo.Admin.Components.Shell;
 using System.Reflection;
 
 namespace MMLib.Alvo.Admin.Tests;

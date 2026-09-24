@@ -4,8 +4,20 @@
 /// The paths and names the dashboard publishes, for a host that has to spell one of them.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The same argument <see cref="AlvoAdminAssets"/> makes: spelled by hand these are strings that
 /// compile either way and fail only in the browser; spelled here they move with the package.
+/// </para>
+/// <para>
+/// <b>This type, <see cref="AlvoAdminAssets"/>, <see cref="AlvoAdminOptions"/>,
+/// <see cref="AlvoAdminClaims"/>, <see cref="IAlvoAdminCallerResolver"/> and the two
+/// <c>Add</c>/<c>Map</c> extension methods are the package's public contract.</b> Everything under
+/// <c>Components.*</c> is implementation — the Razor SDK emits every component class as
+/// <c>public</c> because there is no per-component accessibility to set, not because a host is
+/// meant to construct or extend one — and it may change in any minor version. See
+/// <c>Properties/AssemblyInfo.cs</c> and docs/architecture/admin-dashboard-review.md (F-10) for the
+/// full reasoning.
+/// </para>
 /// </remarks>
 public static class AlvoAdmin
 {

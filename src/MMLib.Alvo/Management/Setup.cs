@@ -96,6 +96,8 @@ internal static class ManagementSetup
             provider.GetRequiredService<Auth.IAlvoContextAccessor>(),
             provider.GetRequiredService<ManagementAccessEvaluator>(),
             provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AlvoManagementService>>(),
+            provider.GetRequiredService<Ai.IAiConnectionResolver>(),
+            provider.GetRequiredService<Secrets.ISecretStore>(),
             provider.GetRequiredService<Migrations.RuntimeSchemaService>));
 
     /// <summary>

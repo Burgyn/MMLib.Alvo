@@ -1,0 +1,48 @@
+﻿@*
+    A panel and the section head it opens with — the shape thirty screens wrote out by hand
+    (docs/architecture/admin-dashboard-review.md, F-1).
+
+    The head is a SectionHead — title over subtitle, or the bar when there are Actions — so its markup
+    is written once for panels and for the heads inside a tab alike. No head at all without a Title, a
+    Subtitle or Actions: a panel that is only a box — a toolbar, an outcome with its own wording — is
+    still this panel.
+*@
+<div @attributes="Attributes" class="@CssClass.Of("a-panel", Attributes, Padded ? "a-panel--padded" : null)">
+    @if (Actions is not null || Title is not null || Subtitle is not null)
+    {
+        <SectionHead Title="@Title" Subtitle="Subtitle" Actions="Actions" />
+    }
+    @ChildContent
+</div>
+
+@code {
+    /// <summary>What the panel is about, as the section head's title.</summary>
+    [Parameter]
+    public string? Title { get; set; }
+
+    /// <summary>The sentence under the title that says what the panel holds, or why.</summary>
+    [Parameter]
+    public RenderFragment? Subtitle { get; set; }
+
+    /// <summary>The controls that belong to the whole panel, drawn at the head's end.</summary>
+    [Parameter]
+    public RenderFragment? Actions { get; set; }
+
+    /// <summary>What the panel holds.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>
+    /// Whether the panel carries its own inset, for content that has none — a form, or an outcome.
+    /// </summary>
+    /// <remarks>Rows and grids draw their own inset to the panel's edge, so the default is none.</remarks>
+    [Parameter]
+    public bool Padded { get; set; }
+
+    /// <summary>
+    /// Anything else, onto the panel's element: an <c>id</c>, a <c>data-testid</c>, or a <c>class</c> that
+    /// adds a modifier such as <c>a-panel--accent</c>.
+    /// </summary>
+    [Parameter(CaptureUnmatchedValues = true)]
+    public IReadOnlyDictionary<string, object>? Attributes { get; set; }
+}

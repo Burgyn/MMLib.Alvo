@@ -6,14 +6,37 @@
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.AspNetCore.Components.Web
+@using Microsoft.Extensions.Logging
 @using Microsoft.JSInterop
 @using MMLib.Alvo.Admin
 @using MMLib.Alvo.Admin.Components
-@using MMLib.Alvo.Admin.Components.Entity
-@using MMLib.Alvo.Admin.Components.Layout
-@using MMLib.Alvo.Admin.Components.Shared
+@using MMLib.Alvo.Admin.Components.Access
+@using MMLib.Alvo.Admin.Components.Assistant
+@using MMLib.Alvo.Admin.Components.Data
+@using MMLib.Alvo.Admin.Components.DesignSystem
+@using MMLib.Alvo.Admin.Components.History
+@using MMLib.Alvo.Admin.Components.Home
+@using MMLib.Alvo.Admin.Components.Integrations
+@using MMLib.Alvo.Admin.Components.Rules
+@using MMLib.Alvo.Admin.Components.Schema
+@using MMLib.Alvo.Admin.Components.Settings
+@using MMLib.Alvo.Admin.Components.Shell
 @using MMLib.Alvo.Admin.Internal
+@using MMLib.Alvo.Ai
 @using MMLib.Alvo.Management
 @using MMLib.Alvo.Data
 @using MMLib.Alvo.Schema
 @using static Microsoft.AspNetCore.Components.Web.RenderMode
+
+@*
+    Every component in this assembly is implementation, not contract (docs/architecture/admin-dashboard-review.md,
+    F-10): the Razor SDK emits each `.razor` file as a public class because it has no per-component
+    accessibility to set, not because a host is meant to construct or extend one. This attribute hides
+    every component from a consumer's IntelliSense and marks `Components.*` as free to change in any
+    minor version — the seven types in the `MMLib.Alvo.Admin` namespace itself (`AlvoAdmin`,
+    `AlvoAdminAssets`, `AlvoAdminOptions`, `AlvoAdminClaims`, `IAlvoAdminCallerResolver`, and the two
+    `Add`/`Map` extension methods) are the actual contract, and none of them is a Razor component. No
+    component here is a supported extension point today (F-11's host extension API is deliberately not
+    built yet), so the attribute applies uniformly rather than selectively.
+*@
+@attribute [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]

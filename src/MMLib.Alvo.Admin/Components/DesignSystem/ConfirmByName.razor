@@ -1,0 +1,52 @@
+﻿@*
+    Typing the name to allow something that destroys data.
+
+    Design §5.5: `MigrationOptions.AllowDestructive` is explicit in the API, so it is explicit in
+    the UI. A checkbox is not explicit — it is one click away from the button beside it, and the
+    click that matters is indistinguishable from the click that does not.
+*@
+<div class="a-confirm">
+    <div class="a-error__title">@Title</div>
+    <div class="a-error__detail">@Detail</div>
+    <Field For="confirm-name" class="a-confirm__field">
+        <LabelContent>Type <code class="a-mono">@Expected</code> to allow it</LabelContent>
+        <ChildContent>
+            @* No placeholder. It used to be the very word to type, so the box looked filled in and an
+               operator could not tell whether they had confirmed anything yet. *@
+            <input class="a-input" id="confirm-name" value="@_typed"
+                   @oninput="OnTyped" autocomplete="off" spellcheck="false" />
+        </ChildContent>
+    </Field>
+</div>
+
+@code {
+    private string _typed = string.Empty;
+
+    /// <summary>What is about to happen.</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>What is lost, concretely.</summary>
+    [Parameter, EditorRequired]
+    public string Detail { get; set; } = string.Empty;
+
+    /// <summary>The word that has to be typed — the entity's own name.</summary>
+    [Parameter, EditorRequired]
+    public string Expected { get; set; } = string.Empty;
+
+    /// <summary>Raised whenever the typed text starts or stops matching.</summary>
+    [Parameter]
+    public EventCallback<bool> OnConfirmedChanged { get; set; }
+
+    private async Task OnTyped(ChangeEventArgs args)
+    {
+        var before = string.Equals(_typed, Expected, StringComparison.Ordinal);
+        _typed = args.Value?.ToString() ?? string.Empty;
+        var now = string.Equals(_typed, Expected, StringComparison.Ordinal);
+
+        if (before != now)
+        {
+            await OnConfirmedChanged.InvokeAsync(now);
+        }
+    }
+}

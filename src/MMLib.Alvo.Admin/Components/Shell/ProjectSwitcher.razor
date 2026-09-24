@@ -1,0 +1,174 @@
+﻿@*
+    The project, and today it is not a switcher.
+
+    `GET {m}/projects` answers with exactly one project (§2.6), so a control offering a choice would
+    be offering a choice that does not exist — the drawing's dropdown is drawn here as what it
+    really is: the project's name and its revision, as a label rather than a button — no pointer, no
+    hover, because a card that lights up under the cursor and then does nothing is a broken control.
+    The day the API answers with two, this is the one place that changes, and it becomes a button then.
+
+    The data provider's type name used to sit under the revision. It is an implementation name, and
+    Settings is where it is shown, with the sentence that says what it is and is not.
+*@
+@implements IDisposable
+@inject ManagementGateway Gateway
+@inject NavigationManager Navigation
+@inject AdminSession Session
+@inject ILogger<ProjectSwitcher> Logger
+
+<div class="a-switcher" data-testid="project-card">
+    <span class="a-brand-mark">@Initial</span>
+    <span class="a-grow">
+        <span class="a-switcher-name">@(_project?.Name ?? (_unread is null ? "…" : "No project"))</span>
+        <span class="a-meta">
+            @Meta
+            @* The same count as the pending bar, with the project as §4.5 draws it: "3 unapplied". *@
+            @if (_copy?.PendingCount is > 0 and var pending)
+            {
+                <span class="a-badge a-badge--accent a-switcher-pending" data-testid="project-pending">@pending unapplied</span>
+            }
+        </span>
+    </span>
+</div>
+
+@code {
+    private ManagementProject? _project;
+    private readonly ComponentLifetime _lifetime = new();
+    private WorkingCopy? _copy;
+    private int? _revision;
+    private string? _unread;
+
+    private string Initial => (_project?.Name is { Length: > 0 } name ? name[..1] : "?").ToUpperInvariant();
+
+    private string Meta => (_project, _revision) switch
+    {
+        ({ }, { } revision) => $"revision {revision}",
+        ({ }, null) => "not applied yet",
+        _ => _unread ?? "loading",
+    };
+
+    /// <summary>
+    /// A refusal here is rendered, never thrown.
+    /// </summary>
+    /// <remarks>
+    /// This sits in the layout, so an exception escaping it takes every screen with it — including
+    /// the one that would have explained the refusal. An operator whose account is admitted to
+    /// nothing must still get a dashboard that says so, which is exactly the failure mode design
+    /// §5.5 has in mind when it says an error lands where it happened and stays.
+    /// </remarks>
+    protected override void OnInitialized()
+    {
+        Navigation.LocationChanged += Reload;
+        Gateway.Applied += Refresh;
+    }
+
+    /// <summary>
+    /// Re-reads on navigation, because this sits in the layout and the layout is not re-initialised.
+    /// </summary>
+    /// <remarks>
+    /// Without it the revision in the sidebar is whatever it was when the session started, and an
+    /// operator who has just applied a change reads a number that contradicts the screen they are
+    /// looking at. The gateway dropped its cache while the location was changing, before this handler, so the
+    /// re-read is of the revision as it is now — including one another tab or another operator applied,
+    /// which this circuit's <see cref="ManagementGateway.Applied"/> never hears about.
+    /// </remarks>
+    private void Reload(object? sender, LocationChangedEventArgs args) => Refresh();
+
+    /// <summary>
+    /// Re-reads, on the renderer's thread — after a navigation, and after an apply, because Preview stays
+    /// put after one and waiting for a navigation left the card a revision behind the panel announcing it.
+    /// </summary>
+    private void Refresh()
+        => _ = InvokeAsync(async () =>
+        {
+            await LoadAsync();
+            StateHasChanged();
+        });
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        await FollowCopyAsync();
+    }
+
+    /// <summary>
+    /// Follows this operator's working copy, so the count moves with every staged edit.
+    /// </summary>
+    /// <remarks>
+    /// A refused caller gets no count rather than a failed shell, for the reason <see cref="LoadAsync"/>
+    /// renders its refusal instead of throwing it.
+    /// </remarks>
+    private async Task FollowCopyAsync()
+    {
+        try
+        {
+            _copy = await Session.CopyAsync(_lifetime.Token);
+            Session.Follow(_copy, InvokeAsync, StateHasChanged, _lifetime.Token);
+        }
+        catch (Exception exception)
+        {
+            AdminProblem.Absorb(exception, Logger);
+            _copy = null;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var projects = await Gateway.ProjectsAsync(_lifetime.Token);
+            _project = projects.Count > 0 ? projects[0] : null;
+            _revision = _project is null ? null : await CurrentRevisionAsync(_project);
+        }
+        catch (Exception exception)
+        {
+            _unread = Unread(AdminProblem.From(exception, Logger));
+        }
+    }
+
+    /// <summary>
+    /// Why there is no project to show, in the card's one line — or nothing, while the circuit is going.
+    /// </summary>
+    /// <remarks>
+    /// "Not admitted" is said only when the management surface said it. A read that failed for any other
+    /// reason used to say it too, which sent an operator to their access level over what was a fault — and
+    /// the fault, unlike the refusal, is in the server log.
+    /// </remarks>
+    private static string? Unread(AdminProblem? problem) => problem?.Exception switch
+    {
+        null => null,
+        ManagementForbiddenException => "not admitted to this project",
+        ManagementProjectNotFoundException => "no project is served",
+        _ => "could not be read",
+    };
+
+    /// <summary>
+    /// The revision the history is at now, rather than the one the project list reports.
+    /// </summary>
+    /// <remarks>
+    /// <b>The list's revision is the one this process booted at</b> — it is read from the boot state,
+    /// which an apply does not move — so re-reading the list after an apply answered with the same
+    /// stale number. The descriptor read is the current one, and the gateway already holds it for
+    /// every other screen. An operator who may list projects and not read the descriptor still gets
+    /// the boot revision, which is what the card showed before.
+    /// </remarks>
+    private async Task<int?> CurrentRevisionAsync(ManagementProject project)
+    {
+        try
+        {
+            var revision = (await Gateway.DescriptorAsync(_lifetime.Token)).Revision;
+            return revision > 0 ? revision : null;
+        }
+        catch (ManagementForbiddenException)
+        {
+            return project.Revision;
+        }
+    }
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= Reload;
+        Gateway.Applied -= Refresh;
+        _lifetime.Dispose();
+    }
+}

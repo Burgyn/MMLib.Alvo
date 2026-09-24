@@ -1,0 +1,292 @@
+﻿@page "/admin/schema"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject AdminSession Session
+@inject NavigationManager Navigation
+@inject ILogger<SchemaList> Logger
+@implements IDisposable
+
+<PageTitle>Schema · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Title="Schema">
+        <Secondary>
+            <button type="button" class="a-btn a-btn--sm" @onclick="ToggleAdding">New entity</button>
+            <a class="a-btn a-btn--sm" href="@AdminPaths.Transfer">Import / export</a>
+        </Secondary>
+    </PageHeader>
+
+    @if (_problem is not null)
+    {
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
+    }
+
+    @*
+        Above the list rather than instead of it: the name an operator is about to type is best chosen
+        looking at the names already there.
+    *@
+    @if (_adding)
+    {
+        <Panel Padded="true" data-testid="new-entity" Title="New entity">
+            <Subtitle>
+                It arrives with one required <code class="a-mono">name</code> field, the smallest entity
+                the schema admits, and opens on its Fields tab to add the rest. Nothing reaches the
+                database until you preview and apply.
+            </Subtitle>
+            <ChildContent>
+                @* Spaced as the field sheet is: the fields sat flush, and the constraints read as part of the
+                   name's hint. *@
+                <div class="a-stack">
+                    @if (_refusal is { Length: > 0 })
+                    {
+                        <ErrorPanel Title="That entity cannot be added" Fix="@_refusal" />
+                    }
+
+                    <Field Label="Name" For="new-entity-name">
+                        <input class="a-input" id="new-entity-name" value="@_name" placeholder="e.g. invoices" @ref="_nameInput"
+                               @oninput="args => _name = args.Value?.ToString() ?? string.Empty" autocomplete="off" />
+                        <span class="a-hint" title="@DescriptorNames.Member">@DescriptorNames.Hint</span>
+                        @* Opened from the palette or the header button, the form is filled from the keyboard. *@
+                        @FocusOnRender.On(() => _nameInput)
+                    </Field>
+
+                    <Field Label="Constraints">
+                        <ChildContent>
+                            <div class="a-check-row">
+                                <label class="a-check">
+                                    <input type="checkbox" checked="@_scoped" @onchange="args => _scoped = args.Value is true" />
+                                    <span>tenant-scoped</span>
+                                </label>
+                                <label class="a-check">
+                                    <input type="checkbox" checked="@_audited" @onchange="args => _audited = args.Value is true" />
+                                    <span>audited</span>
+                                </label>
+                            </div>
+                        </ChildContent>
+                        <Hint>
+                            Scoped means every row belongs to a tenant and a caller with none is refused with 403.
+                            Audited adds the four stamp columns and a version, which is what makes a conditional
+                            write possible.
+                        </Hint>
+                    </Field>
+                </div>
+
+                <div class="a-row a-row--gap-2 a-panel__actions">
+                    <button type="button" class="a-btn a-btn--primary" @onclick="AddEntity">
+                        Add to the working copy
+                    </button>
+                    <button type="button" class="a-btn a-btn--ghost" data-testid="new-entity-cancel"
+                            @onclick="CancelAdding">Cancel</button>
+                </div>
+            </ChildContent>
+        </Panel>
+    }
+
+    @if (_schema is null)
+    {
+        <Skeleton Size="Skeleton.SkeletonSize.Lg" />
+    }
+    else if (_schema.Entities.Count == 0)
+    {
+        <EmptyState Title="This project has no entities yet"
+                    Body="An entity is a table Alvo creates and keeps in step with the descriptor. Import a descriptor, or add the first entity in the editor.">
+            <a class="a-btn a-btn--primary a-btn--sm" href="@AdminPaths.Transfer">Import a descriptor</a>
+        </EmptyState>
+    }
+    else
+    {
+        <Panel Title="@($"{_schema.Entities.Count} entities")">
+            <Subtitle>
+                What the Data API actually serves — the descriptor after everything that did not
+                survive it. Where the two differ is where <em>declared but not honoured</em> lives.
+            </Subtitle>
+            <ChildContent>
+                @foreach (var pending in Pending)
+                {
+                    <ListRow class="a-listrow--accent a-listrow--inline" OnClick="() => Open(pending)">
+                        <Icon Path="@Icons.Schema" />
+                        <span class="a-grow">
+                            <span class="a-mono a-name">@pending</span>
+                            <span class="a-meta">In the working copy. It does not exist in the database until you apply.</span>
+                        </span>
+                        <span class="a-badge a-badge--warn a-listrow__aside">not applied yet</span>
+                    </ListRow>
+                }
+
+                @foreach (var entity in _schema.Entities)
+                {
+                    <ListRow class="a-listrow--inline" OnClick="() => Open(entity.Name)">
+                        <Icon Path="@Icons.Schema" />
+                        <span class="a-grow">
+                            <span class="a-mono a-name">@entity.Name</span>
+                            <span class="a-meta">@(entity.Description ?? "No description in the descriptor")</span>
+                        </span>
+                        <span class="a-row a-row--gap-2 a-listrow__aside">
+                            <span class="a-badge">@entity.Fields.Count fields</span>
+                            @if (entity.Tenancy == TenancyMode.Scoped)
+                            {
+                                <span class="a-badge a-badge--accent">scoped</span>
+                            }
+                            @if (entity.Audit)
+                            {
+                                <span class="a-badge">audited</span>
+                            }
+                            @if (entity.SoftDelete)
+                            {
+                                <span class="a-badge">soft delete</span>
+                            }
+                        </span>
+                    </ListRow>
+                }
+            </ChildContent>
+        </Panel>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// This operator's working copy, resolved from the store rather than injected.
+    /// </summary>
+    /// <remarks>
+    /// Empty until the first render has resolved who is signed in — the markup therefore reads it
+    /// through <c>Copy.Loaded</c> rather than assuming a document is there.
+    /// </remarks>
+    private WorkingCopy Copy { get; set; } = new();
+
+    private SchemaModel? _schema;
+    private AdminProblem? _problem;
+    private string _name = string.Empty;
+    private string? _refusal;
+    private bool _adding;
+    private bool _scoped;
+    private bool _audited = true;
+    private readonly ComponentLifetime _lifetime = new();
+    private ElementReference _nameInput;
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+        _lifetime.Dispose();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+        OpenIfAsked(Navigation.Uri);
+
+        var ct = _lifetime.Token;
+        try
+        {
+            /* The pending rows are drawn from the copy, which the shell's Discard and the operator's other
+               tabs also change — so it is followed, and taken only once the schema has been read. */
+            Copy = await Session.CopyAsync(ct);
+            Session.Follow(Copy, InvokeAsync, StateHasChanged, ct);
+
+            _schema = await Gateway.SchemaAsync(ct);
+            await Session.EnsureLoadedAsync(Copy, ct);
+        }
+        catch (Exception exception)
+        {
+            _problem = AdminProblem.From(exception, Logger);
+        }
+    }
+
+    /// <summary>
+    /// The entities the working copy declares and the applied schema does not.
+    /// </summary>
+    /// <remarks>
+    /// Shown first and tinted, because the whole point of the list is "what is this backend", and
+    /// an entity somebody added ten seconds ago that is nowhere on the screen reads as a control
+    /// that did nothing.
+    /// </remarks>
+    private IEnumerable<string> Pending => Copy.Loaded && _schema is not null
+        ? Copy.Entities.Where(name => !_schema.Entities.Any(
+            entity => string.Equals(entity.Name, name, StringComparison.Ordinal)))
+        : [];
+
+    private void Open(string entity) => Navigation.NavigateTo(AdminPaths.Entity(entity));
+
+    /// <summary>Puts a new entity in the working copy and opens it, to add its fields.</summary>
+    /// <remarks>
+    /// The name is checked against the frozen schema's own pattern before anything else, because a
+    /// control must never produce a descriptor the apply would reject — and because an entity name
+    /// is rendered into markup on six screens.
+    /// </remarks>
+    private void AddEntity()
+    {
+        _refusal = null;
+
+        if (!DescriptorNames.IsMember(_name))
+        {
+            _refusal = $"An entity name must match {DescriptorNames.Member}.";
+            return;
+        }
+
+        if (Copy.Entities.Contains(_name, StringComparer.Ordinal))
+        {
+            _refusal = $"This project already declares an entity called {_name}.";
+            return;
+        }
+
+        Copy.AddEntity(_name, _scoped, _audited);
+        Navigation.NavigateTo(AdminPaths.Entity(_name));
+    }
+
+    /// <summary>Closes the form without touching the working copy, and forgets what was typed.</summary>
+    /// <remarks>
+    /// And drops the palette's <c>?new=entity</c> from the address, without a history step, so a reload
+    /// does not open the form the operator has just closed.
+    /// </remarks>
+    private void CancelAdding()
+    {
+        _adding = false;
+        _name = string.Empty;
+        _refusal = null;
+
+        if (IsNewEntityRequest(Navigation.Uri))
+        {
+            Navigation.NavigateTo(
+                Navigation.GetUriWithQueryParameter(AdminNavigation.NewEntityParameter, (string?)null), replace: true);
+        }
+    }
+
+    /// <summary>
+    /// The palette's New entity, which arrives as an address — from another screen, or from this one.
+    /// </summary>
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        if (IsNewEntityRequest(args.Location))
+        {
+            _ = InvokeAsync(() =>
+            {
+                OpenIfAsked(args.Location);
+                StateHasChanged();
+            });
+        }
+    }
+
+    private void OpenIfAsked(string uri)
+    {
+        if (IsNewEntityRequest(uri))
+        {
+            _adding = true;
+        }
+    }
+
+    /// <summary>The header button: opens the form, or closes it the way Cancel does.</summary>
+    private void ToggleAdding()
+    {
+        if (_adding)
+        {
+            CancelAdding();
+        }
+        else
+        {
+            _adding = true;
+        }
+    }
+
+    private static bool IsNewEntityRequest(string uri) => AdminNavigation.IsNewEntity(uri);
+}

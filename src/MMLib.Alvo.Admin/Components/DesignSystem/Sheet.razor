@@ -1,0 +1,134 @@
+﻿@*
+    One overlay, two shapes: a sheet that rises from the bottom edge on a phone, a centred
+    dialog on a desktop. One component rather than two, for the reason the shell itself gives
+    about navigation — a second implementation is a second set of behaviours to keep in step,
+    and the behaviours here (scrim, Escape, focus, scroll lock) are the part nobody notices
+    until one of them is missing.
+
+    It is a modal: the scrim closes it, Escape closes it, and the panel stops the click that
+    would otherwise reach the scrim underneath.
+*@
+@implements IAsyncDisposable
+@inject AdminInterop Interop
+
+@if (Open)
+{
+    <div class="a-scrim a-sheet" @onclick="CloseAsync" data-testid="@TestId">
+        <div class="a-sheet__panel" role="dialog" aria-modal="true" aria-label="@Title"
+             @onclick:stopPropagation="true" @onkeydown="OnKeyDownAsync" @ref="_panel" tabindex="-1">
+            <div class="a-sheet__grip" aria-hidden="true"></div>
+
+            <div class="a-sheet__head">
+                @* The stacked head without the panel section's padding and rule: the sheet is its own frame. *@
+                <div class="a-section__text">
+                    @if (Eyebrow is { Length: > 0 })
+                    {
+                        <span class="a-pagehead__eyebrow">@Eyebrow</span>
+                    }
+                    <span class="a-section__title">@Title</span>
+                    @if (Subtitle is { Length: > 0 })
+                    {
+                        <span class="a-section__sub">@Subtitle</span>
+                    }
+                </div>
+                <button type="button" class="a-btn a-btn--ghost a-btn--sm"
+                        data-testid="sheet-close" aria-label="Close" @onclick="CloseAsync">Close</button>
+            </div>
+
+            <div class="a-sheet__body">
+                @ChildContent
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private ElementReference _panel;
+    private ScrollLock? _scrollLock;
+
+    /// <summary>Whether the sheet is on the page at all.</summary>
+    /// <remarks>
+    /// Closed means <em>absent</em>, not hidden: a form left in the DOM keeps its values, its
+    /// validation state and its focusability, and the next caller would open somebody else's
+    /// half-typed record.
+    /// </remarks>
+    [Parameter]
+    public bool Open { get; set; }
+
+    /// <summary>What the sheet is for, read out as the dialog's label.</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>What the sheet's subject belongs to, set above the title the way a page header sets its section.</summary>
+    /// <remarks>
+    /// A record's sheet is titled by the record ("Edit SO-2026-0163"), and the entity it is a row of is
+    /// the context that title needs — which is what a page header's eyebrow already is, so it looks the same.
+    /// </remarks>
+    [Parameter]
+    public string? Eyebrow { get; set; }
+
+    /// <summary>One line under the title, or nothing.</summary>
+    [Parameter]
+    public string? Subtitle { get; set; }
+
+    /// <summary>Raised when the operator dismisses it — the scrim, Escape, or the close control.</summary>
+    /// <remarks>
+    /// Dismissal is the caller's to interpret: this component never decides that closing discards
+    /// an edit, because on one screen it does and on another it does not.
+    /// </remarks>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    /// <summary>What the sheet holds.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>The handle a scenario opens and closes it by.</summary>
+    [Parameter]
+    public string TestId { get; set; } = "sheet";
+
+    /// <summary>
+    /// Takes focus and stops the page behind from scrolling, each time it opens.
+    /// </summary>
+    /// <remarks>
+    /// The scroll lock is <see cref="ScrollLock"/>'s, shared with the command palette. Focus moves to the
+    /// panel so the first Tab lands inside the dialog rather than on whatever the operator last touched
+    /// behind it. The panel's focus is sent before anything here awaits: a control inside the sheet that
+    /// takes focus on its first render (<c>FocusOnRender</c>) has its after-render run after this one
+    /// yields, so its focus arrives second and is the one that stays — awaiting the lock first let the
+    /// panel take focus back from the field the operator had started typing into.
+    /// </remarks>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (Open && !Lock.Held)
+        {
+            var holding = Lock.HoldAsync();
+            await _panel.FocusAsync();
+            await holding;
+        }
+        else if (!Open)
+        {
+            await Lock.ReleaseAsync();
+        }
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape")
+        {
+            await CloseAsync();
+        }
+    }
+
+    private Task CloseAsync() => OnClose.InvokeAsync();
+
+    private ScrollLock Lock => _scrollLock ??= new ScrollLock(Interop);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_scrollLock is not null)
+        {
+            await _scrollLock.ReleaseAsync();
+        }
+    }
+}

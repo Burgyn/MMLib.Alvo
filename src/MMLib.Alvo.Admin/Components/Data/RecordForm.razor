@@ -1,0 +1,191 @@
+﻿@*
+    One record, in a form generated from the field types.
+
+    Generated rather than hand-drawn, and that is the point of a descriptor-driven backend: add a
+    field in Schema and it appears here, with the control its type admits and the facets its type
+    allows. A hand-written form would drift from the schema the first time somebody added a column.
+
+    What it refuses to do is validate ahead of the engine. The facets are shown and the obvious
+    input types are used, but the answer to "is this value acceptable" comes from the write — a
+    second validator in the client is a second set of rules to disagree with. The one thing it does
+    check is whether the text can be read as the field's type at all, because a value it cannot build
+    is not one it can send (FormValue).
+*@
+@inject DataGateway Data
+@inject ILogger<RecordForm> Logger
+
+@*
+    The chrome — the overlay, the title, the way out, the scroll lock — belongs to <Sheet>. This
+    component is the form, so the same markup reads as a bottom sheet on a phone and a centred
+    dialog on a desktop without knowing which it is in.
+*@
+<Sheet Open="true" TestId="record-sheet" Eyebrow="@Entity.Name" Title="@Title" OnClose="Cancel">
+
+        @if (_problem is not null)
+        {
+            <CascadingValue Value="_problem">
+                <ErrorPanel />
+            </CascadingValue>
+        }
+
+        <div class="a-stack">
+            @foreach (var column in _editable)
+            {
+                <div class="a-field">
+                    @*
+                        A <label for> may only name a labelable element, and an enum's chips are a group
+                        of buttons, not one control; the group names this label by id instead.
+                    *@
+                    <label class="a-label" id="@LabelId(column)" for="@(column.Type == FieldType.Enum ? null : ControlId(column))">
+                        @GridColumns.Header(column)
+                        @if (column.Required)
+                        {
+                            <span class="a-label__required" aria-hidden="true"> *</span>
+                        }
+                    </label>
+                    <span class="a-hint" id="@HintId(column)" title="@column.FormatPattern">
+                        <span class="a-ident">@column.Name · @TypeOf(column)</span>@Hint(column)
+                    </span>
+                    @Control(column)
+                    @if (_problems.TryGetValue(column.Name, out var problem))
+                    {
+                        <span class="a-field__problem" data-testid="field-problem">@problem</span>
+                    }
+                </div>
+            }
+        </div>
+
+        @*
+            Read-only values last, under their own heading, formatted exactly as the grid formats them:
+            they answer "why is the total 43.50?", and a greyed input would read as a control that is
+            broken rather than as a value that is derived.
+        *@
+        @if (_calculated.Count > 0)
+        {
+            <section class="a-readout" aria-labelledby="rf-calculated" data-testid="record-calculated">
+                <span class="a-section__title" id="rf-calculated">Calculated</span>
+                <dl class="a-readout__list">
+                    @foreach (var column in _calculated)
+                    {
+                        <div class="a-readout__pair">
+                            <dt title="@($"{column.Name} · {Why(column)}")">@GridColumns.Header(column)</dt>
+                            <dd>@Readout(column)</dd>
+                        </div>
+                    }
+                </dl>
+            </section>
+        }
+
+        <details class="a-disclosure">
+            <summary>API</summary>
+            <code class="a-ident">@Verb</code>
+        </details>
+
+        <div class="a-sheet__actions">
+            @if (RecordId is { } id)
+            {
+                <button type="button" class="a-btn a-btn--danger a-btn--sm" @onclick="Delete">Delete</button>
+            }
+            <span class="a-spacer"></span>
+            <button type="button" class="a-btn a-btn--primary" disabled="@_saving" @onclick="Save">
+                @(RecordId is null ? "Create" : "Save")
+            </button>
+        </div>
+</Sheet>
+
+@code {
+    private RenderFragment Control(FieldSchema column) => column.Type switch
+    {
+        FieldType.Boolean => Flag(column),
+        FieldType.Enum => Choice(column),
+        FieldType.Text => @<textarea class="a-textarea" id="@ControlId(column)" rows="4"
+                                     aria-required="@Required(column)" aria-describedby="@HintId(column)"
+                                     value="@_draft.Text(column.Name)"
+                                     @oninput="args => Set(column.Name, args.Value?.ToString())"></textarea>,
+        _ when _pickers.TryGetValue(column.Name, out var picker) => Reference(picker),
+        _ => @<input class="a-input" id="@ControlId(column)" type="@InputType(column)"
+                     inputmode="@InputMode(column)" aria-required="@Required(column)"
+                     aria-describedby="@HintId(column)" value="@_draft.Text(column.Name)"
+                     @oninput="args => Set(column.Name, args.Value?.ToString())" />,
+    };
+
+    private RenderFragment Flag(FieldSchema column)
+    {
+        var on = string.Equals(_draft.Text(column.Name), "true", StringComparison.Ordinal);
+        return @<button type="button" id="@ControlId(column)"
+                        class="@($"a-toggle{(on ? " a-toggle--on" : string.Empty)}")"
+                        aria-describedby="@HintId(column)"
+                        @onclick="() => Toggle(column.Name)" aria-pressed="@(on ? "true" : "false")"></button>;
+    }
+
+    private RenderFragment Choice(FieldSchema column) => @<ChipGroup TValue="string" Items="@(column.EnumValues ?? [])"
+                                                                     Selected="@([_draft.Text(column.Name)])"
+                                                                     id="@ControlId(column)" aria-labelledby="@LabelId(column)"
+                                                                     aria-describedby="@HintId(column)" aria-required="@Required(column)"
+                                                                     SelectedChanged="options => Set(column.Name, options[0])" />;
+
+    /// <summary>
+    /// A reference: a combobox over the target's labelled rows (<see cref="RefPicker"/>).
+    /// </summary>
+    /// <remarks>
+    /// The list is in the flow of the form, not floated over it: the sheet's body scrolls, and a list
+    /// positioned over a scrolling box is cut off at its edge exactly when the field is near the bottom.
+    /// An option is chosen on <c>mousedown</c>, with the default prevented, so the box keeps focus and its
+    /// <c>blur</c> — which puts the chosen label back — does not run first. Escape closes the list and
+    /// stops there, rather than also closing the sheet around it.
+    /// </remarks>
+    private RenderFragment Reference(RefPicker picker)
+    {
+        var column = picker.Field;
+        var list = $"{ControlId(column)}-options";
+        return @<div class="a-combo">
+            <input class="a-input" id="@ControlId(column)" type="text" role="combobox" autocomplete="off"
+                   maxlength="@GridQuery.MaxPatternLength"
+                   aria-autocomplete="list" aria-expanded="@(picker.Open ? "true" : "false")"
+                   aria-controls="@(picker.Open ? list : null)"
+                   aria-activedescendant="@(picker.ActiveOption is { } active ? OptionId(column, active) : null)"
+                   aria-required="@Required(column)" aria-describedby="@HintId(column)"
+                   placeholder="@Placeholder(picker)" title="@_draft.Text(column.Name)" value="@picker.Term"
+                   data-testid="ref-input"
+                   @oninput="args => RefTypedAsync(picker, args.Value?.ToString())"
+                   @onfocus="() => RefFocusedAsync(picker)" @onblur="() => RefLeft(picker)"
+                   @onkeydown="args => RefKeyAsync(picker, args)" @onkeydown:stopPropagation="picker.Open" />
+            @if (picker.Open)
+            {
+                @Options(picker, list)
+            }
+        </div>;
+    }
+
+    /// <summary>The combobox's list: the target's matching rows, or the sentence that says there are none.</summary>
+    private RenderFragment Options(RefPicker picker, string list)
+    {
+        var column = picker.Field;
+        return @<ul class="a-combo__list" role="listbox" id="@list" aria-label="@($"{picker.Target?.Name} to choose from")">
+            @if (picker.Options.Count == 0)
+            {
+                <li class="a-combo__empty" role="presentation">Nothing matches. A full id pasted here sets it anyway.</li>
+            }
+            @foreach (var option in picker.Options)
+            {
+                <li class="a-combo__option" role="option" id="@OptionId(column, option)" data-testid="ref-option"
+                    aria-selected="@(ReferenceEquals(option, picker.ActiveOption) ? "true" : "false")"
+                    @onmousedown="() => Choose(picker, option)" @onmousedown:preventDefault="true">
+                    <span>@option.Label</span>
+                    <span class="a-ident">@RefLabels.ShortId(option.Id)</span>
+                </li>
+            }
+        </ul>;
+    }
+
+    private RenderFragment Readout(FieldSchema column)
+    {
+        var cell = GridCell.Of(column, Values.TryGetValue(column.Name, out var value) ? value : null);
+        return cell.Kind switch
+        {
+            CellKind.Value => @<span class="a-badge a-badge--value">@cell.Text</span>,
+            CellKind.Identifier => @<span class="a-ident" title="@cell.Title">@cell.Text</span>,
+            _ => @<span title="@cell.Title">@cell.Text</span>,
+        };
+    }
+}

@@ -1,0 +1,499 @@
+﻿using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Routing;
+using Microsoft.Extensions.Logging;
+using MMLib.Alvo.Admin.Internal;
+using MMLib.Alvo.Management;
+using MMLib.Alvo.Schema;
+
+namespace MMLib.Alvo.Admin.Components.Schema;
+
+/// <summary>One entity's schema screen: its tabs, the field editor and the rename sheet.</summary>
+public partial class Entity
+{
+    /// <summary>
+    /// This operator's working copy, resolved from the store rather than injected.
+    /// </summary>
+    /// <remarks>
+    /// Empty until the first render has resolved who is signed in — the markup therefore reads it
+    /// through <c>Copy.Loaded</c> rather than assuming a document is there.
+    /// </remarks>
+    private WorkingCopy Copy { get; set; } = new();
+
+    private readonly Dictionary<string, ElementReference> _tabRefs = new(StringComparer.Ordinal);
+    private SchemaModel? _schema;
+    private EntitySchema? _entity;
+    private IReadOnlyList<KeyValuePair<string, string>> _rules = [];
+    private IReadOnlyList<KeyValuePair<string, string>> _hooks = [];
+    private IReadOnlyList<string> _entities = [];
+    private IReadOnlyList<ManagementRefusedFeature> _refused = [];
+    private IReadOnlyList<KeyValuePair<string, string>> _working = [];
+    private IReadOnlyList<IndexSchema> _indexes = [];
+    private IReadOnlyList<string> _fieldNames = [];
+    private IReadOnlyList<StagedField> _fields = [];
+    private StagedView _staged = StagedView.None;
+    private readonly ComponentLifetime _lifetime = new();
+    private WorkingCopy? _followed;
+    private IDisposable? _following;
+    private bool _renaming;
+    private string _newName = string.Empty;
+    private string? _renameRefusal;
+    private AdminProblem? _problem;
+    private EntityTab _tab = EntityTabs.First;
+    private bool _followingAddress;
+    private string? _editing;
+    private bool _editorOpen;
+    private bool _pending;
+
+    /// <summary>The entity's name, from the route.</summary>
+    [Parameter]
+    public string EntityName { get; set; } = string.Empty;
+
+    /// <summary>Reads the entity, its rules and hooks, and the operator's working copy of all of them.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        FollowAddress();
+        _tab = EntityTabs.FromUri(Navigation.Uri);
+
+        try
+        {
+            await ReadAsync(_lifetime.Token);
+        }
+        catch (Exception exception)
+        {
+            _problem = AdminProblem.From(exception, Logger);
+        }
+    }
+
+    /// <summary>
+    /// Follows the address from the first parameters on, once, which is how Back and Forward reach the tab.
+    /// </summary>
+    private void FollowAddress()
+    {
+        if (!_followingAddress)
+        {
+            _followingAddress = true;
+            Navigation.LocationChanged += OnLocationChanged;
+        }
+    }
+
+    /// <summary>
+    /// The copy first, then the applied schema, capabilities and descriptor, then the copy's parts.
+    /// </summary>
+    /// <remarks>
+    /// The copy is followed before the reads that may fail: a screen that could not read the schema still
+    /// draws the copy the operator's other tabs are editing.
+    /// </remarks>
+    private async Task ReadAsync(CancellationToken ct)
+    {
+        Follow(await Session.CopyAsync(ct));
+
+        _schema = await Gateway.SchemaAsync(ct);
+        _entity = _schema.Entities.FirstOrDefault(
+            entity => string.Equals(entity.Name, EntityName, StringComparison.Ordinal));
+        _refused = (await Gateway.CapabilitiesAsync(ct)).Refused;
+        _rules = DescriptorLens.Rules((await Gateway.DescriptorAsync(ct)).DescriptorJson, EntityName);
+        _entities = [.. _schema.Entities.Select(entity => entity.Name)];
+
+        await Session.EnsureLoadedAsync(Copy, ct);
+        ReadWorking();
+
+        /* An entity that exists only in the working copy is not in GET schema, because nothing has been
+           applied. Rendering it from the working copy is what lets somebody add an entity and then give it
+           rules — without this, the screen would say "there is no entity called invoices" to the person who
+           just created one. */
+        _pending = _entity is null;
+        ReadPendingEntity();
+    }
+
+    /// <summary>
+    /// Follows this operator's copy, so the screen redraws when anything changes it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Anything, not only this screen.</b> The copy is the operator's and every tab they have open edits
+    /// it, and so does the shell's Discard. A tab that went on drawing the copy as it was would offer a Remove
+    /// against a position that has since moved — the removal is checked against what was drawn and refused,
+    /// but the operator would be looking at rows that are no longer there.
+    /// </para>
+    /// <para>
+    /// A redraw of the working-copy parts only: the tab, an open sheet and what was typed into it are left
+    /// as they are. Re-followed only when the copy is a different one — the parameters are set again on every
+    /// move to another entity, and the operator's copy is the same across all of them.
+    /// </para>
+    /// </remarks>
+    private void Follow(WorkingCopy copy)
+    {
+        Copy = copy;
+        if (ReferenceEquals(copy, _followed))
+        {
+            return;
+        }
+
+        _following?.Dispose();
+        _followed = copy;
+        _following = Session.Follow(copy, InvokeAsync, OnCopyChanged, _lifetime.Token);
+    }
+
+    /// <summary>Redraws the working-copy parts; <see cref="AdminSession.Follow(WorkingCopy, Func{Func{Task}, Task}, Action, CancellationToken)"/> has put it on the renderer's thread.</summary>
+    private void OnCopyChanged()
+    {
+        ReadWorking();
+        ReadPendingEntity();
+        StateHasChanged();
+    }
+
+    /// <summary>Stops following the address and the working copy, and cancels what is in flight.</summary>
+    public void Dispose()
+    {
+        if (_followingAddress)
+        {
+            Navigation.LocationChanged -= OnLocationChanged;
+        }
+
+        _lifetime.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// Follows the address's <c>?tab=</c>, which is how Back and Forward reach the tab.
+    /// </summary>
+    /// <remarks>
+    /// A change of the query alone does not set a routed page's parameters again, so this is the only
+    /// place a history step between two tabs of one entity arrives. An open field editor stays open
+    /// underneath: it is drawn on Fields only, and returning to Fields finds it as it was left.
+    /// </remarks>
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        var tab = EntityTabs.FromUri(args.Location);
+        if (tab != _tab)
+        {
+            _ = InvokeAsync(() =>
+            {
+                _tab = tab;
+                StateHasChanged();
+            });
+        }
+    }
+
+    /// <summary>Opens a tab by putting it in the address, so a reload, a link and Back all agree.</summary>
+    /// <remarks>
+    /// A click is a step in history; an arrow key <paramref name="replace"/>s it, because walking the
+    /// strip with the arrows is one visit, and six Back presses to leave it would be six too many. The tab
+    /// already open is left alone — a second click on it is not a second step either.
+    /// </remarks>
+    private void Open(EntityTab tab, bool replace = false)
+    {
+        if (tab == _tab)
+        {
+            return;
+        }
+
+        _tab = tab;
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter(EntityTabs.Parameter, tab.Slug), replace: replace);
+    }
+
+    /// <summary>The arrows, Home and End on the strip: open the tab they reach and move focus onto it.</summary>
+    /// <remarks>
+    /// Every tab is always drawn, so the one being moved to already has its element and takes focus now;
+    /// the render that follows only moves the roving <c>tabindex</c> after it.
+    /// </remarks>
+    private async Task Move(string key)
+    {
+        if (EntityTabs.Move(_tab, key) is { } next)
+        {
+            Open(next, replace: true);
+            if (_tabRefs.TryGetValue(next.Slug, out var element))
+            {
+                await element.FocusAsync();
+            }
+        }
+    }
+
+    /// <summary>An entity only the working copy declares, read again from it — gone once it is discarded.</summary>
+    private void ReadPendingEntity()
+    {
+        if (_pending)
+        {
+            _entity = PendingSchema.Read(Copy.Json, EntityName);
+        }
+    }
+
+    /// <summary>
+    /// Reads everything the tabs render from the working copy, with what differs from the applied revision.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Every tab that edits the working copy renders the working copy.</b> Showing the applied rules in an
+    /// editable box would quietly discard an unapplied edit the moment somebody navigated away and back, and
+    /// a field, an index or a hook that vanished on being added reads as a control that did nothing.
+    /// </para>
+    /// <para>
+    /// <b>And each staged row says so</b> — <c>new</c>, <c>changed</c>, or struck through as
+    /// <c>removed</c> — because a staged row that looks applied is the opposite lie: a column the operator
+    /// believes exists, before anything has run.
+    /// </para>
+    /// </remarks>
+    private void ReadWorking()
+    {
+        _working = DescriptorLens.Rules(Copy.Json, EntityName);
+        _indexes = Copy.IndexesOf(EntityName);
+        _fieldNames = [.. Copy.FieldsOf(EntityName).Select(field => field.Key)];
+        _hooks = Copy.HooksOf(EntityName);
+
+        _fields = Copy.FieldChangesOf(EntityName);
+        _staged = new StagedView(
+            _fields.Where(field => field.Change != StagedChange.None)
+                .ToDictionary(field => field.Name, field => field.Change, StringComparer.Ordinal),
+            Copy.StagedIndexesOf(EntityName),
+            Copy.StagedHooksOf(EntityName),
+            EventCallback.Factory.Create<string>(this, RestoreField));
+    }
+
+    /// <summary>
+    /// The entity as the Fields tab lists it: the working copy's fields, the removed ones in place, then the
+    /// columns Alvo maintains.
+    /// </summary>
+    /// <remarks>
+    /// A field the applied schema already serves unchanged is drawn from it, because the resolved schema
+    /// knows facets the working copy's reader does not (a default, a rollup); a staged one can only be drawn
+    /// from the working copy, because the applied schema has never heard of it.
+    /// </remarks>
+    private EntitySchema FieldsView(EntitySchema entity)
+    {
+        if (!Copy.Loaded)
+        {
+            return entity;
+        }
+
+        var pending = PendingSchema.Read(Copy.Json, EntityName);
+        var managed = AlvoManagedColumns.For(entity);
+        var declared = _fields.Select(field => FieldFor(field, entity, pending)).OfType<FieldSchema>();
+
+        return entity with
+        {
+            Fields = [.. declared, .. entity.Fields.Where(field => managed.Contains(field.Name))],
+        };
+    }
+
+    /// <summary>One row's field, from the applied schema when it is unchanged or removed, else from the copy.</summary>
+    private static FieldSchema? FieldFor(StagedField field, EntitySchema applied, EntitySchema? pending)
+    {
+        var fromApplied = applied.Fields.FirstOrDefault(declared => declared.Name == field.Name);
+        var fromCopy = pending?.Fields.FirstOrDefault(declared => declared.Name == field.Name);
+
+        return field.Change is StagedChange.None or StagedChange.Removed
+            ? fromApplied ?? fromCopy
+            : fromCopy ?? fromApplied;
+    }
+
+    /// <summary>Writes one operation's rule into the working copy.</summary>
+    /// <remarks>
+    /// No navigation: an operator setting five rules would be sent to the preview five times. The
+    /// shell's pending bar appears as soon as the copy is dirty, which is the affordance.
+    /// </remarks>
+    private void SetRule((string Operation, string Cel) change)
+    {
+        Copy.SetRule(EntityName, change.Operation, change.Cel);
+        ReadWorking();
+    }
+
+    /// <summary>
+    /// Puts the field in the working copy, and stays on the tab.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The facets are written under the OLD name and the rename happens after, which is an order and
+    /// not a style.</b> The editor's facets were parsed from the declaration as it stood, so they carry
+    /// whatever <c>renamedFrom</c> it already had; writing them under the new name would land that stale
+    /// value on the renamed field, and <c>RenameField</c> would then read it as the origin. Facets first,
+    /// then the rename, and the origin is computed from a declaration that is current.
+    /// </para>
+    /// <para>
+    /// <b>No navigation</b>, for <see cref="AddIndex"/>'s reason: fields are added in sets, and the preview
+    /// after each one made staging three a round trip per field. The row appears badged <c>new</c>, and the
+    /// shell's pending bar is the way to the preview.
+    /// </para>
+    /// </remarks>
+    private void AddFieldAsync(FieldEditor.NewField added)
+    {
+        var editing = _editing;
+
+        if (editing is { Length: > 0 })
+        {
+            Copy.AddField(EntityName, editing, added.Facets);
+
+            if (!string.Equals(editing, added.Name, StringComparison.Ordinal))
+            {
+                Copy.RenameField(EntityName, editing, added.Name);
+            }
+        }
+        else
+        {
+            Copy.AddField(EntityName, added.Name, added.Facets);
+        }
+
+        if (!added.KeepOpen)
+        {
+            CloseEditor();
+        }
+
+        ReadWorking();
+    }
+
+    /// <summary>Opens the editor over a field the descriptor already declares.</summary>
+    private void EditField(string field)
+    {
+        _editing = field;
+        _editorOpen = true;
+    }
+
+    /// <summary>Opens the editor with nothing prefilled.</summary>
+    private void AddField()
+    {
+        _editing = null;
+        _editorOpen = true;
+    }
+
+    /// <summary>
+    /// Closes the editor without touching the working copy.
+    /// </summary>
+    /// <remarks>
+    /// Dismissing is not discarding: what the operator typed was never in the copy until they
+    /// saved, so there is nothing to roll back — and nothing to warn them about either.
+    /// </remarks>
+    private void CloseEditor()
+    {
+        _editing = null;
+        _editorOpen = false;
+    }
+
+    /// <summary>
+    /// Drops a field from the working copy, and leaves its row struck through where it was.
+    /// </summary>
+    /// <remarks>
+    /// No confirmation here, and that is deliberate: nothing has happened to the database yet. The
+    /// change is a line in a document, the preview is where its cost is stated as a plan, and the
+    /// apply is where dropping a column has to be allowed explicitly. A second confirmation in front
+    /// of an edit to a draft trains an operator to click through the one that matters.
+    /// </remarks>
+    private void RemoveField(string field)
+    {
+        Copy.RemoveField(EntityName, field);
+        CloseEditor();
+        ReadWorking();
+    }
+
+    /// <summary>Puts a removed field back exactly as the applied revision declares it.</summary>
+    private void RestoreField(string field)
+    {
+        Copy.RestoreField(EntityName, field);
+        ReadWorking();
+    }
+
+    /// <summary>
+    /// Declares an index in the working copy, and stays on the tab.
+    /// </summary>
+    /// <remarks>
+    /// <b>No navigation, unlike a field.</b> Indexes are declared in sets — the reason an operator
+    /// opens this tab at all is usually a query that needs two of them — and being sent to the
+    /// preview after each one would make declaring three a round trip per index. It is the argument
+    /// <see cref="SetRule"/> already makes, and the shell's pending bar appears the moment the copy is
+    /// dirty either way.
+    /// </remarks>
+    private void AddIndex(IndexSchema index)
+    {
+        Copy.AddIndex(EntityName, index.Fields, index.Unique);
+        ReadWorking();
+    }
+
+    /// <summary>
+    /// Drops the index at one position, and stays on the tab.
+    /// </summary>
+    /// <remarks>
+    /// No confirmation, for <see cref="RemoveField"/>'s reason: nothing has happened to the database
+    /// yet, and the apply is where dropping something is stated as a cost.
+    /// </remarks>
+    private void RemoveIndex(int position)
+    {
+        /* Against the index this screen drew there, so a position another tab has since moved removes nothing. */
+        if (position >= 0 && position < _indexes.Count)
+        {
+            Copy.RemoveIndex(EntityName, position, _indexes[position]);
+        }
+
+        ReadWorking();
+    }
+
+    /// <summary>
+    /// Declares a hook in the working copy, and stays on the tab.
+    /// </summary>
+    /// <remarks>
+    /// No navigation, for <see cref="AddIndex"/>'s reason: an entity's write path is usually
+    /// described by more than one hook, and a trip to the preview between each is a trip per sentence.
+    /// </remarks>
+    private void AddHook(HooksTab.NewHook added)
+    {
+        Copy.AddHook(EntityName, added.Point, added.Condition, added.Action);
+        ReadWorking();
+    }
+
+    /// <summary>Opens the rename sheet, prefilled with the name it has.</summary>
+    private void OpenRename()
+    {
+        _newName = EntityName;
+        _renameRefusal = null;
+        _renaming = true;
+    }
+
+    /// <summary>Closes it without touching the working copy.</summary>
+    private void CloseRename()
+    {
+        _renaming = false;
+        _renameRefusal = null;
+    }
+
+    /// <summary>
+    /// Renames the entity and follows it to its new address.
+    /// </summary>
+    /// <remarks>
+    /// <b>The navigation is the point, not a convenience.</b> This screen is routed by the entity's name,
+    /// so after a rename the URL in the address bar names something the working copy no longer declares —
+    /// and the next render would say "there is no entity called …" to the person who just renamed it.
+    /// </remarks>
+    private void RenameAsync()
+    {
+        if (Copy.RenameEntity(EntityName, _newName) is { } refusal)
+        {
+            _renameRefusal = refusal;
+            return;
+        }
+
+        var renamed = _newName;
+        CloseRename();
+        Navigation.NavigateTo(AdminPaths.Entity(renamed));
+    }
+
+    /// <summary>Drops one hook, and stays on the tab.</summary>
+    private void RemoveHook(HooksTab.HookAt at)
+    {
+        /* Against the list this screen drew, for RemoveIndex's reason. */
+        var drawn = _hooks.FirstOrDefault(point => point.Key == at.Point).Value;
+        if (drawn is not null)
+        {
+            Copy.RemoveHook(EntityName, at.Point, at.Position, drawn);
+        }
+
+        ReadWorking();
+    }
+
+    /// <summary>
+    /// Whether the working copy still declares this entity, so a field's Edit, Remove and Undo have something
+    /// to write to — an entity the copy removed lists every field as removed, and an Undo there would do nothing.
+    /// </summary>
+    private bool DeclaredHere => Copy.Loaded && Copy.Entities.Contains(EntityName, StringComparer.Ordinal);
+
+    /// <summary>The edited field's declaration, as the working copy currently carries it.</summary>
+    private string? EditedJson => _editing is null
+        ? null
+        : Copy.FieldsOf(EntityName).FirstOrDefault(pair => pair.Key == _editing).Value;
+}

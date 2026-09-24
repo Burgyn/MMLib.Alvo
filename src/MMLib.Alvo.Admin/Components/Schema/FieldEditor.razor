@@ -1,0 +1,222 @@
+﻿@*
+    Adding a field.
+
+    The controls change with the type, because the frozen schema's if/then rules decide which
+    facets a type may carry — `decimal` needs precision and scale, `enum` needs values, `ref` needs
+    an entity, and `string` may have a maxLength that `boolean` may not. Offering every facet for
+    every type would be offering a descriptor the apply refuses.
+
+    Nothing here writes to the database. The field lands in the working copy and goes through the
+    same dry run as every other change.
+*@
+@*
+    The chrome belongs to <Sheet>: one overlay that is a bottom sheet on a phone and a centred
+    dialog on a desktop. A field editor that sat permanently under the list was a panel the
+    operator scrolled past on every visit and a second thing competing for the screen on a phone.
+*@
+<Sheet Open="true" TestId="field-sheet"
+       Title="@(IsEditing ? $"Edit {Editing}" : "Add a field")"
+       Subtitle="@(IsEditing
+           ? "The change joins the working copy. Preview shows what it does to the table before anything runs."
+           : "It joins the working copy. Preview shows what it does to the table before anything runs.")"
+       OnClose="Cancel">
+
+    <div class="a-stack">
+        @if (_refusal is { Length: > 0 })
+        {
+            <ErrorPanel Title="@(IsEditing ? "That change cannot be saved" : "That field cannot be added")"
+                        Fix="@_refusal" />
+        }
+
+        <Field Label="Name" For="new-field-name">
+            <ChildContent>
+                <input class="a-input" id="new-field-name" value="@_facets.Name" placeholder="e.g. scheduled_for"
+                       @ref="_nameInput" @oninput="args => _facets.Name = args.Value?.ToString() ?? string.Empty"
+                       autocomplete="off" />
+                @* The sheet opens to be typed into: text typed before a click on the box was lost. *@
+                @FocusOnRender.On(() => _nameInput)
+            </ChildContent>
+            <Hint>
+                @if (IsEditing && !string.Equals(_facets.Name, Editing, StringComparison.Ordinal))
+                {
+                    <text>
+                        Renaming <code class="a-mono">@Editing</code>. The change is carried by
+                        <code class="a-mono">renamedFrom</code>, so the apply moves the column instead of
+                        dropping it and creating a new one — the rows come with it.
+                    </text>
+                }
+                else
+                {
+                    <span title="@DescriptorNames.Member">@DescriptorNames.Hint</span>
+                }
+            </Hint>
+        </Field>
+
+        <Field Label="Type" LabelId="new-field-type">
+            <ChipGroup TValue="FieldType" Items="_types" Selected="[_facets.Type]" aria-labelledby="new-field-type"
+                       Label="Word" SelectedChanged="types => _facets.Type = types[0]" />
+        </Field>
+
+        <div class="a-field">
+            <span class="a-label">Constraints</span>
+            <div class="a-check-row">
+                <label class="a-check">
+                    <input type="checkbox" checked="@_facets.Required" @onchange="args => _facets.Required = args.Value is true" />
+                    <span>required</span>
+                </label>
+                @if (_facets.TakesUnique)
+                {
+                    <label class="a-check">
+                        <input type="checkbox" checked="@_facets.Unique" @onchange="args => _facets.Unique = args.Value is true" />
+                        <span>unique</span>
+                    </label>
+                }
+
+                @*
+                    Offered only while the field is not unique, because a unique field already carries
+                    an index — declaring a second one over the same column is a second B-tree the
+                    database maintains on every write and no query can use. The Indexes tab makes the
+                    same point in prose; this is the half that stops it being declarable.
+                *@
+                @if (!_facets.Unique)
+                {
+                    <label class="a-check">
+                        <input type="checkbox" checked="@_facets.Indexed" data-testid="field-index"
+                               @onchange="args => _facets.Indexed = args.Value is true" />
+                        <span>indexed</span>
+                    </label>
+                }
+            </div>
+            @if (_facets.Unique && _facets.Indexed)
+            {
+                <span class="a-hint">
+                    <code class="a-mono">index</code> is kept as declared and is redundant beside
+                    <code class="a-mono">unique</code>, which already carries one. Clear
+                    <code class="a-mono">unique</code> to change it.
+                </span>
+            }
+        </div>
+
+        @switch (_facets.Type)
+        {
+            case FieldType.String:
+                <Field Label="Max length" For="new-field-max">
+                    <input class="a-input" id="new-field-max" type="number" value="@_facets.MaxLength"
+                           @oninput="args => _facets.MaxLength = Number(args.Value, 120)" />
+                </Field>
+                break;
+            case FieldType.Decimal:
+                <div class="a-field-row">
+                    <Field Label="Precision" For="new-field-precision">
+                        <ChildContent>
+                            <input class="a-input" id="new-field-precision" type="number" value="@_facets.Precision"
+                                   @oninput="args => _facets.Precision = Number(args.Value, 10)" />
+                        </ChildContent>
+                        <Hint>Total digits, not the ones before the point.</Hint>
+                    </Field>
+                    <Field Label="Scale" For="new-field-scale">
+                        <ChildContent>
+                            <input class="a-input" id="new-field-scale" type="number" value="@_facets.Scale"
+                                   @oninput="args => _facets.Scale = Number(args.Value, 2)" />
+                        </ChildContent>
+                        <Hint>Digits after the point.</Hint>
+                    </Field>
+                </div>
+                break;
+            case FieldType.Enum:
+                <Field Label="Values" For="new-field-values">
+                    <ChildContent>
+                        <input class="a-input" id="new-field-values" value="@_facets.Values" placeholder="e.g. scheduled, in_progress, completed"
+                               @oninput="args => _facets.Values = args.Value?.ToString() ?? string.Empty" />
+                    </ChildContent>
+                    <Hint>Comma separated. An enum with no values is refused by the schema.</Hint>
+                </Field>
+                break;
+            case FieldType.Ref:
+                <Field Label="Points at" LabelId="new-field-target">
+                    <ChipGroup TValue="string" Items="Targets" Selected="[_facets.Target]" aria-labelledby="new-field-target"
+                               SelectedChanged="targets => _facets.Target = targets[0]" />
+                </Field>
+                break;
+        }
+
+        @if (_facets.TakesADefault)
+        {
+            @* A boolean's default is a group of chips, which a <label for> cannot name; the group names the
+               label by its id instead. *@
+            <Field Label="Default value" For="@(_facets.Type is FieldType.Boolean ? null : "new-field-default")"
+                   LabelId="new-field-default-label">
+                <ChildContent>
+                    @if (_facets.Type is FieldType.Boolean)
+                    {
+                        <ChipGroup TValue="string" Items="_flags" Selected="[_facets.Default]"
+                                   aria-labelledby="new-field-default-label"
+                                   Label="@(option => option.Length == 0 ? "none" : option)"
+                                   SelectedChanged="options => _facets.Default = options[0]" />
+                    }
+                    else
+                    {
+                        <input class="a-input" id="new-field-default" value="@_facets.Default"
+                               placeholder="@_facets.DefaultPlaceholder" autocomplete="off"
+                               @oninput="args => _facets.Default = args.Value?.ToString() ?? string.Empty" />
+                    }
+                </ChildContent>
+                <Hint>
+                    What a create stores when the caller omits the field. It becomes a column
+                    <code class="a-mono">DEFAULT</code> and is filled in on every write that composes a whole
+                    row. Leave it empty for no default.
+                </Hint>
+            </Field>
+        }
+
+    @* The facets the frozen schema declares and this build refuses. Without this the editor's
+       silence about `default` and `validation` is indistinguishable from an oversight — the
+       question every reader of this panel asks is "where is the default value", and the answer
+       exists, in the framework's own words. Served verbatim (§2.3): a second wording of a refusal
+       is a third spelling of one truth. *@
+    @*
+        Collapsed and last: the answer is there for the operator who asks where the default or the
+        validation box went, and out of the way of the one adding a field — open, it took more than
+        half of the dialog.
+    *@
+    @if (FieldRefusals.Count > 0)
+    {
+        <details class="a-disclosure" data-testid="refused-facets">
+            <summary>@FieldRefusals.Count facet@(FieldRefusals.Count == 1 ? " is" : "s are") not supported yet</summary>
+            <p class="a-section__sub">
+                Declared by the schema, refused at apply — a whole facet, or the one form of it named
+                here. A refused facet has no control above; a refused <em>form</em> of one does, and this
+                says which value it will not take.
+            </p>
+
+            @foreach (var refusal in FieldRefusals)
+            {
+                <ListRow data-testid="@($"refused-{refusal.Slot}")">
+                    <code class="a-mono a-listrow__key">@refusal.Slot</code>
+                    <span class="a-listrow__rest a-listrow__rest--stacked">
+                        <span class="a-section__sub">@refusal.Consequence</span>
+                        <span class="a-section__sub">@refusal.Fix</span>
+                    </span>
+                </ListRow>
+            }
+        </details>
+    }
+    </div>
+
+    <div class="a-sheet__actions">
+        <button type="button" class="a-btn" @onclick="Cancel">Cancel</button>
+        <span class="a-spacer"></span>
+        @* An entity is rarely one field short: the second action stages this one and leaves the sheet open for
+           the next, instead of a reopen per field. *@
+        @if (!IsEditing)
+        {
+            <button type="button" class="a-btn" @onclick="AddAnother" data-testid="field-save-another">
+                Add and add another
+            </button>
+        }
+        <button type="button" class="a-btn a-btn--primary" @onclick="Add" data-testid="field-save">
+            @(IsEditing ? "Save to the working copy" : "Add to the working copy")
+        </button>
+    </div>
+
+</Sheet>

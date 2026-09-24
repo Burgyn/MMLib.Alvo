@@ -1,0 +1,60 @@
+﻿@*
+    The one confirmation that throws the working copy away, wherever it is asked from.
+
+    Discarding is confirmed, and staging and applying-a-draft are not, which is the opposite way round
+    from the usual reflex — deliberately. Every edit up to here wrote to a draft and touched no table,
+    so staging one needs no ceremony; this is the only control that destroys work the operator did, and
+    the one that cannot be undone. So it looks like what it does — the danger button, with a Cancel
+    beside it — rather than the green of every safe action on the screen.
+
+    One component because there are two ways in, Preview and the shell's pending bar, and two copies of
+    a destructive confirmation are two chances for one of them to drift back to green.
+*@
+@inject AdminSession Session
+
+<Sheet Open="Open" Title="Discard every unapplied change?"
+       Subtitle="The working copy goes back to the applied revision. Nothing in the database changes."
+       TestId="discard-sheet" OnClose="OnClose">
+    <p class="a-section__sub">
+        Every edit made since revision @_revision is thrown away — across all screens, not only this
+        one, because there is one working copy and one apply. There is no undo.
+    </p>
+    <div class="a-sheet__actions">
+        <span class="a-spacer"></span>
+        <button type="button" class="a-btn a-btn--ghost a-btn--sm" data-testid="discard-cancel"
+                @onclick="OnClose">Cancel</button>
+        <button type="button" class="a-btn a-btn--danger a-btn--sm" data-testid="discard-confirm"
+                @onclick="DiscardAsync">Discard them</button>
+    </div>
+</Sheet>
+
+@code {
+    private int _revision;
+
+    /// <summary>Whether the confirmation is on the page.</summary>
+    [Parameter]
+    public bool Open { get; set; }
+
+    /// <summary>Raised when the operator backs out — Cancel, the scrim, Escape or the close control.</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    /// <summary>Raised after the copy went back to the applied revision.</summary>
+    [Parameter]
+    public EventCallback OnDiscarded { get; set; }
+
+    /// <summary>Reads the revision the copy would go back to, each time the sheet opens.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Open)
+        {
+            _revision = (await Session.CopyAsync(CancellationToken.None)).Revision;
+        }
+    }
+
+    private async Task DiscardAsync()
+    {
+        (await Session.CopyAsync(CancellationToken.None)).Discard();
+        await OnDiscarded.InvokeAsync();
+    }
+}

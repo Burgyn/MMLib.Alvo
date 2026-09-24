@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Admin.Tests.Internal;
+using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Admin.Tests;
 
@@ -15,9 +16,13 @@ namespace MMLib.Alvo.Admin.Tests;
 /// one.
 /// </para>
 /// </remarks>
-public sealed class ComponentLayerTests
+public sealed partial class ComponentLayerTests
 {
+    private const string LayerStatement = "@layer tokens, base, layout, components, utilities;";
+
     private static readonly string _css = File.ReadAllText(Stylesheet.AlvoCssPath);
+
+    private static readonly string[] _layers = LayerStatement["@layer ".Length..^1].Split(", ");
 
     [Fact]
     public void The_component_layer_uses_tokens_rather_than_literal_colours()
@@ -71,4 +76,107 @@ public sealed class ComponentLayerTests
     [Fact]
     public void Numeric_columns_are_tabular()
         => _css.ShouldContain("font-variant-numeric: tabular-nums");
+
+    /// <summary>
+    /// <c>.a-mono</c> names a family and leaves size and colour to wherever it is used.
+    /// </summary>
+    /// <remarks>
+    /// A utility that also set 11 px and the dim colour was the last word on every element it joined —
+    /// declared after the page title's rule, it drew an entity's name in its own page heading at 11 px
+    /// (finding D-1). The small dim look is <c>.a-ident</c>, which says so in its name.
+    /// </remarks>
+    [Fact]
+    public void The_mono_utility_sets_the_family_and_nothing_else_a_context_decides()
+    {
+        var rule = TopLevelRule(".a-mono");
+        rule.ShouldContain("font-family: var(--font-mono)");
+        rule.ShouldNotContain("font-size:");
+        rule.ShouldNotContain("color:");
+    }
+
+    /// <summary>
+    /// The cascade's order is one statement, and it names utilities last.
+    /// </summary>
+    /// <remarks>
+    /// Source order was the only policy before it (finding F-20), and D-1 is what that policy cost: a
+    /// utility that happened to be declared below a component's rule overrode it. The layer a rule sits in
+    /// now decides, whatever its specificity or position.
+    /// </remarks>
+    [Fact]
+    public void The_cascade_is_ordered_by_one_layer_statement()
+    {
+        _css.ShouldContain(LayerStatement);
+        _css.IndexOf(LayerStatement, StringComparison.Ordinal)
+            .ShouldBeLessThan(_css.IndexOf(":root {", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// No rule sits outside a layer.
+    /// </summary>
+    /// <remarks>
+    /// An unlayered rule outranks every layered one, so a single rule added at the top level would quietly
+    /// bring source order back for whatever it touches — and win over a utility it was meant to lose to.
+    /// </remarks>
+    [Fact]
+    public void Every_rule_sits_in_a_declared_layer()
+        => Stylesheet.BlocksOutsideLayers(_css, _layers).ShouldBeEmpty();
+
+    /// <summary>The check above is not blind to a rule written on one line, or to an undeclared layer.</summary>
+    [Fact]
+    public void The_layer_check_sees_a_one_line_rule_and_an_undeclared_layer()
+    {
+        const string css = "@layer components {\n  .a-ok {\n  }\n}\n.a-stray { color: inherit; }\n@layer extra {\n}\n";
+
+        Stylesheet.BlocksOutsideLayers(css, _layers)
+            .ShouldBe([".a-stray { color: inherit; }", "@layer extra {"]);
+    }
+
+    /// <summary>
+    /// The layout utilities are in the last layer, so they win over any component rule they are added to —
+    /// the reason they can replace a <c>style</c> attribute, which won the same way.
+    /// </summary>
+    [Fact]
+    public void The_layout_utilities_are_the_last_word()
+    {
+        var css = _css.ReplaceLineEndings("\n");
+        var start = css.IndexOf("\n@layer utilities {", StringComparison.Ordinal);
+        start.ShouldBeGreaterThanOrEqualTo(0, "the stylesheet has no utilities layer");
+        var utilities = css[start..];
+
+        utilities.ShouldContain("  .a-spacer {");
+        utilities.ShouldContain("  .a-row--gap-2 {");
+    }
+
+    /// <summary>
+    /// Every face the stylesheet declares has a file behind it.
+    /// </summary>
+    /// <remarks>
+    /// A missing font fails silently by design — <c>font-display: swap</c> keeps the fallback on
+    /// screen — so a renamed or dropped file would ship a dashboard drawn in system-ui with nothing
+    /// red anywhere.
+    /// </remarks>
+    [Fact]
+    public void Every_font_the_stylesheet_names_is_shipped_beside_it()
+    {
+        var fonts = Path.Combine(Path.GetDirectoryName(Stylesheet.AlvoCssPath)!, "fonts");
+        var named = FontUrl().Matches(_css).Select(match => match.Groups["file"].Value).ToList();
+
+        named.ShouldNotBeEmpty();
+        named.Where(file => !File.Exists(Path.Combine(fonts, file))).ShouldBeEmpty();
+    }
+
+    /// <summary>The body of the one top-level rule for <paramref name="selector"/>.</summary>
+    /// <param name="selector">The selector, exactly as it opens its rule.</param>
+    /// <returns>The declarations between its braces.</returns>
+    private static string TopLevelRule(string selector)
+    {
+        var css = Stylesheet.Unlayered(_css);
+        var start = css.IndexOf($"\n{selector} {{", StringComparison.Ordinal);
+        start.ShouldBeGreaterThanOrEqualTo(0, $"{selector} has no top-level rule");
+        var body = css[(start + selector.Length + 3)..];
+        return body[..body.IndexOf('}', StringComparison.Ordinal)];
+    }
+
+    [GeneratedRegex(@"url\('fonts/(?<file>[^']+)'\)")]
+    private static partial Regex FontUrl();
 }

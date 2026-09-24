@@ -1,0 +1,215 @@
+﻿@*
+    The indexes, and why the list is usually shorter than it looks.
+
+    A unique field carries its own index, so listing it again here would double-count what the
+    database actually has.
+
+    It edits the working copy like every other control on this screen — no new write path, the same
+    preview and the same apply. Which is the whole design: the one thing an operator reaches for
+    after watching a list get slow used to be the one thing they had to leave the dashboard for.
+*@
+<SectionHead Title="Indexes">
+    <Subtitle>
+        Declared in the descriptor. A unique field already has one and is not repeated here; a
+        single-field index is the <code class="a-mono">index</code> facet on the field itself.
+    </Subtitle>
+</SectionHead>
+
+@if (Declared.Count == 0)
+{
+    <EmptyState Title="No indexes are declared"
+                Body="Paging is keyset over the primary key, which is always indexed. Add an index when a filter or a sort runs over a column that is not." />
+}
+else
+{
+    @for (var position = 0; position < Declared.Count; position++)
+    {
+        var index = Declared[position];
+        var at = position;
+
+        <ListRow class="a-listrow--inline a-listrow--center" data-testid="index-row">
+            @*
+                An entry the working copy could not read — an imported or proposed descriptor may carry one,
+                and the apply is what refuses it. Shown rather than hidden, and shown in its own position,
+                because the only useful thing to do with it is remove it.
+            *@
+            @if (index.Fields.Count == 0)
+            {
+                <span class="a-section__sub a-grow a-value" data-testid="index-unreadable">
+                    Declared in a shape this screen cannot read. The apply will refuse it — remove it here,
+                    or fix it in the descriptor and import it again.
+                </span>
+            }
+            else
+            {
+                <span class="a-mono a-grow a-value">@string.Join(", ", index.Fields)</span>
+            }
+            @if (index.Unique)
+            {
+                <span class="a-badge a-badge--accent">unique</span>
+            }
+            @if (Staged.IsNewIndex(at))
+            {
+                <span class="a-badge a-badge--accent" data-testid="index-staged">new</span>
+            }
+            @if (Editable)
+            {
+                <button type="button" class="a-btn a-btn--ghost a-btn--sm" data-testid="index-remove"
+                        aria-label="@($"Remove the index on {string.Join(", ", index.Fields)}")"
+                        @onclick="() => OnRemove.InvokeAsync(at)">Remove</button>
+            }
+        </ListRow>
+    }
+}
+
+@if (Editable)
+{
+    <div class="a-stack a-stack--inset a-stack--gap-4">
+        <SectionHead Title="Add an index">
+            <Subtitle>
+                Pick the fields in the order a query filters on them. Order is not cosmetic: an index
+                on <code class="a-mono">(a, b)</code> serves a filter on <code class="a-mono">a</code>
+                and one on <code class="a-mono">a</code> and <code class="a-mono">b</code>, and does
+                nothing for a filter on <code class="a-mono">b</code> alone.
+            </Subtitle>
+        </SectionHead>
+
+        @if (_refusal is { Length: > 0 })
+        {
+            <Refusal data-testid="index-refusal">@_refusal</Refusal>
+        }
+
+        @*
+            The declared fields first — they are what an index is usually for — and the columns Alvo
+            maintains after them under their own label, the way the Fields tab lists them. They stay
+            pickable: a filter on created_at or tenant_id is exactly what an index serves.
+        *@
+        <div class="a-stack a-stack--gap-3" data-testid="index-fields">
+            <ChipGroup TValue="string" Items="Names(Declarable)" Selected="_chosen" Multiple="true"
+                       aria-label="Fields" SelectedChanged="Choose" ChipContent="Chip" />
+
+            @if (Maintained.Count > 0)
+            {
+                <span class="a-label" id="index-maintained-label">Maintained by Alvo</span>
+                <ChipGroup TValue="string" Items="Names(Maintained)" Selected="_chosen" Multiple="true"
+                           aria-labelledby="index-maintained-label" data-testid="index-fields-maintained"
+                           SelectedChanged="Choose" ChipContent="Chip" />
+            }
+        </div>
+
+        <label class="a-row a-row--gap-2">
+            <input type="checkbox" checked="@_unique" data-testid="index-unique"
+                   @onchange="args => _unique = args.Value is true" />
+            <span>Enforce uniqueness across these fields</span>
+        </label>
+
+        <div class="a-row">
+            <button type="button" class="a-btn a-btn--primary a-btn--sm" data-testid="index-add"
+                    @onclick="AddAsync">Add the index</button>
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>One field to pick, with its position in the index while it is in it.</summary>
+    private RenderFragment Chip(string name) => @<text>
+        <span class="a-mono">@name</span>
+        @if (_chosen.IndexOf(name) is >= 0 and var order)
+        {
+            <span class="a-badge">@(order + 1)</span>
+        }
+    </text>;
+
+    private static List<string> Names(List<FieldSchema> fields) => [.. fields.Select(column => column.Name)];
+
+    private List<FieldSchema> Declarable
+        => Entity.Fields.Where(column => !AlvoManagedColumns.For(Entity).Contains(column.Name)).ToList();
+
+    private List<FieldSchema> Maintained
+        => Entity.Fields.Where(column => AlvoManagedColumns.For(Entity).Contains(column.Name)).ToList();
+
+    private List<string> _chosen = [];
+    private bool _unique;
+    private string? _refusal;
+
+    /// <summary>The entity whose indexes these are — and whose fields an index may cover.</summary>
+    [Parameter, EditorRequired]
+    public EntitySchema Entity { get; set; } = default!;
+
+    /// <summary>
+    /// The indexes to render, as the working copy holds them.
+    /// </summary>
+    /// <remarks>
+    /// Passed in rather than read off <see cref="Entity"/>, because <c>SchemaModel</c> is the
+    /// <em>applied</em> schema: an index added here would not appear until the apply, and an editor
+    /// whose additions vanish is worse than no editor. The Rules tab records the same finding.
+    /// </remarks>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<IndexSchema> Declared { get; set; } = [];
+
+    /// <summary>Whether this operator has a working copy to edit at all.</summary>
+    [Parameter]
+    public bool Editable { get; set; }
+
+    /// <summary>
+    /// What the working copy changed, cascaded by the entity screen — an index only it declares is badged
+    /// <c>new</c>, so it reads as staged rather than as already serving queries.
+    /// </summary>
+    [CascadingParameter]
+    private StagedView Staged { get; set; } = StagedView.None;
+
+    /// <summary>
+    /// Raised with the index to declare.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="IndexSchema"/> rather than a tuple, because this is a public parameter and a
+    /// <c>ValueTuple&lt;IReadOnlyList&lt;string&gt;, bool&gt;</c> in the contract says nothing about which
+    /// bool. The record already exists, already means exactly this, and is the shape
+    /// <see cref="Declared"/> is read in.
+    /// </remarks>
+    [Parameter]
+    public EventCallback<IndexSchema> OnAdd { get; set; }
+
+    /// <summary>Raised with the position of the index to remove.</summary>
+    [Parameter]
+    public EventCallback<int> OnRemove { get; set; }
+
+    /// <summary>
+    /// Takes the fields as the chips now have them, in the order they were picked.
+    /// </summary>
+    /// <remarks>
+    /// A list rather than a set: the schema's <c>fields</c> is ordered and the order is what the index
+    /// is for, so the control has to record which was chosen first — which is also why each chip shows
+    /// its position rather than only whether it is on. Both groups share the one list, so a maintained
+    /// column can follow a declared one.
+    /// </remarks>
+    private void Choose(IReadOnlyList<string> fields)
+    {
+        _refusal = null;
+        _chosen = [.. fields];
+    }
+
+    /// <summary>
+    /// Declares the index, or says why it cannot.
+    /// </summary>
+    /// <remarks>
+    /// One refusal, and it is the schema's own <c>minItems: 1</c>. A field named twice cannot be
+    /// reached at all — the chips toggle, so picking one again removes it — and everything else is
+    /// the apply's to judge, because a second validator in the client is a second set of rules to
+    /// disagree with.
+    /// </remarks>
+    private async Task AddAsync()
+    {
+        if (_chosen.Count == 0)
+        {
+            _refusal = "An index covers at least one field. Pick one above.";
+            return;
+        }
+
+        await OnAdd.InvokeAsync(new IndexSchema([.. _chosen], _unique));
+
+        _chosen = [];
+        _unique = false;
+        _refusal = null;
+    }
+}

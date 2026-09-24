@@ -38,6 +38,13 @@
          no reference to MMLib.Alvo (design §1.2) and an architecture test keeps it that way, so
          this reference is the only place the two halves meet. -->
     <ProjectReference Include="../MMLib.Alvo.Admin/MMLib.Alvo.Admin.csproj" />
+
+    <!-- The schema assistant. The same category again: the standalone image ships one, an embedded
+         host chooses whether to. MMLib.Alvo.Ai references only MMLib.Alvo.Abstractions and an
+         architecture test keeps it that way, so this reference is where the agent and the core meet.
+         Shipping it does not configure it — an image with no AI connection has an assistant that
+         resolves to "not configured", and no launcher renders. -->
+    <ProjectReference Include="../MMLib.Alvo.Ai/MMLib.Alvo.Ai.csproj" />
   </ItemGroup>
 
   <ItemGroup>

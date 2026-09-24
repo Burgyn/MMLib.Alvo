@@ -1,0 +1,37 @@
+﻿@*
+    A WARNED subsystem: the descriptor may declare it, the apply accepts it, and nothing runs
+    (design §4.1; docs/architecture/admin-dashboard-review.md, F-6).
+
+    Its counterpart is Refusal, and the two must never be drawn alike — somewhere the operator can stand
+    against a control whose only possible output is a descriptor the apply rejects. That rule lives in
+    these two components now rather than in whichever markup a screen copied: a dashed panel with a
+    heading here, an inert control with its reason there.
+
+    The consequence is the framework's own sentence, served verbatim from capabilities and never
+    reworded: a second wording is a third spelling of one truth.
+*@
+<div @attributes="Attributes" class="@CssClass.Of("a-notyet-panel", Attributes)">
+    <SectionHead Title="@Title" Subtitle="Subtitle" />
+    @if (Consequence is { Length: > 0 })
+    {
+        <NotYetConsequence Consequence="@Consequence" />
+    }
+</div>
+
+@code {
+    /// <summary>What is not there yet, or what the operator needs to know about it.</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>What declaring it does today.</summary>
+    [Parameter]
+    public RenderFragment? Subtitle { get; set; }
+
+    /// <summary>The framework's own sentence about what does not happen, shown verbatim.</summary>
+    [Parameter]
+    public string? Consequence { get; set; }
+
+    /// <summary>Anything else, onto the panel's element.</summary>
+    [Parameter(CaptureUnmatchedValues = true)]
+    public IReadOnlyDictionary<string, object>? Attributes { get; set; }
+}

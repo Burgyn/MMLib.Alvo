@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Net.Http.Headers;
+using MMLib.Alvo.Ai;
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Migrations;
@@ -59,6 +60,8 @@ internal static class ManagementEndpoints
         MapPolicySimulation(group);
         MapApply(group);
         MapRollback(group);
+
+        MapAiConnection(group);
         MapUsers(endpoints, group);
 
         return group;
@@ -325,6 +328,43 @@ internal static class ManagementEndpoints
                     RollbackAsync(project, revision, body, request, management, ct)),
             new ManagementRoute(
                 nameof(IAlvoManagement.RollbackAsync), ManagementOperation.RollbackRevision));
+
+    /// <summary>
+    /// <c>PUT {m}/ai/connection</c> — the instance's AI connection, replaced whole.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A route, because the dashboard is a client of this API and not a second path into the
+    /// product.</b> Every other thing the dashboard can do is reachable here too; a screen that could save
+    /// a credential no CLI could would be the first exception, and the contract test refuses one.
+    /// </para>
+    /// <para>
+    /// It answers with what <c>GET {m}/info</c> would now report — configured, kind, model, source, and no
+    /// endpoint — so a caller learns the state it produced without sending the credential back.
+    /// </para>
+    /// </remarks>
+    /// <param name="group">The management route group.</param>
+    private static void MapAiConnection(RouteGroupBuilder group) =>
+        Gate(
+            group.MapPut(
+                "/ai/connection",
+                (StoredAiConnection? body, IAlvoManagement management, CancellationToken ct) =>
+                    Answer(async () =>
+                    {
+                        await management.SetAiConnectionAsync(
+                            body ?? throw new ManagementRequestException(NoConnectionBody), ct)
+                            .ConfigureAwait(false);
+
+                        return (await management.GetInfoAsync(ct).ConfigureAwait(false)).Ai;
+                    })),
+            new ManagementRoute(
+                nameof(IAlvoManagement.SetAiConnectionAsync), ManagementOperation.SetAiConnection));
+
+    /// <summary>What a caller who sent no body is told.</summary>
+    private const string NoConnectionBody =
+        "Send the connection as the request body: {\"kind\", \"endpoint\", \"model\", \"apiKey\"}. "
+        + "'kind' is 'openai-compatible' or 'azure-openai'; 'apiKey' may be omitted for an endpoint that "
+        + "needs none.";
 
     /// <summary>
     /// Reads the precondition and the dry-run flag, and refuses before anything is applied when either is
@@ -606,6 +646,14 @@ internal static class ManagementEndpoints
         catch (ManagementForbiddenException)
         {
             return ProblemResultFactory.ManagementForbidden();
+        }
+        catch (Secrets.SecretShadowedException refusal)
+        {
+            return ProblemResultFactory.ManagementValidation(refusal.Message);
+        }
+        catch (Secrets.SecretStoreReadOnlyException refusal)
+        {
+            return ProblemResultFactory.ManagementValidation(refusal.Message);
         }
         catch (DescriptorValidationException refusal)
         {

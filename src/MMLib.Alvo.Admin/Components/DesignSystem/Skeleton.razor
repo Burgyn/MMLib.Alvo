@@ -1,0 +1,37 @@
+﻿@*
+    Something is loading here (docs/architecture/admin-dashboard-review.md, F-5). Three heights rather than
+    the nine the screens had set by hand, each in a style attribute: a placeholder promises that content
+    is coming, not how tall it will be.
+*@
+<div class="@SizeClass"></div>
+
+@code {
+    /// <summary>How much is coming: a stat, a panel, or a list.</summary>
+    [Parameter]
+    public SkeletonSize Size { get; set; } = SkeletonSize.Md;
+
+    /// <summary>The three heights a skeleton comes in.</summary>
+    /// <remarks>
+    /// Nested rather than beside the component: it is the type of a public parameter, so it cannot be
+    /// internal, and declared inside the component it is part of what the Razor SDK makes public rather
+    /// than a type this package chose to publish (<c>BoundaryArchitectureTests</c>).
+    /// </remarks>
+    public enum SkeletonSize
+    {
+        /// <summary>A stat card's worth.</summary>
+        Sm = 0,
+
+        /// <summary>A panel's worth — the default.</summary>
+        Md = 1,
+
+        /// <summary>A list's or a grid's worth.</summary>
+        Lg = 2,
+    }
+
+    private string SizeClass => Size switch
+    {
+        SkeletonSize.Sm => "a-skeleton a-skeleton--sm",
+        SkeletonSize.Lg => "a-skeleton a-skeleton--lg",
+        _ => "a-skeleton a-skeleton--md",
+    };
+}

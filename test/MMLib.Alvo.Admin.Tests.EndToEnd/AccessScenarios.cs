@@ -37,15 +37,15 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
             .ShouldBe(0, "the create form asks for a password");
 
         await session.Page.FillAsync("#new-person-email", "dispatcher@alvo.test");
-        await session.Page.ClickAsync("button:has-text('Create')");
+        await session.Button("Create").ClickAsync();
 
         /* Waiting for the row rather than settling and reading: the list re-renders over the
            circuit, and network-idle is true the whole time a WebSocket is quiet. */
         await session.Page.GetByText("dispatcher@alvo.test").First.WaitForAsync();
 
         /* Addressed by the person's own id rather than by a row that happens to contain their
-           address: `.a-row` nests, so a text-scoped locator can match an ancestor whose "Change"
-           button belongs to somebody else. */
+           address: rows nest inside the panel, so a text-scoped locator can match an ancestor whose
+           "Change" button belongs to somebody else. */
         var person = await IdOfAsync(session, "dispatcher@alvo.test");
         await session.Page.ClickAsync($"#change-{person}");
         await session.Page.Locator($"#issue-token-{person}").WaitForAsync();
@@ -56,36 +56,60 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
            panel and return before anything had happened. */
         await session.Page.GetByText("out of band").First.WaitForAsync();
 
-        var text = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var text = await session.Content.InnerTextAsync();
         text.ShouldContain("Credential token");
         text.ShouldContain("out of band");
         session.AssertConsoleClean();
     }
 
     /// <summary>
-    /// Nobody grants themselves a tenant, and the refusal names the recorded alternative.
+    /// Nobody grants themselves a tenant, and their own row says so instead of offering the control.
     /// </summary>
     /// <remarks>
-    /// The guard is in the core, not in this screen — the screen only has to render what the core
-    /// refused. Asserting it here therefore measures both halves at once: that the guard fires, and
-    /// that the operator is told what to do instead.
+    /// The guard is in the core, not in this screen (§3.7 U3.2). The screen used to offer Grant on the
+    /// operator's own row and then render the core's refusal at the top of the page (D-10); it now offers
+    /// no Grant and no Remove there and says, beside the tenant, who can make the change. Another person's
+    /// row still carries both, which is what keeps this from passing on a screen that dropped them for
+    /// everybody.
     /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task An_administrator_cannot_grant_themselves_a_tenant()
+    public async Task An_administrator_is_not_offered_a_tenant_for_themselves()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/access");
 
         var me = await IdOfAsync(session, AdminWorld.AdminEmail);
         await session.Page.ClickAsync($"#change-{me}");
-        await session.Page.Locator($"#tenant-{me}").WaitForAsync();
-        await session.Page.FillAsync($"#tenant-{me}", "9f1c4a20-7d38-4a5e-9c11-2b6e0d4f8a4e");
-        await session.Page.ClickAsync($"#grant-tenant-{me}");
-        await session.Page.GetByText("higher management level").First.WaitForAsync();
+        await session.Page.Locator("[data-testid='tenant-self']").WaitForAsync();
 
-        var text = await session.Page.Locator("main.a-content").InnerTextAsync();
-        text.ShouldContain("higher management level");
-        text.ShouldContain("Another administrator");
+        (await session.Page.Locator($"#grant-tenant-{me}").CountAsync()).ShouldBe(0);
+        (await session.Page.Locator($"#clear-tenant-{me}").CountAsync()).ShouldBe(0);
+        (await session.Page.Locator("[data-testid='tenant-self']").InnerTextAsync())
+            .ShouldContain("You cannot grant yourself a tenant — another administrator can.");
+
+        /* The administrator holds only the built-in `admin` role, so a declared role is known to be
+           unassigned on their row. */
+        (await session.Page.Locator($"#person-{me} .a-choice button:has-text('dispatcher')")
+            .GetAttributeAsync("aria-pressed")).ShouldBe("false");
+
+        // --- another person's row keeps both tenant controls, and a role pressed there reads as assigned
+        await session.Page.FillAsync("#new-person-email", "tenant-peer@alvo.test");
+        await session.Page.ClickAsync("button:has-text('Create')");
+        await session.Page.GetByText("tenant-peer@alvo.test").First.WaitForAsync();
+
+        var peer = await IdOfAsync(session, "tenant-peer@alvo.test");
+        await session.Page.ClickAsync($"#change-{peer}");
+        await session.Page.Locator($"#grant-tenant-{peer}").WaitForAsync();
+
+        (await session.Page.Locator($"#grant-tenant-{peer}").CountAsync()).ShouldBe(1);
+        (await session.Page.Locator($"#clear-tenant-{peer}").CountAsync()).ShouldBe(1);
+
+        var dispatcher = session.Page.Locator($"#person-{peer} .a-choice button:has-text('dispatcher')");
+        (await dispatcher.GetAttributeAsync("aria-pressed")).ShouldBe("false");
+        await dispatcher.ClickAsync();
+        await session.Page.Locator(
+            $"#person-{peer} .a-choice button[aria-pressed='true']:has-text('dispatcher')").WaitForAsync();
+
         session.AssertConsoleClean();
     }
 
@@ -126,7 +150,7 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
     private static async Task<string> IdOfAsync(AdminSession session, string email)
     {
         var id = await session.Page
-            .Locator($".a-row[id^='person-']:has-text('{email}')").First
+            .Locator("[id^='person-']", new() { HasText = email }).First
             .GetAttributeAsync("id");
 
         id.ShouldNotBeNull($"no person row carries {email}");

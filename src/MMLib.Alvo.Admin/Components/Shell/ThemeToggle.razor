@@ -1,0 +1,57 @@
+﻿@*
+    The theme toggle.
+
+    The theme itself is applied by alvo.js before the first paint, from localStorage — so this
+    button's only job is to flip it and to say which way it flips next. It reads the resolved theme
+    after the first render rather than during it: on the server there is no `prefers-color-scheme`
+    to read, and a label rendered from a guess would be wrong for every viewer whose system is dark.
+
+    An icon of the theme it switches to, and the action spelled out in the label and the tooltip. A
+    bare "Light" read as either the state or the action, and nothing on the button said which.
+
+    It also follows a flip it did not make — the palette's Toggle theme — through alvo.js's
+    `alvo:theme` event, so the icon never shows the theme the page is already in.
+*@
+@implements IAsyncDisposable
+@inject AdminInterop Interop
+
+<button type="button" class="a-btn a-btn--ghost a-btn--sm" @onclick="Toggle"
+        aria-label="@Label" title="@Label" data-testid="theme-toggle">
+    <Icon Path="@(_theme == "dark" ? Icons.Sun : Icons.Moon)" />
+</button>
+
+@code {
+    private IAsyncDisposable? _subscription;
+    private string _theme = string.Empty;
+
+    private string Label => _theme == "dark" ? "Switch to light theme" : "Switch to dark theme";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _subscription = await Interop.SubscribeAsync("theme", OnThemeChanged);
+        _theme = await Interop.ThemeAsync() ?? _theme;
+        StateHasChanged();
+    }
+
+    /// <summary>A flip from anywhere, forwarded from alvo.js with the theme it flipped to.</summary>
+    private Task OnThemeChanged(string? theme) => InvokeAsync(() =>
+    {
+        _theme = theme ?? _theme;
+        StateHasChanged();
+    });
+
+    private async Task Toggle() => _theme = await Interop.ToggleThemeAsync() ?? _theme;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_subscription is not null)
+        {
+            await _subscription.DisposeAsync();
+        }
+    }
+}

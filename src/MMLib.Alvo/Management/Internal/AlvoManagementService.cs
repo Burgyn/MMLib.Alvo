@@ -1,12 +1,16 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Ai;
+using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
+using MMLib.Alvo.Secrets;
 using System.Globalization;
 using System.Reflection;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Management.Internal;
 
@@ -57,6 +61,14 @@ namespace MMLib.Alvo.Management.Internal;
 /// Where a record that could not be filed for a write that already landed is reported — see
 /// <see cref="FiledAsync"/> for why that is a warning rather than the caller's problem.
 /// </param>
+/// <param name="ai">
+/// Resolves whether this instance has an AI connection, for <see cref="GetInfoAsync"/> to report. Registered
+/// by the core itself, so it is never optional — what is optional is the connection it resolves.
+/// </param>
+/// <param name="secrets">
+/// Where the AI connection is written. Registered by the core itself, so it is never optional — what is
+/// optional is whether the store it layers over can be written at all, which it answers for itself.
+/// </param>
 /// <param name="runtime">
 /// <b>The apply path, resolved lazily.</b> <see cref="RuntimeSchemaService"/> needs
 /// <see cref="IRuntimeSchemaWriter"/> and <see cref="IDescriptorVersionStore"/>, which only a database
@@ -80,18 +92,44 @@ internal sealed partial class AlvoManagementService(
     IAlvoContextAccessor callers,
     ManagementAccessEvaluator access,
     ILogger<AlvoManagementService> logger,
+    IAiConnectionResolver ai,
+    ISecretStore secrets,
     Func<RuntimeSchemaService> runtime) : IAlvoManagement
 {
     /// <summary>What <see cref="ManagementInfo.DataProvider"/> reports when no driver is registered.</summary>
     private const string NoDriverRegistered = "none";
 
     /// <inheritdoc/>
-    public Task<ManagementInfo> GetInfoAsync(CancellationToken ct = default)
+    public async Task<ManagementInfo> GetInfoAsync(CancellationToken ct = default)
     {
         EnsureMayPerform(ManagementOperation.GetInfo);
 
-        return Task.FromResult(new ManagementInfo(Version, Mode, DataProvider, StartupMode));
+        return new ManagementInfo(Version, Mode, DataProvider, StartupMode, await AiAsync(ct).ConfigureAwait(false));
     }
+
+    /// <summary>
+    /// What this instance can say about its AI connection.
+    /// </summary>
+    /// <remarks>
+    /// <b>Resolved here rather than remembered at boot</b>, because both layers the resolver reads change
+    /// without a restart — an operator who saved a connection and watched this keep reporting "not
+    /// configured" would reasonably conclude the save was lost.
+    /// </remarks>
+    private async ValueTask<ManagementAi> AiAsync(CancellationToken ct)
+    {
+        var (connection, source) = await ai.ResolveAsync(ct).ConfigureAwait(false);
+
+        return connection is null
+            ? new ManagementAi(Configured: false, Kind: null, Model: null, Source: null)
+            : new ManagementAi(Configured: true, KindOf(connection), connection.Model, Lower(source));
+    }
+
+    /// <summary>The wire spelling of a resolved connection's kind — what an operator configured, not the enum.</summary>
+    private static string KindOf(AlvoAiConnection connection) => connection.Kind switch
+    {
+        AiConnectionKind.AzureOpenAi => StoredAiConnection.AzureOpenAiKind,
+        _ => StoredAiConnection.OpenAiCompatibleKind,
+    };
 
     /// <inheritdoc/>
     public Task<IReadOnlyList<ManagementProject>> ListProjectsAsync(CancellationToken ct = default)
@@ -209,6 +247,25 @@ internal sealed partial class AlvoManagementService(
         ManagementIdempotency.FingerprintOf(
             nameof(ApplyDescriptorAsync), project, request.ExpectedRevision, request.AllowDestructive,
             request.DescriptorJson);
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <b>The one write on this surface that touches no descriptor.</b> It is here rather than in the
+    /// dashboard's own gateway because it writes a credential, and every other credential-weight operation
+    /// on this instance — issuing an API key, administering users — is admitted by the same ladder. A
+    /// screen writing the secret store directly would be the only write in the product with no policy
+    /// behind it.
+    /// </remarks>
+    public async Task SetAiConnectionAsync(StoredAiConnection connection, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        EnsureMayPerform(ManagementOperation.SetAiConnection);
+
+        var json = JsonSerializer.Serialize(
+            connection, StoredAiConnectionJsonContext.Default.StoredAiConnection);
+
+        await secrets.SetAsync(SecretName.Parse(StoredAiConnection.SecretName), json, ct).ConfigureAwait(false);
+    }
 
     /// <inheritdoc/>
     public async Task<ManagementApplyResult> RollbackAsync(

@@ -1,0 +1,180 @@
+﻿@page "/admin"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject ILogger<Overview> Logger
+
+<PageTitle>Overview · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Title="@(_descriptor is null ? "Overview" : Gateway.Project)" />
+
+    @if (_problem is not null)
+    {
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
+    }
+    else if (_schema is null)
+    {
+        <div class="a-cards">
+            <Skeleton Size="Skeleton.SkeletonSize.Sm" />
+            <Skeleton Size="Skeleton.SkeletonSize.Sm" />
+            <Skeleton Size="Skeleton.SkeletonSize.Sm" />
+        </div>
+    }
+    else
+    {
+        @if (_schema.Entities.Count == 0 || _revisions.Count == 0)
+        {
+            <Panel Padded="true" class="a-panel--accent">
+                <span class="a-section__title">This project is new</span>
+                <p class="a-section__sub">
+                    Three things make a backend: entities, the rules that guard them, and a tenant if
+                    the data is per-customer. The first run walks through them in that order.
+                </p>
+                <a class="a-btn a-btn--primary a-btn--sm" href="@AdminPaths.Welcome">
+                    Open the first run
+                </a>
+            </Panel>
+        }
+
+        @*
+            One badge for the fact an operator acts on, and one quiet line for how this instance runs.
+            The registered data provider's type name was a third chip here; it is an implementation
+            name, and Settings is where it is shown with the sentence that explains it.
+        *@
+        <div class="a-row a-row--wrap">
+            <span class="a-badge a-badge--ok">Revision @_descriptor!.Revision applied</span>
+            <span class="a-note" data-testid="overview-runtime">@Runtime(_info!)</span>
+        </div>
+
+        <div class="a-cards">
+            <Stat Label="Entities" Value="@_schema.Entities.Count.ToString(CultureInfo.InvariantCulture)"
+                  Note="tables Alvo created and keeps in step" />
+            <Stat Label="Revisions" Value="@_revisions.Count.ToString(CultureInfo.InvariantCulture)"
+                  Note="appended, never rewritten" />
+            <Stat Label="Honoured blocks" Value="@_capabilities!.Honoured.Count.ToString(CultureInfo.InvariantCulture)"
+                  Note="of the descriptor, running today" />
+        </div>
+
+        @*
+            A normal panel under the stats rather than the centred dashed callout it was: it lists
+            facts about blocks this project declared, and the callout's shape — kept for empty states —
+            made a list of consequences read as one. The heading claims only what is true of every row;
+            DeclaredLimits says why the rows are not split into "not running" and "partly running".
+        *@
+        @if (Declared.Count > 0)
+        {
+            <Panel Title="Declared, with limits in this build" data-testid="overview-limits">
+                <Subtitle>Parts of these blocks are not honoured yet — each says which.</Subtitle>
+                <ChildContent>
+                    @foreach (var block in Declared)
+                    {
+                        <ListRow data-testid="@($"overview-limit-{block.Block}")">
+                            <span class="a-listrow__type"><span class="a-badge a-badge--warn a-mono">@block.Block</span></span>
+                            <p class="a-note">@block.Consequence</p>
+                        </ListRow>
+                    }
+                </ChildContent>
+            </Panel>
+        }
+
+        @*
+            The four places an operator goes next, each with the one number that says what is there.
+            Only counts this screen already holds or reads from the descriptor it already has: a count
+            that cost its own round trip would make the landing page the slowest screen to open.
+        *@
+        <nav class="a-cards" aria-label="Sections" data-testid="overview-links">
+            <a class="a-card a-card--action" href="@AdminPaths.Schema" data-testid="overview-link-schema">
+                <span class="a-section__title">Schema</span>
+                <span class="a-section__sub">@Count(_schema.Entities.Count, "entity", "entities")</span>
+            </a>
+            <a class="a-card a-card--action" href="@AdminPaths.Data" data-testid="overview-link-data">
+                <span class="a-section__title">Data</span>
+                <span class="a-section__sub">Browse the records of @Count(_schema.Entities.Count, "entity", "entities")</span>
+            </a>
+            <a class="a-card a-card--action" href="@AdminPaths.Rules()" data-testid="overview-link-rules">
+                <span class="a-section__title">Rules</span>
+                <span class="a-section__sub">@Count(_rules, "rule", "rules") declared</span>
+            </a>
+            <a class="a-card a-card--action" href="@AdminPaths.Access" data-testid="overview-link-access">
+                <span class="a-section__title">Access</span>
+                <span class="a-section__sub">@Count(_roles, "role", "roles") declared</span>
+            </a>
+        </nav>
+
+        <Panel Title="Latest configuration change">
+            <Subtitle>The whole history is under Configuration history.</Subtitle>
+            <ChildContent>
+                @if (_revisions.Count == 0)
+                {
+                    <EmptyState Title="Nothing has been applied yet"
+                                Body="The descriptor this host booted from has not been through an apply. Open Schema to make the first change." />
+                }
+                else
+                {
+                    <RevisionRow Revision="@_revisions[0]" />
+                }
+            </ChildContent>
+        </Panel>
+    }
+</div>
+
+@code {
+    private ManagementDescriptor? _descriptor;
+    private SchemaModel? _schema;
+    private ManagementCapabilities? _capabilities;
+    private ManagementInfo? _info;
+    private IReadOnlyList<ManagementRevision> _revisions = [];
+    private int _rules;
+    private int _roles;
+    private AdminProblem? _problem;
+
+    /// <summary>The warned blocks this descriptor declares (§4.2) — see <see cref="DeclaredLimits"/>.</summary>
+    private IReadOnlyList<ManagementWarnedBlock> Declared { get; set; } = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
+            _schema = await Gateway.SchemaAsync(CancellationToken.None);
+            _capabilities = await Gateway.CapabilitiesAsync(CancellationToken.None);
+            _info = await Gateway.InfoAsync(CancellationToken.None);
+            _revisions = await Gateway.RevisionsAsync(CancellationToken.None);
+            Declared = DeclaredLimits.Of(_descriptor.DescriptorJson, _capabilities);
+            _rules = DescriptorLens.RuleCount(_descriptor.DescriptorJson);
+            _roles = DescriptorLens.DeclaredRoles(_descriptor.DescriptorJson).Count;
+        }
+        catch (Exception exception)
+        {
+            _problem = AdminProblem.From(exception, Logger);
+        }
+    }
+
+    /// <summary>How this instance runs, as one line an operator reads rather than three raw values.</summary>
+    /// <remarks>
+    /// A mode this build does not name is shown as reported rather than hidden, so a future value
+    /// reads as itself instead of as the nearest one this switch happens to know.
+    /// </remarks>
+    private static string Runtime(ManagementInfo info)
+    {
+        var mode = info.Mode.Length > 0
+            ? string.Concat(info.Mode[..1].ToUpperInvariant(), info.Mode[1..])
+            : info.Mode;
+
+        var startup = info.StartupMode switch
+        {
+            "apply" => "applies on start",
+            "verify" => "verifies on start",
+            "skip" => "leaves the schema alone on start",
+            var other => $"starts in {other} mode",
+        };
+
+        return $"{mode} · {startup}";
+    }
+
+    /// <summary>A count with its noun, singular or plural.</summary>
+    private static string Count(int count, string one, string many)
+        => $"{count.ToString(CultureInfo.InvariantCulture)} {(count == 1 ? one : many)}";
+}

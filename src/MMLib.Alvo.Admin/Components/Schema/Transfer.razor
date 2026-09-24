@@ -1,0 +1,130 @@
+﻿@page "/admin/transfer"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject AdminSession Session
+@inject NavigationManager Navigation
+@inject AdminInterop Interop
+@inject ILogger<Transfer> Logger
+@implements IDisposable
+
+<PageTitle>Import and export · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Eyebrow="Schema" EyebrowHref="@AdminPaths.Schema" Title="Import and export" />
+
+    @if (_problem is not null)
+    {
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
+    }
+
+    <Panel Padded="true" Title="Export">
+        <Subtitle>The stored descriptor, byte for byte — exactly what was applied, not a copy rebuilt from it.</Subtitle>
+        <ChildContent>
+            <div class="a-row">
+                <button type="button" class="a-btn a-btn--sm" @onclick="DownloadAsync" disabled="@(_descriptor is null)">
+                    Download @(Gateway.Project).alvo.json
+                </button>
+                <span class="a-section__sub">revision @(_descriptor?.Revision.ToString(CultureInfo.InvariantCulture) ?? "…")</span>
+            </div>
+            @if (_descriptor is not null)
+            {
+                <CodeBlock Json="@_descriptor.DescriptorJson" />
+            }
+        </ChildContent>
+    </Panel>
+
+    <Panel Padded="true" Title="Import">
+        <Subtitle>
+            Paste a descriptor to work from. This does not apply anything — it loads the working
+            copy, and the next screen is the same dry run every other change goes through.
+        </Subtitle>
+        <ChildContent>
+            @if (_refusal is { Length: > 0 })
+            {
+                <ErrorPanel Title="The apply would refuse this descriptor"
+                            Slug="descriptor-invalid"
+                            Fix="@_refusal" />
+            }
+
+            <Field Label="Descriptor JSON" For="import-json">
+                <textarea class="a-textarea" id="import-json" rows="12" spellcheck="false"
+                          value="@_pasted"
+                          @oninput="args => _pasted = args.Value?.ToString() ?? string.Empty"></textarea>
+            </Field>
+
+            <button type="button" class="a-btn a-btn--primary" @onclick="Import"
+                    disabled="@(_pasted.Trim().Length == 0)">
+                Load it into the working copy
+            </button>
+        </ChildContent>
+    </Panel>
+</div>
+
+@code {
+    /// <summary>
+    /// This operator's working copy, resolved from the store rather than injected.
+    /// </summary>
+    /// <remarks>
+    /// Empty until the first render has resolved who is signed in — the markup therefore reads it
+    /// through <c>Copy.Loaded</c> rather than assuming a document is there.
+    /// </remarks>
+    private WorkingCopy Copy { get; set; } = new();
+
+    private readonly ComponentLifetime _lifetime = new();
+    private ManagementDescriptor? _descriptor;
+    private AdminProblem? _problem;
+    private string _pasted = string.Empty;
+    private string? _refusal;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var ct = _lifetime.Token;
+        try
+        {
+            Copy = await Session.CopyAsync(ct);
+            _descriptor = await Gateway.DescriptorAsync(ct);
+            await Session.EnsureLoadedAsync(Copy, ct);
+        }
+        catch (Exception exception)
+        {
+            _problem = AdminProblem.From(exception, Logger);
+        }
+    }
+
+    private async Task DownloadAsync()
+    {
+        if (_descriptor is not null)
+        {
+            await Interop.DownloadAsync($"{Gateway.Project}.alvo.json", _descriptor.DescriptorJson);
+        }
+    }
+
+    /// <summary>
+    /// Loads a pasted descriptor, after refusing the names the frozen schema cannot carry.
+    /// </summary>
+    /// <remarks>
+    /// The check is the boundary, not a validation pass: everything else about the descriptor is
+    /// judged by the apply on the next screen, which is the authority. What is refused here is the
+    /// class of input that must never reach a renderer — see <see cref="DescriptorNames"/>.
+    /// </remarks>
+    private void Import()
+    {
+        _refusal = DescriptorNames.FirstRefusal(_pasted);
+        if (_refusal is not null)
+        {
+            return;
+        }
+
+        if (!Copy.Replace(_pasted))
+        {
+            _refusal = "That is not a JSON object.";
+            return;
+        }
+
+        Navigation.NavigateTo(AdminPaths.Changes);
+    }
+
+    public void Dispose() => _lifetime.Dispose();
+}

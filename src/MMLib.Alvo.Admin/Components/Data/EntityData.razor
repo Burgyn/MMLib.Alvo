@@ -1,0 +1,132 @@
+﻿@page "/admin/data/{EntityName}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject DataGateway Records
+@inject NavigationManager Navigation
+@inject ILogger<EntityData> Logger
+
+<PageTitle>@EntityName · Data · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Eyebrow="Data" EyebrowHref="@AdminPaths.Data" Title="@EntityName" Mono="true">
+        <Secondary>
+            <a class="a-btn a-btn--sm" href="@AdminPaths.Entity(EntityName)">Schema</a>
+        </Secondary>
+        <Primary>
+            @if (_entity is not null && !OutOfScope)
+            {
+                <button type="button" class="a-btn a-btn--primary a-btn--sm" @onclick="NewRecord">New record</button>
+            }
+        </Primary>
+    </PageHeader>
+
+    @if (_problem is not null)
+    {
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
+    }
+
+    @if (_entity is null)
+    {
+        @if (_loading)
+        {
+            <Skeleton Size="Skeleton.SkeletonSize.Lg" />
+        }
+        else if (_problem is null)
+        {
+            <EmptyState Title="@($"There is no entity called {EntityName}")"
+                        Body="The schema this project serves does not declare it." />
+        }
+    }
+    else
+    {
+        @*
+            Provenance, not a headline. It answers "whose rows am I looking at" — which matters, and
+            matters once — so it is set as the fine print it is rather than as the first paragraph of
+            the page competing with the data underneath it.
+        *@
+        <p class="a-note">
+            Reading as <strong>@_who</strong>@(_context?.Tenant is { } tenant
+                ? $", tenant {tenant.Value}" : ", with no tenant").
+            These are exactly the rows this credential sees through <code class="a-mono">/api/@EntityName</code>.
+        </p>
+
+        @if (OutOfScope)
+        {
+            <EmptyState Title="You hold no tenant, and this entity is scoped to one"
+                        Body="@EmptyExplanation" />
+        }
+        else
+        {
+            @*
+                Outside every branch below, so a search that narrows the page to nothing, or back, never
+                unmounts the box being typed into — which would drop its focus mid-word.
+            *@
+            <div class="a-grid-bar">
+                @if (_searchable.Count > 0)
+                {
+                    <div class="a-grid-search">
+                        <input type="search" class="a-input" data-testid="grid-search" data-alvo-search
+                               placeholder="@($"Search {EntityName}…")" aria-label="@($"Search {EntityName}")"
+                               title="@($"Looks in {string.Join(", ", _searchable)}")" maxlength="@GridQuery.MaxPatternLength"
+                               @bind="_search" @bind:event="oninput" @bind:after="SearchChanged" />
+                    </div>
+                }
+
+                @*
+                    What the last write did, said once and quietly. The live region is always on the page
+                    and only its content comes and goes, because a region inserted together with its text
+                    is one a screen reader may never announce. An error is never said here: it stays in
+                    the sheet it happened in (design §5.5 — errors are not toasts).
+                *@
+                <div role="status" aria-live="polite" data-testid="record-status">
+                    @if (_status is { } status)
+                    {
+                        <div class="a-status-line">
+                            <span>@status</span>
+                            <button type="button" class="a-btn a-btn--ghost a-btn--sm" aria-label="Dismiss"
+                                    @onclick="() => _status = null">Dismiss</button>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            @if (_unreachable)
+            {
+                <p class="a-note" data-testid="record-unreachable">
+                    The linked record is not one this credential can read: it does not exist, or the read
+                    rule excludes it.
+                </p>
+            }
+
+            @if (_loading)
+            {
+                <Skeleton Size="Skeleton.SkeletonSize.Lg" />
+            }
+            else if (_page is null)
+            {
+                @* The refusal above is the whole answer; a skeleton that never resolves is not. *@
+            }
+            else if (_page.Items.Count == 0)
+            {
+                <EmptyState Title="@(Searching ? $"Nothing matches “{_search.Trim()}”" : "No rows came back")"
+                            Body="@(Searching ? $"The search looks in {string.Join(", ", _searchable)}." : EmptyExplanation)" />
+            }
+            else
+            {
+                <CascadingValue Value="GridScope">
+                    <RecordGrid OnOpen="Open" OnSort="SortBy" OnNext="Next" OnPrevious="Previous" />
+                </CascadingValue>
+            }
+        }
+    }
+</div>
+
+@if (_form is not null && _entity is not null && _scope is not null)
+{
+    <CascadingValue Value="_scope">
+        <RecordForm Entity="_entity" Values="_form" RecordId="_editing"
+                    OnCancel="CloseForm" OnSaved="Saved" OnDeleted="Saved" />
+    </CascadingValue>
+}

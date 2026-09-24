@@ -84,7 +84,8 @@ compresses out. Violating one of these is a bug, not a style nit.
 - `scripts/` — `test-ring0`/`test-ring1`/`test-ring2` plus `check-brief-freshness`,
   `test-load` (the load harness), `test-prototype` (the design prototype's scenarios) and
   `test-admin-e2e` (the dashboard's scenarios, a real browser over a real host) — all three in
-  no ring, see below.
+  no ring, see below — and `demo-admin`, which boots the dashboard over the seeded
+  `examples/bike-workshop` backend for demos and UX reviews.
 - `.husky/` — Husky.Net git hooks (`pre-commit`, `commit-msg`) + `task-runner.json`; auto-installed on build.
 - `.github/` — CI workflows; the PR run (everything but mutation) plus
   `mutation.yml`, which runs post-merge on `main`.

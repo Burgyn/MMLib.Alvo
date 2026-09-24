@@ -1,4 +1,7 @@
-﻿using Microsoft.AspNetCore.Components.Authorization;
+﻿using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Routing;
+using MMLib.Alvo.Admin.Components.History;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;
@@ -13,20 +16,23 @@ namespace MMLib.Alvo.Admin.Internal;
 /// <b>Why a gateway rather than components injecting the contract directly.</b> Three of the
 /// dashboard's screens need the descriptor, the schema and <c>capabilities</c> at once, and a
 /// component that fetched each in its own <c>OnInitializedAsync</c> would make three round trips
-/// per render pass and four when a child re-rendered. This holds one copy per circuit and
-/// invalidates it on an apply — which is also the only moment any of them can have changed,
-/// because every write to configuration goes through one route.
+/// per render pass and four when a child re-rendered. This holds one copy per circuit, for as long
+/// as the operator stays on one screen.
 /// </para>
 /// <para>
 /// <b>It caches, and the cache is therefore a correctness question rather than a performance
-/// one.</b> <see cref="Invalidate"/> runs after every real apply. A descriptor cannot change under
-/// a dashboard that did not change it, except by another operator's apply — and that apply moves
-/// the revision, so the next <c>If-Match</c> this circuit sends is refused with a concurrency
-/// failure rather than silently overwriting them. The stale read is visible and safe.
+/// one.</b> <see cref="Invalidate"/> runs after every real apply this circuit makes, and on every
+/// navigation. The second is what covers the applies this circuit did not make — another tab of
+/// the same operator, another administrator, the CLI, an assistant turn — none of which this
+/// circuit hears about: a scope is the circuit, and the working copy's <c>Changed</c> says an edit
+/// moved, not that a revision did (docs/architecture/admin-dashboard-review.md, F-15). The reads
+/// are in-process, so re-reading once per screen costs little, and a screen that stays open
+/// across somebody else's apply is still safe: that apply moved the revision, so the next
+/// <c>If-Match</c> this circuit sends is refused rather than silently overwriting them.
 /// </para>
 /// <para>
 /// <b>It authorizes nothing.</b> Every call runs with the operator's principal published on
-/// <see cref="IAlvoContextAccessor"/>, and the core decides — see <see cref="AsOperatorAsync"/>.
+/// <see cref="IAlvoContextAccessor"/>, and the core decides — see <see cref="AsOperatorAsync{T}(Func{Task{T}}, CancellationToken)"/>.
 /// </para>
 /// </remarks>
 /// <param name="management">The one management contract, resolved in-process (design §1.2).</param>
@@ -39,13 +45,15 @@ internal sealed class ManagementGateway(
     IAlvoUserAdministration? people,
     IAlvoAdminCallerResolver callers,
     AuthenticationStateProvider authentication,
-    IAlvoContextAccessor ambient)
+    IAlvoContextAccessor ambient) : IDisposable
 {
-    private ManagementDescriptor? _descriptor;
-    private SchemaModel? _schema;
-    private ManagementCapabilities? _capabilities;
-    private ManagementInfo? _info;
-    private IReadOnlyList<ManagementProject>? _projects;
+    private readonly Slot<ManagementDescriptor> _descriptor = new();
+    private readonly Slot<SchemaModel> _schema = new();
+    private readonly Slot<ManagementCapabilities> _capabilities = new();
+    private readonly Slot<ManagementInfo> _info = new();
+    private readonly Slot<IReadOnlyList<ManagementProject>> _projects = new();
+    private IDisposable? _following;
+    private int _generation;
 
     /// <summary>The project this dashboard is looking at.</summary>
     /// <remarks>
@@ -55,46 +63,93 @@ internal sealed class ManagementGateway(
     /// </remarks>
     public string Project { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Raised after a real apply or rollback, so a component showing the applied revision can read it again.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It exists for the shell, which is mounted once and outlives the screen that applied.</b> The
+    /// project card re-read only on navigation, and Preview stays where it is after an apply, so the card
+    /// said "revision 1" beside a panel announcing revision 2.
+    /// </para>
+    /// <para>
+    /// The same shape as <see cref="AssistantGateway.ConnectionChanged"/> and for the same reason: this
+    /// scoped gateway is what the layout and the page share for a circuit, and the write path is the one
+    /// place that knows the answer moved. A dry run raises nothing, because it wrote nothing.
+    /// </para>
+    /// </remarks>
+    public event Action? Applied;
+
     /// <summary>The descriptor as stored, with the revision it is at.</summary>
     public async ValueTask<ManagementDescriptor> DescriptorAsync(CancellationToken ct)
     {
         var project = await ProjectAsync(ct).ConfigureAwait(false);
-        return _descriptor ??= await AsOperatorAsync(
-            () => management.GetDescriptorAsync(project, ct), ct).ConfigureAwait(false);
+        return await CachedAsync(_descriptor, () => management.GetDescriptorAsync(project, ct), ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>The resolved schema — what the Data API actually serves.</summary>
     public async ValueTask<SchemaModel> SchemaAsync(CancellationToken ct)
     {
         var project = await ProjectAsync(ct).ConfigureAwait(false);
-        return _schema ??= await AsOperatorAsync(
-            () => management.GetSchemaAsync(project, ct), ct).ConfigureAwait(false);
+        return await CachedAsync(_schema, () => management.GetSchemaAsync(project, ct), ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>What this build honours, warns about and refuses.</summary>
     public async ValueTask<ManagementCapabilities> CapabilitiesAsync(CancellationToken ct)
     {
         var project = await ProjectAsync(ct).ConfigureAwait(false);
-        return _capabilities ??= await AsOperatorAsync(
-            () => management.GetCapabilitiesAsync(project, ct), ct).ConfigureAwait(false);
+        return await CachedAsync(_capabilities, () => management.GetCapabilitiesAsync(project, ct), ct)
+            .ConfigureAwait(false);
     }
 
     /// <summary>Build, mode, data provider and startup mode.</summary>
-    public async ValueTask<ManagementInfo> InfoAsync(CancellationToken ct)
-        => _info ??= await AsOperatorAsync(() => management.GetInfoAsync(ct), ct).ConfigureAwait(false);
+    public ValueTask<ManagementInfo> InfoAsync(CancellationToken ct)
+        => CachedAsync(_info, () => management.GetInfoAsync(ct), ct);
 
     /// <summary>Every project this build manages — one, today (§2.6).</summary>
-    public async ValueTask<IReadOnlyList<ManagementProject>> ProjectsAsync(CancellationToken ct)
-        => _projects ??= await AsOperatorAsync(
-            () => management.ListProjectsAsync(ct), ct).ConfigureAwait(false);
+    public ValueTask<IReadOnlyList<ManagementProject>> ProjectsAsync(CancellationToken ct)
+        => CachedAsync(_projects, () => management.ListProjectsAsync(ct), ct);
+
+    /// <summary>A cached read, or the call that fills it.</summary>
+    /// <remarks>
+    /// <b>The answer is kept only if no <see cref="Invalidate"/> ran while it was on its way.</b> A read that
+    /// started before a navigation or an apply and finished after one carries the configuration as it was, and
+    /// storing it would put back exactly the stale value the invalidation had just dropped — so the generation
+    /// is taken before the await and compared after it. The caller still gets the answer it asked for.
+    /// </remarks>
+    private async ValueTask<T> CachedAsync<T>(Slot<T> slot, Func<Task<T>> call, CancellationToken ct)
+        where T : class
+    {
+        if (slot.Value is { } cached)
+        {
+            return cached;
+        }
+
+        var generation = Volatile.Read(ref _generation);
+        var fresh = await AsOperatorAsync(call, ct).ConfigureAwait(false);
+
+        if (generation == Volatile.Read(ref _generation))
+        {
+            slot.Value = fresh;
+        }
+
+        return fresh;
+    }
 
     /// <summary>The append-only configuration history, newest first.</summary>
-    /// <remarks>Never cached: it is the one read whose whole purpose is to be current.</remarks>
+    /// <remarks>
+    /// Never cached: it is the one read whose whole purpose is to be current. Sorted here, because the
+    /// contract answers oldest first and every screen reads newest first — see <see cref="RevisionHistory"/>.
+    /// </remarks>
     public async Task<IReadOnlyList<ManagementRevision>> RevisionsAsync(CancellationToken ct)
     {
         var project = await ProjectAsync(ct).ConfigureAwait(false);
-        return await AsOperatorAsync(
+        var revisions = await AsOperatorAsync(
             () => management.ListRevisionsAsync(project, ct), ct).ConfigureAwait(false);
+
+        return RevisionHistory.NewestFirst(revisions);
     }
 
     /// <summary>One past revision, with the descriptor it applied.</summary>
@@ -133,6 +188,7 @@ internal sealed class ManagementGateway(
         if (!dryRun)
         {
             Invalidate();
+            Applied?.Invoke();
         }
 
         return result;
@@ -162,6 +218,7 @@ internal sealed class ManagementGateway(
         if (!dryRun)
         {
             Invalidate();
+            Applied?.Invoke();
         }
 
         return result;
@@ -201,6 +258,16 @@ internal sealed class ManagementGateway(
     /// </remarks>
     public bool CanAdministerPeople => people is not null;
 
+    /// <summary>The signed-in operator's own user id, or <see langword="null"/> when they resolve to no caller.</summary>
+    /// <remarks>
+    /// For a screen that has to recognise the operator's own row — Access, where the core refuses a person
+    /// granting themselves a tenant, and a control whose only outcome is that refusal should not be offered.
+    /// It decides nothing: the core still refuses the call if a screen offers it anyway.
+    /// </remarks>
+    /// <param name="ct">Cancels the read of the membership store.</param>
+    public async ValueTask<UserId?> SelfAsync(CancellationToken ct)
+        => (await CallerAsync(ct).ConfigureAwait(false))?.Context.User;
+
     /// <summary>One page of the people on this project.</summary>
     public Task<AlvoUserPage> PeopleAsync(AlvoUserQuery query, CancellationToken ct)
         => AsOperatorAsync(() => Administration.ListAsync(query, ct), ct);
@@ -230,12 +297,151 @@ internal sealed class ManagementGateway(
             "This deployment registered no membership store, so there is nobody to administer. "
             + "CanAdministerPeople says so before a screen offers a control.");
 
+    /// <summary>Writes the instance's AI connection, through the core's own admission ladder.</summary>
+    /// <param name="connection">The endpoint, the model and the credential, as one record.</param>
+    /// <param name="ct">A token to cancel the write.</param>
+    public Task SetAiConnectionAsync(MMLib.Alvo.Ai.StoredAiConnection connection, CancellationToken ct)
+        => AsOperatorAsync(async () =>
+        {
+            await management.SetAiConnectionAsync(connection, ct).ConfigureAwait(false);
+
+            return true;
+        }, ct);
+
+    /// <summary>
+    /// Runs a whole stream with the operator published, for as long as it is being consumed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>An iterator rather than the <c>Func</c> overload, and the difference is load-bearing.</b>
+    /// <c>IAlvoContextAccessor</c> is an <see cref="System.Threading.AsyncLocal{T}"/> holder, so a
+    /// publication made inside a helper that then returns is gone by the time the caller enumerates
+    /// anything. Publishing here, in the body that drives the inner enumeration, is what keeps the caller
+    /// published for every <c>MoveNext</c> — which is what an assistant turn needs, because it calls the
+    /// management surface several times between one update and the next.
+    /// </para>
+    /// <para>
+    /// Without it every one of the agent's tool calls sees no principal, resolves to
+    /// <c>AlvoContext.Anonymous</c>, and is refused — the safe direction, and a blind assistant.
+    /// </para>
+    /// </remarks>
+    /// <typeparam name="T">What the stream yields.</typeparam>
+    /// <param name="stream">The stream to run.</param>
+    /// <param name="ct">Cancels resolving the caller and the enumeration.</param>
+    public async IAsyncEnumerable<T> AsOperatorAsync<T>(
+        Func<IAsyncEnumerable<T>> stream,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+
+        var previous = ambient.Principal;
+        ambient.Principal = await CallerAsync(ct).ConfigureAwait(false);
+
+        try
+        {
+            await foreach (var item in stream().WithCancellation(ct).ConfigureAwait(false))
+            {
+                yield return item;
+            }
+        }
+        finally
+        {
+            ambient.Principal = previous;
+        }
+    }
+
+    /// <summary>
+    /// Drops the cached reads on every navigation of this circuit, so a screen reads the configuration as it
+    /// is now rather than as it was when the circuit started.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Invalidate on navigation rather than key the cache by a revision</b>, which is the other shape the
+    /// review offers. The only revision the dashboard could key on is one it saw applied, and an apply over the
+    /// CLI or the HTTP route is seen by no part of it; a navigation is, and it is the moment an operator asks
+    /// for a screen. No bus, no shared state: this circuit's own <see cref="NavigationManager"/>.
+    /// </para>
+    /// <para>
+    /// <b>On the location <em>changing</em>, not changed, and the order is the point.</b> The router subscribes
+    /// to <see cref="NavigationManager.LocationChanged"/> before this gateway exists and renders the destination
+    /// page inside its own handler, so an invalidation hung on the same event ran after the new page had already
+    /// read the old cache. A location-changing handler runs before any <c>LocationChanged</c> handler — for a
+    /// link click, a <c>NavigateTo</c> (a query-only one too) and a step back or forward alike — so every
+    /// screen, and the project card, reads after the drop. It never cancels a navigation.
+    /// </para>
+    /// <para>
+    /// <b>A statically rendered pass has nothing to follow</b>: its navigation manager supports no
+    /// location-changing handlers, and its scope is one request that never navigates. The gateway then caches
+    /// for that request alone, which is what it did before. The registration throws after the handler has been
+    /// added, so the handler stays on that request's navigation manager with no registration to dispose — which
+    /// is harmless: the manager lives for the one request, and nothing there ever raises it.
+    /// </para>
+    /// <para>
+    /// The cost, per navigation of an interactive circuit:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>A re-read of these four — including the query-only navigations, an entity's tab or
+    /// the grid's filter — each an in-process call rather than a network round trip.</description></item>
+    /// <item><description>One circuit round trip before the browser commits the navigation. A registered
+    /// handler is a navigation lock to the framework, so the browser asks the server first, where it used to
+    /// navigate and tell it afterwards.</description></item>
+    /// <item><description>A replayed step for back and forward. The browser has already moved through its
+    /// history when the lock hears of it, so the framework steps back to where it was, asks the handler, and
+    /// then repeats the step.</description></item>
+    /// </list>
+    /// </remarks>
+    /// <param name="navigation">This scope's navigation, initialised.</param>
+    public void FollowNavigation(NavigationManager navigation)
+    {
+        ArgumentNullException.ThrowIfNull(navigation);
+
+        Unfollow();
+        try
+        {
+            _following = navigation.RegisterLocationChangingHandler(OnLocationChanging);
+        }
+        catch (NotSupportedException)
+        {
+            _following = null;
+        }
+    }
+
+    /// <summary>Stops following the scope's navigation, when the scope ends.</summary>
+    public void Dispose() => Unfollow();
+
+    private void Unfollow()
+    {
+        _following?.Dispose();
+        _following = null;
+    }
+
+    private ValueTask OnLocationChanging(LocationChangingContext context)
+    {
+        Invalidate();
+        return ValueTask.CompletedTask;
+    }
+
     /// <summary>Drops every cached read.</summary>
+    /// <remarks>
+    /// <c>info</c> is dropped too, because it now carries the AI connection — which a save from the settings
+    /// screen changes, and a cache that outlived the save would report "not configured" to the operator who
+    /// had just configured it. The project list is kept, as it always was; the project card reads the current
+    /// revision from the descriptor rather than from it.
+    /// </remarks>
     public void Invalidate()
     {
-        _descriptor = null;
-        _schema = null;
-        _capabilities = null;
+        Interlocked.Increment(ref _generation);
+        _descriptor.Value = null;
+        _schema.Value = null;
+        _capabilities.Value = null;
+        _info.Value = null;
+    }
+
+    /// <summary>One cached read. A class, so <see cref="CachedAsync{T}"/> can fill it across an await.</summary>
+    private sealed class Slot<T>
+        where T : class
+    {
+        public T? Value { get; set; }
     }
 
     /// <summary>

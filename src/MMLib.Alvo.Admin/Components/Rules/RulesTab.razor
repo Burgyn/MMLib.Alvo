@@ -1,0 +1,113 @@
+﻿@*
+    The five operations, and the CEL each is guarded by.
+
+    What this screen deliberately does not do is evaluate anything. The CEL is shown as source; the
+    question "would this caller get rows" is answered on the Rules screen, by the engine, and even
+    there only as a predicate — never as a verdict about a stored row (§2.2.1).
+*@
+<SectionHead Title="Who may do what">
+    <Subtitle>
+        Checked inside the same transaction as the query, against the caller's id, roles and tenant
+        and this record's own fields — nothing else.
+    </Subtitle>
+</SectionHead>
+
+@if (Rules.Count == 0 && !Editable)
+{
+    <EmptyState Title="This entity has no rules"
+                Body="Default-deny: with no rule for an operation, nobody reaches it through the Data API — not an empty page, a refusal.">
+        <a class="a-btn a-btn--sm" href="@AdminPaths.Rules(Entity)">Open Rules</a>
+    </EmptyState>
+}
+else if (!Editable)
+{
+    @foreach (var rule in Rules)
+    {
+        <ListRow class="a-listrow--roomy a-listrow--stacked">
+            <div class="a-row">
+                <span class="a-badge a-badge--accent">@rule.Key</span>
+                <code class="a-ident">@Route(rule.Key)</code>
+            </div>
+            <pre class="a-code a-then"><code>@rule.Value</code></pre>
+        </ListRow>
+    }
+
+    @if (Missing.Count > 0)
+    {
+        <p class="a-note">
+            No rule for @string.Join(", ", Missing) — those operations are refused for everyone,
+            which is default-deny working rather than a gap.
+        </p>
+    }
+}
+else
+{
+    @* The editor. One box per operation; an empty box is no rule, which is a refusal for everyone
+       rather than an omission — so the placeholder says that rather than being left blank. The CEL
+       is not parsed here: the apply compiles it against the entity's own columns and refuses a
+       reference to a column that does not exist, which is a fail-fast the client cannot reproduce
+       without a second compiler. *@
+    @foreach (var operation in _operations)
+    {
+        <ListRow class="a-listrow--roomy a-listrow--stacked">
+            <div class="a-row">
+                <span class="@($"a-badge {(Declared(operation) is { Length: > 0 } ? "a-badge--accent" : string.Empty)}")">@operation</span>
+                <code class="a-ident">@Route(operation)</code>
+            </div>
+            <textarea class="a-textarea a-mono a-then" rows="2" spellcheck="false"
+                      id="@($"rule-{operation}")"
+                      placeholder="No rule — refused for everyone. Try: 'dispatcher' in @@user.roles"
+                      value="@Declared(operation)"
+                      @onchange="args => Write(operation, args.Value?.ToString() ?? string.Empty)"></textarea>
+        </ListRow>
+    }
+
+    <p class="a-note">
+        The rule is checked inside the same transaction as the query and may read the caller's id,
+        their roles, their tenant and this record's own fields — nothing else. It goes through the
+        same dry run as every other change.
+    </p>
+}
+
+@code {
+    private static readonly string[] _operations = ["list", "get", "create", "update", "delete"];
+
+    /// <summary>The rules, as the descriptor declares them.</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<KeyValuePair<string, string>> Rules { get; set; } = [];
+
+    /// <summary>The entity, for the route shapes and the link.</summary>
+    [Parameter, EditorRequired]
+    public string Entity { get; set; } = string.Empty;
+
+    /// <summary>Whether the rules may be edited into the working copy here.</summary>
+    /// <remarks>
+    /// The Rules screen shows them beside the simulator and is read-only; the entity's own tab is
+    /// where they are written. One writer, so there is no question of which screen's version wins.
+    /// </remarks>
+    [Parameter]
+    public bool Editable { get; set; }
+
+    /// <summary>Raised with the operation and its new CEL, when <see cref="Editable"/>.</summary>
+    [Parameter]
+    public EventCallback<(string Operation, string Cel)> OnChanged { get; set; }
+
+    private string? Declared(string operation) => Rules
+        .FirstOrDefault(rule => string.Equals(rule.Key, operation, StringComparison.Ordinal)).Value;
+
+    private Task Write(string operation, string cel) => OnChanged.InvokeAsync((operation, cel.Trim()));
+
+    private List<string> Missing => _operations
+        .Where(operation => !Rules.Any(rule => string.Equals(rule.Key, operation, StringComparison.Ordinal)))
+        .ToList();
+
+    private string Route(string operation) => operation switch
+    {
+        "list" => $"GET /api/{Entity}",
+        "get" => $"GET /api/{Entity}/{{id}}",
+        "create" => $"POST /api/{Entity}",
+        "update" => $"PATCH /api/{Entity}/{{id}}",
+        "delete" => $"DELETE /api/{Entity}/{{id}}",
+        _ => string.Empty,
+    };
+}

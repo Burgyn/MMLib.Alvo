@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using MMLib.Alvo.Admin.Components.Data;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Admin.Internal;
 
@@ -40,6 +41,31 @@ internal static class DescriptorLens
     /// <returns>Hook point to the raw JSON of its action list.</returns>
     public static IReadOnlyList<KeyValuePair<string, string>> Hooks(string descriptorJson, string entity)
         => Pairs(descriptorJson, entity, "hooks");
+
+    /// <summary>How many rules the descriptor declares, over every entity and operation.</summary>
+    /// <remarks>
+    /// One parse for the whole count, because Overview shows it beside a link and a count that parsed
+    /// the document once per entity would cost more than the screen it decorates.
+    /// </remarks>
+    /// <param name="descriptorJson">The descriptor as stored.</param>
+    public static int RuleCount(string descriptorJson)
+    {
+        using var document = Parse(descriptorJson);
+        if (document is null
+            || !document.RootElement.TryGetProperty("entities", out var entities)
+            || entities.ValueKind != JsonValueKind.Object)
+        {
+            return 0;
+        }
+
+        return entities.EnumerateObject()
+            .Where(entity => entity.Value.ValueKind == JsonValueKind.Object)
+            .Select(entity => entity.Value.TryGetProperty("rules", out var rules)
+                && rules.ValueKind == JsonValueKind.Object
+                    ? rules.EnumerateObject().Count()
+                    : 0)
+            .Sum();
+    }
 
     /// <summary>The top-level blocks this descriptor declares.</summary>
     public static IReadOnlySet<string> DeclaredBlocks(string descriptorJson)
@@ -97,6 +123,66 @@ internal static class DescriptorLens
             ? value.GetRawText()
             : null;
     }
+
+    /// <summary>The fields one entity declares <c>hidden</c>.</summary>
+    /// <param name="descriptorJson">The descriptor as stored.</param>
+    /// <param name="entity">The entity to read.</param>
+    public static FieldMasks Masks(string descriptorJson, string entity)
+    {
+        var (always, conditional) = BoolOrCel(descriptorJson, entity, "hidden");
+        return always.Count + conditional.Count == 0 ? FieldMasks.None : new FieldMasks(always, conditional);
+    }
+
+    /// <summary>The fields one entity declares <c>readOnly</c>.</summary>
+    /// <remarks>
+    /// Like <c>hidden</c>, a policy the resolved schema does not carry, and split the same way: <c>true</c>
+    /// freezes the field for every caller, a CEL expression for some.
+    /// </remarks>
+    /// <param name="descriptorJson">The descriptor as stored.</param>
+    /// <param name="entity">The entity to read.</param>
+    public static FieldLocks Locks(string descriptorJson, string entity)
+    {
+        var (always, conditional) = BoolOrCel(descriptorJson, entity, "readOnly");
+        return always.Count + conditional.Count == 0 ? FieldLocks.None : new FieldLocks(always, conditional);
+    }
+
+    /// <summary>The fields whose <paramref name="key"/> is <c>true</c>, and those whose is a CEL expression.</summary>
+    private static (HashSet<string> Always, HashSet<string> Conditional) BoolOrCel(
+        string descriptorJson, string entity, string key)
+    {
+        var always = new HashSet<string>(StringComparer.Ordinal);
+        var conditional = new HashSet<string>(StringComparer.Ordinal);
+
+        using var document = Parse(descriptorJson);
+        if (document is null
+            || !document.RootElement.TryGetProperty("entities", out var entities)
+            || !entities.TryGetProperty(entity, out var declared)
+            || !declared.TryGetProperty("fields", out var fields)
+            || fields.ValueKind != JsonValueKind.Object)
+        {
+            return (always, conditional);
+        }
+
+        foreach (var field in fields.EnumerateObject())
+        {
+            var kind = KindOf(field.Value, key);
+            if (kind == JsonValueKind.True)
+            {
+                always.Add(field.Name);
+            }
+            else if (kind == JsonValueKind.String)
+            {
+                conditional.Add(field.Name);
+            }
+        }
+
+        return (always, conditional);
+    }
+
+    private static JsonValueKind KindOf(JsonElement field, string key)
+        => field.ValueKind == JsonValueKind.Object && field.TryGetProperty(key, out var value)
+            ? value.ValueKind
+            : JsonValueKind.Undefined;
 
     private static IReadOnlyList<KeyValuePair<string, string>> Pairs(
         string descriptorJson, string entity, string block)

@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Tests.EndToEnd;
+﻿using Microsoft.Playwright;
+
+namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
 /// Changing what the backend is, through the screens, and then reading the change back.
@@ -34,14 +36,14 @@ public sealed class ChangeTheBackendScenarios(AdminWorld world) : IClassFixture<
 
         // --- the entity lands in the working copy, and is visible before it is applied
         await session.GoAsync("/schema");
-        await session.Page.ClickAsync("button:has-text('New entity')");
+        await session.Button("New entity", exact: true).ClickAsync();
         await session.Page.FillAsync("#new-entity-name", "invoices");
-        await session.Page.ClickAsync("button:has-text('Add to the working copy')");
-        await session.Page.WaitForURLAsync("**/schema/preview");
+        await session.Button("Add to the working copy").ClickAsync();
+        await session.Page.WaitForURLAsync("**/schema/invoices");
 
 
         await session.GoAsync("/schema");
-        (await session.Page.Locator("main.a-content").InnerTextAsync())
+        (await session.Content.InnerTextAsync())
             .ShouldContain("not applied yet");
 
         // --- rules, written onto the pending entity
@@ -56,40 +58,47 @@ public sealed class ChangeTheBackendScenarios(AdminWorld world) : IClassFixture<
         }
 
         // --- the plan, then the apply
-        await session.GoAsync("/schema/preview");
-        await session.Page.ClickAsync("button:has-text('Plan this change')");
+        await session.GoAsync("/changes");
+        await session.WaitForPlanAsync();
         await session.Page.GetByText("against the database").First.WaitForAsync();
 
-        var plan = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var plan = await session.Content.InnerTextAsync();
         plan.ShouldContain("against the database");
         plan.ShouldContain("invoices");
 
         await session.Page.FillAsync("#apply-reason", "Add invoices, admin only");
-        await session.Page.ClickAsync("button:has-text('Apply these changes')");
+        await session.Button("Apply these changes").ClickAsync();
         await session.Page.GetByText("Applied as revision").First.WaitForAsync();
+
+        // --- the shell's project card follows the apply without a navigation (D-4): Preview stays
+        //     put after one, and the card used to keep the old revision until the operator moved on
+        var applied = (await session.Page.GetByText("Applied as revision").First.InnerTextAsync())
+            .Split(' ')[^1];
+        await session.Page.GetByTestId("project-card").Filter(new() { HasText = $"revision {applied}" })
+            .First.WaitForAsync();
 
         // --- the entity now serves rows
         await session.GoAsync("/data/invoices");
-        await session.Page.ClickAsync("button:has-text('New record')");
+        await session.Button("New record").ClickAsync();
         await session.Page.Locator("#rf-name").WaitForAsync();
         await session.Page.FillAsync("#rf-name", "INV-1001");
-        await session.Page.ClickAsync("button:has-text('Create')");
-        await session.Page.Locator("table.a-grid tbody tr").First.WaitForAsync();
+        await SheetButton(session, "Create").ClickAsync();
+        var rows = session.Page.GetByTestId("grid-row");
+        await rows.First.WaitForAsync();
 
-        (await session.Page.Locator("table.a-grid tbody tr").CountAsync()).ShouldBe(1);
-        (await session.Page.Locator("table.a-grid tbody tr").First.InnerTextAsync())
-            .ShouldContain("INV-1001");
+        (await rows.CountAsync()).ShouldBe(1);
+        (await rows.First.InnerTextAsync()).ShouldContain("INV-1001");
 
         // --- and the row can be changed
-        await session.Page.ClickAsync("table.a-grid tbody tr button:has-text('Edit')");
+        await rows.First.GetByRole(AriaRole.Button, new() { Name = "Edit", Exact = true }).ClickAsync();
         await session.Page.Locator("#rf-name").WaitForAsync();
         await session.Page.FillAsync("#rf-name", "INV-1001-amended");
-        await session.Page.ClickAsync("button:has-text('Save')");
+        await SheetButton(session, "Save").ClickAsync();
         await session.Page.GetByText("INV-1001-amended").First.WaitForAsync();
 
         // --- the descriptor carries what the editor sent, and the history says who and why
-        await session.GoAsync("/schema/transfer");
-        var descriptor = await session.Page.Locator("main.a-content").InnerTextAsync();
+        await session.GoAsync("/transfer");
+        var descriptor = await session.Content.InnerTextAsync();
         descriptor.ShouldContain("invoices");
         /* The apostrophes matter. The editor writes the descriptor back out, and a JSON encoder
            that escapes `'` as \u0027 — which the default one does — turns every CEL rule in the
@@ -98,10 +107,23 @@ public sealed class ChangeTheBackendScenarios(AdminWorld world) : IClassFixture<
         descriptor.ShouldContain("'admin' in @user.roles");
 
         await session.GoAsync("/history");
-        var history = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var history = await session.Content.InnerTextAsync();
         history.ShouldContain("Add invoices, admin only");
         history.ShouldContain(AdminWorld.AdminEmail);
 
+        // --- newest first (D-3), and Overview's latest change is that same revision, not r1 (D-2)
+        var newest = await session.Page.Locator("[data-testid='revision-row']").First.InnerTextAsync();
+        newest.ShouldContain($"r{applied}");
+        newest.ShouldContain("Add invoices, admin only");
+
+        await session.GoAsync("");
+        await session.Page.Locator("[data-testid='revision-row']").First.WaitForAsync();
+        (await session.Page.Locator("[data-testid='revision-row']").First.InnerTextAsync())
+            .ShouldContain("Add invoices, admin only");
+
         session.AssertConsoleClean();
     }
+
+    private static ILocator SheetButton(AdminSession session, string name)
+        => session.Page.GetByTestId("record-sheet").GetByRole(AriaRole.Button, new() { Name = name, Exact = true });
 }
