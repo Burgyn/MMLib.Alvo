@@ -69,11 +69,66 @@ internal sealed partial class AiConnectionResolver(
     {
         if (!SecretName.TryParse(options.CurrentValue.ApiKeySecretRef, out var reference))
         {
+            WarnIfEndpointAlwaysNeedsAKey(connection);
             return connection;
         }
 
-        return connection with { ApiKey = await ReadAsync(reference!, ct).ConfigureAwait(false) };
+        return connection with { ApiKey = await ReferencedKeyAsync(reference!, ct).ConfigureAwait(false) };
     }
+
+    /// <summary>
+    /// The key <see cref="AlvoAiOptions.ApiKeySecretRef"/> names, or <see langword="null"/> when this build
+    /// has nothing under that name.
+    /// </summary>
+    /// <remarks>
+    /// <b>Logged by name either way this comes back empty</b> — the live defect this closes (reported 24 Sep
+    /// 2026): <c>ApiKeySecretRef</c> named a secret nobody had written, Settings still reported the connection
+    /// as configured, and the OpenAI client silently sent its own placeholder credential instead. A missing
+    /// name and an unreadable row are told apart, because they call for different fixes — save the secret
+    /// under that name, versus save the connection again — and only the second was logged before this.
+    /// </remarks>
+    private async ValueTask<string?> ReferencedKeyAsync(SecretName reference, CancellationToken ct)
+    {
+        string? value;
+        try
+        {
+            value = await secrets.GetAsync(reference, ct).ConfigureAwait(false);
+        }
+        catch (CryptographicException)
+        {
+            StoredConnectionUnreadable(logger, reference.Value);
+            return null;
+        }
+
+        if (value is null)
+        {
+            ReferencedSecretMissing(logger, reference.Value);
+        }
+
+        return value;
+    }
+
+    /// <summary>
+    /// Warns when this connection dials an endpoint that never accepts an unauthenticated call, and
+    /// <see cref="AlvoAiOptions.ApiKeySecretRef"/> names none at all.
+    /// </summary>
+    /// <remarks>
+    /// Named hosts only, not "every endpoint": a local Ollama or vLLM is routinely run without a key on
+    /// purpose, and warning on every keyless connection would bury the one case that is never intentional —
+    /// OpenAI and Azure OpenAI both refuse an unauthenticated request outright.
+    /// </remarks>
+    private void WarnIfEndpointAlwaysNeedsAKey(AlvoAiConnection connection)
+    {
+        if (AlwaysNeedsAKey(connection.Endpoint.Host))
+        {
+            EndpointAlwaysNeedsAKey(logger, connection.Endpoint.Host);
+        }
+    }
+
+    /// <summary>Whether <paramref name="host"/> is one this build knows always refuses an unauthenticated call.</summary>
+    private static bool AlwaysNeedsAKey(string host) =>
+        string.Equals(host, "api.openai.com", StringComparison.OrdinalIgnoreCase)
+        || host.EndsWith(".openai.azure.com", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The saved connection, or <see langword="null"/> when there is none this build can read.</summary>
     private async ValueTask<AlvoAiConnection?> FromStoreAsync(CancellationToken ct)
@@ -175,4 +230,18 @@ internal sealed partial class AiConnectionResolver(
             + "Either it was written under a key this deployment no longer mounts, or the stored value was "
             + "changed. Save the connection again from the dashboard.")]
     private static partial void StoredConnectionUnreadable(ILogger logger, string secretName);
+
+    [LoggerMessage(
+        EventId = 6102,
+        Level = LogLevel.Warning,
+        Message = "Alvo:Ai:ApiKeySecretRef names secret '{SecretName}', which this instance does not have; "
+            + "the connection is used without a key.")]
+    private static partial void ReferencedSecretMissing(ILogger logger, string secretName);
+
+    [LoggerMessage(
+        EventId = 6103,
+        Level = LogLevel.Warning,
+        Message = "This connection dials '{Host}', which always needs a key, and Alvo:Ai:ApiKeySecretRef names "
+            + "none — every call to it is sent without one.")]
+    private static partial void EndpointAlwaysNeedsAKey(ILogger logger, string host);
 }

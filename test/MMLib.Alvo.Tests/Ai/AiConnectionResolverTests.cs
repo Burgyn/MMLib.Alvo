@@ -1,10 +1,11 @@
-﻿using Microsoft.Extensions.Logging.Abstractions;
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Ai;
 using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Secrets;
 using MMLib.Alvo.Testing.Secrets;
-
+using MMLib.Alvo.Tests;
 using System.Security.Cryptography;
 
 namespace MMLib.Alvo.Tests.Ai;
@@ -198,6 +199,103 @@ public class AiConnectionResolverTests
         (await resolver.ResolveAsync(Ct)).Connection!.ApiKey.ShouldBeNull();
     }
 
+    /// <summary>
+    /// A secret this instance never wrote is logged by name — never a throw, and never the value, because
+    /// there is none to leak.
+    /// </summary>
+    /// <remarks>
+    /// The live defect this closes (reported 24 Sep 2026): <c>ApiKeySecretRef</c> named a secret nobody had
+    /// saved, <c>GET {m}/info</c> still reported the connection as configured, and the OpenAI client sent its
+    /// own placeholder credential in the key's place — an operator staring at a 401 with no lead on why.
+    /// </remarks>
+    [Fact]
+    public async Task A_referenced_secret_this_instance_does_not_have_is_warned_once_by_name()
+    {
+        using var capturing = new CapturingLogger();
+        using var loggers = LoggerFactory.Create(logging => logging.AddProvider(capturing));
+
+        var resolver = Resolver(
+            new InMemorySecretStore(),
+            new AlvoAiOptions
+            {
+                Kind = "openai-compatible",
+                Endpoint = "https://api.openai.com/v1",
+                Model = "gpt-5",
+                ApiKeySecretRef = "openai.key",
+            },
+            loggers.CreateLogger<AiConnectionResolver>());
+
+        var resolved = await resolver.ResolveAsync(Ct);
+
+        resolved.Connection!.ApiKey.ShouldBeNull();
+        capturing.Warnings.ShouldHaveSingleItem()
+            .ShouldContain("openai.key", Case.Sensitive, "the operator has to know which name to save it under");
+    }
+
+    /// <summary>A secret the reference actually resolves never logs the "missing" warning.</summary>
+    [Fact]
+    public async Task A_referenced_secret_this_instance_has_is_not_warned()
+    {
+        using var capturing = new CapturingLogger();
+        using var loggers = LoggerFactory.Create(logging => logging.AddProvider(capturing));
+        var store = new InMemorySecretStore();
+        await store.SetAsync(SecretName.Parse("openai.key"), "sk-live", Ct);
+
+        var resolver = Resolver(
+            store,
+            new AlvoAiOptions
+            {
+                Kind = "openai-compatible",
+                Endpoint = "https://api.openai.com/v1",
+                Model = "gpt-5",
+                ApiKeySecretRef = "openai.key",
+            },
+            loggers.CreateLogger<AiConnectionResolver>());
+
+        await resolver.ResolveAsync(Ct);
+
+        capturing.Warnings.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// OpenAI and Azure OpenAI both refuse an unauthenticated call outright, so a connection to either with
+    /// no referenced key is not "maybe fine" the way a bare Ollama is — it is warned.
+    /// </summary>
+    [Theory]
+    [InlineData("https://api.openai.com/v1")]
+    [InlineData("https://contoso.openai.azure.com")]
+    public async Task An_endpoint_that_always_needs_a_key_is_warned_when_none_is_referenced(string endpoint)
+    {
+        using var capturing = new CapturingLogger();
+        using var loggers = LoggerFactory.Create(logging => logging.AddProvider(capturing));
+
+        var resolver = Resolver(
+            new InMemorySecretStore(),
+            new AlvoAiOptions { Kind = "openai-compatible", Endpoint = endpoint, Model = "gpt-5" },
+            loggers.CreateLogger<AiConnectionResolver>());
+
+        await resolver.ResolveAsync(Ct);
+
+        capturing.Warnings.ShouldHaveSingleItem().ShouldContain("always needs a key");
+    }
+
+    /// <summary>A local endpoint with no key is routinely deliberate, so it is not warned.</summary>
+    [Fact]
+    public async Task An_endpoint_that_does_not_always_need_a_key_is_not_warned_when_none_is_referenced()
+    {
+        using var capturing = new CapturingLogger();
+        using var loggers = LoggerFactory.Create(logging => logging.AddProvider(capturing));
+
+        var resolver = Resolver(
+            new InMemorySecretStore(),
+            new AlvoAiOptions { Kind = "openai-compatible", Endpoint = "http://localhost:11434/v1", Model = "qwen3:8b" },
+            loggers.CreateLogger<AiConnectionResolver>());
+
+        await resolver.ResolveAsync(Ct);
+
+        capturing.Warnings.ShouldBeEmpty();
+    }
+
     /// <summary>A store whose every read is a value it cannot authenticate.</summary>
     private sealed class RefusingStore : ISecretStore
     {
@@ -217,8 +315,11 @@ public class AiConnectionResolverTests
     }
 
     private static AiConnectionResolver Resolver(ISecretStore secrets, AlvoAiOptions configured) =>
-        new AiConnectionResolver(
-            new StaticOptions(configured), secrets, NullLogger<AiConnectionResolver>.Instance);
+        Resolver(secrets, configured, NullLogger<AiConnectionResolver>.Instance);
+
+    private static AiConnectionResolver Resolver(
+        ISecretStore secrets, AlvoAiOptions configured, ILogger<AiConnectionResolver> logger) =>
+        new AiConnectionResolver(new StaticOptions(configured), secrets, logger);
 
     private static string StoredJson(string model) =>
         $$"""

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Management;
 
+using System.ClientModel;
 using System.Runtime.CompilerServices;
 using System.Text;
 
@@ -87,7 +88,7 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
         {
             while (true)
             {
-                var next = await NextAsync(updates).ConfigureAwait(false);
+                var next = await NextAsync(updates, connection.Model).ConfigureAwait(false);
                 if (next.Failure is { } failure)
                 {
                     yield return failure;
@@ -120,9 +121,12 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     /// <c>catch</c>.</b> What is caught is deliberately broad: everything past this point is somebody else's
     /// endpoint — a wrong base address, an expired key, a model that does not exist, a socket that closed
     /// mid-stream — and every one of them is a sentence the operator needs rather than an exception the
-    /// dashboard has to survive. The exception is logged; the operator's message never is.
+    /// dashboard has to survive. <see cref="FailureMessage(Exception, string)"/> is what tells them apart; the
+    /// exception is always logged, and the operator's own message never is.
     /// </remarks>
-    private async ValueTask<StreamStep> NextAsync(IAsyncEnumerator<AgentResponseUpdate> updates)
+    /// <param name="updates">The agent's stream.</param>
+    /// <param name="model">The model this turn asked for, in case the endpoint answered "no such model".</param>
+    private async ValueTask<StreamStep> NextAsync(IAsyncEnumerator<AgentResponseUpdate> updates, string model)
     {
         try
         {
@@ -132,9 +136,42 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
         {
             TurnFailed(_logger, failure);
 
-            return new StreamStep(Moved: false, new AssistantUpdate.Failed(EndpointFailed));
+            return new StreamStep(Moved: false, new AssistantUpdate.Failed(FailureMessage(failure, model)));
         }
     }
+
+    /// <summary>
+    /// What to tell the operator about a failed turn: which thing failed, when the endpoint's own answer
+    /// said — and the old, generic sentence when it never answered at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Pure and static</b>, deliberately: everything this decides is already in <paramref name="failure"/>
+    /// and <paramref name="model"/> — never the connection's key or endpoint, and never the provider's own
+    /// message, which routinely echoes the request back (the live case that prompted this: <c>HTTP 401
+    /// (invalid_request_error: invalid_api_key)</c>) into a sentence an operator may screenshot.
+    /// </para>
+    /// <para>
+    /// <b>Only <see cref="ClientResultException"/> is classified further.</b> It is what the OpenAI client
+    /// throws for a response it received and did not like, so its <see cref="ClientResultException.Status"/>
+    /// is the provider's own status code. Anything else reaching here — <see cref="HttpRequestException"/>, a
+    /// timeout, a DNS failure — is a call that never got a response at all, which is exactly what
+    /// <see cref="EndpointFailed"/> already said, and now correctly.
+    /// </para>
+    /// </remarks>
+    /// <param name="failure">What the endpoint threw.</param>
+    /// <param name="model">The model this turn asked for, already shown on Settings.</param>
+    internal static string FailureMessage(Exception failure, string model) =>
+        failure is ClientResultException client ? ClientFailureMessage(client, model) : EndpointFailed;
+
+    /// <summary>What a provider that answered — with a status code — is telling the operator.</summary>
+    private static string ClientFailureMessage(ClientResultException client, string model) => client.Status switch
+    {
+        401 or 403 => KeyRefused,
+        404 => $"The AI provider has no model called '{model}' for this key.",
+        429 => RateLimited,
+        var status => $"The AI provider answered with an error ({status}).",
+    };
 
     /// <summary>One step of the agent's stream: whether it moved, or what stopped it.</summary>
     private readonly record struct StreamStep(bool Moved, AssistantUpdate.Failed? Failure);
@@ -214,6 +251,16 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     private const string EndpointFailed =
         "The AI endpoint did not answer. Check the connection under Settings — the address, the model name "
         + "and the key — and look at this instance's logs for what the provider said.";
+
+    /// <summary>What an operator is told when the provider answered and refused the key (401 or 403).</summary>
+    private const string KeyRefused =
+        "The AI provider refused the key. Check the key the connection uses — under Settings, or "
+        + "Alvo:Ai:ApiKeySecretRef and the secret it names — and this instance's log for the provider's answer.";
+
+    /// <summary>What an operator is told when the provider is rate-limiting this key, or its quota ran out (429).</summary>
+    private const string RateLimited =
+        "The AI provider is rate-limiting this key, or its quota for it is exhausted. Wait and try again, or "
+        + "check the provider's usage dashboard.";
 
     /// <summary>The failure an unconfigured deployment gets, in words that say what to do about it.</summary>
     private const string NoConnection =

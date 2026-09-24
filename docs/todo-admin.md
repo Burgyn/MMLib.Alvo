@@ -612,3 +612,13 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     sign-in, the token consumed through `UserManager.ResetPasswordAsync`, the refusal wording not saying
     which half was wrong), and the Access token panel showing the link to it. Security-sensitive — the
     `alvo-security-core-review` checklist and `/security-review` apply.
+31. **Settings can say "connected" for a connection whose key is missing.** The live case that drove F5's
+    failure-text work (24 Sep 2026): `Alvo:Ai:ApiKeySecretRef` named a secret nobody had saved, the OpenAI
+    client sent its own placeholder credential in the key's place, and every turn failed with a 401 the
+    operator had no way to see coming — `GET {m}/info` reports `ai.configured` from the endpoint, the model
+    and the kind alone, never whether a key actually resolved. `AiConnectionResolver` now logs the missing
+    reference by name (`src/MMLib.Alvo/Ai/Internal/AiConnectionResolver.cs`), which fixes the *log*, but
+    Settings still has nothing to render — the fix needs `ManagementInfo.Ai` to carry a key state
+    (present / missing / not applicable for a keyless endpoint), which is an Abstractions change and was out
+    of scope for that task. Probably: a third field beside `Configured` and `Source`, and a Settings badge
+    that reads it the way the connection badges already read `Source`.
