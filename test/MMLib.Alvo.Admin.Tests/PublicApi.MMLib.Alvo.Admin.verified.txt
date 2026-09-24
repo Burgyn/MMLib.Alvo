@@ -712,6 +712,8 @@ namespace MMLib.Alvo.Admin.Components.Schema.Map
     {
         public SystemMap() { }
         [Microsoft.AspNetCore.Components.Parameter]
+        public bool ActualSize { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
         public string? AppliedJson { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? Centre { get; set; }

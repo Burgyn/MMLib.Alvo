@@ -76,19 +76,28 @@ internal static class AdminPaths
     /// <summary>The query parameter the map's focused entity is carried in.</summary>
     public const string CentreParameter = "centre";
 
-    /// <summary>The Schema screen's map view, with the reactions layer and a focused entity when asked.</summary>
+    /// <summary>The query parameter the map's zoom is carried in: <c>fit</c>, the default, or <c>actual</c>.</summary>
+    public const string ZoomParameter = "zoom";
+
+    /// <summary>The Schema screen's map view, with the reactions layer, a focused entity and actual size when asked.</summary>
     /// <remarks>
     /// Both in the address for <see cref="EntityTabs"/>' reason: "look at what work_orders reacts to" is a
     /// link somebody sends, and a reload must draw what was on the screen.
     /// </remarks>
     /// <param name="reactions">Whether the reactions layer is drawn.</param>
     /// <param name="centre">The entity to centre on, or null for the default.</param>
-    public static string SchemaMap(bool reactions = false, string? centre = null)
+    /// <param name="actualSize">Whether the drawing is shown at its own size rather than fitted to the panel.</param>
+    public static string SchemaMap(bool reactions = false, string? centre = null, bool actualSize = false)
     {
         var address = $"{Schema}?{ViewParameter}=map";
         if (reactions)
         {
             address += $"&{LayersParameter}=reactions";
+        }
+
+        if (actualSize)
+        {
+            address += $"&{ZoomParameter}=actual";
         }
 
         return centre is null ? address : $"{address}&{CentreParameter}={Segment(centre)}";

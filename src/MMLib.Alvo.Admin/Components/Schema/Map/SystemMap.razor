@@ -17,12 +17,12 @@
 }
 else
 {
-    <div class="a-map" data-testid="system-map">
+    <div class="@(ActualSize ? "a-map" : "a-map a-map--fit")" data-testid="system-map">
         <svg class="a-map__svg" viewBox="@ViewBox" width="@N(_picture.Width + _left + Margin)"
              height="@N(_picture.Height + 2 * Margin)" role="group" aria-label="System map">
-            @foreach (var wire in _picture.Wires)
+            @for (var index = 0; index < _picture.Wires.Count; index++)
             {
-                @Wire(wire)
+                @Wire(_picture.Wires[index], _labelRank[index])
             }
             @foreach (var box in _picture.Boxes)
             {
@@ -65,9 +65,20 @@ else
     [Parameter]
     public string? Centre { get; set; }
 
+    /// <summary>
+    /// Whether the drawing keeps its own size and scrolls; otherwise it is scaled down to fit its container,
+    /// never up.
+    /// </summary>
+    [Parameter]
+    public bool ActualSize { get; set; }
+
+    /// <summary>The vertical step between the words of wires that end at the same node.</summary>
+    private const double LabelStep = 12;
+
     private MapPicture _picture = MapPicture.Empty;
     private (string Json, string? Applied, bool Reactions, string? Centre)? _drawn;
     private double _left = Margin;
+    private int[] _labelRank = [];
 
     /// <summary>Draws the picture again only when one of the four inputs changed.</summary>
     /// <remarks>
@@ -85,7 +96,26 @@ else
         var graph = SystemGraph.From(DescriptorJson, AppliedJson);
         _picture = MapLayout.Arrange(Centre is null ? graph : graph.Focus(Centre), Reactions);
         _left = _picture.Wires.Any(wire => wire.Edge.From == wire.Edge.To && wire.StartX < LoopRoom) ? LoopRoom : Margin;
+        _labelRank = LabelRanks(_picture.Wires);
         _drawn = inputs;
+    }
+
+    /// <summary>
+    /// Each wire's place in the stack of words drawn before the node it ends at: 0 for the first wire into a
+    /// node, 1 for the second, so two hooks on one template do not print their words over each other.
+    /// </summary>
+    private static int[] LabelRanks(IReadOnlyList<PlacedWire> wires)
+    {
+        var seen = new Dictionary<(double, double), int>();
+        var ranks = new int[wires.Count];
+        for (var index = 0; index < wires.Count; index++)
+        {
+            var end = (wires[index].EndX, wires[index].EndY);
+            ranks[index] = seen.TryGetValue(end, out var count) ? count : 0;
+            seen[end] = ranks[index] + 1;
+        }
+
+        return ranks;
     }
 
     /// <summary>
@@ -98,17 +128,22 @@ else
     /// <summary>A layout number as an attribute, invariantly, whatever the circuit's culture.</summary>
     private static string N(double value) => value.ToString("0.#", CultureInfo.InvariantCulture);
 
-    private RenderFragment Wire(PlacedWire wire) => @<g>
+    /// <summary>
+    /// A wire, under the boxes. A reference carries no word on the canvas — its row already says
+    /// <c>→ customers · restrict</c> — while a hook's or an automation's word sits just before the node it
+    /// reaches, where the wires into one node are told apart by their stacked words.
+    /// </summary>
+    private RenderFragment Wire(PlacedWire wire, int rank) => @<g>
         <path class="@WireClass(wire.Edge.Kind)" d="@wire.Path" data-from="@wire.Edge.From" data-to="@wire.Edge.To">
-            <title>@Tooltip(wire.Edge)</title>
+            <title>@MapWords.Tooltip(wire.Edge)</title>
         </path>
         @if (wire.Edge.Kind == MapEdgeKind.Reference)
         {
             <circle class="a-map__dot" cx="@N(wire.StartX)" cy="@N(wire.StartY)" r="3" />
         }
-        @if (MidPoint(wire) is { } mid)
+        else
         {
-            <g><text class="a-map__label" x="@N(mid.X)" y="@N(mid.Y - 4)" text-anchor="middle">@wire.Edge.Label</text></g>
+            <g><text class="a-map__label" x="@N(wire.EndX - 6)" y="@N(wire.EndY - 5 - rank * LabelStep)" text-anchor="end">@wire.Edge.Label</text></g>
         }
     </g>;
 
@@ -137,10 +172,15 @@ else
         }
     </a>;
 
-    private RenderFragment Row(PlacedBox box, int index) => @<g>
-        <text class="@FieldClass(box.Shown[index].Kind)" x="@N(box.X + 12)" y="@N(box.RowY(index) + 4)">@box.Shown[index].Name</text>
-        <text class="@(box.Shown[index].Kind == MapFieldKind.Rollup ? "a-map__type a-map__type--rollup" : "a-map__type")"
-              x="@N(box.X + MapLayout.BoxWidth - 12)" y="@N(box.RowY(index) + 4)" text-anchor="end">@box.Shown[index].Detail</text>
+    /// <summary>One row: the name, the detail right-aligned, both cut to the box and whole in the tooltip.</summary>
+    private RenderFragment Row(PlacedBox box, int index) => RowText(box, index, box.Shown[index],
+        MapText.Fit(box.Shown[index].Name, box.Shown[index].Detail, MapText.RowChars));
+
+    private RenderFragment RowText(PlacedBox box, int index, MapField field, (string Name, string Detail) shown) => @<g>
+        <title>@field.Name — @field.Detail</title>
+        <text class="@FieldClass(field.Kind)" x="@N(box.X + MapText.Inset)" y="@N(box.RowY(index) + 4)">@shown.Name</text>
+        <text class="@(field.Kind == MapFieldKind.Rollup ? "a-map__type a-map__type--rollup" : "a-map__type")"
+              x="@N(box.X + MapLayout.BoxWidth - MapText.Inset)" y="@N(box.RowY(index) + 4)" text-anchor="end">@shown.Detail</text>
     </g>;
 
     private RenderFragment Node(PlacedOutside node) => @<g class="@(node.Node.Used ? "a-map__outside" : "a-map__outside a-map__outside--unused")"
@@ -165,9 +205,6 @@ else
     private static string NodeMeta(MapOutside node)
         => $"{(node.Kind == OutsideKind.Template ? "template" : "webhook")}{(node.Used ? string.Empty : " · unused")}";
 
-    private static string Tooltip(MapEdge edge)
-        => edge.Condition is { Length: > 0 } condition ? $"{edge.Label} — {condition}" : edge.Label;
-
     private static string WireClass(MapEdgeKind kind) => kind switch
     {
         MapEdgeKind.Hook => "a-map__wire a-map__wire--hook",
@@ -181,26 +218,4 @@ else
         MapFieldKind.Rollup => "a-map__field a-map__field--rollup",
         _ => "a-map__field",
     };
-
-    /// <summary>
-    /// Where a wire's word sits: halfway between its ends, which for the layout's S-curve is on the curve.
-    /// </summary>
-    /// <remarks>
-    /// Read back from the path's last point rather than recomputed, so the word follows the wire whatever the
-    /// layout does. None for a self-reference: its loop's midpoint is left of the box, where the column
-    /// before it would draw over the word; its tooltip and the list in words still say it.
-    /// </remarks>
-    private static (double X, double Y)? MidPoint(PlacedWire wire)
-    {
-        if (wire.Edge.From == wire.Edge.To)
-        {
-            return null;
-        }
-
-        var numbers = wire.Path.Split([' ', ','], StringSplitOptions.RemoveEmptyEntries);
-        var x2 = double.Parse(numbers[^2], CultureInfo.InvariantCulture);
-        var y2 = double.Parse(numbers[^1], CultureInfo.InvariantCulture);
-
-        return ((wire.StartX + x2) / 2, (wire.StartY + y2) / 2);
-    }
 }

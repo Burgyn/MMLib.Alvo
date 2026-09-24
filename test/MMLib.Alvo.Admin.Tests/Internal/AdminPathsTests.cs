@@ -84,13 +84,15 @@ public class AdminPathsTests
     }
 
     [Theory]
-    [InlineData(false, null, "/admin/schema?view=map")]
-    [InlineData(true, null, "/admin/schema?view=map&layers=reactions")]
-    [InlineData(true, "bikes", "/admin/schema?view=map&layers=reactions&centre=bikes")]
-    [InlineData(false, "bikes", "/admin/schema?view=map&centre=bikes")]
-    [InlineData(false, "a b&c", "/admin/schema?view=map&centre=a%20b%26c")]
-    public void The_map_address_carries_its_layer_and_its_centre(bool reactions, string? centre, string address)
-        => AdminPaths.SchemaMap(reactions, centre).ShouldBe(address);
+    [InlineData(false, null, false, "/admin/schema?view=map")]
+    [InlineData(true, null, false, "/admin/schema?view=map&layers=reactions")]
+    [InlineData(true, "bikes", false, "/admin/schema?view=map&layers=reactions&centre=bikes")]
+    [InlineData(false, "bikes", false, "/admin/schema?view=map&centre=bikes")]
+    [InlineData(false, "a b&c", false, "/admin/schema?view=map&centre=a%20b%26c")]
+    [InlineData(false, null, true, "/admin/schema?view=map&zoom=actual")]
+    [InlineData(true, "bikes", true, "/admin/schema?view=map&layers=reactions&zoom=actual&centre=bikes")]
+    public void The_map_address_carries_its_layer_its_zoom_and_its_centre(bool reactions, string? centre, bool actual, string address)
+        => AdminPaths.SchemaMap(reactions, centre, actual).ShouldBe(address);
 
     [Theory]
     [InlineData("https://host/admin/changes", true)]

@@ -37,7 +37,11 @@ namespace MMLib.Alvo.Admin.Components.Schema.Map;
 internal static class MapLayout
 {
     /// <summary>An entity box's fixed width, in layout units (px at the SVG's native scale).</summary>
-    public const double BoxWidth = 256;
+    /// <remarks>
+    /// Wide enough that a row holds 44 mono characters (<see cref="MapText.RowChars"/>) — a name such as
+    /// <c>orders_assigned</c> beside <c>Σ count from service_orders</c> whole; longer rows are cut, detail first.
+    /// </remarks>
+    public const double BoxWidth = 320;
 
     /// <summary>The header band at the top of a box, above its first shown row.</summary>
     public const double Head = 42;
@@ -49,7 +53,8 @@ internal static class MapLayout
     public const double Pad = 12;
 
     /// <summary>The horizontal gap between one layer's right edge and the next layer's left edge.</summary>
-    public const double LayerGap = 132;
+    /// <remarks>Only a hook's or an automation's word sits in it — a reference says its delete rule on its row.</remarks>
+    public const double LayerGap = 96;
 
     /// <summary>The vertical gap between two boxes (or outside nodes) stacked in the same column.</summary>
     public const double BoxGap = 38;
@@ -326,11 +331,12 @@ internal static class MapLayout
 
         if (edge.From == edge.To)
         {
-            return new PlacedWire(edge, SelfCurve(x1, y1, source.Y + 19), x1, y1);
+            return new PlacedWire(edge, SelfCurve(x1, y1, source.Y + 19), x1, y1, x1, source.Y + 19);
         }
 
         var target = boxByName[edge.To];
-        return new PlacedWire(edge, Curve(x1, y1, target.X + BoxWidth, target.Y + 19), x1, y1);
+        var (x2, y2) = (target.X + BoxWidth, target.Y + 19);
+        return new PlacedWire(edge, Curve(x1, y1, x2, y2), x1, y1, x2, y2);
     }
 
     /// <summary>A Hook/Automation wire: from an entity's right edge to the outside node it reaches.</summary>
@@ -340,7 +346,8 @@ internal static class MapLayout
     private static PlacedWire OutsideWire(MapEdge edge, PlacedBox source, PlacedOutside node)
     {
         var (x1, y1) = (source.X + BoxWidth, source.Y + 19);
-        return new PlacedWire(edge, Curve(x1, y1, node.X, node.Y + OutsideHeight / 2), x1, y1);
+        var (x2, y2) = (node.X, node.Y + OutsideHeight / 2);
+        return new PlacedWire(edge, Curve(x1, y1, x2, y2), x1, y1, x2, y2);
     }
 
     /// <summary>An S-curve between two points, its control points at their horizontal midpoint.</summary>

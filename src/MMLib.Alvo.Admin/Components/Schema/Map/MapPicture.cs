@@ -29,7 +29,9 @@ internal sealed record PlacedOutside(MapOutside Node, double X, double Y);
 /// <param name="Path">An SVG path `d`.</param>
 /// <param name="StartX">Where the wire leaves its source, x.</param>
 /// <param name="StartY">Where the wire leaves its source, y.</param>
-internal sealed record PlacedWire(MapEdge Edge, string Path, double StartX, double StartY);
+/// <param name="EndX">Where the wire reaches its target, x — a hook's word is drawn just before it.</param>
+/// <param name="EndY">Where the wire reaches its target, y.</param>
+internal sealed record PlacedWire(MapEdge Edge, string Path, double StartX, double StartY, double EndX, double EndY);
 
 /// <summary>The whole placed picture <see cref="MapLayout.Arrange"/> produces.</summary>
 /// <param name="Boxes">Every entity box, placed.</param>

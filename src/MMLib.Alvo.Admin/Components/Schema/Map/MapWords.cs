@@ -8,7 +8,7 @@
 /// </para>
 /// <para>
 /// <b>A condition is not said.</b> It is CEL, which a screen reader reads as punctuation; the wire's tooltip
-/// carries it.
+/// (<see cref="Tooltip"/>) carries it.
 /// </para>
 /// </remarks>
 internal static class MapWords
@@ -17,10 +17,25 @@ internal static class MapWords
     /// <param name="edge">The edge the wire draws.</param>
     public static string Of(MapEdge edge) => edge.Kind switch
     {
-        MapEdgeKind.Reference => $"{edge.From}.{edge.Field} points at {edge.To}; on delete {edge.Label}",
+        MapEdgeKind.Reference => $"{edge.From}.{edge.Field} points at {edge.To}; on delete {Spoken(edge.Label)}",
         MapEdgeKind.Hook => $"{edge.From} {Reaches(edge.To)} {Spoken(edge.Label)}",
-        _ => $"{edge.From} {Reaches(edge.To)} on {Rule(edge.Condition)}, which this build does not run yet",
+        _ => $"{edge.From} {Reaches(edge.To)} on {Rule(edge.Rule)}, which this build does not run yet",
     };
+
+    /// <summary>
+    /// A wire's tooltip: its label, then — for an automation — the rule's name, then the condition when there is one.
+    /// </summary>
+    /// <param name="edge">The edge the wire draws.</param>
+    public static string Tooltip(MapEdge edge)
+    {
+        var rule = edge.Rule is { Length: > 0 } name ? $" — {name}" : string.Empty;
+        if (edge.Condition is not { Length: > 0 } condition)
+        {
+            return edge.Label + rule;
+        }
+
+        return rule.Length > 0 ? $"{edge.Label}{rule}: {condition}" : $"{edge.Label} — {condition}";
+    }
 
     /// <summary>"sends the order-ready template" / "posts to rental-desk", from an outside node's id.</summary>
     /// <param name="id">A <see cref="MapOutside.Id"/>: <c>template:name</c> or <c>endpoint:name</c>.</param>
@@ -32,21 +47,12 @@ internal static class MapWords
         return id.StartsWith("template:", StringComparison.Ordinal) ? $"sends the {name} template" : $"posts to {name}";
     }
 
-    /// <summary>"automation deal-won", read off the rule name the graph prefixes to a rule's condition.</summary>
-    /// <remarks>
-    /// A rule with no condition carries no name in its edge, so it is "an automation rule" — true, and less than
-    /// the drawing says only by the name.
-    /// </remarks>
-    /// <param name="condition">The edge's condition: <c>rule-name: cel</c>, or null.</param>
-    private static string Rule(string? condition)
-    {
-        var colon = condition?.IndexOf(": ", StringComparison.Ordinal) ?? -1;
+    /// <summary>"automation deal-won", or "an automation rule" for an edge that somehow carries no name.</summary>
+    /// <param name="rule">The edge's <see cref="MapEdge.Rule"/>.</param>
+    private static string Rule(string? rule) => rule is { Length: > 0 } name ? $"automation {name}" : "an automation rule";
 
-        return colon > 0 ? $"automation {condition![..colon]}" : "an automation rule";
-    }
-
-    /// <summary>A hook point as words: <c>afterUpdate</c> is "after update".</summary>
-    /// <param name="point">The hook point, camel-cased as the descriptor spells it.</param>
-    private static string Spoken(string point)
-        => string.Concat(point.Select(c => char.IsUpper(c) ? $" {char.ToLowerInvariant(c)}" : c.ToString()));
+    /// <summary>A camel-cased descriptor word as words: <c>afterUpdate</c> is "after update", <c>setNull</c> "set null".</summary>
+    /// <param name="word">The word as the descriptor spells it.</param>
+    private static string Spoken(string word)
+        => string.Concat(word.Select(c => char.IsUpper(c) ? $" {char.ToLowerInvariant(c)}" : c.ToString()));
 }

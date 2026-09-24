@@ -2388,6 +2388,13 @@
     max-width: none;
   }
 
+  /* Fit: scaled down to the panel so the whole system is in view, never up past its own size — the
+     width and height attributes are the natural size, and the viewBox keeps the proportions. */
+  .a-map--fit .a-map__svg {
+    max-width: 100%;
+    height: auto;
+  }
+
   .a-map__box {
     cursor: pointer;
   }

@@ -169,12 +169,17 @@
     private const string ListView = "List";
     private const string MapView = "Map";
 
+    private const string FitZoom = "Fit";
+    private const string ActualZoom = "Actual size";
+
     private static readonly IReadOnlyList<string> _views = [ListView, MapView];
+    private static readonly IReadOnlyList<string> _zooms = [FitZoom, ActualZoom];
 
     private SchemaModel? _schema;
     private AdminProblem? _problem;
     private bool _map;
     private bool _reactions;
+    private bool _actual;
     private string? _centre;
     private (string Json, string Centre, int Count)? _focusCount;
     private string _name = string.Empty;
@@ -303,22 +308,43 @@
             && string.Equals(view.ToString(), "map", StringComparison.OrdinalIgnoreCase);
         _reactions = query.TryGetValue(AdminPaths.LayersParameter, out var layers)
             && string.Equals(layers.ToString(), "reactions", StringComparison.OrdinalIgnoreCase);
+        _actual = query.TryGetValue(AdminPaths.ZoomParameter, out var zoom)
+            && string.Equals(zoom.ToString(), "actual", StringComparison.OrdinalIgnoreCase);
         _centre = query.TryGetValue(AdminPaths.CentreParameter, out var centre) && centre.ToString() is { Length: > 0 } name
             ? name
             : null;
     }
 
     /// <summary>The switch between the list and the map: a history step, so Back returns to the other view.</summary>
+    /// <remarks>
+    /// The chosen chip is pressed too (ChipGroup raises every press), and pressing what is already shown must
+    /// not add a history step that Back then has to undo for nothing — so each chooser below returns early.
+    /// </remarks>
     private void ChooseView(IReadOnlyList<string> chosen)
-        => Navigation.NavigateTo(chosen is [MapView] ? AdminPaths.SchemaMap(_reactions, _centre) : AdminPaths.Schema);
+    {
+        var map = chosen is [MapView];
+        if (map != _map)
+        {
+            Navigation.NavigateTo(map ? AdminPaths.SchemaMap(_reactions, _centre, _actual) : AdminPaths.Schema);
+        }
+    }
 
-    private void ToggleReactions() => Navigation.NavigateTo(AdminPaths.SchemaMap(!_reactions, _centre));
+    private void ToggleReactions() => Navigation.NavigateTo(AdminPaths.SchemaMap(!_reactions, _centre, _actual));
+
+    private void ChooseZoom(IReadOnlyList<string> chosen)
+    {
+        var actual = chosen is [ActualZoom];
+        if (actual != _actual)
+        {
+            Navigation.NavigateTo(AdminPaths.SchemaMap(_reactions, _centre, actual));
+        }
+    }
 
     private void ChooseCentre(IReadOnlyList<string> chosen)
     {
-        if (chosen is [var centre])
+        if (chosen is [var centre] && !string.Equals(centre, Centre, StringComparison.Ordinal))
         {
-            Navigation.NavigateTo(AdminPaths.SchemaMap(_reactions, centre));
+            Navigation.NavigateTo(AdminPaths.SchemaMap(_reactions, centre, _actual));
         }
     }
 
@@ -374,13 +400,16 @@
                         <input type="checkbox" checked="@_reactions" @onchange="ToggleReactions" />
                         <span>Show reactions</span>
                     </label>
+                    <ChipGroup TValue="string" Items="_zooms" Selected="@(new[] { _actual ? ActualZoom : FitZoom })"
+                               SelectedChanged="ChooseZoom" aria-label="Zoom" />
                     <span class="a-hint">✉ template · ↗ webhook · dashed: automation, declared and not run by this build</span>
                 </div>
                 @if (Centre is { } centre)
                 {
                     @CentrePicker(centre)
                 }
-                <SystemMap DescriptorJson="@Copy.Json" AppliedJson="@Copy.AppliedJson" Reactions="_reactions" Centre="@Centre" />
+                <SystemMap DescriptorJson="@Copy.Json" AppliedJson="@Copy.AppliedJson" Reactions="_reactions" Centre="@Centre"
+                           ActualSize="_actual" />
             }
         </ChildContent>
     </Panel>;

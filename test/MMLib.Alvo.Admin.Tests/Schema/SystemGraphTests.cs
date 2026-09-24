@@ -76,6 +76,18 @@ public sealed class SystemGraphTests
         automation.ShouldContain(edge => edge.From == "deals" && edge.To == "endpoint:invoicing");
     }
 
+    /// <summary>A rule's name travels on its own, so a rule without a condition is still named.</summary>
+    [Fact]
+    public void An_automation_edge_carries_its_rule_name_apart_from_its_condition()
+    {
+        var crm = SystemGraph.From(Example("complex-crm", "crm.alvo.json"));
+        var invoicing = crm.Edges.Single(edge => edge.Kind == MapEdgeKind.Automation && edge.To == "endpoint:invoicing");
+
+        invoicing.Rule.ShouldBe("deal-won");
+        invoicing.Condition.ShouldBe("changed(stage) && new.stage == 'won'");
+        crm.Edges.Where(edge => edge.Kind != MapEdgeKind.Automation).ShouldAllBe(edge => edge.Rule == null);
+    }
+
     [Fact]
     public void An_entity_the_applied_descriptor_lacks_or_differs_on_is_pending()
     {
@@ -100,7 +112,7 @@ public sealed class SystemGraphTests
     {
         var graph = SystemGraph.From("""{"entities":{"parts":{"fields":{"parent_id":{"type":"ref","entity":"parts","onDelete":"setNull"}}}}}""");
 
-        graph.Edges.ShouldHaveSingleItem().ShouldBe(new MapEdge(MapEdgeKind.Reference, "parts", "parts", "setNull", "parent_id", null));
+        graph.Edges.ShouldHaveSingleItem().ShouldBe(new MapEdge(MapEdgeKind.Reference, "parts", "parts", "setNull", "parent_id", null, null));
     }
 
     [Fact]

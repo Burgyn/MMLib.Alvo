@@ -73,11 +73,10 @@ internal enum MapEdgeKind
 /// ("afterUpdate"). Automation: "automation · not yet".
 /// </param>
 /// <param name="Field">Reference: the ref field's name; otherwise null.</param>
-/// <param name="Condition">
-/// The hook's or the rule's CEL <c>condition</c>, or null; Automation also prefixes the rule name:
-/// "deal-won: changed(stage) &amp;&amp; …".
-/// </param>
-internal sealed record MapEdge(MapEdgeKind Kind, string From, string To, string Label, string? Field, string? Condition);
+/// <param name="Condition">The hook's or the rule's CEL <c>condition</c>, or null.</param>
+/// <param name="Rule">Automation: the rule's name ("deal-won"), with or without a condition; otherwise null.</param>
+internal sealed record MapEdge(
+    MapEdgeKind Kind, string From, string To, string Label, string? Field, string? Condition, string? Rule = null);
 
 /// <summary>
 /// The descriptor read into what the system map draws: entities as boxes, refs/hooks/automation as wires

@@ -353,61 +353,67 @@
 <!-- ====================================================================== -->
 <h2 class="g-h">System map — the descriptor drawn, read only</h2>
 
-<!-- The markup SystemMap renders, by hand: a ref wire, a hook wire to a template, a dashed automation
-     wire to an endpoint, a rollup row, and a box that is not applied yet. -->
+<!-- The markup SystemMap renders, by hand, fitted to the page: a ref wire (its delete rule on the row, not
+     the wire), a hook wire to a template, a dashed automation wire to an endpoint, a rollup row, and a box
+     that is not applied yet. -->
 <div class="a-panel">
-  <div class="a-map">
-    <svg class="a-map__svg" viewBox="-8 -8 1000 146" width="1000" height="146" role="group" aria-label="System map">
+  <div class="a-map a-map--fit">
+    <svg class="a-map__svg" viewBox="-8 -8 1056 146" width="1056" height="146" role="group" aria-label="System map">
       <g>
-        <path class="a-map__wire" d="M 388 69 C 322 69, 322 19, 256 19" data-from="orders" data-to="customers"><title>restrict</title></path>
-        <circle class="a-map__dot" cx="388" cy="69" r="3" />
-        <text class="a-map__label" x="322" y="40" text-anchor="middle">restrict</text>
+        <path class="a-map__wire" d="M 416 69 C 368 69, 368 19, 320 19" data-from="orders" data-to="customers"><title>restrict</title></path>
+        <circle class="a-map__dot" cx="416" cy="69" r="3" />
       </g>
       <g>
-        <path class="a-map__wire a-map__wire--hook" d="M 644 19 C 710 19, 710 22, 776 22" data-from="orders" data-to="template:order-ready"><title>afterUpdate — changed(status)</title></path>
-        <text class="a-map__label" x="710" y="16.5" text-anchor="middle">afterUpdate</text>
+        <path class="a-map__wire a-map__wire--hook" d="M 736 19 C 784 19, 784 22, 832 22" data-from="orders" data-to="template:order-ready"><title>afterUpdate — changed(status)</title></path>
+        <text class="a-map__label" x="826" y="17" text-anchor="end">afterUpdate</text>
       </g>
       <g>
-        <path class="a-map__wire a-map__wire--automation" d="M 644 19 C 710 19, 710 104, 776 104" data-from="orders" data-to="endpoint:invoicing"><title>automation · not yet</title></path>
-        <text class="a-map__label" x="710" y="57.5" text-anchor="middle">automation · not yet</text>
+        <path class="a-map__wire a-map__wire--automation" d="M 736 19 C 784 19, 784 104, 832 104" data-from="orders" data-to="endpoint:invoicing"><title>automation · not yet — deal-won</title></path>
+        <text class="a-map__label" x="826" y="99" text-anchor="end">automation · not yet</text>
       </g>
       <a class="a-map__box" href="#customers" data-entity="customers" aria-label="customers, 3 fields">
-        <rect class="a-map__plate" x="0" y="0" width="256" height="111" rx="10" />
-        <path class="a-map__head" d="M0 10a10 10 0 0 1 10-10h236a10 10 0 0 1 10 10v32h-256z" />
+        <rect class="a-map__plate" x="0" y="0" width="320" height="111" rx="10" />
+        <path class="a-map__head" d="M0 10a10 10 0 0 1 10-10h300a10 10 0 0 1 10 10v32h-320z" />
         <text class="a-map__name" x="12" y="18">customers</text>
         <text class="a-map__meta" x="12" y="33">global · 3 fields</text>
-        <text class="a-map__field a-map__field--rollup" x="12" y="54">orders</text>
-        <text class="a-map__type a-map__type--rollup" x="244" y="54" text-anchor="end">Σ count from orders</text>
-        <text class="a-map__field" x="12" y="73">name</text>
-        <text class="a-map__type" x="244" y="73" text-anchor="end">string</text>
-        <text class="a-map__field" x="12" y="92">email</text>
-        <text class="a-map__type" x="244" y="92" text-anchor="end">string</text>
+        <g><title>orders — Σ count from orders</title>
+          <text class="a-map__field a-map__field--rollup" x="12" y="54">orders</text>
+          <text class="a-map__type a-map__type--rollup" x="308" y="54" text-anchor="end">Σ count from orders</text></g>
+        <g><title>name — string</title>
+          <text class="a-map__field" x="12" y="73">name</text>
+          <text class="a-map__type" x="308" y="73" text-anchor="end">string</text></g>
+        <g><title>email — string</title>
+          <text class="a-map__field" x="12" y="92">email</text>
+          <text class="a-map__type" x="308" y="92" text-anchor="end">string</text></g>
       </a>
       <a class="a-map__box a-map__box--pending" href="#orders" data-entity="orders" aria-label="orders, 3 fields, not applied">
-        <rect class="a-map__plate" x="388" y="0" width="256" height="130" rx="10" />
-        <path class="a-map__head" d="M388 10a10 10 0 0 1 10-10h236a10 10 0 0 1 10 10v32h-256z" />
-        <text class="a-map__name" x="400" y="18">orders</text>
-        <text class="a-map__meta" x="400" y="33">tenant · 3 fields</text>
-        <text class="a-map__badge" x="632" y="33" text-anchor="end">not applied</text>
-        <text class="a-map__guard" x="400" y="54">1 refuse</text>
-        <text class="a-map__field a-map__field--ref" x="400" y="73">customer_id</text>
-        <text class="a-map__type" x="632" y="73" text-anchor="end">→ customers · restrict</text>
-        <text class="a-map__field" x="400" y="92">total</text>
-        <text class="a-map__type" x="632" y="92" text-anchor="end">decimal</text>
-        <text class="a-map__field" x="400" y="111">status</text>
-        <text class="a-map__type" x="632" y="111" text-anchor="end">enum</text>
+        <rect class="a-map__plate" x="416" y="0" width="320" height="130" rx="10" />
+        <path class="a-map__head" d="M416 10a10 10 0 0 1 10-10h300a10 10 0 0 1 10 10v32h-320z" />
+        <text class="a-map__name" x="428" y="18">orders</text>
+        <text class="a-map__meta" x="428" y="33">tenant · 3 fields</text>
+        <text class="a-map__badge" x="724" y="33" text-anchor="end">not applied</text>
+        <text class="a-map__guard" x="428" y="54">1 refuse</text>
+        <g><title>customer_id — → customers · restrict</title>
+          <text class="a-map__field a-map__field--ref" x="428" y="73">customer_id</text>
+          <text class="a-map__type" x="724" y="73" text-anchor="end">→ customers · restrict</text></g>
+        <g><title>total — decimal</title>
+          <text class="a-map__field" x="428" y="92">total</text>
+          <text class="a-map__type" x="724" y="92" text-anchor="end">decimal</text></g>
+        <g><title>status — enum</title>
+          <text class="a-map__field" x="428" y="111">status</text>
+          <text class="a-map__type" x="724" y="111" text-anchor="end">enum</text></g>
       </a>
       <g class="a-map__outside" data-node="template:order-ready">
-        <rect class="a-map__plate" x="776" y="0" width="208" height="44" rx="8" />
-        <text class="a-map__glyph" x="788" y="27">✉</text>
-        <text class="a-map__name" x="810" y="19">order-ready</text>
-        <text class="a-map__meta" x="810" y="34">template</text>
+        <rect class="a-map__plate" x="832" y="0" width="208" height="44" rx="8" />
+        <text class="a-map__glyph" x="844" y="27">✉</text>
+        <text class="a-map__name" x="866" y="19">order-ready</text>
+        <text class="a-map__meta" x="866" y="34">template</text>
       </g>
       <g class="a-map__outside" data-node="endpoint:invoicing">
-        <rect class="a-map__plate" x="776" y="82" width="208" height="44" rx="8" />
-        <text class="a-map__glyph" x="788" y="109">↗</text>
-        <text class="a-map__name" x="810" y="101">invoicing</text>
-        <text class="a-map__meta" x="810" y="116">webhook</text>
+        <rect class="a-map__plate" x="832" y="82" width="208" height="44" rx="8" />
+        <text class="a-map__glyph" x="844" y="109">↗</text>
+        <text class="a-map__name" x="866" y="101">invoicing</text>
+        <text class="a-map__meta" x="866" y="116">webhook</text>
       </g>
     </svg>
     <ul class="a-sr-only">

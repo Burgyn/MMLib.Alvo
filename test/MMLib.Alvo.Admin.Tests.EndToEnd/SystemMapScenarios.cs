@@ -47,6 +47,45 @@ public sealed class SystemMapScenarios(AdminWorld world) : IClassFixture<AdminWo
         session.AssertConsoleClean();
     }
 
+    /// <summary>A box is a link from the keyboard too: focused, Enter follows it.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Enter_on_a_focused_box_opens_its_entity()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema?view=map");
+
+        await Box(session, "regions").FocusAsync();
+        await session.Page.Keyboard.PressAsync("Enter");
+
+        await session.Page.WaitForURLAsync("**/schema/regions");
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// The zoom is in the address beside the layers, each control keeps the other's choice, and pressing the
+    /// chip that is already chosen adds no history step for Back to undo.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_zoom_is_addressable_and_kept_by_the_other_controls()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema?view=map");
+
+        await Chip(session, "Actual size").ClickAsync();
+        await session.Page.WaitForURLAsync("**zoom=actual**");
+        await Reactions(session).CheckAsync();
+        await session.Page.WaitForURLAsync("**layers=reactions**");
+        session.Page.Url.ShouldContain("zoom=actual");
+
+        var history = await HistoryLengthAsync(session);
+        await Chip(session, "Actual size").ClickAsync();
+        await Chip(session, "Map").ClickAsync();
+        await session.SettleAsync();
+
+        (await HistoryLengthAsync(session)).ShouldBe(history);
+        session.AssertConsoleClean();
+    }
+
     /// <summary>
     /// The map reads the working copy, not the applied schema: an entity added a moment ago is on it, and
     /// says it is not applied.
@@ -91,7 +130,8 @@ public sealed class SystemMapScenarios(AdminWorld world) : IClassFixture<AdminWo
     }
 
     /// <summary>
-    /// A map is wider than a phone, and it scrolls inside its own panel — never the page.
+    /// On a phone the fitted map is scaled into its panel; at actual size it is wider than the phone and
+    /// scrolls inside its own panel — never the page.
     /// </summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task The_map_fits_a_phone()
@@ -100,12 +140,29 @@ public sealed class SystemMapScenarios(AdminWorld world) : IClassFixture<AdminWo
         await session.GoAsync("/schema?view=map&layers=reactions");
         await session.Page.GetByTestId("system-map").WaitForAsync();
 
+        (await OverflowAsync(session)).ShouldBeLessThanOrEqualTo(1, "a fitted map is no wider than its panel");
+        await session.AssertNoHorizontalScrollAsync();
+
+        await session.GoAsync("/schema?view=map&layers=reactions&zoom=actual");
+        await session.Page.GetByTestId("system-map").WaitForAsync();
+
+        (await OverflowAsync(session)).ShouldBeGreaterThan(0, "at actual size the drawing is wider than a phone");
         await session.AssertNoHorizontalScrollAsync();
         session.AssertConsoleClean();
     }
 
     private static ILocator Box(AdminSession session, string entity)
         => session.Page.GetByTestId("system-map").GetByRole(AriaRole.Link, new() { Name = entity, Exact = false });
+
+    private static ILocator Chip(AdminSession session, string name)
+        => session.Page.GetByRole(AriaRole.Radio, new() { Name = name, Exact = true });
+
+    private static Task<int> HistoryLengthAsync(AdminSession session)
+        => session.Page.EvaluateAsync<int>("() => history.length");
+
+    /// <summary>How far the drawing reaches past the map's own box — its scroller's overflow.</summary>
+    private static Task<int> OverflowAsync(AdminSession session)
+        => session.Page.GetByTestId("system-map").EvaluateAsync<int>("map => map.scrollWidth - map.clientWidth");
 
     private static ILocator Reactions(AdminSession session)
         => session.Page.GetByRole(AriaRole.Checkbox, new() { Name = "Show reactions" });

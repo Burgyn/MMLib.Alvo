@@ -224,12 +224,12 @@ internal sealed partial record SystemGraph
                 continue;
             }
 
-            var condition = StringOrNull(rule["condition"]) is { } cel ? $"{pair.Key}: {cel}" : null;
+            var condition = StringOrNull(rule["condition"]);
             foreach (var action in actions)
             {
                 if (action is JsonObject declared && ActionTarget(declared) is { } to)
                 {
-                    edges.Add(new MapEdge(MapEdgeKind.Automation, source, to, "automation · not yet", null, condition));
+                    edges.Add(new MapEdge(MapEdgeKind.Automation, source, to, "automation · not yet", null, condition, pair.Key));
                 }
             }
         }
