@@ -147,7 +147,7 @@ internal static class ApplyScenarioSteps
     }
 
     /// <summary>The bootstrap administrator, as the core authorizes it.</summary>
-    private static async Task<AlvoPrincipal?> AdministratorAsync(IServiceProvider services)
+    internal static async Task<AlvoPrincipal?> AdministratorAsync(IServiceProvider services)
     {
         var people = services.GetRequiredKeyedService<IAlvoUserAdministration>(AlvoUserAdministration.UnguardedKey);
         var page = await people.ListAsync(new AlvoUserQuery());

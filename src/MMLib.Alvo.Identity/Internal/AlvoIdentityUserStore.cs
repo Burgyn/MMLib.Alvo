@@ -12,19 +12,44 @@ namespace MMLib.Alvo.Identity.Internal;
 /// assignment the administration screen has to be able to show.
 /// </remarks>
 /// <param name="users">ASP.NET Core Identity's user manager.</param>
-/// <param name="store">The identity store, for the listing query.</param>
+/// <param name="store">The identity store, for every read — untracked, so a long-lived scope sees writes made elsewhere.</param>
 internal sealed class AlvoIdentityUserStore(
     UserManager<AlvoIdentityUser> users,
     AlvoIdentityDbContext store) : IAlvoUserStore
 {
     /// <inheritdoc/>
+    /// <remarks>
+    /// <b>An untracked query, never <c>UserManager.FindByIdAsync</c>.</b> That call is EF's tracked
+    /// <c>DbSet.FindAsync</c>, and this store's <c>DbContext</c> lives as long as its scope — which for
+    /// the dashboard is the Blazor circuit, open for as long as the tab. The first lookup would load
+    /// the row into the change tracker and every later one would be answered from it, so a disable or
+    /// a tenant move written by another administrator would never reach an operator who already had a
+    /// tab open. This read is what the cookie resolver authorizes on, so it has to be the store's
+    /// state as of the call.
+    /// </remarks>
     public async ValueTask<AlvoUser?> FindAsync(UserId user, CancellationToken cancellationToken)
-        => await ProjectAsync(await users.FindByIdAsync(user.Value.ToString()).ConfigureAwait(false))
+    {
+        var stored = await store.Users.AsNoTracking()
+            .FirstOrDefaultAsync(row => row.Id == user.Value, cancellationToken)
             .ConfigureAwait(false);
+        return await ProjectAsync(stored).ConfigureAwait(false);
+    }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Untracked for the reason <see cref="FindAsync"/> gives. The address is normalised through
+    /// <see cref="UserManager{TUser}.NormalizeEmail"/> and matched on the normalised column, which is
+    /// exactly what <c>UserManager.FindByEmailAsync</c> does — so matching stays case-insensitive and
+    /// a duplicate address still throws rather than picking one of two people.
+    /// </remarks>
     public async ValueTask<AlvoUser?> FindByEmailAsync(string email, CancellationToken cancellationToken)
-        => await ProjectAsync(await users.FindByEmailAsync(email).ConfigureAwait(false)).ConfigureAwait(false);
+    {
+        var normalized = users.NormalizeEmail(email);
+        var stored = await store.Users.AsNoTracking()
+            .SingleOrDefaultAsync(row => row.NormalizedEmail == normalized, cancellationToken)
+            .ConfigureAwait(false);
+        return await ProjectAsync(stored).ConfigureAwait(false);
+    }
 
     /// <inheritdoc/>
     public async ValueTask<IReadOnlyList<AlvoUser>> ListAsync(CancellationToken cancellationToken)

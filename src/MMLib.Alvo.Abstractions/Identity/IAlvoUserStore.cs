@@ -17,6 +17,14 @@
 /// password to verify at all, and a port that demanded one would foreclose it.
 /// </para>
 /// <para>
+/// <b>Every read reflects the store as of the call — never a per-scope cache.</b> The cookie
+/// resolver authorizes on <see cref="FindAsync"/>, and a caller's scope can live much longer than a
+/// request: in the dashboard it is the Blazor circuit, open for as long as the tab. An
+/// implementation that answered from a change tracker or a memo would let a disabled operator, or
+/// one moved to another tenant, keep acting from a tab they already had open — which is why the
+/// default implementation reads untracked.
+/// </para>
+/// <para>
 /// The <c>Alvo</c> prefix follows <c>IAlvoData</c>'s precedent, and here it also avoids a
 /// real collision with ASP.NET Core Identity's own <c>IUserStore&lt;T&gt;</c>, which the default
 /// implementation is built on.
