@@ -82,7 +82,7 @@ public sealed partial class ComponentLayerTests
     /// </summary>
     /// <remarks>
     /// A utility that also set 11 px and the dim colour was the last word on every element it joined —
-    /// declared after <c>.a-page-title</c>, it drew an entity's name in its own page heading at 11 px
+    /// declared after the page title's rule, it drew an entity's name in its own page heading at 11 px
     /// (finding D-1). The small dim look is <c>.a-ident</c>, which says so in its name.
     /// </remarks>
     [Fact]
@@ -145,7 +145,6 @@ public sealed partial class ComponentLayerTests
 
         utilities.ShouldContain("  .a-spacer {");
         utilities.ShouldContain("  .a-row--gap-2 {");
-        utilities.ShouldContain("  .a-row--gap-3 {");
     }
 
     /// <summary>

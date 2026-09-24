@@ -25,13 +25,13 @@
                     {
                         <span class="a-pagehead__eyebrow">@Eyebrow</span>
                     }
-                    <span class="a-section-title">@Title</span>
+                    <span class="a-section__title">@Title</span>
                     @if (Subtitle is { Length: > 0 })
                     {
-                        <span class="a-section-sub">@Subtitle</span>
+                        <span class="a-section__sub">@Subtitle</span>
                     }
                 </div>
-                <button type="button" class="a-btn a-btn--ghost a-btn--sm a-sheet__close"
+                <button type="button" class="a-btn a-btn--ghost a-btn--sm"
                         data-testid="sheet-close" aria-label="Close" @onclick="CloseAsync">Close</button>
             </div>
 

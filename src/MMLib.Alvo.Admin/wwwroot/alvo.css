@@ -39,8 +39,8 @@
    latin + latin-ext only (latin-ext carries Slovak diacritics). Both are
    OFL-1.1; the licences sit beside the files in fonts/. Only the weights the
    scale asks for: 500/600/700 for the UI, and 500/600 for code — chrome has
-   no 400, and a mono name is capped at 600 (see .a-page-title.a-mono) rather
-   than shipping a 700 for one heading.
+   no 400, and a mono name is capped at 600 (see .a-pagehead__title.a-mono)
+   rather than shipping a 700 for one heading.
    =========================================================================== */
 
 @font-face {
@@ -218,6 +218,14 @@
     --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 
     --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+
+    /* --- Stacking — named planes rather than a number each rule picks. A table's sticky head rides
+       over its own rows; a sheet and the palette share the overlay plane; the assistant floats above
+       it, so its launcher is not covered by a sheet's scrim. --- */
+    --z-raised: 1;
+    --z-overlay: 40;
+    --z-palette: var(--z-overlay);
+    --z-assistant: 45;
   }
 
   :root[data-theme='light'] {
@@ -497,6 +505,7 @@
     background: var(--border);
   }
 
+  /* gallery-only: drawn in docs/design/gallery.html, rendered by no component yet. */
   .a-nav-label {
     padding: 0 var(--space-3) var(--space-1);
     color: var(--faint);
@@ -734,12 +743,17 @@
     margin-top: var(--space-4);
   }
 
+  /* A section head's title and subtitle. `__title` and `__sub` are what SectionHead and Sheet render; the
+     hyphenated pair is the same rule for the heads still written out by hand, and goes when the last of
+     them moves to SectionHead — renamed as the markup moves, never in one sweep (F-19). */
+  .a-section__title,
   .a-section-title {
     font-size: var(--text-base);
     font-weight: var(--weight-medium);
     flex: none;
   }
 
+  .a-section__sub,
   .a-section-sub {
     color: var(--dim);
     font-size: var(--text-sm);
@@ -881,7 +895,7 @@
     gap: var(--space-1);
   }
 
-  .a-page-title {
+  .a-pagehead__title {
     margin: 0;
     font-size: var(--text-xl);
     font-weight: var(--weight-bold);
@@ -1008,7 +1022,7 @@
 
   /* An identifier as a page title is set at 600, not the title's 700: Plex Mono ships up to 600, and
      a weight with no face behind it is drawn as the browser's faux bold. */
-  .a-page-title.a-mono {
+  .a-pagehead__title.a-mono {
     font-weight: var(--weight-medium);
   }
 
@@ -1017,8 +1031,8 @@
      on that programmatic focus, so every screen opened with a ring around its own title
      and the heading read as a text input. The heading is not tabbable — tabindex is -1 —
      so nothing is taken away from a keyboard by removing it. */
-  h1.a-page-title:focus-visible,
-  h1.a-page-title:focus {
+  h1.a-pagehead__title:focus-visible,
+  h1.a-pagehead__title:focus {
     outline: none;
     box-shadow: none;
   }
@@ -1150,7 +1164,7 @@
   }
 
   /* The sentence under a control that says what it takes. Drawn like a section's subtitle, and
-     named apart from it: `.a-section-sub` had come to mean both, so no rule could address one
+     named apart from it: the subtitle's class had come to mean both, so no rule could address one
      without the other. */
   .a-hint {
     color: var(--dim);
@@ -1424,6 +1438,7 @@
 
   .a-code-key { color: var(--accent); }
   .a-code-str { color: var(--ok-fg); }
+  /* gallery-only: drawn in docs/design/gallery.html, rendered by no component yet. */
   .a-code-dim { color: var(--faint); }
 
   .a-kbd {
@@ -1503,6 +1518,7 @@
     border-color: var(--accentBorder);
   }
 
+  /* gallery-only: drawn in docs/design/gallery.html, rendered by no component yet. */
   .a-dot {
     width: 7px;
     height: 7px;
@@ -1561,7 +1577,7 @@
   .a-grid th {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: var(--z-raised);
     padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--border);
     background: var(--panel2);
@@ -1681,8 +1697,8 @@
   }
 
   /* The family and nothing else. It used to set a size and a colour as well, which made it the last
-     word on any element it was added to: declared after `.a-page-title`, it drew an entity's name in
-     its own page heading at 11 px. Size and colour now come from wherever the identifier sits. */
+     word on any element it was added to: declared after the page title's rule, it drew an entity's name
+     in its own page heading at 11 px. Size and colour now come from wherever the identifier sits. */
   .a-mono {
     font-family: var(--font-mono);
     /* A route, a table name and a connection string have no spaces to break at, so
@@ -1736,6 +1752,7 @@
     overflow: auto;
   }
 
+  /* gallery-only: drawn in docs/design/gallery.html, rendered by no component yet. */
   .a-bulkbar {
     display: flex;
     align-items: center;
@@ -1879,6 +1896,7 @@
     100% { background-position: 0 50%; }
   }
 
+  /* gallery-only: drawn in docs/design/gallery.html, rendered by no component yet. */
   .a-toast {
     display: flex;
     align-items: flex-start;
@@ -1940,6 +1958,8 @@
    =========================================================================== */
 
 @layer components {
+  /* gallery-only: the warned badge, drawn in docs/design/gallery.html. The product says "not yet" with
+     NotYetPanel, whose own classes are below. */
   .a-notyet {
     display: inline-flex;
     align-items: center;
@@ -2037,6 +2057,7 @@
   /* Inline code inside prose breaks at word boundaries like the prose around it. `anywhere` is for
      a route or a connection string standing alone in its own box, not for a type name mid-sentence. */
   .a-refused__reason .a-mono,
+  .a-section__sub .a-mono,
   .a-section-sub .a-mono,
   .a-hint .a-mono,
   .a-note .a-mono {
@@ -2085,6 +2106,7 @@
     color: var(--danger-fg);
   }
 
+  /* gallery-only: drawn in docs/design/gallery.html, rendered by no component yet. */
   .a-diff__line--warn {
     background: var(--warn-bg);
     color: var(--warn-fg);
@@ -2105,19 +2127,10 @@
   /* The command palette on the same scrim as the sheet, opened near the top where a query is typed rather
      than centred like a dialog. */
   .a-scrim--palette {
-    z-index: 40;
+    z-index: var(--z-palette);
     display: grid;
     place-items: start center;
     padding-top: 12vh;
-  }
-
-  .a-modal {
-    width: min(560px, calc(100vw - var(--space-8)));
-    padding: var(--space-6);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--panel);
-    box-shadow: var(--shadow-pop);
   }
 
   /* The pressed state is the style, so a chip that says aria-pressed="true" cannot look unpicked. */
@@ -2157,16 +2170,6 @@
     .a-split__main {
       align-self: stretch;
     }
-  }
-
-  .a-drawer {
-    width: min(420px, 100vw);
-    height: 100%;
-    padding: var(--space-5);
-    border-left: 1px solid var(--border);
-    background: var(--panel);
-    box-shadow: var(--shadow-pop);
-    overflow: auto;
   }
 
   /* A destructive action asks for the name to be typed. Dropping a column and
@@ -2283,7 +2286,7 @@
      shapes — the shell's own argument about a second navigation applies to a second dialog just as
      well, and the media query below is where the phone half lives. */
   .a-sheet {
-    z-index: 40;
+    z-index: var(--z-overlay);
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -2487,7 +2490,7 @@
     }
 
     /* The name of the thing you are looking at, at the size of a title rather than of a label. */
-    .a-page-title {
+    .a-pagehead__title {
       font-size: var(--text-2xl);
     }
 
@@ -2535,7 +2538,7 @@
     position: fixed;
     right: var(--space-5);
     bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
-    z-index: 45;
+    z-index: var(--z-assistant);
     min-height: 44px;
     padding: 0 var(--space-4);
     border: 1px solid var(--border);
@@ -2552,7 +2555,7 @@
     position: fixed;
     right: var(--space-5);
     bottom: calc(var(--space-5) + 44px + var(--space-3) + env(safe-area-inset-bottom));
-    z-index: 45;
+    z-index: var(--z-assistant);
     display: flex;
     width: min(420px, calc(100vw - var(--space-8)));
     max-height: min(70vh, 640px);
@@ -2658,13 +2661,10 @@
     margin-left: auto;
   }
 
-  /* The two gaps a row is written with besides its own. */
+  /* The one gap a row is written with besides its own. Its `--gap-3` twin is gone: it restated
+     `.a-row`'s own gap, and no screen or drawing ever asked for it. */
   .a-row--gap-2 {
     gap: var(--space-2);
-  }
-
-  .a-row--gap-3 {
-    gap: var(--space-3);
   }
 
   /* Takes the room the other items of a flex row leave, and may be narrower than its content — which

@@ -33,7 +33,7 @@
     }
 
     <div class="a-pagehead__row">
-        <h1 class="@($"a-page-title{(Mono ? " a-mono" : string.Empty)}")">@Title</h1>
+        <h1 class="@($"a-pagehead__title{(Mono ? " a-mono" : string.Empty)}")">@Title</h1>
         @if (Primary is not null || Secondary is not null)
         {
             <div class="a-pagehead__actions">

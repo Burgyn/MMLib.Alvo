@@ -27,7 +27,7 @@
         <div class="a-assistant__thread" data-testid="assistant-thread">
             @foreach (var turn in _turns)
             {
-                <div class="@($"a-assistant__turn a-assistant__turn--{(turn.Role is AssistantRole.Operator ? "you" : "alvo")}")">
+                <div class="a-assistant__turn">
                     <span class="a-assistant__who">@(turn.Role is AssistantRole.Operator ? "You" : "Alvo")</span>
                     <span class="a-assistant__text">@turn.Text</span>
                 </div>
@@ -45,7 +45,7 @@
 
             @if (_streaming is { Length: > 0 })
             {
-                <div class="a-assistant__turn a-assistant__turn--alvo">
+                <div class="a-assistant__turn">
                     <span class="a-assistant__who">Alvo</span>
                     <span class="a-assistant__text">@_streaming</span>
                 </div>
