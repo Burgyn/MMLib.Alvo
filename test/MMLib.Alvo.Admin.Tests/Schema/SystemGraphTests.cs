@@ -114,4 +114,20 @@ public sealed class SystemGraphTests
         focused.Outside.Select(node => node.Id).ShouldBe(
             ["template:order-ready", "template:express-order-received"], ignoreOrder: true);
     }
+
+    [Fact]
+    public void Outside_nodes_follow_webhooks_before_templates_when_the_descriptor_does()
+    {
+        var graph = SystemGraph.From("""{"webhooks":{"endpoints":{"w":{}}},"templates":{"t":{}},"entities":{}}""");
+
+        graph.Outside.Select(node => node.Id).ShouldBe(["endpoint:w", "template:t"]);
+    }
+
+    [Fact]
+    public void Outside_nodes_follow_templates_before_webhooks_when_the_descriptor_does()
+    {
+        var graph = SystemGraph.From("""{"templates":{"t":{}},"webhooks":{"endpoints":{"w":{}}},"entities":{}}""");
+
+        graph.Outside.Select(node => node.Id).ShouldBe(["template:t", "endpoint:w"]);
+    }
 }

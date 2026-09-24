@@ -270,6 +270,12 @@ internal sealed partial record SystemGraph
     /// Builds the outside nodes: every declared template and endpoint, in descriptor order, plus any id an
     /// edge reaches that neither declares — so the wire still has an end — in the order its edge was read.
     /// </summary>
+    /// <remarks>
+    /// <b>"Descriptor order" is the root object's own key order</b>, not a fixed <c>templates</c>-then-
+    /// <c>webhooks</c> assumption: <c>examples/bike-workshop</c> declares <c>webhooks</c> before
+    /// <c>templates</c>, <c>examples/complex-crm</c> the other way round, and a screen that always drew one
+    /// block first would draw one of the two examples out of the order its own file puts them in.
+    /// </remarks>
     /// <param name="working">The descriptor root.</param>
     /// <param name="edges">The edges already read; Hook and Automation edges name the outside ids in play.</param>
     private static List<MapOutside> ReadOutside(JsonObject working, IReadOnlyList<MapEdge> edges)
@@ -280,9 +286,18 @@ internal sealed partial record SystemGraph
 
         var outside = new List<MapOutside>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
-        var endpoints = (working["webhooks"] as JsonObject)?["endpoints"] as JsonObject;
-        AddDeclared(outside, seen, working["templates"] as JsonObject, OutsideKind.Template, used);
-        AddDeclared(outside, seen, endpoints, OutsideKind.Endpoint, used);
+        foreach (var pair in working)
+        {
+            if (pair.Key == "templates" && pair.Value is JsonObject templates)
+            {
+                AddDeclared(outside, seen, templates, OutsideKind.Template, used);
+            }
+            else if (pair.Key == "webhooks" && pair.Value is JsonObject webhooks && webhooks["endpoints"] is JsonObject endpoints)
+            {
+                AddDeclared(outside, seen, endpoints, OutsideKind.Endpoint, used);
+            }
+        }
+
         AddUndeclared(outside, seen, edges);
 
         return outside;
