@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using MMLib.Alvo.Admin.Components.Schema;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Management;

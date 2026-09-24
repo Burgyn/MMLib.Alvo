@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Internal;
+﻿using MMLib.Alvo.Admin.Components.Schema;
+
+namespace MMLib.Alvo.Admin.Internal;
 
 /// <summary>
 /// One component's lifetime as a cancellation token, ended when the component is disposed.

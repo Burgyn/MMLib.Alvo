@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Routing;
+using MMLib.Alvo.Admin.Components.History;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;

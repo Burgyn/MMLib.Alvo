@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Internal;
+﻿using MMLib.Alvo.Admin.Components.Schema;
+
+namespace MMLib.Alvo.Admin.Internal;
 
 /// <summary>
 /// Every address the dashboard links to, in one place.

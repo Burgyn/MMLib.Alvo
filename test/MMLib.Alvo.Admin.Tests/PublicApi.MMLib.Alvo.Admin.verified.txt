@@ -48,6 +48,44 @@ namespace MMLib.Alvo.Admin
         protected void Execute() { }
     }
 }
+namespace MMLib.Alvo.Admin.Components.Access
+{
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/access")]
+    public class Access : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Access() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    public class PersonRow : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public PersonRow() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Expanded { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool IsSelf { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnClearTenant { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnIssueToken { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<bool> OnSetDisabled { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<System.Collections.Generic.IReadOnlyList<string>> OnSetRoles { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> OnSetTenant { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnToggle { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MMLib.Alvo.AlvoUser Person { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<string> Roles { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
+}
 namespace MMLib.Alvo.Admin.Components
 {
     public class AdminApp : Microsoft.AspNetCore.Components.ComponentBase
@@ -59,6 +97,71 @@ namespace MMLib.Alvo.Admin.Components
     {
         public AdminRoutes() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+}
+namespace MMLib.Alvo.Admin.Components.Assistant
+{
+    public class AssistantDrawer : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public AssistantDrawer() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+    }
+}
+namespace MMLib.Alvo.Admin.Components.Data
+{
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/data")]
+    public class DataList : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public DataList() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/data/{EntityName}")]
+    public class EntityData : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public EntityData() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string EntityName { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
+    }
+    public class RecordForm : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public RecordForm() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MMLib.Alvo.Schema.EntitySchema Entity { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnCancel { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnDeleted { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnSaved { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Guid? RecordId { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.Dictionary<string, object?> Values { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
+    }
+    public class RecordGrid : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
+    {
+        public RecordGrid() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnNext { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Data.AlvoRecord> OnOpen { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnPrevious { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Schema.FieldSchema> OnSort { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
     }
 }
 namespace MMLib.Alvo.Admin.Components.DesignSystem
@@ -84,6 +187,59 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnParametersSet() { }
     }
+    public class CodeBlock : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public CodeBlock() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Json { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class ConfirmByName : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public ConfirmByName() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Detail { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Expected { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<bool> OnConfirmedChanged { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Title { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class EmptyState : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public EmptyState() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Body { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? ChildContent { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Title { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class ErrorPanel : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public ErrorPanel() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? Actions { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Fix { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Exception? Problem { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Slug { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Title { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
     public class Field : Microsoft.AspNetCore.Components.ComponentBase
     {
         public Field() { }
@@ -103,6 +259,16 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem
         public string? LabelId { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool Required { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class Icon : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Icon() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Path { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public int Size { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     public class ListRow : Microsoft.AspNetCore.Components.ComponentBase
@@ -135,6 +301,26 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem
         public string? Consequence { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.RenderFragment? Subtitle { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Title { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class PageHeader : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public PageHeader() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Eyebrow { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? EyebrowHref { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Mono { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? Primary { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? Secondary { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Subtitle { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public string Title { get; set; }
@@ -180,6 +366,28 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem
         public string? Title { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
+    public class Sheet : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
+    {
+        public Sheet() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? ChildContent { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Eyebrow { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnClose { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Open { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Subtitle { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string TestId { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Title { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
+    }
     public class Skeleton : Microsoft.AspNetCore.Components.ComponentBase
     {
         public Skeleton() { }
@@ -194,7 +402,128 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem
         }
     }
 }
-namespace MMLib.Alvo.Admin.Components.Entity
+namespace MMLib.Alvo.Admin.Components.History
+{
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/history")]
+    public class History : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public History() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    public class RevisionRow : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public RevisionRow() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MMLib.Alvo.Management.ManagementRevision Revision { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+}
+namespace MMLib.Alvo.Admin.Components.Home
+{
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin")]
+    public class Overview : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Overview() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    public class Stat : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Stat() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Label { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Note { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Value { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class Step : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Step() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? ChildContent { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Done { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Title { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/welcome")]
+    public class Welcome : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Welcome() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+}
+namespace MMLib.Alvo.Admin.Components.Integrations
+{
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/integrations")]
+    public class Integrations : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Integrations() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+}
+namespace MMLib.Alvo.Admin.Components.Rules
+{
+    public class PolicyVerdictView : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public PolicyVerdictView() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Entity { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Operation { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public MMLib.Alvo.Management.ManagementPolicyVerdict Verdict { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/rules")]
+    [Microsoft.AspNetCore.Components.Route("/admin/rules/{EntityName}")]
+    public class Rules : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Rules() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? EntityName { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
+    }
+    public class RulesTab : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public RulesTab() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Editable { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Entity { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        [System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "Operation",
+                "Cel"})]
+        public Microsoft.AspNetCore.Components.EventCallback<System.ValueTuple<string, string>> OnChanged { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, string>> Rules { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+}
+namespace MMLib.Alvo.Admin.Components.Schema
 {
     public class ApiTab : Microsoft.AspNetCore.Components.ComponentBase
     {
@@ -203,6 +532,43 @@ namespace MMLib.Alvo.Admin.Components.Entity
         [Microsoft.AspNetCore.Components.Parameter]
         public MMLib.Alvo.Schema.EntitySchema Entity { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class DescriptorDiff : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public DescriptorDiff() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string After { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Before { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public int Revision { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
+    public class DiscardSheet : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public DiscardSheet() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnClose { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnDiscarded { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public bool Open { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/schema/{EntityName}")]
+    public class Entity : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public Entity() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string EntityName { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
     }
     public class FieldEditor : Microsoft.AspNetCore.Components.ComponentBase
     {
@@ -215,7 +581,7 @@ namespace MMLib.Alvo.Admin.Components.Entity
         [Microsoft.AspNetCore.Components.Parameter]
         public string Entity { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.FieldEditor.NewField> OnAdd { get; set; }
+        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Schema.FieldEditor.NewField> OnAdd { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback OnClose { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -227,7 +593,7 @@ namespace MMLib.Alvo.Admin.Components.Entity
         public System.Collections.Generic.IReadOnlyList<string> Targets { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnParametersSet() { }
-        public sealed class NewField : System.IEquatable<MMLib.Alvo.Admin.Components.Entity.FieldEditor.NewField>
+        public sealed class NewField : System.IEquatable<MMLib.Alvo.Admin.Components.Schema.FieldEditor.NewField>
         {
             public NewField(string Name, System.Text.Json.Nodes.JsonObject Facets) { }
             public System.Text.Json.Nodes.JsonObject Facets { get; init; }
@@ -257,19 +623,19 @@ namespace MMLib.Alvo.Admin.Components.Entity
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, string>> Hooks { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.HooksTab.NewHook> OnAdd { get; set; }
+        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Schema.HooksTab.NewHook> OnAdd { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Entity.HooksTab.HookAt> OnRemove { get; set; }
+        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Admin.Components.Schema.HooksTab.HookAt> OnRemove { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRefusedFeature> Refused { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public sealed class HookAt : System.IEquatable<MMLib.Alvo.Admin.Components.Entity.HooksTab.HookAt>
+        public sealed class HookAt : System.IEquatable<MMLib.Alvo.Admin.Components.Schema.HooksTab.HookAt>
         {
             public HookAt(string Point, int Position) { }
             public string Point { get; init; }
             public int Position { get; init; }
         }
-        public sealed class NewHook : System.IEquatable<MMLib.Alvo.Admin.Components.Entity.HooksTab.NewHook>
+        public sealed class NewHook : System.IEquatable<MMLib.Alvo.Admin.Components.Schema.HooksTab.NewHook>
         {
             public NewHook(string Point, string? Condition, System.Text.Json.Nodes.JsonObject Action) { }
             public System.Text.Json.Nodes.JsonObject Action { get; init; }
@@ -294,6 +660,14 @@ namespace MMLib.Alvo.Admin.Components.Entity
         public Microsoft.AspNetCore.Components.EventCallback<int> OnRemove { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/changes")]
+    public class Preview : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Preview() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
     public class Relationships : Microsoft.AspNetCore.Components.ComponentBase
     {
         public Relationships() { }
@@ -305,26 +679,50 @@ namespace MMLib.Alvo.Admin.Components.Entity
         public MMLib.Alvo.Schema.SchemaModel Schema { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
-    public class RulesTab : Microsoft.AspNetCore.Components.ComponentBase
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/schema")]
+    public class SchemaList : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
-        public RulesTab() { }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public bool Editable { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Entity { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        [System.Runtime.CompilerServices.TupleElementNames(new string[] {
-                "Operation",
-                "Cel"})]
-        public Microsoft.AspNetCore.Components.EventCallback<System.ValueTuple<string, string>> OnChanged { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, string>> Rules { get; set; }
+        public SchemaList() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/transfer")]
+    public class Transfer : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    {
+        public Transfer() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
 }
-namespace MMLib.Alvo.Admin.Components.Layout
+namespace MMLib.Alvo.Admin.Components.Settings
+{
+    public class Detail : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Detail() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Label { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Note { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Value { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/settings")]
+    public class Settings : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public Settings() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+}
+namespace MMLib.Alvo.Admin.Components.Shell
 {
     public class AdminLayout : Microsoft.AspNetCore.Components.LayoutComponentBase, System.IDisposable
     {
@@ -342,16 +740,6 @@ namespace MMLib.Alvo.Admin.Components.Layout
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
         public System.Threading.Tasks.Task OpenAsync() { }
     }
-    public class Icon : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public Icon() { }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Path { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public int Size { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-    }
     public class NavList : Microsoft.AspNetCore.Components.ComponentBase
     {
         public NavList() { }
@@ -360,6 +748,15 @@ namespace MMLib.Alvo.Admin.Components.Layout
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback OnNavigate { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    [Microsoft.AspNetCore.Authorization.Authorize]
+    [Microsoft.AspNetCore.Components.Route("/admin/automations")]
+    [Microsoft.AspNetCore.Components.Route("/admin/functions")]
+    public class NotYet : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public NotYet() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
     }
     public class PendingBar : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
@@ -375,6 +772,24 @@ namespace MMLib.Alvo.Admin.Components.Layout
         public void Dispose() { }
         protected override void OnInitialized() { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    public class RedirectToSignIn : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public RedirectToSignIn() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnInitialized() { }
+    }
+    [Microsoft.AspNetCore.Components.ExcludeFromInteractiveRouting]
+    [Microsoft.AspNetCore.Components.Layout(typeof(MMLib.Alvo.Admin.Components.Shell.SignInLayout?))]
+    [Microsoft.AspNetCore.Components.Route("/admin/sign-in")]
+    public class SignIn : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public SignIn() { }
+        [Microsoft.AspNetCore.Components.SupplyParameterFromQuery(Name="failed")]
+        public bool Failed { get; set; }
+        [Microsoft.AspNetCore.Components.SupplyParameterFromQuery(Name="returnUrl")]
+        public string? ReturnUrl { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     public class SignInLayout : Microsoft.AspNetCore.Components.LayoutComponentBase
     {
@@ -392,402 +807,5 @@ namespace MMLib.Alvo.Admin.Components.Layout
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
-    }
-}
-namespace MMLib.Alvo.Admin.Components.Pages
-{
-    [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/access")]
-    public class Access : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public Access() { }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
-    }
-    [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/data")]
-    public class DataList : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public DataList() { }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
-    }
-    [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/schema/{EntityName}")]
-    public class Entity : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
-    {
-        public Entity() { }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string EntityName { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public void Dispose() { }
-        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
-    }
-    [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/data/{EntityName}")]
-    public class EntityData : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public EntityData() { }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string EntityName { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
-    }
-    [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/history")]
-    public class History : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public History() { }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
-    }
-    [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/integrations")]
-    public class Integrations : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public Integrations() { }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
-    }
-    [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/automations")]
-    [Microsoft.AspNetCore.Components.Route("/admin/functions")]
-    public class NotYet : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public NotYet() { }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
-    }
-    [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin")]
-    public class Overview : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public Overview() { }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
-    }
-    [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/changes")]
-    public class Preview : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public Preview() { }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
-    }
-    [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/rules")]
-    [Microsoft.AspNetCore.Components.Route("/admin/rules/{EntityName}")]
-    public class Rules : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public Rules() { }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string? EntityName { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
-    }
-    [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/schema")]
-    public class SchemaList : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
-    {
-        public SchemaList() { }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public void Dispose() { }
-        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
-    }
-    [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/settings")]
-    public class Settings : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public Settings() { }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
-    }
-    [Microsoft.AspNetCore.Components.ExcludeFromInteractiveRouting]
-    [Microsoft.AspNetCore.Components.Layout(typeof(MMLib.Alvo.Admin.Components.Layout.SignInLayout?))]
-    [Microsoft.AspNetCore.Components.Route("/admin/sign-in")]
-    public class SignIn : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public SignIn() { }
-        [Microsoft.AspNetCore.Components.SupplyParameterFromQuery(Name="failed")]
-        public bool Failed { get; set; }
-        [Microsoft.AspNetCore.Components.SupplyParameterFromQuery(Name="returnUrl")]
-        public string? ReturnUrl { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-    }
-    [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/transfer")]
-    public class Transfer : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
-    {
-        public Transfer() { }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public void Dispose() { }
-        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
-    }
-    [Microsoft.AspNetCore.Authorization.Authorize]
-    [Microsoft.AspNetCore.Components.Route("/admin/welcome")]
-    public class Welcome : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public Welcome() { }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override System.Threading.Tasks.Task OnInitializedAsync() { }
-    }
-}
-namespace MMLib.Alvo.Admin.Components.Shared
-{
-    public class AssistantDrawer : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
-    {
-        public AssistantDrawer() { }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public void Dispose() { }
-    }
-    public class CodeBlock : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public CodeBlock() { }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Json { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-    }
-    public class ConfirmByName : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public ConfirmByName() { }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Detail { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Expected { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback<bool> OnConfirmedChanged { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Title { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-    }
-    public class DescriptorDiff : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public DescriptorDiff() { }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string After { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Before { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public int Revision { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override void OnParametersSet() { }
-    }
-    public class Detail : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public Detail() { }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Label { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string? Note { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Value { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-    }
-    public class DiscardSheet : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public DiscardSheet() { }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback OnClose { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback OnDiscarded { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public bool Open { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
-    }
-    public class EmptyState : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public EmptyState() { }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Body { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.RenderFragment? ChildContent { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Title { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-    }
-    public class ErrorPanel : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public ErrorPanel() { }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.RenderFragment? Actions { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string? Fix { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public System.Exception? Problem { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string? Slug { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string? Title { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override void OnParametersSet() { }
-    }
-    public class PageHeader : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public PageHeader() { }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string? Eyebrow { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string? EyebrowHref { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public bool Mono { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.RenderFragment? Primary { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.RenderFragment? Secondary { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string? Subtitle { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Title { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-    }
-    public class PersonRow : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public PersonRow() { }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public bool Expanded { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public bool IsSelf { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback OnClearTenant { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback OnIssueToken { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback<bool> OnSetDisabled { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback<System.Collections.Generic.IReadOnlyList<string>> OnSetRoles { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback<string> OnSetTenant { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback OnToggle { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public MMLib.Alvo.AlvoUser Person { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public System.Collections.Generic.IReadOnlyList<string> Roles { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override void OnParametersSet() { }
-    }
-    public class PolicyVerdictView : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public PolicyVerdictView() { }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Entity { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Operation { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public MMLib.Alvo.Management.ManagementPolicyVerdict Verdict { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-    }
-    public class RecordForm : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public RecordForm() { }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public MMLib.Alvo.Schema.EntitySchema Entity { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback OnCancel { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback OnDeleted { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback OnSaved { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public System.Guid? RecordId { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public System.Collections.Generic.Dictionary<string, object?> Values { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
-    }
-    public class RecordGrid : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
-    {
-        public RecordGrid() { }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback OnNext { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Data.AlvoRecord> OnOpen { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback OnPrevious { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback<MMLib.Alvo.Schema.FieldSchema> OnSort { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public System.Threading.Tasks.ValueTask DisposeAsync() { }
-        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
-    }
-    public class RedirectToSignIn : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public RedirectToSignIn() { }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override void OnInitialized() { }
-    }
-    public class RevisionRow : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public RevisionRow() { }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public MMLib.Alvo.Management.ManagementRevision Revision { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-    }
-    public class Sheet : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
-    {
-        public Sheet() { }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.RenderFragment? ChildContent { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string? Eyebrow { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback OnClose { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public bool Open { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string? Subtitle { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string TestId { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Title { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public System.Threading.Tasks.ValueTask DisposeAsync() { }
-        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
-    }
-    public class Stat : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public Stat() { }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Label { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Note { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Value { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-    }
-    public class Step : Microsoft.AspNetCore.Components.ComponentBase
-    {
-        public Step() { }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.RenderFragment? ChildContent { get; set; }
-        [Microsoft.AspNetCore.Components.Parameter]
-        public bool Done { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
-        [Microsoft.AspNetCore.Components.Parameter]
-        public string Title { get; set; }
-        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
 }

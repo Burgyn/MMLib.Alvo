@@ -1,7 +1,7 @@
 ﻿using Microsoft.AspNetCore.Components;
+using MMLib.Alvo.Admin.Components.Schema;
 using MMLib.Alvo.Admin.Internal;
 using System.Reflection;
-using Pages = MMLib.Alvo.Admin.Components.Pages;
 
 namespace MMLib.Alvo.Admin.Tests.Internal;
 
@@ -22,28 +22,28 @@ public class AdminPathsTests
     /// <summary>Each address, with the one screen it is meant to reach.</summary>
     public static TheoryData<string, Type> Addresses => new()
     {
-        { AdminPaths.Overview, typeof(Pages.Overview) },
-        { AdminPaths.Welcome, typeof(Pages.Welcome) },
-        { AdminPaths.Schema, typeof(Pages.SchemaList) },
-        { AdminPaths.Entity("work_orders"), typeof(Pages.Entity) },
-        { AdminPaths.Entity("work_orders", EntityTabs.FromSlug(EntityTabs.Rules)), typeof(Pages.Entity) },
+        { AdminPaths.Overview, typeof(Components.Home.Overview) },
+        { AdminPaths.Welcome, typeof(Components.Home.Welcome) },
+        { AdminPaths.Schema, typeof(Components.Schema.SchemaList) },
+        { AdminPaths.Entity("work_orders"), typeof(Components.Schema.Entity) },
+        { AdminPaths.Entity("work_orders", EntityTabs.FromSlug(EntityTabs.Rules)), typeof(Components.Schema.Entity) },
         /* F-12: the two names that used to be screens are entities like any other. */
-        { AdminPaths.Entity("preview"), typeof(Pages.Entity) },
-        { AdminPaths.Entity("transfer"), typeof(Pages.Entity) },
-        { AdminPaths.Changes, typeof(Pages.Preview) },
-        { AdminPaths.Transfer, typeof(Pages.Transfer) },
-        { AdminPaths.Data, typeof(Pages.DataList) },
-        { AdminPaths.Records("work_orders"), typeof(Pages.EntityData) },
-        { AdminPaths.Records("work_orders", _record), typeof(Pages.EntityData) },
-        { AdminPaths.Rules(), typeof(Pages.Rules) },
-        { AdminPaths.Rules("work_orders"), typeof(Pages.Rules) },
-        { AdminPaths.Access, typeof(Pages.Access) },
-        { AdminPaths.History, typeof(Pages.History) },
-        { AdminPaths.Integrations, typeof(Pages.Integrations) },
-        { AdminPaths.Automations, typeof(Pages.NotYet) },
-        { AdminPaths.Functions, typeof(Pages.NotYet) },
-        { AdminPaths.Settings, typeof(Pages.Settings) },
-        { AdminPaths.SignIn, typeof(Pages.SignIn) },
+        { AdminPaths.Entity("preview"), typeof(Components.Schema.Entity) },
+        { AdminPaths.Entity("transfer"), typeof(Components.Schema.Entity) },
+        { AdminPaths.Changes, typeof(Components.Schema.Preview) },
+        { AdminPaths.Transfer, typeof(Components.Schema.Transfer) },
+        { AdminPaths.Data, typeof(Components.Data.DataList) },
+        { AdminPaths.Records("work_orders"), typeof(Components.Data.EntityData) },
+        { AdminPaths.Records("work_orders", _record), typeof(Components.Data.EntityData) },
+        { AdminPaths.Rules(), typeof(Components.Rules.Rules) },
+        { AdminPaths.Rules("work_orders"), typeof(Components.Rules.Rules) },
+        { AdminPaths.Access, typeof(Components.Access.Access) },
+        { AdminPaths.History, typeof(Components.History.History) },
+        { AdminPaths.Integrations, typeof(Components.Integrations.Integrations) },
+        { AdminPaths.Automations, typeof(Components.Shell.NotYet) },
+        { AdminPaths.Functions, typeof(Components.Shell.NotYet) },
+        { AdminPaths.Settings, typeof(Components.Settings.Settings) },
+        { AdminPaths.SignIn, typeof(Components.Shell.SignIn) },
     };
 
     [Theory]
