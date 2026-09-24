@@ -14,7 +14,7 @@
 <div class="a-grid-wrap a-only-desktop-block">
     @* `data-alvo-keyboard` says the rows' keys have a listener, for the markKeyboardReady reason: a `j` pressed
        before this grid has subscribed reaches nobody. *@
-    <table class="a-grid" data-alvo-keyboard="@(_listening ? "ready" : null)">
+    <table class="a-grid" data-testid="record-grid" data-alvo-keyboard="@(_listening ? "ready" : null)">
         <thead>
             <tr>
                 @foreach (var column in Scope.Columns)
@@ -43,9 +43,11 @@
                 row alone does not give — a <tr> is not a control. The row takes focus only
                 from `j`/`k` (tabindex -1), so Tab still walks the controls and nothing else.
             *@
+            @{ var selected = Selected; }
             @foreach (var (row, index) in Scope.Page.Items.Select((row, index) => (row, index)))
             {
-                <tr class="a-grid__row" tabindex="-1" aria-selected="@(index == Selected ? "true" : null)"
+                <tr class="a-grid__row" data-testid="grid-row" tabindex="-1"
+                    aria-selected="@(index == selected ? "true" : null)"
                     @onclick="() => OpenAsync(index)">
                     @foreach (var column in Scope.Columns)
                     {
@@ -116,8 +118,8 @@
 @code {
     private readonly List<IAsyncDisposable> _subscriptions = [];
     private ElementReference _body;
-    private AlvoPage? _selectedOn;
-    private int? _selected;
+    private readonly FocusReturn _focusReturn = new();
+    private Guid? _selected;
     private bool _listening;
     private bool _focusPending;
 
@@ -151,7 +153,7 @@
             StateHasChanged();
         }
 
-        if (_focusPending)
+        if (_focusReturn.Observe(Scope.SheetOpen) || _focusPending)
         {
             _focusPending = false;
             await Interop.FocusSelectedAsync(_body);
@@ -159,22 +161,37 @@
     }
 
     /// <summary>
-    /// The selected row on the page drawn now. A new page is new rows, so a selection made on the one before
-    /// means nothing on it.
+    /// The selected row's place on the page drawn now, or <see langword="null"/>.
     /// </summary>
-    private int? Selected => ReferenceEquals(_selectedOn, Scope.Page) ? _selected : null;
-
-    private void Select(int? index)
+    /// <remarks>
+    /// Held as the record's id rather than a position, so a save that re-reads the page keeps the row it saved
+    /// selected, and a new page — new rows — has none.
+    /// </remarks>
+    private int? Selected
     {
-        _selectedOn = Scope.Page;
-        _selected = index;
+        get
+        {
+            for (var index = 0; _selected is not null && index < Scope.Page.Items.Count; index++)
+            {
+                if (IdOf(Scope.Page.Items[index]) == _selected)
+                {
+                    return index;
+                }
+            }
+
+            return null;
+        }
     }
+
+    private void Select(int? index) => _selected = index is { } at ? IdOf(Scope.Page.Items[at]) : null;
+
+    private static Guid? IdOf(AlvoRecord row) => RefLabels.IdOf(row[AlvoManagedColumns.Id]);
 
     /// <summary><c>j</c> or <c>k</c>: moves the selection, then focuses the row once it is drawn as selected.</summary>
     private Task OnMove(string? direction) => InvokeAsync(() =>
     {
         Select(RowCursor.Move(Selected, direction, Scope.Page.Items.Count));
-        _focusPending = _selected is not null;
+        _focusPending = Selected is not null;
         StateHasChanged();
     });
 
@@ -182,10 +199,14 @@
     private Task OnOpenSelected(string? _) => InvokeAsync(() =>
         Selected is { } index && index < Scope.Page.Items.Count ? OpenAsync(index) : Task.CompletedTask);
 
-    /// <summary>Opens a row, and makes it the selected one, so <c>j</c> goes on from the row last opened.</summary>
+    /// <summary>
+    /// Opens a row, and makes it the selected one — so <c>j</c> goes on from the row last opened, and focus
+    /// returns to it when its sheet closes.
+    /// </summary>
     private Task OpenAsync(int index)
     {
         Select(index);
+        _focusReturn.Opened();
         return OnOpen.InvokeAsync(Scope.Page.Items[index]);
     }
 

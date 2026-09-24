@@ -64,10 +64,9 @@ public static class AlvoAdminAssets
     /// a <c>&lt;link&gt;</c> and a <c>&lt;script src&gt;</c>, where the document's <c>&lt;base&gt;</c>
     /// resolves a relative path. This one is handed to <c>import()</c>, and a specifier that starts
     /// with neither <c>/</c> nor <c>./</c> is a <em>bare specifier</em> — a package name, which a
-    /// browser with no import map cannot resolve. The failure is not quiet: the import rejects, the
-    /// calling component's <c>OnAfterRenderAsync</c> throws, and Blazor <b>terminates the circuit</b>. The
-    /// page is then rendered and completely dead, which reads as a broken application rather than
-    /// as a missing file.
+    /// browser with no import map cannot resolve. The import rejects, the dashboard logs it at error
+    /// and every keyboard shortcut and overlay gesture does nothing — a page that renders but will not
+    /// answer ⌘K, which reads as a broken application rather than as a missing file.
     /// </para>
     /// </remarks>
     public static string Module { get; } = $"/{ContentRoot}/admin.js";

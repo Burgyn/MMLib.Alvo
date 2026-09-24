@@ -22,7 +22,7 @@ public sealed class ScrollLockTests : IAsyncDisposable
         var js = Substitute.For<IJSRuntime>();
         js.InvokeAsync<IJSObjectReference>("import", Arg.Any<object?[]?>())
             .Returns(new ValueTask<IJSObjectReference>(_module));
-        _interop = new AdminInterop(js);
+        _interop = new AdminInterop(js, Microsoft.Extensions.Logging.Abstractions.NullLogger<AdminInterop>.Instance);
     }
 
     [Fact]

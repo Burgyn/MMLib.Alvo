@@ -89,11 +89,13 @@ public sealed class DataGridScenarios(AdminWorld world) : IClassFixture<AdminWor
     }
 
     /// <summary>
-    /// <c>j j Enter</c> opens the second row, and the keys stay with the sheet while it is open (design §5.5).
+    /// <c>j j Enter</c> opens the second row, the keys stay with the sheet while it is open, and closing it
+    /// gives focus back to the row (design §5.5; the WAI-ARIA dialog pattern).
     /// </summary>
     /// <remarks>
-    /// Over <c>regions</c>, which is global, so no tenant is needed; its own two rows, because the grid's
-    /// order is the entity's and this asserts "the second row", whatever that is, rather than a name.
+    /// Over <c>regions</c>, which is global, so no tenant is needed; its own two rows, so there are always at
+    /// least two whatever else this world has seeded, and it asserts "the second row" — whatever the entity's
+    /// order puts there — rather than a name.
     /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task J_moves_the_selected_row_and_enter_opens_it()
@@ -102,17 +104,17 @@ public sealed class DataGridScenarios(AdminWorld world) : IClassFixture<AdminWor
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/data/regions");
 
-        var rows = session.Page.Locator("table.a-grid tbody tr");
+        var rows = session.Page.Locator("[data-testid='grid-row']");
+        var selected = session.Page.Locator("[data-testid='grid-row'][aria-selected='true']");
         await rows.Nth(1).WaitForAsync();
-        await session.Page.Locator("table.a-grid[data-alvo-keyboard='ready']").WaitForAsync();
+        await session.Page.Locator("[data-testid='record-grid'][data-alvo-keyboard='ready']").WaitForAsync();
 
         // --- j j selects the second row, focuses it, and draws it as selected
         await session.Page.Keyboard.PressAsync("j");
         await session.Page.Keyboard.PressAsync("j");
-        await session.Page.WaitForFunctionAsync(
-            "() => document.activeElement === document.querySelectorAll('table.a-grid tbody tr')[1]");
+        await session.Page.WaitForFunctionAsync(SecondRowHasFocus);
         (await rows.Nth(1).GetAttributeAsync("aria-selected")).ShouldBe("true");
-        (await session.Page.Locator("table.a-grid tbody tr[aria-selected='true']").CountAsync()).ShouldBe(1);
+        (await selected.CountAsync()).ShouldBe(1);
         (await rows.Nth(1).EvaluateAsync<string>("row => getComputedStyle(row).boxShadow"))
             .ShouldNotBe("none", "the selected row carries the focus ring");
 
@@ -122,13 +124,24 @@ public sealed class DataGridScenarios(AdminWorld world) : IClassFixture<AdminWor
         await session.Page.Locator("#rf-name").WaitForAsync();
         second.ShouldContain(await session.Page.InputValueAsync("#rf-name"));
 
-        // --- while the sheet is open, j is the sheet's: the selection behind it does not move
-        await session.Page.Keyboard.PressAsync("j");
+        /* --- while the sheet is open, k is the sheet's. From the second row a k that reached the grid would
+               select the first, so an unchanged selection is the guard working, not a clamp at an end. */
+        await session.Page.Locator("[data-testid='record-sheet'] [role='dialog']").FocusAsync();
+        await session.Page.Keyboard.PressAsync("k");
         await session.Page.WaitForTimeoutAsync(500);
         (await rows.Nth(1).GetAttributeAsync("aria-selected")).ShouldBe("true");
+        (await selected.CountAsync()).ShouldBe(1);
+
+        // --- closing the sheet gives focus back to the row that opened it
+        await session.Page.Keyboard.PressAsync("Escape");
+        await session.Page.Locator("#rf-name").WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+        await session.Page.WaitForFunctionAsync(SecondRowHasFocus);
 
         session.AssertConsoleClean();
     }
+
+    private const string SecondRowHasFocus
+        = "() => document.activeElement === document.querySelectorAll(\"[data-testid='grid-row']\")[1]";
 
     /// <summary>Writes two regions, each of which must be unique across the world.</summary>
     private async Task SeedRegionsAsync(params string[] codes)

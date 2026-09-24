@@ -108,7 +108,8 @@ public partial class EntityData
 
     /// <summary>What the grid draws of the current page; only read once there is one.</summary>
     private RecordGridScope GridScope
-        => new(_page!, _columns, _masks, _label, _labels, _sort, HasPrevious: _cursors.Count > 0);
+        => new(_page!, _columns, _masks, _label, _labels, _sort, HasPrevious: _cursors.Count > 0,
+            SheetOpen: _form is not null);
 
     /// <summary>
     /// Reads the entity when the route names a new one, then opens whatever record the query names.

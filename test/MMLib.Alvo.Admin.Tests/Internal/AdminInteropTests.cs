@@ -1,4 +1,5 @@
-﻿using Microsoft.JSInterop;
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.JSInterop;
 using Microsoft.JSInterop.Infrastructure;
 using MMLib.Alvo.Admin.Internal;
 using NSubstitute;
@@ -18,6 +19,7 @@ public class AdminInteropTests
 {
     private readonly IJSRuntime _js = Substitute.For<IJSRuntime>();
     private readonly IJSObjectReference _module = Substitute.For<IJSObjectReference>();
+    private readonly RecordingLogger _logger = new();
 
     public AdminInteropTests()
         => _js.InvokeAsync<IJSObjectReference>("import", Arg.Any<object?[]?>())
@@ -26,21 +28,20 @@ public class AdminInteropTests
     [Fact]
     public async Task The_module_is_imported_once_however_many_calls_use_it()
     {
-        var interop = new AdminInterop(_js);
+        var interop = new AdminInterop(_js, _logger);
 
         await interop.LockScrollAsync(true);
         await interop.DownloadAsync("export.json", "{}");
         await interop.SubscribeAsync("theme", _ => Task.CompletedTask);
 
-        _js.ReceivedCalls().Count(call => call.GetArguments() is ["import", object?[] args]
-            && Equals(args[0], AlvoAdminAssets.Module)).ShouldBe(1);
+        Imports().ShouldBe(1);
     }
 
     [Fact]
     public async Task A_subscription_forwards_its_event_to_the_handler()
     {
         string? received = null;
-        var interop = new AdminInterop(_js);
+        var interop = new AdminInterop(_js, _logger);
 
         await interop.SubscribeAsync("move", value =>
         {
@@ -59,7 +60,7 @@ public class AdminInteropTests
     public async Task A_subscription_removes_its_own_listener_once()
     {
         _module.InvokeAsync<int?>("subscribe", Arg.Any<object?[]?>()).Returns(new ValueTask<int?>(7));
-        var interop = new AdminInterop(_js);
+        var interop = new AdminInterop(_js, _logger);
 
         var subscription = await interop.SubscribeAsync("theme", _ => Task.CompletedTask);
         await subscription.DisposeAsync();
@@ -75,13 +76,14 @@ public class AdminInteropTests
     public async Task A_circuit_that_has_gone_is_not_an_error(Type failure)
     {
         _js.InvokeAsync<IJSObjectReference>("import", Arg.Any<object?[]?>()).ThrowsAsync(Gone(failure));
-        var interop = new AdminInterop(_js);
+        var interop = new AdminInterop(_js, _logger);
 
         await Should.NotThrowAsync(() => interop.LockScrollAsync(true));
         (await interop.ThemeAsync()).ShouldBeNull();
         var subscription = await interop.SubscribeAsync("theme", _ => Task.CompletedTask);
         await Should.NotThrowAsync(subscription.DisposeAsync().AsTask);
         await Should.NotThrowAsync(interop.DisposeAsync().AsTask);
+        _logger.Levels.ShouldBeEmpty("a circuit going is not worth a log line");
     }
 
     [Theory]
@@ -91,7 +93,7 @@ public class AdminInteropTests
     public async Task A_call_the_circuit_drops_mid_flight_is_not_an_error(Type failure)
     {
         _module.InvokeAsync<IJSVoidResult>(Arg.Any<string>(), Arg.Any<object?[]?>()).ThrowsAsync(Gone(failure));
-        var interop = new AdminInterop(_js);
+        var interop = new AdminInterop(_js, _logger);
 
         await Should.NotThrowAsync(() => interop.DownloadAsync("export.json", "{}"));
     }
@@ -102,23 +104,57 @@ public class AdminInteropTests
     {
         _module.InvokeAsync<IJSVoidResult>(Arg.Any<string>(), Arg.Any<object?[]?>())
             .ThrowsAsync(new JSException("lockScroll is not a function"));
-        var interop = new AdminInterop(_js);
+        var interop = new AdminInterop(_js, _logger);
 
         await Should.ThrowAsync<JSException>(() => interop.LockScrollAsync(true));
+    }
+
+    /// <summary>
+    /// A module that did not load is reported, and the next call tries again rather than inheriting the failure.
+    /// </summary>
+    [Fact]
+    public async Task A_failed_import_is_logged_and_retried_rather_than_kept()
+    {
+        _js.InvokeAsync<IJSObjectReference>("import", Arg.Any<object?[]?>()).Returns(
+            _ => ValueTask.FromException<IJSObjectReference>(new JSException("Failed to fetch module")),
+            _ => new ValueTask<IJSObjectReference>(_module));
+        var interop = new AdminInterop(_js, _logger);
+
+        await Should.NotThrowAsync(() => interop.LockScrollAsync(true));
+        _logger.Levels.ShouldBe([LogLevel.Error]);
+
+        await interop.LockScrollAsync(true);
+        Imports().ShouldBe(2);
+        await _module.Received(1).InvokeAsync<IJSVoidResult>("lockScroll", Arg.Any<object?[]?>());
+    }
+
+    [Fact]
+    public async Task Teardown_after_a_failed_import_neither_throws_nor_imports_again()
+    {
+        _js.InvokeAsync<IJSObjectReference>("import", Arg.Any<object?[]?>())
+            .ThrowsAsync(new JSException("Failed to fetch module"));
+        var interop = new AdminInterop(_js, _logger);
+        await interop.LockScrollAsync(true);
+
+        await Should.NotThrowAsync(interop.DisposeAsync().AsTask);
+        Imports().ShouldBe(1);
     }
 
     [Fact]
     public async Task The_circuit_ending_releases_a_module_it_imported_and_imports_none_it_did_not()
     {
-        var unused = new AdminInterop(_js);
+        var unused = new AdminInterop(_js, _logger);
         await unused.DisposeAsync();
         _js.ReceivedCalls().ShouldBeEmpty();
 
-        var used = new AdminInterop(_js);
+        var used = new AdminInterop(_js, _logger);
         await used.LockScrollAsync(true);
         await used.DisposeAsync();
         await _module.Received(1).DisposeAsync();
     }
+
+    private int Imports() => _js.ReceivedCalls().Count(call => call.GetArguments() is ["import", object?[] args]
+        && Equals(args[0], AlvoAdminAssets.Module));
 
     private static Exception Gone(Type failure) => (Exception)Activator.CreateInstance(failure, "gone")!;
 
@@ -127,4 +163,18 @@ public class AdminInteropTests
         .Where(arguments => Equals(arguments[0], identifier))
         .Select(arguments => (object?[])arguments[1]!)
         .ToList();
+
+    private sealed class RecordingLogger : ILogger<AdminInterop>
+    {
+        public List<LogLevel> Levels { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Levels.Add(logLevel);
+    }
 }

@@ -18,6 +18,7 @@ namespace MMLib.Alvo.Admin.Internal;
 /// <param name="Labels">The label of each referenced row on the page, by target entity and id.</param>
 /// <param name="Sort">The sort in force, or <see langword="null"/> for the entity's own order.</param>
 /// <param name="HasPrevious">Whether there is a page before this one.</param>
+/// <param name="SheetOpen">Whether a record's sheet is over the grid, so focus can return to its row on close.</param>
 internal sealed record RecordGridScope(
     AlvoPage Page,
     IReadOnlyList<FieldSchema> Columns,
@@ -25,4 +26,5 @@ internal sealed record RecordGridScope(
     RowLabel? Label,
     IReadOnlyDictionary<string, IReadOnlyDictionary<Guid, string>> Labels,
     GridSort? Sort,
-    bool HasPrevious);
+    bool HasPrevious,
+    bool SheetOpen);

@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 
 namespace MMLib.Alvo.Admin.Internal;
@@ -19,7 +20,16 @@ namespace MMLib.Alvo.Admin.Internal;
 /// and it reports that as <see cref="JSDisconnectedException"/>, as <see cref="ObjectDisposedException"/> from
 /// a module released under the call, or as <see cref="OperationCanceledException"/> from a call torn down in
 /// flight. None of them is anything a person could act on, so every call here drops them and nothing else: a
-/// <see cref="JSException"/> is a defect in the script, and it surfaces.
+/// <see cref="JSException"/> is a defect in the script, and it surfaces. <see cref="AdminProblem"/> treats an
+/// <see cref="ObjectDisposedException"/> as a fault because on a screen it may be a genuine use-after-dispose;
+/// here it can only be the module or a .NET reference released under a call, which is the circuit going.
+/// </para>
+/// <para>
+/// <b>A failed import is logged and retried, never cached.</b> A module that did not load (the asset not
+/// served, a network blip) is logged at error, as <see cref="AdminProblem"/> logs a fault, and the gesture that
+/// needed it does nothing; the next call imports again. Keeping the failed import would leave the circuit's
+/// keyboard dead for good over one bad moment, and rethrowing it from a component's after-render would end
+/// the circuit.
 /// </para>
 /// <para>
 /// <b>Scoped, so one per circuit.</b> In Blazor Server a scope is a circuit; the module is imported on the first
@@ -27,7 +37,8 @@ namespace MMLib.Alvo.Admin.Internal;
 /// </para>
 /// </remarks>
 /// <param name="js">The circuit's JavaScript runtime.</param>
-internal sealed class AdminInterop(IJSRuntime js) : IAsyncDisposable
+/// <param name="logger">Where a failed import is recorded.</param>
+internal sealed partial class AdminInterop(IJSRuntime js, ILogger<AdminInterop> logger) : IAsyncDisposable
 {
     private Task<IJSObjectReference>? _module;
 
@@ -71,20 +82,52 @@ internal sealed class AdminInterop(IJSRuntime js) : IAsyncDisposable
     public Task<string?> ToggleThemeAsync()
         => QuietlyAsync<string?>(module => module.InvokeAsync<string?>("toggleTheme"));
 
-    /// <summary>Releases the module, when the circuit ends.</summary>
+    /// <summary>
+    /// Releases the module, when the circuit ends — only one that loaded: an import still in flight or one that
+    /// failed has nothing to release, and teardown is no place to report it again.
+    /// </summary>
     public async ValueTask DisposeAsync()
     {
-        if (_module is not null)
+        if (_module is { IsCompletedSuccessfully: true } imported)
         {
-            await QuietlyAsync(module => module.DisposeAsync());
+            _module = null;
+            try
+            {
+                await imported.Result.DisposeAsync();
+            }
+            catch (Exception exception) when (IsDisconnect(exception))
+            {
+            }
         }
     }
 
     /// <summary>
     /// Imported once, on first use: a circuit that never reaches a keyboard gesture never loads the module.
     /// </summary>
-    private Task<IJSObjectReference> ModuleAsync()
-        => _module ??= js.InvokeAsync<IJSObjectReference>("import", AlvoAdminAssets.Module).AsTask();
+    /// <returns>The module, or <see langword="null"/> when it did not load; see the remarks.</returns>
+    private async Task<IJSObjectReference?> ModuleAsync()
+    {
+        var import = _module ??= js.InvokeAsync<IJSObjectReference>("import", AlvoAdminAssets.Module).AsTask();
+        try
+        {
+            return await import;
+        }
+        catch (Exception exception) when (ReferenceEquals(_module, import))
+        {
+            _module = null;
+            if (!IsDisconnect(exception))
+            {
+                ImportFailed(logger, AlvoAdminAssets.Module, exception);
+            }
+
+            return null;
+        }
+        catch (Exception)
+        {
+            /* Another caller awaiting the same import has already forgotten and reported it. */
+            return null;
+        }
+    }
 
     private async Task QuietlyAsync(Func<IJSObjectReference, ValueTask> call)
         => await QuietlyAsync<bool>(async module =>
@@ -95,9 +138,14 @@ internal sealed class AdminInterop(IJSRuntime js) : IAsyncDisposable
 
     private async Task<T?> QuietlyAsync<T>(Func<IJSObjectReference, ValueTask<T>> call)
     {
+        if (await ModuleAsync() is not { } module)
+        {
+            return default;
+        }
+
         try
         {
-            return await call(await ModuleAsync());
+            return await call(module);
         }
         catch (Exception exception) when (IsDisconnect(exception))
         {
@@ -108,6 +156,10 @@ internal sealed class AdminInterop(IJSRuntime js) : IAsyncDisposable
     /// <summary>The three ways a circuit that has gone reports itself; see the remarks.</summary>
     private static bool IsDisconnect(Exception exception)
         => exception is JSDisconnectedException or ObjectDisposedException or OperationCanceledException;
+
+    [LoggerMessage(EventId = 3, Level = LogLevel.Error,
+        Message = "The admin dashboard could not import {Module}; its keyboard and overlay gestures do nothing until an import succeeds.")]
+    private static partial void ImportFailed(ILogger logger, string module, Exception exception);
 
     /// <summary>One listener, removed by the token admin.js answered for it.</summary>
     private sealed class Subscription(
