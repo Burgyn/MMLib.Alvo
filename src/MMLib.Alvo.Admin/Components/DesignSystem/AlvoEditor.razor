@@ -9,7 +9,8 @@
     * Escape and Cancel ask "Discard your changes?" when Dirty (EditorCloseGuard). The question replaces the form in
       place instead of opening a second dialog (spec §3.1). The scrim never closes the editor. Escape presses the
       control marked data-alvo-escape, Cancel or, while the question is asked, Keep editing (alvo.js): the library's
-      dialog keeps Escape for its own close and never hands it to OnKeyDown, and a close must ask first.
+      dialog keeps Escape for its own close and never hands it to OnKeyDown, and a close must ask first. An extra
+      action that leaves the editor for a confirm after it (Delete record) asks the same question (LeaveAsync).
     * Enter in a single-line field submits (a real form with a submit button), Ctrl/Cmd+Enter submits from anywhere,
       and the primary button is busy and disabled while OnSubmit runs (SubmitGate). Cancel stays enabled. The chord is
       alvo.js's (data-alvo-chord-submit), not a keydown handler here: the browser's own Enter-submit plus a server
@@ -89,6 +90,7 @@
 
     private MudDialog? _dialog;
     private ScrollLock? _scrollLock;
+    private Func<Task>? _leave;
 
     /// <summary>"New …" or "Edit …" (spec §3.1).</summary>
     [Parameter, EditorRequired]
@@ -170,21 +172,39 @@
         }
     }
 
-    private async Task RequestCloseAsync()
+    private Task RequestCloseAsync() => LeaveAsync(() => OnClose.InvokeAsync());
+
+    /// <summary>
+    /// Leaves the editor for <paramref name="leave"/>, such as a delete confirmed after the editor has closed; asks
+    /// "Discard your changes?" first when it holds any, and runs <paramref name="leave"/> only on Discard.
+    /// </summary>
+    /// <remarks>Internal, so no member of the public component carries it (spec D5's reason).</remarks>
+    internal async Task LeaveAsync(Func<Task> leave)
     {
         if (_guard.RequestClose(Dirty))
         {
-            await OnClose.InvokeAsync();
+            _leave = null;
+            await leave();
+            return;
         }
+
+        _leave = leave;
+        StateHasChanged();
     }
 
     private Task DiscardAsync()
     {
         _guard.Discard();
-        return OnClose.InvokeAsync();
+        var leave = _leave ?? (() => OnClose.InvokeAsync());
+        _leave = null;
+        return leave();
     }
 
-    private void KeepEditing() => _guard.KeepEditing();
+    private void KeepEditing()
+    {
+        _guard.KeepEditing();
+        _leave = null;
+    }
 
     /// <summary>
     /// Closes the dialog, unless the circuit has already gone or the provider is already disposing it. The editor is

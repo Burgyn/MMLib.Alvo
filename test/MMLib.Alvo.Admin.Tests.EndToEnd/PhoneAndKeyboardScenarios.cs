@@ -104,7 +104,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
 
         var rows = width <= 720
             ? session.Page.Locator("[data-testid='row-card']")
-            : session.Page.Locator("table.a-grid tbody tr");
+            : session.Page.GetByTestId("grid-row");
 
         await rows.First.WaitForAsync();
         (await rows.CountAsync()).ShouldBeGreaterThan(0);

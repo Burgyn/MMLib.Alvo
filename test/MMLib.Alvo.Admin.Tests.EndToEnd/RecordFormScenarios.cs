@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Data;
+﻿using Microsoft.Playwright;
+using MMLib.Alvo.Data;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
@@ -30,8 +31,8 @@ public sealed class RecordFormScenarios(AdminWorld world) : IClassFixture<AdminW
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/data/work_orders");
 
-        var row = session.Page.Locator("table.a-grid tbody tr:has-text('WO-0001')");
-        var edit = row.Locator("button:has-text('Edit')");
+        var row = session.Page.GetByTestId("grid-row").Filter(new() { HasText = "WO-0001" });
+        var edit = row.GetByRole(AriaRole.Button, new() { Name = "Edit", Exact = true });
         await edit.ClickAsync();
 
         // --- the sheet is titled by the record, and the reference reads as the customer's name
@@ -77,18 +78,16 @@ public sealed class RecordFormScenarios(AdminWorld world) : IClassFixture<AdminW
 
         // --- the save closes the sheet, says what it saved, and the grid shows the new customer
         await sheet.GetByTestId("record-save").ClickAsync();
-        var status = session.Page.Locator("[data-testid='record-status']");
-        await status.Locator("text=Saved Service call WO-0001").WaitForAsync();
-        (await sheet.CountAsync()).ShouldBe(0);
-        await row.Locator("[data-testid='ref-cell']:has-text('Grace Hopper')").WaitForAsync();
-        (await status.GetAttributeAsync("aria-live")).ShouldBe("polite");
+        await session.SnackbarAsync("Saved Service call WO-0001");
+        await sheet.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await row.GetByTestId("ref-cell").Filter(new() { HasText = "Grace Hopper" }).WaitForAsync();
 
         // --- a save with nothing changed closes without a write: the row's version does not move
         var before = await VersionAsync(order);
         await edit.ClickAsync();
         await WaitForValueAsync(session, "#rf-customer_id", "Grace Hopper");
         await sheet.GetByTestId("record-save").ClickAsync();
-        await sheet.WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+        await sheet.WaitForAsync(new() { State = WaitForSelectorState.Detached });
         (await VersionAsync(order)).ShouldBe(before, "a no-op Save must not PATCH");
 
         session.AssertConsoleClean();

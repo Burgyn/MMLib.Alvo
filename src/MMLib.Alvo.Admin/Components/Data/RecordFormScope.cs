@@ -12,8 +12,8 @@ namespace MMLib.Alvo.Admin.Components.Data;
 /// then have to keep. The Data screen works all of it out once per entity for its grid anyway.
 /// </para>
 /// <para>
-/// <b><see cref="Report"/> is how a write says what it did</b> — "Saved SO-2026-0163" — on the screen
-/// underneath, after the sheet has closed. An error is never reported this way: it stays in the sheet,
+/// <b><see cref="Report"/> is how a write says what it did</b> — "Saved SO-2026-0163" — in a snackbar over
+/// the screen underneath, after the sheet has closed. An error is never reported this way: it stays in the sheet,
 /// where the operator can act on it (design §5.5, errors are not toasts).
 /// </para>
 /// </remarks>
@@ -23,10 +23,12 @@ namespace MMLib.Alvo.Admin.Components.Data;
 /// <param name="Locks">The entity's <c>readOnly</c> fields.</param>
 /// <param name="Targets">The label of each entity a reference points at, by entity; absent when it has none.</param>
 /// <param name="Report">Says what a successful write did, in one sentence.</param>
+/// <param name="Created">Names the record a create wrote, so the grid can show it where it landed (spec §3.5).</param>
 internal sealed record RecordFormScope(
     SchemaModel Schema,
     RowLabel? Label,
     FieldMasks Masks,
     FieldLocks Locks,
     IReadOnlyDictionary<string, RowLabel> Targets,
-    Action<string> Report);
+    Action<string> Report,
+    Action<Guid> Created);

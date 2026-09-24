@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.Logging;
+using MMLib.Alvo.Admin.Components.DesignSystem;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Schema;
@@ -16,6 +17,7 @@ public partial class RecordForm
     /// <summary>How long typing into a reference has to pause before it searches.</summary>
     private static readonly TimeSpan _searchDelay = TimeSpan.FromMilliseconds(250);
 
+    private AlvoEditor? _editor;
     private AdminProblem? _problem;
     private int _problemsDrawn;
     private bool _saving;
@@ -46,9 +48,12 @@ public partial class RecordForm
     [Parameter]
     public EventCallback OnSaved { get; set; }
 
-    /// <summary>Raised after a successful delete.</summary>
+    /// <summary>
+    /// Raised with the record's label when the operator asks to delete it. The page confirms and deletes, after
+    /// this editor has closed, so no dialog opens over it.
+    /// </summary>
     [Parameter]
-    public EventCallback OnDeleted { get; set; }
+    public EventCallback<string> OnDeleteRequested { get; set; }
 
     /// <summary>What the Data screen knows about the entity beyond its shape; see <see cref="RecordFormScope"/>.</summary>
     [CascadingParameter]
@@ -267,6 +272,14 @@ public partial class RecordForm
     private static string? Required(FieldSchema column) => column.Required ? "true" : null;
 
     /// <summary>
+    /// A Mud input's label, marked when the field is required. The mark is text rather than the input's own
+    /// <c>Required</c>, which sets the browser's <c>required</c>: that blocks the submit before the engine is asked,
+    /// and a field never read back is legitimately empty on an edit (the class remarks: no second validator).
+    /// </summary>
+    private static string FieldLabel(FieldSchema column)
+        => column.Required ? $"{GridColumns.Header(column)} *" : GridColumns.Header(column);
+
+    /// <summary>
     /// The control's type. A decimal is text, not <c>number</c>: a number input displays its value in the
     /// browser's locale, which is what drew <c>21,6</c> (D-8); <c>inputmode</c> keeps the numeric keypad.
     /// </summary>
@@ -278,7 +291,24 @@ public partial class RecordForm
         _ => "text",
     };
 
-    private static string? InputMode(FieldSchema column) => column.Type == FieldType.Decimal ? "decimal" : null;
+    /// <summary>The Mud input's type for <see cref="InputType"/>, which stays the one mapping of a field to a control.</summary>
+    private static MudBlazor.InputType MudInputType(FieldSchema column) => InputType(column) switch
+    {
+        "number" => MudBlazor.InputType.Number,
+        "date" => MudBlazor.InputType.Date,
+        "datetime-local" => MudBlazor.InputType.DateTimeLocal,
+        _ => MudBlazor.InputType.Text,
+    };
+
+    /// <summary>The numeric keypad for a decimal, which is a text input for <see cref="InputType"/>'s reason.</summary>
+    private static MudBlazor.InputMode MudInputMode(FieldSchema column)
+        => column.Type == FieldType.Decimal ? MudBlazor.InputMode.@decimal : MudBlazor.InputMode.text;
+
+    /// <summary>
+    /// Whether the field draws Alvo's own label: the enum's chip group and the reference's combobox are Alvo's
+    /// controls, and every other kind is a Mud input that draws its label itself.
+    /// </summary>
+    private bool OwnLabel(FieldSchema column) => column.Type == FieldType.Enum || _pickers.ContainsKey(column.Name);
 
     /// <summary>What the schema says about this field, in the words an author would recognise.</summary>
     private string Hint(FieldSchema column)
@@ -365,6 +395,11 @@ public partial class RecordForm
         {
             var saved = await WriteAsync(values);
             Scope?.Report($"{(Creating ? "Created" : "Saved")} {LabelOf(saved)}");
+            if (Creating && RefLabels.IdOf(saved[AlvoManagedColumns.Id]) is { } created)
+            {
+                Scope?.Created(created);
+            }
+
             await OnSaved.InvokeAsync();
         }
         catch (Exception exception)
@@ -399,29 +434,13 @@ public partial class RecordForm
         return await Data.CreateAsync(Entity.Name, payload, CancellationToken.None);
     }
 
-    private async Task Delete()
-    {
-        if (RecordId is not { } id)
-        {
-            return;
-        }
-
-        _saving = true;
-        try
-        {
-            await Data.DeleteAsync(Entity.Name, id, CancellationToken.None);
-            Scope?.Report($"Deleted {LabelOf(new AlvoRecord(Values))}");
-            await OnDeleted.InvokeAsync();
-        }
-        catch (Exception exception)
-        {
-            Refused(exception);
-        }
-        finally
-        {
-            _saving = false;
-        }
-    }
+    /// <summary>
+    /// Asks the page to delete this record, once any unsaved change has been answered for: the editor closes before
+    /// the confirm opens, and closing it without asking would lose the edit silently.
+    /// </summary>
+    private Task RequestDeleteAsync()
+        => _editor?.LeaveAsync(() => OnDeleteRequested.InvokeAsync(LabelOf(new AlvoRecord(Values))))
+            ?? Task.CompletedTask;
 
     /// <summary>Renders the refusal where it happened, with the fix a write refusal calls for.</summary>
     /// <remarks>Counted, so a second refusal draws a new panel, which takes focus and is announced again.</remarks>

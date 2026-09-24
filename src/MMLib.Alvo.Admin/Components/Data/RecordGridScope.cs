@@ -19,6 +19,7 @@ namespace MMLib.Alvo.Admin.Components.Data;
 /// <param name="Sort">The sort in force, or <see langword="null"/> for the entity's own order.</param>
 /// <param name="HasPrevious">Whether there is a page before this one.</param>
 /// <param name="SheetOpen">Whether a record's sheet is over the grid, so focus can return to its row on close.</param>
+/// <param name="Created">The record the operator just created, to select and scroll to (spec §3.5).</param>
 internal sealed record RecordGridScope(
     AlvoPage Page,
     IReadOnlyList<FieldSchema> Columns,
@@ -27,4 +28,5 @@ internal sealed record RecordGridScope(
     IReadOnlyDictionary<string, IReadOnlyDictionary<Guid, string>> Labels,
     GridSort? Sort,
     bool HasPrevious,
-    bool SheetOpen);
+    bool SheetOpen,
+    Guid? Created);

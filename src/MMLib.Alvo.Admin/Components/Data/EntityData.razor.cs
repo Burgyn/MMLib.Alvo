@@ -22,7 +22,11 @@ public partial class EntityData
     private IReadOnlyList<FieldSchema> _columns = [];
     private RowLabel? _label;
     private RecordFormScope? _scope;
-    private string? _status;
+    private PendingDelete? _deleting;
+    private bool _deletingNow;
+    private Guid? _created;
+    private int _problemsDrawn;
+    private bool _problemFromWrite;
     private IReadOnlyDictionary<string, RowLabel> _targets = new Dictionary<string, RowLabel>(StringComparer.Ordinal);
     private IReadOnlyList<string> _searchable = [];
     private IReadOnlyDictionary<string, IReadOnlyDictionary<Guid, string>> _labels
@@ -107,9 +111,12 @@ public partial class EntityData
     private bool Searching => _search.Trim().Length > 0;
 
     /// <summary>What the grid draws of the current page; only read once there is one.</summary>
+    /// <remarks>
+    /// The delete confirm counts as the sheet: it replaces the editor, and focus goes back to the row when it closes.
+    /// </remarks>
     private RecordGridScope GridScope
         => new(_page!, _columns, _masks, _label, _labels, _sort, HasPrevious: _cursors.Count > 0,
-            SheetOpen: _form is not null);
+            SheetOpen: _form is not null || _deleting is not null, Created: _created);
 
     /// <summary>
     /// Reads the entity when the route names a new one, then opens whatever record the query names.
@@ -162,7 +169,7 @@ public partial class EntityData
         _search = string.Empty;
         _sort = null;
         _page = null;
-        _status = null;
+        _created = null;
         CloseSheet();
         ResetPaging();
     }
@@ -180,11 +187,12 @@ public partial class EntityData
         _searchable = _entity is null ? [] : GridQuery.Searchable(_entity, _masks);
         _targets = Targets();
         _scope = _entity is null ? null : new RecordFormScope(
-            _schema, _label, _masks, DescriptorLens.Locks(_descriptor, EntityName), _targets, Report);
+            _schema, _label, _masks, DescriptorLens.Locks(_descriptor, EntityName), _targets, Report,
+            id => _created = id);
     }
 
-    /// <summary>What the record form says after a write, shown above the grid until dismissed or replaced.</summary>
-    private void Report(string status) => _status = status;
+    /// <summary>What the record form says after a write: a snackbar, because the write worked (spec §3.3).</summary>
+    private void Report(string status) => Snackbar.Confirm(status);
 
     /// <summary>
     /// The label of every entity a reference on this entity points at, worked out once per entity rather
@@ -322,7 +330,10 @@ public partial class EntityData
 
     /// <summary>Turns a refusal into the panel, with the fix this entity's state calls for.</summary>
     private void Refused(Exception exception)
-        => _problem = AdminProblem.From(exception, Logger, Site);
+    {
+        _problem = AdminProblem.From(exception, Logger, Site);
+        _problemFromWrite = false;
+    }
 
     /// <summary>
     /// A scoped entity read with no tenant is refused by the tenant guard, and the fix says so rather than
@@ -332,6 +343,13 @@ public partial class EntityData
         => _entity?.Tenancy == TenancyMode.Scoped && _context?.Tenant is null
             ? ProblemSite.ScopedRecordsWithoutTenant
             : ProblemSite.Records;
+
+    /// <summary>Takes what was typed into the search, and runs it once typing pauses.</summary>
+    private Task SearchTyped(string? search)
+    {
+        _search = search ?? string.Empty;
+        return SearchChanged();
+    }
 
     /// <summary>Runs the search once typing pauses, from the first page.</summary>
     private async Task SearchChanged()
@@ -356,6 +374,7 @@ public partial class EntityData
 
     private void ResetPaging()
     {
+        _created = null;
         _cursors.Clear();
         _cursor = null;
     }
@@ -382,14 +401,13 @@ public partial class EntityData
 
     private void NewRecord()
     {
-        _status = null;
+        _created = null;
         _editing = null;
         _form = new Dictionary<string, object?>(StringComparer.Ordinal);
     }
 
     private void Open(AlvoRecord record)
     {
-        _status = null;
         _editing = RefLabels.IdOf(record[AlvoManagedColumns.Id]);
         _form = _entity!.Fields.ToDictionary(
             column => column.Name, column => record[column.Name], StringComparer.Ordinal);
@@ -416,4 +434,68 @@ public partial class EntityData
         CloseForm();
         await LoadAsync();
     }
+
+    /// <summary>
+    /// Closes the editor and asks: the confirm comes after the editor, never over it (spec §3.1).
+    /// </summary>
+    /// <param name="label">What the confirm calls the record.</param>
+    private void AskToDelete(string label)
+    {
+        if (_editing is { } id)
+        {
+            CloseForm();
+            _deleting = new PendingDelete(id, label);
+        }
+    }
+
+    /// <summary>Cancel and Escape keep the record; a delete already under way is left to answer.</summary>
+    private void CancelDelete()
+    {
+        if (!_deletingNow)
+        {
+            _deleting = null;
+        }
+    }
+
+    /// <summary>
+    /// Deletes what the confirm named, says so, and reads the page again. The confirm stays up and busy until the
+    /// write answers, so a second press of its verb finds it busy rather than the grid underneath.
+    /// </summary>
+    private async Task DeleteAsync()
+    {
+        if (_deleting is not { } target || _deletingNow)
+        {
+            return;
+        }
+
+        _deletingNow = true;
+        try
+        {
+            await Records.DeleteAsync(EntityName, target.Id, CancellationToken.None);
+            Snackbar.Confirm("Record deleted");
+            await LoadAsync();
+        }
+        catch (Exception exception)
+        {
+            RefusedWrite(exception);
+        }
+        finally
+        {
+            _deletingNow = false;
+            _deleting = null;
+        }
+    }
+
+    /// <summary>A refused delete: the panel on the page, which takes focus, and a new one for every refusal.</summary>
+    private void RefusedWrite(Exception exception)
+    {
+        _problem = AdminProblem.From(exception, Logger, ProblemSite.RecordWrite);
+        _problemFromWrite = true;
+        _problemsDrawn++;
+    }
+
+    /// <summary>What the operator asked to delete, held while the confirm is on screen.</summary>
+    /// <param name="Id">The record's id.</param>
+    /// <param name="Label">What the confirm calls it.</param>
+    private sealed record PendingDelete(Guid Id, string Label);
 }

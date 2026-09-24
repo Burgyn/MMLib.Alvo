@@ -35,19 +35,35 @@
         <Panel Title="Entities">
             <Subtitle>Read and written through the Data API, under your own credential.</Subtitle>
             <ChildContent>
-                @* A link rather than ListRow's button: each row is an address. *@
-                @foreach (var entity in _schema.Entities)
-                {
-                    <a class="a-listrow a-listrow--roomy a-listrow--inline a-listrow--center"
-                       href="@AdminPaths.Records(entity.Name)">
-                        <Icon Path="@Icons.Data" />
-                        <span class="a-mono a-grow a-value">@entity.Name</span>
-                        @if (entity.Tenancy == TenancyMode.Scoped)
+                @* Each row's name is a link, because each row is an address. *@
+                <MudSimpleTable Dense="true" Hover="true" Elevation="0" Class="a-grid">
+                    <thead>
+                        <tr>
+                            <th scope="col">Entity</th>
+                            <th scope="col">Tenancy</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var entity in _schema.Entities)
                         {
-                            <span class="@($"a-badge {(_tenant is null ? "a-badge--warn" : "a-badge--accent")}")">scoped</span>
+                            <tr data-testid="data-entity">
+                                <td>
+                                    <a class="a-link a-mono" href="@AdminPaths.Records(entity.Name)">@entity.Name</a>
+                                </td>
+                                <td>
+                                    @if (entity.Tenancy == TenancyMode.Scoped)
+                                    {
+                                        <span class="@($"a-badge {(_tenant is null ? "a-badge--warn" : "a-badge--accent")}")">scoped</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="a-note">global</span>
+                                    }
+                                </td>
+                            </tr>
                         }
-                    </a>
-                }
+                    </tbody>
+                </MudSimpleTable>
             </ChildContent>
         </Panel>
     }

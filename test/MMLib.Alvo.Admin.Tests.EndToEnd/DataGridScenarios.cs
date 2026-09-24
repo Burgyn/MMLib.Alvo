@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Data;
+﻿using Microsoft.Playwright;
+using MMLib.Alvo.Data;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
@@ -33,13 +34,13 @@ public sealed class DataGridScenarios(AdminWorld world) : IClassFixture<AdminWor
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/data/work_orders");
 
-        var rows = session.Page.Locator("table.a-grid tbody tr");
+        var rows = session.Page.GetByTestId("grid-row");
         await rows.Nth(1).WaitForAsync();
 
         // --- the header says what the column is, and the cell says who, not which uuid
-        (await session.Page.Locator("table.a-grid th[title='customer_id']").InnerTextAsync()).Trim()
-            .ShouldBe("Customer");
-        var adaRow = session.Page.Locator("table.a-grid tbody tr:has-text('WO-0001')");
+        (await session.Page.GetByRole(AriaRole.Columnheader, new() { Name = "Customer" }).GetAttributeAsync("title"))
+            .ShouldBe("customer_id");
+        var adaRow = rows.Filter(new() { HasText = "WO-0001" });
         var customer = adaRow.Locator("[data-testid='ref-cell']").First;
         (await customer.InnerTextAsync()).ShouldBe("Ada Lovelace");
         (await adaRow.InnerTextAsync()).ShouldNotContain(ada.ToString());
@@ -49,8 +50,7 @@ public sealed class DataGridScenarios(AdminWorld world) : IClassFixture<AdminWor
         (await session.Page.EvaluateAsync<string>("() => document.activeElement?.dataset.testid ?? ''"))
             .ShouldBe("grid-search", "/ focuses the search (design §5.5)");
         await session.Page.Keyboard.TypeAsync("0002");
-        await session.Page.Locator("table.a-grid tbody tr:has-text('WO-0001')").WaitForAsync(
-            new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+        await adaRow.WaitForAsync(new() { State = WaitForSelectorState.Detached });
         (await rows.CountAsync()).ShouldBe(1);
         (await rows.First.InnerTextAsync()).ShouldContain("Grace Hopper");
 
@@ -134,7 +134,7 @@ public sealed class DataGridScenarios(AdminWorld world) : IClassFixture<AdminWor
 
         // --- closing the sheet gives focus back to the row that opened it
         await session.Page.Keyboard.PressAsync("Escape");
-        await session.Page.Locator("#rf-name").WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+        await session.Page.Locator("#rf-name").WaitForAsync(new() { State = WaitForSelectorState.Detached });
         await session.Page.WaitForFunctionAsync(SecondRowHasFocus);
 
         session.AssertConsoleClean();

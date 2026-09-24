@@ -18,14 +18,14 @@
     The chrome — the overlay, the title, the way out, the unsaved-changes guard, the one submit — belongs to
     <AlvoEditor>. This component is the form. Delete sits left of Cancel, away from the primary action.
 *@
-<AlvoEditor TestId="record-sheet" Eyebrow="@Entity.Name" Title="@Title"
+<AlvoEditor @ref="_editor" TestId="record-sheet" Eyebrow="@Entity.Name" Title="@Title"
             SubmitText="@(RecordId is null ? "Create record" : "Save record")" SubmitTestId="record-save"
             Dirty="_draft.Dirty" Busy="_saving" OnSubmit="Save" OnClose="Cancel">
     <ExtraActions>
         @if (RecordId is not null)
         {
             <AlvoButton Tone="AlvoButton.ButtonTone.Danger" Small="true" data-testid="record-delete"
-                        Disabled="_saving" OnClick="_ => Delete()">Delete record</AlvoButton>
+                        Disabled="_saving" OnClick="_ => RequestDeleteAsync()">Delete record</AlvoButton>
         }
     </ExtraActions>
     <ChildContent>
@@ -41,16 +41,20 @@
             {
                 <div class="a-field">
                     @*
-                        A <label for> may only name a labelable element, and an enum's chips are a group
-                        of buttons, not one control; the group names this label by id instead.
+                        A Mud input draws its own label. An enum's chips and a reference's combobox are Alvo's,
+                        so they keep this one: a <label for> may only name a labelable element, and an enum's
+                        chips are a group of buttons, not one control, so the group names this label by id instead.
                     *@
-                    <label class="a-label" id="@LabelId(column)" for="@(column.Type == FieldType.Enum ? null : ControlId(column))">
-                        @GridColumns.Header(column)
-                        @if (column.Required)
-                        {
-                            <span class="a-label__required" aria-hidden="true"> *</span>
-                        }
-                    </label>
+                    @if (OwnLabel(column))
+                    {
+                        <label class="a-label" id="@LabelId(column)" for="@(column.Type == FieldType.Enum ? null : ControlId(column))">
+                            @GridColumns.Header(column)
+                            @if (column.Required)
+                            {
+                                <span class="a-label__required" aria-hidden="true"> *</span>
+                            }
+                        </label>
+                    }
                     <span class="a-hint" id="@HintId(column)" title="@column.FormatPattern">
                         <span class="a-ident">@column.Name · @TypeOf(column)</span>@Hint(column)
                     </span>
@@ -97,24 +101,25 @@
     {
         FieldType.Boolean => Flag(column),
         FieldType.Enum => Choice(column),
-        FieldType.Text => @<textarea class="a-textarea" id="@ControlId(column)" rows="4"
-                                     aria-required="@Required(column)" aria-describedby="@HintId(column)"
-                                     value="@_draft.Text(column.Name)"
-                                     @oninput="args => Set(column.Name, args.Value?.ToString())"></textarea>,
+        FieldType.Text => @<MudTextField T="string" Variant="Variant.Outlined" Lines="4" Immediate="true"
+                                         id="@ControlId(column)" Label="@FieldLabel(column)"
+                                         aria-required="@Required(column)" aria-describedby="@HintId(column)"
+                                         Value="@_draft.Text(column.Name)"
+                                         ValueChanged="text => Set(column.Name, text)" />,
         _ when _pickers.TryGetValue(column.Name, out var picker) => Reference(picker),
-        _ => @<input class="a-input" id="@ControlId(column)" type="@InputType(column)"
-                     inputmode="@InputMode(column)" aria-required="@Required(column)"
-                     aria-describedby="@HintId(column)" value="@_draft.Text(column.Name)"
-                     @oninput="args => Set(column.Name, args.Value?.ToString())" />,
+        _ => @<MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="@ControlId(column)"
+                           InputType="@MudInputType(column)" InputMode="@MudInputMode(column)"
+                           Label="@FieldLabel(column)" aria-required="@Required(column)"
+                           aria-describedby="@HintId(column)" Value="@_draft.Text(column.Name)"
+                           ValueChanged="text => Set(column.Name, text)" />,
     };
 
     private RenderFragment Flag(FieldSchema column)
     {
         var on = string.Equals(_draft.Text(column.Name), "true", StringComparison.Ordinal);
-        return @<button type="button" id="@ControlId(column)"
-                        class="@($"a-toggle{(on ? " a-toggle--on" : string.Empty)}")"
-                        aria-describedby="@HintId(column)"
-                        @onclick="() => Toggle(column.Name)" aria-pressed="@(on ? "true" : "false")"></button>;
+        return @<MudSwitch T="bool" Value="on" ValueChanged="_ => Toggle(column.Name)" Color="Color.Primary"
+                           Label="@GridColumns.Header(column)" id="@ControlId(column)"
+                           aria-describedby="@HintId(column)" />;
     }
 
     private RenderFragment Choice(FieldSchema column) => @<ChipGroup TValue="string" Items="@(column.EnumValues ?? [])"

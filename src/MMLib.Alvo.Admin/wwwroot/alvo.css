@@ -1512,6 +1512,7 @@
     border-color: var(--border2);
   }
 
+  /* prototype-only: the design prototype's switch; the record form's boolean is a MudSwitch. */
   .a-toggle {
     position: relative;
     width: 38px;
@@ -1524,6 +1525,7 @@
     transition: background 0.14s ease;
   }
 
+  /* prototype-only */
   .a-toggle::after {
     content: '';
     position: absolute;
@@ -1536,10 +1538,12 @@
     transition: transform 0.14s ease;
   }
 
+  /* prototype-only */
   .a-toggle--on {
     background: var(--accent);
   }
 
+  /* prototype-only */
   .a-toggle--on::after {
     transform: translateX(16px);
   }
@@ -1833,29 +1837,8 @@
     max-width: 360px;
   }
 
-  /* The line over the grid: its search, and the sentence a write leaves behind. A block rather than a
-     stack, so the always-present (and usually empty) status region adds no gap of its own. */
-  .a-grid-bar {
-    display: block;
-  }
-
-  /* "Saved SO-2026-0163" — quiet, neutral, and gone when dismissed. Not a toast: it does not float,
-     time out or cover anything, and an error never appears here. */
-  .a-status-line {
-    display: flex;
-    width: fit-content;
-    max-width: 100%;
-    align-items: center;
-    gap: var(--space-3);
-    margin-top: var(--space-3);
-    padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--panel);
-    color: var(--dim);
-    font-size: var(--text-sm);
-  }
-
+  /* Kept although the table is the library's (plan V6): its cell padding and lines are on cells Alvo writes,
+     which the base layer's reset hands back to the browser, and its hover colour is not one of the tokens. */
   .a-grid td {
     padding: calc(var(--space-3) * var(--density)) var(--space-4);
     border-bottom: 1px solid var(--border);
@@ -3073,6 +3056,12 @@
   /* An outlined input draws its own focused border; a second ring inside it is noise, not a signal. */
   .mud-input-slot:focus-visible {
     box-shadow: none;
+  }
+
+  /* The browser sizes a search input border-box, so the library's fixed height swallowed its own padding and
+     the Data search drew as a sliver with its text spilling out of it. */
+  .mud-input-slot[type='search'] {
+    box-sizing: content-box;
   }
 
   /* Alvo puts an icon beside a button's label as content rather than through the library's icon slots, so

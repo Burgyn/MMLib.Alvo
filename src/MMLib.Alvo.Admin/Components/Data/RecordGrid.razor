@@ -10,57 +10,65 @@
 *@
 @implements IAsyncDisposable
 @inject AdminInterop Interop
+@inject IScrollManager Scroll
 
 <div class="a-grid-wrap a-only-desktop-block">
     @* `data-alvo-keyboard` says the rows' keys have a listener, for the markKeyboardReady reason: a `j` pressed
-       before this grid has subscribed reaches nobody. *@
-    <table class="a-grid" data-testid="record-grid" data-alvo-keyboard="@(_listening ? "ready" : null)">
-        <thead>
-            <tr>
-                @foreach (var column in Scope.Columns)
-                {
-                    <th class="@(IsNumeric(column) ? "a-num" : null)" title="@column.Name"
-                        aria-sort="@AriaSort(column)">
-                        @if (GridQuery.Sortable(column, Scope.Masks))
-                        {
-                            <button type="button" class="a-grid__sort" @onclick="() => OnSort.InvokeAsync(column)">
-                                @GridColumns.Header(column)<span class="a-grid__arrow" aria-hidden="true">@Arrow(column)</span>
-                            </button>
-                        }
-                        else
-                        {
-                            @GridColumns.Header(column)
-                        }
-                    </th>
-                }
-                <th></th>
-            </tr>
-        </thead>
-        <tbody @ref="_body">
-            @*
-                The whole row opens the record, because that is what a reader reaching for a
-                row means; the Edit button stays as the same action for Tab, which a clickable
-                row alone does not give — a <tr> is not a control. The row takes focus only
-                from `j`/`k` (tabindex -1), so Tab still walks the controls and nothing else.
-            *@
-            @{ var selected = Selected; }
-            @foreach (var (row, index) in Scope.Page.Items.Select((row, index) => (row, index)))
-            {
-                <tr class="a-grid__row" data-testid="grid-row" tabindex="-1"
-                    aria-selected="@(index == selected ? "true" : null)"
-                    @onclick="() => OpenAsync(index)">
+       before this grid has subscribed reaches nobody. The table is the library's (plan V6); the rows are Alvo's,
+       because the library's rows take no focus and have no row cursor (study §4.1). `scope="col"` because the
+       library's table rules set each cell's display, and Chromium then exposes a bare <th> as a cell, not a header. *@
+    <div data-testid="record-grid" data-alvo-keyboard="@(_listening ? "ready" : null)">
+        <MudSimpleTable Dense="true" Hover="true" FixedHeader="true" Elevation="0" Class="a-grid">
+            <thead>
+                <tr>
                     @foreach (var column in Scope.Columns)
                     {
-                        <td class="@CellClass(column, row)">@Value(column, row)</td>
+                        <th scope="col" class="@(IsNumeric(column) ? "a-num" : null)" title="@column.Name"
+                            aria-sort="@AriaSort(column)">
+                            @if (GridQuery.Sortable(column, Scope.Masks))
+                            {
+                                <button type="button" class="a-grid__sort" @onclick="() => OnSort.InvokeAsync(column)">
+                                    @GridColumns.Header(column)<span class="a-grid__arrow" aria-hidden="true">@Arrow(column)</span>
+                                </button>
+                            }
+                            else
+                            {
+                                @GridColumns.Header(column)
+                            }
+                        </th>
                     }
-                    <td class="a-cell--actions">
-                        <button type="button" class="a-btn a-btn--ghost a-btn--sm"
-                                @onclick="() => OpenAsync(index)" @onclick:stopPropagation="true">Edit</button>
-                    </td>
+                    <th></th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody @ref="_body">
+                @*
+                    The whole row opens the record, because that is what a reader reaching for a
+                    row means; the Edit button stays as the same action for Tab, which a clickable
+                    row alone does not give — a <tr> is not a control. The row takes focus only
+                    from `j`/`k` (tabindex -1), so Tab still walks the controls and nothing else.
+                *@
+                @{ var selected = Selected; }
+                @foreach (var (row, index) in Scope.Page.Items.Select((row, index) => (row, index)))
+                {
+                    <tr class="a-grid__row" data-testid="grid-row" tabindex="-1"
+                        aria-selected="@(index == selected ? "true" : null)"
+                        @onclick="() => OpenAsync(index)">
+                        @foreach (var column in Scope.Columns)
+                        {
+                            <td class="@CellClass(column, row)">@Value(column, row)</td>
+                        }
+                        <td class="a-cell--actions">
+                            @* The span keeps the press from reaching the row, which would open the record twice. *@
+                            <span @onclick:stopPropagation="true">
+                                <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true"
+                                            OnClick="_ => OpenAsync(index)">Edit</AlvoButton>
+                            </span>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    </div>
 </div>
 
 @*
@@ -74,8 +82,8 @@
         <div class="a-row-card" data-testid="row-card">
             <div class="a-row-card__head">
                 <span class="a-row-card__title">@CardTitle(row)</span>
-                <button type="button" class="a-btn a-btn--ghost a-btn--sm"
-                        @onclick="() => OnOpen.InvokeAsync(row)">Edit</button>
+                <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true"
+                            OnClick="_ => OnOpen.InvokeAsync(row)">Edit</AlvoButton>
             </div>
             @*
                 Label above value for every column the head does not already carry. The
@@ -108,11 +116,11 @@
     <span class="a-spacer"></span>
     @if (Scope.HasPrevious)
     {
-        <button type="button" class="a-btn a-btn--sm" @onclick="OnPrevious">Previous</button>
+        <AlvoButton Small="true" OnClick="_ => OnPrevious.InvokeAsync()">Previous</AlvoButton>
     }
     @if (Scope.Page.NextCursor is { Length: > 0 })
     {
-        <button type="button" class="a-btn a-btn--sm" @onclick="OnNext">Next</button>
+        <AlvoButton Small="true" OnClick="_ => OnNext.InvokeAsync()">Next</AlvoButton>
     }
 </div>
 @code {
@@ -122,6 +130,8 @@
     private Guid? _selected;
     private bool _listening;
     private bool _focusPending;
+    private Guid? _revealed;
+    private bool _revealPending;
 
     /// <summary>What to draw; see <see cref="RecordGridScope"/>.</summary>
     [CascadingParameter]
@@ -157,6 +167,51 @@
         {
             _focusPending = false;
             await Interop.FocusSelectedAsync(_body);
+        }
+
+        if (_revealPending)
+        {
+            _revealPending = false;
+            await RevealSelectedAsync();
+        }
+        else if (SelectCreated())
+        {
+            _revealPending = true;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Selects the record the operator just created, once it is on the page drawn: the page is read again after the
+    /// sheet closes, so the first render after a create still holds the rows from before it. The scroll waits for
+    /// the next render, which draws the row as selected.
+    /// </summary>
+    private bool SelectCreated()
+    {
+        if (Scope.Created is not { } created || created == _revealed
+            || !Scope.Page.Items.Any(row => IdOf(row) == created))
+        {
+            return false;
+        }
+
+        _revealed = created;
+        _selected = created;
+        return true;
+    }
+
+    /// <summary>
+    /// Scrolls the selected row into view without taking focus, which the closed sheet gave back to its trigger
+    /// (spec §3.4, §3.5).
+    /// </summary>
+    private async Task RevealSelectedAsync()
+    {
+        try
+        {
+            await Scroll.ScrollIntoViewAsync("[data-testid='record-grid'] [aria-selected='true']", ScrollBehavior.Auto);
+        }
+        catch (JSDisconnectedException)
+        {
+            /* The circuit has gone, and the page with it. */
         }
     }
 

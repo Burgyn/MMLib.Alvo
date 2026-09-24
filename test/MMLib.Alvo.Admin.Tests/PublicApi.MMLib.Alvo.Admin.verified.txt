@@ -138,7 +138,7 @@ namespace MMLib.Alvo.Admin.Components.Data
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback OnCancel { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
-        public Microsoft.AspNetCore.Components.EventCallback OnDeleted { get; set; }
+        public Microsoft.AspNetCore.Components.EventCallback<string> OnDeleteRequested { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback OnSaved { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
