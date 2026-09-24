@@ -52,8 +52,9 @@ internal sealed class AdminSession(ManagementGateway gateway, DataGateway data, 
     /// <remarks>
     /// <para>
     /// <b>Never re-taken while it is loaded</b>: a loaded copy may carry the operator's unapplied edits, and
-    /// re-taking it would discard them the moment they navigated. Asked again after the read, because another
-    /// screen of the same operator may have taken it — and edited it — during the await.
+    /// re-taking it would discard them the moment they navigated. Asked again after the read, and in the same step
+    /// as the take (<see cref="WorkingCopy.TakeIfUnloaded"/>), because another screen of the same operator may
+    /// have taken it — and edited it — during the await, or between a second look and the take.
     /// </para>
     /// <para>
     /// Separate from <see cref="WorkingCopyAsync"/> for the screens that resolve the copy before a read that
@@ -71,10 +72,7 @@ internal sealed class AdminSession(ManagementGateway gateway, DataGateway data, 
         }
 
         var descriptor = await gateway.DescriptorAsync(ct).ConfigureAwait(false);
-        if (!copy.Loaded)
-        {
-            copy.Take(descriptor.DescriptorJson, descriptor.Revision);
-        }
+        copy.TakeIfUnloaded(descriptor.DescriptorJson, descriptor.Revision);
     }
 
     /// <summary>Follows <paramref name="copy"/> until the returned handle or <paramref name="lifetime"/> ends it.</summary>

@@ -55,7 +55,7 @@ public class WorkingCopyStoreTests
         clock.Advance(WorkingCopyStore.IdleWindow + TimeSpan.FromMinutes(1));
 
         store.For(eva).ShouldNotBeSameAs(
-            first, "nothing but an apply removes an entry, so without an idle window the store only grows");
+            first, "nothing else removes an entry, so without an idle window the store only grows");
     }
 
     [Fact]
@@ -71,18 +71,6 @@ public class WorkingCopyStoreTests
             store.For(eva).ShouldBeSameAs(
                 first, "an editor left open over a night is a working copy, not an abandoned one");
         }
-    }
-
-    [Fact]
-    public void An_applied_copy_is_forgotten()
-    {
-        var store = Store(out _);
-        var eva = UserId.New();
-        var first = store.For(eva);
-
-        store.Forget(eva);
-
-        store.For(eva).ShouldNotBeSameAs(first);
     }
 
     private static WorkingCopyStore Store(out Clock clock)

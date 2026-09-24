@@ -235,6 +235,35 @@ public class WorkingCopyPendingTests
     }
 
     [Fact]
+    public void An_unloaded_copy_is_taken_once()
+    {
+        var copy = new WorkingCopy();
+
+        copy.TakeIfUnloaded(Descriptor, revision: 4).ShouldBeTrue();
+
+        copy.Loaded.ShouldBeTrue();
+        copy.Revision.ShouldBe(4);
+        copy.PendingCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public void A_loaded_copy_is_never_taken_over_its_edits()
+    {
+        var copy = Copy();
+        copy.AddEntity("invoices", scoped: false, audited: true);
+        var raised = 0;
+        copy.Changed += () => raised++;
+
+        copy.TakeIfUnloaded(Descriptor, revision: 5).ShouldBeFalse(
+            "another tab took the copy and staged an edit first; taking it again would discard that edit");
+
+        copy.Revision.ShouldBe(4);
+        copy.PendingCount.ShouldBe(1);
+        copy.Entities.ShouldContain("invoices");
+        raised.ShouldBe(0);
+    }
+
+    [Fact]
     public void The_count_is_current_the_moment_the_event_is_raised()
     {
         var copy = Copy();

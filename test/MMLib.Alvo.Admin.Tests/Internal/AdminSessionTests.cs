@@ -104,6 +104,23 @@ public class AdminSessionTests
     }
 
     [Fact]
+    public async Task A_copy_another_tab_took_during_the_read_keeps_that_tabs_edits()
+    {
+        var copy = new WorkingCopy();
+        var management = Management();
+        management.GetDescriptorAsync("p", Arg.Any<CancellationToken>()).Returns(_ =>
+        {
+            copy.Take(Applied, 3);
+            copy.RemoveEntity("orders");
+            return new ManagementDescriptor("p", 3, Applied);
+        });
+
+        await Session(management).EnsureLoadedAsync(copy, Ct);
+
+        copy.IsDirty.ShouldBeTrue("the other tab's edit landed while this one was reading the descriptor");
+    }
+
+    [Fact]
     public async Task The_copy_is_the_signed_in_operators_own()
     {
         var store = new WorkingCopyStore(TimeProvider.System);

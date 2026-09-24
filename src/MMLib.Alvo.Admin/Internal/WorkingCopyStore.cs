@@ -30,8 +30,10 @@ namespace MMLib.Alvo.Admin.Internal;
 /// A caller the resolver refuses carries <see cref="AlvoContext.Anonymous"/>, whose user is the
 /// reserved all-zero <see cref="UserId"/> — so keying on it would hand two different unresolvable
 /// operators the <em>same</em> working copy, which is precisely the sharing the paragraph above
-/// forbids. And nothing but a successful apply removes an entry, so a store that only ever grew
-/// would hold every operator who ever opened an editor until the process restarted.
+/// forbids. And nothing but idleness removes an entry — an apply re-takes the copy in place rather
+/// than dropping it, because every tab the operator has open holds that same instance and a fresh one
+/// would split them — so a store that only ever grew would hold every operator who ever opened an
+/// editor until the process restarted.
 /// </para>
 /// </remarks>
 /// <param name="time">The clock, so the idle window is testable rather than wall-clock only.</param>
@@ -72,14 +74,6 @@ internal sealed class WorkingCopyStore(TimeProvider time)
         entry.LastTouched = time.GetUtcNow();
         return entry.Copy;
     }
-
-    /// <summary>Forgets an operator's copy.</summary>
-    /// <remarks>
-    /// Called after an apply, once the copy has been re-taken from the new revision: keeping a copy
-    /// that is identical to what is applied costs nothing but reads as a pending change.
-    /// </remarks>
-    /// <param name="user">Whose copy to forget.</param>
-    public void Forget(UserId user) => _copies.TryRemove(user, out _);
 
     private void EvictIdle()
     {
