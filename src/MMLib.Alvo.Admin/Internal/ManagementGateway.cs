@@ -1,4 +1,6 @@
-﻿using Microsoft.AspNetCore.Components.Authorization;
+﻿using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Routing;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;
@@ -13,16 +15,19 @@ namespace MMLib.Alvo.Admin.Internal;
 /// <b>Why a gateway rather than components injecting the contract directly.</b> Three of the
 /// dashboard's screens need the descriptor, the schema and <c>capabilities</c> at once, and a
 /// component that fetched each in its own <c>OnInitializedAsync</c> would make three round trips
-/// per render pass and four when a child re-rendered. This holds one copy per circuit and
-/// invalidates it on an apply — which is also the only moment any of them can have changed,
-/// because every write to configuration goes through one route.
+/// per render pass and four when a child re-rendered. This holds one copy per circuit, for as long
+/// as the operator stays on one screen.
 /// </para>
 /// <para>
 /// <b>It caches, and the cache is therefore a correctness question rather than a performance
-/// one.</b> <see cref="Invalidate"/> runs after every real apply. A descriptor cannot change under
-/// a dashboard that did not change it, except by another operator's apply — and that apply moves
-/// the revision, so the next <c>If-Match</c> this circuit sends is refused with a concurrency
-/// failure rather than silently overwriting them. The stale read is visible and safe.
+/// one.</b> <see cref="Invalidate"/> runs after every real apply this circuit makes, and on every
+/// navigation. The second is what covers the applies this circuit did not make — another tab of
+/// the same operator, another administrator, the CLI, an assistant turn — none of which this
+/// circuit hears about: a scope is the circuit, and the working copy's <c>Changed</c> says an edit
+/// moved, not that a revision did (docs/architecture/admin-dashboard-review.md, F-15). The reads
+/// are in-process, so re-reading once per screen costs little, and a screen that stays open
+/// across somebody else's apply is still safe: that apply moved the revision, so the next
+/// <c>If-Match</c> this circuit sends is refused rather than silently overwriting them.
 /// </para>
 /// <para>
 /// <b>It authorizes nothing.</b> Every call runs with the operator's principal published on
@@ -39,8 +44,9 @@ internal sealed class ManagementGateway(
     IAlvoUserAdministration? people,
     IAlvoAdminCallerResolver callers,
     AuthenticationStateProvider authentication,
-    IAlvoContextAccessor ambient)
+    IAlvoContextAccessor ambient) : IDisposable
 {
+    private NavigationManager? _navigation;
     private ManagementDescriptor? _descriptor;
     private SchemaModel? _schema;
     private ManagementCapabilities? _capabilities;
@@ -316,6 +322,47 @@ internal sealed class ManagementGateway(
             ambient.Principal = previous;
         }
     }
+
+    /// <summary>
+    /// Drops the cached reads on every navigation of this circuit, so a screen reads the configuration as it
+    /// is now rather than as it was when the circuit started.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Invalidate on navigation rather than key the cache by a revision</b>, which is the other shape the
+    /// review offers. The only revision the dashboard could key on is one it saw applied, and an apply over the
+    /// CLI or the HTTP route is seen by no part of it; a navigation is, and it is the moment an operator asks
+    /// for a screen. No bus, no shared state: this circuit's own <see cref="NavigationManager"/>.
+    /// </para>
+    /// <para>
+    /// <b>Called by the registration, as the gateway is built, and the timing is the point.</b>
+    /// <see cref="NavigationManager.LocationChanged"/> runs its handlers in the order they subscribed, and the
+    /// project card re-reads the revision from its own handler. Every component that reads through this gateway
+    /// has it injected before its own <c>OnInitialized</c> can subscribe, so subscribing here, at construction,
+    /// puts the invalidation ahead of every re-read it has to precede.
+    /// </para>
+    /// </remarks>
+    /// <param name="navigation">This circuit's navigation.</param>
+    public void FollowNavigation(NavigationManager navigation)
+    {
+        ArgumentNullException.ThrowIfNull(navigation);
+
+        Dispose();
+        _navigation = navigation;
+        _navigation.LocationChanged += OnLocationChanged;
+    }
+
+    /// <summary>Stops following the circuit's navigation.</summary>
+    public void Dispose()
+    {
+        if (_navigation is not null)
+        {
+            _navigation.LocationChanged -= OnLocationChanged;
+            _navigation = null;
+        }
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args) => Invalidate();
 
     /// <summary>Drops every cached read.</summary>
     /// <remarks>

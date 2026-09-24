@@ -68,8 +68,9 @@
     /// <remarks>
     /// Without it the revision in the sidebar is whatever it was when the session started, and an
     /// operator who has just applied a change reads a number that contradicts the screen they are
-    /// looking at. The gateway's own cache is what makes this cheap: after an apply it has been
-    /// invalidated, and on every other navigation the read is already in hand.
+    /// looking at. The gateway drops its cache on the same navigation, and ahead of this handler, so the
+    /// re-read is of the revision as it is now — including one another tab or another operator applied,
+    /// which this circuit's <see cref="ManagementGateway.Applied"/> never hears about.
     /// </remarks>
     private void Reload(object? sender, LocationChangedEventArgs args) => Refresh();
 

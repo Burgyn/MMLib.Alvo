@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Components.Authorization;
+﻿using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using MMLib.Alvo.Admin.Internal;
@@ -65,12 +66,20 @@ public static class AlvoAdminServiceCollectionExtensions
         /* Through a factory: IAlvoUserAdministration is registered only by a deployment that has
            a membership store, and a nullable constructor parameter is not an optional dependency
            to the container. The same shape the core already uses for an optional data port. */
-        services.TryAddScoped(provider => new ManagementGateway(
-            provider.GetRequiredService<IAlvoManagement>(),
-            provider.GetService<IAlvoUserAdministration>(),
-            provider.GetRequiredService<IAlvoAdminCallerResolver>(),
-            provider.GetRequiredService<AuthenticationStateProvider>(),
-            provider.GetRequiredService<IAlvoContextAccessor>()));
+        /* And it follows the circuit's navigation from the moment it exists, which is what keeps its cache
+           from outliving an apply made in another circuit — ManagementGateway.FollowNavigation says why the
+           timing matters. */
+        services.TryAddScoped(provider =>
+        {
+            var gateway = new ManagementGateway(
+                provider.GetRequiredService<IAlvoManagement>(),
+                provider.GetService<IAlvoUserAdministration>(),
+                provider.GetRequiredService<IAlvoAdminCallerResolver>(),
+                provider.GetRequiredService<AuthenticationStateProvider>(),
+                provider.GetRequiredService<IAlvoContextAccessor>());
+            gateway.FollowNavigation(provider.GetRequiredService<NavigationManager>());
+            return gateway;
+        });
         services.TryAddScoped<DataGateway>();
 
         /* Both of the assistant gateway's own dependencies are optional, and neither absence is an error: a
