@@ -209,6 +209,9 @@ public sealed class AssistantGatewayTests
     /// answered <c>forbidden</c> and the assistant was blind on any real deployment — the safe direction,
     /// and useless. It is measured at the moment the inner assistant is asked <em>and</em> at the moment a
     /// later update is pulled, because the tools run between one update and the next.
+    /// <b>It measures the hand-off, not the execution context:</b> the accessor here is a substitute, a plain
+    /// field no context can hide, and this fact passed while every tool of a real turn was refused.
+    /// <c>ManagementGatewayOperatorTests</c> measures the same path over an <c>AsyncLocal</c> accessor.
     /// </remarks>
     [Fact]
     public async Task A_turn_runs_with_the_operator_published()

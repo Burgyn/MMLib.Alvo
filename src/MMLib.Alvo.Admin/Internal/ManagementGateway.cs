@@ -309,20 +309,28 @@ internal sealed class ManagementGateway(
         }, ct);
 
     /// <summary>
-    /// Runs a whole stream with the operator published, for as long as it is being consumed.
+    /// Runs a whole stream as the signed-in operator: every step of it, and nothing between two steps.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>An iterator rather than the <c>Func</c> overload, and the difference is load-bearing.</b>
-    /// <c>IAlvoContextAccessor</c> is an <see cref="System.Threading.AsyncLocal{T}"/> holder, so a
-    /// publication made inside a helper that then returns is gone by the time the caller enumerates
-    /// anything. Publishing here, in the body that drives the inner enumeration, is what keeps the caller
-    /// published for every <c>MoveNext</c> — which is what an assistant turn needs, because it calls the
-    /// management surface several times between one update and the next.
+    /// <b>Published before every step rather than once, and the difference is load-bearing.</b>
+    /// <c>IAlvoContextAccessor</c> is an <see cref="System.Threading.AsyncLocal{T}"/> holder. An async iterator
+    /// resumes on its <em>consumer's</em> execution context each time the consumer asks for the next item, so a
+    /// caller published once at the top of this body was visible to the first step alone. An assistant turn
+    /// calls its tools from the second step on — after the model's first update — so every tool saw no
+    /// principal, resolved to <c>AlvoContext.Anonymous</c> and was refused: an admin was told the assistant had
+    /// no permission to read the schema (reported 24 Sep 2026). The enumerator is therefore driven by hand, and
+    /// its creation, each <c>MoveNextAsync</c> and its disposal each run inside
+    /// <see cref="AsCallerAsync{TResult}(AlvoPrincipal?, Func{ValueTask{TResult}})"/>.
     /// </para>
     /// <para>
-    /// Without it every one of the agent's tool calls sees no principal, resolves to
-    /// <c>AlvoContext.Anonymous</c>, and is refused — the safe direction, and a blind assistant.
+    /// <b>Restored after every step, so the operator's authority stays inside the stream's own work.</b> What
+    /// the consumer does with an update runs as whoever it already was, and work a step left running stops
+    /// seeing the operator once that step has ended — restoring clears the holder the step's context captured.
+    /// </para>
+    /// <para>
+    /// The caller is resolved once per stream, not per step: a turn is one request from the operator, and a
+    /// membership read between two tokens of an answer would buy nothing the next turn does not.
     /// </para>
     /// </remarks>
     /// <typeparam name="T">What the stream yields.</typeparam>
@@ -334,19 +342,25 @@ internal sealed class ManagementGateway(
     {
         ArgumentNullException.ThrowIfNull(stream);
 
-        var previous = ambient.Principal;
-        ambient.Principal = await CallerAsync(ct).ConfigureAwait(false);
+        var caller = await CallerAsync(ct).ConfigureAwait(false);
+        var inner = await AsCallerAsync(caller, () => ValueTask.FromResult(stream().GetAsyncEnumerator(ct)))
+            .ConfigureAwait(false);
 
         try
         {
-            await foreach (var item in stream().WithCancellation(ct).ConfigureAwait(false))
+            while (await AsCallerAsync(caller, inner.MoveNextAsync).ConfigureAwait(false))
             {
-                yield return item;
+                yield return inner.Current;
             }
         }
         finally
         {
-            ambient.Principal = previous;
+            await AsCallerAsync(caller, async () =>
+            {
+                await inner.DisposeAsync().ConfigureAwait(false);
+
+                return true;
+            }).ConfigureAwait(false);
         }
     }
 
@@ -473,12 +487,38 @@ internal sealed class ManagementGateway(
     /// <param name="ct">Cancels resolving the caller; the call itself carries its own.</param>
     private async Task<T> AsOperatorAsync<T>(Func<Task<T>> call, CancellationToken ct)
     {
+        var caller = await CallerAsync(ct).ConfigureAwait(false);
+
+        return await AsCallerAsync(caller, () => new ValueTask<T>(call())).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs one step with <paramref name="caller"/> published, and restores what was published before it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>An async method of its own, so the publication cannot outlive the step.</b> The step is started inside
+    /// this method, so it and every continuation it awaits capture the caller; this method's own context is
+    /// discarded when it returns, so its caller never sees the assignment at all.
+    /// </para>
+    /// <para>
+    /// The restore is still needed, and not for the method's caller: it clears the holder the step's context
+    /// captured, so work the step started and left running stops seeing the operator. It restores the
+    /// previous value rather than clearing it because a statically rendered pass runs inside an HTTP request
+    /// that may already have published one.
+    /// </para>
+    /// </remarks>
+    /// <typeparam name="TResult">What the step answers with.</typeparam>
+    /// <param name="caller">Who the step runs as; <see langword="null"/> leaves the core to refuse it.</param>
+    /// <param name="step">The step.</param>
+    private async ValueTask<TResult> AsCallerAsync<TResult>(AlvoPrincipal? caller, Func<ValueTask<TResult>> step)
+    {
         var previous = ambient.Principal;
-        ambient.Principal = await CallerAsync(ct).ConfigureAwait(false);
+        ambient.Principal = caller;
 
         try
         {
-            return await call().ConfigureAwait(false);
+            return await step().ConfigureAwait(false);
         }
         finally
         {

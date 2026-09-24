@@ -43,3 +43,10 @@
 // every other InternalsVisibleTo in the family applies: the assemblies are unsigned, so this grants
 // access by name alone.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Admin.Tests")]
+
+// And the standalone host's suite, for the assistant's one path that crosses every package: the gateways
+// here publishing the operator, the core authorizing on that publication, and MMLib.Alvo.Ai's tools in
+// between. It is the only suite that references all three, and the defect it pins (a tool refused an admin
+// because the operator was published for the first step of a turn only) lived in the hand-off between them —
+// a fact on either side substitutes the other and passed over it.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Host.Tests")]
