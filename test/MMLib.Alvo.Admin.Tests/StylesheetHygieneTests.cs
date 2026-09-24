@@ -14,6 +14,12 @@ namespace MMLib.Alvo.Admin.Tests;
 /// load-bearing and is not. The gallery draws a few components the product has not built yet; their rules carry
 /// a <c>/* gallery-only */</c> comment, so the difference is written down rather than remembered.
 /// </para>
+/// <para>
+/// <b>The design prototype is a second consumer.</b> <c>docs/design/f5-admin</c> links this same file and adds
+/// <c>proposed.css</c> on top of it, so a rule only the prototype renders is not dead either: removing
+/// <c>.a-drawer</c> and <c>.a-modal</c> as unused left its record drawer unstyled over the page. Such a rule
+/// carries <c>/* prototype-only */</c>, and the prototype's classes are checked against the two files it links.
+/// </para>
 /// </remarks>
 public sealed class StylesheetHygieneTests
 {
@@ -27,6 +33,19 @@ public sealed class StylesheetHygieneTests
 
     private static readonly string _gallery = File.ReadAllText(Stylesheet.GalleryPath);
 
+    private static readonly IReadOnlySet<string> _galleryOnly = Stylesheet.MarkedClasses(_css, Stylesheet.GalleryOnly);
+
+    private static readonly IReadOnlySet<string> _prototypeOnly = Stylesheet.MarkedClasses(_css, Stylesheet.PrototypeOnly);
+
+    /// <summary>
+    /// The classes the prototype renders that neither file defines, each for a reason that is not an oversight.
+    /// </summary>
+    private static readonly string[] _prototypeUndefined =
+    [
+        "a-check--on",   // the drawn check box, retired with it: two meanings for .a-check (see its remark)
+        "a-json__hit",   // a script hook the prototype scrolls to; proposed.css styles its modifiers
+    ];
+
     [Fact]
     public void Every_class_the_product_names_is_defined()
         => Stylesheet.ClassesTheProductNames().Except(Stylesheet.DefinedClasses(_css)).Order().ShouldBeEmpty();
@@ -35,28 +54,51 @@ public sealed class StylesheetHygieneTests
     public void Every_class_the_stylesheet_defines_is_named_by_the_product_or_marked_gallery_only()
         => Stylesheet.DefinedClasses(_css)
             .Except(Stylesheet.ClassesTheProductNames())
-            .Except(Stylesheet.GalleryOnlyClasses(_css))
+            .Except(_galleryOnly)
+            .Except(_prototypeOnly)
             .Order().ShouldBeEmpty();
 
     /// <summary>The marker is a claim, and both halves of it are checked: the gallery draws it, and nothing else does.</summary>
     [Fact]
     public void A_gallery_only_class_is_drawn_by_the_gallery_and_by_nothing_the_product_ships()
     {
-        var marked = Stylesheet.GalleryOnlyClasses(_css);
-
-        marked.ShouldNotBeEmpty();
-        marked.Where(name => !_gallery.Contains(name, StringComparison.Ordinal)).ShouldBeEmpty();
-        marked.Intersect(Stylesheet.ClassesTheProductNames()).ShouldBeEmpty();
+        _galleryOnly.ShouldNotBeEmpty();
+        _galleryOnly.Where(name => !_gallery.Contains(name, StringComparison.Ordinal)).ShouldBeEmpty();
+        _galleryOnly.Intersect(Stylesheet.ClassesTheProductNames()).ShouldBeEmpty();
     }
 
-    /// <summary>The scan behind the three facts above sees a marked rule, and only that rule.</summary>
+    /// <summary>The same claim for the prototype: it renders the class, and the product does not.</summary>
     [Fact]
-    public void The_gallery_only_scan_reads_the_rule_the_marker_opens()
+    public void A_prototype_only_class_is_rendered_by_the_prototype_and_by_nothing_the_product_ships()
     {
-        const string css = "  /* gallery-only: drawn there. */\n  .a-dot,\n  .a-dot--big {\n  }\n\n  .a-real {\n  }\n";
+        _prototypeOnly.ShouldNotBeEmpty();
+        _prototypeOnly.Except(Stylesheet.ClassesThePrototypeNames()).Order().ShouldBeEmpty();
+        _prototypeOnly.Intersect(Stylesheet.ClassesTheProductNames()).ShouldBeEmpty();
+    }
 
-        Stylesheet.GalleryOnlyClasses(css).Order().ShouldBe(["a-dot", "a-dot--big"]);
-        Stylesheet.DefinedClasses(css).Order().ShouldBe(["a-dot", "a-dot--big", "a-real"]);
+    /// <summary>
+    /// Every class the prototype renders is defined by the shipped stylesheet or by the one it adds on top.
+    /// </summary>
+    /// <remarks>This is the check that would have caught the drawer: a class dropped from here that only the
+    /// prototype still used.</remarks>
+    [Fact]
+    public void Every_class_the_prototype_renders_is_defined_by_the_files_it_links()
+        => Stylesheet.ClassesThePrototypeNames()
+            .Except(Stylesheet.DefinedClasses(_css))
+            .Except(Stylesheet.DefinedClasses(File.ReadAllText(Stylesheet.ProposedCssPath)))
+            .Except(_prototypeUndefined)
+            .Order().ShouldBeEmpty();
+
+    /// <summary>The scan behind the facts above sees a marked rule, and only that rule — or only that alias.</summary>
+    [Fact]
+    public void The_marker_scan_reads_the_selectors_between_the_marker_and_the_brace()
+    {
+        const string css = "  /* gallery-only: drawn there. */\n  .a-dot,\n  .a-dot--big {\n  }\n\n"
+            + "  .a-real,\n  /* prototype-only: an alias. */\n  .a-old {\n  }\n";
+
+        Stylesheet.MarkedClasses(css, Stylesheet.GalleryOnly).Order().ShouldBe(["a-dot", "a-dot--big"]);
+        Stylesheet.MarkedClasses(css, Stylesheet.PrototypeOnly).ShouldBe(["a-old"]);
+        Stylesheet.DefinedClasses(css).Order().ShouldBe(["a-dot", "a-dot--big", "a-old", "a-real"]);
     }
 
     /// <summary>

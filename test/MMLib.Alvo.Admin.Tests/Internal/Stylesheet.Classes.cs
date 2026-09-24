@@ -8,10 +8,19 @@ namespace MMLib.Alvo.Admin.Tests.Internal;
 internal static partial class Stylesheet
 {
     /// <summary>The marker a rule carries when only the gallery draws it.</summary>
-    internal const string GalleryOnlyMarker = "gallery-only";
+    internal const string GalleryOnly = "gallery-only";
+
+    /// <summary>The marker a rule carries when only the F5 design prototype renders it.</summary>
+    internal const string PrototypeOnly = "prototype-only";
 
     /// <summary>The folder the product's markup, code and scripts live in.</summary>
     internal static string AdminSourcePath { get; } = Path.Combine(RepositoryRoot.Find(), "src", "MMLib.Alvo.Admin");
+
+    /// <summary>The F5 design prototype, which links the shipped stylesheet rather than a copy of it.</summary>
+    internal static string PrototypePath { get; } = Path.Combine(RepositoryRoot.Find(), "docs", "design", "f5-admin");
+
+    /// <summary>What the prototype adds to the shipped stylesheet — on top of it, never instead of it.</summary>
+    internal static string ProposedCssPath { get; } = Path.Combine(PrototypePath, "proposed.css");
 
     /// <summary>Every <c>a-*</c> class a selector of <paramref name="css"/> names, comments aside.</summary>
     /// <param name="css">The stylesheet's text.</param>
@@ -22,13 +31,23 @@ internal static partial class Stylesheet
         return ClassesIn(Comment().Replace(css, string.Empty));
     }
 
-    /// <summary>The classes named by a rule that a <c>/* gallery-only … */</c> comment opens.</summary>
+    /// <summary>
+    /// The classes a <c>/* gallery-only … */</c> or <c>/* prototype-only … */</c> comment marks: those of the
+    /// selectors between it and the brace that opens its rule.
+    /// </summary>
+    /// <remarks>
+    /// The comment may stand inside a selector list, so an alias such as <c>.a-meta, /* … */ .a-switcher-meta</c>
+    /// marks the alias alone.
+    /// </remarks>
     /// <param name="css">The stylesheet's text.</param>
+    /// <param name="marker"><see cref="GalleryOnly"/> or <see cref="PrototypeOnly"/>.</param>
     /// <returns>The class names, without the leading dot.</returns>
-    internal static IReadOnlySet<string> GalleryOnlyClasses(string css)
+    internal static IReadOnlySet<string> MarkedClasses(string css, string marker)
     {
         ArgumentNullException.ThrowIfNull(css);
-        return ClassesIn(string.Join('\n', MarkedRule().Matches(css).Select(match => match.Groups["selector"].Value)));
+        return ClassesIn(string.Join('\n', MarkedRule().Matches(css)
+            .Where(match => match.Groups["marker"].Value == marker)
+            .Select(match => match.Groups["selector"].Value)));
     }
 
     /// <summary>
@@ -41,10 +60,22 @@ internal static partial class Stylesheet
     /// <c>"a-tab{(…)}"</c>, <c>" a-tab--active"</c> and <c>'.a-content'</c>.
     /// </remarks>
     /// <returns>The class names.</returns>
-    internal static IReadOnlySet<string> ClassesTheProductNames()
+    internal static IReadOnlySet<string> ClassesTheProductNames() => ClassesNamedIn(ProductSources());
+
+    /// <summary>
+    /// Every <c>a-*</c> class the prototype's scripts render, read the way <see cref="ClassesTheProductNames"/>
+    /// reads the product. Its own scenarios are left out: they assert classes, they do not render them.
+    /// </summary>
+    /// <returns>The class names.</returns>
+    internal static IReadOnlySet<string> ClassesThePrototypeNames()
+        => ClassesNamedIn(Directory.EnumerateFiles(PrototypePath, "*.js", SearchOption.AllDirectories)
+            .Where(file => !Path.GetRelativePath(PrototypePath, file).Replace('\\', '/')
+                .StartsWith("tests/", StringComparison.Ordinal)));
+
+    private static HashSet<string> ClassesNamedIn(IEnumerable<string> files)
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var file in ProductSources())
+        foreach (var file in files)
         {
             names.UnionWith(ProductClass().Matches(File.ReadAllText(file)).Select(match => match.Value));
         }
@@ -89,7 +120,7 @@ internal static partial class Stylesheet
     [GeneratedRegex(@"/\*.*?\*/", RegexOptions.Singleline)]
     private static partial Regex Comment();
 
-    [GeneratedRegex(@"/\*\s*gallery-only\b.*?\*/\s*(?<selector>[^{}]+)\{", RegexOptions.Singleline)]
+    [GeneratedRegex(@"/\*\s*(?<marker>gallery-only|prototype-only)\b.*?\*/\s*(?<selector>[^{}]+)\{", RegexOptions.Singleline)]
     private static partial Regex MarkedRule();
 
     [GeneratedRegex(@"\.(?<name>a-[a-z0-9]+(?:(?:--|__|-)[a-z0-9]+)*)")]

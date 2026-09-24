@@ -637,7 +637,9 @@
 
   /* The one line of facts under a name — roles and tenant, a revision's author and time. It was the
      project switcher's class, borrowed by five screens that are not the switcher. */
-  .a-meta {
+  .a-meta,
+  /* prototype-only: the switcher class .a-meta replaced, which the design prototype still renders. */
+  .a-switcher-meta {
     display: block;
     color: var(--dim);
     font-size: var(--text-2xs);
@@ -895,7 +897,9 @@
     gap: var(--space-1);
   }
 
-  .a-pagehead__title {
+  .a-pagehead__title,
+  /* prototype-only: the design prototype's name for the page title (docs/design/f5-admin). */
+  .a-page-title {
     margin: 0;
     font-size: var(--text-xl);
     font-weight: var(--weight-bold);
@@ -2133,6 +2137,16 @@
     padding-top: 12vh;
   }
 
+  /* prototype-only: the F5 design prototype (docs/design/f5-admin) links this file and still renders it. */
+  .a-modal {
+    width: min(560px, calc(100vw - var(--space-8)));
+    padding: var(--space-6);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--panel);
+    box-shadow: var(--shadow-pop);
+  }
+
   /* The pressed state is the style, so a chip that says aria-pressed="true" cannot look unpicked. */
   .a-chip--on,
   .a-chip[aria-pressed='true'] {
@@ -2170,6 +2184,17 @@
     .a-split__main {
       align-self: stretch;
     }
+  }
+
+  /* prototype-only: the F5 design prototype (docs/design/f5-admin) links this file and still renders it. */
+  .a-drawer {
+    width: min(420px, 100vw);
+    height: 100%;
+    padding: var(--space-5);
+    border-left: 1px solid var(--border);
+    background: var(--panel);
+    box-shadow: var(--shadow-pop);
+    overflow: auto;
   }
 
   /* A destructive action asks for the name to be typed. Dropping a column and
@@ -2490,7 +2515,9 @@
     }
 
     /* The name of the thing you are looking at, at the size of a title rather than of a label. */
-    .a-pagehead__title {
+    .a-pagehead__title,
+    /* prototype-only: the design prototype's name for the page title (docs/design/f5-admin). */
+    .a-page-title {
       font-size: var(--text-2xl);
     }
 

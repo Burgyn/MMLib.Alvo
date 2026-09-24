@@ -55,6 +55,20 @@ Severity key: **H** = will actively block or duplicate the next features. **M** 
 | F-26 | 2 Shell | L | The navigation markup is written 6× (3 loops in the sidebar at `AdminLayout.razor:21-47`, 3 in the sheet at `:113-146`). `Short()` hard-codes one title (`:219-223`). The palette is a second modal implementation next to `Sheet` (own scrim, inline z-index, no scroll lock) | Add `<NavList Sections OnNavigate>`, `AdminSection.ShortTitle`, and build the palette's overlay on the shared scrim/lock | S |
 | F-27 | docs | L | Stale package docs: `AlvoAdminAssets.cs:15` says "Nothing else on this assembly is public" (about 40 components are). `AlvoAdminServiceCollectionExtensions.cs:29` says "Nothing else is registered here… no service of its own", yet it registers 4 | Correct both when F-10 is decided | S |
 
+### Decisions while executing
+
+- **F-21 — the breakpoint is pinned as two widths, not one.** `alvo.css` has one phone breakpoint, `720px`,
+  and a second media width, `1100px`, where `.a-split` (a two-column screen) stacks its aside under the main
+  column. That is a layout width rather than a device, and folding it into 720 would change how History and
+  Rules look between the two. `StylesheetHygieneTests` therefore pins the set of media widths to exactly
+  {720px, 1100px}, so a query drifting to 719px fails as the finding intends.
+- **F-21 — a second consumer of the stylesheet.** The F5 design prototype (`docs/design/f5-admin`) links the
+  shipped `alvo.css` and adds `proposed.css` on top. A rule only it renders (`.a-modal`, `.a-drawer`, and the
+  old names `.a-page-title` and `.a-switcher-meta`) is kept and marked `/* prototype-only */`, the same way
+  gallery-only rules are marked, and a test checks every class the prototype renders against the two files.
+- **F-22 — `.a-row--gap-3` was removed, not kept as half of a pair.** It restated `.a-row`'s own
+  `gap: var(--space-3)`, and no screen, the gallery included, ever used it. `.a-row--gap-2` stays.
+
 ### What is good and must be kept
 
 - **The boundary.** `MMLib.Alvo.Admin.csproj` references Abstractions and nothing else, and `BoundaryArchitectureTests` pins it, including "only the seven, plus what Blazor forces".
