@@ -35,6 +35,27 @@ public sealed class GalleryTests
         _gallery.ShouldContain("a-refused");
     }
 
+    /// <summary>
+    /// Every design-system primitive is drawn here, in the markup it renders.
+    /// </summary>
+    /// <remarks>
+    /// One class per primitive, the one only that primitive emits — so a component added to
+    /// <c>Components/DesignSystem</c> without its drawing, or a drawing left behind when a modifier is
+    /// renamed, fails here rather than in review.
+    /// </remarks>
+    [Theory]
+    [InlineData("a-section--bar")]
+    [InlineData("a-panel--padded")]
+    [InlineData("a-listrow--action")]
+    [InlineData("a-hint")]
+    [InlineData("role=\"radiogroup\"")]
+    [InlineData("a-skeleton--sm")]
+    [InlineData("a-notyet-panel__consequence")]
+    [InlineData("a-refused__reason")]
+    [InlineData("a-spacer")]
+    public void The_gallery_draws_each_primitive(string marker)
+        => _gallery.ShouldContain(marker);
+
     [Fact]
     public void The_gallery_shows_the_mobile_substitute_for_a_grid_row()
         => _gallery.ShouldContain("a-row-card");

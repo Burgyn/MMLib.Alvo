@@ -122,6 +122,23 @@ public sealed partial class ComponentLayerTests
         => Stylesheet.BlocksOutsideLayers(_css, _layers).ShouldBeEmpty();
 
     /// <summary>
+    /// The layout utilities are in the last layer, so they win over any component rule they are added to —
+    /// the reason they can replace a <c>style</c> attribute, which won the same way.
+    /// </summary>
+    [Fact]
+    public void The_layout_utilities_are_the_last_word()
+    {
+        var css = _css.ReplaceLineEndings("\n");
+        var start = css.IndexOf("\n@layer utilities {", StringComparison.Ordinal);
+        start.ShouldBeGreaterThanOrEqualTo(0, "the stylesheet has no utilities layer");
+        var utilities = css[start..];
+
+        utilities.ShouldContain("  .a-spacer {");
+        utilities.ShouldContain("  .a-row--gap-2 {");
+        utilities.ShouldContain("  .a-row--gap-3 {");
+    }
+
+    /// <summary>
     /// Every face the stylesheet declares has a file behind it.
     /// </summary>
     /// <remarks>

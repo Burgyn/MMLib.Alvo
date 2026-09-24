@@ -146,6 +146,113 @@
 </div>
 
 <!-- ====================================================================== -->
+<h2 class="g-h">Primitives — the markup each design-system component renders</h2>
+
+<!-- Components/DesignSystem in the Admin package. Each block below is what one component emits, so the
+     page is a proof of the component as well as of the classes it is built from. -->
+<div class="g-two">
+  <div class="a-stack">
+    <!-- Panel Title Subtitle -->
+    <div class="a-panel">
+      <div class="a-section">
+        <span class="a-section-title">Panel</span>
+        <span class="a-section-sub">A title over its subtitle, at every width. Rows run to the panel's edge.</span>
+      </div>
+      <!-- ListRow -->
+      <div class="a-listrow"><span class="a-badge a-badge--ok">safe</span><span style="font-size:var(--text-sm)">ListRow — Add column <code class="a-mono">customers.notes</code></span></div>
+      <!-- ListRow class="a-listrow--roomy a-listrow--wrap" -->
+      <div class="a-listrow a-listrow--roomy a-listrow--wrap"><span style="flex:1;font-size:var(--text-sm)">a-listrow--roomy — a row with controls</span><button class="a-btn a-btn--ghost a-btn--sm">Change</button></div>
+      <!-- ListRow OnClick, class="a-listrow--accent" -->
+      <button type="button" class="a-listrow a-listrow--action a-listrow--accent"><span class="a-mono" style="flex:1;font-size:var(--text-sm)">invoices</span><span class="a-badge a-badge--warn">not applied yet</span></button>
+      <!-- ListRow OnClick -->
+      <button type="button" class="a-listrow a-listrow--action"><span class="a-mono" style="flex:1;font-size:var(--text-sm)">work_orders</span><span class="a-badge">12 fields</span></button>
+    </div>
+
+    <!-- Panel Title Actions -->
+    <div class="a-panel">
+      <div class="a-section a-section--bar">
+        <div class="a-section__text">
+          <span class="a-section-title">Panel with Actions</span>
+          <span class="a-section-sub">The head becomes a bar: heading left, controls right.</span>
+        </div>
+        <button class="a-btn a-btn--sm">Add a field</button>
+      </div>
+    </div>
+
+    <!-- Panel Padded class="a-panel--accent" -->
+    <div class="a-panel a-panel--padded a-panel--accent">
+      <span class="a-section-title">Applied as revision 15</span>
+      <p class="a-section-sub">Panel Padded, with the a-panel--accent modifier: the outcome of something just done.</p>
+    </div>
+  </div>
+
+  <div class="a-stack">
+    <!-- Panel Padded Title, holding Fields -->
+    <div class="a-panel a-panel--padded">
+      <div class="a-section">
+        <span class="a-section-title">Panel Padded</span>
+        <span class="a-section-sub">A form's panel: the head sits inside the panel's inset.</span>
+      </div>
+      <!-- Field Label For Hint Required -->
+      <div class="a-field">
+        <label class="a-label" for="g-reason">Why<span class="a-label__required" aria-hidden="true"> *</span></label>
+        <input class="a-input" id="g-reason" placeholder="What does this change do, and why?">
+        <span class="a-hint">Field — the hint is a-hint, not a section's subtitle.</span>
+      </div>
+      <!-- Field Label LabelId class="a-field--spaced", holding ChipGroup Multiple -->
+      <div class="a-field a-field--spaced" style="margin-top:var(--space-4)">
+        <span class="a-label" id="g-roles">Roles</span>
+        <div class="a-choice" role="group" aria-labelledby="g-roles">
+          <button type="button" class="a-chip a-chip--on" aria-pressed="true">dispatcher</button>
+          <button type="button" class="a-chip" aria-pressed="false">technician</button>
+        </div>
+        <span class="a-hint">ChipGroup Multiple — toggle buttons, each aria-pressed.</span>
+      </div>
+      <!-- ChipGroup, one of them -->
+      <div class="a-field a-field--spaced" style="margin-top:var(--space-4)">
+        <span class="a-label" id="g-type">Type</span>
+        <div class="a-choice" role="radiogroup" aria-labelledby="g-type">
+          <button type="button" role="radio" class="a-chip a-chip--on" aria-checked="true" tabindex="0">string</button>
+          <button type="button" role="radio" class="a-chip" aria-checked="false" tabindex="-1">integer</button>
+          <button type="button" role="radio" class="a-chip" aria-checked="false" tabindex="-1">decimal</button>
+        </div>
+        <span class="a-hint">ChipGroup — a radio group, each aria-checked; the arrows move the choice.</span>
+      </div>
+      <!-- utilities -->
+      <div class="a-row a-row--gap-2" style="margin-top:var(--space-4)">
+        <button class="a-btn a-btn--sm">a-row--gap-2</button>
+        <span class="a-spacer"></span>
+        <button class="a-btn a-btn--primary a-btn--sm">after a-spacer</button>
+      </div>
+    </div>
+
+    <!-- Skeleton Size="Sm|Md|Lg" -->
+    <div class="a-panel a-panel--padded">
+      <div class="a-stack">
+        <div class="a-skeleton a-skeleton--sm"></div>
+        <div class="a-skeleton a-skeleton--md"></div>
+      </div>
+    </div>
+
+    <!-- NotYetPanel Title Subtitle Consequence -->
+    <div class="a-notyet-panel">
+      <div class="a-section">
+        <span class="a-section-title">Not yet</span>
+        <span class="a-section-sub">NotYetPanel — this build parses <code class="a-mono">automations</code> and honours it nowhere.</span>
+      </div>
+      <div class="a-notyet-panel__body">
+        <span class="a-notyet-panel__consequence">no rule is ever evaluated, so no declared action runs</span>
+      </div>
+    </div>
+
+    <!-- Refusal -->
+    <div class="a-refused">
+      <span class="a-refused__reason">Refusal — this deployment has no membership store, so there is nobody to administer here.</span>
+    </div>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
 <h2 class="g-h">Data browser</h2>
 
 <div class="g-frame">

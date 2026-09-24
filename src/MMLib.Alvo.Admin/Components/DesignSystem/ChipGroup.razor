@@ -1,0 +1,108 @@
+﻿@typeparam TValue
+@*
+    A choice drawn as chips — one of them, or several (docs/architecture/admin-dashboard-review.md, F-4).
+
+    The expression that draws a chip on or off was written out eleven times, and the state a screen reader
+    hears with it on three of them. Here it is written once, with the state beside the style: several is a
+    group of toggle buttons, each with aria-pressed; one is a radio group, each chip aria-checked, one of
+    them in the Tab order and the arrows moving the choice the way a radio group's do.
+*@
+<div @attributes="Attributes" class="@CssClass.Of("a-choice", Attributes)"
+     role="@(Multiple ? "group" : "radiogroup")">
+    @for (var index = 0; index < Items.Count; index++)
+    {
+        var at = index;
+        var item = Items[at];
+        var on = IsSelected(item);
+        if (Multiple)
+        {
+            <button type="button" aria-pressed="@(on ? "true" : "false")" class="@Chip(on)"
+                    @onclick="() => ToggleAsync(item)">@Text(item)</button>
+        }
+        else
+        {
+            <button type="button" role="radio" aria-checked="@(on ? "true" : "false")" class="@Chip(on)"
+                    tabindex="@(at == TabStop ? 0 : -1)" @ref="_chips[at]"
+                    @onclick="() => ChooseAsync(item)" @onkeydown="args => MoveAsync(at, args.Key)">@Text(item)</button>
+        }
+    }
+</div>
+
+@code {
+    /// <summary>The choices, in the order they are drawn.</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<TValue> Items { get; set; } = [];
+
+    /// <summary>What is chosen: at most one item unless <see cref="Multiple"/>.</summary>
+    [Parameter]
+    public IReadOnlyCollection<TValue> Selected { get; set; } = [];
+
+    /// <summary>
+    /// Raised with the whole new selection — the pressed chip toggled in or out when several are allowed,
+    /// the one chosen chip otherwise.
+    /// </summary>
+    [Parameter]
+    public EventCallback<IReadOnlyList<TValue>> SelectedChanged { get; set; }
+
+    /// <summary>Whether several can be chosen; one when not.</summary>
+    [Parameter]
+    public bool Multiple { get; set; }
+
+    /// <summary>What a chip reads for its item; the item's own text when not given.</summary>
+    [Parameter]
+    public Func<TValue, string>? Label { get; set; }
+
+    /// <summary>
+    /// Anything else, onto the group's element: the <c>aria-labelledby</c> that names it, an <c>id</c>,
+    /// a <c>data-testid</c>.
+    /// </summary>
+    [Parameter(CaptureUnmatchedValues = true)]
+    public IReadOnlyDictionary<string, object>? Attributes { get; set; }
+
+    private ElementReference[] _chips = [];
+
+    /// <summary>The one chip Tab reaches in a radio group: the chosen one, or the first.</summary>
+    private int TabStop
+    {
+        get
+        {
+            for (var index = 0; index < Items.Count; index++)
+            {
+                if (IsSelected(Items[index]))
+                {
+                    return index;
+                }
+            }
+
+            return 0;
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (_chips.Length != Items.Count)
+        {
+            _chips = new ElementReference[Items.Count];
+        }
+    }
+
+    private bool IsSelected(TValue item) => Selected.Contains(item, EqualityComparer<TValue>.Default);
+
+    private string Text(TValue item) => Label?.Invoke(item) ?? item?.ToString() ?? string.Empty;
+
+    private static string Chip(bool on) => on ? "a-chip a-chip--on" : "a-chip";
+
+    private Task ToggleAsync(TValue item) => SelectedChanged.InvokeAsync(ChipSelection.Toggle(Selected, item));
+
+    private Task ChooseAsync(TValue item) => IsSelected(item) ? Task.CompletedTask : SelectedChanged.InvokeAsync([item]);
+
+    /// <summary>The arrows, Home and End: choose the chip they reach and move focus onto it.</summary>
+    private async Task MoveAsync(int at, string key)
+    {
+        if (ChipSelection.Move(Items.Count, at, key) is { } next)
+        {
+            await ChooseAsync(Items[next]);
+            await _chips[next].FocusAsync();
+        }
+    }
+}

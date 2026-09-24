@@ -1,0 +1,35 @@
+﻿@*
+    One row of a list inside a panel: the inset, the rule under it, and its items side by side
+    (docs/architecture/admin-dashboard-review.md, F-2). `.a-listrow` existed and was used six times; twelve
+    rows copied its padding and border into a style attribute instead, where no media query reaches them.
+
+    A row that opens something is a button, not a div with a click handler — so it is reached by Tab and
+    pressed by Enter and Space like any other control.
+*@
+@if (OnClick.HasDelegate)
+{
+    <button type="button" @attributes="Attributes"
+            class="@CssClass.Of("a-listrow", Attributes, "a-listrow--action")"
+            @onclick="OnClick">@ChildContent</button>
+}
+else
+{
+    <div @attributes="Attributes" class="@CssClass.Of("a-listrow", Attributes)">@ChildContent</div>
+}
+
+@code {
+    /// <summary>What the row carries.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>What pressing the row does; with one, the whole row is a button.</summary>
+    [Parameter]
+    public EventCallback OnClick { get; set; }
+
+    /// <summary>
+    /// Anything else, onto the row's element: an <c>id</c>, a <c>data-testid</c>, or a <c>class</c> with a
+    /// modifier — <c>a-listrow--roomy</c>, <c>--wrap</c>, <c>--stacked</c> or <c>--accent</c>.
+    /// </summary>
+    [Parameter(CaptureUnmatchedValues = true)]
+    public IReadOnlyDictionary<string, object>? Attributes { get; set; }
+}

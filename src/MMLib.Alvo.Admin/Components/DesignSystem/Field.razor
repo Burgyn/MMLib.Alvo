@@ -1,0 +1,65 @@
+﻿@*
+    A label, the control it names, and the hint that says what the control takes
+    (docs/architecture/admin-dashboard-review.md, F-3).
+
+    The label is a <label for> when the control is one element, and a plain span when it is a group —
+    chips, or an input with its buttons — which names itself through aria-labelledby and LabelId instead:
+    a <label> pointing at nothing is a label a screen reader announces for no control.
+
+    The hint is `.a-hint`, not `.a-section-sub`. The two were one class with two meanings, and a field's
+    hint then changed whenever a section's subtitle did.
+*@
+<div @attributes="Attributes" class="@CssClass.Of("a-field", Attributes)">
+    @if (For is { Length: > 0 })
+    {
+        <label class="a-label" id="@LabelId" for="@For">@Label@Marker</label>
+    }
+    else
+    {
+        <span class="a-label" id="@LabelId">@Label@Marker</span>
+    }
+    @ChildContent
+    @if (Hint is not null)
+    {
+        <span class="a-hint">@Hint</span>
+    }
+</div>
+
+@code {
+    /// <summary>What the control is called.</summary>
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>The id of the one control the label names; without it the label is a span.</summary>
+    [Parameter]
+    public string? For { get; set; }
+
+    /// <summary>The label's own id, for a group that names itself with <c>aria-labelledby</c>.</summary>
+    [Parameter]
+    public string? LabelId { get; set; }
+
+    /// <summary>The sentence under the control that says what it takes.</summary>
+    [Parameter]
+    public RenderFragment? Hint { get; set; }
+
+    /// <summary>
+    /// Whether the value must be given; marks the label, and leaves <c>aria-required</c> to the control,
+    /// which is the element a screen reader asks.
+    /// </summary>
+    [Parameter]
+    public bool Required { get; set; }
+
+    /// <summary>The control, or controls.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>
+    /// Anything else, onto the field's element — a <c>class</c> such as <c>a-field--spaced</c>.
+    /// </summary>
+    [Parameter(CaptureUnmatchedValues = true)]
+    public IReadOnlyDictionary<string, object>? Attributes { get; set; }
+
+    private RenderFragment? Marker => Required
+        ? @<span class="a-label__required" aria-hidden="true"> *</span>
+        : null;
+}

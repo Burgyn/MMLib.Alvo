@@ -523,6 +523,23 @@
     box-shadow: var(--shadow-panel);
   }
 
+  /* A panel whose content carries no inset of its own — a form, an outcome — takes the panel's.
+     Its section head then sits inside that inset rather than drawing its own, which is the shape
+     `Panel Padded` renders. */
+  .a-panel--padded {
+    padding: var(--space-5);
+  }
+
+  .a-panel--padded > .a-section {
+    padding: 0 0 var(--space-3);
+  }
+
+  /* The outcome of something the operator just did — an applied revision, a token to hand over —
+     set apart from the panels that describe what is there. */
+  .a-panel--accent {
+    border-color: var(--accentBorder);
+  }
+
   .a-card {
     display: flex;
     flex-direction: column;
@@ -632,6 +649,40 @@
   .a-listrow--removed .a-listrow__type {
     color: var(--dim);
     text-decoration: line-through;
+  }
+
+  /* A row with more to carry than a fact — a person with their controls, a level with its
+     predicate — gets the panel's own vertical inset. */
+  .a-listrow--roomy {
+    padding: var(--space-4) var(--space-5);
+  }
+
+  /* A row whose controls open underneath it: the extra part takes a line of its own. */
+  .a-listrow--wrap {
+    flex-wrap: wrap;
+  }
+
+  /* A row that is a heading over a block, not a line of items side by side. */
+  .a-listrow--stacked {
+    display: block;
+  }
+
+  /* A row that is one button: the whole row opens what it names. `border: 0` first because a
+     button brings its own box, and only the rule between rows is kept. */
+  .a-listrow--action {
+    width: 100%;
+    padding: var(--space-4);
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  /* A row that is not there yet — an entity only the working copy declares. Tinted rather than
+     badged alone, so it is found before it is read. */
+  .a-listrow--accent {
+    background: var(--accentSoft);
   }
 
   .a-detail__label {
@@ -867,6 +918,12 @@
     gap: var(--space-1);
   }
 
+  /* A field whose control is a group — chips, or an input with its buttons — and whose hint would
+     otherwise sit against the group's last line. */
+  .a-field--spaced {
+    gap: var(--space-2);
+  }
+
   /* Two or more fields side by side, stacking when there is no room for them. */
   .a-field-row {
     display: flex;
@@ -882,6 +939,18 @@
     color: var(--dim);
     font-size: var(--text-xs);
     font-weight: var(--weight-medium);
+  }
+
+  .a-label__required {
+    color: var(--accent);
+  }
+
+  /* The sentence under a control that says what it takes. Drawn like a section's subtitle, and
+     named apart from it: `.a-section-sub` had come to mean both, so no rule could address one
+     without the other. */
+  .a-hint {
+    color: var(--dim);
+    font-size: var(--text-sm);
   }
 
   /* A checkbox and its label read as one control, so the whole thing is the target.
@@ -1554,6 +1623,20 @@
     animation: a-shimmer 1.4s ease infinite;
   }
 
+  /* Three heights, not one per screen: a placeholder says "something is coming", and the fifteen
+     hand-set heights it replaces promised a precision no loading state has. */
+  .a-skeleton--sm {
+    height: 96px;
+  }
+
+  .a-skeleton--md {
+    height: 180px;
+  }
+
+  .a-skeleton--lg {
+    height: 240px;
+  }
+
   @keyframes a-shimmer {
     0% { background-position: 100% 50%; }
     100% { background-position: 0 50%; }
@@ -1706,6 +1789,7 @@
      a route or a connection string standing alone in its own box, not for a type name mid-sentence. */
   .a-refused__reason .a-mono,
   .a-section-sub .a-mono,
+  .a-hint .a-mono,
   .a-note .a-mono {
     overflow-wrap: break-word;
   }
@@ -2101,8 +2185,10 @@
 
     /* A key beside its value needs a viewport wide enough for both. At this width the
        key wins the space and the value wraps to one word per line, so the pair stacks
-       instead — the same answer the row cards give the data grid. */
-    .a-listrow {
+       instead — the same answer the row cards give the data grid. Only a row that has a
+       key: a row of items — a person and their Change button, a plan step and its badge —
+       has no pair to break, and keeps its line. */
+    .a-listrow:has(> .a-listrow__key, > .a-detail__label) {
       flex-direction: column;
       align-items: flex-start;
       gap: var(--space-1);
@@ -2264,5 +2350,27 @@
       border-left: none;
       border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     }
+  }
+}
+
+/* ===========================================================================
+   Utilities — last, so each one is the last word on the property it names.
+   Deliberately few: a utility for every declaration is a second stylesheet
+   written in class attributes.
+   =========================================================================== */
+
+@layer utilities {
+  /* Pushes what follows it to the end of a flex row. */
+  .a-spacer {
+    margin-left: auto;
+  }
+
+  /* The two gaps a row is written with besides its own. */
+  .a-row--gap-2 {
+    gap: var(--space-2);
+  }
+
+  .a-row--gap-3 {
+    gap: var(--space-3);
   }
 }
