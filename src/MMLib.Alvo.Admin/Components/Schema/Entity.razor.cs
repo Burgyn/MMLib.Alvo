@@ -326,7 +326,8 @@ public partial class Entity
 
             if (!string.Equals(editing, added.Name, StringComparison.Ordinal))
             {
-                Copy.RenameField(EntityName, editing, added.Name);
+                Copy.RenameField(EntityName, editing, added.Name, out var uncarried);
+                _renameLeftovers = (editing, uncarried);
             }
         }
         else
@@ -367,22 +368,6 @@ public partial class Entity
     {
         _editing = null;
         _editorOpen = false;
-    }
-
-    /// <summary>
-    /// Drops a field from the working copy, and leaves its row struck through where it was.
-    /// </summary>
-    /// <remarks>
-    /// No confirmation here, and that is deliberate: nothing has happened to the database yet. The
-    /// change is a line in a document, the preview is where its cost is stated as a plan, and the
-    /// apply is where dropping a column has to be allowed explicitly. A second confirmation in front
-    /// of an edit to a draft trains an operator to click through the one that matters.
-    /// </remarks>
-    private void RemoveField(string field)
-    {
-        Copy.RemoveField(EntityName, field);
-        CloseEditor();
-        ReadWorking();
     }
 
     /// <summary>Puts a removed field back exactly as the applied revision declares it.</summary>

@@ -543,11 +543,12 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     allow clearing; same for new fields rather than a silent 120.
     **Done:** `maxLength` is optional in the editor — prefilled from the declaration, written only when
     set, clearable; a new string is unbounded unless a limit is typed.
-16. **A field rename or removal carries no references.** Composite indexes, a child rollup's
+16. ✅ **A field rename or removal carries no references.** Composite indexes, a child rollup's
     `field`/`via`, `computed`/rule/hook CEL and `mutate` keys keep the old name (WC.Fields:19-68).
     Some are structured refusals (RR, BHC); an index naming a missing field has no validator check
     (outcome unverified). Probably: an `EntityReferences`-style carry for fields, and a removal that
     names what still points at the field before staging.
+    **Done:** a rename carries composite indexes, a child rollup's field/via/where, mutate keys, {{new./old.}} placeholders and — token by token — the entity's own rules/computed/hook CEL; a place it cannot rewrite safely is named on the Fields tab. A removal names every place first and is refused while one of them would make the apply refuse it.
 17. ✅ **Hidden controls still write.** `unique` hidden for 6 types but rewritten (FF:68,186); `required`
     offered beside an unseen `readOnly: true` → refused (DV:504); a `default` kept into `ref` (refused)
     or `json` (accepted, new meaning) (FF:229); boolean default coerced to `false` (FF:252); a `$cel`

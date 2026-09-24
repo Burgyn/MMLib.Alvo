@@ -54,6 +54,34 @@
         </div>
     </Sheet>
 
+    <Sheet Open="_removal is not null" Title="@($"Remove {_removal?.Field}")" TestId="remove-field-sheet"
+           Subtitle="These name the field. A removal that leaves one of the blocking ones behind is a descriptor the apply refuses."
+           OnClose="CloseRemoval">
+        <div class="a-stack">
+            @foreach (var reference in _removal?.References ?? [])
+            {
+                <ListRow data-testid="field-reference">
+                    <code class="a-mono a-listrow__key">@reference.Place</code>
+                    <span class="@($"a-badge {(reference.Blocks ? "a-badge--danger" : "a-badge--warn")}")">
+                        @(reference.Blocks ? "names it" : "may name it")
+                    </span>
+                </ListRow>
+            }
+
+            @if (_removal?.References.Any(reference => reference.Blocks) == true)
+            {
+                <Refusal data-testid="remove-field-blocked">Change or remove the places that name it first.</Refusal>
+            }
+            else
+            {
+                <div class="a-row">
+                    <button type="button" class="a-btn a-btn--danger a-btn--sm" data-testid="remove-field-anyway"
+                            @onclick="RemoveAnyway">Remove from the working copy</button>
+                </div>
+            }
+        </div>
+    </Sheet>
+
     @if (_problem is not null)
     {
         <CascadingValue Value="_problem">
@@ -123,6 +151,14 @@
                                 }
                             </Actions>
                         </SectionHead>
+                        @if (_renameLeftovers is { Uncarried.Count: > 0 } leftovers)
+                        {
+                            <p class="a-note" data-testid="rename-leftovers">
+                                <code class="a-mono">@leftovers.From</code> is renamed, and these still name it — the
+                                rename could not rewrite them safely, and the apply refuses them until they are edited:
+                                <span class="a-mono">@string.Join(", ", leftovers.Uncarried.Select(reference => reference.Place))</span>
+                            </p>
+                        }
                         <Fields Entity="@FieldsView(_entity)" Editable="DeclaredHere"
                                 OnEdit="EditField" OnRemove="RemoveField" />
                         break;

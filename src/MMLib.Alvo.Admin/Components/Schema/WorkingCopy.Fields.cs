@@ -5,8 +5,12 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /* An entity's fields: adding, renaming, removing and restoring one, and the two readings the Fields tab draws. */
 internal sealed partial class WorkingCopy
 {
+    /// <inheritdoc cref="RenameField(string, string, string, out IReadOnlyList{DescriptorReference})"/>
+    public string? RenameField(string entity, string from, string to) => RenameField(entity, from, to, out _);
+
     /// <summary>
-    /// Renames a field, carrying the rename so the apply moves the column instead of dropping it.
+    /// Renames a field, carrying the rename so the apply moves the column instead of dropping it, and carrying
+    /// every place that names the field (<see cref="FieldReferences"/>).
     /// </summary>
     /// <remarks>
     /// <see cref="RenameEntity"/>'s rules, one level down — including that the origin is read against the
@@ -15,37 +19,41 @@ internal sealed partial class WorkingCopy
     /// <param name="entity">The entity the field is on.</param>
     /// <param name="from">The name it has now.</param>
     /// <param name="to">The name it should have.</param>
+    /// <param name="uncarried">The places that name it and could not be rewritten safely, for the screen to name.</param>
     /// <returns>A sentence saying why it cannot, or <see langword="null"/> when it was renamed.</returns>
-    public string? RenameField(string entity, string from, string to)
+    public string? RenameField(string entity, string from, string to, out IReadOnlyList<DescriptorReference> uncarried)
     {
         string? refusal = null;
-        Edit(root =>
-        {
-            if (root["entities"]?[entity]?["fields"] is not JsonObject fields
-                || fields[from] is not JsonObject declared)
-            {
-                refusal = $"There is no field called {from} on {entity}.";
-                return false;
-            }
+        IReadOnlyList<DescriptorReference> left = [];
+        Edit(root => (refusal = RefuseFieldRename(root, entity, from, to)) is null && MoveField(root, entity, from, to, out left));
 
-            refusal = Refusal(from, to, fields, "field");
-            if (refusal is not null)
-            {
-                return false;
-            }
-
-            /* Against the entity's applied name, not its working one: renaming a field on an entity that was
-               itself renamed in this copy must still resolve the column that exists in the database. */
-            var appliedEntity = AppliedNameOf(entity);
-            var origin = Origin(
-                declared, from, _applied?["entities"]?[appliedEntity]?["fields"]?[from] is not null);
-
-            Rekey(fields, from, to);
-            Carry(fields[to] as JsonObject, origin, to);
-            return true;
-        });
-
+        uncarried = left;
         return refusal;
+    }
+
+    /// <summary>Every place that names a field, and which of them would make the apply refuse its removal.</summary>
+    public IReadOnlyList<DescriptorReference> ReferencesToField(string entity, string field)
+        => Read<IReadOnlyList<DescriptorReference>>(
+            () => _working is JsonObject root ? FieldReferences.Of(root, entity, field) : []);
+
+    private static string? RefuseFieldRename(JsonObject root, string entity, string from, string to)
+        => root["entities"]?[entity]?["fields"] is JsonObject fields && fields[from] is JsonObject
+            ? Refusal(from, to, fields, "field")
+            : $"There is no field called {from} on {entity}.";
+
+    private bool MoveField(JsonObject root, string entity, string from, string to, out IReadOnlyList<DescriptorReference> uncarried)
+    {
+        var fields = (JsonObject)root["entities"]![entity]!["fields"]!;
+
+        /* Against the entity's applied name, not its working one: renaming a field on an entity that was
+           itself renamed in this copy must still resolve the column that exists in the database. */
+        var origin = Origin(
+            (JsonObject)fields[from]!, from, _applied?["entities"]?[AppliedNameOf(entity)]?["fields"]?[from] is not null);
+
+        Rekey(fields, from, to);
+        Carry(fields[to] as JsonObject, origin, to);
+        uncarried = FieldReferences.Rename(root, entity, from, to);
+        return true;
     }
 
     /// <summary>Adds a field to an entity.</summary>
