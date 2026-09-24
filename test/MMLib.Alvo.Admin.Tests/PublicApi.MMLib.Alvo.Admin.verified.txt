@@ -95,9 +95,10 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem
         public string? For { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.RenderFragment? Hint { get; set; }
-        [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public string Label { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? LabelContent { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? LabelId { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -113,6 +114,16 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem
         public Microsoft.AspNetCore.Components.RenderFragment? ChildContent { get; set; }
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.EventCallback OnClick { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class NotYetConsequence : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public NotYetConsequence() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Badge { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Consequence { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     public class NotYetPanel : Microsoft.AspNetCore.Components.ComponentBase
@@ -154,6 +165,19 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public Microsoft.AspNetCore.Components.RenderFragment? ChildContent { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class SectionHead : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public SectionHead() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? Actions { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter(CaptureUnmatchedValues=true)]
+        public System.Collections.Generic.IReadOnlyDictionary<string, object>? Attributes { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.RenderFragment? Subtitle { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Title { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
     public class Skeleton : Microsoft.AspNetCore.Components.ComponentBase

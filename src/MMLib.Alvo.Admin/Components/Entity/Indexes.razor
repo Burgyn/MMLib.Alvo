@@ -8,13 +8,12 @@
     preview and the same apply. Which is the whole design: the one thing an operator reaches for
     after watching a list get slow used to be the one thing they had to leave the dashboard for.
 *@
-<div class="a-section">
-    <span class="a-section-title">Indexes</span>
-    <span class="a-section-sub">
+<SectionHead Title="Indexes">
+    <Subtitle>
         Declared in the descriptor. A unique field already has one and is not repeated here; a
         single-field index is the <code class="a-mono">index</code> facet on the field itself.
-    </span>
-</div>
+    </Subtitle>
+</SectionHead>
 
 @if (Declared.Count == 0)
 {
@@ -36,14 +35,14 @@ else
             *@
             @if (index.Fields.Count == 0)
             {
-                <span class="a-section-sub a-listrow__main" data-testid="index-unreadable">
+                <span class="a-section-sub a-grow a-value" data-testid="index-unreadable">
                     Declared in a shape this screen cannot read. The apply will refuse it — remove it here,
                     or fix it in the descriptor and import it again.
                 </span>
             }
             else
             {
-                <span class="a-mono a-listrow__main">@string.Join(", ", index.Fields)</span>
+                <span class="a-mono a-grow a-value">@string.Join(", ", index.Fields)</span>
             }
             @if (index.Unique)
             {
@@ -66,15 +65,14 @@ else
 @if (Editable)
 {
     <div class="a-stack a-stack--inset a-stack--gap-4">
-        <div class="a-section">
-            <span class="a-section-title">Add an index</span>
-            <span class="a-section-sub">
+        <SectionHead Title="Add an index">
+            <Subtitle>
                 Pick the fields in the order a query filters on them. Order is not cosmetic: an index
                 on <code class="a-mono">(a, b)</code> serves a filter on <code class="a-mono">a</code>
                 and one on <code class="a-mono">a</code> and <code class="a-mono">b</code>, and does
                 nothing for a filter on <code class="a-mono">b</code> alone.
-            </span>
-        </div>
+            </Subtitle>
+        </SectionHead>
 
         @if (_refusal is { Length: > 0 })
         {

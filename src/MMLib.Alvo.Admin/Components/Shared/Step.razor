@@ -6,9 +6,9 @@
         <span class="@($"a-badge a-step__state {(Done ? "a-badge--ok" : "a-badge--warn")}")">
             @(Done ? "done" : "to do")
         </span>
-        <span class="a-item">
+        <span class="a-grow">
             <span class="a-section-title">@Title</span>
-            <p class="a-section-sub a-step__text">@ChildContent</p>
+            <p class="a-section-sub a-then">@ChildContent</p>
         </span>
     </div>
 </Panel>

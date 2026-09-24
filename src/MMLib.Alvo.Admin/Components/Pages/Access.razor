@@ -51,8 +51,8 @@
                     @* A stable id per person, so a row can be addressed by who it is rather than by
                        where it sits in a list that reorders. *@
                     <ListRow id="@($"person-{person.Id.Value}")" class="a-listrow--roomy a-listrow--wrap a-listrow--inline">
-                        <span class="a-item a-item--wide">
-                            <span class="a-item__title">@person.Email</span>
+                        <span class="a-grow a-grow--wide">
+                            <span class="a-name">@person.Email</span>
                             <span class="a-meta">
                                 @(person.RoleNames.Count == 0 ? "no roles" : string.Join(", ", person.RoleNames)) ·
                                 @(person.Tenant is { } tenant ? $"tenant {tenant.Value}" : "no tenant")
@@ -189,7 +189,7 @@
                 {
                     <ListRow class="a-listrow--roomy a-listrow--stacked">
                         <span class="a-badge a-badge--accent">@level.Key</span>
-                        <pre class="a-code a-listrow__body"><code>@level.Value</code></pre>
+                        <pre class="a-code a-then"><code>@level.Value</code></pre>
                     </ListRow>
                 }
             }

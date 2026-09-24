@@ -7,13 +7,12 @@
 *@
 @inject Microsoft.Extensions.Options.IOptions<AlvoAdminOptions> Options
 
-<div class="a-section">
-    <span class="a-section-title">Generated API</span>
-    <span class="a-section-sub">
+<SectionHead Title="Generated API">
+    <Subtitle>
         Alvo generates exactly these five from the entity. The OpenAPI document this host serves is the
         same thing, formally.
-    </span>
-</div>
+    </Subtitle>
+</SectionHead>
 
 @*
     The contract, one click from the schema that changed it — and only where it exists. The route comes
@@ -44,7 +43,7 @@
     @* One line at every width: the verb, its route and its note are one fact. *@
     <ListRow class="a-listrow--inline a-listrow--center">
         <span class="@($"a-badge a-badge--verb {VerbTone(route.Method)}")">@route.Method</span>
-        <code class="a-mono a-listrow__main">@route.Path</code>
+        <code class="a-mono a-grow a-value">@route.Path</code>
         <span class="a-section-sub a-listrow__aside">@route.Note</span>
     </ListRow>
 }

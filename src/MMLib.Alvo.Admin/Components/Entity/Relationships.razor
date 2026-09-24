@@ -4,10 +4,9 @@
     Both directions, because only one of them is visible from the entity's own fields — and the
     incoming one is what an operator needs before deleting anything.
 *@
-<div class="a-section">
-    <span class="a-section-title">Points at</span>
-    <span class="a-section-sub">A ref field carries another entity's id, and its on-delete rule decides what happens when that row goes.</span>
-</div>
+<SectionHead Title="Points at">
+    <Subtitle>A ref field carries another entity's id, and its on-delete rule decides what happens when that row goes.</Subtitle>
+</SectionHead>
 
 @if (Outgoing.Count == 0)
 {
@@ -30,10 +29,9 @@ else
     }
 }
 
-<div class="a-section a-section--spaced">
-    <span class="a-section-title">Pointed at by</span>
-    <span class="a-section-sub">Deleting one of this entity's rows is decided by these rules, not by this entity's own.</span>
-</div>
+<SectionHead Title="Pointed at by" class="a-section--spaced">
+    <Subtitle>Deleting one of this entity's rows is decided by these rules, not by this entity's own.</Subtitle>
+</SectionHead>
 
 @if (Incoming.Count == 0)
 {

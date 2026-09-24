@@ -39,7 +39,7 @@
                     <a class="a-listrow a-listrow--roomy a-listrow--inline a-listrow--center"
                        href="@AdminPaths.Records(entity.Name)">
                         <Icon Path="@Icons.Data" />
-                        <span class="a-mono a-listrow__main">@entity.Name</span>
+                        <span class="a-mono a-grow a-value">@entity.Name</span>
                         @if (entity.Tenancy == TenancyMode.Scoped)
                         {
                             <span class="@($"a-badge {(_tenant is null ? "a-badge--warn" : "a-badge--accent")}")">scoped</span>

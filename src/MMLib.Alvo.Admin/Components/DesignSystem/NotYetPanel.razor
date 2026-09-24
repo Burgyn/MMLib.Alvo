@@ -11,18 +11,10 @@
     reworded: a second wording is a third spelling of one truth.
 *@
 <div @attributes="Attributes" class="@CssClass.Of("a-notyet-panel", Attributes)">
-    <div class="a-section">
-        <span class="a-section-title">@Title</span>
-        @if (Subtitle is not null)
-        {
-            <span class="a-section-sub">@Subtitle</span>
-        }
-    </div>
+    <SectionHead Title="@Title" Subtitle="Subtitle" />
     @if (Consequence is { Length: > 0 })
     {
-        <div class="a-notyet-panel__body">
-            <span class="a-notyet-panel__consequence">@Consequence</span>
-        </div>
+        <NotYetConsequence Consequence="@Consequence" />
     }
 </div>
 

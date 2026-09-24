@@ -99,8 +99,8 @@
                 {
                     <ListRow class="a-listrow--accent a-listrow--inline" OnClick="() => Open(pending)">
                         <Icon Path="@Icons.Schema" />
-                        <span class="a-item">
-                            <span class="a-mono a-item__title">@pending</span>
+                        <span class="a-grow">
+                            <span class="a-mono a-name">@pending</span>
                             <span class="a-meta">In the working copy. It does not exist in the database until you apply.</span>
                         </span>
                         <span class="a-badge a-badge--warn a-listrow__aside">not applied yet</span>
@@ -111,8 +111,8 @@
                 {
                     <ListRow class="a-listrow--inline" OnClick="() => Open(entity.Name)">
                         <Icon Path="@Icons.Schema" />
-                        <span class="a-item">
-                            <span class="a-mono a-item__title">@entity.Name</span>
+                        <span class="a-grow">
+                            <span class="a-mono a-name">@entity.Name</span>
                             <span class="a-meta">@(entity.Description ?? "No description in the descriptor")</span>
                         </span>
                         <span class="a-row a-row--gap-2 a-listrow__aside">

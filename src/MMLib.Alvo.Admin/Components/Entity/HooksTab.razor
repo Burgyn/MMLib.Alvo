@@ -15,13 +15,12 @@
 @using System.Text.Json
 @using System.Text.Json.Nodes
 
-<div class="a-section">
-    <span class="a-section-title">On write</span>
-    <span class="a-section-sub">
+<SectionHead Title="On write">
+    <Subtitle>
         Before-hooks run inside the transaction and can only refuse or change the row.
         After-hooks run once it is committed and are where anything that leaves the process belongs.
-    </span>
-</div>
+    </Subtitle>
+</SectionHead>
 
 @*
     Folded by default. Three refusals at full length were the first screen of this tab on a phone — the
@@ -99,14 +98,13 @@ else
 @if (Editable)
 {
     <div class="a-stack a-stack--inset a-stack--gap-4">
-        <div class="a-section">
-            <span class="a-section-title">Add a hook</span>
-            <span class="a-section-sub">
+        <SectionHead Title="Add a hook">
+            <Subtitle>
                 The point decides what the action may be. A before-hook runs in the transaction and may
                 only refuse or patch the row; a <code class="a-mono">beforeDelete</code> may only refuse,
                 because the row is going and a patch against it would be discarded.
-            </span>
-        </div>
+            </Subtitle>
+        </SectionHead>
 
         @if (_refusal is { Length: > 0 })
         {

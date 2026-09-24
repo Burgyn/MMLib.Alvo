@@ -50,7 +50,7 @@
         }
 
         <div class="a-split">
-            <Panel class="a-split__main">
+            <Panel class="a-split__main a-grow">
                 <RulesTab Rules="_rules" Entity="@Selected" />
             </Panel>
 
@@ -85,7 +85,12 @@
 
                     @if (_simulationProblem is not null)
                     {
-                        <ErrorPanel Problem="@_simulationProblem.Exception" />
+                        <ErrorPanel Problem="@_simulationProblem.Exception">
+                            <Actions>
+                                <button type="button" class="a-btn a-btn--sm" data-testid="simulate-retry"
+                                        @onclick="SimulateAsync">Try again</button>
+                            </Actions>
+                        </ErrorPanel>
                     }
                     else if (_verdict is { } verdict)
                     {
@@ -118,6 +123,7 @@
     private ManagementPolicyVerdict? _verdict;
     private AdminProblem? _problem;
     private AdminProblem? _simulationProblem;
+    private int _simulation;
     private Caller _caller = new("anonymous", null, [], null);
     private string _operation = "list";
 
@@ -192,6 +198,14 @@
         await SimulateAsync();
     }
 
+    /// <summary>
+    /// Asks the engine for the verdict on the caller and operation chosen now.
+    /// </summary>
+    /// <remarks>
+    /// <b>Only the latest question is answered.</b> The arrow keys choose as they move, so three chips
+    /// can be passed in as many keystrokes and the answers can arrive in any order; an answer to a
+    /// question that is no longer the one on screen is dropped rather than drawn under the wrong chips.
+    /// </remarks>
     private async Task SimulateAsync()
     {
         if (Selected.Length == 0)
@@ -199,19 +213,30 @@
             return;
         }
 
+        var asked = ++_simulation;
+
         try
         {
-            _simulationProblem = null;
-            _verdict = await Gateway.SimulateAsync(
+            var verdict = await Gateway.SimulateAsync(
                 new ManagementPolicySimulation(
                     Selected, _operation,
                     new ManagementSimulatedCaller(_caller.User, _caller.Roles, _caller.Tenant)),
                 CancellationToken.None);
+
+            if (asked == _simulation)
+            {
+                _simulationProblem = null;
+                _verdict = verdict;
+            }
         }
         catch (Exception exception)
         {
-            _simulationProblem = AdminProblem.From(exception, Logger);
-            _verdict = null;
+            var problem = AdminProblem.From(exception, Logger);
+            if (asked == _simulation)
+            {
+                _simulationProblem = problem;
+                _verdict = null;
+            }
         }
     }
 

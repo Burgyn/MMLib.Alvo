@@ -12,7 +12,7 @@
     <Authorized>
         <div class="a-switcher a-switcher--person">
             <span class="a-brand-mark a-brand-mark--quiet">@Initial(context.User.Identity?.Name)</span>
-            <span class="a-item">
+            <span class="a-grow">
                 <span class="a-switcher-name">@context.User.Identity?.Name</span>
                 <span class="a-meta">@Roles(context) · @Tenant(context)</span>
             </span>
@@ -20,7 +20,7 @@
         @* data-enhance="false", for the reason the sign-in form carries: the answer to this post
            is a cleared cookie and a redirect, and an enhanced post would patch the DOM instead of
            navigating — leaving the operator on a dashboard they are no longer signed into. *@
-        <form method="post" action="@AlvoAdmin.SignOutEndpoint" class="a-signout"
+        <form method="post" action="@AlvoAdmin.SignOutEndpoint" class="a-then"
               data-enhance="false">
             <AntiforgeryToken />
             <button type="submit" class="a-btn a-btn--ghost a-btn--sm a-btn--block">Sign out</button>

@@ -25,10 +25,7 @@
                 <ChildContent>
                     @if (Warned(block) is { } warning)
                     {
-                        <div class="a-notyet-panel__body">
-                            <span class="a-badge a-badge--warn">not yet</span>
-                            <span class="a-notyet-panel__consequence">@warning.Consequence</span>
-                        </div>
+                        <NotYetConsequence Consequence="@warning.Consequence" Badge="not yet" />
                     }
 
                     @if (Declared(block) is { Length: > 0 } json)

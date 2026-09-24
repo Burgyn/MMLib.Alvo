@@ -2,26 +2,15 @@
     A panel and the section head it opens with — the shape thirty screens wrote out by hand
     (docs/architecture/admin-dashboard-review.md, F-1).
 
-    The head is title over subtitle at every width; with Actions it becomes the bar, the heading on the
-    left and the controls on the right, the title and subtitle still a stacked pair beside them. No head
-    at all without a Title or a Subtitle: a panel that is only a box — a toolbar, an outcome with its own
-    wording — is still this panel.
+    The head is a SectionHead — title over subtitle, or the bar when there are Actions — so its markup
+    is written once for panels and for the heads inside a tab alike. No head at all without a Title, a
+    Subtitle or Actions: a panel that is only a box — a toolbar, an outcome with its own wording — is
+    still this panel.
 *@
 <div @attributes="Attributes" class="@CssClass.Of("a-panel", Attributes, Padded ? "a-panel--padded" : null)">
-    @if (Actions is not null)
+    @if (Actions is not null || Title is not null || Subtitle is not null)
     {
-        <div class="a-section a-section--bar">
-            <div class="a-section__text">
-                @Head
-            </div>
-            @Actions
-        </div>
-    }
-    else if (Title is not null || Subtitle is not null)
-    {
-        <div class="a-section">
-            @Head
-        </div>
+        <SectionHead Title="@Title" Subtitle="Subtitle" Actions="Actions" />
     }
     @ChildContent
 </div>
@@ -56,15 +45,4 @@
     /// </summary>
     [Parameter(CaptureUnmatchedValues = true)]
     public IReadOnlyDictionary<string, object>? Attributes { get; set; }
-
-    private RenderFragment Head => @<text>
-        @if (Title is not null)
-        {
-            <span class="a-section-title">@Title</span>
-        }
-        @if (Subtitle is not null)
-        {
-            <span class="a-section-sub">@Subtitle</span>
-        }
-    </text>;
 }

@@ -8,15 +8,15 @@
 <div class="a-confirm">
     <div class="a-error__title">@Title</div>
     <div class="a-error__detail">@Detail</div>
-    <div class="a-field a-confirm__field">
-        <label class="a-label" for="confirm-name">
-            Type <code class="a-mono">@Expected</code> to allow it
-        </label>
-        @* No placeholder. It used to be the very word to type, so the box looked filled in and an
-           operator could not tell whether they had confirmed anything yet. *@
-        <input class="a-input" id="confirm-name" value="@_typed"
-               @oninput="OnTyped" autocomplete="off" spellcheck="false" />
-    </div>
+    <Field For="confirm-name" class="a-confirm__field">
+        <LabelContent>Type <code class="a-mono">@Expected</code> to allow it</LabelContent>
+        <ChildContent>
+            @* No placeholder. It used to be the very word to type, so the box looked filled in and an
+               operator could not tell whether they had confirmed anything yet. *@
+            <input class="a-input" id="confirm-name" value="@_typed"
+                   @oninput="OnTyped" autocomplete="off" spellcheck="false" />
+        </ChildContent>
+    </Field>
 </div>
 
 @code {

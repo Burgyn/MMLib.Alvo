@@ -41,6 +41,10 @@
     /// Raised with the whole new selection — the pressed chip toggled in or out when several are allowed,
     /// the one chosen chip otherwise.
     /// </summary>
+    /// <remarks>
+    /// Raised on every press, the chosen chip's too: a screen may act on a choice that is already the
+    /// current one — clear the refusal it led to, ask the engine again — as the chips it replaced did.
+    /// </remarks>
     [Parameter]
     public EventCallback<IReadOnlyList<TValue>> SelectedChanged { get; set; }
 
@@ -103,7 +107,7 @@
 
     private Task ToggleAsync(TValue item) => SelectedChanged.InvokeAsync(ChipSelection.Toggle(Selected, item));
 
-    private Task ChooseAsync(TValue item) => IsSelected(item) ? Task.CompletedTask : SelectedChanged.InvokeAsync([item]);
+    private Task ChooseAsync(TValue item) => SelectedChanged.InvokeAsync([item]);
 
     /// <summary>The arrows, Home and End: choose the chip they reach and move focus onto it.</summary>
     private async Task MoveAsync(int at, string key)

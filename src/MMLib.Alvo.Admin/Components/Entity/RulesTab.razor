@@ -5,13 +5,12 @@
     question "would this caller get rows" is answered on the Rules screen, by the engine, and even
     there only as a predicate — never as a verdict about a stored row (§2.2.1).
 *@
-<div class="a-section">
-    <span class="a-section-title">Who may do what</span>
-    <span class="a-section-sub">
+<SectionHead Title="Who may do what">
+    <Subtitle>
         Checked inside the same transaction as the query, against the caller's id, roles and tenant
         and this record's own fields — nothing else.
-    </span>
-</div>
+    </Subtitle>
+</SectionHead>
 
 @if (Rules.Count == 0 && !Editable)
 {
@@ -29,7 +28,7 @@ else if (!Editable)
                 <span class="a-badge a-badge--accent">@rule.Key</span>
                 <code class="a-ident">@Route(rule.Key)</code>
             </div>
-            <pre class="a-code a-listrow__body"><code>@rule.Value</code></pre>
+            <pre class="a-code a-then"><code>@rule.Value</code></pre>
         </ListRow>
     }
 
@@ -55,7 +54,7 @@ else
                 <span class="@($"a-badge {(Declared(operation) is { Length: > 0 } ? "a-badge--accent" : string.Empty)}")">@operation</span>
                 <code class="a-ident">@Route(operation)</code>
             </div>
-            <textarea class="a-textarea a-mono a-listrow__body" rows="2" spellcheck="false"
+            <textarea class="a-textarea a-mono a-then" rows="2" spellcheck="false"
                       id="@($"rule-{operation}")"
                       placeholder="No rule — refused for everyone. Try: 'dispatcher' in @@user.roles"
                       value="@Declared(operation)"

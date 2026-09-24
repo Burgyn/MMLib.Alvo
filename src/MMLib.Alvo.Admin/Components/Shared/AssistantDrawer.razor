@@ -63,12 +63,9 @@
         @if (_proposal is { } proposal)
         {
             <div class="a-assistant__proposal" data-testid="assistant-proposal">
-                <div class="a-section">
-                    <span class="a-section-title">A proposed change</span>
-                    <span class="a-section-sub">
-                        Written against revision @proposal.ExpectedRevision. Nothing has been applied.
-                    </span>
-                </div>
+                <SectionHead Title="A proposed change">
+                    <Subtitle>Written against revision @proposal.ExpectedRevision. Nothing has been applied.</Subtitle>
+                </SectionHead>
 
                 @if (proposal.Refusals.Count > 0)
                 {

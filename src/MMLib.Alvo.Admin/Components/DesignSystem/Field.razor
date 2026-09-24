@@ -12,11 +12,11 @@
 <div @attributes="Attributes" class="@CssClass.Of("a-field", Attributes)">
     @if (For is { Length: > 0 })
     {
-        <label class="a-label" id="@LabelId" for="@For">@Label@Marker</label>
+        <label class="a-label" id="@LabelId" for="@For">@Text@Marker</label>
     }
     else
     {
-        <span class="a-label" id="@LabelId">@Label@Marker</span>
+        <span class="a-label" id="@LabelId">@Text@Marker</span>
     }
     @ChildContent
     @if (Hint is not null)
@@ -27,8 +27,14 @@
 
 @code {
     /// <summary>What the control is called.</summary>
-    [Parameter, EditorRequired]
+    [Parameter]
     public string Label { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The label when it carries markup — the name to type, set as code; <see cref="Label"/> otherwise.
+    /// </summary>
+    [Parameter]
+    public RenderFragment? LabelContent { get; set; }
 
     /// <summary>The id of the one control the label names; without it the label is a span.</summary>
     [Parameter]
@@ -58,6 +64,8 @@
     /// </summary>
     [Parameter(CaptureUnmatchedValues = true)]
     public IReadOnlyDictionary<string, object>? Attributes { get; set; }
+
+    private RenderFragment Text => LabelContent ?? (builder => builder.AddContent(0, Label));
 
     private RenderFragment? Marker => Required
         ? @<span class="a-label__required" aria-hidden="true"> *</span>

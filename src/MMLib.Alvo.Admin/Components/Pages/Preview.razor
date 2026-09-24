@@ -67,7 +67,7 @@
                             <span class="@($"a-badge a-listrow__aside {(step.Destructive ? "a-badge--danger" : "a-badge--ok")}")">
                                 @(step.Destructive ? "destroys" : "safe")
                             </span>
-                            <span class="a-listrow__main">
+                            <span class="a-grow a-value">
                                 @* One expression with its trailing space: a bare `@step.Verb` followed by the element on
                                    the next line lost the whitespace between them ("Drop columncustomers.notes"). *@
                                 @($"{step.Verb} ")

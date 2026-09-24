@@ -451,9 +451,6 @@
     color: var(--dim);
   }
 
-  .a-signout {
-    margin-top: var(--space-2);
-  }
 
   .a-switcher-pending {
     margin-left: var(--space-1);
@@ -509,7 +506,6 @@
     text-transform: uppercase;
   }
 
-
   .a-stack {
     display: flex;
     flex-direction: column;
@@ -543,11 +539,6 @@
   /* Badges and buttons that may not fit on one line at phone width. */
   .a-row--wrap {
     flex-wrap: wrap;
-  }
-
-  /* Items of different heights that read from their first line — a badge beside a paragraph. */
-  .a-row--top {
-    align-items: flex-start;
   }
 
   /* A row of controls placed straight into a panel, at the inset the panel's notes take. */
@@ -629,18 +620,8 @@
     margin-top: var(--space-3);
   }
 
-  /* The lead of a row: a name over its meta, taking the room the row's other items leave. */
-  .a-item {
-    flex: 1;
-    min-width: 0;
-  }
-
-  /* Only as wide as the row allows before its controls wrap under it. */
-  .a-item--wide {
-    min-width: 220px;
-  }
-
-  .a-item__title {
+  /* The name a row is about, over its meta. */
+  .a-name {
     font-size: var(--text-sm);
     font-weight: var(--weight-medium);
   }
@@ -692,10 +673,6 @@
     flex: none;
   }
 
-  .a-step__text {
-    margin-top: var(--space-2);
-  }
-
   /* One applied revision: its number, then what it did, who did it and when. */
   .a-revision {
     display: flex;
@@ -721,10 +698,6 @@
   /* The engine's verdict, in the accent of an outcome the operator asked for. */
   .a-verdict {
     padding: var(--space-4);
-  }
-
-  .a-verdict__why {
-    margin-top: var(--space-2);
   }
 
   /* Title over subtitle, at every width. Side by side, a paragraph-long subtitle was squeezed into a
@@ -885,21 +858,9 @@
     gap: var(--space-1);
   }
 
-  /* The one text of a row of items, taking the room the badges and controls leave. */
-  .a-listrow__main {
-    flex: 1;
-    min-width: 0;
-    font-size: var(--text-sm);
-  }
-
   /* An item that keeps its width while the text beside it wraps. */
   .a-listrow__aside {
     flex: none;
-  }
-
-  /* The block under a stacked row's heading — a predicate, a rule's source. */
-  .a-listrow__body {
-    margin-top: var(--space-2);
   }
 
   /* What a row opens underneath itself, on a line of its own. */
@@ -1967,10 +1928,6 @@
   .a-error__actions {
     margin-top: var(--space-3);
   }
-
-  .a-error__code {
-    margin-top: var(--space-2);
-  }
 }
 
 /* ===========================================================================
@@ -2174,12 +2131,6 @@
     width: 380px;
     max-height: calc(100vh - 180px);
     overflow-y: auto;
-  }
-
-  /* The side of a split that takes what the aside leaves, and may be narrower than its content. */
-  .a-split__main {
-    flex: 1;
-    min-width: 0;
   }
 
   @media (max-width: 1100px) {
@@ -2708,5 +2659,23 @@
 
   .a-row--gap-3 {
     gap: var(--space-3);
+  }
+
+  /* Takes the room the other items of a flex row leave, and may be narrower than its content — which
+     is what lets a long name wrap instead of pushing the row past its box. The one spelling of a pair
+     of declarations three components had each written out. */
+  .a-grow {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* A lead that keeps this much before the controls beside it wrap under it. */
+  .a-grow--wide {
+    min-width: 220px;
+  }
+
+  /* A short step below what precedes it: a predicate under its heading, a reason under its verdict. */
+  .a-then {
+    margin-top: var(--space-2);
   }
 }
