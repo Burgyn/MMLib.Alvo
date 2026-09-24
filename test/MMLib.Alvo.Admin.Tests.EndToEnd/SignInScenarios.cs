@@ -49,6 +49,34 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
             56, $"#email is {box.Height}px tall — a single-line input has been given a textarea's floor");
     }
 
+    /// <summary>
+    /// The sign-in form is on screen and can be pressed, not merely present in the DOM.
+    /// </summary>
+    /// <remarks>
+    /// <b>The defect this pins</b>: the shell's content pane became a size container so a split's reading
+    /// pane could fit the visible height, and the sign-in screen reuses that pane outside the shell's
+    /// fixed-height frame — size containment measured its height from nothing and the whole form collapsed
+    /// to a sliver. Every other sign-in scenario stayed green, because a locator finds and fills an input
+    /// that an ancestor clips to zero height. Hit-testing the button's centre is what a person does.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_sign_in_button_is_where_a_person_can_press_it()
+    {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
+
+        await using var context = await world.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{world.BaseAddress}{AlvoAdmin.SignInPath}");
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Sign in", Exact = true }).WaitForAsync();
+
+        var hit = await page.EvaluateAsync<bool>(
+            "() => { const b = document.querySelector('button[type=submit]'); const r = b.getBoundingClientRect();"
+            + " const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);"
+            + " return r.height > 0 && !!e && b.contains(e); }");
+        hit.ShouldBeTrue("the Sign in button is covered or clipped where it is drawn");
+    }
+
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task An_unauthenticated_visitor_is_sent_to_the_sign_in_screen()
     {

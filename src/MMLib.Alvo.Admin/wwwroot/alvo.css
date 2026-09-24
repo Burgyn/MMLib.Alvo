@@ -378,6 +378,12 @@
     min-height: 0;
     padding: var(--space-6);
     overflow: auto;
+  }
+
+  /* Only inside the shell, whose frame gives the pane a definite height. The sign-in screen reuses
+     .a-content in a document-height layout, and size containment there makes the pane measure its
+     height from nothing — the whole form collapsed to a sliver at the top of the page. */
+  .a-shell .a-content {
     container-type: size;
   }
 
