@@ -10,11 +10,11 @@ namespace MMLib.Alvo.Admin.Tests.Schema;
 public class FieldFacetsTests
 {
     [Fact]
-    public void A_new_string_field_carries_its_type_and_max_length()
+    public void A_new_string_field_carries_its_type_and_nothing_it_was_not_given()
     {
         var facets = Built(new FieldFacets { Name = "title", Required = true });
 
-        facets.ToJsonString().ShouldBe("""{"type":"string","required":true,"maxLength":120}""");
+        facets.ToJsonString().ShouldBe("""{"type":"string","required":true}""");
     }
 
     [Theory]
@@ -89,14 +89,22 @@ public class FieldFacetsTests
             .ContainsKey("default").ShouldBeFalse();
     }
 
+    /// <summary>
+    /// A computed field's own default is shown and refused until removed — carrying it forward would be composing
+    /// the pair the apply refuses (FieldDefault.MaintainedElsewhere).
+    /// </summary>
     [Fact]
-    public void A_computed_fields_default_is_left_as_declared_because_there_is_no_control_for_it()
+    public void A_computed_fields_declared_default_is_refused_until_it_is_removed()
     {
         const string declared = """{"type":"decimal","precision":10,"scale":2,"computed":"a + b","default":1}""";
         var editor = FieldFacets.Prefill("total", declared);
 
         editor.TakesADefault.ShouldBeFalse();
-        editor.Build("total", declared, [], out _)!["default"]!.GetValue<decimal>().ShouldBe(1m);
+        editor.Build("total", declared, [], out var refusal).ShouldBeNull();
+        refusal.ShouldNotBeNull().ShouldContain("Remove the declared default");
+
+        editor.RemoveUndrawnDefault = true;
+        editor.Build("total", declared, [], out _)!.ContainsKey("default").ShouldBeFalse();
     }
 
     [Fact]

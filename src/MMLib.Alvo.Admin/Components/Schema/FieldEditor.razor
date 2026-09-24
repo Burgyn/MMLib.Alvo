@@ -64,7 +64,7 @@
                     <input type="checkbox" checked="@_facets.Required" @onchange="args => _facets.Required = args.Value is true" />
                     <span>required</span>
                 </label>
-                @if (_facets.TakesUnique)
+                @if (_facets.UniqueOffered)
                 {
                     <label class="a-check">
                         <input type="checkbox" checked="@_facets.Unique" @onchange="args => _facets.Unique = args.Value is true" />
@@ -78,7 +78,7 @@
                     database maintains on every write and no query can use. The Indexes tab makes the
                     same point in prose; this is the half that stops it being declarable.
                 *@
-                @if (!_facets.Unique)
+                @if (!(_facets.UniqueOffered && _facets.Unique))
                 {
                     <label class="a-check">
                         <input type="checkbox" checked="@_facets.Indexed" data-testid="field-index"
@@ -87,7 +87,7 @@
                     </label>
                 }
             </div>
-            @if (_facets.Unique && _facets.Indexed)
+            @if (_facets.UniqueOffered && _facets.Unique && _facets.Indexed)
             {
                 <span class="a-hint">
                     <code class="a-mono">index</code> is kept as declared and is redundant beside
@@ -101,8 +101,11 @@
         {
             case FieldType.String:
                 <Field Label="Max length" For="new-field-max">
-                    <input class="a-input" id="new-field-max" type="number" value="@_facets.MaxLength"
-                           @oninput="args => _facets.MaxLength = Number(args.Value, 120)" />
+                    <ChildContent>
+                        <input class="a-input" id="new-field-max" type="number" min="1" value="@_facets.MaxLength"
+                               placeholder="no limit" @oninput="args => _facets.MaxLength = OptionalNumber(args.Value)" />
+                    </ChildContent>
+                    <Hint>Leave it empty for no limit — the schema's own default.</Hint>
                 </Field>
                 break;
             case FieldType.Decimal:
@@ -140,7 +143,7 @@
                 break;
         }
 
-        @if (_facets.TakesADefault)
+        @if (_facets.DrawsDefault)
         {
             @* A boolean's default is a group of chips, which a <label for> cannot name; the group names the
                label by its id instead. *@
@@ -167,6 +170,30 @@
                     row. Leave it empty for no default.
                 </Hint>
             </Field>
+        }
+
+        @if (_facets.KeepsUndrawnDefault)
+        {
+            <label class="a-check">
+                <input type="checkbox" checked="@_facets.RemoveUndrawnDefault" data-testid="field-remove-default"
+                       @onchange="args => _facets.RemoveUndrawnDefault = args.Value is true" />
+                <span>Remove the declared default</span>
+            </label>
+        }
+
+        @* Every facet this editor draws no control for, and what the save does to it. Before this, such a facet was
+           either rewritten from a stale prefill or carried without a word (docs/todo-admin.md §8d item 17). *@
+        @if (_facets.Notes() is { Count: > 0 } notes)
+        {
+            <div class="a-field" data-testid="field-notes">
+                <span class="a-label">Not drawn here</span>
+                @foreach (var note in notes)
+                {
+                    <span class="a-hint" data-testid="@($"field-note-{note.Facet}")">
+                        <code class="a-mono">@note.Facet</code> <code class="a-mono">@Short(note.Value)</code> — @note.Reason
+                    </span>
+                }
+            </div>
         }
 
     @* The facets the frozen schema declares and this build refuses. Without this the editor's

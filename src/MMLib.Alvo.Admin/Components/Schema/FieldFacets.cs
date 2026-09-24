@@ -20,13 +20,19 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /// component draws these values and raises what <see cref="Build"/> returns; every refusal is decided here.
 /// </para>
 /// </remarks>
-internal sealed class FieldFacets
+internal sealed partial class FieldFacets
 {
-    private const int DefaultMaxLength = 120;
     private const int DefaultPrecision = 10;
     private const int DefaultScale = 2;
 
-    private static readonly string[] _typedFacets = ["maxLength", "precision", "scale", "values", "entity"];
+    /// <summary>Every facet that belongs to exactly one type (the frozen schema's if/then rules).</summary>
+    private static readonly string[] _typedFacets = ["maxLength", "format", "precision", "scale", "values", "entity", "onDelete"];
+
+    /// <summary>The declaration the editor was opened on — empty for a new field. Never written to.</summary>
+    private JsonObject _declared = [];
+
+    /// <summary>The type it was declared with, so a facet of the old type can be told from one of the current.</summary>
+    private FieldType _declaredType = FieldType.String;
 
     /// <summary>The field's name as typed.</summary>
     public string Name { get; set; } = string.Empty;
@@ -43,8 +49,14 @@ internal sealed class FieldFacets
     /// <summary>Whether the field carries an index of its own.</summary>
     public bool Indexed { get; set; }
 
-    /// <summary>A string's maximum length.</summary>
-    public int MaxLength { get; set; } = DefaultMaxLength;
+    /// <summary>A string's maximum length, or <see langword="null"/> for none.</summary>
+    /// <remarks>
+    /// <b>Absent is a declaration the editor must be able to keep.</b> The frozen schema makes <c>maxLength</c>
+    /// optional (minimum 1) and the mapper leaves such a column unbounded (<c>DescriptorToSchemaMapper.cs:406</c>).
+    /// This used to default to 120 and was always written, so opening Edit on an unbounded string — even to rename
+    /// it — narrowed a column nobody asked to narrow (docs/todo-admin.md §8d item 15).
+    /// </remarks>
+    public int? MaxLength { get; set; }
 
     /// <summary>A decimal's total digits.</summary>
     public int Precision { get; set; } = DefaultPrecision;
@@ -67,6 +79,33 @@ internal sealed class FieldFacets
     /// <summary>Whether the type may be declared unique.</summary>
     public bool TakesUnique => Type is FieldType.String or FieldType.Integer or FieldType.Uuid
         or FieldType.Date or FieldType.DateTime;
+
+    /// <summary>Whether a declared default no box shows — a <c>$cel</c> object, or one no control draws — is dropped on save.</summary>
+    public bool RemoveUndrawnDefault { get; set; }
+
+    /// <summary>
+    /// Whether the unique checkbox is drawn: for a type that takes one, and wherever the declaration already
+    /// carries one.
+    /// </summary>
+    /// <remarks>
+    /// The apply maps <c>unique</c> for every type (<c>DescriptorToSchemaMapper.cs:404</c>), so a declared
+    /// <c>unique: true</c> on a ref is legal — and was unclearable, because the box was hidden and the prefilled
+    /// value still written (§8d item 17). A control is owed for every facet the save writes.
+    /// </remarks>
+    public bool UniqueOffered => TakesUnique || Flag(_declared["unique"]);
+
+    /// <summary>Whether the field's type or kind differs from the one it was declared with.</summary>
+    private bool Retyped => Type != _declaredType;
+
+    /// <summary>
+    /// Whether the declaration carries a default no box can show, on the type it was declared for — a
+    /// <c>$cel</c> object, or a literal on a type the editor draws no default for (json, a maintained value).
+    /// </summary>
+    public bool KeepsUndrawnDefault
+        => !Retyped && _declared["default"] is { } declared && (declared is not JsonValue || !TakesADefault);
+
+    /// <summary>Whether the default box is drawn: the type takes a literal, and nothing undrawn is being kept.</summary>
+    public bool DrawsDefault => TakesADefault && !(KeepsUndrawnDefault && !RemoveUndrawnDefault);
 
     /// <summary>
     /// Whether this build fills a default in for the field as it currently stands.
@@ -108,26 +147,50 @@ internal sealed class FieldFacets
     public static FieldFacets Prefill(string name, string? json)
     {
         var facets = Parse(json);
+        var type = Enum.TryParse<FieldType>(Text(facets["type"]), ignoreCase: true, out var declared)
+            ? declared : FieldType.String;
 
         return new FieldFacets
         {
             Name = name,
-            Type = Enum.TryParse<FieldType>(facets["type"]?.GetValue<string>(), ignoreCase: true, out var type)
-                ? type : FieldType.String,
-            Required = facets["required"]?.GetValue<bool>() ?? false,
-            Unique = facets["unique"]?.GetValue<bool>() ?? false,
-            Indexed = facets["index"]?.GetValue<bool>() ?? false,
-            MaxLength = facets["maxLength"]?.GetValue<int>() ?? DefaultMaxLength,
-            Precision = facets["precision"]?.GetValue<int>() ?? DefaultPrecision,
-            Scale = facets["scale"]?.GetValue<int>() ?? DefaultScale,
-            Target = facets["entity"]?.GetValue<string>() ?? string.Empty,
+            Type = type,
+            Required = Flag(facets["required"]),
+            Unique = Flag(facets["unique"]),
+            Indexed = Flag(facets["index"]),
+            MaxLength = Whole(facets["maxLength"]),
+            Precision = Whole(facets["precision"]) ?? DefaultPrecision,
+            Scale = Whole(facets["scale"]) ?? DefaultScale,
+            Target = Text(facets["entity"]),
             MaintainedElsewhere = facets["computed"] is not null || facets["rollup"] is not null,
-            Default = facets["default"] is { } declared and not JsonArray ? declared.ToString() : string.Empty,
-            Values = facets["values"] is JsonArray values
-                ? string.Join(", ", values.Select(value => value?.GetValue<string>()))
-                : string.Empty,
+            Default = LiteralText(facets["default"]),
+            Values = facets["values"] is JsonArray values ? string.Join(", ", values.Select(Text)) : string.Empty,
+            _declared = facets,
+            _declaredType = type,
         };
     }
+
+    /// <summary>
+    /// A declared literal as the box shows it; a <c>$cel</c> object or an array is not one, and the box stays empty
+    /// rather than holding the object's JSON — which a string field then saved as the literal <c>"{"$cel":…}"</c>.
+    /// </summary>
+    private static string LiteralText(JsonNode? declared) => declared switch
+    {
+        JsonValue value when value.TryGetValue<string>(out var text) => text,
+        JsonValue value => value.ToJsonString(),
+        _ => string.Empty,
+    };
+
+    private static string Text(JsonNode? node)
+        => node is JsonValue value && value.TryGetValue<string>(out var text) ? text : string.Empty;
+
+    private static bool Flag(JsonNode? node)
+        => node is JsonValue value && value.TryGetValue<bool>(out var on) && on;
+
+    private static int? Whole(JsonNode? node)
+        => node is JsonValue value && value.TryGetValue<int>(out var number) ? number : (int?)null;
+
+    /// <summary>A type as the descriptor spells it.</summary>
+    internal static string Word(FieldType type) => type.ToString().ToLowerInvariant();
 
     /// <summary>
     /// The facets as an object, or an empty one — a field whose declaration the editor cannot read is one
@@ -174,21 +237,32 @@ internal sealed class FieldFacets
         }
 
         var facets = editing is { Length: > 0 } ? Parse(editingJson) : [];
-        facets["type"] = Type.ToString().ToLowerInvariant();
-        Toggle(facets, "required", Required);
+        refusal = WriteSupplied(facets) ?? RefuseWhatTheApplyRefuses(facets);
+        return refusal is null ? facets : null;
+    }
 
-        refusal = WriteDefault(facets);
-        if (refusal is not null)
+    /// <summary>
+    /// Writes a field a caller supplies. Every key that already exists is set in place, so an edit that changes
+    /// nothing writes the declaration back unchanged — a staged row that says "changed" for an unchanged field is a
+    /// second kind of lie about what the operator did.
+    /// </summary>
+    private string? WriteSupplied(JsonObject facets)
+    {
+        facets["type"] = Word(Type);
+        Toggle(facets, "required", Required);
+        if (WriteDefault(facets) is { } refused)
         {
-            return null;
+            return refused;
         }
 
-        Toggle(facets, "unique", Unique);
+        if (UniqueOffered)
+        {
+            Toggle(facets, "unique", Unique);
+        }
+
         Toggle(facets, "index", Indexed);
         ClearFacetsOfOtherTypes(facets);
-
-        refusal = WriteTypeFacets(facets);
-        return refusal is null ? facets : null;
+        return WriteTypeFacets(facets);
     }
 
     /// <summary>Why the typed name cannot be used, or nothing.</summary>
@@ -209,77 +283,104 @@ internal sealed class FieldFacets
     }
 
     /// <summary>
-    /// Writes the declared default into the facets as a literal of the field's own type, or says why it
-    /// cannot be one.
+    /// Writes the default the box holds, or does to a declared one what <see cref="DefaultFate"/> decides.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// <b>Typed here rather than sent as a string.</b> The descriptor's <c>default</c> is a JSON literal, and
-    /// the apply refuses one whose kind the field cannot hold — so a box that always wrote a string would
-    /// produce a descriptor refused for a reason the operator never typed. An empty box removes the key: a
-    /// field with no default is the normal case, and a <c>null</c> would be a declaration of nothing.
-    /// </para>
-    /// <para>
-    /// A control that was never drawn must not remove what the declaration carries: a json or computed
-    /// field's own default is one the editor cannot draw, and dropping it would be a silent narrowing.
-    /// </para>
+    /// Typed here rather than sent as a string: the descriptor's <c>default</c> is a JSON literal and the apply
+    /// refuses one its field cannot hold (<c>FieldDefault.cs:190-199</c>). A declared default no box draws is
+    /// kept or removed — never rewritten from the box's prefill.
     /// </remarks>
     private string? WriteDefault(JsonObject facets)
     {
-        if (!TakesADefault)
+        if (DrawsDefault)
         {
-            return null;
+            return WriteTypedDefault(facets);
         }
 
+        if (DefaultFate() == FacetFate.Removed)
+        {
+            facets.Remove("default");
+        }
+
+        return null;
+    }
+
+    private string? WriteTypedDefault(JsonObject facets)
+    {
         if (Default.Length == 0)
         {
             facets.Remove("default");
             return null;
         }
 
-        if (TypedDefault() is { } literal)
+        if (TypedDefault() is not { } literal)
         {
-            facets["default"] = literal;
-            return null;
+            return DefaultRefusal();
         }
 
-        return $"'{Default}' is not a number, and this field's default has to be one.";
+        facets["default"] = literal;
+        return null;
     }
 
-    /// <summary>The default as a literal of the field's type, or nothing when a number does not parse.</summary>
+    /// <summary>
+    /// What the save does to a declared default no box draws, or <see langword="null"/> when the box decides.
+    /// </summary>
+    private FacetFate? DefaultFate()
+        => _declared["default"] is null || DrawsDefault ? null
+            : KeepsUndrawnDefault && !RemoveUndrawnDefault ? FacetFate.Kept
+            : FacetFate.Removed;
+
+    /// <summary>The default as a literal of the field's type, or nothing when the apply would refuse it.</summary>
+    /// <remarks>
+    /// Each arm is <c>FieldDefault</c>'s own check (<c>Fits</c>, <c>Excluded</c>): a boolean is <c>true</c> or
+    /// <c>false</c> and nothing else — anything else used to be saved as <c>false</c> — a uuid parses, a date
+    /// parses, an enum default is one of its values, a string fits its max length.
+    /// </remarks>
     private JsonNode? TypedDefault() => Type switch
     {
-        FieldType.Boolean => Default == "true",
+        FieldType.Boolean => Default switch { "true" => JsonValue.Create(true), "false" => JsonValue.Create(false), _ => null },
         FieldType.Integer => long.TryParse(Default, CultureInfo.InvariantCulture, out var whole) ? whole : null,
         FieldType.Decimal => decimal.TryParse(Default, CultureInfo.InvariantCulture, out var number) ? number : null,
-        _ => Default,
+        FieldType.Uuid => Guid.TryParse(Default, out _) ? Default : null,
+        FieldType.Date or FieldType.DateTime
+            => DateTimeOffset.TryParse(Default, CultureInfo.InvariantCulture, out _) ? Default : null,
+        FieldType.Enum => SplitValues().Contains(Default, StringComparer.Ordinal) ? Default : null,
+        _ => MaxLength is { } max && Default.Length > max ? null : Default,
     };
 
-    /// <summary>
-    /// Drops the facets that belong to a type this field no longer has.
-    /// </summary>
+    /// <summary>Why <see cref="TypedDefault"/> found nothing, in the field's own terms.</summary>
+    private string DefaultRefusal() => Type switch
+    {
+        FieldType.Integer or FieldType.Decimal => $"'{Default}' is not a number, and this field's default has to be one.",
+        FieldType.Boolean => $"'{Default}' is not true or false, and this field's default has to be one.",
+        FieldType.Uuid => $"'{Default}' is not a uuid, and this field's default has to be one.",
+        FieldType.Date or FieldType.DateTime => $"'{Default}' is not a date, and this field's default has to be one.",
+        FieldType.Enum => $"'{Default}' is not one of the values above, and this field's default has to be one.",
+        _ => string.Create(
+            CultureInfo.InvariantCulture, $"'{Default}' is {Default.Length} characters and the max length is {MaxLength}."),
+    };
+
+    /// <summary>Drops the facets that belong to a type this field no longer has, and only those.</summary>
     /// <remarks>
-    /// A <c>maxLength</c> left behind on a field retyped to <c>integer</c>, or a <c>format</c> on one retyped
-    /// away from <c>string</c>, is a descriptor the apply refuses — and refused for a facet nobody typed,
-    /// which is the worst kind of refusal to read. The facets the current type needs are written back after.
+    /// The current type's own facets are left where they stand and set in place by <see cref="WriteTypeFacets"/>;
+    /// removing and re-adding them moved them to the end of the object and badged an untouched field "changed".
     /// </remarks>
     private void ClearFacetsOfOtherTypes(JsonObject facets)
     {
-        foreach (var facet in _typedFacets)
+        foreach (var facet in _typedFacets.Where(facet => OwnerOf(facet) != Type))
         {
             facets.Remove(facet);
         }
-
-        if (Type is not FieldType.Ref)
-        {
-            facets.Remove("onDelete");
-        }
-
-        if (Type is not FieldType.String)
-        {
-            facets.Remove("format");
-        }
     }
+
+    /// <summary>The one type a type-bound facet belongs to.</summary>
+    private static FieldType OwnerOf(string facet) => facet switch
+    {
+        "maxLength" or "format" => FieldType.String,
+        "precision" or "scale" => FieldType.Decimal,
+        "values" => FieldType.Enum,
+        _ => FieldType.Ref,
+    };
 
     /// <summary>Writes the facets the type requires, or says which one is missing.</summary>
     private string? WriteTypeFacets(JsonObject facets)
@@ -287,8 +388,7 @@ internal sealed class FieldFacets
         switch (Type)
         {
             case FieldType.String:
-                facets["maxLength"] = MaxLength;
-                return null;
+                return WriteMaxLength(facets);
             case FieldType.Decimal:
                 facets["precision"] = Precision;
                 facets["scale"] = Scale;
@@ -300,6 +400,23 @@ internal sealed class FieldFacets
             default:
                 return null;
         }
+    }
+
+    private string? WriteMaxLength(JsonObject facets)
+    {
+        if (MaxLength is not { } max)
+        {
+            facets.Remove("maxLength");
+            return null;
+        }
+
+        if (max < 1)
+        {
+            return "A max length is at least 1 — the schema's minimum. Leave the box empty for no limit.";
+        }
+
+        facets["maxLength"] = max;
+        return null;
     }
 
     private string? WriteValues(JsonObject facets)
@@ -339,4 +456,39 @@ internal sealed class FieldFacets
 
         facets.Remove(facet);
     }
+
+    private const string CelDefaultRefusal =
+        "Its declared default is a '$cel' expression, which this build refuses at apply (field.default). Tick "
+        + "\"Remove the declared default\" to save the field, or declare a literal.";
+
+    private const string MaintainedDefaultRefusal =
+        "It declares a default beside a value that is maintained for it, which the apply refuses — that value can "
+        + "never fall back to a default. Tick \"Remove the declared default\" to save the field.";
+
+    private const string RequiredReadOnlyRefusal =
+        "This field is readOnly: true, so no create could ever supply it, and the apply refuses 'required' beside "
+        + "it. Give it a default, or leave required off.";
+
+    /// <summary>What the apply would still refuse about the built declaration, checked on the result itself.</summary>
+    private string? RefuseWhatTheApplyRefuses(JsonObject facets)
+        => RefuseAKeptDefault(facets) ?? RefuseRequiredBesideReadOnly(facets);
+
+    /// <summary>A kept default the apply refuses: <c>$cel</c> (<c>UnhonouredFeatures.cs:63</c>) or beside a maintained value (<c>FieldDefault.cs:88</c>).</summary>
+    private string? RefuseAKeptDefault(JsonObject facets)
+    {
+        if (DefaultFate() != FacetFate.Kept || facets["default"] is not { } kept)
+        {
+            return null;
+        }
+
+        return IsCel(kept) ? CelDefaultRefusal : MaintainedElsewhere ? MaintainedDefaultRefusal : null;
+    }
+
+    /// <summary><c>DescriptorValidator.IsRequiredAndStaticallyReadOnly</c> (<c>DescriptorValidator.cs:504-521</c>), asked of the result.</summary>
+    private static string? RefuseRequiredBesideReadOnly(JsonObject facets)
+        => Flag(facets["required"]) && Flag(facets["readOnly"]) && (facets["default"] is null || IsCel(facets["default"]))
+            ? RequiredReadOnlyRefusal
+            : null;
+
+    private static bool IsCel(JsonNode? node) => node is JsonObject tagged && tagged.ContainsKey("$cel");
 }

@@ -10,6 +10,8 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /// <summary>The sheet that adds a field to an entity, or edits one it declares.</summary>
 public partial class FieldEditor
 {
+    private const int NoteValueLimit = 40;
+
     private static readonly FieldType[] _types = Enum.GetValues<FieldType>();
     private static readonly string[] _flags = [string.Empty, "false", "true"];
 
@@ -110,6 +112,13 @@ public partial class FieldEditor
 
     private static int Number(object? value, int fallback)
         => int.TryParse(value?.ToString(), CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
+
+    /// <summary>A number box's value, or <see langword="null"/> when it was cleared — which is how "no limit" is said.</summary>
+    private static int? OptionalNumber(object? value)
+        => int.TryParse(value?.ToString(), CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
+
+    /// <summary>A declared value short enough to sit in a line of prose; a description can be a paragraph.</summary>
+    private static string Short(string json) => json.Length <= NoteValueLimit ? json : json[..NoteValueLimit] + "…";
 
     private Task Cancel() => OnClose.InvokeAsync();
 
