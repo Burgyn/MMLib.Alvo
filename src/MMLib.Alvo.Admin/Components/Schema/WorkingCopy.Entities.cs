@@ -54,6 +54,10 @@ internal sealed partial class WorkingCopy
     /// <b>An entity this copy invented carries no <c>renamedFrom</c> at all.</b> It has no table behind it,
     /// so there is nothing to move and the key would name something the apply cannot find.
     /// </para>
+    /// <para>
+    /// <b>What names the entity moves with it, in the same edit</b> — the refs, rollups, actions and trigger
+    /// patterns <see cref="EntityReferences"/> lists — so the renamed copy is one the apply accepts.
+    /// </para>
     /// </remarks>
     /// <param name="from">The name it has now.</param>
     /// <param name="to">The name it should have.</param>
@@ -78,6 +82,7 @@ internal sealed partial class WorkingCopy
             var origin = Origin(declared, from, _applied?["entities"]?[from] is not null);
             Rekey(entities, from, to);
             Carry(entities[to] as JsonObject, origin, to);
+            EntityReferences.Rename(root, from, to);
             return true;
         });
 

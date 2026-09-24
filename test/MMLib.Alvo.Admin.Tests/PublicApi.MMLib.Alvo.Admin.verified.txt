@@ -597,7 +597,6 @@ namespace MMLib.Alvo.Admin.Components.Schema
         {
             public NewField(string Name, System.Text.Json.Nodes.JsonObject Facets) { }
             public System.Text.Json.Nodes.JsonObject Facets { get; init; }
-            public bool KeepOpen { get; init; }
             public string Name { get; init; }
         }
     }

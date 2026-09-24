@@ -70,7 +70,8 @@ public partial class FieldEditor
     public sealed record NewField(string Name, JsonObject Facets)
     {
         /// <summary>Whether the operator asked for another field after this one, so the sheet stays open.</summary>
-        public bool KeepOpen { get; init; }
+        /// <remarks>Internal: it passes between two screens of this assembly and is nobody else's to read.</remarks>
+        internal bool KeepOpen { get; init; }
     }
 
     /// <summary>

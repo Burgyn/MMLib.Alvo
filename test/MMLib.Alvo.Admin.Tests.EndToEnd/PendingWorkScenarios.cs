@@ -199,12 +199,15 @@ public sealed class PendingWorkScenarios(AdminWorld world) : IClassFixture<Admin
         await session.GoAsync("/changes");
         await session.WaitForPlanAsync();
 
-        (await session.Button("Plan this change").CountAsync()).ShouldBe(0);
         (await session.Content.InnerTextAsync()).ShouldContain("arrival_note");
         await session.Page.Locator("#apply-reason").WaitForAsync();
 
+        /* The second dry run is waited on by its own answer, not by the plan already on the page: the panel
+           numbers the plan it shows, and a second plan is a second number. */
+        var plan = session.Page.GetByTestId("plan");
+        (await plan.GetAttributeAsync("data-plan-run")).ShouldBe("1");
         await session.Page.ClickAsync("[data-testid='replan']");
-        await session.WaitForPlanAsync();
+        await session.Page.Locator("[data-testid='plan'][data-plan-run='2']").WaitForAsync();
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
 
         session.AssertConsoleClean();

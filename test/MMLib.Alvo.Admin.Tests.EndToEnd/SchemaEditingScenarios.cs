@@ -566,14 +566,16 @@ public sealed class RenameScenarios(AdminWorld world) : IClassFixture<AdminWorld
 
         await session.Page.WaitForURLAsync("**/schema/service_areas");
 
-        /* The plan or its refusal, whichever the arrival's dry run comes back with: work_orders still points
-           at `regions`, which the validator refuses, and this fact is about the diff, not the plan. */
+        /* It plans cleanly: work_orders.region_id followed the rename, so the validator has no ref to an
+           entity that is gone. */
         await session.GoAsync("/changes");
-        await session.Page.GetByTestId("plan").Or(session.Page.GetByTestId("error-panel")).WaitForAsync();
+        await session.WaitForPlanAsync();
+        (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
 
         var previewed = await session.Content.InnerTextAsync();
         previewed.ShouldContain("service_areas");
         previewed.ShouldContain("\"renamedFrom\": \"regions\"");
+        previewed.ShouldContain("\"entity\": \"service_areas\"");
     }
 
     /// <summary>

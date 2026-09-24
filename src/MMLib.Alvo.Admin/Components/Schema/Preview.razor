@@ -61,7 +61,7 @@
         }
         else
         {
-            <Panel Title="@PlanTitle(_plan.Plan)" data-testid="plan">
+            <Panel Title="@PlanTitle(_plan.Plan)" data-testid="plan" data-plan-run="@_planRuns">
                 @*
                     The plan is of the working copy as it stood when it was asked, and the copy can move under
                     this page — the assistant's drawer composes into it from here, and so does a second tab of
@@ -168,6 +168,9 @@
     private WorkingCopy Copy { get; set; } = new();
 
     private ManagementApplyResult? _plan;
+
+    /// <summary>How many plans this page has been answered with — which one is showing, for a reader who asked again.</summary>
+    private int _planRuns;
     private ManagementApplyResult? _applied;
     private AdminProblem? _problem;
     private string _reason = string.Empty;
@@ -251,6 +254,7 @@
             if (dryRun)
             {
                 _plan = result;
+                _planRuns++;
             }
             else
             {
