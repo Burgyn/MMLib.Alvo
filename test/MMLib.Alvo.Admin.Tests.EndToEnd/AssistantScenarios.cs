@@ -36,7 +36,7 @@ public sealed class AssistantScenarios(AssistantWorld world) : IClassFixture<Ass
         await session.Page.ClickAsync("[data-testid='assistant-review']");
         await session.Page.WaitForURLAsync("**/changes");
 
-        await session.Page.ClickAsync("button:has-text('Plan this change')");
+        await session.Button("Plan this change").ClickAsync();
         await session.Page.GetByText("against the database").First.WaitForAsync();
 
         /* The reason box renders with the plan, not before it — so this is asserted here rather than on
@@ -45,11 +45,11 @@ public sealed class AssistantScenarios(AssistantWorld world) : IClassFixture<Ass
         (await session.Page.Locator("#apply-reason").InputValueAsync())
             .ShouldBe("assistant: add an invoices entity");
 
-        await session.Page.ClickAsync("button:has-text('Apply these changes')");
+        await session.Button("Apply these changes").ClickAsync();
         await session.Page.GetByText("Applied as revision").First.WaitForAsync();
 
         await session.GoAsync("/history");
-        var history = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var history = await session.Content.InnerTextAsync();
         history.ShouldContain("assistant: add an invoices entity");
         history.ShouldContain(AdminWorld.AdminEmail);
 

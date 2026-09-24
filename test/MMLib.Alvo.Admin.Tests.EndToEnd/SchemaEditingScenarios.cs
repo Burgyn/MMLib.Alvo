@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Tests.EndToEnd;
+﻿using Microsoft.Playwright;
+
+namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
 /// Changing a field the descriptor already declares.
@@ -32,7 +34,7 @@ public sealed class SchemaEditingScenarios(AdminWorld world) : IClassFixture<Adm
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/customers");
 
-        (await session.Page.Locator("main.a-content").InnerTextAsync()).ShouldContain("max 160");
+        (await session.Content.InnerTextAsync()).ShouldContain("max 160");
 
         await session.Page.ClickAsync("[data-testid='edit-field-email']");
 
@@ -53,25 +55,25 @@ public sealed class SchemaEditingScenarios(AdminWorld world) : IClassFixture<Adm
         await session.Page.ClickAsync("[data-testid='field-save']");
         await session.PreviewPendingAsync();
 
-        await session.Page.ClickAsync("button:has-text('Plan this change')");
+        await session.Button("Plan this change").ClickAsync();
 
         /* Not "N steps against the database": on SQLite a longer maxLength is no DDL at all, because
            TEXT carries no length — so the honest signal that the plan came back is the apply control
            appearing, whether or not the plan has steps in it. */
         await session.Page.Locator("#apply-reason").WaitForAsync();
         await session.Page.FillAsync("#apply-reason", "Widen the customer email column");
-        await session.Page.ClickAsync("button:has-text('Apply these changes')");
+        await session.Button("Apply these changes").ClickAsync();
         await session.Page.GetByText("Applied as revision").First.WaitForAsync();
 
         await session.GoAsync("/schema/customers");
-        (await session.Page.Locator("main.a-content").InnerTextAsync()).ShouldContain("max 200");
+        (await session.Content.InnerTextAsync()).ShouldContain("max 200");
 
         /* The facets the editor cannot draw must survive it. `email` carries a description and a
            `format`, and an editor that rebuilt the declaration from its own controls would drop both
            — silently, with the apply carrying on working, which is exactly the narrowing §4.6
            forbids of the export. */
         await session.GoAsync("/transfer");
-        var descriptor = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var descriptor = await session.Content.InnerTextAsync();
         descriptor.ShouldContain("Where to send correspondence");
         descriptor.ShouldContain("\"format\": \"email\"");
 
@@ -122,14 +124,15 @@ public sealed class IndexEditingScenarios(AdminWorld world) : IClassFixture<Admi
 
         var before = await session.Page.Locator("[data-testid='index-row']").CountAsync();
 
-        await session.Page.ClickAsync("[data-testid='index-fields'] button:has-text('scheduled_for')");
-        await session.Page.ClickAsync("[data-testid='index-fields'] button:has-text('status')");
+        var fields = session.Page.GetByTestId("index-fields");
+        await fields.GetByRole(AriaRole.Button, new() { Name = "scheduled_for", Exact = true }).ClickAsync();
+        await fields.GetByRole(AriaRole.Button, new() { Name = "status", Exact = true }).ClickAsync();
         await session.Page.ClickAsync("[data-testid='index-add']");
 
         await session.Page.Locator("[data-testid='index-row']").Nth(before).WaitForAsync();
 
         await session.GoAsync("/changes");
-        var previewed = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var previewed = await session.Content.InnerTextAsync();
         previewed.ShouldContain("scheduled_for");
         previewed.ShouldContain("status");
 
@@ -270,7 +273,8 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
 
         var before = await session.Page.Locator("[data-testid='hook-row']").CountAsync();
 
-        await session.Page.ClickAsync("[data-testid='hook-points'] button:has-text('beforeUpdate')");
+        await session.Page.GetByTestId("hook-points")
+            .GetByRole(AriaRole.Radio, new() { Name = "beforeUpdate", Exact = true }).ClickAsync();
         await session.Page.FillAsync("#hook-condition", "old.status == 'completed'");
         await session.Page.FillAsync("#hook-reject", "A completed work order cannot be reopened.");
         await session.Page.ClickAsync("[data-testid='hook-add']");
@@ -278,9 +282,9 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.Locator("[data-testid='hook-row']").Nth(before).WaitForAsync();
 
         await session.GoAsync("/changes");
-        await session.Page.Locator("button:has-text('Plan this change')").WaitForAsync();
+        await session.Button("Plan this change").WaitForAsync();
 
-        var previewed = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var previewed = await session.Content.InnerTextAsync();
         previewed.ShouldContain("beforeUpdate");
         previewed.ShouldContain("cannot be reopened");
 
@@ -290,12 +294,12 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
            editor wrote *something* into the document.
 
            The apply control appearing is the signal the plan came back — this screen renders it only
-           then — and `.a-error` being absent is the signal it came back clean. Both, because a refused
+           then — and the error panel being absent is the signal it came back clean. Both, because a refused
            descriptor leaves the error panel on a screen that still has everything else on it. */
-        await session.Page.ClickAsync("button:has-text('Plan this change')");
+        await session.Button("Plan this change").ClickAsync();
         await session.Page.Locator("#apply-reason").WaitForAsync();
 
-        (await session.Page.Locator(".a-error").CountAsync()).ShouldBe(0);
+        (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
 
         session.AssertConsoleClean();
     }
@@ -566,9 +570,9 @@ public sealed class RenameScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.Page.WaitForURLAsync("**/schema/service_areas");
 
         await session.GoAsync("/changes");
-        await session.Page.Locator("button:has-text('Plan this change')").WaitForAsync();
+        await session.Button("Plan this change").WaitForAsync();
 
-        var previewed = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var previewed = await session.Content.InnerTextAsync();
         previewed.ShouldContain("service_areas");
         previewed.ShouldContain("\"renamedFrom\": \"regions\"");
     }
@@ -667,7 +671,7 @@ public sealed class DiscardScenarios(AdminWorld world) : IClassFixture<AdminWorl
         await session.Page.Locator("[data-testid='discard']").First.WaitForAsync();
 
         /* The premise: it really is staged before anything was planned. */
-        (await session.Page.Locator("main.a-content").InnerTextAsync()).ShouldContain("notes");
+        (await session.Content.InnerTextAsync()).ShouldContain("notes");
 
         await session.Page.Locator("[data-testid='discard']").First.ClickAsync();
         await session.Page.ClickAsync("[data-testid='discard-confirm']");
@@ -679,7 +683,7 @@ public sealed class DiscardScenarios(AdminWorld world) : IClassFixture<AdminWorl
 
         /* And the field is back on the entity, because the copy went to the applied revision. */
         await session.GoAsync("/schema/customers");
-        (await session.Page.Locator("main.a-content").InnerTextAsync()).ShouldContain("notes");
+        (await session.Content.InnerTextAsync()).ShouldContain("notes");
 
         session.AssertConsoleClean();
     }

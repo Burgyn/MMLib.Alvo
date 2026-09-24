@@ -6,9 +6,18 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// One signed-in browser session, with the assertions every scenario shares.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The three checks the brief for this dashboard asks of every screen live here so no scenario has
 /// to remember them: the console is clean, the page does not scroll sideways, and nothing that was
 /// rendered is clipped out of view.
+/// </para>
+/// <para>
+/// <b>The selector policy</b> (docs/architecture/admin-dashboard-review.md, F-23): a scenario finds an element
+/// by its <c>data-testid</c>, or by its role and accessible name — <see cref="Content"/>, <see cref="Button"/>.
+/// A design-system class (<c>.a-*</c>) is styling and a <c>:has-text(…)</c> is copy, and a scenario pinned to
+/// either breaks on a rename or a reworded sentence that changed nothing it tests.
+/// <c>EndToEndSelectorTests</c> holds the count of both down; migrate a scenario when you touch it.
+/// </para>
 /// </remarks>
 /// <param name="context">The browser context, disposed with the session.</param>
 /// <param name="page">The page.</param>
@@ -35,6 +44,16 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
 
     /// <summary>Everything the page said that it should not have.</summary>
     public IReadOnlyList<string> Noise => _noise;
+
+    /// <summary>The screen's content: the shell's one <c>main</c> landmark.</summary>
+    public ILocator Content => Page.GetByRole(AriaRole.Main);
+
+    /// <summary>A button by its accessible name, which by default it only has to contain — the match <c>:has-text</c> made.</summary>
+    /// <param name="name">The name, or a part of it.</param>
+    /// <param name="exact">Whether the name must be the whole of it, for a label another button's contains.</param>
+    /// <returns>The button; a locator, so an action on it fails if the name is not one button's.</returns>
+    public ILocator Button(string name, bool exact = false)
+        => Page.GetByRole(AriaRole.Button, new() { Name = name, Exact = exact });
 
     /// <summary>Starts watching the console. Called by the world before it navigates anywhere.</summary>
     /// <remarks>
@@ -88,7 +107,7 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     {
         await Page.ClickAsync("[data-testid='pending-preview']").ConfigureAwait(false);
         await Page.WaitForURLAsync("**/changes").ConfigureAwait(false);
-        await Page.Locator("button:has-text('Plan this change')").WaitForAsync().ConfigureAwait(false);
+        await Button("Plan this change").WaitForAsync().ConfigureAwait(false);
     }
 
     /// <summary>
@@ -96,14 +115,15 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     /// </summary>
     /// <remarks>
     /// The click re-renders over the circuit, so reading the panel straight afterwards reads the
-    /// tab that was open before. Waiting on the active class is waiting on the thing the click was
-    /// for.
+    /// tab that was open before. Waiting on the tab being the selected one is waiting on the thing the
+    /// click was for.
     /// </remarks>
     /// <param name="tab">The tab's label.</param>
     public async Task OpenTabAsync(string tab)
     {
-        await Page.ClickAsync($"button.a-tab:has-text('{tab}')").ConfigureAwait(false);
-        await Page.Locator($"button.a-tab--active:has-text('{tab}')").WaitForAsync().ConfigureAwait(false);
+        await Page.GetByRole(AriaRole.Tab, new() { Name = tab, Exact = true }).ClickAsync().ConfigureAwait(false);
+        await Page.GetByRole(AriaRole.Tab, new() { Name = tab, Exact = true, Selected = true })
+            .WaitForAsync().ConfigureAwait(false);
     }
 
     /// <summary>
@@ -259,7 +279,7 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     /// </remarks>
     public async Task AssertRenderedAsync()
     {
-        var text = await Page.Locator("main.a-content").InnerTextAsync().ConfigureAwait(false);
+        var text = await Content.InnerTextAsync().ConfigureAwait(false);
         text.Trim().ShouldNotBeEmpty("the content area rendered nothing");
     }
 

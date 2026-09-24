@@ -37,7 +37,7 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
             .ShouldBe(0, "the create form asks for a password");
 
         await session.Page.FillAsync("#new-person-email", "dispatcher@alvo.test");
-        await session.Page.ClickAsync("button:has-text('Create')");
+        await session.Button("Create").ClickAsync();
 
         /* Waiting for the row rather than settling and reading: the list re-renders over the
            circuit, and network-idle is true the whole time a WebSocket is quiet. */
@@ -56,7 +56,7 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
            panel and return before anything had happened. */
         await session.Page.GetByText("out of band").First.WaitForAsync();
 
-        var text = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var text = await session.Content.InnerTextAsync();
         text.ShouldContain("Credential token");
         text.ShouldContain("out of band");
         session.AssertConsoleClean();
@@ -150,7 +150,7 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
     private static async Task<string> IdOfAsync(AdminSession session, string email)
     {
         var id = await session.Page
-            .Locator($"[id^='person-']:has-text('{email}')").First
+            .Locator("[id^='person-']", new() { HasText = email }).First
             .GetAttributeAsync("id");
 
         id.ShouldNotBeNull($"no person row carries {email}");

@@ -11,8 +11,8 @@
     reading a log. What is never rewritten is a framework sentence: a refusal's own `Consequence`
     and `Fix` are served verbatim (§4.1).
 *@
-<div class="a-error" role="alert">
-    <div class="a-error__title">@Headline</div>
+<div class="a-error" role="alert" data-testid="error-panel">
+    <div class="a-error__title" data-testid="error-title">@Headline</div>
     <div class="a-error__detail">@Detail</div>
     @if (ShownFix is { Length: > 0 })
     {

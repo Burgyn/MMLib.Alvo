@@ -40,12 +40,12 @@ public sealed class OtherCircuitApplyScenarios(AdminWorld world) : IClassFixture
         /* The premise: nothing told the bystander's circuit. Its card still reads what it read at load. */
         (await Card(bystander).InnerTextAsync()).ShouldBe(before);
 
-        await bystander.Page.Locator("nav.a-sidebar")
+        await bystander.Page.GetByTestId("sidebar")
             .GetByRole(AriaRole.Link, new() { Name = "Overview", Exact = true }).ClickAsync();
         await bystander.Page.WaitForURLAsync("**/admin");
 
         await bystander.Page.Locator("main").GetByText($"Revision {applied} applied").WaitForAsync();
-        await bystander.Page.Locator($"[data-testid='project-card']:has-text('revision {applied}')").WaitForAsync();
+        await Card(bystander).Filter(new() { HasText = $"revision {applied}" }).WaitForAsync();
 
         bystander.AssertConsoleClean();
         applier.AssertConsoleClean();

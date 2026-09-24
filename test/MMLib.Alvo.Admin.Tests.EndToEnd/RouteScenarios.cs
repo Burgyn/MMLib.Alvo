@@ -38,7 +38,7 @@ public sealed class RouteScenarios(AdminWorld world) : IClassFixture<AdminWorld>
         await session.PreviewPendingAsync();
 
         await session.GoAsync("/transfer");
-        (await session.Page.Locator("main").InnerTextAsync()).ShouldContain("byte for byte");
+        (await session.Content.InnerTextAsync()).ShouldContain("byte for byte");
 
         session.AssertConsoleClean();
     }
@@ -56,20 +56,20 @@ public sealed class RouteScenarios(AdminWorld world) : IClassFixture<AdminWorld>
         await using var desktop = await world.SignInAsync(cancel);
         await desktop.GoAsync(route);
 
-        (await Link(desktop, "nav.a-sidebar").GetAttributeAsync("aria-current")).ShouldBe("page");
-        (await desktop.Page.Locator("nav.a-sidebar [aria-current='page']").CountAsync()).ShouldBe(1);
+        (await Link(desktop, "sidebar").GetAttributeAsync("aria-current")).ShouldBe("page");
+        (await desktop.Page.GetByTestId("sidebar").Locator("[aria-current='page']").CountAsync()).ShouldBe(1);
 
         await using var phone = await world.SignInAsync(cancel, 375);
         await phone.GoAsync(route);
 
-        (await Link(phone, "nav.a-bottomnav").GetAttributeAsync("aria-current")).ShouldBe("page");
+        (await Link(phone, "bottom-nav").GetAttributeAsync("aria-current")).ShouldBe("page");
 
         desktop.AssertConsoleClean();
         phone.AssertConsoleClean();
     }
 
     private static ILocator Link(AdminSession session, string navigation)
-        => session.Page.Locator(navigation).GetByRole(AriaRole.Link, new() { Name = "Schema", Exact = true });
+        => session.Page.GetByTestId(navigation).GetByRole(AriaRole.Link, new() { Name = "Schema", Exact = true });
 
     private static async Task AddEntityAsync(AdminSession session, string name)
     {

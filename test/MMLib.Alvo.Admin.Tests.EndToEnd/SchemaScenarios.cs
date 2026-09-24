@@ -186,7 +186,7 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/transfer");
 
-        var text = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var text = await session.Content.InnerTextAsync();
         text.ShouldContain("byte for byte");
         text.ShouldContain("field-service");
         session.AssertConsoleClean();
@@ -210,11 +210,11 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.Page.FillAsync(
             "#import-json",
             """{"name":"borrowed","entities":{"Things":{"fields":{"a":{"type":"string"}}}}}""");
-        await session.Page.ClickAsync("button:has-text('Load it into the working copy')");
+        await session.Button("Load it into the working copy").ClickAsync();
         await session.SettleAsync();
 
         session.Page.Url.ShouldContain("/transfer");
-        (await session.Page.Locator(".a-error__title").InnerTextAsync())
+        (await session.Page.GetByTestId("error-title").InnerTextAsync())
             .ShouldContain("apply would refuse");
         session.AssertConsoleClean();
     }

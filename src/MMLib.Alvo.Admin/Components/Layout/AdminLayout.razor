@@ -11,7 +11,7 @@
 @inject ILogger<AdminLayout> Logger
 
 <div class="a-shell">
-    <nav class="a-sidebar" aria-label="Sections">
+    <nav class="a-sidebar" aria-label="Sections" data-testid="sidebar">
         <a class="a-brand" href="@AdminPaths.Overview" aria-label="Alvo">
             <img src="@AlvoAdminAssets.Mark" width="26" height="26" alt="" />
             <span>Alvo</span>
@@ -78,7 +78,7 @@
         }
     </div>
 
-    <nav class="a-bottomnav" aria-label="Sections">
+    <nav class="a-bottomnav" aria-label="Sections" data-testid="bottom-nav">
         @foreach (var entry in AdminNavigation.Bar)
         {
             @SectionLink.For(entry, "a-bottomnav__item", "a-bottomnav__item--active", BarContent(entry))
