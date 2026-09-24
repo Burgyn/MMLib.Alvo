@@ -4,6 +4,7 @@
 @inject AdminSession Session
 @inject NavigationManager Navigation
 @inject ILogger<Preview> Logger
+@inject ISnackbar Snackbar
 
 <PageTitle>Preview changes · Alvo</PageTitle>
 
@@ -12,8 +13,9 @@
 
     @if (_problem is not null)
     {
+        @* Keyed per refusal, so every refused attempt draws a new panel and takes focus again (spec §3.3). *@
         <CascadingValue Value="_problem">
-            <ErrorPanel />
+            <ErrorPanel @key="_problemsDrawn" TakeFocus="_problemFromSubmit" />
         </CascadingValue>
     }
 
@@ -25,7 +27,7 @@
     {
         <EmptyState Title="Nothing to apply"
                     Body="@($"The working copy is identical to revision {Copy.Revision}. Change something in Schema, or import a descriptor.")">
-            <a class="a-btn a-btn--sm" href="@AdminPaths.Schema">Back to Schema</a>
+            <AlvoButton Small="true" Href="@AdminPaths.Schema">Back to Schema</AlvoButton>
         </EmptyState>
     }
     else
@@ -50,13 +52,12 @@
         {
             @* Reached only when the plan on arrival was refused: the panel above says why, and this asks again. *@
             <Panel Padded="true" class="a-row">
-                <button type="button" class="a-btn a-btn--primary" disabled="@_busy" @onclick="PlanAsync">
+                <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Busy="_busy" OnClick="_ => PlanAsync()">
                     Plan this change
-                </button>
-                <button type="button" class="a-btn a-btn--sm" disabled="@_busy"
-                        data-testid="discard" @onclick="() => _discarding = true">
+                </AlvoButton>
+                <AlvoButton Small="true" Disabled="_busy" data-testid="discard" OnClick="_ => _discarding = true">
                     Discard them
-                </button>
+                </AlvoButton>
             </Panel>
         }
         else
@@ -68,10 +69,10 @@
                     the same operator. Asking again is the way to a plan of what the diff above now shows.
                 *@
                 <Actions>
-                    <button type="button" class="a-btn a-btn--ghost a-btn--sm" disabled="@_busy"
-                            data-testid="replan" @onclick="PlanAsync">
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" Disabled="_busy"
+                                data-testid="replan" OnClick="_ => PlanAsync()">
                         Plan again
-                    </button>
+                    </AlvoButton>
                 </Actions>
                 <Subtitle>
                     @(_plan.Plan.IsEmpty
@@ -85,41 +86,43 @@
 
             @if (_plan.Plan.HasDestructiveChanges)
             {
-                <ConfirmByName Title="This plan destroys data"
-                               Detail="Permission to lose data is never implied — not by this preview, and not by your management level. Confirming here is what allows it."
-                               Expected="@Gateway.Project"
-                               OnConfirmedChanged="confirmed => _allowed = confirmed" />
+                <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" Title="This plan destroys data" TestId="plan-destroys">
+                    Permission to lose data is never implied: not by this preview, and not by your management level.
+                    Applying asks you to type the project's name.
+                </AlvoAlert>
             }
 
             <Panel Padded="true">
-                <Field Label="Why" For="apply-reason">
-                    <ChildContent>
-                        <input class="a-input" id="apply-reason" value="@_reason" placeholder="@ReasonPlaceholder"
-                               @oninput="args => _reason = args.Value?.ToString() ?? string.Empty" />
-                    </ChildContent>
-                    <Hint>Configuration history shows this on the revision forever.</Hint>
-                </Field>
+                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" Label="Why" id="apply-reason"
+                              HelperText="Configuration history shows this on the revision forever."
+                              Placeholder="@ReasonPlaceholder" Value="_reason"
+                              ValueChanged="text => _reason = text ?? string.Empty" />
             </Panel>
 
             <div class="a-toolbar">
-                <a class="a-btn a-btn--ghost a-btn--sm" href="@AdminPaths.Schema">Back to the editor</a>
-                <button type="button" class="a-btn a-btn--sm" disabled="@_busy"
-                        data-testid="discard" @onclick="() => _discarding = true">
+                <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" Href="@AdminPaths.Schema">Back to the editor</AlvoButton>
+                <AlvoButton Small="true" Disabled="_busy" data-testid="discard" OnClick="_ => _discarding = true">
                     Discard them
-                </button>
+                </AlvoButton>
                 <span class="a-spacer"></span>
                 <span class="a-hint">
                     Applying as yourself, against revision @Copy.Revision. If somebody applies first, this is
                     refused rather than written over theirs.
                 </span>
-                <button type="button" class="a-btn a-btn--primary"
-                        disabled="@(_busy || (_plan.Plan.HasDestructiveChanges && !_allowed))"
-                        @onclick="ApplyAsync">
+                <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Busy="_busy" OnClick="_ => RequestApplyAsync()">
                     Apply these changes
-                </button>
+                </AlvoButton>
             </div>
         }
     }
+
+    <AlvoConfirm Open="_confirming" TestId="apply-confirm" ConfirmTestId="apply-confirm-run" CancelTestId="apply-confirm-cancel"
+                 Title="Apply a plan that destroys data?"
+                 Consequence="The steps marked as destructive drop data that no rollback brings back."
+                 Verb="Apply and destroy data" TypeToConfirm="@Gateway.Project" Busy="_busy"
+                 OnConfirm="ApplyConfirmedAsync" OnCancel="() => _confirming = false">
+        <PlanSteps Steps="@(_plan?.Plan.Steps ?? [])" />
+    </AlvoConfirm>
 
     <DiscardConfirm Open="_discarding" OnClose="() => _discarding = false" OnDiscarded="Discarded" />
 
@@ -132,7 +135,7 @@
                     ? "This request repeated one that had already run — the revision it names was applied by the earlier one."
                     : "The migration ran and the revision was appended.")
             </p>
-            <a class="a-btn a-btn--sm" href="@AdminPaths.History">Open Configuration history</a>
+            <AlvoButton Small="true" Href="@AdminPaths.History">Open Configuration history</AlvoButton>
         </Panel>
     }
 </div>
@@ -157,6 +160,13 @@
     private bool _allowed;
     private bool _busy;
     private bool _discarding;
+    private bool _confirming;
+
+    /// <summary>How many refusals this page has drawn, which keys the panel so each one takes focus again.</summary>
+    private int _problemsDrawn;
+
+    /// <summary>Whether the refusal on screen answered a press rather than the page's own load.</summary>
+    private bool _problemFromSubmit;
 
     protected override async Task OnInitializedAsync()
     {
@@ -182,7 +192,7 @@
            database; the skeleton stands in until the interactive render asks. */
         if (Copy.IsDirty && RendererInfo.IsInteractive)
         {
-            await PlanAsync();
+            await SendAsync(dryRun: true, pressed: false);
         }
     }
 
@@ -212,8 +222,47 @@
 
     private Task ApplyAsync() => SendAsync(dryRun: false);
 
-    private async Task SendAsync(bool dryRun)
+    /// <summary>A destructive plan asks for the project's name first; any other applies at once.</summary>
+    private Task RequestApplyAsync()
     {
+        if (_plan?.Plan.HasDestructiveChanges == true)
+        {
+            _confirming = true;
+            return Task.CompletedTask;
+        }
+
+        return ApplyAsync();
+    }
+
+    /// <summary>The name was typed, which is the permission to lose data this one apply carries.</summary>
+    private async Task ApplyConfirmedAsync()
+    {
+        _allowed = true;
+        _confirming = false;
+        try
+        {
+            await ApplyAsync();
+        }
+        finally
+        {
+            _allowed = false;
+        }
+    }
+
+    /// <summary>Plans or applies the working copy.</summary>
+    /// <param name="dryRun">Whether it only asks what would happen.</param>
+    /// <param name="pressed">
+    /// Whether an operator's press sent it, so a refusal takes focus; the plan on arrival does not pull focus off the
+    /// heading the router gave it.
+    /// </param>
+    private async Task SendAsync(bool dryRun, bool pressed = true)
+    {
+        /* The disabled attribute arrives a render after the first press; a double click lands both before it. */
+        if (_busy)
+        {
+            return;
+        }
+
         _busy = true;
         _problem = null;
 
@@ -238,20 +287,32 @@
             }
             else
             {
-                _applied = result;
-                _plan = null;
-                var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
-                Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
+                await TakeAppliedAsync(result);
             }
         }
         catch (Exception exception)
         {
             _problem = AdminProblem.From(exception, Logger, ProblemSite.SchemaApply);
+            _problemsDrawn++;
+            _problemFromSubmit = pressed;
         }
         finally
         {
             _busy = false;
         }
+    }
+
+    /// <summary>
+    /// Says the apply happened twice over: briefly in a snackbar, and in the panel that stays because it links onward
+    /// (spec §3.3). The copy then starts again from the revision just written.
+    /// </summary>
+    private async Task TakeAppliedAsync(ManagementApplyResult result)
+    {
+        _applied = result;
+        _plan = null;
+        Snackbar.Confirm($"Applied as revision {result.Revision}");
+        var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
+        Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
     }
 
     /// <summary>

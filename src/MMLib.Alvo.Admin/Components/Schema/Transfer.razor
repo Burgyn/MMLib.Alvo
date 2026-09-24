@@ -23,9 +23,9 @@
         <Subtitle>The stored descriptor, byte for byte — exactly what was applied, not a copy rebuilt from it.</Subtitle>
         <ChildContent>
             <div class="a-row">
-                <button type="button" class="a-btn a-btn--sm" @onclick="DownloadAsync" disabled="@(_descriptor is null)">
+                <AlvoButton Small="true" Disabled="@(_descriptor is null)" OnClick="_ => DownloadAsync()">
                     Download @(Gateway.Project).alvo.json
-                </button>
+                </AlvoButton>
                 <span class="a-section__sub">revision @(_descriptor?.Revision.ToString(CultureInfo.InvariantCulture) ?? "…")</span>
             </div>
             @if (_descriptor is not null)
@@ -43,21 +43,21 @@
         <ChildContent>
             @if (_refusal is { Length: > 0 })
             {
-                <ErrorPanel Title="The apply would refuse this descriptor"
+                @* Keyed per refusal, so every refused import draws a new panel and takes focus again (spec §3.3). *@
+                <ErrorPanel @key="_refusals" TakeFocus="true"
+                            Title="The apply would refuse this descriptor"
                             Slug="descriptor-invalid"
                             Fix="@_refusal" />
             }
 
-            <Field Label="Descriptor JSON" For="import-json">
-                <textarea class="a-textarea" id="import-json" rows="12" spellcheck="false"
-                          value="@_pasted"
-                          @oninput="args => _pasted = args.Value?.ToString() ?? string.Empty"></textarea>
-            </Field>
+            <MudTextField T="string" Variant="Variant.Outlined" Lines="12" Immediate="true" id="import-json" Class="a-mono"
+                          spellcheck="false" Label="Descriptor JSON"
+                          Value="_pasted" ValueChanged="text => _pasted = text ?? string.Empty" OnKeyDown="ImportKeyAsync" />
 
-            <button type="button" class="a-btn a-btn--primary" @onclick="Import"
-                    disabled="@(_pasted.Trim().Length == 0)">
+            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Disabled="@(_pasted.Trim().Length == 0)"
+                        data-testid="import-run" OnClick="_ => Import()">
                 Load it into the working copy
-            </button>
+            </AlvoButton>
         </ChildContent>
     </Panel>
 </div>
@@ -77,6 +77,9 @@
     private AdminProblem? _problem;
     private string _pasted = string.Empty;
     private string? _refusal;
+
+    /// <summary>How many refusals this page has drawn, which keys the panel so each one takes focus again.</summary>
+    private int _refusals;
 
     protected override async Task OnInitializedAsync()
     {
@@ -105,26 +108,36 @@
     /// Loads a pasted descriptor, after refusing the names the frozen schema cannot carry.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The check is the boundary, not a validation pass: everything else about the descriptor is
     /// judged by the apply on the next screen, which is the authority. What is refused here is the
     /// class of input that must never reach a renderer — see <see cref="DescriptorNames"/>.
+    /// </para>
+    /// <para>
+    /// The keyboard reaches it without the button, so the empty box is refused here as well as by the disabled button.
+    /// </para>
     /// </remarks>
-    private void Import()
+    private Task Import()
     {
-        _refusal = DescriptorNames.FirstRefusal(_pasted);
-        if (_refusal is not null)
+        if (_pasted.Trim().Length == 0)
         {
-            return;
+            return Task.CompletedTask;
         }
 
-        if (!Copy.Replace(_pasted))
+        _refusal = DescriptorNames.FirstRefusal(_pasted) ?? (Copy.Replace(_pasted) ? null : "That is not a JSON object.");
+        if (_refusal is not null)
         {
-            _refusal = "That is not a JSON object.";
-            return;
+            _refusals++;
+            return Task.CompletedTask;
         }
 
         Navigation.NavigateTo(AdminPaths.Changes);
+        return Task.CompletedTask;
     }
+
+    /// <summary>Ctrl/Cmd+Enter imports; Enter alone is a newline in a JSON document (spec §3.4).</summary>
+    private Task ImportKeyAsync(KeyboardEventArgs args)
+        => args.Key == "Enter" && (args.CtrlKey || args.MetaKey) ? Import() : Task.CompletedTask;
 
     public void Dispose() => _lifetime.Dispose();
 }
