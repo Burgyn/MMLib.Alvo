@@ -246,6 +246,89 @@
    =========================================================================== */
 
 @layer base {
+  /* ---------------------------------------------------------------------------
+     The component library's element rules, undone for everything that is not the
+     library's own.
+
+     MudBlazor's sheet sits in the lowest layer (alvo-mud.css), so it loses to every
+     rule below. But a layered author rule still beats the browser's own defaults,
+     so wherever this file says nothing, Mud's reset would decide:
+     *{margin:0;padding:0;border-style:solid}, button{display:inline-flex},
+     label{display:inline-block}, body{letter-spacing}. A paragraph would lose its
+     margins and a plain button its display. `revert` hands each property back to the
+     browser's default, which is what it was before the library was referenced.
+
+     Scoped by the element's OWN class, not by its ancestors. An element is the
+     library's when a class of its own starts with `mud-`, and Mud marks every part
+     of its components that way. An ancestor test (`[class*=mud-] *`) would be wrong
+     twice: the shell will sit inside MudLayout, which would exempt every screen, and
+     Alvo's markup inside a Mud dialog would draw differently from the same markup on
+     a page. Every rule has zero specificity (`:where`) and comes first, so any other
+     rule of this file wins.
+     LibraryProbe (the end-to-end suite) compares every such element with and without
+     the library's sheet.
+     --------------------------------------------------------------------------- */
+  :where(:not([class^='mud-'], [class*=' mud-'])) {
+    margin: revert;
+    padding: revert;
+    border-width: revert;
+    border-style: revert;
+    -webkit-tap-highlight-color: revert;
+  }
+
+  :where(body) {
+    letter-spacing: revert;
+    text-transform: revert;
+  }
+
+  :where(strong, b):where(:not([class^='mud-'], [class*=' mud-'])) {
+    font-weight: revert;
+  }
+
+  :where(label):where(:not([class^='mud-'], [class*=' mud-'])) {
+    display: revert;
+  }
+
+  :where(button):where(:not([class^='mud-'], [class*=' mud-'])) {
+    display: revert;
+    position: revert;
+    align-items: revert;
+    justify-content: revert;
+    vertical-align: revert;
+    border: revert;
+    border-radius: revert;
+    background-color: revert;
+    outline: revert;
+    cursor: revert;
+    user-select: revert;
+    appearance: revert;
+    text-decoration: revert;
+  }
+
+  :where(input, button, select, optgroup, textarea):where(:not([class^='mud-'], [class*=' mud-'])) {
+    line-height: revert;
+    overflow: revert;
+    text-transform: revert;
+    overflow-wrap: revert;
+    appearance: revert;
+  }
+
+  :where(optgroup):where(:not([class^='mud-'], [class*=' mud-'])) {
+    font-family: revert;
+    font-size: revert;
+  }
+
+  :where(iframe):where(:not([class^='mud-'], [class*=' mud-'])) {
+    border: revert;
+    width: revert;
+    height: revert;
+  }
+
+  /* Alvo's own, so that `hidden` never depends on the library that happens to say it too. */
+  [hidden] {
+    display: none !important;
+  }
+
   *,
   *::before,
   *::after {

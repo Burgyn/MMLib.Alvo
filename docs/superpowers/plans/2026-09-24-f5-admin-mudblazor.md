@@ -196,7 +196,7 @@ The operator sees no change from this task. Every screen renders as before: the 
 - Modify tests:
   - `test/MMLib.Alvo.Admin.Tests/Internal/AdminInteropTests.cs`
   - `test/MMLib.Alvo.Admin.Tests.EndToEnd/AdminSession.cs`
-  - `test/MMLib.Alvo.Admin.Tests/PublicApi.MMLib.Alvo.Admin.verified.txt` (it gains the five new components)
+  - `test/MMLib.Alvo.Admin.Tests/PublicApi.MMLib.Alvo.Admin.verified.txt` (it gains the five new components, and `AdminLayout`'s `OnAfterRenderAsync` override)
 - Modify docs: `docs/architecture/admin-dashboard-review.md`: a dated note under "Considered and rejected".
 
 **Interfaces:**
@@ -1992,12 +1992,14 @@ git add Directory.Packages.props src/MMLib.Alvo.Admin/MMLib.Alvo.Admin.csproj sr
 git commit -m "feat(admin): MudBlazor foundation beneath the design system, with the wrapper layer
 
 MudBlazor 9.10.0, pinned exactly, is imported into @layer mud beneath Alvo's five layers
-(alvo-mud.css), so no existing screen moves. The theme is built from the tokens and pinned
+(alvo-mud.css), and alvo.css's base layer hands every element that is not Mud's back to the
+browser's defaults, which a layered reset would otherwise still beat; LibraryProbe measures
+that no existing screen moves. The theme is built from the tokens and pinned
 equal to them; a second provider scoped to [data-theme=dark] plus alvo.js always writing a
 resolved theme gives dark mode with no flash. AlvoButton, AlvoAlert, AlvoEditor, AlvoConfirm
 and AlvoTheme carry the pattern language's policy; none takes a MudBlazor type (D5, pinned by
-LibraryBoundaryTests). The public API grows by those five components only: Blazor compiles
-every component public, and Components.* is implementation (F-10).
+LibraryBoundaryTests). The public API grows by those five components and AdminLayout's
+OnAfterRenderAsync override (the shell-ready mark): Blazor compiles every component public, and Components.* is implementation (F-10).
 
 Deviations: V1 (a second, internal stylesheet), V2 (library assets internal), V3 (palette
 duplicated and pinned), V4 (editor full-width below 560 px).

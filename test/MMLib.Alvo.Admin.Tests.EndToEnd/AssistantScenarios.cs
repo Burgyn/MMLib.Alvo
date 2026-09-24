@@ -55,6 +55,31 @@ public sealed class AssistantScenarios(AssistantWorld world) : IClassFixture<Ass
 
         session.AssertConsoleClean();
     }
+
+    /// <summary>
+    /// The launcher and the open drawer look as they did before the component library was referenced (spec D8).
+    /// </summary>
+    /// <remarks>
+    /// The launcher is a plain <c>button</c>, which Mud's element rule made <c>inline-flex</c>.
+    /// <see cref="FoundationScenarios"/> measures the screens. The assistant has its own world, so it is measured
+    /// here.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_library_changes_no_style_of_the_assistant()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema");
+
+        var closed = await LibraryProbe.ReadAsync(session.Page, "button[data-testid=assistant-launch]");
+        closed.Missing.ShouldBeEmpty();
+        closed.Differences.ShouldBeEmpty("MudBlazor's sheet restyles the assistant's launcher");
+
+        await session.Page.ClickAsync("[data-testid='assistant-launch']");
+        await session.Page.Locator("#assistant-message").WaitForAsync();
+        var open = await LibraryProbe.ReadAsync(session.Page, "#assistant-message");
+        open.Missing.ShouldBeEmpty();
+        open.Differences.ShouldBeEmpty("MudBlazor's sheet restyles the open assistant");
+    }
 }
 
 /// <summary>

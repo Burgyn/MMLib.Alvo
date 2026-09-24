@@ -115,6 +115,20 @@
       return;
     }
 
+    /* Ctrl/Cmd+Enter submits the editor form it is typed in, exactly once. The browser already
+       submits a form on Enter in a single-line field, modifier or not. A server-side keydown
+       handler as well would make that one chord two submits, and the second would land after an
+       owner that saves synchronously had reopened its gate. So the default is cancelled and
+       this is the only path. A textarea, where Enter is a newline, gets the same submit. */
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && event.target instanceof Element) {
+      const form = event.target.closest('form[data-alvo-chord-submit]');
+      if (form) {
+        event.preventDefault();
+        form.requestSubmit();
+        return;
+      }
+    }
+
     if (event.key === 'Escape') {
       awaitingGoto = false;
       emit('dismiss');

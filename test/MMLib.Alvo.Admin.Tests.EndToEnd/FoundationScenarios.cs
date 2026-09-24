@@ -29,6 +29,44 @@ public sealed class FoundationScenarios(AdminWorld world) : IClassFixture<AdminW
         session.AssertConsoleClean();
     }
 
+    /// <summary>
+    /// Referencing the library moves nothing Alvo draws: every element that is not Mud's computes the same style
+    /// with the library's sheet as without it (spec D8).
+    /// </summary>
+    /// <remarks>
+    /// The comparison covers every element. The named tags are the kinds Mud's reset was seen to strip: a
+    /// section's subtitle paragraph, a code block, a heading and a list. Naming them makes a screen that stopped
+    /// rendering them fail rather than pass. They are tags rather than classes because the suite does not add
+    /// raw design-system selectors (EndToEndSelectorTests).
+    /// </remarks>
+    /// <param name="path">The screen.</param>
+    /// <param name="named">Elements the screen must show, comma-separated.</param>
+    [Theory(Timeout = AdminWorld.ScenarioTimeout)]
+    [InlineData("", "h1")]
+    [InlineData("/welcome", "h1,p")]
+    [InlineData("/automations", "p")]
+    [InlineData("/access", "h1")]
+    [InlineData("/schema", "h1")]
+    [InlineData("/schema?view=map", "ul")]
+    [InlineData("/schema/work_orders", "h1")]
+    [InlineData("/data/regions", "h1")]
+    [InlineData("/changes", "h1")]
+    [InlineData("/history", "h1")]
+    [InlineData("/rules", "h1")]
+    [InlineData("/transfer", "h1,pre")]
+    [InlineData("/settings", "h1")]
+    public async Task The_library_changes_no_style_of_an_element_Alvo_draws(string path, string named)
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync(path);
+
+        var reading = await LibraryProbe.ReadAsync(session.Page, named.Split(','));
+
+        reading.Missing.ShouldBeEmpty($"{path} must show these for the comparison to cover them");
+        reading.Compared.ShouldBeGreaterThan(20);
+        reading.Differences.ShouldBeEmpty($"MudBlazor's sheet restyles Alvo's markup on '{path}'");
+    }
+
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task A_stored_dark_theme_is_dark_on_the_first_paint_before_the_circuit()
     {

@@ -9,7 +9,9 @@
     * Escape and Cancel ask "Discard your changes?" when Dirty (EditorCloseGuard). The question replaces the form in
       place instead of opening a second dialog (spec §3.1). The scrim never closes the editor.
     * Enter in a single-line field submits (a real form with a submit button), Ctrl/Cmd+Enter submits from anywhere,
-      and the primary button is busy and disabled while OnSubmit runs (SubmitGate). Cancel stays enabled.
+      and the primary button is busy and disabled while OnSubmit runs (SubmitGate). Cancel stays enabled. The chord is
+      alvo.js's (data-alvo-chord-submit), not a keydown handler here: the browser's own Enter-submit plus a server
+      handler would be two submits for one keystroke.
 
     Closed means absent: the owner removes this component, and disposing it closes the dialog, so focus goes back to
     the trigger.
@@ -48,7 +50,8 @@
                 </Actions>
             </AlvoAlert>
         }
-        <form id="@_formId" class="a-stack" hidden="@_guard.Asking" @onsubmit="SubmitAsync">
+        @* `hidden` wins over .a-stack's display only because alvo.css's base layer says [hidden]{display:none!important}. *@
+        <form id="@_formId" class="a-stack" hidden="@_guard.Asking" data-alvo-chord-submit @onsubmit="SubmitAsync">
             @ChildContent
         </form>
     </DialogContent>
@@ -179,17 +182,7 @@
 
     private void KeepEditing() => _guard.KeepEditing();
 
-    private async Task OnKeyDownAsync(KeyboardEventArgs args)
-    {
-        if (args.Key == "Escape")
-        {
-            await EscapeAsync();
-        }
-        else if (args.Key == "Enter" && (args.CtrlKey || args.MetaKey))
-        {
-            await SubmitAsync();
-        }
-    }
+    private Task OnKeyDownAsync(KeyboardEventArgs args) => args.Key == "Escape" ? EscapeAsync() : Task.CompletedTask;
 
     /// <summary>Escape answers the topmost thing: the question if one is asked, the editor otherwise.</summary>
     private Task EscapeAsync()
@@ -203,13 +196,32 @@
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc />
-    public async ValueTask DisposeAsync()
+    /// <summary>
+    /// Closes the dialog, unless the circuit has already gone or the provider is already disposing it. The editor is
+    /// disposed on both of those paths too, and closing then has nothing left to close.
+    /// </summary>
+    private async Task CloseQuietlyAsync()
     {
-        if (_dialog is not null)
+        if (_dialog is null)
+        {
+            return;
+        }
+
+        try
         {
             await _dialog.CloseAsync();
         }
+        catch (Exception exception) when (exception is JSDisconnectedException or ObjectDisposedException
+                                              or OperationCanceledException)
+        {
+            /* Nothing is left to close. */
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        await CloseQuietlyAsync();
 
         if (_scrollLock is not null)
         {

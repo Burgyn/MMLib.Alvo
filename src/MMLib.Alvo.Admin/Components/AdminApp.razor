@@ -12,7 +12,8 @@
 
     * The library's stylesheet is linked FIRST and reaches the page through `alvo-mud.css`, which
       imports it into the lowest cascade layer. See that file. Linking the library's own sheet
-      directly would let its reset beat every Alvo rule.
+      directly would let its reset beat every Alvo rule. The layer alone does not keep it off
+      Alvo's markup; alvo.css's base layer does the rest.
 
     * The render mode is decided here, PER REQUEST, and each of the three obvious alternatives is
       wrong in its own way. Declaring it on each page leaves the LAYOUT static — the sidebar, the

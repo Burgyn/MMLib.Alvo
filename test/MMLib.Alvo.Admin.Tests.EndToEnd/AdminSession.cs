@@ -225,8 +225,17 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
 
         /* And wait for the shell, which the keyboard does NOT imply: the keyboard is the palette's first render and
            the popover and dialog providers are the layout's. A select opened between the two opened nothing. */
-        await Page.WaitForFunctionAsync(
-            "() => document.documentElement.dataset.alvoShell === 'ready'", null, _polling).ConfigureAwait(false);
+        try
+        {
+            await Page.WaitForFunctionAsync(
+                "() => document.documentElement.dataset.alvoShell === 'ready'", null, _polling).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            throw new InvalidOperationException(
+                $"The shell at {Page.Url} never said it was ready, so its popover and dialog providers may not be live. "
+                + $"The console said: {(_noise.Count == 0 ? "nothing" : string.Join(" | ", _noise))}");
+        }
 
         await Page.EvaluateAsync(
             "() => Promise.all(document.getAnimations().map(a => a.finished.catch(() => {})))")
