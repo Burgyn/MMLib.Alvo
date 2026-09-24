@@ -371,9 +371,12 @@ internal sealed partial class FieldFacets
     /// The current type's own facets are left where they stand and set in place by <see cref="WriteTypeFacets"/>;
     /// removing and re-adding them moved them to the end of the object and badged an untouched field "changed".
     /// </remarks>
-    private void ClearFacetsOfOtherTypes(JsonObject facets)
+    private void ClearFacetsOfOtherTypes(JsonObject facets) => ClearFacetsOfOtherTypes(facets, Type);
+
+    /// <summary>Drops the facets that belong to any type but <paramref name="type"/> — the one being written.</summary>
+    private static void ClearFacetsOfOtherTypes(JsonObject facets, FieldType type)
     {
-        foreach (var facet in _typedFacets.Where(facet => OwnerOf(facet) != Type))
+        foreach (var facet in _typedFacets.Where(facet => OwnerOf(facet) != type))
         {
             facets.Remove(facet);
         }

@@ -64,15 +64,16 @@
         {
             <Field Label="Type" LabelId="new-field-type">
                 <span class="a-hint" data-testid="rollup-type">
-                    Stored as <code class="a-mono">@FieldFacets.Word(_facets.DerivedType)</code> —
-                    @(_facets.RollupOp == "count" ? "a count is a whole number." : "the type of the field it aggregates.")
+                    Stored as <code class="a-mono">@FieldFacets.Word(_facets.RollupType)</code> —
+                    @(_facets.KeepsDeclaredType ? "as declared, which holds this rollup's value."
+                        : _facets.RollupOp == "count" ? "a count is a whole number." : "the type of the field it aggregates.")
                 </span>
             </Field>
         }
         else
         {
             <Field Label="Type" LabelId="new-field-type">
-                <ChipGroup TValue="FieldType" Items="@(_facets.Kind == FieldKind.Computed ? FieldFacets.ComputedTypes : _types)"
+                <ChipGroup TValue="FieldType" Items="@(_facets.Kind == FieldKind.Computed ? _facets.ComputedTypesOffered : _types)"
                            Selected="[_facets.Type]" aria-labelledby="new-field-type"
                            Label="Word" SelectedChanged="types => _facets.Type = types[0]" />
             </Field>

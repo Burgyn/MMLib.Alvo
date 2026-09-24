@@ -1,7 +1,5 @@
 ﻿using MMLib.Alvo.Admin.Components.Schema;
 using MMLib.Alvo.Schema;
-using System.Text.Encodings.Web;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Tests.Schema;
@@ -15,9 +13,6 @@ public class FieldFacetsMaintainedTests
     private static readonly RollupSource _orders = new(
         "orders", ["customer_id"],
         [new("priority", FieldType.Integer, null, null), new("total", FieldType.Decimal, 10, 2)], null);
-
-    /// <summary>How the working copy writes JSON (<c>WorkingCopy._pretty</c>'s encoder): a bare <c>ToJsonString()</c> escapes <c>+</c>.</summary>
-    private static readonly JsonSerializerOptions _relaxed = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     private static readonly RollupSource _follows = new("follows", ["follower", "followee"], [], null);
 
@@ -137,7 +132,7 @@ public class FieldFacetsMaintainedTests
     [Fact]
     public void A_computed_field_carries_its_expression_and_chosen_type()
         => Built(new FieldFacets { Name = "twice", Kind = FieldKind.Computed, Type = FieldType.Integer, Computed = " priority + priority " })
-            .ToJsonString(_relaxed).ShouldBe("""{"type":"integer","computed":"priority + priority"}""");
+            .ToJsonString(Relaxed.Options).ShouldBe("""{"type":"integer","computed":"priority + priority"}""");
 
     [Fact]
     public void A_computed_field_with_no_expression_is_refused()

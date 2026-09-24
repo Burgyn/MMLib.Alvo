@@ -144,7 +144,7 @@ public partial class FieldEditor
     private void ChooseKind(FieldKind kind)
     {
         _facets.Kind = kind;
-        if (kind == FieldKind.Computed && !FieldFacets.ComputedTypes.Contains(_facets.Type))
+        if (kind == FieldKind.Computed && !_facets.ComputedTypesOffered.Contains(_facets.Type))
         {
             _facets.Type = FieldType.Decimal;
         }

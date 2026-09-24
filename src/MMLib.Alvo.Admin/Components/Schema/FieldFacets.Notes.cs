@@ -29,7 +29,7 @@ internal sealed partial class FieldFacets
                 "the schema's default, written for a new ref — choosing another is #265."));
         }
 
-        notes.AddRange(Withheld());
+        notes.AddRange(MaintainedNotes());
         return notes;
     }
 

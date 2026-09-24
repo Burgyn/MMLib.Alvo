@@ -4,9 +4,9 @@ using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
-/// <summary>One number field of a child entity — what <c>sum</c>, <c>avg</c>, <c>min</c> and <c>max</c> can aggregate.</summary>
+/// <summary>One field of a child entity, as a rollup on the parent would see it.</summary>
 /// <param name="Name">The child field.</param>
-/// <param name="Type">Integer or decimal.</param>
+/// <param name="Type">Its declared type.</param>
 /// <param name="Precision">A decimal's precision, as declared.</param>
 /// <param name="Scale">A decimal's scale, as declared.</param>
 internal sealed record RollupChildField(string Name, FieldType Type, int? Precision, int? Scale);
@@ -14,10 +14,19 @@ internal sealed record RollupChildField(string Name, FieldType Type, int? Precis
 /// <summary>An entity a rollup on the parent could aggregate.</summary>
 /// <param name="Entity">The child entity.</param>
 /// <param name="Via">Its ref fields that point at the parent, in declaration order.</param>
-/// <param name="Numbers">Its integer and decimal fields, in declaration order.</param>
+/// <param name="Numbers">Its integer and decimal fields, in declaration order — what a new rollup is offered.</param>
 /// <param name="Refusal">Why the apply would refuse a rollup from it, or <see langword="null"/>.</param>
 internal sealed record RollupSource(
-    string Entity, IReadOnlyList<string> Via, IReadOnlyList<RollupChildField> Numbers, string? Refusal);
+    string Entity, IReadOnlyList<string> Via, IReadOnlyList<RollupChildField> Numbers, string? Refusal)
+{
+    /// <summary>Every field it declares, of any type, in declaration order.</summary>
+    /// <remarks>
+    /// Wider than <see cref="Numbers"/> because the apply is: <c>RollupResolver.EnsureAggregatedFieldIsResolvable</c>
+    /// asks only that the aggregated field exists on the child, and <c>RollupRecompute</c> renders a plain
+    /// <c>AVG</c>/<c>MIN</c>/<c>MAX</c> over any column. An existing rollup over one of these must stay savable.
+    /// </remarks>
+    public IReadOnlyList<RollupChildField> Fields { get; init; } = Numbers;
+}
 
 /// <summary>
 /// The entities whose rows a rollup on <c>parent</c> could aggregate, read from the <b>working copy</b> — so an
@@ -62,17 +71,30 @@ internal static class RollupSources
             .Where(field => Is(field.Value?["type"], "ref") && Is(field.Value?["entity"], parent))
             .Select(field => field.Key)];
 
-        return via.Count == 0 ? null : new RollupSource(name, via, Numbers(fields), Refusal(name, child, parent, declaring, enabled));
+        if (via.Count == 0)
+        {
+            return null;
+        }
+
+        var declared = Declared(fields);
+        return new RollupSource(
+            name, via, [.. declared.Where(field => field.Type is FieldType.Integer or FieldType.Decimal)],
+            Refusal(name, child, parent, declaring, enabled))
+        { Fields = declared };
     }
 
-    private static List<RollupChildField> Numbers(JsonObject fields)
+    /// <summary>Every child field with its type; an unreadable type reads as a string, the schema's default.</summary>
+    private static List<RollupChildField> Declared(JsonObject fields)
         => [.. fields
-            .Where(field => Is(field.Value?["type"], "integer") || Is(field.Value?["type"], "decimal"))
+            .Where(field => field.Value is JsonObject)
             .Select(field => new RollupChildField(
                 field.Key,
-                Is(field.Value?["type"], "decimal") ? FieldType.Decimal : FieldType.Integer,
-                Whole(field.Value?["precision"]),
-                Whole(field.Value?["scale"])))];
+                Enum.TryParse<FieldType>(Text(field.Value!["type"]), ignoreCase: true, out var type) ? type : FieldType.String,
+                Whole(field.Value!["precision"]),
+                Whole(field.Value!["scale"])))];
+
+    private static string? Text(JsonNode? node)
+        => node is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
 
     private static string? Refusal(string name, JsonObject child, string parent, JsonObject declaring, bool enabled)
     {

@@ -1,10 +1,16 @@
 ﻿using MMLib.Alvo.Schema;
+using System.Globalization;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
 /* The two kinds whose value is maintained for the field — a rollup (RollupResolver) and a computed column
-   (ComputedColumnSql) — and exactly what the apply accepts of each. */
+   (ComputedColumnSql) — and exactly what the apply accepts of each.
+
+   Two rules pull in different directions here and both hold: a NEW choice is offered conservatively (avg over
+   decimals, number fields only, the scalar computed types), and an EXISTING declaration the core accepts is saved
+   as declared — nothing the apply accepts is blocked, and nothing is rewritten from what the editor would have
+   offered. */
 internal sealed partial class FieldFacets
 {
     private const int CelMaxLength = 2000;
@@ -12,16 +18,15 @@ internal sealed partial class FieldFacets
     /// <summary>The frozen schema's <c>rollup.op</c> values, in its own order.</summary>
     public static IReadOnlyList<string> RollupOps { get; } = ["sum", "count", "avg", "min", "max"];
 
-    /// <summary>The types a computed column is offered as.</summary>
+    /// <summary>The types a new computed column is offered as.</summary>
     /// <remarks>
     /// The scalar ones. The type is chosen rather than derived because the dashboard has no CEL compiler
     /// (<c>RulesTab.razor</c> gives the reason); a ref, an enum, a json or a uuid generated column is withheld
-    /// as the conservative choice — unverified whether the migrator refuses one.
+    /// from a new field as the conservative choice — unverified whether the migrator refuses one. A field already
+    /// declared as one keeps it (<see cref="ComputedTypesOffered"/>).
     /// </remarks>
     public static IReadOnlyList<FieldType> ComputedTypes { get; } =
         [FieldType.String, FieldType.Text, FieldType.Integer, FieldType.Decimal, FieldType.Boolean, FieldType.Date, FieldType.DateTime];
-
-    private static readonly string[] _withheld = ["required", "unique"];
 
     private FieldKind _declaredKind;
 
@@ -58,16 +63,77 @@ internal sealed partial class FieldFacets
     /// <summary>The chosen source, when it is one of <see cref="Sources"/>.</summary>
     public RollupSource? Source => Sources.FirstOrDefault(source => source.Entity == RollupFrom);
 
-    /// <summary>The child fields the current op can aggregate: none for <c>count</c>, decimals only for <c>avg</c>.</summary>
-    public IReadOnlyList<RollupChildField> Aggregatable => Source is not { } source || RollupOp == "count"
-        ? []
-        : [.. source.Numbers.Where(child => RollupOp != "avg" || child.Type == FieldType.Decimal)];
+    /// <summary>
+    /// The child fields the current op can aggregate: none for <c>count</c>; for a new choice the number fields
+    /// (decimals only for <c>avg</c>); and the declared field, whatever its type, while the declaration is unchanged.
+    /// </summary>
+    public IReadOnlyList<RollupChildField> Aggregatable
+    {
+        get
+        {
+            if (Source is not { } source || RollupOp == "count")
+            {
+                return [];
+            }
 
-    /// <summary>The type a rollup is stored as: a count is whole, anything else takes the aggregated field's type.</summary>
-    public FieldType DerivedType => Aggregatable.FirstOrDefault(child => child.Name == RollupField)?.Type ?? FieldType.Integer;
+            List<RollupChildField> offered = [.. source.Numbers.Where(child => RollupOp != "avg" || child.Type == FieldType.Decimal)];
+            if (KeptAggregate is { } kept && !offered.Any(child => child.Name == kept.Name))
+            {
+                offered.Add(kept);
+            }
+
+            return offered;
+        }
+    }
+
+    /// <summary>The type a new rollup is stored as: a count is whole, anything else takes the aggregated field's type.</summary>
+    public FieldType DerivedType => Aggregated?.Type ?? FieldType.Integer;
+
+    /// <summary>
+    /// The type the save writes: the declared one while it can hold the aggregate, and <see cref="DerivedType"/>
+    /// for a new rollup or a declared type that cannot.
+    /// </summary>
+    /// <remarks>
+    /// Kept rather than re-derived because the apply checks no parent type (<c>RollupResolver</c>): a
+    /// <c>decimal(12,2)</c> sum over an integer child, or a count declared decimal, is legal, and re-deriving it
+    /// silently retyped the column and dropped its precision and scale.
+    /// </remarks>
+    public FieldType RollupType => KeepsDeclaredType ? _declaredType : DerivedType;
+
+    /// <summary>Whether the declared type is kept — see <see cref="RollupType"/>.</summary>
+    public bool KeepsDeclaredType => StillDeclaredRollup && _declared.ContainsKey("type") && Holds(_declaredType, DerivedType);
+
+    /// <summary>The types the computed chips offer: <see cref="ComputedTypes"/>, and the declared type of a computed field.</summary>
+    public IReadOnlyList<FieldType> ComputedTypesOffered
+        => _declaredKind == FieldKind.Computed && !ComputedTypes.Contains(_declaredType)
+            ? [.. ComputedTypes, _declaredType]
+            : ComputedTypes;
 
     /// <summary>Whether the declaration carries a <c>rollup.where</c>.</summary>
-    public bool DeclaresRollupFilter => _declared["rollup"]?["where"] is not null;
+    public bool DeclaresRollupFilter => DeclaredRollup?["where"] is not null;
+
+    private JsonObject? DeclaredRollup => _declared["rollup"] as JsonObject;
+
+    /// <summary>Whether the field was declared a rollup and still is one.</summary>
+    private bool StillDeclaredRollup => Kind == FieldKind.Rollup && _declaredKind == FieldKind.Rollup;
+
+    /// <summary>The aggregated child field, when it is one <see cref="Aggregatable"/> allows.</summary>
+    private RollupChildField? Aggregated => Aggregatable.FirstOrDefault(child => child.Name == RollupField);
+
+    /// <summary>
+    /// The declared aggregated field, while the rollup still declares it from the same entity with the same op and it
+    /// exists on the child — which is all <c>RollupResolver.EnsureAggregatedFieldIsResolvable</c> asks.
+    /// </summary>
+    private RollupChildField? KeptAggregate
+        => StillDeclaredRollup && RollupField.Length > 0
+            && RollupFrom == Text(DeclaredRollup?["from"]) && RollupOp == Text(DeclaredRollup?["op"])
+            && RollupField == Text(DeclaredRollup?["field"])
+            ? Source?.Fields.FirstOrDefault(child => child.Name == RollupField)
+            : null;
+
+    /// <summary>Whether a column of <paramref name="declared"/> holds an aggregate of <paramref name="aggregate"/> — the same type, or an integer widened to a decimal.</summary>
+    private static bool Holds(FieldType declared, FieldType aggregate)
+        => declared == aggregate || (declared == FieldType.Decimal && aggregate == FieldType.Integer);
 
     /// <summary>Reads the rollup or the computed expression a declaration carries, and so its kind.</summary>
     private void ReadMaintained(JsonObject facets)
@@ -97,7 +163,7 @@ internal sealed partial class FieldFacets
             return refusal;
         }
 
-        WriteDerivedType(facets);
+        WriteRollupType(facets);
         facets.Remove("computed");
         WriteRollupObject(RollupObject(facets), Source!);
         Toggle(facets, "index", Indexed);
@@ -129,7 +195,7 @@ internal sealed partial class FieldFacets
 
     private string? RefuseAggregatedField()
     {
-        if (RollupOp == "count" || Aggregatable.Any(field => field.Name == RollupField))
+        if (RollupOp == "count" || Aggregated is not null)
         {
             return null;
         }
@@ -144,18 +210,20 @@ internal sealed partial class FieldFacets
             ? $"{RollupFrom} points here through {string.Join(", ", source.Via)} — pick which one this rollup follows."
             : null;
 
-    /// <summary>The derived type; a declared precision and scale are the author's, derived only when absent.</summary>
-    private void WriteDerivedType(JsonObject facets)
+    /// <summary>
+    /// Writes <see cref="RollupType"/> and drops only the facets of other types; the editor's own <see cref="Type"/>
+    /// is not touched, so a successful build leaves the sheet as the operator left it.
+    /// </summary>
+    private void WriteRollupType(JsonObject facets)
     {
-        var child = Aggregatable.FirstOrDefault(field => field.Name == RollupField);
-        Type = child?.Type ?? FieldType.Integer;
-        facets["type"] = Word(Type);
-        ClearFacetsOfOtherTypes(facets);
+        var type = RollupType;
+        facets["type"] = Word(type);
+        ClearFacetsOfOtherTypes(facets, type);
 
-        if (child is { Type: FieldType.Decimal })
+        if (type == FieldType.Decimal)
         {
-            facets["precision"] ??= child.Precision ?? DefaultPrecision;
-            facets["scale"] ??= child.Scale ?? DefaultScale;
+            facets["precision"] ??= Aggregated?.Precision ?? DefaultPrecision;
+            facets["scale"] ??= Aggregated?.Scale ?? DefaultScale;
         }
     }
 
@@ -171,6 +239,12 @@ internal sealed partial class FieldFacets
         return created;
     }
 
+    /// <summary>Writes the rollup object's keys in place.</summary>
+    /// <remarks>
+    /// A <c>field</c> on a count and a <c>via</c> that is not a ref here are dropped, each with a note
+    /// (<see cref="DroppedFromRollup"/>): the apply ignores the first (<c>RollupResolver.cs:66</c>) and refuses the
+    /// second (<c>:256-263</c>).
+    /// </remarks>
     private void WriteRollupObject(JsonObject rollup, RollupSource source)
     {
         rollup["from"] = RollupFrom;
@@ -184,10 +258,24 @@ internal sealed partial class FieldFacets
         }
     }
 
-    /// <summary>Writes a computed column: the expression and a chosen scalar type.</summary>
+    /// <summary>Writes a computed column: the expression and a chosen type.</summary>
     private string? WriteComputed(JsonObject facets)
     {
-        var expression = Computed.Trim();
+        if (RefuseComputed(Computed.Trim()) is { } refusal)
+        {
+            return refusal;
+        }
+
+        facets.Remove("rollup");
+        facets["type"] = Word(Type);
+        facets["computed"] = Computed.Trim();
+        Toggle(facets, "index", Indexed);
+        ClearFacetsOfOtherTypes(facets);
+        return WriteDefault(facets) ?? WriteTypeFacets(facets);
+    }
+
+    private string? RefuseComputed(string expression)
+    {
         if (expression.Length == 0)
         {
             return "A computed field needs its expression — CEL over this row's own fields, such as unit_price * amount.";
@@ -195,20 +283,13 @@ internal sealed partial class FieldFacets
 
         if (expression.Length > CelMaxLength)
         {
-            return "A computed expression is at most 2000 characters — the schema's limit for CEL.";
+            return string.Create(
+                CultureInfo.InvariantCulture, $"A computed expression is at most {CelMaxLength} characters — the schema's limit for CEL.");
         }
 
-        if (!ComputedTypes.Contains(Type))
-        {
-            return $"A computed value is stored as a generated column, offered here as {string.Join(", ", ComputedTypes.Select(Word))}.";
-        }
-
-        facets.Remove("rollup");
-        facets["type"] = Word(Type);
-        facets["computed"] = expression;
-        Toggle(facets, "index", Indexed);
-        ClearFacetsOfOtherTypes(facets);
-        return WriteDefault(facets) ?? WriteTypeFacets(facets);
+        return ComputedTypesOffered.Contains(Type)
+            ? null
+            : $"A computed value is stored as a generated column, offered here as {string.Join(", ", ComputedTypes.Select(Word))}.";
     }
 
     /// <summary>A kept <c>rollup.where</c> is refused at apply (<c>RollupResolver.cs:107</c>).</summary>
@@ -216,13 +297,6 @@ internal sealed partial class FieldFacets
         => Kind == FieldKind.Rollup && facets["rollup"]?["where"] is not null
             ? "Its rollup declares a 'where' filter, which this build refuses at apply (rollup.where). Tick \"Remove the declared filter\" to save the field."
             : null;
-
-    /// <summary>A required or unique on a maintained value: carried, and said.</summary>
-    private IEnumerable<FacetNote> Withheld()
-        => MaintainedElsewhere
-            ? _withheld.Where(facet => Flag(_declared[facet])).Select(facet => new FacetNote(
-                facet, "true", FacetFate.Kept, "not offered for a value that is maintained for it — kept as declared."))
-            : [];
 
     private static void SetOrRemove(JsonObject owner, string key, string? value)
     {
