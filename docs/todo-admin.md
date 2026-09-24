@@ -320,7 +320,7 @@ Relationships tab already computes), `op`, `field` (that child's numeric fields,
 `via` (only when the child has more than one ref here) and `where` (CEL, marked `not yet` —
 `rollup.where` is in `UnhonouredFeatures`). `Computed` offers the CEL input. Either way the type is
 derived (`count` → `integer`; `sum`/`avg`/`min`/`max` → the child field's type), and `required`,
-`unique`, `default` are not offered.
+`unique`, `default` are not offered. **Done** — §8d item 14.
 
 The wider question the maintainer asked — *how many more of these are there* — is §8.
 
@@ -532,10 +532,11 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
 **#268** (identity — add that the build ignores these keys too), **#269** (extended by 19),
 **#270**, **#271** (extended by 27).
 
-14. **Rollup and computed cannot be authored, and the editor contradicts them** — §7. Add from this
+14. ✅ **Rollup and computed cannot be authored, and the editor contradicts them** — §7. Add from this
     audit: `unique` is offered on a rollup and accepted by the apply; the apply checks no parent type
     (RR:46-69), so a `string` count rollup applies; the `rollup` / `computed` badge vanishes once the
     field is staged. Answer as §7, and withhold `unique` alongside `required`/`default`.
+    **Done:** the field editor has a Value kind — written by callers / rollup / computed. A rollup offers the working copy's sources (refused ones said: dynamic, tenancy), op, the child's number fields (decimals for avg), via when ambiguous, and the build's where refusal; its type is derived; required/unique/default are withheld and a declared one is kept and said. An existing rollup/computed field opens in its kind, and its badge survives staging.
 15. ✅ **Opening Edit on an unbounded string adds `maxLength: 120`.** FF:120 prefills 120 when absent and
     FF:290 always writes it, so a rename or a `required` tick narrows the column — a DB change nobody
     chose (destructive-plan guard catching it: unverified). Probably: prefill null, write only when set,

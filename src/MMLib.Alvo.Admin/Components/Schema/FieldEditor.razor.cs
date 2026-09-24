@@ -14,6 +14,7 @@ public partial class FieldEditor
 
     private static readonly FieldType[] _types = Enum.GetValues<FieldType>();
     private static readonly string[] _flags = [string.Empty, "false", "true"];
+    private static readonly FieldKind[] _kinds = Enum.GetValues<FieldKind>();
 
     private FieldFacets _facets = new();
     private ElementReference _nameInput;
@@ -66,6 +67,16 @@ public partial class FieldEditor
     [Parameter]
     public IReadOnlyList<ManagementRefusedFeature> Refused { get; set; } = [];
 
+    /// <summary>
+    /// The entities a rollup here could aggregate, cascaded by the entity screen from the working copy.
+    /// </summary>
+    /// <remarks>
+    /// Cascaded and private rather than a parameter — the <c>StagedView</c> pattern — because a component parameter
+    /// must be public and <see cref="RollupSource"/> is internal; a parameter would grow the package's surface.
+    /// </remarks>
+    [CascadingParameter]
+    private IReadOnlyList<RollupSource>? Sources { get; set; }
+
     /// <summary>A field the editor built, in the schema's own shape.</summary>
     /// <param name="Name">The field's name.</param>
     /// <param name="Facets">Its type and facets.</param>
@@ -85,26 +96,60 @@ public partial class FieldEditor
 
     private bool IsEditing => Editing is { Length: > 0 };
 
+    /// <summary>The build's refusal of a rollup filter, shown where the filter would be.</summary>
+    private ManagementRefusedFeature? WhereRefusal => Refused.FirstOrDefault(refusal => refusal.Slot == "rollup.where");
+
+    /// <summary>The sources a rollup may be chosen from: the ones the apply accepts.</summary>
+    private IReadOnlyList<string> RollupFroms => [.. _facets.Sources.Where(source => source.Refusal is null).Select(source => source.Entity)];
+
+    /// <summary>The child fields the chosen op can aggregate, by name.</summary>
+    private IReadOnlyList<string> AggregatableNames => [.. _facets.Aggregatable.Select(child => child.Name)];
+
+    /// <summary>What a kind is called on its chip.</summary>
+    private static string KindWord(FieldKind kind) => kind switch
+    {
+        FieldKind.Rollup => "rollup",
+        FieldKind.Computed => "computed",
+        _ => "written by callers",
+    };
+
+    /// <summary>What the chosen kind means, under its chips.</summary>
+    private string KindHint => _facets.Kind switch
+    {
+        FieldKind.Rollup => "Maintained by Alvo: aggregated from the rows of an entity that points here, in the same transaction as the write to them. Callers never write it.",
+        FieldKind.Computed => "Maintained by the database: a stored generated column computed from this row's own fields. Callers never write it.",
+        _ => "A caller writes it, within the type and constraints below.",
+    };
+
     /// <inheritdoc />
     protected override void OnParametersSet()
     {
-        if (!IsEditing)
+        /* Prefilled only when the target changes: re-reading the parameters on every render would overwrite
+           what the operator is in the middle of typing with what the document still says. */
+        if (IsEditing && _prefilled != Editing)
+        {
+            _prefilled = Editing;
+            _refusal = null;
+            _facets = FieldFacets.Prefill(Editing!, EditingJson);
+        }
+        else if (!IsEditing)
         {
             _prefilled = null;
-            _facets.MaintainedElsewhere = false;
-            return;
         }
 
-        /* Only when the target changes: re-reading the parameters on every render would overwrite
-           what the operator is in the middle of typing with what the document still says. */
-        if (_prefilled == Editing)
+        _facets.Sources = Sources ?? [];
+    }
+
+    /// <summary>Switches the kind; a computed column keeps a type it can be, and decimal otherwise.</summary>
+    private void ChooseKind(FieldKind kind)
+    {
+        _facets.Kind = kind;
+        if (kind == FieldKind.Computed && !FieldFacets.ComputedTypes.Contains(_facets.Type))
         {
-            return;
+            _facets.Type = FieldType.Decimal;
         }
 
-        _prefilled = Editing;
         _refusal = null;
-        _facets = FieldFacets.Prefill(Editing!, EditingJson);
     }
 
     /// <summary>A type as the descriptor spells it.</summary>
@@ -142,7 +187,7 @@ public partial class FieldEditor
             return;
         }
 
-        _facets = new FieldFacets { Type = _facets.Type };
+        _facets = new FieldFacets { Type = _facets.Type, Kind = _facets.Kind, Sources = _facets.Sources };
         await _nameInput.FocusAsync();
     }
 

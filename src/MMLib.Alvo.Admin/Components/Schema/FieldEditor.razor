@@ -52,18 +52,42 @@
             </Hint>
         </Field>
 
-        <Field Label="Type" LabelId="new-field-type">
-            <ChipGroup TValue="FieldType" Items="_types" Selected="[_facets.Type]" aria-labelledby="new-field-type"
-                       Label="Word" SelectedChanged="types => _facets.Type = types[0]" />
+        <Field Label="Value" LabelId="new-field-kind">
+            <ChildContent>
+                <ChipGroup TValue="FieldKind" Items="_kinds" Selected="[_facets.Kind]" aria-labelledby="new-field-kind"
+                           Label="KindWord" SelectedChanged="kinds => ChooseKind(kinds[0])" />
+            </ChildContent>
+            <Hint>@KindHint</Hint>
         </Field>
+
+        @if (_facets.Kind == FieldKind.Rollup)
+        {
+            <Field Label="Type" LabelId="new-field-type">
+                <span class="a-hint" data-testid="rollup-type">
+                    Stored as <code class="a-mono">@FieldFacets.Word(_facets.DerivedType)</code> —
+                    @(_facets.RollupOp == "count" ? "a count is a whole number." : "the type of the field it aggregates.")
+                </span>
+            </Field>
+        }
+        else
+        {
+            <Field Label="Type" LabelId="new-field-type">
+                <ChipGroup TValue="FieldType" Items="@(_facets.Kind == FieldKind.Computed ? FieldFacets.ComputedTypes : _types)"
+                           Selected="[_facets.Type]" aria-labelledby="new-field-type"
+                           Label="Word" SelectedChanged="types => _facets.Type = types[0]" />
+            </Field>
+        }
 
         <div class="a-field">
             <span class="a-label">Constraints</span>
             <div class="a-check-row">
-                <label class="a-check">
-                    <input type="checkbox" checked="@_facets.Required" @onchange="args => _facets.Required = args.Value is true" />
-                    <span>required</span>
-                </label>
+                @if (_facets.RequiredOffered)
+                {
+                    <label class="a-check">
+                        <input type="checkbox" checked="@_facets.Required" @onchange="args => _facets.Required = args.Value is true" />
+                        <span>required</span>
+                    </label>
+                }
                 @if (_facets.UniqueOffered)
                 {
                     <label class="a-check">
@@ -97,50 +121,126 @@
             }
         </div>
 
-        @switch (_facets.Type)
+        @if (_facets.Kind != FieldKind.Rollup)
         {
-            case FieldType.String:
-                <Field Label="Max length" For="new-field-max">
-                    <ChildContent>
-                        <input class="a-input" id="new-field-max" type="number" min="1" value="@_facets.MaxLength"
-                               placeholder="no limit" @oninput="args => _facets.MaxLength = OptionalNumber(args.Value)" />
-                    </ChildContent>
-                    <Hint>Leave it empty for no limit — the schema's own default.</Hint>
-                </Field>
-                break;
-            case FieldType.Decimal:
-                <div class="a-field-row">
-                    <Field Label="Precision" For="new-field-precision">
+            @switch (_facets.Type)
+            {
+                case FieldType.String:
+                    <Field Label="Max length" For="new-field-max">
                         <ChildContent>
-                            <input class="a-input" id="new-field-precision" type="number" value="@_facets.Precision"
-                                   @oninput="args => _facets.Precision = Number(args.Value, 10)" />
+                            <input class="a-input" id="new-field-max" type="number" min="1" value="@_facets.MaxLength"
+                                   placeholder="no limit" @oninput="args => _facets.MaxLength = OptionalNumber(args.Value)" />
                         </ChildContent>
-                        <Hint>Total digits, not the ones before the point.</Hint>
+                        <Hint>Leave it empty for no limit — the schema's own default.</Hint>
                     </Field>
-                    <Field Label="Scale" For="new-field-scale">
+                    break;
+                case FieldType.Decimal:
+                    <div class="a-field-row">
+                        <Field Label="Precision" For="new-field-precision">
+                            <ChildContent>
+                                <input class="a-input" id="new-field-precision" type="number" value="@_facets.Precision"
+                                       @oninput="args => _facets.Precision = Number(args.Value, 10)" />
+                            </ChildContent>
+                            <Hint>Total digits, not the ones before the point.</Hint>
+                        </Field>
+                        <Field Label="Scale" For="new-field-scale">
+                            <ChildContent>
+                                <input class="a-input" id="new-field-scale" type="number" value="@_facets.Scale"
+                                       @oninput="args => _facets.Scale = Number(args.Value, 2)" />
+                            </ChildContent>
+                            <Hint>Digits after the point.</Hint>
+                        </Field>
+                    </div>
+                    break;
+                case FieldType.Enum:
+                    <Field Label="Values" For="new-field-values">
                         <ChildContent>
-                            <input class="a-input" id="new-field-scale" type="number" value="@_facets.Scale"
-                                   @oninput="args => _facets.Scale = Number(args.Value, 2)" />
+                            <input class="a-input" id="new-field-values" value="@_facets.Values" placeholder="e.g. scheduled, in_progress, completed"
+                                   @oninput="args => _facets.Values = args.Value?.ToString() ?? string.Empty" />
                         </ChildContent>
-                        <Hint>Digits after the point.</Hint>
+                        <Hint>Comma separated. An enum with no values is refused by the schema.</Hint>
                     </Field>
-                </div>
-                break;
-            case FieldType.Enum:
-                <Field Label="Values" For="new-field-values">
-                    <ChildContent>
-                        <input class="a-input" id="new-field-values" value="@_facets.Values" placeholder="e.g. scheduled, in_progress, completed"
-                               @oninput="args => _facets.Values = args.Value?.ToString() ?? string.Empty" />
-                    </ChildContent>
-                    <Hint>Comma separated. An enum with no values is refused by the schema.</Hint>
+                    break;
+                case FieldType.Ref:
+                    <Field Label="Points at" LabelId="new-field-target">
+                        <ChipGroup TValue="string" Items="Targets" Selected="[_facets.Target]" aria-labelledby="new-field-target"
+                                   SelectedChanged="targets => _facets.Target = targets[0]" />
+                    </Field>
+                    break;
+            }
+        }
+
+        @if (_facets.Kind == FieldKind.Rollup)
+        {
+            @if (_facets.Sources.Count == 0)
+            {
+                <Refusal data-testid="rollup-no-source">
+                    Nothing points at <code class="a-mono">@Entity</code>. A rollup aggregates the rows of an entity with a
+                    ref field here — add one on the child first.
+                </Refusal>
+            }
+            else
+            {
+                <Field Label="Rolls up" LabelId="rollup-from">
+                    <ChipGroup TValue="string" Items="RollupFroms" Selected="[_facets.RollupFrom]" aria-labelledby="rollup-from"
+                               SelectedChanged="picked => _facets.RollupFrom = picked[0]" />
                 </Field>
-                break;
-            case FieldType.Ref:
-                <Field Label="Points at" LabelId="new-field-target">
-                    <ChipGroup TValue="string" Items="Targets" Selected="[_facets.Target]" aria-labelledby="new-field-target"
-                               SelectedChanged="targets => _facets.Target = targets[0]" />
+                @foreach (var refused in _facets.Sources.Where(source => source.Refusal is not null))
+                {
+                    <span class="a-hint" data-testid="@($"rollup-refused-{refused.Entity}")">
+                        <code class="a-mono">@refused.Entity</code> — @refused.Refusal
+                    </span>
+                }
+
+                <Field Label="Operation" LabelId="rollup-op">
+                    <ChipGroup TValue="string" Items="FieldFacets.RollupOps" Selected="[_facets.RollupOp]" aria-labelledby="rollup-op"
+                               SelectedChanged="ops => _facets.RollupOp = ops[0]" />
                 </Field>
-                break;
+
+                @if (_facets.RollupOp != "count" && _facets.Source is not null)
+                {
+                    <Field Label="Of the field" LabelId="rollup-field">
+                        <ChipGroup TValue="string" Items="AggregatableNames" Selected="[_facets.RollupField]" aria-labelledby="rollup-field"
+                                   SelectedChanged="fields => _facets.RollupField = fields[0]" />
+                    </Field>
+                }
+
+                @if (_facets.Source is { Via.Count: > 1 } source)
+                {
+                    <Field Label="Through" LabelId="rollup-via">
+                        <ChipGroup TValue="string" Items="source.Via" Selected="[_facets.RollupVia]" aria-labelledby="rollup-via"
+                                   SelectedChanged="refs => _facets.RollupVia = refs[0]" />
+                    </Field>
+                }
+            }
+
+            @* `where` is in the frozen schema and refused by this build, so it gets the build's sentence and no box. *@
+            <Refusal data-testid="rollup-where-refused">
+                <code class="a-mono">where</code> — @(WhereRefusal?.Consequence ?? "a filter on the child rows is not offered here.")
+            </Refusal>
+            @if (_facets.DeclaresRollupFilter)
+            {
+                <label class="a-check">
+                    <input type="checkbox" checked="@_facets.RemoveRollupFilter" data-testid="rollup-remove-where"
+                           @onchange="args => _facets.RemoveRollupFilter = args.Value is true" />
+                    <span>Remove the declared filter</span>
+                </label>
+            }
+        }
+
+        @if (_facets.Kind == FieldKind.Computed)
+        {
+            <Field Label="Expression" For="new-field-computed">
+                <ChildContent>
+                    <textarea class="a-textarea a-mono" id="new-field-computed" rows="2" spellcheck="false"
+                              placeholder="e.g. unit_price * amount" value="@_facets.Computed"
+                              @oninput="args => _facets.Computed = args.Value?.ToString() ?? string.Empty"></textarea>
+                </ChildContent>
+                <Hint>
+                    CEL over this row's own fields — and its rollups. No constants: the column is DDL, which carries no bound
+                    value. The apply compiles it, and Preview shows its refusal in the framework's own words.
+                </Hint>
+            </Field>
         }
 
         @if (_facets.DrawsDefault)

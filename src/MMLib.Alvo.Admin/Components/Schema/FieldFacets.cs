@@ -73,9 +73,6 @@ internal sealed partial class FieldFacets
     /// <summary>The default as typed, or empty for none.</summary>
     public string Default { get; set; } = string.Empty;
 
-    /// <summary>Whether the declaration is <c>computed</c> or a <c>rollup</c>, whose value is maintained for it.</summary>
-    public bool MaintainedElsewhere { get; set; }
-
     /// <summary>Whether the type may be declared unique.</summary>
     public bool TakesUnique => Type is FieldType.String or FieldType.Integer or FieldType.Uuid
         or FieldType.Date or FieldType.DateTime;
@@ -92,10 +89,10 @@ internal sealed partial class FieldFacets
     /// <c>unique: true</c> on a ref is legal — and was unclearable, because the box was hidden and the prefilled
     /// value still written (§8d item 17). A control is owed for every facet the save writes.
     /// </remarks>
-    public bool UniqueOffered => TakesUnique || Flag(_declared["unique"]);
+    public bool UniqueOffered => Kind == FieldKind.Supplied && (TakesUnique || Flag(_declared["unique"]));
 
     /// <summary>Whether the field's type or kind differs from the one it was declared with.</summary>
-    private bool Retyped => Type != _declaredType;
+    private bool Retyped => Type != _declaredType || Kind != _declaredKind;
 
     /// <summary>
     /// Whether the declaration carries a default no box can show, on the type it was declared for — a
@@ -150,7 +147,7 @@ internal sealed partial class FieldFacets
         var type = Enum.TryParse<FieldType>(Text(facets["type"]), ignoreCase: true, out var declared)
             ? declared : FieldType.String;
 
-        return new FieldFacets
+        var editor = new FieldFacets
         {
             Name = name,
             Type = type,
@@ -161,12 +158,14 @@ internal sealed partial class FieldFacets
             Precision = Whole(facets["precision"]) ?? DefaultPrecision,
             Scale = Whole(facets["scale"]) ?? DefaultScale,
             Target = Text(facets["entity"]),
-            MaintainedElsewhere = facets["computed"] is not null || facets["rollup"] is not null,
             Default = LiteralText(facets["default"]),
             Values = facets["values"] is JsonArray values ? string.Join(", ", values.Select(Text)) : string.Empty,
             _declared = facets,
             _declaredType = type,
         };
+
+        editor.ReadMaintained(facets);
+        return editor;
     }
 
     /// <summary>
@@ -237,7 +236,12 @@ internal sealed partial class FieldFacets
         }
 
         var facets = editing is { Length: > 0 } ? Parse(editingJson) : [];
-        refusal = WriteSupplied(facets) ?? RefuseWhatTheApplyRefuses(facets);
+        refusal = Kind switch
+        {
+            FieldKind.Rollup => WriteRollup(facets),
+            FieldKind.Computed => WriteComputed(facets),
+            _ => WriteSupplied(facets),
+        } ?? RefuseWhatTheApplyRefuses(facets);
         return refusal is null ? facets : null;
     }
 
@@ -248,6 +252,8 @@ internal sealed partial class FieldFacets
     /// </summary>
     private string? WriteSupplied(JsonObject facets)
     {
+        facets.Remove("rollup");
+        facets.Remove("computed");
         facets["type"] = Word(Type);
         Toggle(facets, "required", Required);
         if (WriteDefault(facets) is { } refused)
@@ -471,7 +477,7 @@ internal sealed partial class FieldFacets
 
     /// <summary>What the apply would still refuse about the built declaration, checked on the result itself.</summary>
     private string? RefuseWhatTheApplyRefuses(JsonObject facets)
-        => RefuseAKeptDefault(facets) ?? RefuseRequiredBesideReadOnly(facets);
+        => RefuseAKeptDefault(facets) ?? RefuseRequiredBesideReadOnly(facets) ?? RefuseAKeptFilter(facets);
 
     /// <summary>A kept default the apply refuses: <c>$cel</c> (<c>UnhonouredFeatures.cs:63</c>) or beside a maintained value (<c>FieldDefault.cs:88</c>).</summary>
     private string? RefuseAKeptDefault(JsonObject facets)

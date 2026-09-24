@@ -30,6 +30,7 @@ public partial class Entity
     private IReadOnlyList<IndexSchema> _indexes = [];
     private IReadOnlyList<string> _fieldNames = [];
     private IReadOnlyList<StagedField> _fields = [];
+    private IReadOnlyList<RollupSource> _rollupSources = [];
     private StagedView _staged = StagedView.None;
     private readonly ComponentLifetime _lifetime = new();
     private WorkingCopy? _followed;
@@ -247,6 +248,7 @@ public partial class Entity
             Copy.StagedIndexesOf(EntityName),
             Copy.StagedHooksOf(EntityName),
             EventCallback.Factory.Create<string>(this, RestoreField));
+        _rollupSources = RollupSources.For(Copy.Json, EntityName);
     }
 
     /// <summary>

@@ -86,8 +86,29 @@ internal static class PendingSchema
             EnumValues = Values(field.Value),
             Reference = Reference(field.Value),
             Format = String(field.Value, "format"),
+            ComputedExpression = String(field.Value, "computed"),
+            Rollup = Rollup(field.Value),
         })];
     }
+
+    /// <summary>
+    /// A staged rollup, so its row keeps the <c>rollup</c> badge the moment it is changed (§8d item 22).
+    /// </summary>
+    /// <remarks>
+    /// <c>Via</c> is required on the applied shape because the resolver always resolves it; a staged one has not been
+    /// resolved yet, so it is the declared <c>via</c> or empty — this is a renderer, and the apply resolves it.
+    /// </remarks>
+    private static RollupSchema? Rollup(JsonElement field)
+        => field.TryGetProperty("rollup", out var rollup) && rollup.ValueKind == JsonValueKind.Object
+            && String(rollup, "from") is { Length: > 0 } from
+            ? new RollupSchema
+            {
+                From = from,
+                Op = Enum.TryParse<RollupOperation>(String(rollup, "op"), ignoreCase: true, out var op) ? op : RollupOperation.Count,
+                Field = String(rollup, "field"),
+                Via = String(rollup, "via") ?? string.Empty,
+            }
+            : null;
 
     /// <summary>
     /// The declared type, defaulting to <see cref="FieldType.String"/> for anything unreadable.

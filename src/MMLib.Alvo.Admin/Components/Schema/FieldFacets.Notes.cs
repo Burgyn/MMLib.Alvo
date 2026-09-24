@@ -10,6 +10,7 @@ internal sealed partial class FieldFacets
     private static readonly HashSet<string> _drawn = new(StringComparer.Ordinal)
     {
         "type", "required", "unique", "index", "maxLength", "precision", "scale", "values", "entity", "default",
+        "rollup", "computed",
     };
 
     /// <summary>Every declared facet this editor does not draw, with what the save does to it.</summary>
@@ -28,6 +29,7 @@ internal sealed partial class FieldFacets
                 "the schema's default, written for a new ref — choosing another is #265."));
         }
 
+        notes.AddRange(Withheld());
         return notes;
     }
 
@@ -59,6 +61,7 @@ internal sealed partial class FieldFacets
             : $"no control draws a {Word(Type)} default — kept exactly as declared.";
 
     private string RemovedDefaultReason()
-        => RemoveUndrawnDefault ? "removed, as asked."
+        => MaintainedElsewhere ? "a value that is maintained for it takes no default, so it does not follow the field."
+            : RemoveUndrawnDefault ? "removed, as asked."
             : $"a {Word(Type)} takes no default here, so it does not follow the field into its new type.";
 }
