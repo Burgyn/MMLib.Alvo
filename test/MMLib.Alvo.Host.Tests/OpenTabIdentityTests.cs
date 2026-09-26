@@ -105,6 +105,14 @@ public sealed class OpenTabIdentityTests : IAsyncLifetime
             route.Metadata.GetMetadata<Microsoft.AspNetCore.Components.Endpoints.ComponentTypeMetadata>() != null
             && route.RoutePattern.RawText?.Contains("sign-in", StringComparison.Ordinal) != true).ToList();
         pages.ShouldNotBeEmpty();
+
+        /* The other half: what the check skips must say so. The sign-in page and its two posts are the only
+           non-asset endpoints the re-check skips, and they are skipped because they are marked anonymous. */
+        var anonymous = routes.Where(route => route.RoutePattern.RawText?.Contains("sign-in", StringComparison.Ordinal) == true
+            || route.RoutePattern.RawText?.Contains("sign-out", StringComparison.Ordinal) == true).ToList();
+        anonymous.Count.ShouldBeGreaterThanOrEqualTo(3);
+        anonymous.Where(route => route.Metadata.GetMetadata<IAllowAnonymous>() == null)
+            .Select(route => route.RoutePattern.RawText).ShouldBeEmpty();
         pages.Where(route => route.Metadata.GetMetadata<IAuthorizeData>() == null).Select(route => route.RoutePattern.RawText + " " + route.DisplayName).ShouldBeEmpty();
     }
 

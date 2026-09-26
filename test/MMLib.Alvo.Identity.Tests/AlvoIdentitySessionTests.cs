@@ -64,8 +64,10 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
         _app.MapPost("/sign-in", async (string email, string password, AlvoSignIn signIn)
             => await signIn.PasswordSignInAsync(email, password) ? Results.Ok() : Results.Unauthorized());
         _app.MapGet("/me", () => Results.Ok()).RequireAuthorization();
-        _app.MapGet("/asset.css", () => Results.Ok());
+        _app.MapGet("/asset.css", () => Results.Ok()).WithMetadata(Asset("asset.css"));
         _app.MapGet("/sign-in", () => Results.Ok()).AllowAnonymous();
+        _app.MapGet("/open", () => Results.Ok());
+        _app.MapGet("/requirement", () => Results.Ok()).WithMetadata(new RequiresAuthentication());
 
         await _app.StartAsync(Ct);
         _client = _app.GetTestClient();
@@ -271,24 +273,78 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// Which endpoints are re-checked: anything with an authorization requirement, a SignalR hub (the Blazor
-    /// circuit's connection carries the principal into the circuit), and a request no endpoint matched —
-    /// default-deny; only an endpoint that demonstrably guards nothing is skipped.
+    /// <b>An endpoint with no authorization metadata is still checked.</b> It can authorize imperatively — an
+    /// <c>AuthorizeView</c>, a handler calling <c>IAuthorizationService</c> or <c>User.IsInRole</c> — and would
+    /// otherwise be handed a disabled operator's principal, role claims and all.
     /// </summary>
     [Fact]
-    public void The_check_runs_exactly_where_the_cookie_guards_something()
+    public async Task An_endpoint_with_no_authorization_metadata_is_still_checked()
+    {
+        var id = await CreateAsync();
+        var cookie = await SignInAsync();
+        var before = _probe.Reads;
+
+        (await GetAsync("/open", cookie)).StatusCode.ShouldBe(HttpStatusCode.OK);
+        _probe.Reads.ShouldBe(before + 1);
+
+        await AdministerAsync(people => people.SetDisabledAsync(id, disabled: true, Ct));
+        using var refused = await GetAsync("/open", cookie);
+        refused.Headers.GetValues("Set-Cookie").ShouldContain(
+            header => header.StartsWith("alvo.session=;", StringComparison.Ordinal),
+            "the disabled operator's cookie is rejected and cleared even where nothing requires it");
+    }
+
+    /// <summary>
+    /// An endpoint whose requirement is <see cref="Microsoft.AspNetCore.Authorization.IAuthorizationRequirementData"/>
+    /// — the third kind of metadata the authorization middleware reads — refuses a disabled operator's cookie.
+    /// </summary>
+    [Fact]
+    public async Task An_endpoint_guarded_by_requirement_data_refuses_a_disabled_operators_cookie()
+    {
+        var id = await CreateAsync();
+        var cookie = await SignInAsync();
+        (await GetAsync("/requirement", cookie)).StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        await AdministerAsync(people => people.SetDisabledAsync(id, disabled: true, Ct));
+
+        (await GetAsync("/requirement", cookie)).StatusCode.ShouldBe(HttpStatusCode.Redirect);
+    }
+
+    /// <summary>
+    /// <b>The skip is an allow-list:</b> only a static asset and an explicitly anonymous endpoint go
+    /// unchecked. Everything else — no metadata, any kind of requirement, a hub (even one marked anonymous,
+    /// because its connection becomes a circuit's authentication state), a request nothing matched — is checked.
+    /// </summary>
+    [Fact]
+    public void Only_a_static_asset_or_an_explicitly_anonymous_endpoint_skips_the_check()
     {
         static Endpoint With(params object[] metadata) => new(_ => Task.CompletedTask, new EndpointMetadataCollection(metadata), "e");
+        var anonymous = new Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute();
+        var hub = new Microsoft.AspNetCore.SignalR.HubMetadata(typeof(Microsoft.AspNetCore.SignalR.Hub));
 
-        AlvoSessionValidation.Guards(null, fallback: false).ShouldBeTrue();
-        AlvoSessionValidation.Guards(With(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute()), fallback: false).ShouldBeTrue();
-        AlvoSessionValidation.Guards(With(new Microsoft.AspNetCore.SignalR.HubMetadata(typeof(Microsoft.AspNetCore.SignalR.Hub))), fallback: false).ShouldBeTrue();
-        AlvoSessionValidation.Guards(With(), fallback: true).ShouldBeTrue("a fallback policy protects an endpoint that declares nothing");
-        AlvoSessionValidation.Guards(With(), fallback: false).ShouldBeFalse();
-        AlvoSessionValidation.Guards(
-            With(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute(), new Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute()),
-            fallback: false).ShouldBeFalse();
+        AlvoSessionValidation.Guards(With(Asset("app.css"))).ShouldBeFalse();
+        AlvoSessionValidation.Guards(With(anonymous)).ShouldBeFalse();
+        AlvoSessionValidation.Guards(With(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute(), anonymous)).ShouldBeFalse();
+
+        AlvoSessionValidation.Guards(null).ShouldBeTrue("an unmatched request cannot be shown to guard nothing");
+        AlvoSessionValidation.Guards(With()).ShouldBeTrue("no metadata is not proof of guarding nothing");
+        AlvoSessionValidation.Guards(With(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute())).ShouldBeTrue();
+        AlvoSessionValidation.Guards(With(new RequiresAuthentication())).ShouldBeTrue();
+        AlvoSessionValidation.Guards(With(hub)).ShouldBeTrue();
+        AlvoSessionValidation.Guards(With(hub, anonymous)).ShouldBeTrue();
     }
+
+    /// <summary>The metadata <c>MapStaticAssets</c> puts on each asset's endpoint.</summary>
+    /// <param name="route">The asset's route.</param>
+    /// <returns>A descriptor for it.</returns>
+    private static Microsoft.AspNetCore.StaticAssets.StaticAssetDescriptor Asset(string route) => new()
+    {
+        Route = route,
+        AssetPath = route,
+        Selectors = [],
+        Properties = [],
+        ResponseHeaders = [],
+    };
 
     /// <summary>An authenticated principal with <paramref name="subject"/> as its user id claim.</summary>
     /// <param name="subject">The subject, or <see langword="null"/> for a principal with none.</param>
@@ -398,5 +454,12 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
 
         public ValueTask SetRolesAsync(UserId user, IReadOnlyList<string> roleNames, CancellationToken cancellationToken)
             => inner.SetRolesAsync(user, roleNames, cancellationToken);
+    }
+
+    /// <summary>A requirement carried as <see cref="Microsoft.AspNetCore.Authorization.IAuthorizationRequirementData"/>, with no <c>[Authorize]</c> beside it.</summary>
+    private sealed class RequiresAuthentication : Microsoft.AspNetCore.Authorization.IAuthorizationRequirementData
+    {
+        public IEnumerable<Microsoft.AspNetCore.Authorization.IAuthorizationRequirement> GetRequirements()
+            => [new Microsoft.AspNetCore.Authorization.Infrastructure.DenyAnonymousAuthorizationRequirement()];
     }
 }

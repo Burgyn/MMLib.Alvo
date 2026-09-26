@@ -4,8 +4,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.StaticAssets;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using System.Security.Claims;
 
 namespace MMLib.Alvo.Identity.Internal;
@@ -30,7 +30,8 @@ namespace MMLib.Alvo.Identity.Internal;
 /// <para>
 /// <b>So an identity-store outage fails closed, and loudly.</b> While the store is unreachable, every
 /// request that carries the cookie to an endpoint that guards something answers <c>500</c> — the dashboard's
-/// pages and the Blazor hub. The sign-in page and static assets guard nothing, are not checked, and stay up. That is the default-deny reading of
+/// pages, the Blazor hub, and anything else that is not a static asset or explicitly anonymous. The sign-in
+/// page and static assets are not checked, and stay up. That is the default-deny reading of
 /// "cannot tell whether this account is still enabled"; a request with no cookie is not checked and
 /// reaches the sign-in page, whose own sign-in then fails on the same outage.
 /// </para>
@@ -63,15 +64,26 @@ internal static class AlvoSessionValidation
         return await users.FindAsync(id, cancellationToken).ConfigureAwait(false) is { IsDisabled: false };
     }
 
-    /// <summary>Whether the request's endpoint is one a stale cookie could reach anything through.</summary>
+    /// <summary>Whether the request's endpoint must have its cookie re-checked.</summary>
     /// <remarks>
     /// <para>
-    /// <b>Default-deny, with one skip.</b> The check runs for a request no endpoint matched (it cannot be
-    /// shown to guard nothing), for any endpoint with an authorization requirement — its own
-    /// <see cref="IAuthorizeData"/> or policy, or the host's fallback policy — and for a SignalR hub, because
-    /// the Blazor circuit's connection is where the cookie's principal becomes the circuit's authentication
-    /// state, and a hub carries no <c>[Authorize]</c> of its own. It is skipped only for an endpoint that
-    /// demonstrably guards nothing: no requirement, or an explicit <see cref="IAllowAnonymous"/>.
+    /// <b>An allow-list of two, and everything else is checked.</b> The check is skipped only for an endpoint
+    /// that demonstrably guards nothing: a static asset (the <see cref="StaticAssetDescriptor"/>
+    /// <c>MapStaticAssets</c> puts on each asset's endpoint), and an endpoint explicitly marked
+    /// <see cref="IAllowAnonymous"/> — the sign-in page and its two form posts. Anything else is checked,
+    /// fail-closed: an endpoint with no authorization metadata (it can still authorize imperatively, through an
+    /// <c>AuthorizeView</c> or <c>User.IsInRole</c>), every kind of requirement the authorization middleware
+    /// reads, whatever fallback a policy provider supplies, and a request no endpoint matched.
+    /// </para>
+    /// <para>
+    /// <b>Why an allow-list rather than "whatever declares a requirement".</b> Mirroring the middleware means
+    /// tracking three metadata kinds and an async fallback, and a host that authorizes imperatively declares
+    /// none of them: a skip inferred from missing metadata hands a disabled operator's principal, role claims
+    /// and all, to exactly that host. What must be skipped is known and small, so it is named.
+    /// </para>
+    /// <para>
+    /// <b>A SignalR hub is checked even if marked anonymous</b>, because the Blazor circuit's connection is where
+    /// the cookie's principal becomes the circuit's authentication state.
     /// </para>
     /// <para>
     /// <b>Why skip at all.</b> A first page load sends every stylesheet, script and font at once with the
@@ -81,23 +93,16 @@ internal static class AlvoSessionValidation
     /// </para>
     /// </remarks>
     /// <param name="endpoint">The endpoint routing selected, or <see langword="null"/> when none matched.</param>
-    /// <param name="fallback">Whether the host set an authorization fallback policy.</param>
     /// <returns><see langword="true"/> when the cookie must be re-checked.</returns>
-    internal static bool Guards(Endpoint? endpoint, bool fallback)
+    internal static bool Guards(Endpoint? endpoint)
     {
         if (endpoint is null || endpoint.Metadata.GetMetadata<HubMetadata>() is not null)
         {
             return true;
         }
 
-        if (endpoint.Metadata.GetMetadata<IAllowAnonymous>() is not null)
-        {
-            return false;
-        }
-
-        return fallback
-            || endpoint.Metadata.GetMetadata<IAuthorizeData>() is not null
-            || endpoint.Metadata.GetMetadata<AuthorizationPolicy>() is not null;
+        return endpoint.Metadata.GetMetadata<StaticAssetDescriptor>() is null
+            && endpoint.Metadata.GetMetadata<IAllowAnonymous>() is null;
     }
 
     /// <summary>
@@ -130,8 +135,7 @@ internal static class AlvoSessionValidation
         ArgumentNullException.ThrowIfNull(context);
 
         var http = context.HttpContext;
-        var fallback = http.RequestServices.GetService<IOptions<AuthorizationOptions>>()?.Value.FallbackPolicy is not null;
-        if (!Guards(http.GetEndpoint(), fallback))
+        if (!Guards(http.GetEndpoint()))
         {
             return;
         }

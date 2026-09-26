@@ -51,8 +51,10 @@ internal static class AlvoAdminSignIn
             return;
         }
 
-        app.MapPost(AlvoAdmin.SignInEndpoint, SignInAsync).ExcludeFromDescription();
-        app.MapPost(AlvoAdmin.SignOutEndpoint, SignOutAsync).ExcludeFromDescription();
+        /* AllowAnonymous says what these are, and it is what the identity package's cookie re-check skips on:
+           signing in and out must work with no session, and while the identity store is unreachable. */
+        app.MapPost(AlvoAdmin.SignInEndpoint, SignInAsync).AllowAnonymous().ExcludeFromDescription();
+        app.MapPost(AlvoAdmin.SignOutEndpoint, SignOutAsync).AllowAnonymous().ExcludeFromDescription();
     }
 
     /// <summary>

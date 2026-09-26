@@ -2,6 +2,9 @@
 @layout SignInLayout
 @* Statically rendered, and the form post is why — see AdminApp.razor. *@
 @attribute [ExcludeFromInteractiveRouting]
+@* Anonymous by declaration, not by omission: the cookie re-check skips only a static asset and an endpoint
+   that says [AllowAnonymous], so the one screen that works with no session stays up when the store does not. *@
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
 @*
     Signing in.
 
