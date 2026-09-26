@@ -117,6 +117,39 @@ public sealed partial class FieldConventionTests
         IsNamed(inputs[1], source).ShouldBeFalse();
     }
 
+    [Fact]
+    public void An_id_that_is_only_part_of_another_fields_for_is_not_named_by_it()
+    {
+        const string source = """
+            <Field Label="Rename" For="rename">x</Field>
+            <MudTextField T="string" Variant="Variant.Outlined" id="name" />
+            """;
+
+        IsNamed(new Input("probe", Attributes(LibraryTags(source).Single())), source).ShouldBeFalse();
+    }
+
+    /// <summary>FieldEditor's default box: a computed For= with a string literal inside it and text after the literal.</summary>
+    [Fact]
+    public void A_computed_for_with_a_literal_inside_parses_whole_and_names_only_that_id()
+    {
+        const string source = """
+            <Field Label="Default value" For="@(_facets.Type is FieldType.Boolean ? null : "new-field-default")"
+                   LabelId="new-field-default-label">
+                <MudTextField T="string" Variant="Variant.Outlined" id="new-field-default" />
+                <MudTextField T="string" Variant="Variant.Outlined" id="new-field-defaults" />
+            </Field>
+            """;
+
+        var field = Attributes(source[..RazorTag.End(source, 0)]);
+        field["For"].ShouldBe("@(_facets.Type is FieldType.Boolean ? null : \"new-field-default\")");
+        field["LabelId"].ShouldBe("new-field-default-label");
+        RazorTag.Ids(field["For"]).ShouldContain("new-field-default");
+
+        var inputs = LibraryTags(source).Select(tag => new Input("probe", Attributes(tag))).ToList();
+        IsNamed(inputs[0], source).ShouldBeTrue();
+        IsNamed(inputs[1], source).ShouldBeFalse("a mismatched id is not named by a For that computes another");
+    }
+
     private static bool IsNamed(Input input, string source)
     {
         if (input.Attributes.ContainsKey("aria-label") || input.Attributes.ContainsKey("aria-labelledby"))
@@ -124,15 +157,9 @@ public sealed partial class FieldConventionTests
             return true;
         }
 
-        var id = Bare(input.Attributes.GetValueOrDefault("id") ?? string.Empty);
-        return id.Length > 0 && ForValues().Matches(source).Any(match => Bare(match.Groups["value"].Value).Contains(id, StringComparison.Ordinal));
-    }
-
-    /// <summary>An attribute value without Razor's <c>@</c> or <c>@( … )</c> around it.</summary>
-    private static string Bare(string value)
-    {
-        var bare = value.StartsWith('@') ? value[1..] : value;
-        return bare.StartsWith('(') && bare.EndsWith(')') ? bare[1..^1] : bare;
+        var ids = RazorTag.Ids(input.Attributes.GetValueOrDefault("id") ?? string.Empty);
+        return ForAttribute().Matches(source)
+            .Any(match => RazorTag.Ids(RazorTag.Value(source, match.Index + match.Length - 1)).Overlaps(ids));
     }
 
     /// <summary>Every <c>&lt;Field … For=…&gt;</c> block that has a <c>&lt;Hint&gt;</c>, to its matching close.</summary>
@@ -140,12 +167,13 @@ public sealed partial class FieldConventionTests
     {
         foreach (Match open in FieldOpen().Matches(source))
         {
-            if (!Attributes(open.Value).ContainsKey("For"))
+            var end = RazorTag.End(source, open.Index);
+            if (!Attributes(source[open.Index..end]).ContainsKey("For"))
             {
                 continue;
             }
 
-            var block = source[open.Index..FieldEnd(source, open.Index + open.Length)];
+            var block = source[open.Index..FieldEnd(source, end)];
             if (block.Contains("<Hint>", StringComparison.Ordinal))
             {
                 yield return block;
@@ -183,50 +211,20 @@ public sealed partial class FieldConventionTests
 
     private static string AdminRoot() => Path.Combine(RepositoryRoot.Find(), "src", "MMLib.Alvo.Admin");
 
-    /// <summary>Every opening tag of a library input, to the first <c>&gt;</c> outside a quoted value.</summary>
+    /// <summary>Every opening tag of a library input, to its <c>&gt;</c> (<see cref="RazorTag.End"/>).</summary>
     private static IEnumerable<string> LibraryTags(string source)
-        => LibraryOpen().Matches(source).Select(open => source[open.Index..TagEnd(source, open.Index)]);
+        => LibraryOpen().Matches(source).Select(open => source[open.Index..RazorTag.End(source, open.Index)]);
 
-    private static int TagEnd(string source, int start)
-    {
-        var quoted = false;
-        for (var at = start; at < source.Length; at++)
-        {
-            if (source[at] == '"')
-            {
-                quoted = !quoted;
-            }
-            else if (source[at] == '>' && !quoted)
-            {
-                return at + 1;
-            }
-        }
-
-        return source.Length;
-    }
-
-    /// <summary>A tag's attributes by name, each name a whole token: <c>AdornmentAriaLabel</c> is not <c>Label</c>.</summary>
-    private static Dictionary<string, string> Attributes(string tag)
-    {
-        var attributes = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (Match attribute in Attribute().Matches(tag))
-        {
-            attributes.TryAdd(attribute.Groups["name"].Value, attribute.Groups["value"].Value);
-        }
-
-        return attributes;
-    }
+    private static Dictionary<string, string> Attributes(string tag) => RazorTag.Attributes(tag);
 
     [GeneratedRegex(@"<(MudTextField|MudSelect|MudNumericField|MudAutocomplete)(?=[\s@/>])")]
     private static partial Regex LibraryOpen();
 
-    [GeneratedRegex(@"(?<=[\s])(?<name>@?[A-Za-z][\w:.-]*)\s*=\s*""(?<value>(?:[^""]|""(?=[^""\s>]*""\)))*)""")]
-    private static partial Regex Attribute();
+    /// <summary>A <c>for=</c> or <c>For=</c> attribute, up to and including its opening quote.</summary>
+    [GeneratedRegex(@"(?<=\s)[Ff]or\s*=\s*""")]
+    private static partial Regex ForAttribute();
 
-    [GeneratedRegex(@"\b[Ff]or=""(?<value>(?:[^""]|""(?=[^""\s>]*""\)))*)""")]
-    private static partial Regex ForValues();
-
-    [GeneratedRegex(@"<Field(?=[\s>])[^>]*>")]
+    [GeneratedRegex(@"<Field(?=[\s>])")]
     private static partial Regex FieldOpen();
 
     [GeneratedRegex(@"</?Field(?=[\s>])")]
