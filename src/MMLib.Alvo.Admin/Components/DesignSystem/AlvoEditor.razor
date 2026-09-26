@@ -55,7 +55,13 @@
             </AlvoAlert>
         }
         @* `hidden` wins over .a-stack's display only because alvo.css's base layer says [hidden]{display:none!important}. *@
-        <form id="@_formId" class="a-stack" hidden="@_guard.Asking" data-alvo-chord-submit @onsubmit="SubmitAsync">
+        @*
+            novalidate: the engine is the one authority on a value, and its refusal is drawn at the field (spec §3.8). The
+            browser's own check ran first and silently: a fraction in a whole-number box was a native bubble, and the
+            submit never reached the form.
+        *@
+        <form id="@_formId" class="a-stack" hidden="@_guard.Asking" novalidate data-alvo-chord-submit
+              @onsubmit="SubmitAsync">
             @ChildContent
         </form>
     </DialogContent>

@@ -54,6 +54,19 @@ public sealed class FieldRefusalsTests
         refusals.Attempt.ShouldBeGreaterThan(first);
     }
 
+    /// <summary>A form refused on several fields at once hands focus to the first of them, in the order it lists them.</summary>
+    [Fact]
+    public void Several_fields_refused_at_once_give_focus_to_the_first()
+    {
+        var refusals = new FieldRefusals();
+
+        refusals.RefuseAll([new("amount", "Not a number."), new("due", "Not a date.")]);
+
+        refusals.Has("amount").ShouldBeTrue();
+        refusals.Has("due").ShouldBeTrue();
+        refusals.Focus.ShouldBe("amount");
+    }
+
     [Fact]
     public void Typing_into_a_refused_field_clears_it_and_leaves_the_others()
     {

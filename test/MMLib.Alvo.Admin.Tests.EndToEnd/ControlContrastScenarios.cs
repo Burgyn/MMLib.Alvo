@@ -5,7 +5,8 @@ using MMLib.Alvo.Data;
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
-/// Every button and link the dashboard draws reads at AA against what is behind it, in both themes (WCAG 1.4.3).
+/// Every button and link the dashboard draws reads at AA against what is behind it, in both themes (WCAG 1.4.3), and so
+/// do the two messages whose colours are the palette's tones: a success snackbar and an information alert.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -36,6 +37,7 @@ public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<A
         var failures = new List<string>(await SnackbarBelowAAAsync(session));
         failures.AddRange(await SignInBelowAAAsync(scheme));
         failures.AddRange(await BadgesBelowAAAsync(session));
+        failures.AddRange(await InfoAlertBelowAAAsync(session));
 
         foreach (var route in _screens)
         {
@@ -86,6 +88,21 @@ public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<A
         var readings = await ContrastProbe.ReadAsync(badges);
         readings.Count.ShouldBeGreaterThanOrEqualTo(3, "the revision badge and both Not yet pills");
         return readings.Where(r => r.Ratio < ContrastProbe.AA).Select(r => $"the badge: {r}");
+    }
+
+    /// <summary>
+    /// An information alert's text, on its own tone: the "Not yet" panel of a warned section. Its colour is the
+    /// library's info colour, which the palette takes from <c>--accentInk</c>, so a token move reaches it unmeasured
+    /// unless this reads it.
+    /// </summary>
+    private static async Task<IEnumerable<string>> InfoAlertBelowAAAsync(AdminSession session)
+    {
+        await session.GoAsync("/automations");
+        var alert = session.Page.GetByTestId("notyet-panel");
+        await alert.WaitForAsync();
+        var readings = await ContrastProbe.ReadAsync(alert.Locator(".mud-alert-message, .mud-alert-message *"));
+        readings.ShouldNotBeEmpty("the alert's title and its sentences are read");
+        return readings.Where(r => r.Name.Length > 0 && r.Ratio < ContrastProbe.AA).Select(r => $"the info alert: {r}");
     }
 
     /// <summary>The static sign-in page's one button, in a context of its own, before anybody signs in.</summary>

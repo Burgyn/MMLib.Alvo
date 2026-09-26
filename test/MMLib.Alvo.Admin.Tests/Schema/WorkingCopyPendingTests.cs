@@ -420,6 +420,48 @@ public class WorkingCopyPendingTests
         copy.Entities.ShouldContain("tickets");
     }
 
+    /// <summary>
+    /// A fresh take forgets what the previous copy's apply was meant to say: the suggestion described edits that are
+    /// gone, and Preview would pre-fill a reason for a change nobody staged.
+    /// </summary>
+    [Fact]
+    public void A_fresh_take_forgets_the_suggested_reason()
+    {
+        var copy = Copy();
+        copy.SuggestReason("Add invoices");
+
+        copy.Take(Descriptor, revision: 5);
+
+        copy.SuggestedReason.ShouldBeNull();
+    }
+
+    /// <summary>An apply that starts the copy again leaves no suggestion behind for the next one.</summary>
+    [Fact]
+    public void An_apply_that_restarts_the_copy_forgets_the_suggested_reason()
+    {
+        var copy = Copy();
+        copy.AddEntity("invoices", scoped: false, audited: true);
+        copy.SuggestReason("Add invoices");
+        var sent = copy.Json;
+
+        copy.TakeApplied(sent, applied: 5, head: sent, headRevision: 5).ShouldBe(WorkingCopy.AppliedFollow.Restarted);
+
+        copy.SuggestedReason.ShouldBeNull("the edits it described are revision 5 now");
+    }
+
+    /// <summary>The document and the revision it was taken from are read as one pair, the pair an apply sends.</summary>
+    [Fact]
+    public void A_snapshot_is_the_working_document_with_the_revision_it_is_against()
+    {
+        var copy = Copy();
+        copy.AddEntity("invoices", scoped: false, audited: true);
+
+        var snapshot = copy.Snapshot();
+
+        snapshot.Json.ShouldBe(copy.Json);
+        snapshot.Revision.ShouldBe(4);
+    }
+
     [Fact]
     public void The_count_is_current_the_moment_the_event_is_raised()
     {

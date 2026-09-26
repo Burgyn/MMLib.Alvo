@@ -26,7 +26,11 @@ public partial class RecordForm
     private IReadOnlyList<FieldSchema> _editable = [];
     private IReadOnlyList<FieldSchema> _calculated = [];
     private Dictionary<string, RefPicker> _pickers = new(StringComparer.Ordinal);
-    private IReadOnlyDictionary<string, string> _problems = new Dictionary<string, string>(StringComparer.Ordinal);
+    private readonly Dictionary<string, MudBlazor.MudTextField<string>> _texts = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ElementReference> _references = new(StringComparer.Ordinal);
+
+    /// <summary>What the draft could not read, one refusal per control, keyed by the control's id (spec §3.8).</summary>
+    private readonly FieldRefusals _refusals = new();
 
     /// <summary>The entity this record belongs to.</summary>
     [Parameter, EditorRequired]
@@ -83,7 +87,7 @@ public partial class RecordForm
         _draft = new RecordDraft(_editable, Values);
         _pickers = _editable.Where(column => column.Reference is not null)
             .ToDictionary(column => column.Name, Picker, StringComparer.Ordinal);
-        _problems = new Dictionary<string, string>(StringComparer.Ordinal);
+        _refusals.ClearAll();
 
         foreach (var picker in _pickers.Values)
         {
@@ -105,20 +109,33 @@ public partial class RecordForm
         => Scope?.Label?.Of(record)
             ?? (RefLabels.IdOf(record[AlvoManagedColumns.Id]) is { } id ? RefLabels.ShortId(id) : Entity.Name);
 
-    private static string ControlId(FieldSchema column) => $"rf-{column.Name}";
+    private static string ControlId(FieldSchema column) => ControlId(column.Name);
+
+    private static string ControlId(string name) => $"rf-{name}";
 
     private static string HintId(FieldSchema column) => $"rf-{column.Name}-hint";
 
     private static string LabelId(FieldSchema column) => $"rf-{column.Name}-label";
 
-    private static string ProblemId(FieldSchema column) => $"rf-{column.Name}-problem";
-
     /// <summary>What the control is described by: its hint, and the sentence under it while it is refused (spec §3.8).</summary>
-    private string DescribedBy(FieldSchema column)
-        => _problems.ContainsKey(column.Name) ? $"{HintId(column)} {ProblemId(column)}" : HintId(column);
+    private string DescribedBy(FieldSchema column) => _refusals.DescribedBy(ControlId(column), HintId(column));
 
     /// <summary>Whether the control is refused, which draws it in the error tone and marks it <c>aria-invalid</c>.</summary>
-    private bool Refused(FieldSchema column) => _problems.ContainsKey(column.Name);
+    private bool Refused(FieldSchema column) => _refusals.Has(ControlId(column));
+
+    /// <summary>
+    /// Focuses a refused control. Only text controls and references can be refused, because only typed text can fail
+    /// to read; a switch or a choice has nothing to focus here.
+    /// </summary>
+    private ValueTask FocusAsync(FieldSchema column)
+    {
+        if (_texts.TryGetValue(column.Name, out var text))
+        {
+            return text.FocusAsync();
+        }
+
+        return _references.TryGetValue(column.Name, out var reference) ? reference.FocusAsync() : ValueTask.CompletedTask;
+    }
 
     private static string TypeOf(FieldSchema column) => column.Reference is { } reference
         ? $"ref to {reference.TargetEntity}"
@@ -127,11 +144,7 @@ public partial class RecordForm
     private void Set(string name, string? text)
     {
         _draft.Set(name, text);
-        if (_problems.ContainsKey(name))
-        {
-            _problems = _problems.Where(pair => pair.Key != name)
-                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
-        }
+        _refusals.Clear(ControlId(name));
     }
 
     private void Toggle(string name)
@@ -389,8 +402,10 @@ public partial class RecordForm
         }
 
         var changes = _draft.Read();
-        _problems = changes.Problems;
-        if (_problems.Count == 0)
+        _refusals.ClearAll();
+        _refusals.RefuseAll(_editable.Where(column => changes.Problems.ContainsKey(column.Name))
+            .Select(column => KeyValuePair.Create(ControlId(column), changes.Problems[column.Name])));
+        if (!_refusals.Any)
         {
             await SubmitAsync(changes.Values);
         }

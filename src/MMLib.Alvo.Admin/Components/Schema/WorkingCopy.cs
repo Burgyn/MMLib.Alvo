@@ -105,6 +105,14 @@ internal sealed partial class WorkingCopy
     /// <summary>The working document, formatted.</summary>
     public string Json => Read(() => _working?.ToJsonString(_pretty) ?? "{}");
 
+    /// <summary>The working document and the revision it is against, read as one pair.</summary>
+    /// <remarks>
+    /// What an apply sends. Read as <see cref="Json"/> and then <see cref="Revision"/>, another tab's take could land
+    /// between the two, and the apply would send one revision's document under the other's <c>If-Match</c>.
+    /// </remarks>
+    /// <returns>The document, formatted, and its revision.</returns>
+    public (string Json, int Revision) Snapshot() => Read(() => (Json, Revision));
+
     /// <summary>The applied document, formatted.</summary>
     public string AppliedJson => Read(() => _applied?.ToJsonString(_pretty) ?? "{}");
 
@@ -132,7 +140,8 @@ internal sealed partial class WorkingCopy
     /// <remarks>
     /// <b>A suggestion, never the reason itself.</b> Preview pre-fills its box with it and the operator can
     /// replace every character — which is what keeps the history a record of what a person meant rather than
-    /// of what a machine drafted. Cleared by <see cref="Discard"/> along with everything else the copy held.
+    /// of what a machine drafted. Cleared by <see cref="Discard"/> along with everything else the copy held, and by
+    /// every fresh take: a copy started again from the head has none of the edits it described.
     /// </remarks>
     public string? SuggestedReason => Read(() => _suggestedReason);
 
@@ -369,11 +378,12 @@ internal sealed partial class WorkingCopy
         return changed;
     }
 
-    /// <summary>Loads both documents from one applied descriptor. Under the gate.</summary>
+    /// <summary>Loads both documents from one applied descriptor, and forgets the old copy's suggestion. Under the gate.</summary>
     private void Load(string descriptorJson, int revision)
     {
         _applied = JsonNode.Parse(descriptorJson);
         _working = JsonNode.Parse(descriptorJson);
+        _suggestedReason = null;
         Revision = revision;
     }
 

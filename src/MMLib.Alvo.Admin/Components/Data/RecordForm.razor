@@ -54,10 +54,7 @@
                     <span class="a-hint" id="@HintId(column)" title="@column.FormatPattern">
                         <span class="a-ident">@column.Name · @TypeOf(column)</span>@Hint(column)
                     </span>
-                    @if (_problems.TryGetValue(column.Name, out var problem))
-                    {
-                        <span class="a-field__problem" id="@ProblemId(column)" data-testid="field-problem">@problem</span>
-                    }
+                    @_refusals.Under(ControlId(column), () => FocusAsync(column))
                 </div>
             }
         </div>
@@ -97,12 +94,13 @@
         FieldType.Boolean => Flag(column),
         FieldType.Enum => Choice(column),
         FieldType.Text => @<MudTextField T="string" Variant="Variant.Outlined" Lines="4" Immediate="true"
-                                         id="@ControlId(column)" aria-required="@Required(column)"
+                                         @ref="_texts[column.Name]" id="@ControlId(column)" aria-required="@Required(column)"
                                          Error="@Refused(column)" aria-describedby="@DescribedBy(column)"
                                          Value="@_draft.Text(column.Name)"
                                          ValueChanged="text => Set(column.Name, text)" />,
         _ when _pickers.TryGetValue(column.Name, out var picker) => Reference(picker),
         _ => @<MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="@ControlId(column)"
+                           @ref="_texts[column.Name]"
                            InputType="@MudInputType(column)" InputMode="@MudInputMode(column)"
                            aria-required="@Required(column)" Error="@Refused(column)"
                            aria-describedby="@DescribedBy(column)" Value="@_draft.Text(column.Name)"
@@ -140,6 +138,7 @@
         var list = $"{ControlId(column)}-options";
         return @<div class="a-combo">
             <input class="a-input" id="@ControlId(column)" type="text" role="combobox" autocomplete="off"
+                   @ref="_references[column.Name]"
                    maxlength="@GridQuery.MaxPatternLength"
                    aria-autocomplete="list" aria-expanded="@(picker.Open ? "true" : "false")"
                    aria-controls="@(picker.Open ? list : null)"

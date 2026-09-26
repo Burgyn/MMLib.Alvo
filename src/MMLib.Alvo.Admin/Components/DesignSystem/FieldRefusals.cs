@@ -47,6 +47,28 @@ internal sealed class FieldRefusals
         Attempt++;
     }
 
+    /// <summary>
+    /// Refuses several fields at once, as a form whose submit read more than one of them wrong does, and asks the first
+    /// of them to take focus: the one a reader going down the form reaches first.
+    /// </summary>
+    /// <param name="refusals">Each input's id and why it is refused, in the order the form draws them.</param>
+    public void RefuseAll(IEnumerable<KeyValuePair<string, string>> refusals)
+    {
+        ArgumentNullException.ThrowIfNull(refusals);
+        string? first = null;
+        foreach (var (field, message) in refusals)
+        {
+            _refused[field] = message;
+            first ??= field;
+        }
+
+        if (first is not null)
+        {
+            Focus = first;
+            Attempt++;
+        }
+    }
+
     /// <summary>Whether <paramref name="field"/> is refused.</summary>
     /// <param name="field">The input's id.</param>
     public bool Has(string field) => _refused.ContainsKey(field);

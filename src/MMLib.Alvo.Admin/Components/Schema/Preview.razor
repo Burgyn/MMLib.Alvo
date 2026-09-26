@@ -19,6 +19,29 @@
         </CascadingValue>
     }
 
+    @if (_kept is { } kept)
+    {
+        @*
+            Persistent and in place, not a second snackbar: the apply worked, and the snackbar says so, but the copy
+            is now a state the operator has to act on before their next apply can run (spec §3.3).
+        *@
+        <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" TestId="apply-kept" TakeFocus="true"
+                   Title="@($"Somebody applied revision {kept.HeadRevision} after yours")">
+            <ChildContent>
+                Your edits staged after you pressed Apply are kept against revision @Copy.Revision, so the next apply
+                is refused as a conflict until you start again from revision @kept.HeadRevision.
+            </ChildContent>
+            <Actions>
+                <AlvoButton Small="true" data-testid="apply-kept-restart" OnClick="_ => _restarting = true">
+                    Start again from revision @kept.HeadRevision
+                </AlvoButton>
+                <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" Href="@AdminPaths.History">
+                    Open Configuration history
+                </AlvoButton>
+            </Actions>
+        </AlvoAlert>
+    }
+
     @if (!Copy.Loaded)
     {
         <Skeleton />
@@ -130,6 +153,11 @@
 
     <DiscardConfirm Open="_discarding" OnClose="() => _discarding = false" OnDiscarded="Discarded" />
 
+    <AlvoConfirm Open="_restarting" TestId="restart-confirm" ConfirmTestId="restart-confirm-run"
+                 CancelTestId="restart-confirm-cancel" Title="Discard your later edits?"
+                 Consequence="@($"The edits staged after you pressed Apply are thrown away, and the working copy starts again from revision {_kept?.HeadRevision}, across all screens. There is no undo.")"
+                 Verb="Discard and start again" OnConfirm="RestartFromHeadAsync" OnCancel="() => _restarting = false" />
+
     @if (_applied is { } result)
     {
         <Panel Padded="true" class="a-panel--accent">
@@ -165,6 +193,10 @@
     private bool _busy;
     private bool _discarding;
     private bool _confirming;
+    private bool _restarting;
+
+    /// <summary>The head an apply found moved past its own revision while later edits were staged, until acted on.</summary>
+    private KeptFollow? _kept;
 
     /// <summary>How many refusals this page has drawn, which keys the panel so each one takes focus again.</summary>
     private int _problemsDrawn;
@@ -218,6 +250,7 @@
         _discarding = false;
         _plan = null;
         _applied = null;
+        _kept = null;
         Navigation.NavigateTo(AdminPaths.Schema);
     }
 
@@ -282,9 +315,9 @@
                project's name "above", and that control renders only once there is a plan — so a
                destructive change could be composed and never reviewed or applied from here. Nothing
                is destroyed by describing it. */
-            var sent = Copy.Json;
+            var (sent, revision) = Copy.Snapshot();
             var result = await Gateway.ApplyAsync(
-                sent, Copy.Revision, allowDestructive: dryRun || _allowed, dryRun,
+                sent, revision, allowDestructive: dryRun || _allowed, dryRun,
                 author: await Gateway.AuthorAsync(),
                 reason: _reason.Length > 0 ? _reason : null,
                 CancellationToken.None);
@@ -312,22 +345,34 @@
     }
 
     /// <summary>
-    /// Keeps the result in the panel that stays because it links onward, restarts the copy from the revision just
+    /// Keeps the result in the panel that stays because it links onward, follows the copy to the revision just
     /// written, and only then says so in a snackbar (spec §3.3).
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The re-read is caught here rather than by the apply's own handler: the apply has run, so its failure is not a
-    /// refused apply, and the snackbar would be the one message on screen claiming everything worked. The copy is
-    /// restarted only if it still holds what was sent: an edit another tab staged meanwhile stays staged.
+    /// refused apply, and the snackbar would be the one message on screen claiming everything worked.
+    /// </para>
+    /// <para>
+    /// How the copy follows is <see cref="WorkingCopy.TakeApplied"/>'s decision, made under its gate: it starts again
+    /// from the head when it holds nothing but what was sent (or a discard landed meanwhile); an edit another tab
+    /// staged meanwhile stays staged over the revision just written; and when somebody applied after us as well, the
+    /// copy keeps its old base. That last one is still a success, so the snackbar says so, and the warning in place
+    /// says the rest: the next apply will be refused until the operator starts again from the head.
+    /// </para>
     /// </remarks>
     private async Task TakeAppliedAsync(ManagementApplyResult result, string sent)
     {
         _applied = result;
         _plan = null;
+        _kept = null;
         try
         {
-            var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
-            Copy.TakeApplied(sent, result.Revision, descriptor.DescriptorJson, descriptor.Revision);
+            var head = await Gateway.DescriptorAsync(CancellationToken.None);
+            if (Copy.TakeApplied(sent, result.Revision, head.DescriptorJson, head.Revision) is WorkingCopy.AppliedFollow.Kept)
+            {
+                _kept = new KeptFollow(head.Revision);
+            }
         }
         catch (Exception exception)
         {
@@ -340,6 +385,34 @@
 
         Snackbar.Confirm($"Applied as revision {result.Revision}");
     }
+
+    /// <summary>
+    /// Throws the edits the kept copy still holds away and starts it again from the head, read again now: the head
+    /// may have moved once more while the warning was on screen.
+    /// </summary>
+    private async Task RestartFromHeadAsync()
+    {
+        _restarting = false;
+        try
+        {
+            var head = await Gateway.DescriptorAsync(CancellationToken.None);
+            Copy.Take(head.DescriptorJson, head.Revision);
+            _kept = null;
+            _applied = null;
+            _reason = string.Empty;
+            Snackbar.Confirm($"Started again from revision {head.Revision}");
+        }
+        catch (Exception exception)
+        {
+            _problem = AdminProblem.From(exception, Logger);
+            _problemsDrawn++;
+            _problemFromSubmit = true;
+        }
+    }
+
+    /// <summary>The head an apply found already past the revision it wrote.</summary>
+    /// <param name="HeadRevision">The revision the head was at.</param>
+    private sealed record KeptFollow(int HeadRevision);
 
     /// <summary>
     /// What the "Why" box offers before anything is typed: a sentence about this change, when one can be said.
