@@ -336,8 +336,10 @@ public partial class RecordForm
     private static bool OwnLabel(FieldSchema column) => column.Type != FieldType.Boolean;
 
     /// <summary>What the schema says about this field, in the words an author would recognise.</summary>
+    /// <remarks>A text box is multi-line, so its hint also says what Ctrl/Cmd+Enter and Enter do (spec §3.4).</remarks>
     private string Hint(FieldSchema column)
-        => string.Concat(DeclaredFacets(column).Concat(CallerFacets(column)).Select(part => $" · {part}"));
+        => string.Concat(DeclaredFacets(column).Concat(CallerFacets(column)).Select(part => $" · {part}"))
+            + (column.Type == FieldType.Text ? $" · {ChordHint.Of("saves")}" : string.Empty);
 
     /// <summary>What the field's declaration admits, whoever is writing.</summary>
     private static IEnumerable<string> DeclaredFacets(FieldSchema column)

@@ -101,24 +101,24 @@
         Not disabled while a turn runs: the operator may type the next question. Only Ask is busy, so it cannot
         be asked twice.
     *@
-    <div class="a-assistant__ask">
+    @* A form, so Ctrl/Cmd+Enter is alvo.js's one chord (data-alvo-chord-submit), as in every other multi-line box. *@
+    <form class="a-assistant__ask" data-alvo-chord-submit novalidate @onsubmit="AskAsync">
         <Field Label="Your question" For="assistant-message">
             <ChildContent>
                 <MudTextField @ref="_question" T="string" Variant="Variant.Outlined" Lines="3" Immediate="true"
                               id="assistant-message" aria-describedby="assistant-message-hint"
                               Placeholder="Add a nullable note column to work orders"
-                              Value="_message" ValueChanged="text => _message = text ?? string.Empty"
-                              OnKeyDown="KeyAsync" />
+                              Value="_message" ValueChanged="text => _message = text ?? string.Empty" />
             </ChildContent>
-            <Hint>Ctrl+Enter or ⌘+Enter sends. Enter is a new line.</Hint>
+            <Hint>@ChordHint.Of("sends")</Hint>
         </Field>
         <div class="a-row a-row--gap-2">
-            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" data-testid="assistant-send" Busy="_busy"
-                        Disabled="@(_message.Trim().Length == 0)" OnClick="_ => AskAsync()">
+            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" data-testid="assistant-send" Busy="_busy"
+                        Disabled="@(_message.Trim().Length == 0)">
                 @(_busy ? "Thinking…" : "Ask")
             </AlvoButton>
         </div>
-    </div>
+    </form>
 </div>
 
 @code {
@@ -162,10 +162,6 @@
 
         await Interop.FollowNewestAsync(_thread);
     }
-
-    /// <summary>Ctrl/Cmd+Enter asks; Enter alone stays a newline, which the text box does by itself (spec §3.4).</summary>
-    private Task KeyAsync(KeyboardEventArgs args)
-        => args.Key == "Enter" && (args.CtrlKey || args.MetaKey) ? AskAsync() : Task.CompletedTask;
 
     /// <summary>
     /// Escape from anywhere in the pane closes it. Only from inside it: the pane sits beside the page, and an

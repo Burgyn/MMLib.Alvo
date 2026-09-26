@@ -79,8 +79,13 @@ and the e2e suite asserts that things render, not that they behave.
    - **`AlvoAlert`** (persistent, in place, `role=alert` / `role=status`) for state and **every error**, with Alvo's
      structured fix as its action. On a failed submit, focus moves to it. **No error ever goes to a snackbar.**
    - **Field error** under the input for a field-specific refusal.
-4. **Forms and keys.** Enter submits a single-line form. In a multi-line input Enter is a newline and
-   **Ctrl/Cmd+Enter submits** (the assistant, CEL rules, import). Escape closes the topmost dialog; an editor with
+4. **Forms and keys.** Enter submits a single-line form — every one (amended 26 Sep, final review M6): Preview's
+   Why applies exactly as its primary does, and the typed-name box confirms once the name matches (before that the verb
+   is disabled and Enter does nothing). In a multi-line input Enter is a newline and **Ctrl/Cmd+Enter submits** (the
+   assistant, CEL rules, import, an editor's text), by **one mechanism** (M5): the box sits in a
+   `form[data-alvo-chord-submit]` (an editor's, or its own) and alvo.js submits it; no component reads the modifier
+   keys. Every such box says so under it in one sentence (`ChordHint`): "Ctrl+Enter or ⌘+Enter <does>. Enter is a new
+   line." — a rule box adds "Escape puts back the saved rule." Escape closes the topmost dialog; an editor with
    unsaved changes asks "Discard changes?" first, and **Keep editing** gives focus back to the form's first control
    (M4b), so the next Escape still reaches the editor. The submit button is **disabled and shows progress while busy**
    (no double submit anywhere); Cancel stays enabled. On open, focus lands on the first field; on close it returns to

@@ -175,11 +175,13 @@
       return;
     }
 
-    /* Ctrl/Cmd+Enter submits the editor form it is typed in, exactly once. The browser already
-       submits a form on Enter in a single-line field, modifier or not. A server-side keydown
-       handler as well would make that one chord two submits, and the second would land after an
-       owner that saves synchronously had reopened its gate. So the default is cancelled and
-       this is the only path. A textarea, where Enter is a newline, gets the same submit. */
+    /* Ctrl/Cmd+Enter submits the form it is typed in, exactly once: an editor, the assistant's
+       question, the import, a rule box. The one mechanism for every multi-line box (spec §3.4),
+       so none of them carries a keydown handler of its own. The browser already submits a form on
+       Enter in a single-line field, modifier or not. A server-side keydown handler as well would
+       make that one chord two submits, and the second would land after an owner that saves
+       synchronously had reopened its gate. So the default is cancelled and this is the only path.
+       A textarea, where Enter is a newline, gets the same submit. */
     if (event.key === 'Enter' && !event.isComposing && (event.metaKey || event.ctrlKey)
       && event.target instanceof Element) {
       const form = event.target.closest('form[data-alvo-chord-submit]');

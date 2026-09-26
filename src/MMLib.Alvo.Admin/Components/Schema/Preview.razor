@@ -111,34 +111,40 @@
                 </AlvoAlert>
             }
 
-            <Panel Padded="true">
-                <Field Label="Why" For="apply-reason">
-                    <ChildContent>
-                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="apply-reason"
-                                      aria-describedby="apply-reason-hint" Placeholder="@ReasonPlaceholder" Value="_reason"
-                                      ValueChanged="text => _reason = text ?? string.Empty" />
-                    </ChildContent>
-                    <Hint>Configuration history shows this on the revision forever.</Hint>
-                </Field>
-            </Panel>
+            @*
+                A form, so Enter in Why applies exactly as the primary does (spec §3.4): a destructive plan still asks
+                for the project's name first. Every other button in it says type="button" (AlvoButton does).
+            *@
+            <form class="a-stack" novalidate @onsubmit="RequestApplyAsync">
+                <Panel Padded="true">
+                    <Field Label="Why" For="apply-reason">
+                        <ChildContent>
+                            <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="apply-reason"
+                                          aria-describedby="apply-reason-hint" Placeholder="@ReasonPlaceholder" Value="_reason"
+                                          ValueChanged="text => _reason = text ?? string.Empty" />
+                        </ChildContent>
+                        <Hint>Configuration history shows this on the revision forever.</Hint>
+                    </Field>
+                </Panel>
 
-            <div class="a-toolbar">
-                <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" Href="@AdminPaths.Schema">Back to the editor</AlvoButton>
-                <AlvoButton Small="true" Disabled="_busy" data-testid="discard" OnClick="_ => _discarding = true">
-                    Discard them
-                </AlvoButton>
-                <span class="a-spacer"></span>
-                @if (!_stale)
-                {
-                    <span class="a-hint">
-                        Applying as yourself, against revision @(_planned?.Revision ?? Copy.Revision). If somebody applies first, this is
-                        refused rather than written over theirs.
-                    </span>
-                    <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Busy="_busy" OnClick="_ => RequestApplyAsync()">
-                        Apply these changes
+                <div class="a-toolbar">
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" Href="@AdminPaths.Schema">Back to the editor</AlvoButton>
+                    <AlvoButton Small="true" Disabled="_busy" data-testid="discard" OnClick="_ => _discarding = true">
+                        Discard them
                     </AlvoButton>
-                }
-            </div>
+                    <span class="a-spacer"></span>
+                    @if (!_stale)
+                    {
+                        <span class="a-hint">
+                            Applying as yourself, against revision @(_planned?.Revision ?? Copy.Revision). If somebody applies first, this is
+                            refused rather than written over theirs.
+                        </span>
+                        <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" Busy="_busy">
+                            Apply these changes
+                        </AlvoButton>
+                    }
+                </div>
+            </form>
 
             @*
                 The plan is of the copy as it stood when it was asked, and what an apply sends is that same copy — the

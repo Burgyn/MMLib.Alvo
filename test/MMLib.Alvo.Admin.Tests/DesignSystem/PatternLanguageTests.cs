@@ -58,6 +58,32 @@ public sealed partial class PatternLanguageTests
                 .Select(text => $"{editor.File}: \"{text}\""))
             .ShouldBeEmpty("an editor is titled New … or Edit … (a rename is titled by its verb)");
 
+    /// <summary>
+    /// Ctrl/Cmd+Enter has one mechanism, alvo.js's <c>form[data-alvo-chord-submit]</c> (spec §3.4; final review M5):
+    /// no component reads the modifier keys itself, as the assistant, the import and the rule box each once did.
+    /// </summary>
+    [Fact]
+    public void No_screen_handles_the_submit_chord_itself()
+        => Sources()
+            .Where(file => ModifierKey().IsMatch(file.Source))
+            .Select(file => file.Name)
+            .ShouldBeEmpty("the chord is alvo.js's, on a form marked data-alvo-chord-submit");
+
+    /// <summary>
+    /// Every multi-line box sits in a form the chord submits, an editor's or its own, and its hint says the chord in
+    /// the one sentence <c>ChordHint</c> writes.
+    /// </summary>
+    [Fact]
+    public void Every_multi_line_box_submits_by_the_chord_and_says_so()
+        => Components()
+            .Where(file => MultiLine().IsMatch(file.Source))
+            .Select(file => (file.Name, Source: file.Source + CodeBehind(file.Name)))
+            .Where(file => !(file.Source.Contains("data-alvo-chord-submit", StringComparison.Ordinal)
+                    || file.Source.Contains("<AlvoEditor", StringComparison.Ordinal))
+                || !file.Source.Contains("ChordHint.Of(", StringComparison.Ordinal))
+            .Select(file => file.Name)
+            .ShouldBeEmpty("a multi-line box is submitted by the chord and its hint names it (ChordHint)");
+
     private static readonly string[] _submitWords =
     [
         "Create record", "Create person", "Save changes", "Add to the working copy", "Save to the working copy",
@@ -75,6 +101,23 @@ public sealed partial class PatternLanguageTests
             ? value.Length == 0 ? [] : [value]
             : StringLiteral().Matches(value).Select(match => match.Groups[1].Value);
 
+    /// <summary>A component's <c>.razor.cs</c>, or nothing when its code is all in the markup.</summary>
+    private static string CodeBehind(string component)
+    {
+        var path = Path.Combine(RepositoryRoot.Find(), "src", "MMLib.Alvo.Admin", "Components", component + ".cs");
+        return File.Exists(path) ? File.ReadAllText(path) : string.Empty;
+    }
+
+    /// <summary>Every component's markup and code, by its path under <c>Components/</c>.</summary>
+    private static IEnumerable<(string Name, string Source)> Sources()
+    {
+        var root = Path.Combine(RepositoryRoot.Find(), "src", "MMLib.Alvo.Admin", "Components");
+        return Directory.EnumerateFiles(root, "*.*", SearchOption.AllDirectories)
+            .Where(path => path.EndsWith(".razor", StringComparison.Ordinal) || path.EndsWith(".cs", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .Select(path => (Path.GetRelativePath(root, path).Replace('\\', '/'), File.ReadAllText(path)));
+    }
+
     /// <summary>Every component's markup, by its path under <c>Components/</c>.</summary>
     internal static IEnumerable<(string Name, string Source)> Components()
     {
@@ -89,6 +132,12 @@ public sealed partial class PatternLanguageTests
 
     [GeneratedRegex(@"<ErrorPanel\s[^>]*@key=")]
     private static partial Regex KeyedPanel();
+
+    [GeneratedRegex(@"\b(CtrlKey|MetaKey)\b")]
+    private static partial Regex ModifierKey();
+
+    [GeneratedRegex(@"<MudTextField\b[^>]*\bLines=")]
+    private static partial Regex MultiLine();
 
     [GeneratedRegex(@"<AlvoEditor(?=[\s@/>])")]
     private static partial Regex EditorOpen();

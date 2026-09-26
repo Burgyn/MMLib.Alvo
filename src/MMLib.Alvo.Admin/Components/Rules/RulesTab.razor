@@ -50,12 +50,14 @@ else
 
        Nothing is staged when the box loses focus (inventory defect #7: tabbing away staged a change
        nobody meant). A rule is staged by its Save or by Ctrl/Cmd+Enter in the box, and stays marked
-       unsaved until then; Escape puts back what the working copy declares. Enter is a newline. *@
+       unsaved until then; Escape puts back what the working copy declares. Enter is a newline. Each box is its
+       own form, so the chord is alvo.js's one (data-alvo-chord-submit), as in every multi-line box, and the
+       hint under it says all three keys. *@
     @foreach (var operation in _operations)
     {
         var declared = Declared(operation);
         <ListRow class="a-listrow--roomy a-listrow--stacked">
-            <div class="a-stack a-stack--gap-3">
+            <form class="a-stack a-stack--gap-3" data-alvo-chord-submit novalidate @onsubmit="() => SaveAsync(operation)">
                 @*
                     The operation and its route are the box's name, above it as every field's is (spec §3.8). The unsaved
                     mark sits in the same row but out of the name, so the box is not renamed under a screen reader
@@ -76,16 +78,17 @@ else
                     <ChildContent>
                         <MudTextField T="string" Variant="Variant.Outlined" Lines="2" Immediate="true" id="@($"rule-{operation}")"
                                       Class="a-mono" spellcheck="false" Placeholder="@EmptyHint"
-                                      aria-describedby="@(Drafts.IsDirty(operation, declared) ? $"rule-{operation}-dirty" : null)"
+                                      aria-describedby="@DescribedBy(operation, declared)"
                                       Value="@Drafts.Text(operation, declared)" ValueChanged="text => Drafts.Set(operation, text ?? string.Empty)"
-                                      OnKeyDown="args => KeyAsync(operation, args)" />
+                                      OnKeyDown="args => RevertOnEscape(operation, args)" />
                     </ChildContent>
+                    <Hint>@RuleHint</Hint>
                 </Field>
                 <div class="a-row">
-                    <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" data-testid="@($"rule-save-{operation}")"
-                                Disabled="@(!Drafts.IsDirty(operation, declared))" OnClick="_ => SaveAsync(operation)">Save rule</AlvoButton>
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" Submit="true" data-testid="@($"rule-save-{operation}")"
+                                Disabled="@(!Drafts.IsDirty(operation, declared))">Save rule</AlvoButton>
                 </div>
-            </div>
+            </form>
         </ListRow>
     }
 
@@ -134,18 +137,24 @@ else
 
     private RuleDrafts Drafts => Cascaded ?? _own;
 
-    /// <summary>Ctrl/Cmd+Enter saves the rule; Escape puts back what the working copy declares.</summary>
-    private async Task KeyAsync(string operation, KeyboardEventArgs args)
+    /// <summary>
+    /// Escape puts back what the working copy declares. Ctrl/Cmd+Enter is not handled here: it is alvo.js's chord on
+    /// the box's form, the one submit path every multi-line box has.
+    /// </summary>
+    private void RevertOnEscape(string operation, KeyboardEventArgs args)
     {
-        if (args.Key == "Enter" && (args.CtrlKey || args.MetaKey))
-        {
-            await SaveAsync(operation);
-        }
-        else if (args.Key == "Escape")
+        if (args.Key == "Escape")
         {
             Drafts.Revert(operation);
         }
     }
+
+    /// <summary>Every key a rule box answers, said under it (final review M5, T-8).</summary>
+    private static readonly string RuleHint = $"{ChordHint.Of("saves the rule")} Escape puts back the saved rule.";
+
+    /// <summary>The box is described by its hint, and by its unsaved mark while it has one.</summary>
+    private string DescribedBy(string operation, string? declared)
+        => Drafts.IsDirty(operation, declared) ? $"rule-{operation}-hint rule-{operation}-dirty" : $"rule-{operation}-hint";
 
     /// <summary>Stages what was typed, only when it differs from what the descriptor says.</summary>
     private Task SaveAsync(string operation)

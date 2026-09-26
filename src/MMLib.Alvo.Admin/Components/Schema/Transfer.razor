@@ -43,20 +43,22 @@
         <ChildContent>
             @RefusalPanel.Of(_refusal, "The apply would refuse this descriptor", "descriptor-invalid")
 
-            <Field Label="Descriptor JSON" For="import-json">
-                <ChildContent>
-                    <MudTextField T="string" Variant="Variant.Outlined" Lines="12" Immediate="true" id="import-json"
-                                  Class="a-mono" spellcheck="false" aria-describedby="import-json-hint"
-                                  Value="_pasted" ValueChanged="text => _pasted = text ?? string.Empty"
-                                  OnKeyDown="ImportKeyAsync" />
-                </ChildContent>
-                <Hint>@ImportHint</Hint>
-            </Field>
+            @* A form, so Ctrl/Cmd+Enter is alvo.js's one chord (data-alvo-chord-submit), as in every multi-line box. *@
+            <form class="a-stack" data-alvo-chord-submit novalidate @onsubmit="Import">
+                <Field Label="Descriptor JSON" For="import-json">
+                    <ChildContent>
+                        <MudTextField T="string" Variant="Variant.Outlined" Lines="12" Immediate="true" id="import-json"
+                                      Class="a-mono" spellcheck="false" aria-describedby="import-json-hint"
+                                      Value="_pasted" ValueChanged="text => _pasted = text ?? string.Empty" />
+                    </ChildContent>
+                    <Hint>@ImportHint</Hint>
+                </Field>
 
-            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Disabled="@(_pasted.Trim().Length == 0)"
-                        data-testid="import-run" OnClick="_ => Import()">
-                Load it into the working copy
-            </AlvoButton>
+                <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" Disabled="@(_pasted.Trim().Length == 0)"
+                            data-testid="import-run">
+                    Load it into the working copy
+                </AlvoButton>
+            </form>
         </ChildContent>
     </Panel>
 </div>
@@ -182,13 +184,9 @@
         {
             var lines = _pasted.Length == 0 ? 0 : _pasted.Count(c => c == '\n') + 1;
             var size = lines == 1 ? "1 line" : $"{lines.ToString(CultureInfo.InvariantCulture)} lines";
-            return $"{size}. Ctrl+Enter or ⌘+Enter loads it.";
+            return $"{ChordHint.Of("loads it")} {size}.";
         }
     }
-
-    /// <summary>Ctrl/Cmd+Enter imports; Enter alone is a newline in a JSON document (spec §3.4).</summary>
-    private Task ImportKeyAsync(KeyboardEventArgs args)
-        => args.Key == "Enter" && (args.CtrlKey || args.MetaKey) ? Import() : Task.CompletedTask;
 
     public void Dispose() => _lifetime.Dispose();
 }

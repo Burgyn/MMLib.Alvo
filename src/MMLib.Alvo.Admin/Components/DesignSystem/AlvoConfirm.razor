@@ -6,6 +6,9 @@
     disabled until the name is typed exactly. A checkbox is one click from the button beside it, and the click that
     matters looks like the one that does not (design §5.5, kept from ConfirmByName).
 
+    Enter in the typed-name box confirms, once the name matches, as the verb would; with it not matching yet, Enter
+    does nothing, because the verb is disabled. No other confirm has a box, and there Enter presses the focused button.
+
     Opened after any editor closed: never over a dialog (spec §3.1). The first focusable element takes focus, which
     is the typed-name field when there is one and Cancel when there is not, the safe choice either way.
 
@@ -23,13 +26,16 @@
             @ContainedFault.Around(ChildContent, FaultPanel, Faulted)
             @if (TypeToConfirm is { } expected)
             {
-                <Field For="confirm-name">
-                    <LabelContent>Type <code class="a-mono">@expected</code> to allow it</LabelContent>
-                    <ChildContent>
-                        <MudTextField T="string" Value="_typed" ValueChanged="Typed" Immediate="true"
-                                      Variant="Variant.Outlined" id="confirm-name" autocomplete="off" spellcheck="false" />
-                    </ChildContent>
-                </Field>
+                @* A form of one box, so Enter confirms once the name matches (spec §3.4); ConfirmAsync is the gate. *@
+                <form novalidate @onsubmit="ConfirmAsync">
+                    <Field For="confirm-name">
+                        <LabelContent>Type <code class="a-mono">@expected</code> to allow it</LabelContent>
+                        <ChildContent>
+                            <MudTextField T="string" Value="_typed" ValueChanged="Typed" Immediate="true"
+                                          Variant="Variant.Outlined" id="confirm-name" autocomplete="off" spellcheck="false" />
+                        </ChildContent>
+                    </Field>
+                </form>
             }
         </div>
     </DialogContent>
