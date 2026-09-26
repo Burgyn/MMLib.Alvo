@@ -63,7 +63,10 @@ and the e2e suite asserts that things render, not that they behave.
    is pressed (the verb's own gate keeps a double click to one run), the action runs, its result is drawn, and then
    focus goes to the trigger, or to a refusal's panel; when the trigger is gone
    (the item was removed, or the editor that held the button closed first), to the item's row or the row that took its
-   place, else to the list's create action. Never `<body>`. A confirm **names its subject** ("Remove the index on
+   place, else to the list's create action; a verb that leaves the screen hands focus to the new screen's heading (the
+   router's), and one whose whole bar or pane goes with it (Discard, Start again) to the screen's content. Never
+   `<body>`. Every confirm's Cancel and verb are pinned (`AdminSession.FocusAfterConfirmAsync`; `PatternLanguageTests`
+   reads the confirms from the source, batch-B re-review N1). A confirm **names its subject** ("Remove the index on
    status, priority?", "Remove this beforeCreate hook?", "Disable dispatcher@…?") and acts on what it named, found
    again when it runs, never on a position captured at the press (M7).
 3. **Feedback.**

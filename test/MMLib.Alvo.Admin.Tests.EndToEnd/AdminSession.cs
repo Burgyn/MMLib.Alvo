@@ -172,6 +172,32 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
             """, handle, _polling).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Waits until, after <paramref name="confirm"/> closed, the focused element matches <paramref name="selector"/>, and
+    /// is never <c>&lt;body&gt;</c> (spec §3.2).
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="confirm"/> names the confirm by its test id (<c>discard-sheet@PendingBar</c> for the one confirm
+    /// drawn in two places), and <c>PatternLanguageTests</c> reads those names to fail a confirm no scenario pins, for
+    /// its Cancel and its verb both.
+    /// </remarks>
+    /// <param name="confirm">The confirm whose close this follows.</param>
+    /// <param name="selector">Where focus must be.</param>
+    public async Task FocusAfterConfirmAsync(string confirm, string selector)
+    {
+        try
+        {
+            await Page.WaitForFunctionAsync(
+                "selector => document.activeElement !== document.body && !!document.activeElement?.matches(selector)",
+                selector, _polling).ConfigureAwait(false);
+        }
+        catch (TimeoutException timeout)
+        {
+            throw new TimeoutException(
+                $"After {confirm} closed, focus was on {await FocusedAsync().ConfigureAwait(false)}, not {selector}.", timeout);
+        }
+    }
+
     /// <summary>Waits until focus is inside the element with <paramref name="testId"/>.</summary>
     /// <param name="testId">The container's test id.</param>
     public Task WaitForFocusInsideAsync(string testId)

@@ -104,6 +104,7 @@ public sealed class TypedNameEnterScenarios(AdminWorld world) : IClassFixture<Ad
 
         await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
         await session.SnackbarAsync("Applied as revision");
+        await session.FocusAfterConfirmAsync("apply-confirm", "[data-testid='apply-applied']");
         session.AssertConsoleClean();
     }
 }

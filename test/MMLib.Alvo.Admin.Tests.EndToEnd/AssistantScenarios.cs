@@ -236,6 +236,7 @@ public sealed class ProposalOverEditsScenarios(AssistantWorld world) : IClassFix
         await confirm.GetByText("Discard 1 unapplied change?", new() { Exact = true }).WaitForAsync();
         await confirm.GetByTestId("assistant-replace-cancel").ClickAsync();
         await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.FocusAfterConfirmAsync("assistant-replace-confirm", "[data-testid='assistant-review']");
         session.Page.Url.ShouldEndWith("/schema/vendors");
         (await session.Page.GetByTestId("pending-count").InnerTextAsync()).ShouldBe("1", "Cancel keeps the staged edit");
         await session.Page.GetByTestId("assistant-proposal").WaitForAsync();
@@ -244,11 +245,13 @@ public sealed class ProposalOverEditsScenarios(AssistantWorld world) : IClassFix
         await confirm.GetByTestId("assistant-replace-run").ClickAsync();
         await session.Page.WaitForURLAsync("**/changes");
         await session.WaitForPlanAsync();
+        await session.FocusAfterConfirmAsync("assistant-replace-confirm", "h1");
         (await session.Content.InnerTextAsync()).ShouldNotContain("vendors");
 
         await session.Page.GetByTestId("discard").First.ClickAsync();
         await session.Dialog("discard-sheet").GetByTestId("discard-confirm").ClickAsync();
         await session.Page.WaitForURLAsync("**/schema");
+        await session.FocusAfterConfirmAsync("discard-sheet@Preview", "h1");
         await session.Page.GetByTestId("assistant-review").ClickAsync();
         await session.Page.WaitForURLAsync("**/changes");
         await session.WaitForPlanAsync();

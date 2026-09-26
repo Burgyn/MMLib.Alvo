@@ -141,27 +141,20 @@ export function focusSelected(container) {
  * a keyboard user's next Tab would start again from the top of the page.
  */
 export function focusFirst(selectors) {
-  const target = focusable(selectors);
-  if (target) {
-    target.focus();
-    return true;
-  }
-
-  return false;
-}
-
-/** The first element any of the selectors names that is on screen and can take focus, most wanted selector first. */
-const focusable = (selectors) => {
   for (const selector of selectors ?? []) {
     for (const element of document.querySelectorAll(selector)) {
       if (element instanceof HTMLElement && !element.matches(':disabled') && element.getClientRects().length > 0) {
-        return element;
+        /* Tried rather than judged: an element that cannot take focus leaves it where it was, and the next is asked. */
+        element.focus();
+        if (document.activeElement === element) {
+          return true;
+        }
       }
     }
   }
 
-  return null;
-};
+  return false;
+}
 
 /**
  * `focusFirst`, as soon as one of the selectors names something that can take focus: inside a dialog, the library

@@ -54,6 +54,7 @@ public sealed class DestructivePlanScenarios(AdminWorld world) : IClassFixture<A
         await session.Dialog("apply-confirm").WaitForAsync();
         await session.Dialog("apply-confirm").GetByTestId("apply-confirm-cancel").ClickAsync();
         await session.Dialog("apply-confirm").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.FocusAfterConfirmAsync("apply-confirm", "[data-testid='apply-run']");
 
         session.AssertConsoleClean();
     }

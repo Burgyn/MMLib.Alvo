@@ -91,10 +91,12 @@ public sealed class RuleEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.GetByTestId("unsaved-rules").WaitForAsync(new() { State = WaitForSelectorState.Detached });
         session.Page.Url.ShouldContain("/schema/work_orders");
         (await session.Page.InputValueAsync("#rule-update")).ShouldBe("false");
+        await session.FocusAfterConfirmAsync("unsaved-rules", "#a-content a[href$='/admin/schema']");
 
         await schema.ClickAsync();
         await session.Dialog("unsaved-rules").GetByTestId("unsaved-rules-discard").ClickAsync();
         await session.Page.WaitForURLAsync("**/admin/schema");
+        await session.FocusAfterConfirmAsync("unsaved-rules", "h1");
 
         await session.GoAsync("/schema/work_orders?tab=rules");
         (await session.Page.InputValueAsync("#rule-update")).ShouldBe(declared, "discarding a draft stages nothing");

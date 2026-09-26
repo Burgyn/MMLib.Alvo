@@ -4,6 +4,7 @@
 @inject AdminSession Session
 @inject ILogger<History> Logger
 @inject ISnackbar Snackbar
+@inject AdminInterop Interop
 
 <PageTitle>Configuration history · Alvo</PageTitle>
 
@@ -264,6 +265,10 @@
         if (!_problem.Shown)
         {
             Snackbar.Confirm($"Rolled back to r{target} as revision {_current}");
+
+            /* The revision that asked is no longer selected; the newest row, the one the rollback appended, is where
+               the operator goes on from (spec §3.2). */
+            await Interop.FocusFirstOnceClosedAsync(["button:has([data-testid='revision-row'])", "#a-content"]);
         }
     }
 

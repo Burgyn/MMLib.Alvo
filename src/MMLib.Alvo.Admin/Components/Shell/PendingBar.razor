@@ -12,6 +12,7 @@
 @inject AdminSession Session
 @inject NavigationManager Navigation
 @inject ILogger<PendingBar> Logger
+@inject AdminInterop Interop
 
 @if (Pending > 0 && !OnPreview)
 {
@@ -83,7 +84,13 @@
     /// <summary>Closes the sheet; the discard itself was the copy's, and every screen showing it follows.</summary>
     /// <remarks>
     /// No navigation: the screens that draw the working copy follow <see cref="WorkingCopy.Changed"/>, so the
-    /// row behind the sheet goes on its own, and the tab — and anything open on it — stays where it was.
+    /// row behind the sheet goes on its own, and the tab — and anything open on it — stays where it was. The bar goes
+    /// with the last pending change, and the Discard that asked with it, so focus goes to the screen's content
+    /// (spec §3.2), where the next Tab goes on from, rather than to the document.
     /// </remarks>
-    private void Discarded() => _discarding = false;
+    private Task Discarded()
+    {
+        _discarding = false;
+        return Interop.FocusFirstOnceClosedAsync(["#a-content"]);
+    }
 }

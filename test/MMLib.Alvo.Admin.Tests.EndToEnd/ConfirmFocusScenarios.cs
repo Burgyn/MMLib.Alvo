@@ -4,8 +4,10 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
 /// After any confirm, Cancel or its verb, focus is on the trigger, or, when the trigger is gone, on the item's row or
-/// the list's create action: never on <c>&lt;body&gt;</c> (spec §3.2; final review M4). One scenario per confirm the
-/// dashboard has, so a screen that departs from the rule fails here.
+/// the list's create action: never on <c>&lt;body&gt;</c> (spec §3.2; final review M4). These are the confirms with no
+/// flow of their own elsewhere; the rest are pinned inside the scenarios that already drive them, through
+/// <c>AdminSession.FocusAfterConfirmAsync</c>, and <c>PatternLanguageTests</c> fails any confirm in the source whose
+/// Cancel and verb are not both pinned.
 /// </summary>
 /// <remarks>
 /// Its own world: it stages removals, disables a person and deletes a record. Each fact works on its own entity or
@@ -24,12 +26,12 @@ public sealed class ConfirmFocusScenarios(AdminWorld world) : IClassFixture<Admi
         var confirm = await AskAsync(session, "index-remove", 0, "remove-index");
         (await confirm.InnerTextAsync()).ShouldContain("Remove the index on status, priority?");
         await confirm.GetByTestId("remove-index-cancel").ClickAsync();
-        await FocusOnAsync(session, "#index-row-0 [data-testid='index-remove']");
+        await session.FocusAfterConfirmAsync("remove-index", "#index-row-0 [data-testid='index-remove']");
 
         confirm = await AskAsync(session, "index-remove", 0, "remove-index");
         await confirm.GetByTestId("remove-index-run").ClickAsync();
         await session.SnackbarAsync("Removed from the working copy");
-        await FocusOnAsync(session, "#index-row-0 [data-testid='index-remove']");
+        await session.FocusAfterConfirmAsync("remove-index", "#index-row-0 [data-testid='index-remove']");
         (await session.Page.GetByTestId("index-row").InnerTextAsync()).ShouldContain("assigned_to", Case.Sensitive,
             "the row that took the removed one's place");
         session.AssertConsoleClean();
@@ -51,12 +53,12 @@ public sealed class ConfirmFocusScenarios(AdminWorld world) : IClassFixture<Admi
         var confirm = await AskAsync(session, "hook-remove", 0, "remove-hook");
         (await confirm.InnerTextAsync()).ShouldContain("Remove this beforeCreate hook?");
         await session.Page.Keyboard.PressAsync("Escape");
-        await FocusOnAsync(session, "[data-testid='hook-remove']");
+        await session.FocusAfterConfirmAsync("remove-hook", "[data-testid='hook-remove']");
 
         confirm = await AskAsync(session, "hook-remove", 0, "remove-hook");
         await confirm.GetByTestId("remove-hook-run").ClickAsync();
         await session.Page.GetByTestId("hook-row").WaitForAsync(new() { State = WaitForSelectorState.Detached });
-        await FocusOnAsync(session, "[data-testid='hook-new']");
+        await session.FocusAfterConfirmAsync("remove-hook", "[data-testid='hook-new']");
         session.AssertConsoleClean();
     }
 
@@ -69,11 +71,11 @@ public sealed class ConfirmFocusScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Page.GetByTestId("remove-field-notes").ClickAsync();
         var confirm = session.Dialog("remove-field-sheet");
         await confirm.GetByTestId("remove-field-cancel").ClickAsync();
-        await FocusOnAsync(session, "[data-testid='remove-field-notes']");
+        await session.FocusAfterConfirmAsync("remove-field-sheet", "[data-testid='remove-field-notes']");
 
         await session.Page.GetByTestId("remove-field-notes").ClickAsync();
         await confirm.GetByTestId("remove-field-anyway").ClickAsync();
-        await FocusOnAsync(session, "[data-testid='restore-field-notes']");
+        await session.FocusAfterConfirmAsync("remove-field-sheet", "[data-testid='restore-field-notes']");
         session.AssertConsoleClean();
     }
 
@@ -88,16 +90,16 @@ public sealed class ConfirmFocusScenarios(AdminWorld world) : IClassFixture<Admi
 
         await (await session.OpenPersonAsync(person)).GetByTestId("person-disable").ClickAsync();
         await session.Dialog("disable-person").GetByTestId("disable-person-cancel").ClickAsync();
-        await FocusOnAsync(session, change);
+        await session.FocusAfterConfirmAsync("disable-person", change);
 
         await (await session.OpenPersonAsync(person)).GetByTestId("person-disable").ClickAsync();
         await session.Dialog("disable-person").GetByTestId("disable-person-run").ClickAsync();
         await session.SnackbarAsync("Disabled focus-return@example.com");
-        await FocusOnAsync(session, change);
+        await session.FocusAfterConfirmAsync("disable-person", change);
 
         await (await session.OpenPersonAsync(person)).GetByTestId("person-let-in").ClickAsync();
         await session.SnackbarAsync("focus-return@example.com can sign in again");
-        await FocusOnAsync(session, change);
+        await session.FocusAfterConfirmAsync("disable-person", change);
         session.AssertConsoleClean();
     }
 
@@ -112,12 +114,12 @@ public sealed class ConfirmFocusScenarios(AdminWorld world) : IClassFixture<Admi
 
         var confirm = await RecordEditorScenarios.AskToDeleteAsync(session, "WO-0901");
         await confirm.GetByTestId("delete-record-cancel").ClickAsync();
-        await FocusOnAsync(session, "[data-testid='grid-row'][aria-selected='true']");
+        await session.FocusAfterConfirmAsync("delete-record", "[data-testid='grid-row'][aria-selected='true']");
 
         confirm = await RecordEditorScenarios.AskToDeleteAsync(session, "WO-0901");
         await confirm.GetByTestId("delete-record-run").ClickAsync();
         await session.SnackbarAsync("Record deleted");
-        await FocusOnAsync(session, "[data-testid='grid-row'][aria-selected='true']");
+        await session.FocusAfterConfirmAsync("delete-record", "[data-testid='grid-row'][aria-selected='true']");
         session.AssertConsoleClean();
     }
 
@@ -149,7 +151,7 @@ public sealed class ConfirmFocusScenarios(AdminWorld world) : IClassFixture<Admi
 
         await confirm.GetByTestId("remove-index-run").ClickAsync();
         await asker.Page.GetByTestId("index-row").WaitForAsync(new() { State = WaitForSelectorState.Detached });
-        await FocusOnAsync(asker, "[data-testid='index-new']");
+        await asker.FocusAfterConfirmAsync("remove-index", "[data-testid='index-new']");
         asker.AssertConsoleClean();
     }
 
@@ -188,9 +190,4 @@ public sealed class ConfirmFocusScenarios(AdminWorld world) : IClassFixture<Admi
         return dialog;
     }
 
-    /// <summary>Waits until the focused element matches <paramref name="selector"/>: never <c>&lt;body&gt;</c>.</summary>
-    private static async Task FocusOnAsync(AdminSession session, string selector)
-        => await session.Page.WaitForFunctionAsync(
-            "selector => document.activeElement !== document.body && !!document.activeElement?.matches(selector)",
-            selector, new() { PollingInterval = 100 });
 }

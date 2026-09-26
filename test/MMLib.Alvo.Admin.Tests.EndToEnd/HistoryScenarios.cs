@@ -78,6 +78,7 @@ public sealed partial class HistoryScenarios(AdminWorld world) : IClassFixture<A
         await TypeTheProjectNameAsync(session);
         await session.Page.Keyboard.PressAsync("Escape");
         await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.FocusAfterConfirmAsync("rollback-confirm", "[data-testid='rollback-run']");
         await session.GoAsync("/history");
         (await session.Page.GetByTestId("revision-row").CountAsync()).ShouldBe(rows);
     }
@@ -101,6 +102,11 @@ public sealed partial class HistoryScenarios(AdminWorld world) : IClassFixture<A
         await session.SnackbarAsync("Rolled back to r");
         await session.Page.GetByTestId("revision-row").Nth(rows).WaitForAsync();
         (await session.Page.GetByTestId("revision-row").CountAsync()).ShouldBe(rows + 1);
+        /* The revision that asked is no longer selected: focus is the newest row, the one the rollback appended. */
+        await session.FocusAfterConfirmAsync("rollback-confirm", "button:has([data-testid='revision-row'])");
+        (await session.Page.EvaluateAsync<bool>(
+            "() => document.activeElement === document.querySelector(\"button:has([data-testid='revision-row'])\")"))
+            .ShouldBeTrue("the newest row");
 
         /* The operator's unedited working copy followed the rollback, so their next change is not refused as a conflict. */
         await session.ApplyNewEntityAsync("stickers");

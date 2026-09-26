@@ -97,6 +97,44 @@ public sealed partial class PatternLanguageTests
         => Components().Single(file => file.Name == component).Source
             .ShouldContain("@RefreshBar.While(", Case.Sensitive, "the refresh indicator is RefreshBar, at the pane's top");
 
+    /// <summary>
+    /// Every confirm the dashboard draws has its focus after Cancel and after its verb pinned in a browser (spec §3.2;
+    /// batch-B re-review N1): the confirms are read from the source, so a new one fails here until a scenario pins it.
+    /// </summary>
+    [Fact]
+    public void Every_confirm_has_its_focus_after_closing_pinned()
+    {
+        var pinned = EndToEndSources()
+            .SelectMany(source => PinnedConfirm().Matches(source).Select(match => match.Groups[1].Value))
+            .GroupBy(key => key, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+
+        Confirms().Where(key => pinned.GetValueOrDefault(key) < 2)
+            .ShouldBeEmpty("a confirm's Cancel and verb both need a FocusAfterConfirmAsync in a scenario");
+    }
+
+    /// <summary>
+    /// Every confirm, by its test id; the discard confirm, drawn in two places, by where (<c>discard-sheet@PendingBar</c>).
+    /// </summary>
+    private static List<string> Confirms()
+    {
+        var confirms = new List<string>();
+        foreach (var file in Components().Where(file => file.Name != "Schema/DiscardConfirm.razor"))
+        {
+            confirms.AddRange(ConfirmOpen().Matches(file.Source).Select(open =>
+                RazorTag.Attributes(file.Source[open.Index..RazorTag.End(file.Source, open.Index)]).GetValueOrDefault("TestId")
+                    ?? $"(no TestId) {file.Name}"));
+            confirms.AddRange(DiscardOpen().Matches(file.Source)
+                .Select(_ => $"discard-sheet@{Path.GetFileNameWithoutExtension(file.Name)}"));
+        }
+
+        return confirms;
+    }
+
+    private static IEnumerable<string> EndToEndSources()
+        => Directory.EnumerateFiles(Path.Combine(RepositoryRoot.Find(), "test", "MMLib.Alvo.Admin.Tests.EndToEnd"), "*.cs")
+            .Select(File.ReadAllText);
+
     private static readonly string[] _submitWords =
     [
         "Create record", "Create person", "Save changes", "Add to the working copy", "Save to the working copy",
@@ -151,6 +189,15 @@ public sealed partial class PatternLanguageTests
 
     [GeneratedRegex(@"<MudTextField\b[^>]*\bLines=")]
     private static partial Regex MultiLine();
+
+    [GeneratedRegex(@"<AlvoConfirm(?=[\s@/>])")]
+    private static partial Regex ConfirmOpen();
+
+    [GeneratedRegex(@"<DiscardConfirm(?=[\s@/>])")]
+    private static partial Regex DiscardOpen();
+
+    [GeneratedRegex(@"FocusAfterConfirmAsync\(\s*""([^""]+)""")]
+    private static partial Regex PinnedConfirm();
 
     [GeneratedRegex(@"<AlvoEditor(?=[\s@/>])")]
     private static partial Regex EditorOpen();

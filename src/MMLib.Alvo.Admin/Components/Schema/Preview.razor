@@ -5,6 +5,7 @@
 @inject NavigationManager Navigation
 @inject ILogger<Preview> Logger
 @inject ISnackbar Snackbar
+@inject AdminInterop Interop
 @implements IDisposable
 
 <PageTitle>Preview changes · Alvo</PageTitle>
@@ -141,7 +142,7 @@
                             Applying as yourself, against revision @(_planned?.Revision ?? Copy.Revision). If somebody applies first, this is
                             refused rather than written over theirs.
                         </span>
-                        <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" Busy="_busy">
+                        <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" Busy="_busy" data-testid="apply-run">
                             Apply these changes
                         </AlvoButton>
                     }
@@ -486,6 +487,14 @@
         }
 
         Snackbar.Confirm($"Applied as revision {result.Revision}");
+
+        /* The Apply that asked is gone with the plan; the result is what the operator reads next (spec §3.2). Once it
+           is drawn, which is after this call reaches the browser; any confirm closed before the apply was sent. The Kept
+           warning, when there is one, takes focus itself: it is the state the operator has to act on. */
+        if (_kept is null)
+        {
+            await Interop.FocusFirstOnceShownAsync(["[data-testid='apply-applied']"]);
+        }
     }
 
     /// <summary>
@@ -503,6 +512,7 @@
             _applied = null;
             _reason = string.Empty;
             Snackbar.Confirm($"Started again from revision {head.Revision}");
+            await Interop.FocusFirstOnceClosedAsync(["#a-content"]);
         }
         catch (Exception exception)
         {

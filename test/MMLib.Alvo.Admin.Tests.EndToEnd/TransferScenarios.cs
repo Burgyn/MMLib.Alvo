@@ -82,6 +82,7 @@ public sealed class ImportOverEditsScenarios(AdminWorld world) : IClassFixture<A
         await confirm.GetByText("Discard 1 unapplied change?", new() { Exact = true }).WaitForAsync();
         await confirm.GetByTestId("import-replace-cancel").ClickAsync();
         await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.FocusAfterConfirmAsync("import-replace-confirm", "[data-testid='import-run']");
         session.Page.Url.ShouldEndWith("/transfer");
         (await session.Page.GetByTestId("pending-count").InnerTextAsync()).ShouldBe("1", "Cancel keeps the staged edit");
 
@@ -89,10 +90,14 @@ public sealed class ImportOverEditsScenarios(AdminWorld world) : IClassFixture<A
         await confirm.GetByTestId("import-replace-run").ClickAsync();
         await session.Page.WaitForURLAsync("**/changes");
         await session.WaitForPlanAsync();
+        await session.FocusAfterConfirmAsync("import-replace-confirm", "h1");
         var plan = await session.Content.InnerTextAsync();
         plan.ShouldContain("Imported over the edits.");
         plan.ShouldNotContain("vendors");
 
+        await session.Page.GetByTestId("discard").First.ClickAsync();
+        await session.Dialog("discard-sheet").GetByTestId("discard-cancel").ClickAsync();
+        await session.FocusAfterConfirmAsync("discard-sheet@Preview", "[data-testid='discard']");
         await session.Page.GetByTestId("discard").First.ClickAsync();
         await session.Dialog("discard-sheet").GetByTestId("discard-confirm").ClickAsync();
         await session.Page.WaitForURLAsync("**/schema");

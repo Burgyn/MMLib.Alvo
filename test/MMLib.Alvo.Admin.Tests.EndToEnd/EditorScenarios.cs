@@ -210,6 +210,7 @@ public sealed class EditorScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.Dialog("discard-sheet").GetByTestId("discard-cancel").ClickAsync();
         await session.Dialog("discard-sheet").WaitForAsync(new() { State = WaitForSelectorState.Detached });
         (await session.Page.GetByTestId("pending-bar").IsVisibleAsync()).ShouldBeTrue();
+        await session.FocusAfterConfirmAsync("discard-sheet@PendingBar", "[data-testid='pending-discard']");
 
         await session.Page.GetByTestId("pending-discard").ClickAsync();
         await session.Dialog("discard-sheet").WaitForAsync();
@@ -221,6 +222,8 @@ public sealed class EditorScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.Dialog("discard-sheet").GetByTestId("discard-confirm").DblClickAsync();
         await session.SnackbarAsync("Discarded the working copy");
         await session.Page.GetByTestId("pending-bar").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        /* The bar and its Discard went with the last change, so focus is the screen's content, never the document. */
+        await session.FocusAfterConfirmAsync("discard-sheet@PendingBar", "#a-content");
         await OutwaitASecondSubmitAsync(session);
         (await session.SnackbarCountAsync("Discarded the working copy")).ShouldBe(1, "a double click discarded once");
         session.AssertConsoleClean();

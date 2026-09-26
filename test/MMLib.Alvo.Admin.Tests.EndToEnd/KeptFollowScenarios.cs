@@ -145,6 +145,7 @@ public sealed class KeptFollowScenarios(HeldApplyWorld world) : IClassFixture<He
         await applier.Page.GetByTestId("apply-kept-restart").ClickAsync();
         await applier.Dialog("restart-confirm").GetByTestId("restart-confirm-run").ClickAsync();
         await applier.SnackbarAsync("Started again from revision");
+        await applier.FocusAfterConfirmAsync("restart-confirm", "#a-content");
         await kept.WaitForAsync(new() { State = WaitForSelectorState.Detached });
         await applier.Content.GetByText("Nothing to apply").WaitForAsync();
 
@@ -190,6 +191,7 @@ public sealed class KeptFollowScenarios(HeldApplyWorld world) : IClassFixture<He
         await confirm.GetByTestId("restart-confirm-cancel").ClickAsync();
         await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
         await kept.WaitForAsync();
+        await applier.FocusAfterConfirmAsync("restart-confirm", "[data-testid='apply-kept-restart']");
         (await applier.Content.GetByText("Nothing to apply").CountAsync()).ShouldBe(0, "Cancel threw nothing away");
 
         await applier.Button("Plan this change").ClickAsync();
