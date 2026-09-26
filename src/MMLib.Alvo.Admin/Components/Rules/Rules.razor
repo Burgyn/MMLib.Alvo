@@ -39,7 +39,7 @@
         }
         else
         {
-            <MudTabs ActivePanelIndex="@SelectedIndex" ActivePanelIndexChanged="index => Choose(_schema.Entities[index].Name)"
+            <MudTabs ActivePanelIndex="@SelectedIndex" OnPreviewInteraction="ChooseAsync"
                      Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-ruletabs" id="rules-entities">
                 @foreach (var entity in _schema.Entities)
                 {
@@ -136,7 +136,21 @@
     public string? EntityName { get; set; }
 
     /// <summary>Where the selected entity sits in the strip, which is the order the schema lists them in.</summary>
-    private int SelectedIndex => _schema is null ? 0 : Math.Max(0, _schema.Entities.ToList().FindIndex(entity => entity.Name == Selected));
+    private int SelectedIndex
+    {
+        get
+        {
+            for (var index = 0; _schema is not null && index < _schema.Entities.Count; index++)
+            {
+                if (_schema.Entities[index].Name == Selected)
+                {
+                    return index;
+                }
+            }
+
+            return 0;
+        }
+    }
 
     private string Selected => EntityName ?? _schema?.Entities.FirstOrDefault()?.Name ?? string.Empty;
 
@@ -192,6 +206,26 @@
     }
 
     private void Choose(string entity) => Navigation.NavigateTo(AdminPaths.Rules(entity));
+
+    /// <summary>
+    /// Opens the entity whose tab the operator activated.
+    /// </summary>
+    /// <remarks>
+    /// On the operator's interaction rather than on <c>ActivePanelIndexChanged</c>: MudTabs also moves its active index
+    /// as it removes its panels, which it does when the page is disposed after a prerender and when the circuit
+    /// closes. Followed there, the index change navigated away from a page nobody was looking at, which throws while
+    /// prerendering and fails once the circuit is gone.
+    /// </remarks>
+    private Task ChooseAsync(TabInteractionEventArgs interaction)
+    {
+        if (_schema is not null && interaction.PanelIndex >= 0 && interaction.PanelIndex < _schema.Entities.Count
+            && _schema.Entities[interaction.PanelIndex].Name != Selected)
+        {
+            Choose(_schema.Entities[interaction.PanelIndex].Name);
+        }
+
+        return Task.CompletedTask;
+    }
 
     private async Task Pick(Caller caller)
     {

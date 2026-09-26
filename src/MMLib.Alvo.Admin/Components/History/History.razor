@@ -1,6 +1,7 @@
 ﻿@page "/admin/history"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
+@inject AdminSession Session
 @inject ILogger<History> Logger
 @inject ISnackbar Snackbar
 
@@ -23,8 +24,12 @@
     }
     else if (_revisions.Count == 0)
     {
-        <EmptyState Title="Nothing has been applied through this API yet"
-                    Body="The descriptor this host booted from was mounted rather than applied. The first change you make here becomes revision 1." />
+        @*
+            A host records the descriptor it boots from as revision 1, so an empty history is the one start that
+            records nothing: startup mode Skip over a database whose schema a migration job already made.
+        *@
+        <EmptyState Title="No revision has been recorded yet"
+                    Body="This host started without recording its descriptor, because a migration job owns its schema. The first change you apply here becomes revision 1." />
     }
     else
     {
@@ -80,6 +85,16 @@
                                         <PlanSteps Steps="_rollback.Steps" />
                                     </div>
 
+                                    @if (_rollback.HasDestructiveChanges)
+                                    {
+                                        <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" Title="This rollback destroys data"
+                                                   TestId="rollback-destroys">
+                                            A reverse migration can discard data that was added after this revision.
+                                            Permission to lose data is never implied: rolling back asks you to type the
+                                            project's name.
+                                        </AlvoAlert>
+                                    }
+
                                     <AlvoButton Tone="AlvoButton.ButtonTone.Danger" class="a-actions" data-testid="rollback-run"
                                                 Busy="_busy" OnClick="_ => _confirmingRollback = true">
                                         Roll back to r@(_selected.Version.Revision)
@@ -106,8 +121,7 @@
 *@
 <AlvoConfirm Open="_confirmingRollback" TestId="rollback-confirm" ConfirmTestId="rollback-confirm-run"
              CancelTestId="rollback-confirm-cancel" Title="@($"Roll back to r{_selected?.Version.Revision}?")"
-             Consequence="The reverse migration is appended as a new revision. It can discard data added since, and nothing restores that."
-             Verb="Roll back" TypeToConfirm="@Gateway.Project" Busy="_busy"
+             Consequence="@RollbackConsequence" Verb="@RollbackVerb" TypeToConfirm="@Gateway.Project" Busy="_busy"
              OnConfirm="RollbackConfirmedAsync" OnCancel="() => _confirmingRollback = false">
     @if (_rollback is not null)
     {
@@ -124,6 +138,9 @@
     private ManagementPlanSummary? _rollback;
     private AdminProblem? _problem;
     private int _current;
+
+    /// <summary>The applied descriptor as last read, which a clean working copy follows after a rollback.</summary>
+    private ManagementDescriptor? _head;
     private bool _allowed;
     private bool _busy;
     private bool _confirmingRollback;
@@ -141,7 +158,8 @@
         try
         {
             _revisions = await Gateway.RevisionsAsync(CancellationToken.None);
-            _current = (await Gateway.DescriptorAsync(CancellationToken.None)).Revision;
+            _head = await Gateway.DescriptorAsync(CancellationToken.None);
+            _current = _head.Revision;
         }
         catch (Exception exception)
         {
@@ -153,11 +171,13 @@
     {
         _allowed = false;
         _rollback = null;
-        _previous = null;
         try
         {
-            _selected = await Gateway.RevisionAsync(revision, CancellationToken.None);
-            _previous = await LoadPreviousAsync(revision);
+            /* Both read before either is shown: drawn between the two reads, the last revision would stand beside
+               no predecessor and say it was the first. */
+            var selected = await Gateway.RevisionAsync(revision, CancellationToken.None);
+            var previous = await LoadPreviousAsync(revision);
+            (_selected, _previous) = (selected, previous);
         }
         catch (Exception exception)
         {
@@ -206,6 +226,29 @@
         _rollback = null;
         _allowed = false;
         await LoadAsync();
+        await FollowWithTheWorkingCopyAsync();
+    }
+
+    /// <summary>
+    /// Moves this operator's working copy to the revision the rollback appended, when it holds no edits of theirs.
+    /// </summary>
+    /// <remarks>
+    /// Preview's rule after an apply. Left at the revision it was taken from, an unedited copy made the operator's next
+    /// change look like it was staged over somebody else's apply, and Preview refused it as a conflict. A copy with
+    /// edits stays as it is: those edits were made against the old revision, and Preview's refusal is then right.
+    /// </remarks>
+    private async Task FollowWithTheWorkingCopyAsync()
+    {
+        if (_problem is not null || _head is null)
+        {
+            return;
+        }
+
+        var copy = await Session.CopyAsync(CancellationToken.None);
+        if (copy.Loaded && !copy.IsDirty)
+        {
+            copy.Take(_head.DescriptorJson, _head.Revision);
+        }
     }
 
     private async Task<ManagementApplyResult?> SendRollbackAsync(bool dryRun, bool allowDestructive)
@@ -239,7 +282,8 @@
     private RenderFragment RevisionContent(ManagementRevisionDetail selected) => @<text>
         @if (_previous is { } before)
         {
-            <MudTabs Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-revtabs" id="revision-tabs">
+            @* Keyed by the revision, so every revision opens on its change, whichever tab the last one was left on. *@
+            <MudTabs @key="selected.Version.Revision" Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-revtabs" id="revision-tabs">
                 <MudTabPanel Text="@($"Changes from r{before.Version.Revision}")">
                     <div data-testid="revision-diff">
                         <DescriptorDiff Before="@before.DescriptorJson" After="@selected.DescriptorJson"
@@ -256,11 +300,19 @@
         else
         {
             <p class="a-section__sub" data-testid="revision-first">
-                The first revision applied through this API: there is nothing before it to compare with.
+                This is the descriptor the project started from: there is no earlier revision to compare it with.
             </p>
             <div data-testid="revision-descriptor"><CodeBlock Json="@selected.DescriptorJson" /></div>
         }
     </text>;
+
+    /// <summary>What the rollback loses, first: the plan on screen decides whether it destroys data.</summary>
+    private string RollbackConsequence => _rollback?.HasDestructiveChanges == true
+        ? "The reverse migration is appended as a new revision, and the steps marked as destructive drop data that nothing brings back."
+        : "The reverse migration is appended as a new revision. It destroys no data, and this revision stays in the list.";
+
+    /// <summary>The confirm's verb, naming the loss when there is one, as Preview's does.</summary>
+    private string RollbackVerb => _rollback?.HasDestructiveChanges == true ? "Roll back and destroy data" : "Roll back";
 
     private static string RollbackTitle(ManagementPlanSummary plan) => plan.IsEmpty
         ? "No migration — the schema is the same"

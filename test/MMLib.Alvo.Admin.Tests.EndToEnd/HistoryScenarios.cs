@@ -5,15 +5,18 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
 /// A revision opens on what it changed (inventory defect #4), and a rollback cannot run without the project's name
-/// typed (spec §3.2).
+/// typed (spec §3.2); a rollback that ran says so in a snackbar, and one that was refused is an alert with focus on it
+/// (spec §3.3).
 /// </summary>
 /// <remarks>
 /// Its own world, because it applies: a diff needs a revision before the one it shows. The world boots with its
 /// descriptor as r1, the initial one, which has nothing before it. xUnit v3 does not run a class's facts in the order
-/// they are written, so each fact applies what it reads rather than leaning on another's applies.
+/// they are written, so each fact applies what it reads rather than leaning on another's applies, and each rollback it
+/// runs removes only the entity that fact added. The refused rollback has a world of its own, because it applies behind
+/// the dashboard's back and leaves the operator's working copy behind the head.
 /// </remarks>
 /// <param name="world">The running host and browser.</param>
-public sealed class HistoryScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+public sealed partial class HistoryScenarios(AdminWorld world) : IClassFixture<AdminWorld>
 {
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task A_revision_opens_on_its_change_against_the_one_before()
@@ -23,16 +26,22 @@ public sealed class HistoryScenarios(AdminWorld world) : IClassFixture<AdminWorl
         var second = await ApplyNewEntityAsync(session, "invoices");
 
         await session.GoAsync("/history");
-        await session.Page.GetByTestId("revision-row").Filter(new() { HasText = $"r{second}" }).ClickAsync();
+        await Row(session, second).ClickAsync();
 
-        var selected = session.Page.GetByRole(AriaRole.Tab, new() { Selected = true });
-        (await selected.InnerTextAsync()).Trim().ShouldBe($"Changes from r{first}");
-        var diff = session.Page.GetByTestId("revision-diff");
-        (await diff.InnerTextAsync()).ShouldContain("+ ");
-        (await diff.InnerTextAsync()).ShouldContain("invoices");
+        await SelectedTabAsync(session, $"Changes from r{first}");
+        var lines = (await session.Page.GetByTestId("revision-diff").InnerTextAsync()).Split('\n');
+        var added = lines.Where(line => AddedLine().IsMatch(line)).ToList();
+        added.ShouldContain(line => line.Contains("invoices", StringComparison.Ordinal));
+        added.ShouldNotContain(
+            line => line.Contains("tickets", StringComparison.Ordinal), "the diff is against r(n-1), which has tickets already");
 
         await session.OpenTabAsync("Descriptor");
         await session.Page.GetByTestId("revision-descriptor").WaitForAsync();
+
+        /* Another revision opens on its change again, whichever tab the last one was left on. */
+        await Row(session, first).ClickAsync();
+        await session.Page.GetByRole(AriaRole.Tab, new() { Name = "Changes from r", Selected = true }).WaitForAsync();
+        session.AssertConsoleClean();
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -43,7 +52,8 @@ public sealed class HistoryScenarios(AdminWorld world) : IClassFixture<AdminWorl
 
         await session.Page.GetByTestId("revision-row").Last.ClickAsync();
 
-        await session.Page.GetByTestId("revision-first").WaitForAsync();
+        (await session.Page.GetByTestId("revision-first").InnerTextAsync()).Trim().ShouldBe(
+            "This is the descriptor the project started from: there is no earlier revision to compare it with.");
         await session.Page.GetByTestId("revision-descriptor").WaitForAsync();
     }
 
@@ -62,12 +72,62 @@ public sealed class HistoryScenarios(AdminWorld world) : IClassFixture<AdminWorl
         await confirm.WaitForAsync();
         (await confirm.GetByTestId("rollback-confirm-run").IsDisabledAsync()).ShouldBeTrue();
 
+        /* Typed, so the button is live: Escape is what stops it, not a disabled button. */
+        await TypeTheProjectNameAsync(session);
         await session.Page.Keyboard.PressAsync("Escape");
         await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.GoAsync("/history");
         (await session.Page.GetByTestId("revision-row").CountAsync()).ShouldBe(rows);
     }
 
-    private static async Task<string> ApplyNewEntityAsync(AdminSession session, string name)
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_rollback_that_destroys_data_says_so_and_reports_the_revision_it_appended()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await ApplyNewEntityAsync(session, "labels");
+        await session.GoAsync("/history");
+        var rows = await session.Page.GetByTestId("revision-row").CountAsync();
+
+        await PlanTheRollbackOfTheNewestAsync(session);
+        await session.Page.GetByTestId("rollback-destroys").WaitForAsync();
+        await session.Page.GetByTestId("rollback-run").ClickAsync();
+        var confirm = session.Dialog("rollback-confirm");
+        (await confirm.GetByTestId("rollback-confirm-run").InnerTextAsync()).Trim().ShouldBe("Roll back and destroy data");
+        await TypeTheProjectNameAsync(session);
+        await confirm.GetByTestId("rollback-confirm-run").ClickAsync();
+
+        await session.SnackbarAsync("Rolled back to r");
+        await session.Page.GetByTestId("revision-row").Nth(rows).WaitForAsync();
+        (await session.Page.GetByTestId("revision-row").CountAsync()).ShouldBe(rows + 1);
+
+        /* The operator's unedited working copy followed the rollback, so their next change is not refused as a conflict. */
+        await ApplyNewEntityAsync(session, "stickers");
+        session.AssertConsoleClean();
+    }
+
+    private static ILocator Row(AdminSession session, string revision)
+        => session.Page.GetByTestId("revision-row").Filter(new() { HasTextRegex = new Regex($@"\br{revision}\b") });
+
+    private static Task SelectedTabAsync(AdminSession session, string name)
+        => session.Page.GetByRole(AriaRole.Tab, new() { Name = name, Exact = true, Selected = true }).WaitForAsync();
+
+    /// <summary>Opens the revision just before the newest one and asks its rollback plan: a rollback of the newest apply.</summary>
+    internal static async Task PlanTheRollbackOfTheNewestAsync(AdminSession session)
+    {
+        await session.Page.GetByTestId("revision-row").Nth(1).ClickAsync();
+        await session.Page.GetByTestId("rollback-plan").ClickAsync();
+        await session.Page.GetByTestId("rollback-plan-steps").WaitForAsync();
+    }
+
+    internal static async Task TypeTheProjectNameAsync(AdminSession session)
+    {
+        await EditorScenarios.WaitForFocusOnAsync(session, "confirm-name");
+        await session.Page.Keyboard.TypeAsync("field-service");
+        await session.Page.WaitForFunctionAsync(
+            "() => !document.querySelector(\"[data-testid='rollback-confirm-run']\")?.disabled");
+    }
+
+    internal static async Task<string> ApplyNewEntityAsync(AdminSession session, string name)
     {
         await session.GoAsync("/schema");
         await session.Button("New entity", exact: true).ClickAsync();
@@ -80,5 +140,35 @@ public sealed class HistoryScenarios(AdminWorld world) : IClassFixture<AdminWorl
         var announced = session.Content.GetByText("Applied as revision").First;
         await announced.WaitForAsync();
         return Regex.Match(await announced.InnerTextAsync(), @"revision (\d+)").Groups[1].Value;
+    }
+
+    /// <summary>A line the diff adds: its gutter number, then the sign.</summary>
+    [GeneratedRegex(@"^\s*\d*\s*\+ ")]
+    private static partial Regex AddedLine();
+}
+
+/// <summary>A refused rollback is an alert that takes focus, and never a snackbar (spec §3.3).</summary>
+/// <remarks>
+/// Its own world, because it applies behind the dashboard's back: the rollback is then asked against a revision that is
+/// no longer the head, which the contract refuses rather than writing over the other apply.
+/// </remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class RefusedRollbackScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+{
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_refused_rollback_is_an_alert_that_takes_focus_and_never_a_snackbar()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await HistoryScenarios.ApplyNewEntityAsync(session, "vendors");
+        await session.GoAsync("/history");
+        await HistoryScenarios.PlanTheRollbackOfTheNewestAsync(session);
+
+        await ApplyScenarioSteps.ApplySomebodyElsesChangeAsync(world);
+        await session.Page.GetByTestId("rollback-run").ClickAsync();
+        await HistoryScenarios.TypeTheProjectNameAsync(session);
+        await session.Dialog("rollback-confirm").GetByTestId("rollback-confirm-run").ClickAsync();
+
+        await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+        (await session.SnackbarCountAsync("Rolled back")).ShouldBe(0, "no error is ever a snackbar");
     }
 }
