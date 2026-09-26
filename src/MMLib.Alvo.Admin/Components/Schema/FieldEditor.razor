@@ -132,11 +132,13 @@
                 case FieldType.String:
                     <Field Label="Max length" For="new-field-max">
                         <ChildContent>
-                            <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-max"
-                                          InputType="InputType.Number" min="1" Placeholder="no limit"
-                                          aria-describedby="new-field-max-hint"
-                                          Value="@_facets.MaxLength?.ToString(CultureInfo.InvariantCulture)"
-                                          ValueChanged="text => _facets.MaxLength = OptionalNumber(text)" />
+                            @* Text with the numeric keypad, read by FacetNumber: a number box reports what it cannot parse as empty. *@
+                            <MudTextField T="string" @ref="_maxField" Variant="Variant.Outlined" Immediate="true" id="new-field-max"
+                                          InputMode="InputMode.numeric" Placeholder="no limit"
+                                          aria-describedby="@_numbers.DescribedBy(MaxBox, "new-field-max-hint")"
+                                          Error="@_numbers.Has(MaxBox)"
+                                          Value="@NumberText(MaxBox, _facets.MaxLength)" ValueChanged="TypeMaxLength" />
+                            @_numbers.Under(MaxBox, () => _maxField!.FocusAsync())
                         </ChildContent>
                         <Hint>Leave it empty for no limit — the schema's own default.</Hint>
                     </Field>
@@ -145,19 +147,23 @@
                     <div class="a-field-row">
                         <Field Label="Precision" For="new-field-precision">
                             <ChildContent>
-                                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-precision"
-                                              InputType="InputType.Number" aria-describedby="new-field-precision-hint"
-                                              Value="@_facets.Precision.ToString(CultureInfo.InvariantCulture)"
-                                              ValueChanged="text => _facets.Precision = Number(text, 10)" />
+                                <MudTextField T="string" @ref="_precisionField" Variant="Variant.Outlined" Immediate="true"
+                                              id="new-field-precision" InputMode="InputMode.numeric"
+                                              aria-describedby="@_numbers.DescribedBy(PrecisionBox, "new-field-precision-hint")"
+                                              Error="@_numbers.Has(PrecisionBox)"
+                                              Value="@NumberText(PrecisionBox, _facets.Precision)" ValueChanged="TypePrecision" />
+                                @_numbers.Under(PrecisionBox, () => _precisionField!.FocusAsync())
                             </ChildContent>
                             <Hint>Total digits, not the ones before the point.</Hint>
                         </Field>
                         <Field Label="Scale" For="new-field-scale">
                             <ChildContent>
-                                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-scale"
-                                              InputType="InputType.Number" aria-describedby="new-field-scale-hint"
-                                              Value="@_facets.Scale.ToString(CultureInfo.InvariantCulture)"
-                                              ValueChanged="text => _facets.Scale = Number(text, 2)" />
+                                <MudTextField T="string" @ref="_scaleField" Variant="Variant.Outlined" Immediate="true"
+                                              id="new-field-scale" InputMode="InputMode.numeric"
+                                              aria-describedby="@_numbers.DescribedBy(ScaleBox, "new-field-scale-hint")"
+                                              Error="@_numbers.Has(ScaleBox)"
+                                              Value="@NumberText(ScaleBox, _facets.Scale)" ValueChanged="TypeScale" />
+                                @_numbers.Under(ScaleBox, () => _scaleField!.FocusAsync())
                             </ChildContent>
                             <Hint>Digits after the point.</Hint>
                         </Field>

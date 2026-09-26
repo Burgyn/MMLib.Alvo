@@ -22,7 +22,7 @@ public sealed class FieldFacetScenarios(AdminWorld world) : IClassFixture<AdminW
         await session.Page.GetByTestId("add-field").ClickAsync();
         var sheet = session.Page.GetByTestId("field-sheet");
         await sheet.GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync("dispatch_zone");
-        (await sheet.GetByRole(AriaRole.Spinbutton, new() { Name = "Max length" }).InputValueAsync()).ShouldBeEmpty();
+        (await sheet.GetByRole(AriaRole.Textbox, new() { Name = "Max length" }).InputValueAsync()).ShouldBeEmpty();
         await session.Page.GetByTestId("field-save").ClickAsync();
 
         var row = session.Page.GetByTestId("field-row-dispatch_zone");

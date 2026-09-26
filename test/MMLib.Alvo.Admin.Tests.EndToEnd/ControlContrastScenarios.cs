@@ -100,7 +100,9 @@ public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<A
         await session.GoAsync("/automations");
         var alert = session.Page.GetByTestId("notyet-panel");
         await alert.WaitForAsync();
-        var readings = await ContrastProbe.ReadAsync(alert.Locator(".mud-alert-message, .mud-alert-message *"));
+        /* Every element inside the alert frame, by its test id rather than the library's classes; the ones with no text
+           (the icon, its paths) are dropped below, so what is judged is what is read. */
+        var readings = await ContrastProbe.ReadAsync(alert.Locator("*"));
         readings.ShouldNotBeEmpty("the alert's title and its sentences are read");
         return readings.Where(r => r.Name.Length > 0 && r.Ratio < ContrastProbe.AA).Select(r => $"the info alert: {r}");
     }

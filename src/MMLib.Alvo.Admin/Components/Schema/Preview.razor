@@ -5,6 +5,7 @@
 @inject NavigationManager Navigation
 @inject ILogger<Preview> Logger
 @inject ISnackbar Snackbar
+@implements IDisposable
 
 <PageTitle>Preview changes · Alvo</PageTitle>
 
@@ -28,8 +29,9 @@
         <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" TestId="apply-kept" TakeFocus="true"
                    Title="@($"Somebody applied revision {kept.HeadRevision} after yours")">
             <ChildContent>
-                Your edits staged after you pressed Apply are kept against revision @Copy.Revision, so the next apply
-                is refused as a conflict until you start again from revision @kept.HeadRevision.
+                Your edits staged after you pressed Apply are kept against revision @Copy.Revision, so the diff below
+                still lists the change you just applied as pending, and the next apply is refused as a conflict until
+                you start again from revision @kept.HeadRevision.
             </ChildContent>
             <Actions>
                 <AlvoButton Small="true" data-testid="apply-kept-restart" OnClick="_ => _restarting = true">
@@ -182,6 +184,8 @@
     /// </remarks>
     private WorkingCopy Copy { get; set; } = new();
 
+    private readonly ComponentLifetime _lifetime = new();
+
     private ManagementApplyResult? _plan;
 
     /// <summary>How many plans this page has been answered with — which one is showing, for a reader who asked again.</summary>
@@ -212,6 +216,7 @@
         try
         {
             Copy = await Session.WorkingCopyAsync(CancellationToken.None);
+            Session.Follow(Copy, InvokeAsync, OnCopyChanged, _lifetime.Token);
         }
         catch (Exception exception)
         {
@@ -233,6 +238,23 @@
         {
             await SendAsync(dryRun: true, pressed: false);
         }
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => _lifetime.Dispose();
+
+    /// <summary>
+    /// Redraws when the operator's copy moved in another tab, and drops the Kept warning once it no longer holds: the
+    /// copy was discarded, or started again from the head, somewhere other than this page.
+    /// </summary>
+    private void OnCopyChanged()
+    {
+        if (_kept is { } kept && (!Copy.IsDirty || Copy.Revision >= kept.HeadRevision))
+        {
+            _kept = null;
+        }
+
+        StateHasChanged();
     }
 
     /// <summary>

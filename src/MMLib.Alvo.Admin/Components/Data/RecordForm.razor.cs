@@ -302,12 +302,13 @@ public partial class RecordForm
     private static string? RequiredMark(FieldSchema column) => column.Required ? "a-required" : null;
 
     /// <summary>
-    /// The control's type. A decimal is text, not <c>number</c>: a number input displays its value in the
-    /// browser's locale, which is what drew <c>21,6</c> (D-8); <c>inputmode</c> keeps the numeric keypad.
+    /// The control's type. A number is text, not <c>number</c>, and <c>inputmode</c> keeps the numeric keypad. A
+    /// decimal, because a number input displays its value in the browser's locale, which is what drew <c>21,6</c>
+    /// (D-8). An integer, because a number input reports text it cannot parse (<c>1e</c>, <c>--3</c>) as an empty
+    /// value: the form would send an optional one as nothing, where reading the text itself refuses it at the field.
     /// </summary>
     private static string InputType(FieldSchema column) => column.Type switch
     {
-        FieldType.Integer => "number",
         FieldType.Date => "date",
         FieldType.DateTime => "datetime-local",
         _ => "text",
@@ -316,15 +317,18 @@ public partial class RecordForm
     /// <summary>The Mud input's type for <see cref="InputType"/>, which stays the one mapping of a field to a control.</summary>
     private static MudBlazor.InputType MudInputType(FieldSchema column) => InputType(column) switch
     {
-        "number" => MudBlazor.InputType.Number,
         "date" => MudBlazor.InputType.Date,
         "datetime-local" => MudBlazor.InputType.DateTimeLocal,
         _ => MudBlazor.InputType.Text,
     };
 
-    /// <summary>The numeric keypad for a decimal, which is a text input for <see cref="InputType"/>'s reason.</summary>
-    private static MudBlazor.InputMode MudInputMode(FieldSchema column)
-        => column.Type == FieldType.Decimal ? MudBlazor.InputMode.@decimal : MudBlazor.InputMode.text;
+    /// <summary>The numeric keypad for a number, which is a text input for <see cref="InputType"/>'s reason.</summary>
+    private static MudBlazor.InputMode MudInputMode(FieldSchema column) => column.Type switch
+    {
+        FieldType.Decimal => MudBlazor.InputMode.@decimal,
+        FieldType.Integer => MudBlazor.InputMode.numeric,
+        _ => MudBlazor.InputMode.text,
+    };
 
     /// <summary>
     /// Whether the field is named by a label above its control, as every field is (spec §3.8). A boolean is not: its

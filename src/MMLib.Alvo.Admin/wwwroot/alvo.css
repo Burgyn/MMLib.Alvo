@@ -1272,7 +1272,9 @@
     opacity: 0.92;
   }
 
-  /* prototype-only: the dashboard's quiet buttons are AlvoButton's Ghost tone. */
+  /* prototype-only: the dashboard's quiet buttons are AlvoButton's Ghost tone; the prototype renders this, and so
+     does the gallery, which cannot draw the library's button. Marked rather than left unmarked, because no product
+     component names it (StylesheetHygieneTests). */
   .a-btn--ghost {
     border-color: transparent;
     background: transparent;

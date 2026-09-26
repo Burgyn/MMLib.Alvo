@@ -25,6 +25,19 @@ public partial class FieldEditor
     private int _refusals;
     private readonly SubmitGate _another = new();
 
+    private const string MaxBox = "new-field-max";
+    private const string PrecisionBox = "new-field-precision";
+    private const string ScaleBox = "new-field-scale";
+
+    /// <summary>What each number box holds as typed, once typed into; until then it shows the facet.</summary>
+    private readonly Dictionary<string, string?> _numberTexts = new(StringComparer.Ordinal);
+
+    /// <summary>The number boxes the editor could not read, refused at the box (spec §3.8).</summary>
+    private readonly MMLib.Alvo.Admin.Components.DesignSystem.FieldRefusals _numbers = new();
+    private MudBlazor.MudTextField<string>? _maxField;
+    private MudBlazor.MudTextField<string>? _precisionField;
+    private MudBlazor.MudTextField<string>? _scaleField;
+
     /// <summary>The entity the field is added to.</summary>
     [Parameter, EditorRequired]
     public string Entity { get; set; } = string.Empty;
@@ -139,6 +152,7 @@ public partial class FieldEditor
             _prefilled = Editing;
             _refusal = null;
             _facets = FieldFacets.Prefill(Editing!, EditingJson);
+            ForgetNumbers();
             prefilledNow = true;
         }
         else if (!IsEditing)
@@ -180,12 +194,60 @@ public partial class FieldEditor
     /// <summary>A type as the descriptor spells it.</summary>
     private static string Word(FieldType type) => type.ToString().ToLowerInvariant();
 
-    private static int Number(object? value, int fallback)
-        => int.TryParse(value?.ToString(), CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
+    /// <summary>What a number box shows: the text typed into it, or the facet it opened on.</summary>
+    private string? NumberText(string box, int? facet)
+        => _numberTexts.TryGetValue(box, out var typed) ? typed : facet?.ToString(CultureInfo.InvariantCulture);
 
-    /// <summary>A number box's value, or <see langword="null"/> when it was cleared — which is how "no limit" is said.</summary>
-    private static int? OptionalNumber(object? value)
-        => int.TryParse(value?.ToString(), CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
+    private void TypeMaxLength(string? text) => _facets.MaxLength = Typed(MaxBox, text, FacetNumber.MaxLength(text), null);
+
+    private void TypePrecision(string? text) => _facets.Precision = Typed(PrecisionBox, text, FacetNumber.Precision(text), 10)!.Value;
+
+    private void TypeScale(string? text) => _facets.Scale = Typed(ScaleBox, text, FacetNumber.Scale(text), 2)!.Value;
+
+    /// <summary>
+    /// Keeps what was typed and forgets the box's refusal; answers the facet it reads as, or <paramref name="fallback"/>
+    /// while it cannot be read. The fallback only keeps the form's fingerprint whole: an unreadable box is refused
+    /// before anything is staged (<see cref="NumbersRead"/>).
+    /// </summary>
+    private int? Typed(string box, string? text, FacetRead read, int? fallback)
+    {
+        _numberTexts[box] = text;
+        _numbers.Clear(box);
+        return read.Problem is null ? read.Value : fallback;
+    }
+
+    /// <summary>Refuses, at the box, every number box the form shows and cannot read; true when there is none.</summary>
+    private bool NumbersRead()
+    {
+        _numbers.ClearAll();
+        if (_facets.Kind != FieldKind.Rollup)
+        {
+            _numbers.RefuseAll(ShownNumbers()
+                .Where(box => box.Read.Problem is not null)
+                .Select(box => KeyValuePair.Create(box.Id, box.Read.Problem!)));
+        }
+
+        return !_numbers.Any;
+    }
+
+    /// <summary>The number boxes the chosen type draws, in the order it draws them, each as it reads.</summary>
+    private IEnumerable<(string Id, FacetRead Read)> ShownNumbers() => _facets.Type switch
+    {
+        FieldType.String => [(MaxBox, FacetNumber.MaxLength(NumberText(MaxBox, _facets.MaxLength)))],
+        FieldType.Decimal =>
+        [
+            (PrecisionBox, FacetNumber.Precision(NumberText(PrecisionBox, _facets.Precision))),
+            (ScaleBox, FacetNumber.Scale(NumberText(ScaleBox, _facets.Scale))),
+        ],
+        _ => [],
+    };
+
+    /// <summary>Forgets what was typed into the number boxes, as a fresh or prefilled form does.</summary>
+    private void ForgetNumbers()
+    {
+        _numberTexts.Clear();
+        _numbers.ClearAll();
+    }
 
     /// <summary>A declared value short enough to sit in a line of prose; a description can be a paragraph.</summary>
     private static string Short(string json) => json.Length <= NoteValueLimit ? json : json[..NoteValueLimit] + "…";
@@ -221,6 +283,7 @@ public partial class FieldEditor
             if (await StageAsync(keepOpen: true))
             {
                 _facets = new FieldFacets { Type = _facets.Type, Kind = _facets.Kind, Sources = _facets.Sources };
+                ForgetNumbers();
                 _opened = Fingerprint();
                 if (_nameField is not null)
                 {
@@ -239,6 +302,11 @@ public partial class FieldEditor
     /// </summary>
     private async Task<bool> StageAsync(bool keepOpen)
     {
+        if (!NumbersRead())
+        {
+            return false;
+        }
+
         if (_facets.Build(Editing, EditingJson, Siblings, out _refusal) is not { } facets)
         {
             _refusals++;

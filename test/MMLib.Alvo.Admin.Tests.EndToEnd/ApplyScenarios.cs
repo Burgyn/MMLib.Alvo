@@ -124,7 +124,9 @@ internal static class ApplyScenarioSteps
     /// copy is left naming the revision before it.
     /// </summary>
     /// <param name="world">The running host.</param>
-    public static async Task ApplySomebodyElsesChangeAsync(AdminWorld world)
+    /// <param name="description">What the change says, different per call when one scenario makes it twice: the same
+    /// descriptor again appends no revision.</param>
+    public static async Task ApplySomebodyElsesChangeAsync(AdminWorld world, string description = "Changed behind the dashboard.")
     {
         using var scope = world.Services.CreateScope();
         var services = scope.ServiceProvider;
@@ -136,7 +138,7 @@ internal static class ApplyScenarioSteps
             var project = (await management.ListProjectsAsync())[0].Name;
             var current = await management.GetDescriptorAsync(project);
             var changed = JsonNode.Parse(current.DescriptorJson)!.AsObject();
-            changed["description"] = "Changed behind the dashboard.";
+            changed["description"] = description;
             await management.ApplyDescriptorAsync(
                 project, new ManagementApplyRequest(changed.ToJsonString(), current.Revision, Reason: "Somebody else"));
         }

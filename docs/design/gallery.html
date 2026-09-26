@@ -494,12 +494,12 @@ WHERE <span class="a-code-key">"owner_id"</span> = @p0 AND <span class="a-code-k
         <input class="a-input a-mono" id="g-f-name" value="work_orders" aria-required="true" aria-describedby="g-f-name-hint">
         <span class="a-hint" id="g-f-name-hint">Lowercase letters, digits and underscores; it becomes the table's name.</span>
       </div>
-      <!-- Field with a refusal: box, hint, then the refusal (FieldRefusals) -->
+      <!-- Field with a refusal: box, hint, then the refusal (FieldRefusals), in that order in the markup as on screen -->
       <div class="a-field">
         <label class="a-label" for="g-f-email">Email</label>
         <input class="a-input" id="g-f-email" value="dispatch@" aria-invalid="true" aria-describedby="g-f-email-hint g-f-email-problem">
-        <span class="a-field__problem" id="g-f-email-problem">That is not an email address the store accepts.</span>
         <span class="a-hint" id="g-f-email-hint">Where the sign-in link is sent.</span>
+        <span class="a-field__problem" id="g-f-email-problem">That is not an email address the store accepts.</span>
       </div>
       <!-- Disabled -->
       <div class="a-field">
@@ -542,7 +542,7 @@ WHERE <span class="a-code-key">"owner_id"</span> = @p0 AND <span class="a-code-k
     </div>
   </div>
   <div class="a-panel a-panel--padded">
-    <p class="a-hint"><code>AlvoConfirm</code> with <code>TypeToConfirm</code>: centred, no light dismiss, Escape is Cancel, focus lands in the name box. The button stays disabled until the name is typed exactly — a checkbox would be one click from the button beside it. Used for a destructive apply, a rollback and removing an entity; every other destructive action is the same dialog without the name.</p>
+    <p class="a-hint"><code>AlvoConfirm</code> with <code>TypeToConfirm</code>: centred, no light dismiss, Escape is Cancel, focus lands in the name box. The button stays disabled until the name is typed exactly — a checkbox would be one click from the button beside it. Used for a destructive apply and a rollback; every other destructive action is the same dialog without the name.</p>
   </div>
 </div>
 

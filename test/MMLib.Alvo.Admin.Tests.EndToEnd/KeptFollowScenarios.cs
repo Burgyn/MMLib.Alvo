@@ -127,41 +127,75 @@ public sealed class HeldApplyWorld : AdminWorld
 /// <param name="world">A host whose next apply can be held after it wrote.</param>
 public sealed class KeptFollowScenarios(HeldApplyWorld world) : IClassFixture<HeldApplyWorld>
 {
+    /// <summary>
+    /// Round one: Cancel keeps the edits and the warning, the copy is refused as a conflict, and only the confirm starts
+    /// it again. Round two: the same overtaken apply, and another tab's Discard takes the warning away (the copy it
+    /// described is gone).
+    /// </summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task An_apply_overtaken_by_another_says_so_in_place_and_starts_again_only_through_its_confirm()
     {
         var cancel = TestContext.Current.CancellationToken;
         await using var applier = await world.SignInAsync(cancel);
-        await StageEntityAsync(applier, "tickets");
+        await using var otherTab = await world.SignInAsync(cancel);
+
+        var kept = await OvertakeAnApplyAsync(applier, otherTab, "tickets", "parts");
+        await CancelKeepsTheEditsAndTheConflictAsync(applier, kept);
+
+        await applier.Page.GetByTestId("apply-kept-restart").ClickAsync();
+        await applier.Dialog("restart-confirm").GetByTestId("restart-confirm-run").ClickAsync();
+        await applier.SnackbarAsync("Started again from revision");
+        await kept.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await applier.Content.GetByText("Nothing to apply").WaitForAsync();
+
+        kept = await OvertakeAnApplyAsync(applier, otherTab, "invoices", "vehicles");
+        await otherTab.Page.GetByTestId("pending-discard").ClickAsync();
+        await otherTab.Dialog("discard-sheet").GetByTestId("discard-confirm").ClickAsync();
+        await kept.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+
+        applier.AssertConsoleClean();
+        otherTab.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// Stages <paramref name="applied"/> and applies it, holding the apply while the other tab stages
+    /// <paramref name="later"/> and somebody else applies; answers the warning that says so.
+    /// </summary>
+    private async Task<ILocator> OvertakeAnApplyAsync(AdminSession applier, AdminSession otherTab, string applied, string later)
+    {
+        await StageEntityAsync(applier, applied);
         await applier.PreviewPendingAsync();
-        await applier.Page.FillAsync("#apply-reason", "Add tickets");
+        await applier.Page.FillAsync("#apply-reason", $"Add {applied}");
 
         world.HoldNextApply();
         await applier.Button("Apply these changes").ClickAsync();
-        await world.Written.WaitAsync(cancel);
-
-        await using (var otherTab = await world.SignInAsync(cancel))
-        {
-            await StageEntityAsync(otherTab, "parts");
-        }
-
-        await ApplyScenarioSteps.ApplySomebodyElsesChangeAsync(world);
+        await world.Written.WaitAsync(TestContext.Current.CancellationToken);
+        await StageEntityAsync(otherTab, later);
+        await ApplyScenarioSteps.ApplySomebodyElsesChangeAsync(world, $"Changed behind the dashboard, after {applied}.");
         world.Release();
 
         var kept = applier.Page.GetByTestId("apply-kept");
         await kept.WaitForAsync();
         await applier.SnackbarAsync("Applied as revision");
-        (await kept.InnerTextAsync()).ShouldContain("after yours");
+        (await kept.InnerTextAsync()).ShouldContain("still lists the change you just applied as pending");
         await EditorScenarios.WaitForFocusInsideAsync(applier, "apply-kept");
+        return kept;
+    }
 
+    /// <summary>Cancel on the restart keeps everything; asking again is refused as the conflict the warning named.</summary>
+    private static async Task CancelKeepsTheEditsAndTheConflictAsync(AdminSession applier, ILocator kept)
+    {
         await applier.Page.GetByTestId("apply-kept-restart").ClickAsync();
         var confirm = applier.Dialog("restart-confirm");
-        await confirm.GetByTestId("restart-confirm-run").ClickAsync();
+        await confirm.GetByTestId("restart-confirm-cancel").ClickAsync();
+        await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await kept.WaitForAsync();
+        (await applier.Content.GetByText("Nothing to apply").CountAsync()).ShouldBe(0, "Cancel threw nothing away");
 
-        await applier.SnackbarAsync("Started again from revision");
-        await kept.WaitForAsync(new() { State = WaitForSelectorState.Detached });
-        await applier.Content.GetByText("Nothing to apply").WaitForAsync();
-        applier.AssertConsoleClean();
+        await applier.Button("Plan this change").ClickAsync();
+        (await applier.Page.GetByTestId("error-title").InnerTextAsync())
+            .ShouldBe("Somebody applied a revision in between", "the kept copy is refused as the conflict it is");
+        await kept.WaitForAsync();
     }
 
     /// <summary>Stages one new entity from the schema list.</summary>
