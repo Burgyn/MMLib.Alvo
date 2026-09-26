@@ -59,4 +59,10 @@ internal static class Icons
 
     /// <summary>A crescent — the dark theme.</summary>
     public const string Moon = """<path d="M16.5 12.2A6.8 6.8 0 017.8 3.5a6.8 6.8 0 108.7 8.7z"/>""";
+
+    /// <summary>A four-pointed sparkle beside a small one — the assistant.</summary>
+    public const string Sparkle = """<path d="M9 3l1.6 4.4L15 9l-4.4 1.6L9 15l-1.6-4.4L3 9l4.4-1.6z"/><path d="M15.5 13.5l.6 1.4 1.4.6-1.4.6-.6 1.4-.6-1.4-1.4-.6 1.4-.6z"/>""";
+
+    /// <summary>A cross — closes a pane.</summary>
+    public const string Close = """<path d="M5 5l10 10M15 5L5 15"/>""";
 }

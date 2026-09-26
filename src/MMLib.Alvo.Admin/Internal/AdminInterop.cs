@@ -81,6 +81,10 @@ internal sealed partial class AdminInterop(IJSRuntime js, ILogger<AdminInterop> 
     public Task FocusSelectedAsync(ElementReference container)
         => QuietlyAsync(module => module.InvokeVoidAsync("focusSelected", container));
 
+    /// <summary>Keeps a growing thread's newest item in view; see <c>followNewest</c> in admin.js.</summary>
+    public Task FollowNewestAsync(ElementReference thread)
+        => QuietlyAsync(module => module.InvokeVoidAsync("followNewest", thread));
+
     /// <summary>The theme in force, or <see langword="null"/> when the circuit has gone.</summary>
     public Task<string?> ThemeAsync() => QuietlyAsync<string?>(module => module.InvokeAsync<string?>("theme"));
 

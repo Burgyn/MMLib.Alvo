@@ -89,6 +89,18 @@ internal sealed class ScriptedAssistant : IAlvoAssistant
         ArgumentNullException.ThrowIfNull(request);
 
         yield return new AssistantUpdate.ToolInvoked("get_descriptor");
+
+        if (request.Message.Contains("slowly", StringComparison.OrdinalIgnoreCase))
+        {
+            await Task.Delay(_slowTurn, ct);
+        }
+
+        if (request.Message.Contains("fail", StringComparison.OrdinalIgnoreCase))
+        {
+            yield return new AssistantUpdate.Failed(FailureText);
+            yield break;
+        }
+
         yield return new AssistantUpdate.ToolInvoked("validate_descriptor");
 
         if (request.Message.Contains("drop", StringComparison.OrdinalIgnoreCase))
@@ -106,6 +118,15 @@ internal sealed class ScriptedAssistant : IAlvoAssistant
 
         await Task.CompletedTask;
     }
+
+    /// <summary>What a turn asked to fail reports, which a scenario asserts is drawn in place.</summary>
+    internal const string FailureText = "The AI provider refused the key.";
+
+    /// <summary>
+    /// How long a turn asked to go slowly holds its answer back: long enough for a scenario to read the pane while
+    /// the turn is still running, short enough not to matter to the suite's time.
+    /// </summary>
+    private static readonly TimeSpan _slowTurn = TimeSpan.FromSeconds(3);
 
     /// <summary>The refusal a scenario asserts is rendered verbatim.</summary>
     internal const string RefusalText =

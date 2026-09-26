@@ -220,12 +220,10 @@
     --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
 
     /* --- Stacking — named planes rather than a number each rule picks. A table's sticky head rides
-       over its own rows; a sheet takes the overlay plane; the assistant floats above it, so its
-       launcher is not covered by a sheet's scrim. The palette is the library's dialog, on the
-       library's own dialog plane. --- */
+       over its own rows; a sheet takes the overlay plane. The palette is the library's dialog, on the
+       library's own dialog plane, and the assistant is the library's drawer, on its drawer plane. --- */
     --z-raised: 1;
     --z-overlay: 40;
-    --z-assistant: 45;
   }
 
   :root[data-theme='light'] {
@@ -361,6 +359,13 @@
   button {
     font-family: inherit;
     font-size: inherit;
+  }
+
+  /* Alvo's own controls take the text colour around them. A library button does not: its palette gives a
+     filled button its contrast text (--accentText on --accent, --panel on --danger-fg), and inheriting here,
+     a layer above the library, painted --text on the fill instead: 3.09:1 on the light accent and 1.32:1 on the
+     dark one, where the pairs themselves are 5.39:1 and 10.24:1. */
+  :where(input, textarea, select, button):where(:not([class^='mud-'], [class*=' mud-'])) {
     color: inherit;
   }
 
@@ -1438,6 +1443,7 @@
   }
 
   .a-input,
+  /* prototype-only: the design prototype's textarea; the dashboard's are MudTextField. */
   .a-textarea,
   /* prototype-only: the design prototype's native select; the dashboard's pickers are MudSelect. */
   .a-select {
@@ -1454,6 +1460,7 @@
      Both properties lived here until a refactor folded this rule into the shared block above — which
      gave every single-line input an 84 px floor, so a sign-in form was two boxes the size of a
      paragraph, and `resize` to controls that cannot be resized. */
+  /* prototype-only */
   textarea.a-textarea {
     min-height: 84px;
     resize: vertical;
@@ -1462,12 +1469,14 @@
   /* An example, not a value. At full --faint a placeholder was one tier from the dim text beside it
      and read as something already typed; the opacity is what tells the two apart. */
   .a-input::placeholder,
+  /* prototype-only */
   .a-textarea::placeholder {
     color: var(--faint);
     opacity: 0.8;
   }
 
   .a-input:hover,
+  /* prototype-only */
   .a-textarea:hover,
   /* prototype-only */
   .a-select:hover {
@@ -2763,6 +2772,12 @@
       margin-left: 0;
     }
 
+    /* On a phone the assistant's pane is the whole width below the app bar, so the page column keeps its own
+       width under it rather than being squeezed to nothing beside it, which pushed its rows past the edge. */
+    .a-shell.mud-drawer-open-persistent-right .a-main {
+      margin-right: 0;
+    }
+
     .a-bottomnav {
       display: flex;
     }
@@ -2890,57 +2905,38 @@
     }
   }
 
-  /* The schema assistant.
+  /* The schema assistant: the pane beside the page, in the layout's end drawer (spec §3.1). A column as tall
+     as the drawer, which the library clips under the app bar: the head and the question box keep their
+     height, and the thread between them takes the rest and scrolls. It is only ever in the DOM when a
+     connection resolves, so none of this renders for a deployment with no AI. */
+  .a-assistant-drawer {
+    border-left: 1px solid var(--border);
+    background: var(--panel);
+  }
 
-     A panel docked to the bottom-right on a desktop and a full-width sheet on a phone — the same
-     two-layouts-one-media-query shape the shell itself uses, because a second component would be a
-     second assistant to keep in step. It is only ever in the DOM when a connection resolves, so none
-     of this renders for a deployment with no AI. */
-  .a-assistant__launch {
-    position: fixed;
-    right: var(--space-5);
-    bottom: calc(var(--space-5) + env(safe-area-inset-bottom));
-    z-index: var(--z-assistant);
-    min-height: 44px;
-    padding: 0 var(--space-4);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--accent);
-    color: var(--accent-fg);
-    font: inherit;
-    font-weight: var(--weight-medium);
-    box-shadow: var(--shadow-pop);
-    cursor: pointer;
+  /* Hidden once it has slid out, for .a-navdrawer's reason: the library only moves a closed drawer
+     off-screen, which left the question box and its buttons in the tab order. */
+  .a-assistant-drawer.mud-drawer--closed {
+    visibility: hidden;
+    transition-property: right, visibility;
   }
 
   .a-assistant {
-    position: fixed;
-    right: var(--space-5);
-    bottom: calc(var(--space-5) + 44px + var(--space-3) + env(safe-area-inset-bottom));
-    z-index: var(--z-assistant);
     display: flex;
-    width: min(420px, calc(100vw - var(--space-8)));
-    max-height: min(70vh, 640px);
     flex-direction: column;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--panel);
-    box-shadow: var(--shadow-pop);
-    overflow: hidden;
-  }
-
-  /* The drawer's head is a section head (SectionHead), inset as the drawer's own body is. */
-  .a-assistant__head {
+    height: 100%;
+    min-height: 0;
+    gap: var(--space-3);
     padding: var(--space-4);
   }
 
   .a-assistant__thread {
     display: flex;
     flex: 1;
+    min-height: 0;
     flex-direction: column;
     gap: var(--space-3);
-    padding: var(--space-4);
-    overflow-y: auto;
+    overflow: auto;
   }
 
   .a-assistant__turn {
@@ -2973,7 +2969,10 @@
   .a-assistant__proposal {
     display: flex;
     flex-direction: column;
-    border-top: 1px solid var(--border);
+    gap: var(--space-2);
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     background: var(--surface);
   }
 
@@ -2981,34 +2980,11 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
-    padding: var(--space-4) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
+    padding-top: var(--space-3);
+    padding-bottom: env(safe-area-inset-bottom);
     border-top: 1px solid var(--border);
   }
 
-  .a-assistant__review {
-    padding: var(--space-4);
-  }
-
-  /* At phone width the launcher sits above the bottom bar rather than over it, and the panel fills
-     the screen — the bar is 5 items wide at 375 px and a floating button on top of it covers one. */
-  @media (max-width: 720px) {
-    .a-assistant__launch {
-      right: var(--space-4);
-      bottom: calc(var(--space-4) + 64px + env(safe-area-inset-bottom));
-    }
-
-    .a-assistant {
-      right: 0;
-      bottom: 0;
-      left: 0;
-      width: 100%;
-      max-height: 85vh;
-      border-right: none;
-      border-bottom: none;
-      border-left: none;
-      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    }
-  }
 
   /* ===========================================================================
      Library seams: MudBlazor's own classes, overridden once, and the wrappers'

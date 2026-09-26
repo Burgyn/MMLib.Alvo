@@ -27,7 +27,7 @@ namespace MMLib.Alvo.Admin.Tests;
 public sealed partial class EndToEndSelectorTests
 {
     /* These may only go down. Lower them in the commit that migrates a scenario; never raise them. */
-    private const int ClassSelectors = 15;
+    private const int ClassSelectors = 14;
     private const int HasTextSelectors = 10;
 
     private static readonly string _scenarios = string.Join('\n',

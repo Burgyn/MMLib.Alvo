@@ -1,5 +1,6 @@
 ﻿@*
-    The schema assistant, as a drawer.
+    The schema assistant, as the pane beside the page (spec §3.1): the layout mounts it in its end drawer and opens
+    it from the app bar, so this draws only what is inside: the head, the thread, the proposal and the question.
 
     It is mounted only when a connection resolves, so a deployment with no AI has no launcher, no
     badge and no explanation to read — spec §3.3. What it can do is ask and propose; the one control
@@ -10,94 +11,104 @@
 @inject ManagementGateway Gateway
 @inject AdminSession Session
 @inject NavigationManager Navigation
+@inject AdminInterop Interop
 @implements IDisposable
 
-<button type="button" class="a-assistant__launch" data-testid="assistant-launch"
-        aria-expanded="@_open.ToString().ToLowerInvariant()" @onclick="Toggle">
-    @(_open ? "Close assistant" : "Ask Alvo")
-</button>
+<div class="a-assistant" data-testid="assistant-drawer" @onkeydown="OnKeyDownAsync">
+    <SectionHead Title="Ask Alvo">
+        <Subtitle>It reads this project and proposes a descriptor. You apply it, from Preview.</Subtitle>
+        <Actions>
+            <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" aria-label="Close the assistant"
+                        data-testid="assistant-close" OnClick="_ => Pane.Close.InvokeAsync()">
+                <Icon Path="@Icons.Close" />
+            </AlvoButton>
+        </Actions>
+    </SectionHead>
 
-@if (_open)
-{
-    <div class="a-assistant" data-testid="assistant-drawer">
-        <SectionHead Title="Ask Alvo" class="a-assistant__head">
-            <Subtitle>It reads this project and proposes a descriptor. You apply it, from Preview.</Subtitle>
-        </SectionHead>
-
-        <div class="a-assistant__thread" data-testid="assistant-thread">
-            @foreach (var turn in _turns)
-            {
-                <div class="a-assistant__turn">
-                    <span class="a-assistant__who">@(turn.Role is AssistantRole.Operator ? "You" : "Alvo")</span>
-                    <span class="a-assistant__text">@turn.Text</span>
-                </div>
-            }
-
-            @if (_tools.Count > 0)
-            {
-                <div class="a-assistant__tools" data-testid="assistant-tools">
-                    @foreach (var tool in _tools)
-                    {
-                        <span class="a-badge a-mono">@tool</span>
-                    }
-                </div>
-            }
-
-            @if (_streaming is { Length: > 0 })
-            {
-                <div class="a-assistant__turn">
-                    <span class="a-assistant__who">Alvo</span>
-                    <span class="a-assistant__text">@_streaming</span>
-                </div>
-            }
-
-            @if (_failure is { Length: > 0 })
-            {
-                <ErrorPanel Title="That turn could not be answered" Fix="@_failure" />
-            }
-        </div>
-
-        @if (_proposal is { } proposal)
+    @* Polite, so a screen reader hears each turn as it lands without being cut off mid-sentence. *@
+    <div class="a-assistant__thread" data-testid="assistant-thread" aria-live="polite" @ref="_thread">
+        @foreach (var turn in _turns)
         {
-            <div class="a-assistant__proposal" data-testid="assistant-proposal">
-                <SectionHead Title="A proposed change">
-                    <Subtitle>Written against revision @proposal.ExpectedRevision. Nothing has been applied.</Subtitle>
-                </SectionHead>
+            <div class="a-assistant__turn" data-testid="assistant-turn">
+                <span class="a-assistant__who">@(turn.Role is AssistantRole.Operator ? "You" : "Alvo")</span>
+                <span class="a-assistant__text">@turn.Text</span>
+            </div>
+        }
 
-                @if (proposal.Refusals.Count > 0)
+        @if (_tools.Count > 0)
+        {
+            <div class="a-assistant__tools" data-testid="assistant-tools">
+                @foreach (var tool in _tools)
                 {
-                    <div class="a-refused" data-testid="assistant-refusals">
-                        <span class="a-refused__reason">Alvo refused this draft:</span>
-                        @foreach (var refusal in proposal.Refusals)
-                        {
-                            <span class="a-refused__reason a-mono">@refusal</span>
-                        }
-                    </div>
-                }
-                else
-                {
-                    <div class="a-row a-row--gap-2 a-assistant__review">
-                        <button type="button" class="a-btn a-btn--primary" data-testid="assistant-review"
-                                @onclick="() => Review(proposal)">Review it in Preview</button>
-                    </div>
+                    <span class="a-badge a-mono">@tool</span>
                 }
             </div>
         }
 
-        <div class="a-assistant__ask">
-            <label class="a-label" for="assistant-message">Your question</label>
-            <textarea class="a-textarea" id="assistant-message" rows="3" disabled="@_busy"
-                      placeholder="Add a nullable note column to work orders"
-                      @oninput="args => _message = args.Value?.ToString() ?? string.Empty">@_message</textarea>
-            <div class="a-row a-row--gap-2">
-                <button type="button" class="a-btn a-btn--primary" data-testid="assistant-send"
-                        disabled="@(_busy || _message.Trim().Length == 0)" @onclick="AskAsync">
-                    @(_busy ? "Thinking…" : "Ask")
-                </button>
+        @* The answer still arriving counts as the turn it becomes. *@
+        @if (_streaming is { Length: > 0 })
+        {
+            <div class="a-assistant__turn" data-testid="assistant-turn">
+                <span class="a-assistant__who">Alvo</span>
+                <span class="a-assistant__text">@_streaming</span>
             </div>
+        }
+    </div>
+
+    @*
+        Under the thread rather than in it: an alert announces itself, and inside the polite region it would be
+        read twice. Keyed per question, so every failed turn draws a new panel and takes focus again (spec §3.3).
+    *@
+    @if (_failure is { Length: > 0 })
+    {
+        <ErrorPanel @key="_asked" TakeFocus="true" Title="That turn could not be answered" Fix="@_failure" />
+    }
+
+    @if (_proposal is { } proposal)
+    {
+        <div class="a-assistant__proposal" data-testid="assistant-proposal">
+            <SectionHead Title="A proposed change">
+                <Subtitle>Written against revision @proposal.ExpectedRevision. Nothing has been applied.</Subtitle>
+            </SectionHead>
+
+            @if (proposal.Refusals.Count > 0)
+            {
+                <div class="a-refused" data-testid="assistant-refusals">
+                    <span class="a-refused__reason">Alvo refused this draft:</span>
+                    @foreach (var refusal in proposal.Refusals)
+                    {
+                        <span class="a-refused__reason a-mono">@refusal</span>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="a-row a-row--gap-2">
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Primary" data-testid="assistant-review"
+                                OnClick="_ => Review(proposal)">Review it in Preview</AlvoButton>
+                </div>
+            }
+        </div>
+    }
+
+    @*
+        Not disabled while a turn runs: the operator may type the next question. Only Ask is busy, so it cannot
+        be asked twice.
+    *@
+    <div class="a-assistant__ask">
+        <MudTextField @ref="_question" T="string" Variant="Variant.Outlined" Lines="3" Immediate="true" id="assistant-message"
+                      Label="Your question" Placeholder="Add a nullable note column to work orders"
+                      HelperText="Ctrl+Enter or ⌘+Enter sends. Enter is a new line."
+                      Value="_message" ValueChanged="text => _message = text ?? string.Empty"
+                      OnKeyDown="KeyAsync" />
+        <div class="a-row a-row--gap-2">
+            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" data-testid="assistant-send" Busy="_busy"
+                        Disabled="@(_message.Trim().Length == 0)" OnClick="_ => AskAsync()">
+                @(_busy ? "Thinking…" : "Ask")
+            </AlvoButton>
         </div>
     </div>
-}
+</div>
 
 @code {
     /* A turn runs for seconds across several tool calls and a streaming answer. Without a token tied to
@@ -110,10 +121,49 @@
     private string _streaming = string.Empty;
     private string? _failure;
     private bool _busy;
-    private bool _open;
+    private int _asked;
+    private bool _wasOpen;
+    private bool _focusQuestion;
+    private ElementReference _thread;
+    private MudTextField<string>? _question;
     private AssistantUpdate.Proposal? _proposal;
 
-    private void Toggle() => _open = !_open;
+    /// <summary>Whether the pane is open and how it closes, from the layout that owns both.</summary>
+    [CascadingParameter]
+    private AssistantPane Pane { get; set; } = AssistantPane.None;
+
+    /// <summary>Opening the pane puts focus in the question box (spec §3.4); the layout returns it on close.</summary>
+    protected override void OnParametersSet()
+    {
+        _focusQuestion |= Pane.Open && !_wasOpen;
+        _wasOpen = Pane.Open;
+    }
+
+    /// <summary>
+    /// Moves focus into a pane that just opened, then keeps the thread on its newest turn unless the operator
+    /// scrolled up (spec §3.5).
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusQuestion && _question is not null)
+        {
+            _focusQuestion = false;
+            await _question.FocusAsync();
+        }
+
+        await Interop.FollowNewestAsync(_thread);
+    }
+
+    /// <summary>Ctrl/Cmd+Enter asks; Enter alone stays a newline, which the text box does by itself (spec §3.4).</summary>
+    private Task KeyAsync(KeyboardEventArgs args)
+        => args.Key == "Enter" && (args.CtrlKey || args.MetaKey) ? AskAsync() : Task.CompletedTask;
+
+    /// <summary>
+    /// Escape from anywhere in the pane closes it. Only from inside it: the pane sits beside the page, and an
+    /// Escape pressed in the page belongs to whatever is open there.
+    /// </summary>
+    private Task OnKeyDownAsync(KeyboardEventArgs args)
+        => args.Key == "Escape" ? Pane.Close.InvokeAsync() : Task.CompletedTask;
 
     /// <summary>Cancels a turn still in flight when the operator leaves.</summary>
     public void Dispose() => _lifetime.Dispose();
@@ -158,6 +208,7 @@
     private void Begin(string asked)
     {
         _busy = true;
+        _asked++;
         _failure = null;
         _proposal = null;
         _streaming = string.Empty;

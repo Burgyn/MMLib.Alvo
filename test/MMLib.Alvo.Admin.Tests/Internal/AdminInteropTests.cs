@@ -173,6 +173,16 @@ public class AdminInteropTests
         await _module.Received(1).DisposeAsync();
     }
 
+    [Fact]
+    public async Task Following_the_newest_turn_is_one_call_with_the_thread()
+    {
+        var interop = new AdminInterop(_js, _logger);
+
+        await interop.FollowNewestAsync(default);
+
+        Arguments("followNewest").ShouldHaveSingleItem();
+    }
+
     private int Imports() => _js.ReceivedCalls().Count(call => call.GetArguments() is ["import", object?[] args]
         && Equals(args[0], AlvoAdminAssets.Module));
 

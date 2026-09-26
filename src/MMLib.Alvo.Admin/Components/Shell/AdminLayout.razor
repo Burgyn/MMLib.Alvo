@@ -41,6 +41,20 @@
             <kbd class="a-kbd">&#8984;K</kbd>
         </AlvoButton>
         <span class="a-spacer"></span>
+        @*
+            Mounted only when a connection resolves. A deployment with no AI gets no launcher, no badge and no
+            explanation to read: spec §3.3, a control whose only possible outcome is "not configured" is worse than
+            its absence, which is the argument Settings already makes about issuing an API key. An icon alone on a
+            phone, named by its label.
+        *@
+        @if (_assistant)
+        {
+            <AlvoButton @ref="_assistantLauncher" Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="assistant-launch"
+                        aria-label="Ask Alvo" aria-expanded="@(_assistantOpen ? "true" : "false")" OnClick="_ => ToggleAssistant()">
+                <Icon Path="@Icons.Sparkle" />
+                <span class="a-only-desktop-block">Ask Alvo</span>
+            </AlvoButton>
+        }
         <ThemeToggle />
         <SignedInAs />
     </MudAppBar>
@@ -86,17 +100,6 @@
             </ErrorBoundary>
         </main>
 
-        @*
-            Mounted only when a connection resolves. A deployment with no AI gets no launcher, no badge
-            and no explanation to read — spec §3.3: a control whose only possible outcome is "not
-            configured" is worse than its absence, which is the argument Settings already makes about
-            issuing an API key.
-        *@
-        @if (_assistant)
-        {
-            <AssistantDrawer />
-        }
-
         @* The pane's last row rather than the layout's, so it sits under the content on a phone and needs no
            height of its own subtracted anywhere. *@
         <nav class="a-bottomnav" aria-label="Sections" data-testid="bottom-nav">
@@ -106,6 +109,24 @@
             }
         </nav>
     </MudMainContent>
+
+    @if (_assistant)
+    {
+        @*
+            Beside the page, not over it (spec §3.1): a persistent end drawer at every width, with no scrim, no scroll
+            lock and no focus trap, and labelled so a screen reader reaches it as a region. Clipped under the app bar,
+            and the page column narrows beside it, so neither the header nor the pending bar is covered. On a phone
+            it is the whole width below the app bar. Kept mounted while closed, because the thread lives in the
+            component and closing the pane must not end the conversation.
+        *@
+        <MudDrawer Open="_assistantOpen" Anchor="Anchor.End" Variant="DrawerVariant.Persistent"
+                   ClipMode="DrawerClipMode.Always" Elevation="0" Width="min(440px, 100vw)"
+                   Class="a-assistant-drawer" role="complementary" aria-label="Ask Alvo">
+            <CascadingValue Value="AssistantPane">
+                <AssistantDrawer />
+            </CascadingValue>
+        </MudDrawer>
+    }
 </MudLayout>
 
 <CommandPalette @ref="_palette" />
@@ -127,6 +148,9 @@
 
     private readonly Guid _viewportWatch = Guid.NewGuid();
     private AlvoButton? _sectionsButton;
+    private AlvoButton? _assistantLauncher;
+    private EventCallback _closeAssistant;
+    private bool _assistantOpen;
     private ElementReference _drawerNav;
     private IAsyncDisposable? _dismiss;
     private FocusNext _focusNext;
@@ -154,6 +178,7 @@
     /// </remarks>
     protected override async Task OnInitializedAsync()
     {
+        _closeAssistant = EventCallback.Factory.Create(this, CloseAssistant);
         Assistant.ConnectionChanged += OnConnectionChanged;
         await RefreshAssistantAsync();
     }
@@ -268,6 +293,30 @@
             AdminProblem.Absorb(exception, Logger);
             _assistant = false;
         }
+
+        _assistantOpen &= _assistant;
+    }
+
+    /// <summary>What the pane reads: whether it is open, and the close it asks for.</summary>
+    private AssistantPane AssistantPane => new(_assistantOpen, _closeAssistant);
+
+    /// <summary>The launcher opens the pane or closes it; the pane moves focus into itself as it opens.</summary>
+    private void ToggleAssistant()
+    {
+        if (_assistantOpen)
+        {
+            CloseAssistant();
+            return;
+        }
+
+        _assistantOpen = true;
+    }
+
+    /// <summary>Closes the pane, from its close button, Escape inside it, or the launcher, and focus goes back to the launcher.</summary>
+    private void CloseAssistant()
+    {
+        _assistantOpen = false;
+        _focusNext = FocusNext.Launcher;
     }
 
     private Task OpenPalette() => _palette?.OpenAsync() ?? Task.CompletedTask;
@@ -328,6 +377,10 @@
         {
             await _sectionsButton.FocusAsync();
         }
+        else if (next == FocusNext.Launcher && _assistantLauncher is not null)
+        {
+            await _assistantLauncher.FocusAsync();
+        }
     }
 
     /// <summary>Where focus goes after the next render.</summary>
@@ -341,6 +394,9 @@
 
         /// <summary>Back to the Sections button that opened the drawer that just closed.</summary>
         Sections,
+
+        /// <summary>Back to the launcher of the assistant's pane that just closed.</summary>
+        Launcher,
     }
 
     /// <summary>A bottom-bar entry: a smaller icon over the section's short title.</summary>

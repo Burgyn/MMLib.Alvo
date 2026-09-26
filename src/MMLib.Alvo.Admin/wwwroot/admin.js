@@ -127,6 +127,30 @@ export function lockScroll(locked) {
   document.documentElement.toggleAttribute('data-scroll-locked', scrollLocks > 0);
 }
 
+/**
+ * Keeps a growing list's newest item in view, unless the operator has scrolled up to read something older.
+ *
+ * "Scrolled up" is remembered from the operator's own scrolling, not measured after the list grew: once the new
+ * turn is in, every list is "not at the bottom", and a check made then would never follow.
+ */
+export function followNewest(element) {
+  if (!(element instanceof HTMLElement)) {
+    return;
+  }
+
+  if (!element.dataset.alvoFollow) {
+    element.dataset.alvoFollow = 'on';
+    element.addEventListener('scroll', () => {
+      const gap = element.scrollHeight - element.scrollTop - element.clientHeight;
+      element.dataset.alvoFollow = gap < 48 ? 'on' : 'off';
+    }, { passive: true });
+  }
+
+  if (element.dataset.alvoFollow === 'on') {
+    element.scrollTop = element.scrollHeight;
+  }
+}
+
 /** Selects the text in an input, so a re-opened palette replaces rather than appends. */
 export function focusAndSelect(element) {
   if (element && typeof element.select === 'function') {

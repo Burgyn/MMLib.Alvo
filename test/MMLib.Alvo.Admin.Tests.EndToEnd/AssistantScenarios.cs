@@ -60,7 +60,8 @@ public sealed class AssistantScenarios(AssistantWorld world) : IClassFixture<Ass
     /// The launcher and the open drawer look as they did before the component library was referenced (spec D8).
     /// </summary>
     /// <remarks>
-    /// The launcher is a plain <c>button</c>, which Mud's element rule made <c>inline-flex</c>.
+    /// The launcher is the app bar's <c>AlvoButton</c> and the question box a <c>MudTextField</c>, so what this
+    /// guards is Alvo's own markup around them: the pane, its thread and its head.
     /// <see cref="FoundationScenarios"/> measures the screens. The assistant has its own world, so it is measured
     /// here.
     /// </remarks>
@@ -118,7 +119,8 @@ public sealed class RefusedProposalScenarios(AssistantWorld world) : IClassFixtu
     /// <summary>The drawer fits a phone, and the launcher does not sit on the bottom bar.</summary>
     /// <remarks>
     /// The editor is the screen an operator is most likely to reach for away from a desk, and a floating
-    /// button over a five-item bar at 375 px covers one of the five.
+    /// button over a five-item bar at 375 px covered one of the five. The launcher is in the app bar now, above
+    /// the bottom bar by construction; the assertion stays so a launcher that floats again is caught.
     /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task The_drawer_fits_a_phone_and_clears_the_bottom_bar()
@@ -127,7 +129,7 @@ public sealed class RefusedProposalScenarios(AssistantWorld world) : IClassFixtu
         await session.GoAsync("/schema");
 
         var launcher = await session.Page.Locator("[data-testid='assistant-launch']").BoundingBoxAsync();
-        var bar = await session.Page.Locator("nav.a-bottomnav").BoundingBoxAsync();
+        var bar = await session.Page.GetByTestId("bottom-nav").BoundingBoxAsync();
 
         launcher.ShouldNotBeNull();
         bar.ShouldNotBeNull();
