@@ -176,13 +176,20 @@ public sealed class RefusedRollbackScenarios(AdminWorld world) : IClassFixture<A
     }
 }
 
-/// <summary>A host whose revision reads can be made to fail once, the way a store that is briefly unreachable does.</summary>
+/// <summary>
+/// A host whose revision reads can be made to fail once, the way a store that is briefly unreachable does, or to take
+/// their time, the way a slow one does.
+/// </summary>
 public sealed class FailingRevisionReadWorld : AdminWorld
 {
     private int _failures;
+    private int _slow;
 
     /// <summary>Makes the next revision read throw.</summary>
     public void FailNextRevisionRead() => Interlocked.Exchange(ref _failures, 1);
+
+    /// <summary>Makes the next revision read wait a second and a half first.</summary>
+    public void SlowNextRevisionRead() => Interlocked.Exchange(ref _slow, 1);
 
     /// <inheritdoc/>
     protected override void Configure(IServiceCollection services)
@@ -190,13 +197,22 @@ public sealed class FailingRevisionReadWorld : AdminWorld
 
     private bool TakeFailure() => Interlocked.Exchange(ref _failures, 0) == 1;
 
+    private bool TakeSlow() => Interlocked.Exchange(ref _slow, 0) == 1;
+
     private sealed class Failing(IAlvoManagement inner, FailingRevisionReadWorld world) : ManagementDecorator(inner)
     {
-        public override Task<ManagementRevisionDetail> GetRevisionAsync(
+        public override async Task<ManagementRevisionDetail> GetRevisionAsync(
             string project, int revision, CancellationToken ct = default)
-            => world.TakeFailure()
+        {
+            if (world.TakeSlow())
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1.5), ct).ConfigureAwait(false);
+            }
+
+            return world.TakeFailure()
                 ? throw new InvalidOperationException("The revision store did not answer.")
-                : base.GetRevisionAsync(project, revision, ct);
+                : await base.GetRevisionAsync(project, revision, ct).ConfigureAwait(false);
+        }
     }
 }
 
@@ -221,5 +237,29 @@ public sealed class FailedRevisionReadScenarios(FailingRevisionReadWorld world) 
         await session.Page.GetByTestId("history-reload").ClickAsync();
         await session.Page.GetByTestId("revision-first").WaitForAsync();
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// A slow read of a revision shows the refresh bar at the top of the pane it is read into, and the list stays in
+    /// place (spec §3.6; final review M9): on a slow store a click must not look ignored.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_slow_revision_read_shows_the_refresh_bar_in_its_pane()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/history");
+        var rows = await session.Page.GetByTestId("revision-row").CountAsync();
+
+        world.SlowNextRevisionRead();
+        await session.Page.GetByTestId("revision-row").Last.ClickAsync();
+
+        var bar = HistoryScenarios.Pane(session).GetByTestId("refreshing");
+        await bar.WaitForAsync();
+        (await bar.EvaluateAsync<bool>("e => e.matches(\"[role='progressbar']\") || !!e.querySelector(\"[role='progressbar']\")"))
+            .ShouldBeTrue("the bar says it is a progress bar");
+        (await session.Page.GetByTestId("revision-row").CountAsync()).ShouldBe(rows, "the list stays in place");
+        await session.Page.GetByTestId("revision-first").WaitForAsync();
+        await bar.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        session.AssertConsoleClean();
     }
 }

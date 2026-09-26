@@ -82,6 +82,7 @@
         else
         {
             <Panel Title="@PlanTitle(_plan.Plan)" data-testid="plan" data-plan-run="@_planRuns">
+                @* Asked again while this one is on screen: the pane says so over its top, and the steps stay. *@
                 @*
                     The plan is of the working copy as it stood when it was asked, and the copy can move under
                     this page — the assistant's drawer composes into it from here, and so does a second tab of
@@ -99,6 +100,7 @@
                         : "In this order, in one transaction.")
                 </Subtitle>
                 <ChildContent>
+                    @RefreshBar.While(_busy)
                     <PlanSteps Steps="_plan.Plan.Steps" />
                 </ChildContent>
             </Panel>
@@ -185,17 +187,22 @@
                  Consequence="@($"The edits staged after you pressed Apply are thrown away, and the working copy starts again from revision {_kept?.HeadRevision}, across all screens. There is no undo.")"
                  Verb="Discard and start again" OnConfirm="RestartFromHeadAsync" OnCancel="() => _restarting = false" />
 
+    @*
+        The one success that stays in place (spec §3.3): the snackbar says it worked, and this keeps the revision and the
+        way onward on screen. AlvoAlert's Success tone is for exactly this.
+    *@
     @if (_applied is { } result)
     {
-        <Panel Padded="true" class="a-panel--accent">
-            <span class="a-section__title">Applied as revision @result.Revision</span>
-            <p class="a-section__sub">
+        <AlvoAlert Tone="AlvoAlert.AlertTone.Success" Title="@($"Applied as revision {result.Revision}")" TestId="apply-applied">
+            <ChildContent>
                 @(result.Replayed
                     ? "This request repeated one that had already run — the revision it names was applied by the earlier one."
                     : "The migration ran and the revision was appended.")
-            </p>
-            <AlvoButton Small="true" Href="@AdminPaths.History">Open Configuration history</AlvoButton>
-        </Panel>
+            </ChildContent>
+            <Actions>
+                <AlvoButton Small="true" Href="@AdminPaths.History">Open Configuration history</AlvoButton>
+            </Actions>
+        </AlvoAlert>
     }
 </div>
 

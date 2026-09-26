@@ -46,6 +46,7 @@
             }
             else
             {
+                @RefreshBar.While(_refreshing)
                 @foreach (var person in _people.Users)
                 {
                     @* The wrapper carries the new-item wash, so the row's own contract stays who it is and Change. *@
@@ -163,6 +164,9 @@
     private UserId? _arrived;
     private int _reveals;
     private readonly FieldRefusals _fields = new();
+
+    /// <summary>Whether the people already on screen are being read again, after a write (spec §3.6).</summary>
+    private bool _refreshing;
     private MudTextField<string>? _emailField;
 
     private const string EmailField = "new-person-email";
@@ -199,12 +203,17 @@
 
             if (Gateway.CanAdministerPeople)
             {
+                _refreshing = _people is not null;
                 _people = await Gateway.PeopleAsync(new AlvoUserQuery(), CancellationToken.None);
             }
         }
         catch (Exception exception)
         {
             Refused(exception);
+        }
+        finally
+        {
+            _refreshing = false;
         }
     }
 

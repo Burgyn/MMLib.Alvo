@@ -98,7 +98,11 @@ and the e2e suite asserts that things render, not that they behave.
    while the operator watches (the assistant thread, a log) **follows the newest item** unless the operator has
    scrolled up.
 6. **Loading, empty, error.** `MudSkeleton` for known-shape content; `MudProgressLinear` at the top of a pane for a
-   refresh; content stays in place. Empty = one sentence on what the operator can do + one primary action. Page-level
+   refresh; content stays in place. *Where* (added 26 Sep, final review M9; `RefreshBar`, over the pane's top edge so
+   nothing under it moves): History's list read again (a Reload, after a rollback) and a revision read into its pane;
+   the Data grid's page read again (a search, a sort, a page turn, after a save or a delete); Access's people after a
+   write; Preview's plan asked again. The Schema list has none, because it never reads again: a staged change is the
+   working copy's, drawn at once. Empty = one sentence on what the operator can do + one primary action. Page-level
    failures → the `ErrorBoundary` panel with Reload.
 7. **Navigation.** One app bar (search/⌘K, theme, the signed-in menu with Sign out), one nav drawer (responsive: a
    temporary drawer on a phone, plus the existing bottom bar), the pending-changes bar under the app bar. Page title

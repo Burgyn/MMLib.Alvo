@@ -84,6 +84,19 @@ public sealed partial class PatternLanguageTests
             .Select(file => file.Name)
             .ShouldBeEmpty("a multi-line box is submitted by the chord and its hint names it (ChordHint)");
 
+    /// <summary>
+    /// Every pane that reads again what it already shows says so at its top (spec §3.6; final review M9): the History
+    /// list and revision, the Data grid, the Access people and Preview's plan.
+    /// </summary>
+    [Theory]
+    [InlineData("History/History.razor")]
+    [InlineData("Data/EntityData.razor")]
+    [InlineData("Access/Access.razor")]
+    [InlineData("Schema/Preview.razor")]
+    public void A_pane_that_reads_again_shows_the_refresh_bar(string component)
+        => Components().Single(file => file.Name == component).Source
+            .ShouldContain("@RefreshBar.While(", Case.Sensitive, "the refresh indicator is RefreshBar, at the pane's top");
+
     private static readonly string[] _submitWords =
     [
         "Create record", "Create person", "Save changes", "Add to the working copy", "Save to the working copy",

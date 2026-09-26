@@ -37,6 +37,7 @@
     {
         <div class="a-split">
             <Panel class="a-split__main a-grow">
+                @RefreshBar.While(_reloading)
                 @foreach (var revision in _revisions)
                 {
                     @* Flush: the revision draws its own inset, the one it has on Overview. *@
@@ -50,6 +51,7 @@
             <SplitHandle Controls="history-revision" />
 
             <div class="a-split__aside a-stack" id="history-revision">
+                @RefreshBar.While(_opening)
                 @if (_problem.Shown)
                 {
                     @Refusal()
@@ -155,6 +157,12 @@
     /// <summary>The revision the operator last asked to open, which Reload opens again.</summary>
     private int? _asked;
 
+    /// <summary>Whether the list is being read again, which its pane shows at its top (spec §3.6).</summary>
+    private bool _reloading;
+
+    /// <summary>Whether a revision is being read into the detail pane.</summary>
+    private bool _opening;
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
@@ -183,10 +191,24 @@
         _problem.Clear();
         _rollback = null;
         _allowed = false;
-        await LoadAsync();
+        await ReadAgainAsync();
         if (!_problem.Shown && _asked is { } asked && _revisions!.Any(listed => listed.Revision == asked))
         {
             await OpenAsync(asked);
+        }
+    }
+
+    /// <summary>Reads the list and the head again, with the list's pane showing that it is (spec §3.6).</summary>
+    private async Task ReadAgainAsync()
+    {
+        _reloading = true;
+        try
+        {
+            await LoadAsync();
+        }
+        finally
+        {
+            _reloading = false;
         }
     }
 
@@ -202,6 +224,7 @@
         _rollback = null;
         _problem.Clear();
         _asked = revision;
+        _opening = true;
         try
         {
             /* Both read before either is shown: drawn between the two reads, the last revision would stand beside
@@ -213,6 +236,10 @@
         catch (Exception exception)
         {
             Refused(AdminProblem.From(exception, Logger), fromPress: true);
+        }
+        finally
+        {
+            _opening = false;
         }
     }
 
@@ -256,7 +283,7 @@
         _previous = null;
         _rollback = null;
         _allowed = false;
-        await LoadAsync();
+        await ReadAgainAsync();
         await FollowWithTheWorkingCopyAsync();
     }
 

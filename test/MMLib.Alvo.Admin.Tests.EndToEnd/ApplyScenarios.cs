@@ -31,6 +31,8 @@ public sealed class ApplyScenarios(AdminWorld world) : IClassFixture<AdminWorld>
         await session.Content.GetByText("Applied as revision").WaitForAsync();
         (await session.Content.GetByRole(AriaRole.Link, new() { Name = "Open Configuration history" }).CountAsync())
             .ShouldBe(1, "the result stays, because it links onward");
+        /* The one success in place is AlvoAlert's Success tone, a status (final review M8), not a hand-drawn panel. */
+        (await session.Page.GetByTestId("apply-applied").GetAttributeAsync("role")).ShouldBe("status");
         (await ApplyScenarioSteps.RevisionCountAsync(session)).ShouldBe(before + 1);
         session.AssertConsoleClean();
     }

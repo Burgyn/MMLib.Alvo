@@ -770,10 +770,23 @@
     padding: 0 0 var(--space-3);
   }
 
-  /* The outcome of something the operator just did — an applied revision, a token to hand over —
-     set apart from the panels that describe what is there. */
+  /* The outcome of something the operator just asked, a policy verdict, set apart from the panels that describe
+     what is there. */
   .a-panel--accent {
     border-color: var(--accentBorder);
+  }
+
+  /* A pane reading again what it shows (spec §3.6): the bar lies over the pane's top edge in a slot of no height, so
+     the rows under it stay where they are while it is drawn and when it goes. */
+  .a-refresh {
+    position: relative;
+    height: 0;
+  }
+
+  .a-refresh > .mud-progress-linear {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
   }
 
   /* Content with no inset of its own — a code block, a sentence — placed straight into a panel. */

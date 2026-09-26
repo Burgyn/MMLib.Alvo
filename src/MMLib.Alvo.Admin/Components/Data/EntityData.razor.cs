@@ -47,6 +47,9 @@ public partial class EntityData
     private string _who = string.Empty;
     private bool _loading = true;
 
+    /// <summary>Whether a page already on screen is being read again, which the grid's pane shows (spec §3.6).</summary>
+    private bool _refreshing;
+
     /// <summary>The entity being browsed, from the route.</summary>
     [Parameter]
     public string EntityName { get; set; } = string.Empty;
@@ -234,6 +237,7 @@ public partial class EntityData
     private async Task LoadAsync()
     {
         var version = ++_loadVersion;
+        _refreshing = _page is not null;
         try
         {
             var query = GridQuery.Page(
@@ -249,11 +253,13 @@ public partial class EntityData
             _page = page;
             _labels = labels;
             _problem.Clear();
+            _refreshing = false;
         }
         catch (Exception exception)
         {
             if (version == _loadVersion)
             {
+                _refreshing = false;
                 Refused(exception);
             }
             else

@@ -80,6 +80,7 @@
                 </p>
             }
 
+            @RefreshBar.While(_refreshing)
             @if (_loading)
             {
                 <Skeleton Size="Skeleton.SkeletonSize.Lg" />
