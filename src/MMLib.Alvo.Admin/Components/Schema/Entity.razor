@@ -5,6 +5,7 @@
 @inject NavigationManager Navigation
 @inject ILogger<Entity> Logger
 @inject ISnackbar Snackbar
+@inject AdminInterop Interop
 @implements IDisposable
 
 <PageTitle>@EntityName · Schema · Alvo</PageTitle>
@@ -160,6 +161,7 @@
     saved on the way out either). Moving between this entity's tabs does not ask: the drafts belong to the screen, not
     to the tab, and the Rules tab still shows them marked unsaved on the way back.
 *@
+
 <NavigationLock OnBeforeInternalNavigation="GuardRules" ConfirmExternalNavigation="@UnsavedRules" />
 <AlvoConfirm Open="_leavingTo is not null" TestId="unsaved-rules" ConfirmTestId="unsaved-rules-discard"
              CancelTestId="unsaved-rules-keep" Title="Discard the unsaved rules?"

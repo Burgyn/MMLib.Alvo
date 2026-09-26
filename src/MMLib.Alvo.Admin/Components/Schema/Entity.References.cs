@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Components.Schema;
+﻿using MMLib.Alvo.Admin.Internal;
+
+namespace MMLib.Alvo.Admin.Components.Schema;
 
 /* What names a field or an entity, asked before it is renamed or removed. Kept out of Entity.razor.cs so the
    screen's own file stays about its tabs. */
@@ -18,18 +20,32 @@ public partial class Entity
     /// </remarks>
     private void RemoveField(string field) => _removal = (field, Copy.ReferencesToField(EntityName, field));
 
-    /// <summary>Removes the field the confirm named, when nothing it named blocks the removal.</summary>
-    private void RemoveAnyway()
+    /// <summary>
+    /// Removes the field the confirm named, when nothing it named blocks the removal; focus goes to its row's Undo, or,
+    /// for a field only the copy declared (its row goes with it), to the list's New field (spec §3.2).
+    /// </summary>
+    private Task RemoveAnyway()
     {
-        if (_removal is { } removal && !removal.References.Any(reference => reference.Blocks))
+        var removal = _removal;
+        _removal = null;
+        if (removal is not { } asked || asked.References.Any(reference => reference.Blocks))
         {
-            StageRemoval(removal.Field);
+            return Task.CompletedTask;
         }
 
-        _removal = null;
+        StageRemoval(asked.Field);
+        return Interop.FocusFirstOnceClosedAsync([$"[data-testid='restore-field-{asked.Field}']", "[data-testid='add-field']"]);
     }
 
-    private void CloseRemoval() => _removal = null;
+    /// <summary>Cancel and Escape keep the field, and focus goes back to its Remove.</summary>
+    private Task CloseRemoval()
+    {
+        var removal = _removal;
+        _removal = null;
+        return removal is not { } asked
+            ? Task.CompletedTask
+            : Interop.FocusFirstOnceClosedAsync([$"[data-testid='remove-field-{asked.Field}']", "[data-testid='add-field']"]);
+    }
 
     /// <summary>
     /// Drops the leftovers note once it no longer describes the copy on screen.

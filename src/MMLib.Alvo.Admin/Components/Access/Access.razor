@@ -137,7 +137,8 @@
 <AlvoConfirm Open="_disabling is not null" TestId="disable-person" ConfirmTestId="disable-person-run"
              CancelTestId="disable-person-cancel" Title="@($"Disable {_disabling?.Email}?")"
              Consequence="They can no longer sign in, and every session they hold stops at its next request. You can let them back in later."
-             Verb="Disable person" OnConfirm="DisableConfirmedAsync" OnCancel="() => _disabling = null" />
+             Verb="Disable person" OnConfirm="DisableConfirmedAsync" OnCancel="CancelDisable" />
+
 
 @code {
     private AlvoUserPage? _people;
@@ -342,7 +343,7 @@
         _disabling = person;
     }
 
-    /// <summary>Disables the person the confirm names; the confirm stays busy until the write returns.</summary>
+    /// <summary>Disables the person the confirm names, and gives focus to their row.</summary>
     private async Task DisableConfirmedAsync()
     {
         if (_disabling is not { } person)
@@ -350,16 +351,36 @@
             return;
         }
 
-        await WriteAsync(() => Gateway.SetDisabledAsync(person.Id, true, CancellationToken.None), $"Disabled {person.Email}");
+        /* Closed first, then written, then focused: the order every confirm follows (spec §3.2). */
         _disabling = null;
+        await WriteAsync(() => Gateway.SetDisabledAsync(person.Id, true, CancellationToken.None), $"Disabled {person.Email}");
+        await FocusRowOfAsync(person);
     }
 
+    /// <summary>Cancel and Escape keep the person as they are; the Disable that asked is gone with its editor.</summary>
+    private Task CancelDisable()
+    {
+        var person = _disabling;
+        _disabling = null;
+        return person is null ? Task.CompletedTask : FocusRowOfAsync(person);
+    }
+
+    /// <summary>
+    /// Focus on the person's row once the editor or the confirm has closed and the list is drawn again (spec §3.2): the
+    /// control that asked was inside the editor, which is gone. A refusal's panel takes focus instead, when there is one.
+    /// </summary>
+    private Task FocusRowOfAsync(AlvoUser person)
+        => _problem.Shown
+            ? Task.CompletedTask
+            : Interop.FocusFirstOnceClosedAsync([$"#change-{person.Id.Value}", "[data-testid='person-new']"]);
+
     /// <summary>Lets a disabled person sign in again: not destructive, so it asks nothing.</summary>
-    private Task LetBackInAsync(AlvoUser person)
+    private async Task LetBackInAsync(AlvoUser person)
     {
         CloseEditor();
-        return WriteAsync(() => Gateway.SetDisabledAsync(person.Id, false, CancellationToken.None),
+        await WriteAsync(() => Gateway.SetDisabledAsync(person.Id, false, CancellationToken.None),
             $"{person.Email} can sign in again");
+        await FocusRowOfAsync(person);
     }
 
     /// <summary>Creates the person, closes the editor, and brings their new row into view, lit.</summary>

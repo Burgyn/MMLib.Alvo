@@ -51,6 +51,13 @@ and the e2e suite asserts that things render, not that they behave.
    the action, body leads with the consequence, the button names the verb ("Delete record"). Irreversible and
    wide-blast-radius ones (destructive apply, rollback, remove entity) add the **type-the-name** step. A staged
    (undoable before apply) removal may instead be immediate with a snackbar **Undo**.
+   *Focus after a confirm* (added 26 Sep, final review M4): one order on every screen — the confirm closes as its verb
+   is pressed (the verb's own gate keeps a double click to one run), the action runs, its result is drawn, and then
+   focus goes to the trigger, or to a refusal's panel; when the trigger is gone
+   (the item was removed, or the editor that held the button closed first), to the item's row or the row that took its
+   place, else to the list's create action. Never `<body>`. A confirm **names its subject** ("Remove the index on
+   status, priority?", "Remove this beforeCreate hook?", "Disable dispatcher@…?") and acts on what it named, found
+   again when it runs, never on a position captured at the press (M7).
 3. **Feedback.**
    - **Snackbar** (`ISnackbar`, **bottom-left, never over an open editor's footer** — the editor is a right-hand
      sheet with its actions bottom-right; 4–6 s, at most two; its text and close on the tone's contrast colour, AA in
@@ -66,7 +73,8 @@ and the e2e suite asserts that things render, not that they behave.
    - **Field error** under the input for a field-specific refusal.
 4. **Forms and keys.** Enter submits a single-line form. In a multi-line input Enter is a newline and
    **Ctrl/Cmd+Enter submits** (the assistant, CEL rules, import). Escape closes the topmost dialog; an editor with
-   unsaved changes asks "Discard changes?" first. The submit button is **disabled and shows progress while busy**
+   unsaved changes asks "Discard changes?" first, and **Keep editing** gives focus back to the form's first control
+   (M4b), so the next Escape still reaches the editor. The submit button is **disabled and shows progress while busy**
    (no double submit anywhere); Cancel stays enabled. On open, focus lands on the first field; on close it returns to
    the trigger. After a submit the input the operator typed into is **cleared** when it was a message/command
    (assistant, search-and-go), kept when it was a form value.

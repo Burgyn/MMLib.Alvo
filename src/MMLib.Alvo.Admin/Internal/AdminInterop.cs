@@ -77,6 +77,27 @@ internal sealed partial class AdminInterop(IJSRuntime js, ILogger<AdminInterop> 
     public Task FocusSelectedAsync(ElementReference container)
         => QuietlyAsync(module => module.InvokeVoidAsync("focusSelected", container));
 
+    /// <summary>Focuses the first of <paramref name="selectors"/> as soon as one of them is on screen.</summary>
+    /// <param name="selectors">CSS selectors, most wanted first; see <c>focusFirstOnceShown</c> in admin.js.</param>
+    public Task FocusFirstOnceShownAsync(IReadOnlyList<string> selectors)
+        => QuietlyAsync(module => module.InvokeVoidAsync("focusFirstOnceShown", selectors));
+
+    /// <summary>
+    /// Focuses the first of <paramref name="selectors"/> once no dialog is over the page: where focus goes after a
+    /// confirm (spec §3.2), in the one order every screen uses. The confirm closes, the action's result is drawn, and
+    /// then focus moves to the trigger, or, when the trigger is gone, to the row that took the item's place or the
+    /// list's create action; never <c>&lt;body&gt;</c>.
+    /// </summary>
+    /// <remarks>
+    /// Called from the handler that closed the confirm, so the call reaches the browser before the render that closes
+    /// it, and the browser waits for the dialog to go. A component drawn beside the confirm to do this after its own
+    /// render was tried first: the extra render it caused, while the library was closing the dialog, left the dialog
+    /// open for good.
+    /// </remarks>
+    /// <param name="selectors">CSS selectors, most wanted first; see <c>focusFirstOnceClosed</c> in admin.js.</param>
+    public Task FocusFirstOnceClosedAsync(IReadOnlyList<string> selectors)
+        => QuietlyAsync(module => module.InvokeVoidAsync("focusFirstOnceClosed", selectors));
+
     /// <summary>Keeps a growing thread's newest item in view; see <c>followNewest</c> in admin.js.</summary>
     public Task FollowNewestAsync(ElementReference thread)
         => QuietlyAsync(module => module.InvokeVoidAsync("followNewest", thread));

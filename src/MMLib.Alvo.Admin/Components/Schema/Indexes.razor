@@ -8,6 +8,8 @@
     preview and the same apply. Which is the whole design: the one thing an operator reaches for
     after watching a list get slow used to be the one thing they had to leave the dashboard for.
 *@
+@inject AdminInterop Interop
+
 <SectionHead Title="Indexes">
     <Subtitle>
         Declared in the descriptor. A unique field already has one and is not repeated here; a
@@ -57,7 +59,7 @@ else
             {
                 <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="index-remove"
                             aria-label="@($"Remove the index on {string.Join(", ", index.Fields)}")"
-                            OnClick="_ => _removing = at">Remove</AlvoButton>
+                            OnClick="_ => _removing = index">Remove</AlvoButton>
             }
         </ListRow>
     }
@@ -111,9 +113,9 @@ else
 }
 
 <AlvoConfirm Open="_removing is not null" TestId="remove-index" ConfirmTestId="remove-index-run"
-             CancelTestId="remove-index-cancel" Title="Remove this index?"
+             CancelTestId="remove-index-cancel" Title="@RemovalTitle"
              Consequence="It leaves the working copy now; the database drops it when you apply."
-             Verb="Remove index" OnConfirm="RemoveAsync" OnCancel="() => _removing = null" />
+             Verb="Remove index" OnConfirm="RemoveAsync" OnCancel="CancelRemoval" />
 
 @code {
     /// <summary>One field to pick, with its position in the index while it is in it.</summary>
@@ -137,7 +139,7 @@ else
     private bool _unique;
     private readonly RefusalState<string> _refusal = new();
     private bool _adding;
-    private int? _removing;
+    private IndexSchema? _removing;
     private int? _reveal;
     private int _reveals;
 
@@ -179,7 +181,7 @@ else
     [Parameter]
     public EventCallback<IndexSchema> OnAdd { get; set; }
 
-    /// <summary>Raised with the position of the index to remove.</summary>
+    /// <summary>Raised with the position of the index to remove, as <see cref="Declared"/> holds it now.</summary>
     [Parameter]
     public EventCallback<int> OnRemove { get; set; }
 
@@ -232,15 +234,60 @@ else
         _adding = false;
     }
 
-    /// <summary>The confirm's verb: asks the entity screen to drop the index that was asked about.</summary>
+    /// <summary>The confirm's title, naming the index by what it covers, which is all an index is.</summary>
+    private string RemovalTitle => _removing is { } index
+        ? $"Remove the {(index.Unique ? "unique " : string.Empty)}index on {string.Join(", ", index.Fields)}?"
+        : string.Empty;
+
+    /// <summary>
+    /// The confirm's verb: asks the entity screen to drop the index that was asked about, found again where it is now.
+    /// </summary>
+    /// <remarks>
+    /// By what the index is, not by where it was: another tab's edit reaching the copy while the confirm is up moves the
+    /// rows, and a position captured at the press would then name a different index. One no longer declared is left
+    /// alone. Focus then goes to the row that took its place, or to the list's New index (spec §3.2).
+    /// </remarks>
     private async Task RemoveAsync()
     {
-        if (_removing is { } position)
+        if (_removing is not { } index)
         {
-            _removing = null;
+            return;
+        }
+
+        _removing = null;
+        var position = PositionOf(index);
+        if (position >= 0)
+        {
             /* The rows after it move up, so the lit one would be a different index. */
             _reveal = null;
             await OnRemove.InvokeAsync(position);
         }
+
+        await Interop.FocusFirstOnceClosedAsync(
+            [RemoveButton(position), RemoveButton(position - 1), "[data-testid='index-new']"]);
     }
+
+    /// <summary>Cancel and Escape keep the index, and focus goes back to its Remove.</summary>
+    private Task CancelRemoval()
+    {
+        var position = _removing is { } index ? PositionOf(index) : -1;
+        _removing = null;
+        return Interop.FocusFirstOnceClosedAsync([RemoveButton(position), "[data-testid='index-new']"]);
+    }
+
+    /// <summary>Where <paramref name="index"/> is declared now, or -1 when it no longer is.</summary>
+    private int PositionOf(IndexSchema index)
+    {
+        for (var position = 0; position < Declared.Count; position++)
+        {
+            if (Declared[position].Unique == index.Unique && Declared[position].Fields.SequenceEqual(index.Fields))
+            {
+                return position;
+            }
+        }
+
+        return -1;
+    }
+
+    private static string RemoveButton(int position) => $"#index-row-{position} [data-testid='index-remove']";
 }

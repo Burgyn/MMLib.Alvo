@@ -12,6 +12,7 @@
     five *action types*, and those are read off `capabilities` rather than listed here, so the day
     one of them lands the tab stops warning about it without anybody editing this file.
 *@
+@inject AdminInterop Interop
 
 <SectionHead Title="On write">
     <Subtitle>
@@ -85,7 +86,7 @@ else
                     {
                         <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" class="a-hookrow__remove"
                                     data-testid="hook-remove" aria-label="@($"Remove hook {at + 1} of {name}")"
-                                    OnClick="_ => _removing = new HookAt(name, at)">Remove</AlvoButton>
+                                    OnClick="_ => _removing = new PendingRemoval(name, hook)">Remove</AlvoButton>
                     }
                 </div>
             }
@@ -141,10 +142,16 @@ else
     </AlvoEditor>
 }
 
+@* Names the hook by its point and shows what it does, which is all a hook is: its position is not a name. *@
 <AlvoConfirm Open="_removing is not null" TestId="remove-hook" ConfirmTestId="remove-hook-run"
-             CancelTestId="remove-hook-cancel" Title="Remove this hook?"
+             CancelTestId="remove-hook-cancel" Title="@($"Remove this {_removing?.Point} hook?")"
              Consequence="It leaves the working copy now; writes stop running it when you apply."
-             Verb="Remove hook" OnConfirm="RemoveAsync" OnCancel="() => _removing = null" />
+             Verb="Remove hook" OnConfirm="RemoveAsync" OnCancel="CancelRemoval">
+    @if (_removing is { } removing)
+    {
+        <CodeBlock Json="@removing.Json" />
+    }
+</AlvoConfirm>
 
 @code {
     /// <summary>The boxes the chosen action takes.</summary>

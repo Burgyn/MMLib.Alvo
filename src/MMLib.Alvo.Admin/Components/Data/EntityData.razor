@@ -5,6 +5,7 @@
 @inject NavigationManager Navigation
 @inject ILogger<EntityData> Logger
 @inject ISnackbar Snackbar
+@inject AdminInterop Interop
 
 <PageTitle>@EntityName · Data · Alvo</PageTitle>
 
@@ -16,7 +17,8 @@
         <Primary>
             @if (_entity is not null && !OutOfScope)
             {
-                <AlvoButton @ref="_newRecord" Tone="AlvoButton.ButtonTone.Primary" Small="true" OnClick="_ => NewRecord()">New record</AlvoButton>
+                <AlvoButton @ref="_newRecord" Tone="AlvoButton.ButtonTone.Primary" Small="true" data-testid="record-new"
+                            OnClick="_ => NewRecord()">New record</AlvoButton>
             }
         </Primary>
     </PageHeader>
@@ -112,4 +114,4 @@
 <AlvoConfirm Open="_deleting is not null" TestId="delete-record" ConfirmTestId="delete-record-run"
              CancelTestId="delete-record-cancel" Title="@($"Delete {_deleting?.Label}?")"
              Consequence="@($"The record is deleted from {EntityName} for everyone who can read it. There is no undo.")"
-             Verb="Delete record" Busy="_deletingNow" OnConfirm="DeleteAsync" OnCancel="CancelDelete" />
+             Verb="Delete record" OnConfirm="DeleteAsync" OnCancel="CancelDelete" />

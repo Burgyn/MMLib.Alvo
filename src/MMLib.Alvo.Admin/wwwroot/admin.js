@@ -111,6 +111,69 @@ export function focusSelected(container) {
 }
 
 /**
+ * Focuses the first of the selectors that names an element on the page which can take focus: where focus goes after
+ * a confirm or an editor closed (spec §3.2). The trigger comes first; when it is gone (the item was removed, the
+ * editor that held it closed), the row that took the item's place, then the list's own create action. Never <body>:
+ * a keyboard user's next Tab would start again from the top of the page.
+ */
+export function focusFirst(selectors) {
+  const target = focusable(selectors);
+  if (target) {
+    target.focus();
+    return true;
+  }
+
+  return false;
+}
+
+/** The first element any of the selectors names that is on screen and can take focus, most wanted selector first. */
+const focusable = (selectors) => {
+  for (const selector of selectors ?? []) {
+    for (const element of document.querySelectorAll(selector)) {
+      if (element instanceof HTMLElement && !element.matches(':disabled') && element.getClientRects().length > 0) {
+        return element;
+      }
+    }
+  }
+
+  return null;
+};
+
+/**
+ * `focusFirst`, as soon as one of the selectors names something that can take focus: inside a dialog, the library
+ * draws the content a render after the component that owns it, so what was asked for is not on screen yet when the
+ * owner's render completes. Polled on a timer and given up after two seconds, like `focusFirstOnceClosed`.
+ */
+export function focusFirstOnceShown(selectors) {
+  const deadline = Date.now() + 2000;
+  const attempt = () => {
+    if (!focusFirst(selectors) && Date.now() < deadline) {
+      setTimeout(attempt, 20);
+    }
+  };
+  attempt();
+}
+
+/**
+ * `focusFirst`, once no dialog is over the page: the order spec §3.2 names, where the confirm closes, the result is
+ * drawn, and only then does focus move. The call arrives before the render that closes the confirm, and the library
+ * gives focus back to whatever had it as the dialog goes, so moving focus any earlier would be undone. Polled on a
+ * timer, not an animation frame, which a page in the background does not get; given up after two seconds, so a dialog
+ * that stays open (another one opened) does not have focus pulled out from under it.
+ */
+export function focusFirstOnceClosed(selectors) {
+  const deadline = Date.now() + 2000;
+  const attempt = () => {
+    if (document.querySelector('[aria-modal="true"]') === null) {
+      focusFirst(selectors);
+    } else if (Date.now() < deadline) {
+      setTimeout(attempt, 20);
+    }
+  };
+  attempt();
+}
+
+/**
  * Holds the page still while a sheet or the palette is over it. Without this a drag near the panel's edge
  * scrolls the list underneath and the sheet appears to float over a page that is still moving — the one
  * thing that makes a bottom sheet read as a web page rather than a control.

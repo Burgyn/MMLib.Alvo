@@ -32,7 +32,7 @@ public partial class HooksTab
     private readonly HookBuilder _hook = new();
     private readonly RefusalState<string> _refusal = new();
     private bool _adding;
-    private HookAt? _removing;
+    private PendingRemoval? _removing;
     private string? _reveal;
     private int _reveals;
 
@@ -159,17 +159,55 @@ public partial class HooksTab
     private bool Dirty => _hook.Condition.Length > 0 || _hook.RejectMessage.Length > 0 || _hook.MutateField.Length > 0
         || _hook.MutateValue.Length > 0 || _hook.Endpoint.Length > 0 || _hook.Template.Length > 0 || _hook.To.Length > 0;
 
-    /// <summary>The confirm's verb: asks the entity screen to drop the hook that was asked about.</summary>
+    /// <summary>
+    /// The confirm's verb: asks the entity screen to drop the hook that was asked about, found again where it is now.
+    /// </summary>
+    /// <remarks>
+    /// By what the hook is, not by where it was, for the Indexes tab's reason: another tab's edit reaching the copy
+    /// while the confirm is up moves the rows. One no longer declared is left alone. Focus then goes to the row that
+    /// took its place, or to the list's New hook (spec §3.2).
+    /// </remarks>
     private async Task RemoveAsync()
     {
-        if (_removing is { } at)
+        if (_removing is not { } removing)
         {
-            _removing = null;
+            return;
+        }
+
+        _removing = null;
+        var position = PositionOf(removing);
+        if (position >= 0)
+        {
             /* The rows after it move up, so the lit one would be a different hook. */
             _reveal = null;
-            await OnRemove.InvokeAsync(at);
+            await OnRemove.InvokeAsync(new HookAt(removing.Point, position));
         }
+
+        await Interop.FocusFirstOnceClosedAsync(
+            [RemoveButton(removing.Point, position), RemoveButton(removing.Point, position - 1), "[data-testid='hook-new']"]);
     }
+
+    /// <summary>Cancel and Escape keep the hook, and focus goes back to its Remove.</summary>
+    private Task CancelRemoval()
+    {
+        var removing = _removing;
+        _removing = null;
+        return removing is null
+            ? Task.CompletedTask
+            : Interop.FocusFirstOnceClosedAsync([RemoveButton(removing.Point, PositionOf(removing)), "[data-testid='hook-new']"]);
+    }
+
+    /// <summary>Where the hook is declared at its point now, or -1 when it no longer is.</summary>
+    private int PositionOf(PendingRemoval removing)
+        => Declared(Hooks.FirstOrDefault(declared => declared.Key == removing.Point).Value ?? "[]")
+            .IndexOf(removing.Json);
+
+    private static string RemoveButton(string point, int position) => $"#{RowId(point, position)} [data-testid='hook-remove']";
+
+    /// <summary>The hook the confirm is asking about: its point, and the declaration as it was drawn.</summary>
+    /// <param name="Point">The hook point.</param>
+    /// <param name="Json">The hook as the row drew it.</param>
+    private sealed record PendingRemoval(string Point, string Json);
 
     /// <summary>One hook row's element id, by where it sits.</summary>
     private static string RowId(string point, int position) => $"hook-{point}-{position}";

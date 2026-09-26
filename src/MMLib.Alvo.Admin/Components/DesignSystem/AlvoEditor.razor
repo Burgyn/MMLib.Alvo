@@ -103,6 +103,9 @@
     private ScrollLock? _scrollLock;
     private Func<Task>? _leave;
 
+    /// <summary>Whether the next render gives focus back to the form, which Keep editing asks for.</summary>
+    private bool _refocus;
+
     /// <summary>"New …" or "Edit …" (spec §3.1).</summary>
     [Parameter, EditorRequired]
     public string Title { get; set; } = string.Empty;
@@ -191,7 +194,17 @@
         {
             await Lock.HoldAsync();
         }
+
+        if (_refocus)
+        {
+            _refocus = false;
+            await Interop.FocusFirstOnceShownAsync([FirstControl]);
+        }
     }
+
+    /// <summary>The form's first control, which takes focus back after Keep editing.</summary>
+    private string FirstControl
+        => $"#{_formId} :is(input:not([type='hidden']), textarea, select, button, [tabindex]:not([tabindex='-1']))";
 
     /// <summary>
     /// Submits, once the operator chose to leave when a cascaded question says the submit would lose something: a
@@ -249,10 +262,15 @@
         return leave();
     }
 
+    /// <summary>
+    /// Takes the question away and gives focus back to the form: the Keep editing that had it is gone, and focus left
+    /// on the page would put the next Escape out of the editor's reach.
+    /// </summary>
     private void KeepEditing()
     {
         _guard.KeepEditing();
         _leave = null;
+        _refocus = true;
     }
 
     /// <summary>

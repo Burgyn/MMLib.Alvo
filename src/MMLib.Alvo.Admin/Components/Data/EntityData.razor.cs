@@ -450,19 +450,31 @@ public partial class EntityData
         }
     }
 
-    /// <summary>Cancel and Escape keep the record; a delete already under way is left to answer.</summary>
-    private void CancelDelete()
+    /// <summary>
+    /// Cancel and Escape keep the record, and focus goes to its row, since the Delete that asked closed with the editor
+    /// (spec §3.2); a delete already under way is left to answer.
+    /// </summary>
+    private Task CancelDelete()
     {
-        if (!_deletingNow)
+        if (_deletingNow)
         {
-            _deleting = null;
+            return Task.CompletedTask;
         }
+
+        _deleting = null;
+        return Interop.FocusFirstOnceClosedAsync(
+            ["[data-testid='record-grid'] [aria-selected='true']", "[data-testid='record-new']"]);
     }
 
     /// <summary>
-    /// Deletes what the confirm named, and puts focus where the deleted row was. The confirm stays up and busy until
-    /// the write answers, so a second press of its verb finds it busy rather than the grid underneath.
+    /// Deletes what the confirm named, and puts focus where the deleted row was.
     /// </summary>
+    /// <remarks>
+    /// In the one order every confirm follows (spec §3.2): the confirm closes as its verb is pressed, the write runs,
+    /// its result is drawn, and focus moves last. Closed first, the library's own focus return (to what had focus when
+    /// the confirm opened) is spent before the result is drawn, so it cannot undo the focus the result sets, a refusal's
+    /// panel included. The verb's own gate keeps a double click to one delete while the confirm is closing.
+    /// </remarks>
     private async Task DeleteAsync()
     {
         if (_deleting is not { } target || _deletingNow)
@@ -470,10 +482,10 @@ public partial class EntityData
             return;
         }
 
+        _deleting = null;
         _deletingNow = true;
         var deleted = await TryDeleteAsync(target);
         _deletingNow = false;
-        _deleting = null;
         if (deleted && _focusRow is null)
         {
             await FocusNewRecordAsync();
