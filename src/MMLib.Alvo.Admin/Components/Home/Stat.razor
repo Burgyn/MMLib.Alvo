@@ -4,11 +4,11 @@
     The note is not decoration: "3" on a card labelled Entities is ambiguous between the descriptor
     and the database, and the whole dashboard exists to keep that distinction visible.
 *@
-<div class="a-card">
+<MudPaper Outlined="true" Elevation="0" Class="a-card">
     <span class="a-label">@Label</span>
     <span class="a-stat">@Value</span>
     <span class="a-section__sub">@Note</span>
-</div>
+</MudPaper>
 
 @code {
     /// <summary>What is being counted.</summary>

@@ -4,18 +4,23 @@
 
     Its counterpart is Refusal, and the two must never be drawn alike — somewhere the operator can stand
     against a control whose only possible output is a descriptor the apply rejects. That rule lives in
-    these two components now rather than in whichever markup a screen copied: a dashed panel with a
-    heading here, an inert control with its reason there.
+    these two components now rather than in whichever markup a screen copied: an alert in the information
+    tone here (a state, never an error: the alert is role=status), an inert control with its reason there.
 
     The consequence is the framework's own sentence, served verbatim from capabilities and never
     reworded: a second wording is a third spelling of one truth.
 *@
-<div @attributes="Attributes" class="@CssClass.Of("a-notyet-panel", Attributes)">
-    <SectionHead Title="@Title" Subtitle="Subtitle" />
-    @if (Consequence is { Length: > 0 })
-    {
-        <NotYetConsequence Consequence="@Consequence" />
-    }
+<div @attributes="Attributes" class="@CssClass.Of("a-notyet-frame", Attributes)">
+    <AlvoAlert Tone="AlvoAlert.AlertTone.Info" Title="@Title" TestId="notyet-panel">
+        @if (Subtitle is not null)
+        {
+            <div class="a-notyet-frame__sub">@Subtitle</div>
+        }
+        @if (Consequence is { Length: > 0 })
+        {
+            <NotYetConsequence Consequence="@Consequence" />
+        }
+    </AlvoAlert>
 </div>
 
 @code {

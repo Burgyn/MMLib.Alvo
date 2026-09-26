@@ -4,6 +4,7 @@
 @inject AssistantGateway Assistant
 @inject Microsoft.Extensions.Options.IOptions<AlvoAdminOptions> Admin
 @inject ILogger<Settings> Logger
+@inject ISnackbar Snackbar
 @rendermode InteractiveServer
 
 <PageTitle>Settings · Alvo</PageTitle>
@@ -45,15 +46,15 @@
                     <div class="a-row a-row--inset">
                         @if (Admin.Value.DocsPath is { Length: > 0 } docs)
                         {
-                            <a class="a-btn a-btn--sm" href="@docs" target="_blank" rel="noopener"
-                               data-testid="settings-docs">Open the documentation</a>
+                            <AlvoButton Small="true" Href="@docs" target="_blank" rel="noopener"
+                                        data-testid="settings-docs">Open the documentation</AlvoButton>
                         }
                         @if (Admin.Value.OpenApiPath is { Length: > 0 } document)
                         {
-                            <a class="a-btn a-btn--sm a-btn--ghost" href="@document" target="_blank" rel="noopener"
-                               data-testid="settings-document">
+                            <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" Href="@document" target="_blank"
+                                        rel="noopener" data-testid="settings-document">
                                 <code class="a-mono">@document</code>
-                            </a>
+                            </AlvoButton>
                         }
                     </div>
                 </ChildContent>
@@ -92,7 +93,8 @@
                 {
                     @if (_saveRefusal is { Length: > 0 })
                     {
-                        <ErrorPanel Title="That connection could not be saved" Fix="@_saveRefusal" />
+                        <ErrorPanel @key="_refusalsDrawn" TakeFocus="true" Title="That connection could not be saved"
+                                    Fix="@_saveRefusal" />
                     }
 
                     <div class="a-stack a-stack--inset">
@@ -103,18 +105,22 @@
 
                         <Field Label="Endpoint" For="ai-endpoint">
                             <ChildContent>
-                                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="ai-endpoint"
-                                              autocomplete="off" aria-describedby="ai-endpoint-hint"
-                                              Placeholder="e.g. http://localhost:11434/v1"
-                                              Value="_endpoint" ValueChanged="text => _endpoint = text ?? string.Empty" />
+                                <MudTextField @ref="_endpointField" T="string" Variant="Variant.Outlined" Immediate="true"
+                                              id="ai-endpoint" autocomplete="off"
+                                              aria-describedby="@_fields.DescribedBy(EndpointField, "ai-endpoint-hint")"
+                                              Error="@_fields.Has(EndpointField)" Placeholder="e.g. http://localhost:11434/v1"
+                                              Value="_endpoint" ValueChanged="TypeEndpoint" />
+                                @_fields.Under(EndpointField, () => _endpointField!.FocusAsync())
                             </ChildContent>
                             <Hint>The base address. It is never shown back, on this page or anywhere else.</Hint>
                         </Field>
 
                         <Field Label="Model" For="ai-model">
-                            <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="ai-model"
-                                          autocomplete="off" Placeholder="e.g. qwen3:8b"
-                                          Value="_model" ValueChanged="text => _model = text ?? string.Empty" />
+                            <MudTextField @ref="_modelField" T="string" Variant="Variant.Outlined" Immediate="true"
+                                          id="ai-model" autocomplete="off" Placeholder="e.g. qwen3:8b"
+                                          aria-describedby="@_fields.DescribedBy(ModelField)" Error="@_fields.Has(ModelField)"
+                                          Value="_model" ValueChanged="TypeModel" />
+                            @_fields.Under(ModelField, () => _modelField!.FocusAsync())
                         </Field>
 
                         <Field Label="API key" For="ai-key">
@@ -131,12 +137,8 @@
                         </Field>
 
                         <div class="a-row a-row--gap-2">
-                            <button type="button" class="a-btn a-btn--primary" data-testid="ai-save"
-                                    @onclick="SaveAsync">Save the connection</button>
-                            @if (_saved)
-                            {
-                                <span class="a-section__sub">Saved.</span>
-                            }
+                            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Busy="_saving" data-testid="ai-save"
+                                        OnClick="_ => SaveAsync()">Save the connection</AlvoButton>
                         </div>
                     </div>
                 }
@@ -157,24 +159,42 @@
 </div>
 
 @code {
+    private const string EndpointField = "ai-endpoint";
+    private const string ModelField = "ai-model";
+    private const string OpenAiCompatible = "openai-compatible";
+    private const string AzureOpenAi = "azure-openai";
+
+    private static readonly string[] _kinds = [OpenAiCompatible, AzureOpenAi];
+
+    private readonly FieldRefusals _fields = new();
     private ManagementInfo? _info;
     private string _kind = OpenAiCompatible;
     private string _endpoint = string.Empty;
     private string _model = string.Empty;
     private string _apiKey = string.Empty;
     private string? _saveRefusal;
-    private bool _saved;
-
-    private const string OpenAiCompatible = "openai-compatible";
-    private const string AzureOpenAi = "azure-openai";
-
-    private static readonly string[] _kinds = [OpenAiCompatible, AzureOpenAi];
+    private int _refusalsDrawn;
+    private bool _saving;
+    private MudTextField<string>? _endpointField;
+    private MudTextField<string>? _modelField;
 
     protected override async Task OnInitializedAsync()
         => _info = await Gateway.InfoAsync(CancellationToken.None);
 
+    private void TypeEndpoint(string? text)
+    {
+        _endpoint = text ?? string.Empty;
+        _fields.Clear(EndpointField);
+    }
+
+    private void TypeModel(string? text)
+    {
+        _model = text ?? string.Empty;
+        _fields.Clear(ModelField);
+    }
+
     /// <summary>
-    /// Saves the connection, or shows why it could not be saved.
+    /// Saves the connection and says so once the screen has read it back, or shows why it could not be saved.
     /// </summary>
     /// <remarks>
     /// The refusal a shadowing configuration raises must reach the screen, because it is the one failure whose
@@ -186,20 +206,53 @@
     private async Task SaveAsync()
     {
         _saveRefusal = null;
-        _saved = false;
+        if (!Admissible())
+        {
+            return;
+        }
 
+        _saving = true;
         try
         {
             await Assistant.SaveConnectionAsync(
                 new AiConnectionForm(_kind, _endpoint, _model, _apiKey), CancellationToken.None);
 
             _apiKey = string.Empty;
-            _saved = true;
             _info = await Gateway.InfoAsync(CancellationToken.None);
+            Snackbar.Confirm("Saved the AI connection");
         }
         catch (Exception exception)
         {
             _saveRefusal = AdminProblem.From(exception, Logger)?.Detail;
+            _refusalsDrawn++;
         }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    /// <summary>
+    /// Refuses, under its field, a value the connection resolver would read as no connection at all.
+    /// </summary>
+    /// <remarks>
+    /// The store takes any text, and the resolver builds a connection only from an absolute endpoint and a model
+    /// name; anything else it reads as none. Saved unchecked, the screen would say saved while the status stayed
+    /// "not configured", with nothing saying why. The same two conditions, asked before the write.
+    /// </remarks>
+    private bool Admissible()
+    {
+        _fields.ClearAll();
+        if (string.IsNullOrWhiteSpace(_model))
+        {
+            _fields.Refuse(ModelField, "Type the model or deployment name, such as qwen3:8b.");
+        }
+
+        if (!Uri.TryCreate(_endpoint, UriKind.Absolute, out _))
+        {
+            _fields.Refuse(EndpointField, "Type the whole base address, with its scheme, such as http://localhost:11434/v1.");
+        }
+
+        return !_fields.Any;
     }
 }

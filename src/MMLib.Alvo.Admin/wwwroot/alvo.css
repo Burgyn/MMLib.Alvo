@@ -848,6 +848,14 @@
     padding: var(--space-4);
   }
 
+  /* One declared integration block, folded: an outlined strip inside its panel, the JSON under its header. */
+  .a-integration {
+    margin: var(--space-4);
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+
   /* Signing in: one narrow card, a little above the middle of the screen. */
   .a-signin {
     max-width: 380px;
@@ -860,6 +868,16 @@
 
   .a-signin__panel > .a-section {
     padding: 0 0 var(--space-4);
+  }
+
+  /* Sign-in is static, so the library's button cannot run there (D10, study §2.3); its native one takes the
+     library's variables, which the theme provider writes statically too. Each falls back to Alvo's token, so a
+     page with no provider (the gallery) still draws. Its inputs need no seam: .a-input is already the box every
+     library field is drawn as (spec §3.8). */
+  .a-signin .a-btn--primary {
+    background: var(--mud-palette-primary, var(--accent));
+    color: var(--mud-palette-primary-text, var(--accentText));
+    border-radius: var(--mud-default-borderradius, var(--radius-xs));
   }
 
   /* The engine's verdict, in the accent of an outcome the operator asked for. */
@@ -2130,6 +2148,15 @@
     font-size: var(--text-sm);
   }
 
+  /* Loading (spec §3.6): the library's skeleton lines in a labelled frame, as tall as the lines it holds. */
+  .a-skeleton-frame {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-4);
+  }
+
+  /* prototype-only: the design prototype's loading bars; the product draws MudSkeleton in .a-skeleton-frame. */
   .a-skeleton {
     border-radius: var(--radius-xs);
     background: linear-gradient(
@@ -2142,18 +2169,14 @@
     animation: a-shimmer 1.4s ease infinite;
   }
 
-  /* Three heights, not one per screen: a placeholder says "something is coming", and the fifteen
-     hand-set heights it replaces promised a precision no loading state has. */
+  /* gallery-only: two of the heights the gallery still draws, until it is redrawn on the library's skeleton. */
   .a-skeleton--sm {
     height: 96px;
   }
 
+  /* gallery-only: see .a-skeleton--sm. */
   .a-skeleton--md {
     height: 180px;
-  }
-
-  .a-skeleton--lg {
-    height: 240px;
   }
 
   @keyframes a-shimmer {
@@ -2233,6 +2256,19 @@
     white-space: nowrap;
   }
 
+  /* A warned subsystem, drawn by NotYetPanel as an alert in the information tone; the frame is only its handle
+     and what a screen's modifier (the tab's inset) lands on. */
+  .a-notyet-frame {
+    display: block;
+  }
+
+  /* What declaring it does today, under the alert's title. */
+  .a-notyet-frame__sub {
+    color: var(--dim);
+    font-size: var(--text-sm);
+  }
+
+  /* prototype-only: the dashed panel the prototype and the gallery still draw; NotYetPanel is .a-notyet-frame. */
   .a-notyet-panel {
     display: flex;
     flex-direction: column;

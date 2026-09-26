@@ -1,16 +1,23 @@
 ﻿@*
-    Something is loading here (docs/architecture/admin-dashboard-review.md, F-5). Three heights rather than
-    the nine the screens had set by hand, each in a style attribute: a placeholder promises that content
-    is coming, not how tall it will be.
+    Loading, drawn as the shape of what is coming (spec §3.6): known-shape content gets a skeleton, never a spinner
+    on an empty page. Three sizes rather than the nine heights the screens once set by hand
+    (docs/architecture/admin-dashboard-review.md, F-5): a placeholder promises that content is coming, not how tall
+    it will be. The frame is labelled, so "loading" is something a screen reader hears, not only something a sighted
+    operator infers from grey bars.
 *@
-<div class="@SizeClass"></div>
+<div class="a-skeleton-frame" aria-busy="true" aria-label="Loading">
+    @for (var line = 0; line < Lines; line++)
+    {
+        <MudSkeleton SkeletonType="SkeletonType.Text" Animation="Animation.Wave" Width="@Width(line)" />
+    }
+</div>
 
 @code {
     /// <summary>How much is coming: a stat, a panel, or a list.</summary>
     [Parameter]
     public SkeletonSize Size { get; set; } = SkeletonSize.Md;
 
-    /// <summary>The three heights a skeleton comes in.</summary>
+    /// <summary>The three sizes a skeleton comes in.</summary>
     /// <remarks>
     /// Nested rather than beside the component: it is the type of a public parameter, so it cannot be
     /// internal, and declared inside the component it is part of what the Razor SDK makes public rather
@@ -18,20 +25,18 @@
     /// </remarks>
     public enum SkeletonSize
     {
-        /// <summary>A stat card's worth.</summary>
+        /// <summary>A stat card's worth: one line.</summary>
         Sm = 0,
 
-        /// <summary>A panel's worth — the default.</summary>
+        /// <summary>A panel's worth, three lines — the default.</summary>
         Md = 1,
 
-        /// <summary>A list's or a grid's worth.</summary>
+        /// <summary>A list's or a grid's worth: six lines.</summary>
         Lg = 2,
     }
 
-    private string SizeClass => Size switch
-    {
-        SkeletonSize.Sm => "a-skeleton a-skeleton--sm",
-        SkeletonSize.Lg => "a-skeleton a-skeleton--lg",
-        _ => "a-skeleton a-skeleton--md",
-    };
+    private int Lines => Size switch { SkeletonSize.Sm => 1, SkeletonSize.Lg => 6, _ => 3 };
+
+    /// <summary>Uneven line lengths, so the shape reads as text rather than as a table.</summary>
+    private static string Width(int line) => (line % 3) switch { 0 => "70%", 1 => "55%", _ => "62%" };
 }

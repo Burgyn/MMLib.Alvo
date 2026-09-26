@@ -26,16 +26,17 @@
     {
         @if (_schema.Entities.Count == 0 || _revisions.Count == 0)
         {
-            <Panel Padded="true" class="a-panel--accent">
-                <span class="a-section__title">This project is new</span>
-                <p class="a-section__sub">
+            <AlvoAlert Tone="AlvoAlert.AlertTone.Info" Title="This project is new" TestId="overview-new">
+                <ChildContent>
                     Three things make a backend: entities, the rules that guard them, and a tenant if
                     the data is per-customer. The first run walks through them in that order.
-                </p>
-                <a class="a-btn a-btn--primary a-btn--sm" href="@AdminPaths.Welcome">
-                    Open the first run
-                </a>
-            </Panel>
+                </ChildContent>
+                <Actions>
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" Href="@AdminPaths.Welcome">
+                        Open the first run
+                    </AlvoButton>
+                </Actions>
+            </AlvoAlert>
         }
 
         @*

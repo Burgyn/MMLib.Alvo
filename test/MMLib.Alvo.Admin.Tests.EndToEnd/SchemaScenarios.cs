@@ -12,7 +12,7 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema");
 
-        var text = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var text = await session.Content.InnerTextAsync();
         text.ShouldContain("regions");
         text.ShouldContain("customers");
         text.ShouldContain("work_orders");
@@ -53,7 +53,7 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
 
-        var fields = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var fields = await session.Content.InnerTextAsync();
         fields.ShouldContain("reference");
         fields.ShouldContain("unique");
         fields.ShouldContain("work-order-ref");
@@ -111,7 +111,7 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
 
-        var text = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var text = await session.Content.InnerTextAsync();
         text.ShouldContain("Maintained by Alvo");
         text.ShouldContain("framework writes it");
     }
@@ -126,7 +126,7 @@ public sealed class SchemaScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.GoAsync("/schema/work_orders");
         await session.OpenTabAsync("API");
 
-        var text = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var text = await session.Content.InnerTextAsync();
         text.ShouldContain("after a restart");
         text.ShouldContain("/api/work_orders");
     }

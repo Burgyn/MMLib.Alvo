@@ -243,7 +243,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
             await session.SettleAsync();
             await session.AssertRenderedAsync();
 
-            (await session.Page.Locator("main.a-content").InnerTextAsync())
+            (await session.Content.InnerTextAsync())
                 .ShouldNotContain("Not yet");
         }
 
@@ -266,7 +266,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await session.GoAsync(route);
 
         await session.AssertRenderedAsync();
-        (await session.Page.Locator("main.a-content").InnerTextAsync()).ShouldContain("Not yet");
+        (await session.Content.InnerTextAsync()).ShouldContain("Not yet");
         session.AssertConsoleClean();
     }
 

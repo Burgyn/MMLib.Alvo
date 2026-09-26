@@ -62,7 +62,7 @@ public sealed class FieldDefaultScenarios(AdminWorld world) : IClassFixture<Admi
            render arrives, and the diff below is what that render draws. */
         await session.PreviewPendingAsync();
 
-        (await session.Page.Locator("main.a-content").InnerTextAsync())
+        (await session.Content.InnerTextAsync())
             .ShouldContain("\"default\": \"unassigned\"");
 
         await session.Page.Locator("#apply-reason").WaitForAsync();
@@ -71,7 +71,7 @@ public sealed class FieldDefaultScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Page.GetByText("Applied as revision").First.WaitForAsync();
 
         await session.GoAsync("/schema/regions");
-        (await session.Page.Locator("main.a-content").InnerTextAsync())
+        (await session.Content.InnerTextAsync())
             .ShouldContain("default \"unassigned\"");
 
         /* The point of the whole feature: a create that omits the field stores the default rather

@@ -28,11 +28,17 @@
                         <NotYetConsequence Consequence="@warning.Consequence" Badge="not yet" />
                     }
 
+                    @*
+                        Folded, so the page opens as the list of what is declared rather than as the longest block's
+                        JSON; the one sentence above already says whether there is anything to unfold.
+                    *@
                     @if (Declared(block) is { Length: > 0 } json)
                     {
-                        <div class="a-panel__body">
-                            <CodeBlock Json="@json" />
-                        </div>
+                        <MudExpansionPanels Elevation="0" Class="a-integration">
+                            <MudExpansionPanel Text="@($"The {block} block, as stored")">
+                                <CodeBlock Json="@json" />
+                            </MudExpansionPanel>
+                        </MudExpansionPanels>
                     }
                 </ChildContent>
             </Panel>

@@ -21,6 +21,11 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// <param name="world">The running host and browser.</param>
 public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<AdminWorld>
 {
+    /* Every screen with a control of its own, the read-only ones included: a filled link on the overview's banner is a
+       filled button too. */
+    private static readonly string[] _screens =
+        ["", "/welcome", "/schema", "/data/regions", "/access", "/history", "/integrations", "/automations", "/settings"];
+
     [Theory(Timeout = AdminWorld.ScenarioTimeout)]
     [InlineData(ColorScheme.Light)]
     [InlineData(ColorScheme.Dark)]
@@ -29,8 +34,9 @@ public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<A
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, colorScheme: scheme);
         await StageAFieldAsync(session, scheme);
         var failures = new List<string>(await SnackbarBelowAAAsync(session));
+        failures.AddRange(await SignInBelowAAAsync(scheme));
 
-        foreach (var route in new[] { "/schema", "/data/regions", "/access", "/history", "/settings" })
+        foreach (var route in _screens)
         {
             await session.GoAsync(route);
             await session.Page.GetByTestId("pending-bar").WaitForAsync();
@@ -65,6 +71,18 @@ public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<A
         failures.AddRange(await BelowAAAsync(session, "the new person editor"));
 
         failures.ShouldBeEmpty();
+    }
+
+    /// <summary>The static sign-in page's one button, in a context of its own, before anybody signs in.</summary>
+    private async Task<IEnumerable<string>> SignInBelowAAAsync(ColorScheme scheme)
+    {
+        await using var context = await world.Browser.NewContextAsync(new() { ColorScheme = scheme });
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{world.BaseAddress}{AlvoAdmin.SignInPath}");
+        await page.GetByRole(AriaRole.Button, new() { Name = "Sign in", Exact = true }).WaitForAsync();
+        return (await ContrastProbe.ReadAsync(ContrastProbe.Controls(page)))
+            .Where(reading => reading.Ratio < ContrastProbe.AA)
+            .Select(reading => $"the sign-in page: {reading}");
     }
 
     /// <summary>
