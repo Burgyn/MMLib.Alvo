@@ -112,9 +112,11 @@
                 Dirty="@(_newEmail.Trim().Length > 0)"
                 OnSubmit="CreateAsync" OnClose="CloseCreate">
         @EditorProblem
-        <MudTextField T="string" Value="_newEmail" ValueChanged="email => _newEmail = email ?? string.Empty"
+        <MudTextField @ref="_emailField" T="string" Value="_newEmail" ValueChanged="TypeEmail"
                       Immediate="true" Variant="Variant.Outlined" Label="Email" InputType="InputType.Email"
-                      id="new-person-email" Placeholder="dispatcher@example.com" />
+                      id="@EmailField" Placeholder="dispatcher@example.com"
+                      Error="@_fields.Has(EmailField)" aria-describedby="@_fields.DescribedBy(EmailField)" />
+        @_fields.Under(EmailField, () => _emailField!.FocusAsync())
     </AlvoEditor>
 }
 
@@ -149,6 +151,10 @@
     private UserId? _self;
     private UserId? _arrived;
     private int _reveals;
+    private readonly FieldRefusals _fields = new();
+    private MudTextField<string>? _emailField;
+
+    private const string EmailField = "new-person-email";
 
     /// <summary>Whether an editor is on screen, which is then where a refusal is drawn.</summary>
     private bool EditorOpen => _creating || _editing is not null;
@@ -235,6 +241,14 @@
         _creating = false;
         _newEmail = string.Empty;
         _problem = null;
+        _fields.ClearAll();
+    }
+
+    /// <summary>Takes the address as typed, which answers any refusal it had.</summary>
+    private void TypeEmail(string? email)
+    {
+        _newEmail = email ?? string.Empty;
+        _fields.Clear(EmailField);
     }
 
     /// <summary>Writes the parts of the draft that changed, says so, and closes the editor.</summary>
@@ -265,13 +279,17 @@
                 await Gateway.SetTenantAsync(person.Id, tenant, CancellationToken.None);
             }
 
-            Snackbar.Confirm($"Saved {person.Email}");
             CloseEditor();
             await LoadAsync();
+            Snackbar.Confirm($"Saved {person.Email}");
         });
     }
 
     /// <summary>Parses a typed tenant, or says in the editor why it is not one.</summary>
+    /// <remarks>
+    /// The editor already refuses a mistyped tenant under its field before raising Save; this is the page's own
+    /// guard, for a caller that did not.
+    /// </remarks>
     private bool TryTenant(string typed, out TenantId? tenant)
     {
         if (TenantId.TryParse(typed, null, out var parsed))
@@ -347,28 +365,25 @@
     /// <remarks>
     /// Create is never disabled for an empty box: Enter pressed straight after typing reaches the browser before the
     /// render that would have enabled the button, and implicit submission does nothing on a disabled default button.
-    /// An empty address is refused here instead, in place, like every other editor's refusal.
+    /// An empty address is refused here instead, under the field, which takes focus (spec §3.3).
     /// </remarks>
     private async Task CreateAsync()
     {
         var email = _newEmail.Trim();
         if (email.Length == 0)
         {
-            Show(AdminProblem.From(new ManagementRequestException("A person needs an address to sign in with."))! with
-            {
-                Fix = "Type the address they will sign in with, such as dispatcher@example.com.",
-            });
+            _fields.Refuse(EmailField, "Type the address they will sign in with, such as dispatcher@example.com.");
             return;
         }
 
         try
         {
             var created = await Gateway.CreatePersonAsync(new AlvoUserCreation(email, []), CancellationToken.None);
-            Snackbar.Confirm($"Created {email}");
             CloseCreate();
             await LoadAsync();
             _arrived = created.Id;
             _reveals++;
+            Snackbar.Confirm($"Created {email}");
         }
         catch (Exception exception)
         {
@@ -383,8 +398,8 @@
         {
             await write();
             _problem = null;
-            Snackbar.Confirm(done);
             await LoadAsync();
+            Snackbar.Confirm(done);
         }
         catch (Exception exception)
         {

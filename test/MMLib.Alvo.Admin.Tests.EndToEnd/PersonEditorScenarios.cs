@@ -23,11 +23,46 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Dialog("person-create").GetByTestId("person-create-run").DblClickAsync();
 
         await session.SnackbarAsync("Created twice@example.com");
-        (await session.Content.GetByText("twice@example.com").CountAsync()).ShouldBe(1);
 
+        /* The row, not the snackbar, is what says the list was read again; and a second submit that slipped past
+           the gate would be refused as a duplicate address, so it would show as a panel, not as a second row. */
         var arrived = session.Content.Locator("[data-alvo-new]").Filter(new() { HasText = "twice@example.com" });
+        await arrived.WaitForAsync();
+        (await session.Content.GetByText("twice@example.com").CountAsync()).ShouldBe(1);
         (await arrived.CountAsync()).ShouldBe(1, "a created person is highlighted as well as shown");
+        (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0, "the second click was not a second create");
         await session.WaitForInViewAsync(arrived);
+    }
+
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task An_empty_address_is_refused_under_the_field_with_focus()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/access");
+
+        await session.Page.GetByTestId("person-new").ClickAsync();
+        var editor = session.Dialog("person-create");
+        await editor.WaitForAsync();
+        await session.Page.Keyboard.PressAsync("Enter");
+
+        await AssertFieldRefusedAsync(session, "new-person-email", "Type the address");
+        (await editor.GetByTestId("error-panel").CountAsync()).ShouldBe(0, "a field's refusal is under the field");
+        (await session.SnackbarCountAsync()).ShouldBe(0, "an error is never a snackbar");
+        (await editor.CountAsync()).ShouldBe(1);
+    }
+
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_editor_takes_focus_on_open_and_Escape_hands_it_back_to_the_row()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        var person = await CreateAsync(session, "focus@example.com");
+
+        await OpenAsync(session, person);
+        await EditorScenarios.WaitForFocusInsideAsync(session, "person-editor");
+        await session.Page.Keyboard.PressAsync("Escape");
+
+        await session.Dialog("person-editor").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await EditorScenarios.WaitForFocusOnAsync(session, $"change-{person}");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -41,8 +76,8 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Page.Keyboard.PressAsync("Enter");
 
         var editor = session.Dialog("person-editor");
-        await editor.GetByTestId("error-panel").WaitForAsync();
-        await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+        await AssertFieldRefusedAsync(session, $"tenant-{person}", "uuid");
+        (await editor.GetByTestId("error-panel").CountAsync()).ShouldBe(0, "a field's refusal is under the field");
         (await session.SnackbarCountAsync("tenant id")).ShouldBe(0, "an error is never a snackbar");
         (await Row(session, person).InnerTextAsync()).ShouldContain("no tenant");
     }
@@ -80,12 +115,14 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
 
         await confirm.GetByTestId("disable-person-cancel").ClickAsync();
         (await Row(session, person).InnerTextAsync()).ShouldNotContain("disabled");
+        await WaitForFocusOnRowAsync(session, person);
 
         await OpenAsync(session, person);
         await session.Dialog("person-editor").GetByTestId("person-disable").ClickAsync();
         await session.Dialog("disable-person").GetByTestId("disable-person-run").ClickAsync();
         await session.SnackbarAsync("Disabled leaver@example.com");
         await Row(session, person).Filter(new() { HasText = "disabled" }).WaitForAsync();
+        await WaitForFocusOnRowAsync(session, person);
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -107,6 +144,30 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
     }
 
     private static ILocator Row(AdminSession session, string id) => session.Page.Locator($"#person-{id}");
+
+    /// <summary>
+    /// Waits for a field refused in place (spec §3.3): marked invalid, described by the sentence that says why, and
+    /// holding focus.
+    /// </summary>
+    /// <param name="session">The signed-in session.</param>
+    /// <param name="id">The input's id.</param>
+    /// <param name="because">Part of the sentence under it.</param>
+    internal static async Task AssertFieldRefusedAsync(AdminSession session, string id, string because)
+    {
+        await session.Page.Locator($"#{id}[aria-invalid='true']").WaitForAsync();
+        await EditorScenarios.WaitForFocusOnAsync(session, id);
+        var description = await session.Page.EvaluateAsync<string>(
+            "id => (document.getElementById(id).getAttribute('aria-describedby') ?? '').split(' ')"
+            + ".map(part => document.getElementById(part)?.textContent ?? '').join(' ')", id);
+        description.ShouldContain(because);
+    }
+
+    /// <summary>Waits for focus to be on a person's row or inside it: where a confirm that closed hands it back.</summary>
+    private static async Task WaitForFocusOnRowAsync(AdminSession session, string id)
+        => await session.Page.WaitForFunctionAsync(
+            "id => { const row = document.getElementById(id); const at = document.activeElement;"
+            + " return !!row && !!at && at !== document.body && (at.contains(row) || row.contains(at)); }",
+            $"person-{id}");
 
     private static async Task OpenAsync(AdminSession session, string id)
     {

@@ -87,10 +87,12 @@
         else
         {
             <div class="a-stack a-stack--gap-3">
-                <MudTextField T="string" Value="_tenantText" ValueChanged="TypeTenant" Immediate="true"
-                              Variant="Variant.Outlined" Label="Tenant" id="@($"tenant-{Person.Id.Value}")"
-                              Class="a-mono" autocomplete="off" spellcheck="false"
+                <MudTextField @ref="_tenantField" T="string" Value="_tenantText" ValueChanged="TypeTenant" Immediate="true"
+                              Variant="Variant.Outlined" Label="Tenant" id="@TenantField" Class="a-mono"
+                              autocomplete="off" spellcheck="false"
+                              Error="@_fields.Has(TenantField)" aria-describedby="@_fields.DescribedBy(TenantField)"
                               HelperText="A tenant id (a uuid). One tenant, not a set: a tenant-scoped entity refuses a person with none before any rule runs." />
+                @_fields.Under(TenantField, () => _tenantField!.FocusAsync())
                 <div class="a-row a-row--gap-2">
                     <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true"
                                 id="@($"clear-tenant-{Person.Id.Value}")" Disabled="@(_draft.Tenant.Length == 0)"
@@ -106,6 +108,10 @@
     private PersonDraft _draft = new([], null);
     private string _tenantText = string.Empty;
     private AlvoUser? _opened;
+    private readonly FieldRefusals _fields = new();
+    private MudTextField<string>? _tenantField;
+
+    private string TenantField => $"tenant-{Person.Id.Value}";
 
     /// <summary>The person being edited, as the list last read them.</summary>
     [Parameter, EditorRequired]
@@ -169,6 +175,7 @@
             _opened = Person;
             _draft = new PersonDraft(Person.RoleNames, Person.Tenant?.Value.ToString());
             _tenantText = _draft.Tenant;
+            _fields.ClearAll();
         }
     }
 
@@ -177,6 +184,7 @@
     {
         _tenantText = text ?? string.Empty;
         _draft.SetTenant(_tenantText);
+        _fields.Clear(TenantField);
     }
 
     /// <summary>
@@ -185,12 +193,26 @@
     /// </summary>
     /// <remarks>
     /// Save stays enabled on a clean draft: Enter pressed straight after typing reaches the browser before the render
-    /// that would enable it, and implicit submission does nothing on a disabled default button.
+    /// that would enable it, and implicit submission does nothing on a disabled default button. A mistyped tenant is
+    /// refused here, under its field, before anything is written (spec §3.3).
     /// </remarks>
-    private Task SaveAsync() => !_draft.Dirty ? OnClose.InvokeAsync() : OnSave.InvokeAsync((
-        _draft.RolesChanged ? _draft.Roles : null,
-        _draft.TenantChanged && _draft.Tenant.Length > 0 ? _draft.Tenant : null,
-        _draft.TenantChanged && _draft.Tenant.Length == 0));
+    private Task SaveAsync()
+    {
+        if (!_draft.Dirty)
+        {
+            return OnClose.InvokeAsync();
+        }
+
+        var tenant = _draft.TenantChanged && _draft.Tenant.Length > 0 ? _draft.Tenant : null;
+        if (tenant is not null && !TenantId.TryParse(tenant, null, out _))
+        {
+            _fields.Refuse(TenantField, "That is not a tenant id. A tenant is a uuid: copy it from a row's tenant_id, or from the caller you are modelling.");
+            return Task.CompletedTask;
+        }
+
+        return OnSave.InvokeAsync((_draft.RolesChanged ? _draft.Roles : null, tenant,
+            _draft.TenantChanged && _draft.Tenant.Length == 0));
+    }
 
     /// <summary>Leaves the editor for <paramref name="next"/>, asking first when the draft holds unsaved changes.</summary>
     private Task LeaveForAsync(EventCallback next)
