@@ -304,6 +304,41 @@ public class WorkingCopyPendingTests
         copy.Loaded.ShouldBeFalse("the next screen to read it takes the head then");
     }
 
+    /// <summary>
+    /// A genuine race: an edit on one thread against a follow on another, many times over. Whichever wins, the edit is
+    /// never lost — the follow either took the head first and the edit landed on it, or saw the edit and refused.
+    /// </summary>
+    /// <remarks>
+    /// Injecting the edit exactly between the check and the take is impossible by construction: both run inside one
+    /// <c>Edit</c> step under the gate, and the only callback the copy raises (<c>Changed</c>) is raised after the gate is
+    /// released. So the test races the two calls instead; the check-then-take it replaced loses the edit within a few
+    /// hundred rounds.
+    /// </remarks>
+    [Fact]
+    public async Task An_edit_racing_a_follow_is_never_lost()
+    {
+        var cancel = TestContext.Current.CancellationToken;
+        for (var round = 0; round < 2000; round++)
+        {
+            var copy = Copy();
+            using var start = new Barrier(2);
+            var edit = Task.Run(() =>
+            {
+                start.SignalAndWait();
+                copy.AddEntity("invoices", scoped: false, audited: true);
+            }, cancel);
+            var follow = Task.Run(() =>
+            {
+                start.SignalAndWait();
+                copy.TakeIfUnedited(Descriptor, revision: 5);
+            }, cancel);
+
+            await Task.WhenAll(edit, follow);
+
+            copy.Entities.ShouldContain("invoices", $"round {round}: the follow discarded an edit");
+        }
+    }
+
     [Fact]
     public void An_applied_copy_starts_again_from_the_revision_it_wrote()
     {
@@ -311,11 +346,41 @@ public class WorkingCopyPendingTests
         copy.AddEntity("invoices", scoped: false, audited: true);
         var sent = copy.Json;
 
-        copy.TakeApplied(sent, sent, revision: 5).ShouldBeTrue();
+        copy.TakeApplied(sent, applied: 5, head: sent, headRevision: 5).ShouldBe(WorkingCopy.AppliedFollow.Restarted);
 
         copy.Revision.ShouldBe(5);
         copy.PendingCount.ShouldBe(0);
         copy.IsDirty.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void An_applied_copy_starts_again_from_a_head_somebody_moved_since()
+    {
+        var copy = Copy();
+        copy.AddEntity("invoices", scoped: false, audited: true);
+        var sent = copy.Json;
+        var later = Later(sent);
+
+        copy.TakeApplied(sent, applied: 5, head: later, headRevision: 6).ShouldBe(WorkingCopy.AppliedFollow.Restarted);
+
+        copy.Revision.ShouldBe(6, "the copy held nothing but what was sent, so it has nothing to lose to the newer head");
+        copy.IsDirty.ShouldBeFalse();
+        copy.Entities.ShouldContain("later");
+    }
+
+    [Fact]
+    public void A_discard_while_the_apply_was_on_the_wire_starts_again_rather_than_staging_a_revert()
+    {
+        var copy = Copy();
+        copy.AddEntity("invoices", scoped: false, audited: true);
+        var sent = copy.Json;
+        copy.Discard();
+
+        copy.TakeApplied(sent, applied: 5, head: sent, headRevision: 5).ShouldBe(WorkingCopy.AppliedFollow.Restarted);
+
+        copy.Revision.ShouldBe(5);
+        copy.IsDirty.ShouldBeFalse("a discarded copy holds no edits, so there is nothing to stage over the new revision");
+        copy.Entities.ShouldContain("invoices");
     }
 
     [Fact]
@@ -326,12 +391,33 @@ public class WorkingCopyPendingTests
         var sent = copy.Json;
         copy.AddEntity("tickets", scoped: false, audited: true);
 
-        copy.TakeApplied(sent, sent, revision: 5).ShouldBeFalse(
-            "another tab staged tickets after the send; restarting the copy would discard it");
+        copy.TakeApplied(sent, applied: 5, head: sent, headRevision: 5).ShouldBe(
+            WorkingCopy.AppliedFollow.Rebased, "another tab staged tickets after the send; restarting would discard it");
 
         copy.Revision.ShouldBe(5, "everything else in the copy is what revision 5 holds");
         copy.Entities.ShouldContain("tickets");
         copy.PendingCount.ShouldBe(1, "only tickets is left to apply");
+    }
+
+    [Theory]
+    [InlineData(6, true)]
+    [InlineData(5, false)]
+    public void A_late_edit_over_a_head_that_is_not_the_revision_just_written_keeps_the_old_base(int headRevision, bool sameDocument)
+    {
+        var copy = Copy();
+        var before = copy.AppliedJson;
+        copy.AddEntity("invoices", scoped: false, audited: true);
+        var sent = copy.Json;
+        copy.AddEntity("tickets", scoped: false, audited: true);
+        var head = sameDocument ? sent : Later(sent);
+
+        copy.TakeApplied(sent, applied: 5, head, headRevision).ShouldBe(
+            WorkingCopy.AppliedFollow.Kept,
+            "rebasing onto somebody else's revision would stage a silent revert of it and pass If-Match");
+
+        copy.Revision.ShouldBe(4, "the next apply is refused as a conflict, which is the honest answer");
+        copy.AppliedJson.ShouldBe(before);
+        copy.Entities.ShouldContain("tickets");
     }
 
     [Fact]
@@ -344,6 +430,14 @@ public class WorkingCopyPendingTests
         copy.AddEntity("invoices", scoped: false, audited: true);
 
         seen.ShouldBe(1, "a handler redraws from the count, so it must be taken before the event");
+    }
+
+    /// <summary><paramref name="descriptor"/> with one more entity: a revision somebody else applied on top of it.</summary>
+    private static string Later(string descriptor)
+    {
+        var later = JsonNode.Parse(descriptor)!.AsObject();
+        later["entities"]!.AsObject()["later"] = new JsonObject { ["fields"] = new JsonObject { ["code"] = Facets() } };
+        return later.ToJsonString();
     }
 
     private static WorkingCopy Copy()

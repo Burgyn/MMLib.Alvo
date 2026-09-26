@@ -211,7 +211,21 @@ public partial class Entity
     }
 
     /// <summary>The open tab's position in the strip.</summary>
-    private int ActiveIndex => EntityTabs.All.ToList().IndexOf(_tab);
+    private int ActiveIndex
+    {
+        get
+        {
+            for (var index = 0; index < EntityTabs.All.Count; index++)
+            {
+                if (EntityTabs.All[index] == _tab)
+                {
+                    return index;
+                }
+            }
+
+            return -1;
+        }
+    }
 
     /// <summary>An entity only the working copy declares, read again from it — gone once it is discarded.</summary>
     private void ReadPendingEntity()

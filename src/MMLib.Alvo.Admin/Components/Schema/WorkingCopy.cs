@@ -221,39 +221,76 @@ internal sealed partial class WorkingCopy
         return true;
     });
 
+    /// <summary>What <see cref="TakeApplied"/> did with the copy.</summary>
+    public enum AppliedFollow
+    {
+        /// <summary>The copy held nothing of the operator's beyond what was applied, and started again from the head.</summary>
+        Restarted,
+
+        /// <summary>An edit landed after the send; it stays staged, over the revision the apply wrote.</summary>
+        Rebased,
+
+        /// <summary>An edit landed after the send and the head is not what the apply wrote; nothing moved.</summary>
+        Kept,
+    }
+
     /// <summary>
-    /// Takes the revision an apply of <paramref name="sentJson"/> wrote. The copy starts again from it, unless an edit
-    /// landed after the send: that edit stays staged, now over the revision just written.
+    /// Follows an apply of <paramref name="sentJson"/> that wrote revision <paramref name="applied"/>, given the head as
+    /// read afterwards.
     /// </summary>
     /// <remarks>
-    /// <b>Asked and taken in one step under the gate</b>, for <see cref="TakeIfUnloaded"/>'s reason: an edit another
-    /// tab staged while the apply was on the wire is not in the revision, and a plain take would discard it. Its base
-    /// moves to the new revision, because everything else in the copy is what that revision holds.
+    /// <para>
+    /// <b>Decided and done in one step under the gate</b>, for <see cref="TakeIfUnloaded"/>'s reason: another tab of the
+    /// operator can edit or discard the copy while the apply is on the wire. In this order:
+    /// </para>
+    /// <list type="number">
+    /// <item>The copy still holds what was sent, or holds no edits against its old base (a discard landed): it starts
+    /// again from the head, because nothing in it is the operator's beyond what was applied.</item>
+    /// <item>An edit landed, and the head is exactly what the apply wrote: the edit stays staged, and only the base moves,
+    /// because everything else in the copy is what that revision holds.</item>
+    /// <item>An edit landed, and somebody applied after us: nothing moves. Rebasing onto their revision would stage a
+    /// silent revert of it that <c>If-Match</c> then lets through; left on the old base, the next apply is refused as a
+    /// conflict, which is the honest answer.</item>
+    /// </list>
     /// </remarks>
     /// <param name="sentJson">The working document the apply sent.</param>
-    /// <param name="descriptorJson">The descriptor as stored after the apply.</param>
-    /// <param name="revision">The revision the apply wrote.</param>
-    /// <returns><see langword="true"/> when the copy started again; <see langword="false"/> when an edit was kept.</returns>
-    public bool TakeApplied(string sentJson, string descriptorJson, int revision)
+    /// <param name="applied">The revision the apply wrote.</param>
+    /// <param name="head">The applied descriptor as read after the apply.</param>
+    /// <param name="headRevision">The revision <paramref name="head"/> is at.</param>
+    /// <returns>What happened to the copy.</returns>
+    public AppliedFollow TakeApplied(string sentJson, int applied, string head, int headRevision)
     {
-        var fresh = false;
+        var follow = AppliedFollow.Kept;
         Edit(_ =>
         {
-            fresh = _working is null || string.Equals(_working.ToJsonString(_pretty), sentJson, StringComparison.Ordinal);
-            if (fresh)
+            follow = FollowFor(sentJson, applied, head, headRevision);
+            if (follow == AppliedFollow.Restarted)
             {
-                Load(descriptorJson, revision);
+                Load(head, headRevision);
             }
-            else
+            else if (follow == AppliedFollow.Rebased)
             {
-                _applied = JsonNode.Parse(descriptorJson);
-                Revision = revision;
+                _applied = JsonNode.Parse(head);
+                Revision = headRevision;
             }
 
-            return true;
+            return follow != AppliedFollow.Kept;
         });
 
-        return fresh;
+        return follow;
+    }
+
+    /// <summary>Which of <see cref="TakeApplied"/>'s three answers applies. Under the gate.</summary>
+    private AppliedFollow FollowFor(string sentJson, int applied, string head, int headRevision)
+    {
+        if (_working is null || !IsDirty || string.Equals(_working.ToJsonString(_pretty), sentJson, StringComparison.Ordinal))
+        {
+            return AppliedFollow.Restarted;
+        }
+
+        return headRevision == applied && JsonNode.DeepEquals(JsonNode.Parse(head), JsonNode.Parse(sentJson))
+            ? AppliedFollow.Rebased
+            : AppliedFollow.Kept;
     }
 
     /// <summary>Discards every unapplied edit.</summary>

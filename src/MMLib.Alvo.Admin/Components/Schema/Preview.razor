@@ -323,7 +323,7 @@
         try
         {
             var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
-            Copy.TakeApplied(sent, descriptor.DescriptorJson, descriptor.Revision);
+            Copy.TakeApplied(sent, result.Revision, descriptor.DescriptorJson, descriptor.Revision);
         }
         catch (Exception exception)
         {

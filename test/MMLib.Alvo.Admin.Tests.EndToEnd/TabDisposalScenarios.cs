@@ -11,11 +11,19 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// disposal, and a screen that followed that index navigated from a page that was going away.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The fault is the server's, not the browser's: a prerendered page's disposal threw a <see cref="NavigationException"/>
 /// that Kestrel logged, and a disposed circuit logged "Navigation failed". So the world keeps the host's navigation
 /// errors, and the facts assert there are none after a prerender, an in-app move away, and a closed tab. Each opens a
 /// tab other than the first, because the index the removal moves to is the first one, and a screen already there had
 /// nothing to follow.
+/// </para>
+/// <para>
+/// <b>The Rules case reproduces; the Schema cases are guards.</b> Against Rules' old <c>ActivePanelIndexChanged</c>
+/// binding the Rules case failed on the <see cref="NavigationException"/> it logged. Against the entity screen's old
+/// binding the two Schema cases passed: its disposal did not throw in this suite. It was moved to the same binding for
+/// the same library path, and these cases keep it there; they have not been seen to fail.
+/// </para>
 /// </remarks>
 /// <param name="world">A host whose navigation errors are kept.</param>
 public sealed class TabDisposalScenarios(NavigationLogWorld world) : IClassFixture<NavigationLogWorld>
