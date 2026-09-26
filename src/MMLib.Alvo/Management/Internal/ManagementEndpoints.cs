@@ -663,6 +663,12 @@ internal static class ManagementEndpoints
         {
             return ProblemResultFactory.PreconditionFailed(refusal.Message);
         }
+        catch (Data.AlvoPreconditionFailedException refusal)
+        {
+            /* A user write that lost a race to another administrator's. The same exception the Data API
+               answers 412 for, minted the same way: one exception type, one classification. */
+            return ProblemResultFactory.PreconditionFailed(refusal.Message);
+        }
         catch (DestructiveChangeNotAllowedException refusal)
         {
             return ProblemResultFactory.DestructiveChange(

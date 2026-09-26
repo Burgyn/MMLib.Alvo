@@ -18,6 +18,12 @@ namespace MMLib.Alvo.Identity.Internal;
 /// It is registered under <see cref="AlvoUserAdministration.UnguardedKey"/> precisely so that
 /// nothing but that decorator can resolve it.
 /// </para>
+/// <para>
+/// <b>Every write is its own unit of work</b> through <see cref="AlvoIdentityUnitOfWork"/>, and a write
+/// that lost a race to another administrator's is refused as
+/// <see cref="MMLib.Alvo.Data.AlvoPreconditionFailedException"/> — never as a raw EF exception, and
+/// never leaving rows behind for the next write to trip over.
+/// </para>
 /// </remarks>
 /// <param name="users">Identity's user manager over the Alvo identity store.</param>
 /// <param name="roles">Identity's role manager, for the rows a membership needs.</param>
@@ -71,11 +77,16 @@ internal sealed class AlvoIdentityUserAdministration(
     }
 
     /// <inheritdoc/>
-    public async Task<AlvoUser> CreateAsync(
+    public Task<AlvoUser> CreateAsync(
         AlvoUserCreation creation, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(creation);
+        return AlvoIdentityUnitOfWork.RunAsync(store, () => CreateRowAsync(creation));
+    }
 
+    /// <inheritdoc cref="CreateAsync"/>
+    private async Task<AlvoUser> CreateRowAsync(AlvoUserCreation creation)
+    {
         var row = new AlvoIdentityUser
         {
             Id = Guid.CreateVersion7(),
@@ -101,11 +112,16 @@ internal sealed class AlvoIdentityUserAdministration(
     }
 
     /// <inheritdoc/>
-    public async Task<AlvoUser> SetRolesAsync(
+    public Task<AlvoUser> SetRolesAsync(
         UserId user, IReadOnlyList<string> roleNames, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(roleNames);
+        return AlvoIdentityUnitOfWork.RunAsync(store, () => ReplaceRolesAsync(user, roleNames));
+    }
 
+    /// <inheritdoc cref="SetRolesAsync"/>
+    private async Task<AlvoUser> ReplaceRolesAsync(UserId user, IReadOnlyList<string> roleNames)
+    {
         var row = await RequireAsync(user).ConfigureAwait(false);
         var existing = await users.GetRolesAsync(row).ConfigureAwait(false);
 
@@ -120,29 +136,34 @@ internal sealed class AlvoIdentityUserAdministration(
     }
 
     /// <inheritdoc/>
-    public async Task<AlvoUser> SetTenantAsync(
+    public Task<AlvoUser> SetTenantAsync(
         UserId user, TenantId? tenant, CancellationToken cancellationToken = default)
-    {
-        var row = await RequireAsync(user).ConfigureAwait(false);
-        row.TenantId = tenant?.Value;
-        Succeeded(await users.UpdateAsync(row).ConfigureAwait(false), user.ToString());
-        return await ProjectAsync(row).ConfigureAwait(false);
-    }
+        => AlvoIdentityUnitOfWork.RunAsync(store, async () =>
+        {
+            var row = await RequireAsync(user).ConfigureAwait(false);
+            row.TenantId = tenant?.Value;
+            Succeeded(await users.UpdateAsync(row).ConfigureAwait(false), user.ToString());
+            return await ProjectAsync(row).ConfigureAwait(false);
+        });
 
     /// <inheritdoc/>
-    public async Task<AlvoUser> SetDisabledAsync(
+    public Task<AlvoUser> SetDisabledAsync(
         UserId user, bool disabled, CancellationToken cancellationToken = default)
+        => AlvoIdentityUnitOfWork.RunAsync(store, () => WriteDisabledAsync(user, disabled));
+
+    /// <inheritdoc cref="SetDisabledAsync"/>
+    private async Task<AlvoUser> WriteDisabledAsync(UserId user, bool disabled)
     {
         var row = await RequireAsync(user).ConfigureAwait(false);
 
-        /* A lockout with no end is what "disabled" means here, and the resolver reads exactly that:
-           it answers null for a user whose LockoutEnd is in the future. DateTimeOffset.MaxValue is
-           Identity's own idiom for "indefinitely". */
+        /* A lockout with no end is what "disabled" means here, and the resolver reads exactly that
+           through AlvoIdentityLockout — which also says why a lockout *with* an end, the one failed
+           sign-ins write, is deliberately not read as disabled. */
         Succeeded(
             await users.SetLockoutEnabledAsync(row, enabled: true).ConfigureAwait(false),
             user.ToString());
         Succeeded(
-            await users.SetLockoutEndDateAsync(row, disabled ? DateTimeOffset.MaxValue : null)
+            await users.SetLockoutEndDateAsync(row, disabled ? AlvoIdentityLockout.Disabled : null)
                 .ConfigureAwait(false),
             user.ToString());
 
@@ -150,8 +171,12 @@ internal sealed class AlvoIdentityUserAdministration(
     }
 
     /// <inheritdoc/>
-    public async Task<AlvoCredentialToken> IssueCredentialTokenAsync(
+    public Task<AlvoCredentialToken> IssueCredentialTokenAsync(
         UserId user, CancellationToken cancellationToken = default)
+        => AlvoIdentityUnitOfWork.RunAsync(store, () => MintCredentialTokenAsync(user));
+
+    /// <inheritdoc cref="IssueCredentialTokenAsync"/>
+    private async Task<AlvoCredentialToken> MintCredentialTokenAsync(UserId user)
     {
         var row = await RequireAsync(user).ConfigureAwait(false);
         var token = await users.GeneratePasswordResetTokenAsync(row).ConfigureAwait(false);
@@ -212,7 +237,7 @@ internal sealed class AlvoIdentityUserAdministration(
         Id = new UserId(row.Id),
         Email = row.Email ?? row.UserName ?? string.Empty,
         RoleNames = [.. await users.GetRolesAsync(row).ConfigureAwait(false)],
-        IsDisabled = row.LockoutEnd is { } until && until > DateTimeOffset.UtcNow,
+        IsDisabled = AlvoIdentityLockout.IsDisabled(row.LockoutEnd),
         Tenant = row.TenantId is { } tenant ? new TenantId(tenant) : null,
     };
 
@@ -223,6 +248,7 @@ internal sealed class AlvoIdentityUserAdministration(
             return;
         }
 
+        AlvoIdentityUnitOfWork.ThrowIfRaced(result);
         var reasons = string.Join("; ", result.Errors.Select(error => error.Description));
         throw new InvalidOperationException($"The account '{who}' could not be written: {reasons}");
     }

@@ -10,13 +10,14 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// <para>
 /// <b>Found by running the thing, not by reading it.</b> A cookie survives the database that issued
 /// it, so a developer who deletes the SQLite file and restarts — which is the ordinary inner loop —
-/// comes back to a dashboard that renders its whole chrome and refuses every screen. The refusal is
-/// correct; what was missing was any way out of it, because the only sign-out control lives in the
-/// shell's account menu, around the screen rather than on it.
+/// came back to a dashboard that rendered its whole chrome and refused every screen, with the only
+/// sign-out control in the shell's account menu. The cookie is now re-checked against the store on
+/// every request, so that page load lands on sign-in instead; the refusal's own way out is still
+/// pinned, by <see cref="OpenCircuitRevocationScenarios"/>, where a tab that is already open meets it.
 /// </para>
 /// <para>
 /// This scenario reaches the same state the supported way — disabling the operator — and asserts
-/// both halves: the refusal is rendered, and it carries the control that resolves it.
+/// that the next page load does not render the shell at all.
 /// </para>
 /// <para>
 /// <b>Its own world, and it ends by locking that world out.</b> Disabling the bootstrap
@@ -28,21 +29,19 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 public sealed class RevokedSessionScenarios(AdminWorld world) : IClassFixture<AdminWorld>
 {
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task A_session_whose_account_is_gone_is_offered_the_way_out()
+    public async Task A_session_whose_account_is_disabled_lands_on_sign_in_at_its_next_page_load()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("");
 
         await SetOperatorDisabledAsync(world, disabled: true);
 
-        await session.GoAsync("");
-        await session.Page.GetByText("not allowed").First.WaitForAsync();
-
-        var exit = session.Page.Locator("[data-testid='forbidden-sign-out']");
-        (await exit.CountAsync()).ShouldBeGreaterThan(0, "a refusal with no control on the screen is a dead end");
-
-        await exit.First.ClickAsync();
+        /* A reload rather than GoAsync: that one waits for the shell to settle, and the point is that
+           there is no shell to settle. */
+        await session.Page.ReloadAsync();
         await session.Page.WaitForURLAsync("**/admin/sign-in**");
+        (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(
+            0, "a disabled operator's cookie is refused before the shell renders, not answered with a refused screen");
     }
 
     /// <summary>
@@ -89,6 +88,12 @@ public sealed class RevokedSessionScenarios(AdminWorld world) : IClassFixture<Ad
 /// operator out; it restores them only to read the revision back.
 /// </para>
 /// <para>
+/// <b>It also carries the refusal's way out</b>, which used to be pinned on a page load: the error
+/// panel offers sign-out, because the shell's own control is in the account menu around the screen.
+/// The circuit's authentication state is re-checked every thirty seconds, so this relies on the
+/// click landing well inside that window after the circuit opened — seconds, in practice.
+/// </para>
+/// <para>
 /// No tenant-move twin here: the bootstrap administrator is authorized above the descriptor whatever
 /// tenant they hold, so a move changes nothing an Apply could show. The tenant half is pinned at the
 /// store and the resolver, in <c>AlvoIdentityLongLivedScopeTests</c>.
@@ -118,8 +123,13 @@ public sealed class OpenCircuitRevocationScenarios(AdminWorld world) : IClassFix
         await session.Page.GetByTestId("error-panel").Or(applied).First.WaitForAsync();
         (await applied.CountAsync()).ShouldBe(0, "a disabled operator's apply must be refused, not written");
         await session.Page.GetByTestId("error-panel").WaitForAsync();
+        var exit = session.Page.Locator("[data-testid='forbidden-sign-out']");
+        (await exit.CountAsync()).ShouldBeGreaterThan(0, "a refusal with no control on the screen is a dead end");
+
         await RevokedSessionScenarios.SetOperatorDisabledAsync(world, disabled: false);
         (await CurrentRevisionAsync()).ShouldBe(before, "the refused apply must not have appended a revision");
+        await exit.First.ClickAsync();
+        await session.Page.WaitForURLAsync("**/admin/sign-in**");
     }
 
     /// <summary>

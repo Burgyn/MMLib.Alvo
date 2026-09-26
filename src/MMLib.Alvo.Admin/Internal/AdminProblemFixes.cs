@@ -64,6 +64,8 @@ internal static class AdminProblemFixes
         ManagementEscalationException => "Another administrator can make this change, or the access block can, through an apply — which records who made it.",
         ManagementForbiddenException => "Administering people is an admin operation. Your management level is lower.",
         NotSupportedException => "This deployment's membership store does not support that operation.",
+        AlvoPreconditionFailedException
+            => "Somebody changed this person in another tab or session. Reload the list to see them as they are now, then make the change again.",
         _ => null,
     };
 

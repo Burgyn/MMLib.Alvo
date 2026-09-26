@@ -125,19 +125,37 @@ public sealed class AlvoIdentityUserStoreTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// <b>A locked-out operator must not resolve as enabled.</b> <c>IsDisabled</c> is what the cookie
-    /// resolver refuses on, so this is the field the descriptor's <c>access</c> enforcement reads.
+    /// <b>A disabled operator must not resolve as enabled.</b> <c>IsDisabled</c> is what the cookie
+    /// resolver refuses on, and a disable is a lockout with no end — <see cref="DateTimeOffset.MaxValue"/>,
+    /// which is what <c>SetDisabledAsync</c> writes.
     /// </summary>
     [Fact]
-    public async Task A_locked_out_account_projects_as_disabled()
+    public async Task A_disabled_account_projects_as_disabled()
     {
         var id = await CreateAsync("eva@example.test");
-        await LockOutAsync(id);
+        await LockOutAsync(id, DateTimeOffset.MaxValue);
         var store = Services.GetRequiredService<IAlvoUserStore>();
 
         var user = await store.FindAsync(id, TestContext.Current.CancellationToken);
 
         user.ShouldNotBeNull().IsDisabled.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// <b>A temporary lockout is not a disable.</b> Failed sign-ins lock an account for minutes, and
+    /// anyone who knows the address can cause that; reading it as <c>IsDisabled</c> turned five wrong
+    /// passwords into revoking somebody else's open session. Identity still refuses the sign-in.
+    /// </summary>
+    [Fact]
+    public async Task A_temporarily_locked_out_account_does_not_project_as_disabled()
+    {
+        var id = await CreateAsync("eva@example.test");
+        await LockOutAsync(id, DateTimeOffset.UtcNow.AddHours(1));
+        var store = Services.GetRequiredService<IAlvoUserStore>();
+
+        var user = await store.FindAsync(id, TestContext.Current.CancellationToken);
+
+        user.ShouldNotBeNull().IsDisabled.ShouldBeFalse();
     }
 
     /// <summary>The listing is the administration screen's source, so it holds everyone.</summary>
@@ -185,14 +203,15 @@ public sealed class AlvoIdentityUserStoreTests : IAsyncLifetime
         return new UserId(user.Id);
     }
 
-    /// <summary>Bars an account from signing in, the way the administration screen will.</summary>
+    /// <summary>Bars an account from signing in until <paramref name="until"/>.</summary>
     /// <param name="id">The account to lock out.</param>
-    private async Task LockOutAsync(UserId id)
+    /// <param name="until">When the lockout ends; <see cref="DateTimeOffset.MaxValue"/> is a disable.</param>
+    private async Task LockOutAsync(UserId id, DateTimeOffset until)
     {
         var users = Services.GetRequiredService<UserManager<AlvoIdentityUser>>();
         var user = (await users.FindByIdAsync(id.Value.ToString())).ShouldNotBeNull();
 
         (await users.SetLockoutEnabledAsync(user, true)).Succeeded.ShouldBeTrue();
-        (await users.SetLockoutEndDateAsync(user, DateTimeOffset.UtcNow.AddHours(1))).Succeeded.ShouldBeTrue();
+        (await users.SetLockoutEndDateAsync(user, until)).Succeeded.ShouldBeTrue();
     }
 }

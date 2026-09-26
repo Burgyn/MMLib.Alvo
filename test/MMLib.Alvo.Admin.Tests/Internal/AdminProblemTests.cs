@@ -139,6 +139,18 @@ public class AdminProblemTests
     }
 
     [Fact]
+    public void A_person_changed_elsewhere_is_a_refusal_that_says_to_reload()
+    {
+        var stale = new AlvoPreconditionFailedException("Somebody else changed this person.");
+
+        var problem = AdminProblem.From(stale, ProblemSite.People)!;
+
+        problem.IsFault.ShouldBeFalse("a lost race is a documented refusal, not an error the operator cannot act on");
+        problem.Detail.ShouldBe("Somebody else changed this person.");
+        problem.Fix.ShouldNotBeNull().ShouldContain("Reload");
+    }
+
+    [Fact]
     public void A_fault_is_logged_as_an_error_with_its_exception()
     {
         var logger = new RecordingLogger();

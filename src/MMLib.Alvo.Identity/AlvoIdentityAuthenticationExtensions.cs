@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Identity.Internal;
@@ -33,6 +34,13 @@ public static class AlvoIdentityAuthenticationExtensions
     /// The unauthenticated redirect goes to <paramref name="signInPath"/> and the caller supplies
     /// it, because the screen belongs to whoever is rendering one — <c>MMLib.Alvo.Admin</c> in the
     /// standalone image, the host's own page in an embedded one.
+    /// </para>
+    /// <para>
+    /// <b>A session is re-checked, not trusted for its eight hours.</b> The cookie is re-validated
+    /// against the store on every request, and a Blazor circuit's authentication state every thirty
+    /// seconds; a disabled or deleted account's cookie is rejected and cleared, and its open tab drops
+    /// to sign-in. See <c>AlvoSessionValidation</c> and
+    /// <c>AlvoIdentityRevalidatingAuthenticationStateProvider</c> for why each exists.
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into.</param>
@@ -71,7 +79,13 @@ public static class AlvoIdentityAuthenticationExtensions
                 cookie.Cookie.SecurePolicy = Microsoft.AspNetCore.Http.CookieSecurePolicy.SameAsRequest;
                 cookie.SlidingExpiration = true;
                 cookie.ExpireTimeSpan = TimeSpan.FromHours(8);
+                cookie.Events.OnValidatePrincipal = AlvoSessionValidation.ValidateCookieAsync;
             });
+
+        /* The circuit's half of the same re-check. Added, not tried: AddRazorComponents registers
+           its plain provider with TryAdd, so this wins whichever of the two a host calls first, and
+           the last registration is the one the container hands out. */
+        services.AddScoped<AuthenticationStateProvider, AlvoIdentityRevalidatingAuthenticationStateProvider>();
 
         services.AddAuthorization();
 

@@ -66,11 +66,22 @@ internal sealed class AlvoIdentityUserStore(
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// Its own unit of work on the scope's context, for the reason <see cref="AlvoIdentityUnitOfWork"/>
+    /// gives: a write left tracked is the copy the next write from a long-lived scope is made against.
+    /// </remarks>
     public async ValueTask SetRolesAsync(
         UserId user, IReadOnlyList<string> roleNames, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(roleNames);
 
+        await AlvoIdentityUnitOfWork.RunAsync(store, () => ReplaceRolesAsync(user, roleNames))
+            .ConfigureAwait(false);
+    }
+
+    /// <inheritdoc cref="SetRolesAsync"/>
+    private async Task<bool> ReplaceRolesAsync(UserId user, IReadOnlyList<string> roleNames)
+    {
         var stored = await users.FindByIdAsync(user.Value.ToString()).ConfigureAwait(false)
             ?? throw new InvalidOperationException($"No user with id '{user}' is stored.");
 
@@ -84,6 +95,7 @@ internal sealed class AlvoIdentityUserStore(
             await users.AddToRolesAsync(stored, roleNames.Except(current, StringComparer.Ordinal))
                 .ConfigureAwait(false),
             user);
+        return true;
     }
 
     /// <summary>
@@ -100,6 +112,7 @@ internal sealed class AlvoIdentityUserStore(
     /// <param name="result">What Identity said.</param>
     /// <param name="user">The user whose memberships were being replaced.</param>
     /// <exception cref="InvalidOperationException">The change was refused.</exception>
+    /// <exception cref="MMLib.Alvo.Data.AlvoPreconditionFailedException">Somebody else wrote the user in between.</exception>
     private static void Succeeded(IdentityResult result, UserId user)
     {
         if (result.Succeeded)
@@ -107,6 +120,7 @@ internal sealed class AlvoIdentityUserStore(
             return;
         }
 
+        AlvoIdentityUnitOfWork.ThrowIfRaced(result);
         var reasons = string.Join("; ", result.Errors.Select(error => error.Description));
         throw new InvalidOperationException(
             $"The role memberships of user '{user}' could not be replaced: {reasons}");
@@ -121,7 +135,7 @@ internal sealed class AlvoIdentityUserStore(
             Id = new UserId(stored.Id),
             Email = stored.Email ?? stored.UserName ?? string.Empty,
             RoleNames = [.. await users.GetRolesAsync(stored).ConfigureAwait(false)],
-            IsDisabled = stored.LockoutEnd is { } until && until > DateTimeOffset.UtcNow,
+            IsDisabled = AlvoIdentityLockout.IsDisabled(stored.LockoutEnd),
             Tenant = stored.TenantId is { } tenant ? new TenantId(tenant) : null,
         };
 }
