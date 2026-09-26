@@ -46,6 +46,9 @@ public partial class Entity
     private bool _editorOpen;
     private bool _pending;
 
+    /// <summary>The field this screen added last, which its list scrolls to and lights (spec §3.5).</summary>
+    private Arrival _arrived = Arrival.None;
+
     /// <summary>The entity's name, from the route.</summary>
     [Parameter]
     public string EntityName { get; set; } = string.Empty;
@@ -357,6 +360,7 @@ public partial class Entity
         else
         {
             Copy.AddField(EntityName, added.Name, added.Facets);
+            _arrived = new Arrival(added.Name, _arrived.Attempt + 1);
         }
 
         if (!added.KeepOpen)

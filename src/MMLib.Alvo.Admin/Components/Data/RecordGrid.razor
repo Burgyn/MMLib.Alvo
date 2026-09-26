@@ -51,7 +51,7 @@
                 @foreach (var (row, index) in Scope.Page.Items.Select((row, index) => (row, index)))
                 {
                     <tr class="a-grid__row" data-testid="grid-row" tabindex="-1"
-                        aria-selected="@(index == selected ? "true" : null)"
+                        aria-selected="@(index == selected ? "true" : null)" data-alvo-new="@Arrived(row)"
                         @onclick="() => OpenAsync(index)">
                         @foreach (var column in Scope.Columns)
                         {
@@ -79,7 +79,7 @@
 <div class="a-grid-wrap a-only-mobile-block">
     @foreach (var row in Scope.Page.Items)
     {
-        <div class="a-row-card" data-testid="row-card">
+        <div class="a-row-card" data-testid="row-card" data-alvo-new="@Arrived(row)">
             <div class="a-row-card__head">
                 <span class="a-row-card__title">@CardTitle(row)</span>
                 <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true"
@@ -274,6 +274,12 @@
     private void Select(int? index) => _selected = index is { } at ? IdOf(Scope.Page.Items[at]) : null;
 
     private static Guid? IdOf(AlvoRecord row) => RefLabels.IdOf(row[AlvoManagedColumns.Id]);
+
+    /// <summary>
+    /// The wash on the record the operator just created, the one every created item gets (spec §3.5); the grid also
+    /// selects it, so <c>j</c>/<c>k</c> go on from there.
+    /// </summary>
+    private string? Arrived(AlvoRecord row) => Scope.Created is { } created && IdOf(row) == created ? "true" : null;
 
     /// <summary><c>j</c> or <c>k</c>: moves the selection, then focuses the row once it is drawn as selected.</summary>
     private Task OnMove(string? direction) => InvokeAsync(() =>

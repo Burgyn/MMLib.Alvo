@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Components.Routing;
+using MMLib.Alvo.Admin.Components.DesignSystem;
 using MMLib.Alvo.Admin.Components.Rules;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
@@ -35,7 +36,7 @@ public partial class Entity
 
     /// <summary>
     /// A move to another entity forgets this one's drafts: they are typed against its rules, and the question on the
-    /// way out has already been answered.
+    /// way out has already been answered. It forgets the field this screen added last too.
     /// </summary>
     private void ForgetOtherEntitysRules()
     {
@@ -43,6 +44,8 @@ public partial class Entity
         {
             _ruleDrafts.Clear();
             _draftsFor = EntityName;
+            /* A field added on the last entity is no arrival on this one. */
+            _arrived = Arrival.None;
         }
     }
 

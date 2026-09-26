@@ -311,6 +311,7 @@ public sealed class RecordPlacementScenarios(AdminWorld world) : IClassFixture<A
         await session.Page.GetByTestId("grid-row").And(session.Page.Locator("[aria-selected='true']"))
             .Filter(new() { HasText = "PLACED" }).WaitForAsync();
         await session.Page.WaitForFunctionAsync(InView, await created.ElementHandleAsync(), _polling);
+        (await created.GetAttributeAsync("data-alvo-new")).ShouldBe("true", "lit as every created item is (final review M3)");
         session.AssertConsoleClean();
     }
 

@@ -78,7 +78,10 @@ and the e2e suite asserts that things render, not that they behave.
    (no double submit anywhere); Cancel stays enabled. On open, focus lands on the first field; on close it returns to
    the trigger. After a submit the input the operator typed into is **cleared** when it was a message/command
    (assistant, search-and-go), kept when it was a form value.
-5. **Lists and new items.** A created item appears **in place and is scrolled to and highlighted**; a list that grows
+5. **Lists and new items.** A created item appears **in place and is scrolled to and highlighted**: one treatment on
+   every list (amended 26 Sep, final review M3) — `RevealOnRender` scrolls it into view and the `data-alvo-new` wash
+   lights it, for a field, an index, a hook, a person and a record alike; the Data grid also *selects* the record, so
+   `j`/`k` go on from it. A created entity opens its own screen, which is its reveal. A list that grows
    while the operator watches (the assistant thread, a log) **follows the newest item** unless the operator has
    scrolled up.
 6. **Loading, empty, error.** `MudSkeleton` for known-shape content; `MudProgressLinear` at the top of a pane for a

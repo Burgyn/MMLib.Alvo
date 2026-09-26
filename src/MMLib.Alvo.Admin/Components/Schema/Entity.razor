@@ -131,7 +131,9 @@
                         @* The staged rows' badges reach the tabs as a cascade, which keeps their model internal. *@
                         <CascadingValue Value="_staged">
                             <CascadingValue Value="_ruleDrafts">
-                                <Panel data-testid="entity-tabpanel">@TabContent(tab)</Panel>
+                                <CascadingValue Value="_arrived">
+                                    <Panel data-testid="entity-tabpanel">@TabContent(tab)</Panel>
+                                </CascadingValue>
                             </CascadingValue>
                         </CascadingValue>
                     }
