@@ -19,7 +19,8 @@ public sealed partial class PatternLanguageTests
     [Fact]
     public void Every_refusal_is_the_titled_error_panel()
         => Components()
-            .Where(file => file.Name != "DesignSystem/ErrorPanel.razor" && ErrorAlert().IsMatch(file.Source))
+            .Where(file => file.Name != "DesignSystem/ErrorPanel.razor" && Tags(file.Source, "AlvoAlert")
+                .Any(tag => tag.GetValueOrDefault("Tone", string.Empty).Contains("AlertTone.Error", StringComparison.Ordinal)))
             .Select(file => file.Name)
             .ShouldBeEmpty("a refusal is an ErrorPanel with a Title, which is what says what could not be done");
 
@@ -30,7 +31,7 @@ public sealed partial class PatternLanguageTests
     [Fact]
     public void No_screen_keys_a_refusal_panel_by_hand()
         => Components()
-            .Where(file => KeyedPanel().IsMatch(file.Source))
+            .Where(file => Tags(file.Source, "ErrorPanel").Any(tag => tag.ContainsKey("@key")))
             .Select(file => file.Name)
             .ShouldBeEmpty("a refusal is drawn by RefusalPanel.Of, which keys it per attempt");
 
@@ -42,10 +43,68 @@ public sealed partial class PatternLanguageTests
     [Fact]
     public void Every_editor_submit_says_what_its_kind_of_edit_does()
         => Editors()
-            .SelectMany(editor => Literals(editor.Attributes.GetValueOrDefault("SubmitText") ?? string.Empty)
-                .Where(text => !_submitWords.Contains(text))
-                .Select(text => $"{editor.File}: \"{text}\""))
+            .SelectMany(editor => editor.Attributes.TryGetValue("SubmitText", out var submit)
+                ? Literals(submit).Where(text => !_submitWords.Contains(text)).Select(text => $"{editor.File}: \"{text}\"")
+                : [$"{editor.File}: no SubmitText"])
             .ShouldBeEmpty($"a submit says one of: {string.Join(", ", _submitWords)}");
+
+    /// <summary>
+    /// Enter submits every single-line form (spec §3.4; batch-B re-review N3): a single-line box is in a form (its own,
+    /// or an editor's, whose fields a component with an <c>AlvoEditor</c> draws), unless it is a search over a list,
+    /// which is named by an <c>aria-label</c> saying what it filters or searches and has nothing to submit (§3.8).
+    /// </summary>
+    [Fact]
+    public void Every_single_line_box_is_in_a_form_Enter_submits()
+        => Components()
+            .Where(file => !file.Source.Contains("<AlvoEditor", StringComparison.Ordinal))
+            .SelectMany(file => TagsAt(file.Source, "MudTextField")
+                .Where(tag => !tag.Attributes.ContainsKey("Lines") && !IsSearch(tag.Attributes) && !InsideForm(file.Source, tag.Index))
+                .Select(tag => $"{file.Name}: {tag.Attributes.GetValueOrDefault("id") ?? "(no id)"}"))
+            .ShouldBeEmpty("Enter in a single-line box submits its form, so the box is in one");
+
+    /// <summary>
+    /// A create is found in one place per level (spec §3.7; re-review N3): every "New …" button is a page header's
+    /// primary action or a section head's action, read from the source so a new one placed anywhere else fails.
+    /// </summary>
+    [Fact]
+    public void Every_new_trigger_is_a_headers_primary_or_a_section_heads_action()
+        => Components()
+            .SelectMany(file => TagsAt(file.Source, "AlvoButton")
+                .Where(tag => ButtonText(file.Source, tag.Index).StartsWith("New ", StringComparison.Ordinal))
+                .Where(tag => !Within(file.Source, tag.Index, "Primary") && !Within(file.Source, tag.Index, "Actions"))
+                .Select(tag => $"{file.Name}: {ButtonText(file.Source, tag.Index)}"))
+            .ShouldBeEmpty("a create is in a page header's <Primary> or a section head's <Actions>");
+
+    private static bool IsSearch(Dictionary<string, string> attributes)
+        => attributes.GetValueOrDefault("aria-label") is { } name
+           && (name.StartsWith("Filter ", StringComparison.Ordinal) || name.StartsWith("@($\"Search ", StringComparison.Ordinal)
+               || name.StartsWith("Search ", StringComparison.Ordinal));
+
+    /// <summary>Whether a <c>&lt;form</c> opened before <paramref name="index"/> is not closed by then.</summary>
+    private static bool InsideForm(string source, int index)
+        => source.LastIndexOf("<form", index, StringComparison.Ordinal) > source.LastIndexOf("</form>", index, StringComparison.Ordinal);
+
+    /// <summary>Whether a <c>&lt;<paramref name="slot"/>&gt;</c> opened before <paramref name="index"/> is not closed by then.</summary>
+    private static bool Within(string source, int index, string slot)
+        => source.LastIndexOf($"<{slot}>", index, StringComparison.Ordinal)
+           > source.LastIndexOf($"</{slot}>", index, StringComparison.Ordinal);
+
+    /// <summary>The text between a button tag's end and its closing tag.</summary>
+    private static string ButtonText(string source, int index)
+    {
+        var start = RazorTag.End(source, index);
+        var end = source.IndexOf("</AlvoButton>", start, StringComparison.Ordinal);
+        return end < 0 ? string.Empty : source[start..end].Trim();
+    }
+
+    /// <summary>Every opening tag of <paramref name="name"/>, by its attributes, read as the Razor compiler reads them.</summary>
+    private static IEnumerable<Dictionary<string, string>> Tags(string source, string name)
+        => TagsAt(source, name).Select(tag => tag.Attributes);
+
+    /// <summary>Every opening tag of <paramref name="name"/>, where it opens and its attributes (<c>=&gt;</c> included).</summary>
+    private static IEnumerable<(int Index, Dictionary<string, string> Attributes)> TagsAt(string source, string name)
+        => Regex.Matches(source, $@"<{name}(?=[\s@/>])")
+            .Select(open => (open.Index, RazorTag.Attributes(source[open.Index..RazorTag.End(source, open.Index)])));
 
     /// <summary>An editor's title says whether it creates or edits: "New …" or "Edit …" (spec §3.1).</summary>
     [Fact]
@@ -76,7 +135,7 @@ public sealed partial class PatternLanguageTests
     [Fact]
     public void Every_multi_line_box_submits_by_the_chord_and_says_so()
         => Components()
-            .Where(file => MultiLine().IsMatch(file.Source))
+            .Where(file => Tags(file.Source, "MudTextField").Any(tag => tag.ContainsKey("Lines")))
             .Select(file => (file.Name, Source: file.Source + CodeBehind(file.Name)))
             .Where(file => !(file.Source.Contains("data-alvo-chord-submit", StringComparison.Ordinal)
                     || file.Source.Contains("<AlvoEditor", StringComparison.Ordinal))
@@ -169,26 +228,24 @@ public sealed partial class PatternLanguageTests
             .Select(path => (Path.GetRelativePath(root, path).Replace('\\', '/'), File.ReadAllText(path)));
     }
 
-    /// <summary>Every component's markup, by its path under <c>Components/</c>.</summary>
+    /// <summary>
+    /// Every component's markup, by its path under <c>Components/</c>, without its Razor comments: a remark that names
+    /// <c>&lt;AlvoEditor&gt;</c> is not an editor, and read as one it hid a real tag's attributes behind an empty one.
+    /// </summary>
     internal static IEnumerable<(string Name, string Source)> Components()
     {
         var root = Path.Combine(RepositoryRoot.Find(), "src", "MMLib.Alvo.Admin", "Components");
         return Directory.EnumerateFiles(root, "*.razor", SearchOption.AllDirectories)
             .Order(StringComparer.Ordinal)
-            .Select(path => (Path.GetRelativePath(root, path).Replace('\\', '/'), File.ReadAllText(path)));
+            .Select(path => (Path.GetRelativePath(root, path).Replace('\\', '/'),
+                RazorComment().Replace(File.ReadAllText(path), string.Empty)));
     }
 
-    [GeneratedRegex(@"<AlvoAlert\b[^>]*AlertTone\.Error")]
-    private static partial Regex ErrorAlert();
-
-    [GeneratedRegex(@"<ErrorPanel\s[^>]*@key=")]
-    private static partial Regex KeyedPanel();
+    [GeneratedRegex(@"@\*.*?\*@", RegexOptions.Singleline)]
+    private static partial Regex RazorComment();
 
     [GeneratedRegex(@"\b(CtrlKey|MetaKey)\b")]
     private static partial Regex ModifierKey();
-
-    [GeneratedRegex(@"<MudTextField\b[^>]*\bLines=")]
-    private static partial Regex MultiLine();
 
     [GeneratedRegex(@"<AlvoConfirm(?=[\s@/>])")]
     private static partial Regex ConfirmOpen();

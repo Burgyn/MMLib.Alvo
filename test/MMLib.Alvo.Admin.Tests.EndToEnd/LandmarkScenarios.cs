@@ -11,13 +11,18 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 public sealed class LandmarkScenarios(AdminWorld world) : IClassFixture<AdminWorld>
 {
     /// <summary>Every navigation landmark has a name, and no two share one, on a desktop and on a phone with the drawer open.</summary>
+    /// <remarks>Every screen with a pane of its own beside the list is walked, not only Schema (re-review N3).</remarks>
     [Theory(Timeout = AdminWorld.ScenarioTimeout)]
-    [InlineData(1400)]
-    [InlineData(390)]
-    public async Task Each_navigation_landmark_is_named_once_and_no_region_is_unnamed(int width)
+    [InlineData(1400, "/schema")]
+    [InlineData(390, "/schema")]
+    [InlineData(1400, "/history")]
+    [InlineData(1400, "/rules")]
+    [InlineData(1400, "/data/regions")]
+    [InlineData(390, "/access")]
+    public async Task Each_navigation_landmark_is_named_once_and_no_region_is_unnamed(int width, string path)
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, width);
-        await session.GoAsync("/schema");
+        await session.GoAsync(path);
         if (width < 720)
         {
             await session.Page.GetByTestId("more-sections").ClickAsync();
@@ -72,19 +77,28 @@ public sealed class LandmarkScenarios(AdminWorld world) : IClassFixture<AdminWor
         (await box.EvaluateAsync<bool>("b => document.activeElement === b")).ShouldBeTrue("focus stays in the box");
     }
 
-    /// <summary>A snackbar confirms an action just taken, so it is a status, not an alert (spec §3.3).</summary>
+    /// <summary>
+    /// A snackbar is read out by the one polite region it appears in, which is on the page, empty, before any message
+    /// (spec §3.3; batch-B re-review N2): a region inserted with its content is often not announced at all.
+    /// </summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task A_snackbar_is_a_status()
+    public async Task A_snackbar_appears_in_the_polite_region_that_was_there_first()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
+        var region = session.Page.GetByTestId("snackbars");
+        (await region.GetAttributeAsync("role")).ShouldBe("status");
+        (await region.GetAttributeAsync("aria-live")).ShouldBe("polite");
+        (await region.InnerTextAsync()).Trim().ShouldBeEmpty("the region is there before any message");
+
         await session.Page.GetByTestId("add-field").ClickAsync();
         await session.Page.FillAsync("#new-field-name", "status_note");
         await session.Page.Keyboard.PressAsync("Enter");
 
-        await session.SnackbarAsync("Saved to the working copy");
-        (await session.Snackbars.EvaluateAllAsync<string[]>("bars => bars.map(bar => bar.getAttribute('role'))"))
-            .ShouldAllBe(role => role == "status");
+        await session.SnackbarAsync("added to the working copy");
+        (await region.InnerTextAsync()).ShouldContain("added to the working copy", Case.Sensitive, "the message is in the region");
+        (await session.Snackbars.EvaluateAllAsync<string[]>("bars => bars.map(bar => bar.getAttribute('role') ?? '')"))
+            .ShouldAllBe(role => role == string.Empty, "a snackbar is no region of its own inside the one that reads it");
     }
 
     /// <summary>

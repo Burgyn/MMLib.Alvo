@@ -73,7 +73,7 @@ public sealed class LibraryRegistrationTests
             RepositoryRoot.Find(), "src", "MMLib.Alvo.Admin", "Components", "Shell", "AdminLayout.razor"));
         var css = File.ReadAllText(Stylesheet.AlvoCssPath);
 
-        layout.ShouldContain("<MudSnackbarProvider Class=\"a-snackbars\" />");
+        layout.ShouldContain("<MudSnackbarProvider Class=\"a-snackbars\" role=\"status\" aria-live=\"polite\"");
         css.ShouldContain(".a-snackbars {");
     }
 

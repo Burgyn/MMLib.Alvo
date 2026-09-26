@@ -72,10 +72,11 @@ document.addEventListener('keydown', (event) => {
 });
 
 /**
- * A snackbar is a status, not an alert (spec §3.3; final review M15). It only ever confirms an action just taken, and
- * no error is ever one, but the library writes `role="alert"` on each, which a screen reader reads out over whatever
- * it was saying. The library has no option for it, so the dashboard's own provider (`.a-snackbars`) has each
- * snackbar's role turned into `status` as it is added, before it is announced.
+ * A snackbar is announced by the region it appears in, not by itself (spec §3.3; batch-B re-review N2). The dashboard's
+ * provider (`.a-snackbars`) is the polite live region, on the page before any message, which is what a screen reader
+ * needs to announce what is added to it. The library writes `role="alert"` and `aria-live` on each snackbar as well,
+ * which would make it a second region, assertive and inserted with its content; both are taken off as it is added,
+ * so the one region reads it once. No error is ever a snackbar, so nothing here needed to interrupt.
  */
 const quietSnackbar = (element) => {
   if (!(element instanceof Element) || !element.closest('.a-snackbars')) {
@@ -84,7 +85,8 @@ const quietSnackbar = (element) => {
 
   for (const bar of [element, ...element.querySelectorAll('[role="alert"]')]) {
     if (bar.getAttribute('role') === 'alert') {
-      bar.setAttribute('role', 'status');
+      bar.removeAttribute('role');
+      bar.removeAttribute('aria-live');
     }
   }
 };

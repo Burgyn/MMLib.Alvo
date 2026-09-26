@@ -87,16 +87,10 @@
                                    SelectedChanged="operations => SetOperation(operations[0])" />
                     </Field>
 
-                    @if (_simulationProblem is not null)
+                    @* Keyed per refusal by RefusalState, so a second failure after a press takes focus and is read again. *@
+                    @if (_simulationProblem.Shown)
                     {
-                        <CascadingValue Value="_simulationProblem">
-                            <ErrorPanel>
-                                <Actions>
-                                    <AlvoButton Small="true" data-testid="simulate-retry"
-                                                OnClick="_ => SimulateAsync()">Try again</AlvoButton>
-                                </Actions>
-                            </ErrorPanel>
-                        </CascadingValue>
+                        @RefusalPanel.Of(_simulationProblem, RetryAction)
                     }
                     else if (_verdict is { } verdict)
                     {
@@ -128,7 +122,10 @@
     private IReadOnlyList<KeyValuePair<string, string>> _rules = [];
     private ManagementPolicyVerdict? _verdict;
     private AdminProblem? _problem;
-    private AdminProblem? _simulationProblem;
+    private readonly RefusalState<AdminProblem> _simulationProblem = new();
+
+    private RenderFragment RetryAction => @<AlvoButton Small="true" data-testid="simulate-retry"
+                                                      OnClick="_ => SimulateAsync()">Try again</AlvoButton>;
     private int _simulation;
     private Caller _caller = new("anonymous", null, [], null);
     private string _operation = "list";
@@ -169,7 +166,7 @@
                 await BuildCallersAsync(descriptor.DescriptorJson);
             }
 
-            await SimulateAsync();
+            await SimulateAsync(pressed: false);
         }
         catch (Exception exception)
         {
@@ -249,7 +246,8 @@
     /// can be passed in as many keystrokes and the answers can arrive in any order; an answer to a
     /// question that is no longer the one on screen is dropped rather than drawn under the wrong chips.
     /// </remarks>
-    private async Task SimulateAsync()
+    /// <param name="pressed">Whether an operator's choice asked it, so a refusal takes focus; the page's own first ask does not.</param>
+    private async Task SimulateAsync(bool pressed = true)
     {
         if (Selected.Length == 0)
         {
@@ -268,7 +266,7 @@
 
             if (asked == _simulation)
             {
-                _simulationProblem = null;
+                _simulationProblem.Clear();
                 _verdict = verdict;
             }
         }
@@ -277,7 +275,7 @@
             var problem = AdminProblem.From(exception, Logger);
             if (asked == _simulation)
             {
-                _simulationProblem = problem;
+                _simulationProblem.Show(problem, pressed);
                 _verdict = null;
             }
         }

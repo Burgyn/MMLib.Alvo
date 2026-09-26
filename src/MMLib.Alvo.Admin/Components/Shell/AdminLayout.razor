@@ -24,7 +24,9 @@
 <AlvoTheme />
 <MudPopoverProvider />
 <MudDialogProvider DefaultFocus="DefaultFocus.FirstChild" BackdropClick="false" CloseButton="false" />
-<MudSnackbarProvider Class="a-snackbars" />
+@* The one polite live region every confirmation is read from, on the page before any message is, which is when a
+   screen reader starts to listen to a region (spec §3.3; batch-B re-review N2). *@
+<MudSnackbarProvider Class="a-snackbars" role="status" aria-live="polite" data-testid="snackbars" />
 
 @*
     The first stop of Tab on every screen: past the app bar and the sections, straight to the screen's content
