@@ -225,3 +225,50 @@ public sealed class RuleSaveScenarios(AdminWorld world) : IClassFixture<AdminWor
         await session.Page.GetByTestId("pending-bar").WaitForAsync();
     }
 }
+
+/// <summary>
+/// A rename moves the entity screen to a new address, and a rule typed there and not saved does not come with it: the
+/// rename editor says so before anything is staged, Cancel keeps the rule, and the rename names what it discards
+/// (final review T-9).
+/// </summary>
+/// <remarks>Its own world: it renames an entity the other rule scenarios type into.</remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class RenameOverUnsavedRuleScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+{
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_rename_over_an_unsaved_rule_warns_first_and_Cancel_keeps_the_rule()
+    {
+        const string typed = "'dispatcher' in @user.roles";
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/customers");
+        await session.OpenTabAsync("Rules");
+        await session.Page.FillAsync("#rule-list", typed);
+        await session.Page.GetByTestId("rule-dirty-list").WaitForAsync();
+
+        var editor = await OpenRenameAsync(session);
+        (await editor.GetByTestId("rename-unsaved-rules").InnerTextAsync()).ShouldContain("Renaming discards it.");
+        (await editor.GetByTestId("rename-save").InnerTextAsync()).Trim().ShouldBe("Discard the unsaved rule and rename");
+        await editor.GetByTestId("editor-cancel").ClickAsync();
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        (await session.Page.InputValueAsync("#rule-list")).ShouldBe(typed, "Cancel keeps the rule as typed");
+        await session.Page.GetByTestId("rule-dirty-list").WaitForAsync();
+
+        editor = await OpenRenameAsync(session);
+        await session.Page.FillAsync("#rename-entity-name", "clients");
+        await editor.GetByTestId("rename-save").ClickAsync();
+        await session.Page.WaitForURLAsync("**/schema/clients");
+        await session.SnackbarAsync("Renamed to clients in the working copy");
+        await session.OpenTabAsync("Rules");
+        (await session.Page.InputValueAsync("#rule-list")).ShouldNotBe(typed, "the unsaved rule was discarded, as it said");
+        (await session.Page.GetByTestId("rule-dirty-list").CountAsync()).ShouldBe(0);
+        session.AssertConsoleClean();
+    }
+
+    private static async Task<ILocator> OpenRenameAsync(AdminSession session)
+    {
+        await session.Page.GetByTestId("rename-entity").ClickAsync();
+        var editor = session.Dialog("rename-sheet");
+        await editor.GetByTestId("rename-unsaved-rules").WaitForAsync();
+        return editor;
+    }
+}
