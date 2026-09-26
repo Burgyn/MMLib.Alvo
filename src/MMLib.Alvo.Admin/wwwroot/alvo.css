@@ -700,10 +700,6 @@
     gap: var(--space-3);
   }
 
-  .a-stack--gap-4 {
-    gap: var(--space-4);
-  }
-
   /* A screen read top to bottom as prose — the first run — at a measure a line can be followed at. */
   .a-stack--narrow {
     max-width: 820px;
@@ -723,12 +719,6 @@
   /* A row of controls placed straight into a panel, at the inset the panel's notes take. */
   .a-row--inset {
     padding: var(--space-4) var(--space-5);
-  }
-
-  /* The last controls of a block, set apart from the fields above them by a rule. */
-  .a-row--ruled {
-    padding-top: var(--space-3);
-    border-top: 1px solid var(--border);
   }
 
   /* The screens with no shell around them — signing in. */
@@ -776,12 +766,6 @@
   /* Content with no inset of its own — a code block, a sentence — placed straight into a panel. */
   .a-panel__body {
     padding: var(--space-4);
-  }
-
-  /* A second part at the end of a panel's rows, such as the form that adds one more. */
-  .a-panel__foot {
-    padding: var(--space-5);
-    border-top: 1px solid var(--border);
   }
 
   /* The controls under a block of prose, a line below it. */
@@ -980,11 +964,6 @@
     padding: var(--space-4) var(--space-5);
   }
 
-  /* A row whose controls open underneath it: the extra part takes a line of its own. */
-  .a-listrow--wrap {
-    flex-wrap: wrap;
-  }
-
   /* A row that is a heading over a block, not a line of items side by side. */
   .a-listrow--stacked {
     display: block;
@@ -1038,11 +1017,6 @@
   /* An item that keeps its width while the text beside it wraps. */
   .a-listrow__aside {
     flex: none;
-  }
-
-  /* What a row opens underneath itself, on a line of its own. */
-  .a-listrow__under {
-    flex-basis: 100%;
   }
 
   .a-detail__label {
@@ -1328,11 +1302,6 @@
   /* A single picker that has no business being as wide as the screen. */
   .a-field--narrow {
     max-width: 360px;
-  }
-
-  /* An input sharing its line with the buttons that act on it. */
-  .a-input--grow {
-    flex: 1;
   }
 
   /* A control's name, at the size of the text it names: at 12 px it read smaller than the hint under it. */

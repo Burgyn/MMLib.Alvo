@@ -2,6 +2,8 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
 @inject ILogger<Access> Logger
+@inject ISnackbar Snackbar
+@inject AdminInterop Interop
 
 <PageTitle>Access · Alvo</PageTitle>
 
@@ -9,23 +11,10 @@
     <PageHeader Title="Access"
                 Subtitle="Two different things live here and they take effect at different times. Membership — who exists, what roles they have, which tenant they act in — is the identity store, and a change applies at once. The role catalogue and the three management levels are the descriptor, and a change to either waits for an apply." />
 
-    @if (_problem is not null)
+    @* A refusal while an editor is open is drawn inside it (EditorProblem); only the others land here. *@
+    @if (_problem is not null && !EditorOpen)
     {
-        <CascadingValue Value="_problem">
-            <ErrorPanel />
-        </CascadingValue>
-    }
-
-    @if (_token is { } token)
-    {
-        <Panel Padded="true" class="a-panel--accent">
-            <span class="a-section__title">Credential token for @_tokenFor</span>
-            <p class="a-section__sub">
-                Hand this over out of band — this build sends no email. It works once, until
-                @token.ExpiresAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture).
-            </p>
-            <pre class="a-code"><code>@token.Token</code></pre>
-        </Panel>
+        @ProblemPanel(_problemFromWrite)
     }
 
     <Panel Title="People">
@@ -50,30 +39,20 @@
             {
                 @foreach (var person in _people.Users)
                 {
-                    <PersonRow @key="person.Id" Person="person" Roles="_roles" IsSelf="person.Id == _self"
-                               Expanded="_editing == person.Id"
-                               OnToggle="() => _editing = _editing == person.Id ? null : person.Id"
-                               OnSetRoles="roles => SetRolesAsync(person, roles)"
-                               OnSetTenant="draft => SetTenantAsync(person, draft)"
-                               OnClearTenant="() => ClearTenantAsync(person)"
-                               OnIssueToken="() => IssueTokenAsync(person)"
-                               OnSetDisabled="disabled => SetDisabledAsync(person, disabled)" />
+                    @* The wrapper carries the new-item wash, so the row's own contract stays who it is and Change. *@
+                    <div @key="person.Id" data-alvo-new="@(person.Id == _arrived ? "true" : null)">
+                        <PersonRow Person="person" OnOpen="() => Open(person)" />
+                    </div>
                 }
 
-                <div class="a-panel__foot">
-                    <span class="a-section__title">Add a person</span>
-                    <p class="a-section__sub">
-                        No password field, deliberately: a credential that travels as a value is readable by
-                        whoever handles it. The account is created without one and you hand over a
-                        single-use token.
-                    </p>
-                    <div class="a-row a-row--gap-2">
-                        <input class="a-input a-input--grow" id="new-person-email" type="email"
-                               placeholder="dispatcher@example.com" value="@_newEmail"
-                               @oninput="args => _newEmail = args.Value?.ToString() ?? string.Empty" />
-                        <button type="button" class="a-btn a-btn--primary a-btn--sm" @onclick="CreateAsync"
-                                disabled="@(_newEmail.Trim().Length == 0)">Create</button>
-                    </div>
+                @if (_arrived is { } arrived)
+                {
+                    @RevealOnRender.On($"#person-{arrived.Value}", _reveals)
+                }
+
+                @* Under the list, where a new person appears: the editor hands focus back here on close. *@
+                <div class="a-row a-row--inset">
+                    <AlvoButton Small="true" data-testid="person-new" OnClick="_ => OpenCreate()">Add a person</AlvoButton>
                 </div>
             }
         </ChildContent>
@@ -126,19 +105,80 @@
     </Panel>
 </div>
 
+@if (_creating)
+{
+    <AlvoEditor TestId="person-create" Title="New person" SubmitText="Create person" SubmitTestId="person-create-run"
+                Subtitle="No password field, deliberately: a credential that travels as a value is readable by whoever handles it. The account is created without one and you hand over a single-use token."
+                Dirty="@(_newEmail.Trim().Length > 0)"
+                OnSubmit="CreateAsync" OnClose="CloseCreate">
+        @EditorProblem
+        <MudTextField T="string" Value="_newEmail" ValueChanged="email => _newEmail = email ?? string.Empty"
+                      Immediate="true" Variant="Variant.Outlined" Label="Email" InputType="InputType.Email"
+                      id="new-person-email" Placeholder="dispatcher@example.com" />
+    </AlvoEditor>
+}
+
+@if (_editing is { } editing)
+{
+    <PersonEditor Person="editing" Roles="_roles" IsSelf="editing.Id == _self"
+                  Token="@(_tokenFor == editing.Id ? _token : null)" Busy="_busy" Problem="EditorProblem"
+                  OnSave="change => SaveAsync(editing, change)" OnIssueToken="() => IssueTokenAsync(editing)"
+                  OnRequestDisable="() => AskToDisable(editing)" OnLetBackIn="() => LetBackInAsync(editing)"
+                  OnCopyToken="CopyTokenAsync" OnClose="CloseEditor" />
+}
+
+<AlvoConfirm Open="_disabling is not null" TestId="disable-person" ConfirmTestId="disable-person-run"
+             CancelTestId="disable-person-cancel" Title="@($"Disable {_disabling?.Email}?")"
+             Consequence="They can no longer sign in, and every session they hold stops at its next request. You can let them back in later."
+             Verb="Disable person" OnConfirm="DisableConfirmedAsync" OnCancel="() => _disabling = null" />
+
 @code {
     private AlvoUserPage? _people;
     private IReadOnlyList<string> _roles = [];
     private IReadOnlyList<KeyValuePair<string, string>> _levels = [];
     private AlvoCredentialToken? _token;
+    private UserId? _tokenFor;
     private AdminProblem? _problem;
-    private string _tokenFor = string.Empty;
+    private bool _problemFromWrite;
+    private int _problemsDrawn;
     private string _newEmail = string.Empty;
-    private UserId? _editing;
+    private bool _creating;
+    private bool _busy;
+    private AlvoUser? _editing;
+    private AlvoUser? _disabling;
     private UserId? _self;
+    private UserId? _arrived;
+    private int _reveals;
 
+    /// <summary>Whether an editor is on screen, which is then where a refusal is drawn.</summary>
+    private bool EditorOpen => _creating || _editing is not null;
+
+    /// <summary>The refusal, drawn inside whichever editor is open, where the operator is looking.</summary>
+    private RenderFragment? EditorProblem => _problem is null ? null : ProblemPanel(true);
+
+    /// <summary>
+    /// The page's one refusal panel. Keyed by the attempt, so every refusal draws a new panel that takes focus again
+    /// (spec §3.3); a lost race also offers Reload, the one way to see the person as they now are.
+    /// </summary>
+    private RenderFragment ProblemPanel(bool takeFocus) => @<CascadingValue Value="_problem">
+        @if (_problem?.Exception is AlvoPreconditionFailedException)
+        {
+            <ErrorPanel @key="_problemsDrawn" TakeFocus="takeFocus" Title="This person changed while the screen was open">
+                <Actions>
+                    <AlvoButton Small="true" data-testid="person-reload" OnClick="_ => ReloadAsync()">Reload</AlvoButton>
+                </Actions>
+            </ErrorPanel>
+        }
+        else
+        {
+            <ErrorPanel @key="_problemsDrawn" TakeFocus="takeFocus" />
+        }
+    </CascadingValue>;
+
+    /// <inheritdoc />
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
+    /// <summary>Reads the descriptor's roles and levels, the operator's own id, and the people.</summary>
     private async Task LoadAsync()
     {
         try
@@ -159,78 +199,233 @@
         }
     }
 
-    /* A chip press becomes a grant or a revoke against the roles as stored now, never the set this row was
-       loaded with — ManagementGateway.ChangeRolesAsync says why a snapshot would restore a revoked role. */
-    private Task SetRolesAsync(AlvoUser person, IReadOnlyList<string> roles)
+    /// <summary>After a lost race: closes the editor and reads the list again, so the next change starts from it.</summary>
+    private async Task ReloadAsync()
     {
-        var (grant, revoke) = ManagementGateway.RoleChange(person.RoleNames, roles);
-        return WriteAsync(() => Gateway.ChangeRolesAsync(person, grant, revoke, CancellationToken.None));
+        CloseEditor();
+        await LoadAsync();
     }
 
-    private async Task SetTenantAsync(AlvoUser person, string draft)
+    /// <summary>Opens a person's editor, from their row's Change.</summary>
+    private void Open(AlvoUser person)
     {
-        if (!TenantId.TryParse(draft, null, out var tenant))
+        _problem = null;
+        _editing = person;
+    }
+
+    /// <summary>Opens the Add a person editor.</summary>
+    private void OpenCreate()
+    {
+        _problem = null;
+        _creating = true;
+    }
+
+    /// <summary>Closes the person's editor, and with it the token it was showing: a token is shown once.</summary>
+    private void CloseEditor()
+    {
+        _editing = null;
+        _token = null;
+        _tokenFor = null;
+        _problem = null;
+    }
+
+    /// <summary>Closes the Add a person editor and forgets what was typed, so the next one starts empty.</summary>
+    private void CloseCreate()
+    {
+        _creating = false;
+        _newEmail = string.Empty;
+        _problem = null;
+    }
+
+    /// <summary>Writes the parts of the draft that changed, says so, and closes the editor.</summary>
+    /// <remarks>
+    /// The tenant is parsed before anything is written, so a mistyped one refuses the whole save rather than half
+    /// of it. The roles go as a grant and a revoke against the roles this editor was opened on, which the gateway
+    /// applies to the person as stored now: a whole set written back from a stale screen would restore a role
+    /// somebody else revoked (ManagementGateway.ChangeRolesAsync).
+    /// </remarks>
+    private async Task SaveAsync(AlvoUser person, (IReadOnlyList<string>? Roles, string? Tenant, bool ClearTenant) change)
+    {
+        TenantId? tenant = null;
+        if (change.Tenant is { } typed && !TryTenant(typed, out tenant))
         {
-            _problem = AdminProblem.From(new ManagementRequestException("That is not a tenant id."))! with
-            {
-                Fix = "A tenant is a uuid. Copy it from a row's tenant_id, or from the caller you are modelling.",
-            };
             return;
         }
 
-        await WriteAsync(() => Gateway.SetTenantAsync(person.Id, tenant, CancellationToken.None));
+        await BusyAsync(async () =>
+        {
+            if (change.Roles is { } roles)
+            {
+                var (grant, revoke) = ManagementGateway.RoleChange(person.RoleNames, roles);
+                await Gateway.ChangeRolesAsync(person, grant, revoke, CancellationToken.None);
+            }
+
+            if (tenant is not null || change.ClearTenant)
+            {
+                await Gateway.SetTenantAsync(person.Id, tenant, CancellationToken.None);
+            }
+
+            Snackbar.Confirm($"Saved {person.Email}");
+            CloseEditor();
+            await LoadAsync();
+        });
     }
 
-    private Task ClearTenantAsync(AlvoUser person)
-        => WriteAsync(() => Gateway.SetTenantAsync(person.Id, null, CancellationToken.None));
-
-    private Task SetDisabledAsync(AlvoUser person, bool disabled)
-        => WriteAsync(() => Gateway.SetDisabledAsync(person.Id, disabled, CancellationToken.None));
-
-    private async Task IssueTokenAsync(AlvoUser person)
+    /// <summary>Parses a typed tenant, or says in the editor why it is not one.</summary>
+    private bool TryTenant(string typed, out TenantId? tenant)
     {
+        if (TenantId.TryParse(typed, null, out var parsed))
+        {
+            tenant = parsed;
+            return true;
+        }
+
+        tenant = null;
+        Show(AdminProblem.From(new ManagementRequestException("That is not a tenant id."))! with
+        {
+            Fix = "A tenant is a uuid. Copy it from a row's tenant_id, or from the caller you are modelling.",
+        });
+        return false;
+    }
+
+    /// <summary>Mints a token and keeps it in the person's editor, the one place it is shown.</summary>
+    private Task IssueTokenAsync(AlvoUser person) => BusyAsync(async () =>
+    {
+        _token = await Gateway.IssueCredentialTokenAsync(person.Id, CancellationToken.None);
+        _tokenFor = person.Id;
+        _problem = null;
+    });
+
+    /// <summary>Copies the token; a clipboard the browser withholds is said in place, beside the token itself.</summary>
+    private async Task CopyTokenAsync()
+    {
+        if (_token is not { } token)
+        {
+            return;
+        }
+
         try
         {
-            _token = await Gateway.IssueCredentialTokenAsync(person.Id, CancellationToken.None);
-            _tokenFor = person.Email;
-            _problem = null;
+            await Interop.CopyAsync(token.Token);
+            Snackbar.Confirm("Token copied");
         }
-        catch (Exception exception)
+        catch (JSException exception)
         {
-            Refused(exception);
+            Show(new AdminProblem("The token could not be copied", "The browser did not let this page use the clipboard.",
+                "Select the token above and copy it by hand.", exception, IsFault: false));
         }
     }
 
+    /// <summary>Closes the editor, then asks: a confirm never opens over a dialog (spec §3.1).</summary>
+    private void AskToDisable(AlvoUser person)
+    {
+        CloseEditor();
+        _disabling = person;
+    }
+
+    /// <summary>Disables the person the confirm names; the confirm stays busy until the write returns.</summary>
+    private async Task DisableConfirmedAsync()
+    {
+        if (_disabling is not { } person)
+        {
+            return;
+        }
+
+        await WriteAsync(() => Gateway.SetDisabledAsync(person.Id, true, CancellationToken.None), $"Disabled {person.Email}");
+        _disabling = null;
+    }
+
+    /// <summary>Lets a disabled person sign in again: not destructive, so it asks nothing.</summary>
+    private Task LetBackInAsync(AlvoUser person)
+    {
+        CloseEditor();
+        return WriteAsync(() => Gateway.SetDisabledAsync(person.Id, false, CancellationToken.None),
+            $"{person.Email} can sign in again");
+    }
+
+    /// <summary>Creates the person, closes the editor, and brings their new row into view, lit.</summary>
+    /// <remarks>
+    /// Create is never disabled for an empty box: Enter pressed straight after typing reaches the browser before the
+    /// render that would have enabled the button, and implicit submission does nothing on a disabled default button.
+    /// An empty address is refused here instead, in place, like every other editor's refusal.
+    /// </remarks>
     private async Task CreateAsync()
     {
+        var email = _newEmail.Trim();
+        if (email.Length == 0)
+        {
+            Show(AdminProblem.From(new ManagementRequestException("A person needs an address to sign in with."))! with
+            {
+                Fix = "Type the address they will sign in with, such as dispatcher@example.com.",
+            });
+            return;
+        }
+
         try
         {
-            await Gateway.CreatePersonAsync(
-                new AlvoUserCreation(_newEmail.Trim(), []), CancellationToken.None);
-            _newEmail = string.Empty;
+            var created = await Gateway.CreatePersonAsync(new AlvoUserCreation(email, []), CancellationToken.None);
+            Snackbar.Confirm($"Created {email}");
+            CloseCreate();
             await LoadAsync();
+            _arrived = created.Id;
+            _reveals++;
         }
         catch (Exception exception)
         {
-            Refused(exception);
+            RefusedWrite(exception);
         }
     }
 
-    private async Task WriteAsync(Func<Task<AlvoUser>> write)
+    /// <summary>Runs one write from the page, says it worked, and reads the list again.</summary>
+    private async Task WriteAsync(Func<Task<AlvoUser>> write, string done)
     {
         try
         {
             await write();
             _problem = null;
+            Snackbar.Confirm(done);
             await LoadAsync();
         }
         catch (Exception exception)
         {
-            Refused(exception);
+            RefusedWrite(exception);
         }
     }
 
-    /// <summary>Renders the refusal, with the fix that says which of the guards produced it.</summary>
+    /// <summary>Runs <paramref name="work"/> with the editor busy, and draws a refusal from it in place.</summary>
+    private async Task BusyAsync(Func<Task> work)
+    {
+        _busy = true;
+        try
+        {
+            await work();
+        }
+        catch (Exception exception)
+        {
+            RefusedWrite(exception);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>A refusal from something the operator did: a new panel, which takes focus.</summary>
+    private void RefusedWrite(Exception exception)
+        => Show(AdminProblem.From(exception, Logger, ProblemSite.People));
+
+    /// <summary>Draws <paramref name="problem"/> as a new panel that takes focus.</summary>
+    private void Show(AdminProblem? problem)
+    {
+        _problem = problem;
+        _problemFromWrite = true;
+        _problemsDrawn++;
+    }
+
+    /// <summary>A refusal while reading: drawn, but not handed focus, which the router gave the heading.</summary>
     private void Refused(Exception exception)
-        => _problem = AdminProblem.From(exception, Logger, ProblemSite.People);
+    {
+        _problem = AdminProblem.From(exception, Logger, ProblemSite.People);
+        _problemFromWrite = false;
+    }
 }

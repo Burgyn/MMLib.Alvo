@@ -161,3 +161,11 @@ export function download(name, text) {
   link.remove();
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Copies text to the clipboard: the credential token, which is shown once and has to leave this page intact.
+ * A snackbar is never its only copy (spec §3.3); this is the operator's second one.
+ */
+export async function copyText(text) {
+  await navigator.clipboard.writeText(text);
+}

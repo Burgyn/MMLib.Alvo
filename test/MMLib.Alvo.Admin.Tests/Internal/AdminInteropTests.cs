@@ -110,6 +110,16 @@ public class AdminInteropTests
     }
 
     [Fact]
+    public async Task A_copy_hands_the_text_to_the_script()
+    {
+        var interop = new AdminInterop(_js, _logger);
+
+        await interop.CopyAsync("tok_123");
+
+        Arguments("copyText").ShouldHaveSingleItem()[0].ShouldBe("tok_123");
+    }
+
+    [Fact]
     public async Task The_shell_says_when_it_is_ready()
     {
         var interop = new AdminInterop(_js, _logger);

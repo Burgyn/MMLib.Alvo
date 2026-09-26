@@ -64,6 +64,9 @@ internal sealed partial class AdminInterop(IJSRuntime js, ILogger<AdminInterop> 
     public Task DownloadAsync(string name, string text)
         => QuietlyAsync(module => module.InvokeVoidAsync("download", name, text));
 
+    /// <summary>Copies <paramref name="text"/> to the clipboard; see <c>copyText</c> in admin.js.</summary>
+    public Task CopyAsync(string text) => QuietlyAsync(module => module.InvokeVoidAsync("copyText", text));
+
     /// <summary>Says the keyboard map now has a listener; see <c>markKeyboardReady</c> in admin.js.</summary>
     public Task MarkKeyboardReadyAsync() => QuietlyAsync(module => module.InvokeVoidAsync("markKeyboardReady"));
 
