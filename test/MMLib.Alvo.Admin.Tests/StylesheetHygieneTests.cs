@@ -11,8 +11,8 @@ namespace MMLib.Alvo.Admin.Tests;
 /// <b>A dead selector costs a reader, not a user.</b> Nothing renders it, so nothing fails — and the next person
 /// to style a drawer finds <c>.a-drawer</c>, assumes it is the product's, and builds on a rule no screen has ever
 /// exercised. A class the markup names and the stylesheet does not define is the mirror image: the hook looks
-/// load-bearing and is not. The gallery draws a few components the product has not built yet; their rules carry
-/// a <c>/* gallery-only */</c> comment, so the difference is written down rather than remembered.
+/// load-bearing and is not. The gallery used to draw a few patterns the product had superseded or never built,
+/// under a <c>/* gallery-only */</c> comment; it now draws only what the dashboard uses, so no such rule remains.
 /// </para>
 /// <para>
 /// <b>The design prototype is a second consumer.</b> <c>docs/design/f5-admin</c> links this same file and adds
@@ -30,8 +30,6 @@ public sealed class StylesheetHygieneTests
     private const string SplitStacks = "1100px";
 
     private static readonly string _css = File.ReadAllText(Stylesheet.AlvoCssPath);
-
-    private static readonly string _gallery = File.ReadAllText(Stylesheet.GalleryPath);
 
     private static readonly IReadOnlySet<string> _galleryOnly = Stylesheet.MarkedClasses(_css, Stylesheet.GalleryOnly);
 
@@ -58,14 +56,14 @@ public sealed class StylesheetHygieneTests
             .Except(_prototypeOnly)
             .Order().ShouldBeEmpty();
 
-    /// <summary>The marker is a claim, and both halves of it are checked: the gallery draws it, and nothing else does.</summary>
+    /// <summary>
+    /// The gallery shows only what the dashboard uses (final review M11), so no rule is kept for the gallery alone: the
+    /// hand-drawn toast, the span-drawn required mark and the other gallery-only patterns were each a superseded look
+    /// the gallery went on documenting. A class the prototype still renders is marked <c>prototype-only</c> instead.
+    /// </summary>
     [Fact]
-    public void A_gallery_only_class_is_drawn_by_the_gallery_and_by_nothing_the_product_ships()
-    {
-        _galleryOnly.ShouldNotBeEmpty();
-        _galleryOnly.Where(name => !_gallery.Contains(name, StringComparison.Ordinal)).ShouldBeEmpty();
-        _galleryOnly.Intersect(Stylesheet.ClassesTheProductNames()).ShouldBeEmpty();
-    }
+    public void No_rule_is_kept_for_the_gallery_alone()
+        => _galleryOnly.Order().ShouldBeEmpty("the gallery documents the dashboard's patterns, not patterns of its own");
 
     /// <summary>The same claim for the prototype: it renders the class, and the product does not.</summary>
     [Fact]
