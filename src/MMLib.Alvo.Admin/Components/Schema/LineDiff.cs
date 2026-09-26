@@ -22,6 +22,14 @@ internal enum LineChange
 /// <param name="Number">Its number in the new document, or in the old one for a removal.</param>
 internal sealed record DiffLine(LineChange Change, string Text, int Number);
 
+/// <summary>A diff to draw, and whether its lines were aligned or, past <see cref="LineDiff.MaxCells"/>, shown whole.</summary>
+/// <param name="Lines">The lines to render, in order; empty when the two are identical.</param>
+/// <param name="Aligned">
+/// Whether every changed line was matched against the other document; <see langword="false"/> when what lies between
+/// their common head and tail was too large, and is shown removed and then added.
+/// </param>
+internal sealed record LineDiffResult(IReadOnlyList<DiffLine> Lines, bool Aligned);
+
 /// <summary>
 /// A line diff between two versions of the same document.
 /// </summary>
@@ -62,13 +70,22 @@ internal static class LineDiff
     /// <param name="before">The document as it stands.</param>
     /// <param name="after">The document as it would stand.</param>
     /// <returns>The lines to render, in order; empty when the two are identical.</returns>
-    public static IReadOnlyList<DiffLine> Between(string before, string after)
+    public static IReadOnlyList<DiffLine> Between(string before, string after) => Compare(before, after).Lines;
+
+    /// <summary>
+    /// <see cref="Between"/>, and whether the lines were aligned: a diff past the cap says so where it is drawn, so an
+    /// operator does not read "everything changed" into what is only "too large to align" (batch-B re-review N4).
+    /// </summary>
+    /// <param name="before">The document as it stands.</param>
+    /// <param name="after">The document as it would stand.</param>
+    /// <returns>The lines to render, and whether they are aligned.</returns>
+    public static LineDiffResult Compare(string before, string after)
     {
         var old = Split(before);
         var updated = Split(after);
-        var full = Align(old, updated);
+        var (full, aligned) = Align(old, updated);
 
-        return full.Any(line => line.Change is not LineChange.Same) ? Elide(full) : [];
+        return full.Any(line => line.Change is not LineChange.Same) ? new(Elide(full), aligned) : new([], true);
     }
 
     /// <summary>
@@ -81,7 +98,7 @@ internal static class LineDiff
     /// tail already say. What is left between them is aligned while its table stays under <see cref="MaxCells"/>; past
     /// that, it is shown removed and then added: still a correct diff, only not the shortest one.
     /// </remarks>
-    private static List<DiffLine> Align(string[] old, string[] updated)
+    private static (List<DiffLine> Lines, bool Aligned) Align(string[] old, string[] updated)
     {
         var head = CommonHead(old, updated);
         var tail = CommonTail(old, updated, head);
@@ -92,14 +109,15 @@ internal static class LineDiff
             lines.Add(new DiffLine(LineChange.Same, updated[index], index + 1));
         }
 
-        lines.AddRange(Middle(old[head..^tail], updated[head..^tail], head));
+        var middle = Middle(old[head..^tail], updated[head..^tail], head);
+        lines.AddRange(middle.Lines);
 
         for (var index = updated.Length - tail; index < updated.Length; index += 1)
         {
             lines.Add(new DiffLine(LineChange.Same, updated[index], index + 1));
         }
 
-        return lines;
+        return (lines, middle.Aligned);
     }
 
     private static int CommonHead(string[] old, string[] updated)
@@ -130,17 +148,17 @@ internal static class LineDiff
     /// <param name="old">The old document's middle.</param>
     /// <param name="updated">The new document's middle.</param>
     /// <param name="offset">How many lines precede the middle in both documents.</param>
-    private static List<DiffLine> Middle(string[] old, string[] updated, int offset)
+    private static (List<DiffLine> Lines, bool Aligned) Middle(string[] old, string[] updated, int offset)
     {
         if ((long)(old.Length + 1) * (updated.Length + 1) > MaxCells)
         {
             var whole = new List<DiffLine>(old.Length + updated.Length);
             AppendRemainder(whole, old, 0, LineChange.Removed, offset);
             AppendRemainder(whole, updated, 0, LineChange.Added, offset);
-            return whole;
+            return (whole, false);
         }
 
-        return Walk(old, updated, LongestCommonSubsequence(old, updated), offset);
+        return (Walk(old, updated, LongestCommonSubsequence(old, updated), offset), true);
     }
 
     private static string[] Split(string document)

@@ -114,6 +114,15 @@ public class LineDiffTests
         diff.Count(line => line.Change == LineChange.Added).ShouldBe(3000);
     }
 
+    /// <summary>A diff past the cap says it was not aligned; one under it, and an identical pair, say it was.</summary>
+    [Fact]
+    public void A_diff_says_whether_it_was_aligned()
+    {
+        LineDiff.Compare(Numbered(3000), Numbered(3000).Replace("line", "row", StringComparison.Ordinal)).Aligned.ShouldBeFalse();
+        LineDiff.Compare("a\nb", "a\nc").Aligned.ShouldBeTrue();
+        LineDiff.Compare("a", "a").ShouldBe(new LineDiffResult([], true), "identical: nothing to draw, nothing capped");
+    }
+
     /// <summary>A change right at the start and one right at the end are found with the trimming in place.</summary>
     [Fact]
     public void Changes_at_both_ends_are_found()

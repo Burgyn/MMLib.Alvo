@@ -17,8 +17,14 @@
 }
 else
 {
+    @if (!_aligned)
+    {
+        <p class="a-note" data-testid="diff-unaligned">
+            Too large to align line by line — showing the whole revision: what differs is shown removed and then added.
+        </p>
+    }
     <div class="a-diff">
-        @foreach (var line in _lines)
+        @foreach (var line in _showAll ? _lines : _lines.Take(MaxDrawn))
         {
             <div class="@ClassFor(line)">
                 <span class="a-diff__gutter">@Gutter(line)</span>
@@ -26,10 +32,23 @@ else
             </div>
         }
     </div>
+    @if (!_showAll && _lines.Count > MaxDrawn)
+    {
+        @* Drawn on request only: a page of thousands of rows is a render nobody reads and every re-render repeats. *@
+        <div class="a-row a-row--inset">
+            <span class="a-note">Showing @MaxDrawn of @_lines.Count lines.</span>
+            <AlvoButton Small="true" data-testid="diff-show-all" OnClick="_ => _showAll = true">Show all @_lines.Count lines</AlvoButton>
+        </div>
+    }
 }
 
 @code {
+    /// <summary>How many lines are drawn before the rest waits for "Show all".</summary>
+    private const int MaxDrawn = 400;
+
     private IReadOnlyList<DiffLine> _lines = [];
+    private bool _aligned = true;
+    private bool _showAll;
 
     /// <summary>The descriptor as it stands, applied.</summary>
     [Parameter, EditorRequired]
@@ -64,7 +83,8 @@ else
         }
 
         _diffed = (Before, After);
-        _lines = LineDiff.Between(Before, After);
+        var diff = LineDiff.Compare(Before, After);
+        (_lines, _aligned, _showAll) = (diff.Lines, diff.Aligned, false);
     }
 
     private static string ClassFor(DiffLine line) => line.Change switch
