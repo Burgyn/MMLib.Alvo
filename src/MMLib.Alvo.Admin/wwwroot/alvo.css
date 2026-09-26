@@ -1249,12 +1249,14 @@
 
   /* Destructive in both themes by its own tokens. The hover is restated because `.a-btn:hover` draws
      the accent border, and a delete that turns green under the pointer reads as the safe choice. */
+  /* prototype-only: the dashboard's destructive buttons are AlvoButton's Danger tone. */
   .a-btn--danger {
     border-color: var(--danger-fg);
     background: var(--danger-bg);
     color: var(--danger-fg);
   }
 
+  /* prototype-only */
   .a-btn--danger:hover {
     border-color: var(--danger-fg);
     background: color-mix(in srgb, var(--danger-bg), var(--danger-fg) 12%);
@@ -1436,8 +1438,9 @@
   }
 
   .a-input,
-  .a-select,
-  .a-textarea {
+  .a-textarea,
+  /* prototype-only: the design prototype's native select; the dashboard's pickers are MudSelect. */
+  .a-select {
     width: 100%;
     padding: calc(var(--space-2) * var(--density)) var(--space-3);
     border: 1px solid var(--border);
@@ -1465,8 +1468,9 @@
   }
 
   .a-input:hover,
-  .a-select:hover,
-  .a-textarea:hover {
+  .a-textarea:hover,
+  /* prototype-only */
+  .a-select:hover {
     border-color: var(--border2);
   }
 
@@ -1684,6 +1688,7 @@
    =========================================================================== */
 
 @layer components {
+  /* prototype-only: the design prototype's tab strip; the dashboard's strips are MudTabs. */
   .a-tabs {
     display: flex;
     gap: var(--space-1);
@@ -1691,6 +1696,7 @@
     overflow-x: auto;
   }
 
+  /* prototype-only */
   .a-tab {
     padding: var(--space-3) var(--space-4);
     border: none;
@@ -1703,10 +1709,12 @@
     cursor: pointer;
   }
 
+  /* prototype-only */
   .a-tab:hover {
     color: var(--text);
   }
 
+  /* prototype-only */
   .a-tab--active {
     border-bottom-color: var(--accent);
     color: var(--text);
@@ -2865,11 +2873,13 @@
        for targets a thumb can reach. Raising the minimum leaves the type scale alone. */
     .a-btn,
     .a-chip,
+    /* prototype-only */
     .a-tab {
       min-height: 40px;
     }
 
     .a-input,
+    /* prototype-only */
     .a-select {
       min-height: 40px;
     }
@@ -3013,13 +3023,17 @@
     letter-spacing: normal;
   }
 
-  /* The entity's tab strip: a rule under it, as the hand-rolled strip had, and the open tab's panel a step below. */
-  .a-entitytabs .mud-tabs-tabbar {
+  /* The tab strips (an entity's sections, a revision's views, the Rules entity picker): a rule under each, as the
+     hand-rolled strip had, and the open tab's panel a step below. */
+  .a-entitytabs .mud-tabs-tabbar,
+  .a-revtabs .mud-tabs-tabbar,
+  .a-ruletabs .mud-tabs-tabbar {
     border-bottom: 1px solid var(--border);
     background: transparent;
   }
 
-  .a-entitytabs .mud-tabs-panels {
+  .a-entitytabs .mud-tabs-panels,
+  .a-revtabs .mud-tabs-panels {
     padding-top: var(--space-4);
   }
 

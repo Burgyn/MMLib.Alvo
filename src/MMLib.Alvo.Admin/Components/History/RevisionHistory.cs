@@ -34,6 +34,19 @@ internal static class RevisionHistory
         return [.. revisions.OrderByDescending(revision => revision.Revision)];
     }
 
+    /// <summary>
+    /// The revision applied just before <paramref name="revision"/>: the one its change is read against. A rollback
+    /// is a revision like any other, so this is the nearest earlier number listed, never the one it restored.
+    /// </summary>
+    /// <param name="revisions">The revisions listed, in any order.</param>
+    /// <param name="revision">The revision whose predecessor is wanted.</param>
+    /// <returns>That revision's number, or <see langword="null"/> for the first.</returns>
+    public static int? Previous(IReadOnlyList<ManagementRevision> revisions, int revision)
+    {
+        ArgumentNullException.ThrowIfNull(revisions);
+        return revisions.Where(entry => entry.Revision < revision).Select(entry => (int?)entry.Revision).Max();
+    }
+
     /// <summary>What a revision is called in a list: its reason, or what the absence of one means.</summary>
     /// <remarks>
     /// Revision 1 with no reason is the descriptor the project started from — mounted or seeded rather than

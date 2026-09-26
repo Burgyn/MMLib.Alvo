@@ -25,30 +25,28 @@
     {
         @*
             A strip reads at a glance while it fits; past a handful of entities it scrolls sideways and
-            the one somebody wants is off the edge, so it becomes a select — which a phone also draws as
-            its own picker.
+            the one somebody wants is off the edge, so it becomes a select.
         *@
         @if (_schema.Entities.Count > TabStripLimit)
         {
-            <Field Label="Entity" For="rules-entity" class="a-field--narrow">
-                <select class="a-select a-mono" id="rules-entity" data-testid="rules-entity"
-                        value="@Selected" @onchange="args => Choose(args.Value?.ToString() ?? string.Empty)">
-                    @foreach (var entity in _schema.Entities)
-                    {
-                        <option value="@entity.Name">@entity.Name</option>
-                    }
-                </select>
-            </Field>
+            <MudSelect T="string" Value="Selected" ValueChanged="Choose" Label="Entity" Variant="Variant.Outlined"
+                       data-testid="rules-entity" Class="a-mono a-field--narrow">
+                @foreach (var entity in _schema.Entities)
+                {
+                    <MudSelectItem Value="@entity.Name">@entity.Name</MudSelectItem>
+                }
+            </MudSelect>
         }
         else
         {
-            <div class="a-tabs">
+            <MudTabs ActivePanelIndex="@SelectedIndex" ActivePanelIndexChanged="index => Choose(_schema.Entities[index].Name)"
+                     Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-ruletabs" id="rules-entities">
                 @foreach (var entity in _schema.Entities)
                 {
-                    <button type="button" class="@($"a-tab{(entity.Name == Selected ? " a-tab--active" : string.Empty)}")"
-                            @onclick="() => Choose(entity.Name)">@entity.Name</button>
+                    <MudTabPanel Text="@entity.Name" />
                 }
-            </div>
+            </MudTabs>
+            @TablistName.On("#rules-entities", "Entity")
         }
 
         <div class="a-split">
@@ -92,8 +90,8 @@
                         <CascadingValue Value="_simulationProblem">
                             <ErrorPanel>
                                 <Actions>
-                                    <button type="button" class="a-btn a-btn--sm" data-testid="simulate-retry"
-                                            @onclick="SimulateAsync">Try again</button>
+                                    <AlvoButton Small="true" data-testid="simulate-retry"
+                                                OnClick="_ => SimulateAsync()">Try again</AlvoButton>
                                 </Actions>
                             </ErrorPanel>
                         </CascadingValue>
@@ -108,8 +106,8 @@
                         Checking a rule against one stored row needs a read of that row, which this screen does
                         not make — scoring it here would make it a second policy evaluator that could disagree
                         with the engine. To check one row, open it in Data as yourself.
-                        <a class="a-btn a-btn--sm a-actions"
-                           href="@AdminPaths.Records(Selected)">Open @Selected in Data</a>
+                        <AlvoButton Small="true" class="a-actions"
+                                    Href="@AdminPaths.Records(Selected)">Open @Selected in Data</AlvoButton>
                     </p>
                 </div>
             </div>
@@ -136,6 +134,9 @@
     /// <summary>The entity whose rules are shown, from the route.</summary>
     [Parameter]
     public string? EntityName { get; set; }
+
+    /// <summary>Where the selected entity sits in the strip, which is the order the schema lists them in.</summary>
+    private int SelectedIndex => _schema is null ? 0 : Math.Max(0, _schema.Entities.ToList().FindIndex(entity => entity.Name == Selected));
 
     private string Selected => EntityName ?? _schema?.Entities.FirstOrDefault()?.Name ?? string.Empty;
 
