@@ -13,6 +13,9 @@ public sealed class FacetNumberTests
     [InlineData("--3")]
     [InlineData("0")]
     [InlineData("1.5")]
+    [InlineData("-1")]
+    [InlineData("-120")]
+    [InlineData("2147483648")]
     public void A_max_length_that_is_not_a_whole_number_of_one_or_more_is_refused(string text)
     {
         var read = FacetNumber.MaxLength(text);
@@ -38,6 +41,9 @@ public sealed class FacetNumberTests
     [InlineData("1e", false)]
     [InlineData("0", false)]
     [InlineData("39", false)]
+    [InlineData("-1", false)]
+    [InlineData("-38", false)]
+    [InlineData(" 12 ", true)]
     [InlineData("1", true)]
     [InlineData("38", true)]
     public void A_precision_is_a_whole_number_from_1_to_38(string text, bool read)

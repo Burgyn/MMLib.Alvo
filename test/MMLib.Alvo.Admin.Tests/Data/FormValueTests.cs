@@ -63,9 +63,37 @@ public class FormValueTests
     }
 
     [Theory]
+    [InlineData("-5", -5L)]
+    [InlineData("+5", 5L)]
+    [InlineData("  7  ", 7L)]
+    [InlineData("9223372036854775807", long.MaxValue)]
+    public void An_integer_is_read_with_its_sign_and_without_the_space_around_it(string typed, long expected)
+    {
+        var read = FormValue.Parse(Field(FieldType.Integer), typed);
+
+        read.Problem.ShouldBeNull();
+        read.Value.ShouldBe(expected);
+    }
+
+    [Theory]
+    [InlineData("9223372036854775808")]
+    [InlineData("-9223372036854775809")]
+    [InlineData("1.5")]
+    [InlineData("1,000")]
+    [InlineData("--5")]
+    public void An_integer_the_port_cannot_hold_is_refused_rather_than_rounded_or_wrapped(string typed)
+    {
+        var read = FormValue.Parse(Field(FieldType.Integer), typed);
+
+        read.Value.ShouldBeNull();
+        read.Problem.ShouldBe("A whole number, such as 3.");
+    }
+
+    [Theory]
     [InlineData(FieldType.String)]
     [InlineData(FieldType.Decimal)]
     [InlineData(FieldType.Ref)]
+    [InlineData(FieldType.Integer)]
     public void An_empty_control_clears_the_field(FieldType type)
         => FormValue.Parse(Field(type), "  ").ShouldBe(FormParse.Empty);
 
