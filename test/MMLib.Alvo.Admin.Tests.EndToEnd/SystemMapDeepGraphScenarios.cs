@@ -60,11 +60,25 @@ public sealed class SystemMapDeepGraphScenarios(AdminWorld world) : IClassFixtur
     }
 
     /// <summary>Loads complex-crm into this operator's working copy through the Import box.</summary>
+    /// <remarks>
+    /// The two facts share the world's one working copy, so whichever runs second imports over the first one's
+    /// unapplied import and is asked first (spec §3.2); it answers Discard and import. Waiting for either answer
+    /// rather than reading the pending bar first: the bar draws its count a render after the page.
+    /// </remarks>
     private static async Task ImportCrmAsync(AdminSession session)
     {
         await session.GoAsync("/transfer");
         await session.Page.FillAsync("#import-json", Descriptors.ComplexCrm);
         await session.Button("Load it into the working copy").ClickAsync();
+
+        await session.Page.WaitForFunctionAsync(
+            "() => location.pathname.endsWith('/changes') || !!document.querySelector(\"[data-testid='import-replace-run']\")");
+        var replace = session.Dialog("import-replace-confirm").GetByTestId("import-replace-run");
+        if (await replace.IsVisibleAsync())
+        {
+            await replace.ClickAsync();
+        }
+
         await session.Page.WaitForURLAsync("**/changes**");
     }
 
