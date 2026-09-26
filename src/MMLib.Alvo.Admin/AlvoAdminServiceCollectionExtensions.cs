@@ -39,6 +39,14 @@ public static class AlvoAdminServiceCollectionExtensions
     /// six is public, and none is meant to be resolved by host code. Beside them it registers the component library
     /// the screens are drawn with: MudBlazor's own services, through <c>AddLibrary</c>.
     /// </para>
+    /// <para>
+    /// <b>It adds no session re-check of its own.</b> The dashboard's chrome — which screens the router
+    /// renders — follows the host's <c>AuthenticationStateProvider</c>, and a signed-in session is re-checked only
+    /// if the host's provider does it. <c>MMLib.Alvo.Identity</c>'s cookie sign-in registers one that does; a
+    /// host that mints its own sessions owns their revalidation, and without it a disabled operator's open tab
+    /// keeps navigating until its next page load. Authority never lingers either way: every management and
+    /// data call re-resolves its caller through <see cref="IAlvoAdminCallerResolver"/> and is refused at once.
+    /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into.</param>
     /// <param name="configure">Configures the dashboard.</param>

@@ -131,7 +131,7 @@
     [Parameter]
     public EventCallback OnToggle { get; set; }
 
-    /// <summary>Raised with the roles the person should hold.</summary>
+    /// <summary>Raised with the roles now selected; the page turns the difference from <see cref="Person"/> into a grant or a revoke.</summary>
     [Parameter]
     public EventCallback<IReadOnlyList<string>> OnSetRoles { get; set; }
 

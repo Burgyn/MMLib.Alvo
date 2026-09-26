@@ -32,7 +32,7 @@ namespace MMLib.Alvo.Identity.Tests;
 public sealed class AlvoIdentityLongLivedScopeTests : IAsyncLifetime
 {
     private readonly string _file = Path.Combine(Path.GetTempPath(), $"alvo-identity-{Guid.NewGuid():N}.db");
-    private readonly InterleavedWrite _interleaved = new();
+    private readonly RivalWrite _rival = new();
     private ServiceProvider _provider = null!;
     private IServiceScope _circuit = null!;
 
@@ -43,7 +43,7 @@ public sealed class AlvoIdentityLongLivedScopeTests : IAsyncLifetime
     {
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddAlvoIdentity(store => store.UseSqlite($"Data Source={_file}").AddInterceptors(_interleaved));
+        services.AddAlvoIdentity(store => store.UseSqlite($"Data Source={_file}").AddInterceptors(_rival));
 
         /* The catalogue is the applied descriptor's, which this package does not own; a fixed one
            keeps the facts about the store rather than about applying a descriptor. */
@@ -217,9 +217,9 @@ public sealed class AlvoIdentityLongLivedScopeTests : IAsyncLifetime
 
     /// <summary>
     /// <b>A write that loses a race is a clean, named refusal, and it leaves nothing behind.</b> Another
-    /// administrator's write lands between the open scope's read and its save, so the concurrency stamp
-    /// check fails — fail-safe, and correct. What must not follow is the failed row staying in the
-    /// circuit's change tracker: every later identity write from that tab would re-flush it and fail,
+    /// administrator's write moves the row's concurrency stamp between the open scope's read and its save,
+    /// so the stamp check fails — fail-safe, and correct. What must not follow is the failed row staying in
+    /// the circuit's change tracker: every later identity write from that tab would re-flush it and fail,
     /// so the tab could no longer disable <em>anybody</em> until it was reloaded.
     /// </summary>
     [Fact]
@@ -227,21 +227,54 @@ public sealed class AlvoIdentityLongLivedScopeTests : IAsyncLifetime
     {
         var eva = await CreateAsync();
         var otto = await CreateAsync(email: "Otto@Example.test");
-        var moved = TenantId.New();
         var tab = OpenScopeAdministration();
 
-        _interleaved.Before(() => AdministerAsync(people => people.SetTenantAsync(eva, moved, Ct)));
+        _rival.Before(eva);
         await Should.ThrowAsync<AlvoPreconditionFailedException>(() => tab.SetDisabledAsync(eva, disabled: true, Ct));
 
-        _interleaved.Before(() => AdministerAsync(people => people.SetTenantAsync(eva, moved, Ct)));
+        _rival.Before(eva);
         await Should.ThrowAsync<AlvoPreconditionFailedException>(() => tab.SetDisabledAsync(eva, disabled: true, Ct));
 
         await tab.SetDisabledAsync(otto, disabled: true, Ct);
 
         (await StoredAsync(otto)).IsDisabled.ShouldBeTrue("a refused write must not stop the tab from revoking somebody else");
-        var loser = await StoredAsync(eva);
-        loser.IsDisabled.ShouldBeFalse("the refused write wrote nothing");
-        loser.Tenant.ShouldBe(moved);
+        (await StoredAsync(eva)).IsDisabled.ShouldBeFalse("the refused write wrote nothing");
+    }
+
+    /// <summary>
+    /// <b>"Nothing was written" is true of a replacement that lost its race halfway.</b> A role
+    /// replacement is several saves — remove the held roles, create any missing role row, add the new
+    /// ones — and a race lost on the last of them used to leave the person holding <em>no</em> roles while
+    /// the operator read that nothing had changed. The unit of work is one transaction, so it rolls back.
+    /// </summary>
+    [Fact]
+    public async Task A_role_replacement_that_loses_its_race_halfway_leaves_the_roles_as_they_were()
+    {
+        var eva = await CreateAsync();
+        var tab = OpenScopeAdministration();
+
+        _rival.Before(eva, when: context => context.ChangeTracker.Entries<IdentityUserRole<Guid>>()
+            .Any(entry => entry.State == EntityState.Added));
+        await Should.ThrowAsync<AlvoPreconditionFailedException>(() => tab.SetRolesAsync(eva, ["viewer"], Ct));
+
+        (await StoredAsync(eva)).RoleNames.ShouldBe(["editor"], "a lost race writes nothing, not half a replacement");
+    }
+
+    /// <summary>The same for the membership store's own role replacement.</summary>
+    [Fact]
+    public async Task The_stores_role_replacement_that_loses_its_race_halfway_leaves_the_roles_as_they_were()
+    {
+        var eva = await CreateAsync();
+        var store = _circuit.ServiceProvider.GetRequiredService<IAlvoUserStore>();
+        await AdministerAsync(people => people.SetRolesAsync(eva, ["editor", "viewer"], Ct));
+        await AdministerAsync(people => people.SetRolesAsync(eva, ["editor"], Ct));
+
+        _rival.Before(eva, when: context => context.ChangeTracker.Entries<IdentityUserRole<Guid>>()
+            .Any(entry => entry.State == EntityState.Added));
+        await Should.ThrowAsync<AlvoPreconditionFailedException>(
+            async () => await store.SetRolesAsync(eva, ["viewer"], Ct));
+
+        (await StoredAsync(eva)).RoleNames.ShouldBe(["editor"]);
     }
 
     /// <summary>
@@ -336,31 +369,54 @@ public sealed class AlvoIdentityLongLivedScopeTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// Lets another administrator's write land between a scope's read and its save — the race a
-    /// concurrency stamp exists for, made deterministic.
+    /// Moves a user's concurrency stamp just before a save — what another administrator's committed write
+    /// looks like to the save that follows it — made deterministic.
     /// </summary>
     /// <remarks>
-    /// One-shot: the armed write is taken before it runs, so the save it makes itself passes straight
-    /// through rather than recursing.
+    /// <para>
+    /// <b>On the saving context's own connection, not from a second scope.</b> A unit of work is one
+    /// transaction, and SQLite's writer lock would make a second scope's write wait for this one to commit:
+    /// the race is not reachable on SQLite at all, only on an engine with row locks. Bumping the stamp inside
+    /// the transaction produces exactly the state that race produces — a stored stamp the save's
+    /// <c>WHERE</c> no longer matches — and the rollback proves nothing of the failed write survives.
+    /// </para>
+    /// <para>One-shot, and optionally conditional, so a fact can aim it at one save of several.</para>
     /// </remarks>
-    private sealed class InterleavedWrite : SaveChangesInterceptor
+    private sealed class RivalWrite : SaveChangesInterceptor
     {
-        private Func<Task>? _next;
+        private (Guid User, Func<DbContext, bool> When)? _armed;
 
-        /// <summary>Arms one write to run before the next save of any scope.</summary>
-        /// <param name="write">The other administrator's write.</param>
-        public void Before(Func<Task> write) => _next = write;
+        /// <summary>Arms one stamp change on <paramref name="user"/>, before the next save that matches.</summary>
+        /// <param name="user">Whose row the rival writes.</param>
+        /// <param name="when">Which save to aim at; every save when omitted.</param>
+        public void Before(UserId user, Func<DbContext, bool>? when = null) => _armed = (user.Value, when ?? (_ => true));
 
         /// <inheritdoc/>
         public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
             DbContextEventData eventData, InterceptionResult<int> result, CancellationToken cancellationToken = default)
         {
-            if (Interlocked.Exchange(ref _next, null) is { } write)
+            if (_armed is { } armed && eventData.Context is { } context && armed.When(context))
             {
-                await write();
+                _armed = null;
+                await BumpAsync(context, armed.User, cancellationToken);
             }
 
             return result;
+        }
+
+        private static async Task BumpAsync(DbContext context, Guid user, CancellationToken cancellationToken)
+        {
+            var users = context.Model.FindEntityType(typeof(AlvoIdentityUser)).ShouldNotBeNull();
+            var table = users.GetTableName();
+            var stamp = users.FindProperty(nameof(AlvoIdentityUser.ConcurrencyStamp)).ShouldNotBeNull().GetColumnName();
+            var id = users.FindProperty(nameof(AlvoIdentityUser.Id)).ShouldNotBeNull().GetColumnName();
+
+            /* Identifiers from the model, never from input; the one value is a parameter. */
+            var sql = $"UPDATE \"{table}\" SET \"{stamp}\" = lower(hex(randomblob(16))) WHERE upper(\"{id}\") = upper({{0}})";
+            (await context.Database.ExecuteSqlRawAsync(
+                sql,
+                [user.ToString()],
+                cancellationToken)).ShouldBe(1, "the rival must really have written the row");
         }
     }
 }

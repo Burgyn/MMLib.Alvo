@@ -19,6 +19,14 @@ namespace MMLib.Alvo.Identity.Internal;
 /// not.
 /// </para>
 /// <para>
+/// <b>And it is one transaction.</b> A single administration call is several saves — a role replacement
+/// removes the held roles, may create a role row, then adds the new ones — so without one, a race lost on
+/// the last save left the person holding no roles while the operator read that nothing was written. Inside
+/// one transaction a lost race rolls back whole, which is what makes <see cref="ChangedElsewhere"/> true.
+/// On SQLite the transaction also takes the writer lock for its duration, so two units of work serialize
+/// rather than race; on an engine with row locks the stamp check is still what catches the race.
+/// </para>
+/// <para>
 /// The core's guarded decorator already resolves the implementation from a scope per call, which makes
 /// this unreachable through the public interface. It is kept because the implementation is also
 /// resolvable by key, and a rule that holds only because of how its one caller happens to resolve it is
@@ -43,10 +51,16 @@ internal static class AlvoIdentityUnitOfWork
     /// <exception cref="AlvoPreconditionFailedException">The row was written by somebody else in between.</exception>
     internal static async Task<T> RunAsync<T>(AlvoIdentityDbContext store, Func<Task<T>> work)
     {
-        store.ChangeTracker.Clear();
         try
         {
-            return await work().ConfigureAwait(false);
+            /* Through the execution strategy, because a host may configure a retrying one for its
+               identity store, and a retrying strategy refuses a transaction opened outside it. A retry
+               reruns the whole unit — from an empty tracker, so from a fresh read. */
+            return await store.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+            {
+                store.ChangeTracker.Clear();
+                return await InTransactionAsync(store, work).ConfigureAwait(false);
+            }).ConfigureAwait(false);
         }
         catch (DbUpdateConcurrencyException raced)
         {
@@ -57,6 +71,31 @@ internal static class AlvoIdentityUnitOfWork
         finally
         {
             store.ChangeTracker.Clear();
+        }
+    }
+
+    /// <summary>Runs <paramref name="work"/> in one transaction, committed only when it returns.</summary>
+    /// <remarks>
+    /// Joins a transaction the context already has rather than nesting one — a caller that opened it owns
+    /// the commit. Disposing an uncommitted transaction rolls it back, which is the throw path.
+    /// </remarks>
+    /// <typeparam name="T">What the write answers with.</typeparam>
+    /// <param name="store">The identity store the write goes through.</param>
+    /// <param name="work">The write.</param>
+    /// <returns>Whatever the write answered.</returns>
+    private static async Task<T> InTransactionAsync<T>(AlvoIdentityDbContext store, Func<Task<T>> work)
+    {
+        if (store.Database.CurrentTransaction is not null)
+        {
+            return await work().ConfigureAwait(false);
+        }
+
+        var transaction = await store.Database.BeginTransactionAsync().ConfigureAwait(false);
+        await using (transaction.ConfigureAwait(false))
+        {
+            var answer = await work().ConfigureAwait(false);
+            await transaction.CommitAsync().ConfigureAwait(false);
+            return answer;
         }
     }
 

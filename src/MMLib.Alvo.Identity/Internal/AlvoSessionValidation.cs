@@ -24,6 +24,13 @@ namespace MMLib.Alvo.Identity.Internal;
 /// and the request fails, which is the only honest answer to "could not tell".
 /// </para>
 /// <para>
+/// <b>So an identity-store outage fails closed, and loudly.</b> While the store is unreachable, every
+/// request that carries the cookie answers <c>500</c> — the dashboard, the Management API over the cookie,
+/// and the sign-in page itself when the browser still presents one. That is the default-deny reading of
+/// "cannot tell whether this account is still enabled"; a request with no cookie is not checked and
+/// reaches the sign-in page, whose own sign-in then fails on the same outage.
+/// </para>
+/// <para>
 /// <b>It asks <see cref="IAlvoUserStore"/>, not the context resolver.</b> The resolver also refuses a
 /// caller when no descriptor has been applied yet, which is a statement about the project rather than
 /// the account — dropping every session to sign-in on an empty project would loop the one operator who
@@ -58,11 +65,16 @@ internal static class AlvoSessionValidation
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Every request, with no throttle, deliberately.</b> A throttle would have to remember when the
-    /// cookie was last checked, which means re-issuing the cookie to carry the timestamp, and it would
-    /// open exactly the window this exists to close. What it would save is small: the dashboard is a
-    /// Blazor circuit, so after the first page load it makes almost no HTTP requests, and each check is
-    /// one indexed read — the same one the context resolver already makes per management call.
+    /// <b>Every request, with no throttle, deliberately.</b> The alternative is ASP.NET Core Identity's
+    /// <c>SecurityStampValidator</c> shape: skip the check while the cookie's <c>IssuedUtc</c> is younger
+    /// than an interval, and renew the cookie on a successful check past it — which sliding expiration
+    /// already does, so the throttle itself is cheap. What it costs is latency: a disabled operator's cookie
+    /// would keep passing for up to one interval, the same lag the circuit's thirty seconds accepts. On HTTP
+    /// there is no reason to accept it, because the saving is small — after the first page load the
+    /// dashboard is a Blazor circuit and makes almost no HTTP requests. Each check is two indexed reads
+    /// (the user row, then its role memberships, because <see cref="IAlvoUserStore.FindAsync"/> projects
+    /// the roles), and on a first page load it runs for every static asset too, since authentication runs
+    /// ahead of the asset endpoints: tens of cheap reads per load at dashboard scale.
     /// </para>
     /// <para>
     /// The store comes from the request's own scope, which is fresh per request, and

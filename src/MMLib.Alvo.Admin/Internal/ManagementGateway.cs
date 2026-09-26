@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Routing;
 using MMLib.Alvo.Admin.Components.History;
 using MMLib.Alvo.Auth;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;
 
@@ -276,9 +277,88 @@ internal sealed class ManagementGateway(
     public Task<AlvoUser> CreatePersonAsync(AlvoUserCreation creation, CancellationToken ct)
         => AsOperatorAsync(() => Administration.CreateAsync(creation, ct), ct);
 
-    /// <summary>Replaces a person's roles.</summary>
-    public Task<AlvoUser> SetRolesAsync(UserId user, IReadOnlyList<string> roleNames, CancellationToken ct)
-        => AsOperatorAsync(() => Administration.SetRolesAsync(user, roleNames, ct), ct);
+    /// <summary>
+    /// Grants and revokes the named roles against the person's roles <em>as stored now</em>, not as the screen
+    /// last showed them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the screen sends a change and not a set.</b> The port's <c>SetRolesAsync</c> is a replacement, and
+    /// the chip group's selection is computed from the row as it was loaded. Sending that set from a tab that
+    /// was open while another administrator revoked a role would silently grant it back — the one direction a
+    /// stale screen must never move authority (security review of <c>c10f75c</c>, Q1). So the screen names only
+    /// what its operator pressed, and this reads the person fresh, applies that to the stored roles, and
+    /// replaces with the result.
+    /// </para>
+    /// <para>
+    /// <b>Done here, over the port's existing members, rather than as a grant/revoke pair on the port.</b> That
+    /// would be two public members every implementation has to carry, for a problem only a screen that holds a
+    /// snapshot has. What it does not buy is atomicity: between the fresh read and the replacement another write
+    /// can still land, and the later one wins. That window is the length of one round trip rather than the life
+    /// of a tab, and closing it is the port's expected-version follow-up (<c>docs/todo-admin.md</c> §8d item 37).
+    /// </para>
+    /// </remarks>
+    /// <param name="shown">The person as the screen shows them — for the id and the address to find them by.</param>
+    /// <param name="grant">The roles to add.</param>
+    /// <param name="revoke">The roles to take away.</param>
+    /// <param name="ct">A token to cancel the reads and the write.</param>
+    /// <returns>The person as they now are.</returns>
+    /// <exception cref="AlvoPreconditionFailedException">The person is no longer stored.</exception>
+    public Task<AlvoUser> ChangeRolesAsync(
+        AlvoUser shown, IReadOnlyCollection<string> grant, IReadOnlyCollection<string> revoke, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(shown);
+        ArgumentNullException.ThrowIfNull(grant);
+        ArgumentNullException.ThrowIfNull(revoke);
+
+        return AsOperatorAsync(async () =>
+        {
+            var stored = await StoredAsync(shown, ct).ConfigureAwait(false);
+            IReadOnlyList<string> next =
+            [
+                .. stored.RoleNames.Except(revoke, StringComparer.Ordinal),
+                .. grant.Except(stored.RoleNames, StringComparer.Ordinal),
+            ];
+            return await Administration.SetRolesAsync(shown.Id, next, ct).ConfigureAwait(false);
+        }, ct);
+    }
+
+    /// <summary>What an operator pressing a chip changed: the roles now selected that were not shown, and the reverse.</summary>
+    /// <param name="shown">The roles the row showed.</param>
+    /// <param name="selected">The roles the chip group now has selected.</param>
+    /// <returns>The roles to grant and the roles to revoke.</returns>
+    internal static (IReadOnlyList<string> Grant, IReadOnlyList<string> Revoke) RoleChange(
+        IReadOnlyList<string> shown, IReadOnlyList<string> selected)
+        => ([.. selected.Except(shown, StringComparer.Ordinal)], [.. shown.Except(selected, StringComparer.Ordinal)]);
+
+    /// <summary>Reads a person as the store holds them now, through the port's own paged read.</summary>
+    /// <remarks>
+    /// The port has no read by id, so this searches by the person's address and matches the id, following the
+    /// cursor: the search is a substring match, so another address can contain this one.
+    /// </remarks>
+    /// <param name="shown">The person as the screen shows them.</param>
+    /// <param name="ct">A token to cancel the reads.</param>
+    /// <returns>The stored person.</returns>
+    /// <exception cref="AlvoPreconditionFailedException">The person is no longer stored.</exception>
+    private async Task<AlvoUser> StoredAsync(AlvoUser shown, CancellationToken ct)
+    {
+        string? after = null;
+        do
+        {
+            var page = await Administration.ListAsync(new AlvoUserQuery(shown.Email, 200, after), ct)
+                .ConfigureAwait(false);
+            if (page.Users.FirstOrDefault(person => person.Id == shown.Id) is { } stored)
+            {
+                return stored;
+            }
+
+            after = page.NextCursor;
+        }
+        while (after is not null);
+
+        throw new AlvoPreconditionFailedException(
+            "This person is no longer there — somebody removed them while this screen was open. Reload the list.");
+    }
 
     /// <summary>Grants, changes or removes the one tenant a person acts in.</summary>
     public Task<AlvoUser> SetTenantAsync(UserId user, TenantId? tenant, CancellationToken ct)

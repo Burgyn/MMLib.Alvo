@@ -27,6 +27,15 @@
 /// of a swappable adapter where it would be optional by construction.
 /// </para>
 /// <para>
+/// <b>Writes are unversioned, and the later one wins, column by column — by decision, for now.</b> No
+/// member takes the version of the person the caller last saw, so an implementation cannot refuse a write
+/// made from a stale view; it can only apply it to the row as stored (each member changes its own column
+/// and nothing else) and refuse a write that races another <em>inside</em> the call. That is why the role
+/// member is a replacement a screen must compute from a fresh read, never from a snapshot it has held. An
+/// expected-version check (an <c>If-Match</c> on the route, a version on the member) is the follow-up —
+/// <c>docs/todo-admin.md</c> §8d item 37.
+/// </para>
+/// <para>
 /// <b>The bootstrap administrator is not a target of this surface.</b> Two members refuse it by
 /// name — see each one — because it is the identity the whole default-deny story rests on: a
 /// project whose <c>access</c> block admits nobody still has exactly one person who can fix it.

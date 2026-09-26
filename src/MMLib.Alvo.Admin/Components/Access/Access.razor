@@ -159,8 +159,13 @@
         }
     }
 
+    /* A chip press becomes a grant or a revoke against the roles as stored now, never the set this row was
+       loaded with — ManagementGateway.ChangeRolesAsync says why a snapshot would restore a revoked role. */
     private Task SetRolesAsync(AlvoUser person, IReadOnlyList<string> roles)
-        => WriteAsync(() => Gateway.SetRolesAsync(person.Id, roles, CancellationToken.None));
+    {
+        var (grant, revoke) = ManagementGateway.RoleChange(person.RoleNames, roles);
+        return WriteAsync(() => Gateway.ChangeRolesAsync(person, grant, revoke, CancellationToken.None));
+    }
 
     private async Task SetTenantAsync(AlvoUser person, string draft)
     {

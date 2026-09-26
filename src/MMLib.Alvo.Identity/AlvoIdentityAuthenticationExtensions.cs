@@ -42,6 +42,15 @@ public static class AlvoIdentityAuthenticationExtensions
     /// to sign-in. See <c>AlvoSessionValidation</c> and
     /// <c>AlvoIdentityRevalidatingAuthenticationStateProvider</c> for why each exists.
     /// </para>
+    /// <para>
+    /// <b>The circuit's provider is registered last-wins, and a host decides which one it gets.</b> This
+    /// method adds <c>AuthenticationStateProvider</c> with a plain <c>AddScoped</c>, so it replaces a provider
+    /// the host registered <em>before</em> calling it, and a provider the host registers <em>after</em> it
+    /// replaces this one — and with it the circuit's re-check. A host with a provider of its own should
+    /// register it after this call and make it revalidate (deriving from
+    /// <c>RevalidatingServerAuthenticationStateProvider</c>); a host that wants this one should register none.
+    /// Either way the cookie re-check stays, and every management and data call still re-resolves its caller.
+    /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into.</param>
     /// <param name="signInPath">Where an unauthenticated request is sent.</param>
