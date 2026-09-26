@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;
+using MudBlazor;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
@@ -193,8 +194,21 @@ public partial class Entity
         Navigation.NavigateTo(Navigation.GetUriWithQueryParameter(EntityTabs.Parameter, tab.Slug));
     }
 
-    /// <summary>A tab chosen in the strip; the URL follows, exactly as a click on the old strip made it.</summary>
-    private void OpenAt(int index) => Open(EntityTabs.All[index]);
+    /// <summary>A tab the operator activated in the strip; the URL follows, exactly as a click on the old strip made it.</summary>
+    /// <remarks>
+    /// On the operator's interaction rather than on <c>ActivePanelIndexChanged</c>, for Rules' reason: MudTabs also moves
+    /// its active index as it removes its panels on disposal, and a tab followed there navigates from a page that is
+    /// going away.
+    /// </remarks>
+    private Task OpenAsync(TabInteractionEventArgs interaction)
+    {
+        if (interaction.PanelIndex >= 0 && interaction.PanelIndex < EntityTabs.All.Count)
+        {
+            Open(EntityTabs.All[interaction.PanelIndex]);
+        }
+
+        return Task.CompletedTask;
+    }
 
     /// <summary>The open tab's position in the strip.</summary>
     private int ActiveIndex => EntityTabs.All.ToList().IndexOf(_tab);

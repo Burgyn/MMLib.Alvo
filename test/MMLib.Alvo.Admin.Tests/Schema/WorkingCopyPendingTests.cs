@@ -264,6 +264,77 @@ public class WorkingCopyPendingTests
     }
 
     [Fact]
+    public void An_unedited_copy_follows_a_revision_somebody_else_appended()
+    {
+        var copy = Copy();
+        var raised = 0;
+        copy.Changed += () => raised++;
+
+        copy.TakeIfUnedited(Descriptor, revision: 5).ShouldBeTrue();
+
+        copy.Revision.ShouldBe(5);
+        copy.PendingCount.ShouldBe(0);
+        raised.ShouldBe(1);
+    }
+
+    [Fact]
+    public void An_edited_copy_is_never_taken_over_its_edits_when_the_head_moves()
+    {
+        var copy = Copy();
+        copy.AddEntity("invoices", scoped: false, audited: true);
+        var raised = 0;
+        copy.Changed += () => raised++;
+
+        copy.TakeIfUnedited(Descriptor, revision: 5).ShouldBeFalse(
+            "another tab staged an edit before the follow; taking the head would discard it");
+
+        copy.Revision.ShouldBe(4);
+        copy.PendingCount.ShouldBe(1);
+        copy.Entities.ShouldContain("invoices");
+        raised.ShouldBe(0);
+    }
+
+    [Fact]
+    public void A_copy_nobody_took_is_not_taken_by_a_follow()
+    {
+        var copy = new WorkingCopy();
+
+        copy.TakeIfUnedited(Descriptor, revision: 5).ShouldBeFalse();
+
+        copy.Loaded.ShouldBeFalse("the next screen to read it takes the head then");
+    }
+
+    [Fact]
+    public void An_applied_copy_starts_again_from_the_revision_it_wrote()
+    {
+        var copy = Copy();
+        copy.AddEntity("invoices", scoped: false, audited: true);
+        var sent = copy.Json;
+
+        copy.TakeApplied(sent, sent, revision: 5).ShouldBeTrue();
+
+        copy.Revision.ShouldBe(5);
+        copy.PendingCount.ShouldBe(0);
+        copy.IsDirty.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void An_edit_staged_while_the_apply_was_on_the_wire_stays_staged_over_the_new_revision()
+    {
+        var copy = Copy();
+        copy.AddEntity("invoices", scoped: false, audited: true);
+        var sent = copy.Json;
+        copy.AddEntity("tickets", scoped: false, audited: true);
+
+        copy.TakeApplied(sent, sent, revision: 5).ShouldBeFalse(
+            "another tab staged tickets after the send; restarting the copy would discard it");
+
+        copy.Revision.ShouldBe(5, "everything else in the copy is what revision 5 holds");
+        copy.Entities.ShouldContain("tickets");
+        copy.PendingCount.ShouldBe(1, "only tickets is left to apply");
+    }
+
+    [Fact]
     public void The_count_is_current_the_moment_the_event_is_raised()
     {
         var copy = Copy();

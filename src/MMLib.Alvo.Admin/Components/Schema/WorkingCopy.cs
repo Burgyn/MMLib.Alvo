@@ -198,6 +198,64 @@ internal sealed partial class WorkingCopy
         return true;
     });
 
+    /// <summary>
+    /// Takes a fresh working copy from an applied descriptor, when the copy is loaded and holds no edits — what a copy
+    /// does when somebody else moved the head: a rollback appended a revision.
+    /// </summary>
+    /// <remarks>
+    /// <b>The question and the take are one step under the gate</b>, for <see cref="TakeIfUnloaded"/>'s reason: asked
+    /// and taken separately, another tab of the operator could stage an edit in between, and the take would discard
+    /// it. An edited copy stays where it is, because its edits were made against the revision it names.
+    /// </remarks>
+    /// <param name="descriptorJson">The descriptor as stored.</param>
+    /// <param name="revision">The revision it is at.</param>
+    /// <returns><see langword="true"/> when this call took it.</returns>
+    public bool TakeIfUnedited(string descriptorJson, int revision) => Edit(_ =>
+    {
+        if (_working is null || IsDirty)
+        {
+            return false;
+        }
+
+        Load(descriptorJson, revision);
+        return true;
+    });
+
+    /// <summary>
+    /// Takes the revision an apply of <paramref name="sentJson"/> wrote. The copy starts again from it, unless an edit
+    /// landed after the send: that edit stays staged, now over the revision just written.
+    /// </summary>
+    /// <remarks>
+    /// <b>Asked and taken in one step under the gate</b>, for <see cref="TakeIfUnloaded"/>'s reason: an edit another
+    /// tab staged while the apply was on the wire is not in the revision, and a plain take would discard it. Its base
+    /// moves to the new revision, because everything else in the copy is what that revision holds.
+    /// </remarks>
+    /// <param name="sentJson">The working document the apply sent.</param>
+    /// <param name="descriptorJson">The descriptor as stored after the apply.</param>
+    /// <param name="revision">The revision the apply wrote.</param>
+    /// <returns><see langword="true"/> when the copy started again; <see langword="false"/> when an edit was kept.</returns>
+    public bool TakeApplied(string sentJson, string descriptorJson, int revision)
+    {
+        var fresh = false;
+        Edit(_ =>
+        {
+            fresh = _working is null || string.Equals(_working.ToJsonString(_pretty), sentJson, StringComparison.Ordinal);
+            if (fresh)
+            {
+                Load(descriptorJson, revision);
+            }
+            else
+            {
+                _applied = JsonNode.Parse(descriptorJson);
+                Revision = revision;
+            }
+
+            return true;
+        });
+
+        return fresh;
+    }
+
     /// <summary>Discards every unapplied edit.</summary>
     public void Discard() => Edit(_ =>
     {

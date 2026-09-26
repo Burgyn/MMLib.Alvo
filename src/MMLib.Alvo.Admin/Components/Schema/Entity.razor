@@ -115,7 +115,7 @@
             the focused tab. The open tab is still the address's ?tab=, so a reload, a link and Back all agree.
             Only the open tab's body is drawn.
         *@
-        <MudTabs ActivePanelIndex="@ActiveIndex" ActivePanelIndexChanged="OpenAt"
+        <MudTabs ActivePanelIndex="@ActiveIndex" OnPreviewInteraction="OpenAsync"
                  Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-entitytabs"
                  id="entity-tabs">
             @foreach (var tab in EntityTabs.All)

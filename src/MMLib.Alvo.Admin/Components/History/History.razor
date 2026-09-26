@@ -245,10 +245,7 @@
         }
 
         var copy = await Session.CopyAsync(CancellationToken.None);
-        if (copy.Loaded && !copy.IsDirty)
-        {
-            copy.Take(_head.DescriptorJson, _head.Revision);
-        }
+        copy.TakeIfUnedited(_head.DescriptorJson, _head.Revision);
     }
 
     private async Task<ManagementApplyResult?> SendRollbackAsync(bool dryRun, bool allowDestructive)

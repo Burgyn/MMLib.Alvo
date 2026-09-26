@@ -278,8 +278,9 @@
                project's name "above", and that control renders only once there is a plan — so a
                destructive change could be composed and never reviewed or applied from here. Nothing
                is destroyed by describing it. */
+            var sent = Copy.Json;
             var result = await Gateway.ApplyAsync(
-                Copy.Json, Copy.Revision, allowDestructive: dryRun || _allowed, dryRun,
+                sent, Copy.Revision, allowDestructive: dryRun || _allowed, dryRun,
                 author: await Gateway.AuthorAsync(),
                 reason: _reason.Length > 0 ? _reason : null,
                 CancellationToken.None);
@@ -291,7 +292,7 @@
             }
             else
             {
-                await TakeAppliedAsync(result);
+                await TakeAppliedAsync(result, sent);
             }
         }
         catch (Exception exception)
@@ -312,16 +313,17 @@
     /// </summary>
     /// <remarks>
     /// The re-read is caught here rather than by the apply's own handler: the apply has run, so its failure is not a
-    /// refused apply, and the snackbar would be the one message on screen claiming everything worked.
+    /// refused apply, and the snackbar would be the one message on screen claiming everything worked. The copy is
+    /// restarted only if it still holds what was sent: an edit another tab staged meanwhile stays staged.
     /// </remarks>
-    private async Task TakeAppliedAsync(ManagementApplyResult result)
+    private async Task TakeAppliedAsync(ManagementApplyResult result, string sent)
     {
         _applied = result;
         _plan = null;
         try
         {
             var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
-            Copy.Take(descriptor.DescriptorJson, descriptor.Revision);
+            Copy.TakeApplied(sent, descriptor.DescriptorJson, descriptor.Revision);
         }
         catch (Exception exception)
         {
