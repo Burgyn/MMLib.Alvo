@@ -167,9 +167,11 @@
     {
         try
         {
-            _revisions = await Gateway.RevisionsAsync(CancellationToken.None);
-            _head = await Gateway.DescriptorAsync(CancellationToken.None);
-            _current = _head.Revision;
+            /* Both read before either is kept: a list drawn beside no head would offer every revision a Rollback
+               against r0, and take the panel's focus on the page's own load. */
+            var revisions = await Gateway.RevisionsAsync(CancellationToken.None);
+            var head = await Gateway.DescriptorAsync(CancellationToken.None);
+            (_revisions, _head, _current) = (revisions, head, head.Revision);
         }
         catch (Exception exception)
         {

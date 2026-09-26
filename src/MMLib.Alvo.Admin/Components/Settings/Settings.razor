@@ -131,7 +131,7 @@
 
         <Field Label="Kind" LabelId="ai-kind">
             <ChipGroup TValue="string" Items="_kinds" Selected="[_kind]" aria-labelledby="ai-kind"
-                       SelectedChanged="kinds => _kind = kinds[0]" />
+                       SelectedChanged="ChooseKind" />
         </Field>
 
         <Field Label="Endpoint" For="ai-endpoint">
@@ -159,7 +159,7 @@
                 <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="ai-key"
                               InputType="InputType.Password" autocomplete="off"
                               aria-describedby="ai-key-hint" Placeholder="leave empty for a local model"
-                              Value="_apiKey" ValueChanged="text => _apiKey = text ?? string.Empty" />
+                              Value="_apiKey" ValueChanged="TypeKey" />
             </ChildContent>
             <Hint>
                 Stored encrypted and never read back into this page. Saving replaces the whole
@@ -188,15 +188,21 @@
     private int _refusalsDrawn;
     private bool _saving;
     private bool _editing;
+
+    /// <summary>Whether what the editor holds is what was last saved, so closing it loses nothing.</summary>
+    private bool _savedAsTyped;
     private MudTextField<string>? _endpointField;
     private MudTextField<string>? _modelField;
 
     protected override async Task OnInitializedAsync()
         => _info = await Gateway.InfoAsync(CancellationToken.None);
 
-    /// <summary>Whether the editor holds anything closing it would lose: a kind picked, or any text typed.</summary>
-    private bool Dirty => _kind != StoredAiConnection.OpenAiCompatibleKind
-        || _endpoint.Length > 0 || _model.Length > 0 || _apiKey.Length > 0;
+    /// <summary>
+    /// Whether the editor holds anything closing it would lose: a kind picked, or any text typed, since the last save.
+    /// A save whose read-back failed still happened, so what it wrote is not lost by closing.
+    /// </summary>
+    private bool Dirty => !_savedAsTyped && (_kind != StoredAiConnection.OpenAiCompatibleKind
+        || _endpoint.Length > 0 || _model.Length > 0 || _apiKey.Length > 0);
 
     /// <summary>
     /// Opens the editor empty: nothing stored is read back into it, so the endpoint and the key are never shown back.
@@ -216,6 +222,7 @@
     private void ClearForm()
     {
         (_kind, _endpoint, _model, _apiKey) = (StoredAiConnection.OpenAiCompatibleKind, string.Empty, string.Empty, string.Empty);
+        _savedAsTyped = false;
         _problem = null;
         _fields.ClearAll();
     }
@@ -223,12 +230,26 @@
     private void TypeEndpoint(string? text)
     {
         _endpoint = text ?? string.Empty;
+        _savedAsTyped = false;
         _fields.Clear(EndpointField);
+    }
+
+    private void ChooseKind(IReadOnlyList<string> kinds)
+    {
+        _kind = kinds[0];
+        _savedAsTyped = false;
+    }
+
+    private void TypeKey(string? text)
+    {
+        _apiKey = text ?? string.Empty;
+        _savedAsTyped = false;
     }
 
     private void TypeModel(string? text)
     {
         _model = text ?? string.Empty;
+        _savedAsTyped = false;
         _fields.Clear(ModelField);
     }
 
@@ -273,6 +294,7 @@
             await Assistant.SaveConnectionAsync(
                 new AiConnectionForm(_kind, _endpoint, _model, _apiKey), CancellationToken.None);
             _apiKey = string.Empty;
+            _savedAsTyped = true;
             return true;
         }
         catch (Exception exception)

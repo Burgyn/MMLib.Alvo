@@ -353,8 +353,17 @@
     }
 
     /// <summary>A destructive plan asks for the project's name first; any other applies at once.</summary>
+    /// <remarks>
+    /// Not while a plan or an apply is in flight: a press in the render before "Plan again" disables the button would
+    /// open the confirm over steps that are about to be replaced.
+    /// </remarks>
     private Task RequestApplyAsync()
     {
+        if (_busy)
+        {
+            return Task.CompletedTask;
+        }
+
         if (CopyMovedPastThePlan())
         {
             MarkStale(takesFocus: true);

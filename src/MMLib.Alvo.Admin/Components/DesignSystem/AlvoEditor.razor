@@ -195,13 +195,18 @@
 
     /// <summary>
     /// Submits, once the operator chose to leave when a cascaded question says the submit would lose something: a
-    /// submit closes the editor as surely as Cancel does.
+    /// submit closes the editor as surely as Cancel does. A form that cannot submit asks nothing, because its answer
+    /// would lead nowhere.
     /// </summary>
-    private Task SubmitAsync() => LeaveQuestion is null ? RunSubmitAsync() : LeaveAsync(RunSubmitAsync);
+    private Task SubmitAsync() => !Submittable ? Task.CompletedTask
+        : LeaveQuestion is null ? RunSubmitAsync() : LeaveAsync(RunSubmitAsync);
+
+    /// <summary>Whether the primary action can run now.</summary>
+    private bool Submittable => CanSubmit && !Busy && !HoldsFault;
 
     private async Task RunSubmitAsync()
     {
-        if (!CanSubmit || Busy || HoldsFault || !_gate.TryBegin())
+        if (!Submittable || !_gate.TryBegin())
         {
             return;
         }

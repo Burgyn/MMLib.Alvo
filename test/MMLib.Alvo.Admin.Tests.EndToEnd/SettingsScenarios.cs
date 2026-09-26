@@ -24,6 +24,9 @@ public sealed class SettingsWorld : ConfigurableAssistantWorld
     /// <summary>What a connection save throws instead of writing, or <see langword="null"/> to write.</summary>
     public Func<Exception>? RefuseSaves { get; set; }
 
+    /// <summary>Whether every info read throws, the way a store that is briefly unreachable does.</summary>
+    public bool FailInfoReads { get; set; }
+
     /// <inheritdoc/>
     protected override void Configure(IServiceCollection services)
     {
@@ -36,6 +39,11 @@ public sealed class SettingsWorld : ConfigurableAssistantWorld
     {
         public override async Task<ManagementInfo> GetInfoAsync(CancellationToken ct = default)
         {
+            if (world.FailInfoReads)
+            {
+                throw new InvalidOperationException("The info store did not answer.");
+            }
+
             if (world.InfoDelay > TimeSpan.Zero)
             {
                 await Task.Delay(world.InfoDelay, ct).ConfigureAwait(false);
@@ -99,6 +107,36 @@ public sealed class SettingsScenarios(SettingsWorld world) : IClassFixture<Setti
         await EditorScenarios.WaitForFocusOnTestIdAsync(session, "ai-change");
         (await session.SnackbarCountAsync()).ShouldBe(0, "nothing was saved");
         session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// A save whose read-back failed still happened: the editor says so, and closing it asks nothing, because the
+    /// connection it holds is the one stored (final-fix-A re-review, finding 2).
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task After_a_save_whose_read_back_failed_closing_asks_nothing()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/settings");
+        var editor = await OpenConnectionEditorAsync(session);
+        await session.Page.FillAsync("#ai-endpoint", "http://127.0.0.1:1/v1");
+        await session.Page.FillAsync("#ai-model", "scripted");
+
+        world.FailInfoReads = true;
+        try
+        {
+            await session.Page.Locator("#ai-model").PressAsync("Enter");
+            (await session.Page.GetByTestId("error-title").InnerTextAsync())
+                .ShouldBe("The connection was saved, and this screen could not read it back");
+        }
+        finally
+        {
+            world.FailInfoReads = false;
+        }
+
+        await session.Page.Keyboard.PressAsync("Escape");
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        (await session.Page.GetByTestId("editor-discard-question").CountAsync()).ShouldBe(0, "nothing is lost by closing");
     }
 
     /// <summary>Opens the connection editor from its summary and waits for focus inside it.</summary>
