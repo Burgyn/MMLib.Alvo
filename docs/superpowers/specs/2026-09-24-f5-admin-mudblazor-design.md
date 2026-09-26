@@ -52,7 +52,9 @@ and the e2e suite asserts that things render, not that they behave.
    wide-blast-radius ones (destructive apply, rollback, remove entity) add the **type-the-name** step. A staged
    (undoable before apply) removal may instead be immediate with a snackbar **Undo**.
 3. **Feedback.**
-   - **Snackbar** (`ISnackbar`, bottom-right, 4–6 s, at most two) for the brief confirmation of an action just taken:
+   - **Snackbar** (`ISnackbar`, **bottom-left, never over an open editor's footer** — the editor is a right-hand
+     sheet with its actions bottom-right; 4–6 s, at most two; its text and close on the tone's contrast colour, AA in
+     both themes) for the brief confirmation of an action just taken:
      "Saved to the working copy", "Applied as revision 12", "Record deleted". Never the only copy of something the
      operator must keep (a credential token goes in the dialog with a Copy button).
    - **`AlvoAlert`** (persistent, in place, `role=alert` / `role=status`) for state and **every error**, with Alvo's
@@ -79,24 +81,41 @@ and the e2e suite asserts that things render, not that they behave.
    or is not used (the record form's reference combobox, D7):
    - **Name above the box**, never floating and never in a notch: the `Field` component's `<label for>` (or, for a
      group, a label a group names with `aria-labelledby`), left-aligned with the box, `--text-sm`, `--dim`, medium
-     weight. A library input carries **no `Label`, `HelperText`, `Margin` or `Dense`** of its own
-     (`FieldConventionTests`). The one exception is a **search over a list** (the entity filter, the Data search):
+     weight. A library input carries **no `Label`, `HelperText`, `Margin`, `Dense` or `@attributes`** of its own,
+     and it **must be named**: a `Field For=` its id, `aria-label` or `aria-labelledby` (`FieldConventionTests`).
+     One name only — the library's label is never drawn beside the Field's. The one exception is a **search over a list** (the entity filter, the Data search):
      no visible name, its placeholder says what it searches and `aria-label` names it.
    - **Box**: the outlined variant, drawn as `.a-input` is — 1 px `--border`, `--border2` on hover, the focus ring on
      the frame, `--panel` background, a `--radius-xs` corner (the buttons' — the theme's `DefaultBorderRadius` — so a
      field and its submit have one edge). The library's own outline and its legend are never drawn.
-   - **Text**: `--text-sm` at line-height 1.5, in the font around it (`a-mono` for names and CEL). The value, the name
+   - **Text**: `--text-sm` at line-height 1.5 (**`--text-lg`, 16 px, on a phone**, ≤ 720 px: iOS Safari zooms the
+     page into any input under 16 px as it takes focus; the name and hint stay `--text-sm`), in the font around it (`a-mono` for names and CEL). The value, the name
      and the hint are one size, so a field reads as one thing. *Deviation from the brief's "body text size"*:
      `--text-sm`, not `--text-base`, because it is the size every Alvo form control (`.a-input`, `.a-label`,
      `.a-hint`, `.a-check`) and the static sign-in page already use; `--text-base` is running text.
    - **Rhythm**: one single-line height everywhere — `--space-2 × --density` above and below one line, `--space-3`
      at the sides, 40 px minimum on a phone; a field has no margin of its own (the stack spaces it, `--space-1`
      between name, box and hint). Multi-line = `Lines="n"` rows of the same line-height.
+   - **Width**: a field fills its form's column. Side by side: `.a-field-row` (wraps below 160 px a field). A single
+     picker is `.a-field--narrow` (360 px at most); a search over a list is `.a-filter` / `.a-grid-search` (360 px).
+   - **Numbers**: `MudTextField InputType.Number` (a decimal is text with `inputmode=decimal`, D-8). `MudNumericField`
+     is not used: its spin buttons would be a second adornment look. If one is ever needed, every rule here applies.
+   - **Adornments**: a button inside the box (the filter's clear, a select's arrow) sits at its end with 2 px padding
+     and keeps the box one line tall. No other adornment (no password reveal, no start icon) is used today.
    - **Required**: an accent `*` after the name, drawn by the stylesheet (`.a-label--required`) with empty
      alternative text, so the accessible name stays the field's name; `aria-required` on the control says the rest.
-     Never the browser's `required` (it would validate ahead of the engine).
-   - **Hint** under the box, `.a-hint` at `--text-sm`; the `Field` gives it the id `{For}-hint` and the input lists it
-     in `aria-describedby`.
+     Never the browser's `required` (it would validate ahead of the engine). A required **switch** carries the class
+     `a-required`, which draws the same mark after its text. *Exemption, D10*: the static sign-in page's two inputs
+     are native and carry `required` — a form posted without a circuit has no other way to say "empty"; both fields
+     are required, so no mark is drawn there.
+   - **Hint** under the box, `.a-hint` at `--text-sm`. The `Field` gives it the id `{For}-hint`, and **the call site
+     writes `aria-describedby="{For}-hint"` on the input** (with `FieldRefusals.DescribedBy(id, hint)` when the field
+     can be refused): a `Field` cannot set an attribute on the component inside it. `FieldConventionTests` fails a
+     hinted Field whose input does not. *Why not shared defaults*: MudBlazor 9.10 has no global input defaults
+     (`MudGlobal` carries menu and tooltip defaults only), and a process-wide default would reach an embedding host's
+     own MudBlazor UI; a wrapper component cannot be internal and still be a tag (Razor discovers public components
+     only), and a public one would add a Mud-shaped parameter surface to PublicApi (D5). So the look is alvo.css's,
+     and the two attributes each call site writes (`Variant.Outlined`, `aria-describedby`) are enforced by the test.
    - **Field error** (`FieldRefusals`, the record form's own read errors): the sentence directly under the box,
      `.a-field__problem` at `--text-sm` in `--danger-fg`, with an id the input's `aria-describedby` lists after the
      hint; the input is `aria-invalid` (`Error`) and its border takes `--danger-fg`. Focus moves to it on a failed
@@ -104,8 +123,9 @@ and the e2e suite asserts that things render, not that they behave.
    - **Disabled**: `--panel2` background, `--faint` text. **Read-only**: not a box — a value that can never be changed
      is text (the record form's *Calculated* readout), because a greyed box reads as a broken control.
    - **Select**: `MudSelect` outlined, named by a `Field` label through `aria-labelledby`, the same box.
-   - **Checkbox / switch**: the library's, its label beside it at `--text-sm`; a group of them sits under a `Field`
-     label ("Constraints"). **Chip groups** (`ChipGroup`) stay Alvo's, under a `Field` label, as V7 has them.
+   - **Checkbox / switch**: the library's (`MudCheckBox`, `MudSwitch`; never a native checkbox), its label beside it
+     at `--text-sm`; a group of them sits under a label it names with `role="group"` + `aria-labelledby`
+     ("Constraints"). **Chip groups** (`ChipGroup`) stay Alvo's, under a `Field` label, as V7 has them.
    - Not a field: the command palette's input, which is the palette's own search-and-go line (§3.7).
 
    *This item supersedes the plan's control-migration rule on two points*: a library input is not given the

@@ -23,7 +23,10 @@ public sealed class AlvoMudThemeTests
     [Theory]
     [InlineData("--accent", "--accentText")]
     [InlineData("--danger-fg", "--panel")]
-    public void Text_on_a_filled_button_meets_AA_in_both_themes(string fill, string text)
+    [InlineData("--ok-fg", "--accentText")]
+    [InlineData("--warn-fg", "--panel")]
+    [InlineData("--neutral-fg", "--panel")]
+    public void Text_on_a_filled_button_or_snackbar_meets_AA_in_both_themes(string fill, string text)
     {
         Stylesheet.ContrastRatio(Hex(fill).Light, Hex(text).Light).ShouldBeGreaterThanOrEqualTo(4.5);
         Stylesheet.ContrastRatio(Hex(fill).Dark, Hex(text).Dark).ShouldBeGreaterThanOrEqualTo(4.5);

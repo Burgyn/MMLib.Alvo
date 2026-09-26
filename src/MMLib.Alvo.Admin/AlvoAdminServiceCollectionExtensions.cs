@@ -129,14 +129,15 @@ public static class AlvoAdminServiceCollectionExtensions
     /// </summary>
     /// <remarks>
     /// Registered here so an embedded host never learns the library exists (study §1.3). The snackbar settings
-    /// are spec §3.3: bottom-right, a few seconds, at most two, and never a duplicate. The breakpoint is Alvo's
+    /// are spec §3.3: bottom-left, where no editor's footer is (an editor is a right-hand sheet whose actions sit
+    /// bottom-right), a few seconds, at most two, and never a duplicate. The breakpoint is Alvo's
     /// one phone width (720 px, pinned by StylesheetHygieneTests), so the responsive drawer turns temporary where
     /// the bottom bar appears rather than at Mud's own 600.
     /// </remarks>
     private static void AddLibrary(IServiceCollection services)
         => services.AddMudServices(library =>
         {
-            library.SnackbarConfiguration.PositionClass = Defaults.Classes.Position.BottomRight;
+            library.SnackbarConfiguration.PositionClass = Defaults.Classes.Position.BottomLeft;
             library.SnackbarConfiguration.VisibleStateDuration = 5000;
             library.SnackbarConfiguration.MaxDisplayedSnackbars = 2;
             library.SnackbarConfiguration.PreventDuplicates = true;

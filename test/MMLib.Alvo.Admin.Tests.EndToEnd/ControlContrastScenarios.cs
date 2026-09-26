@@ -1,4 +1,6 @@
-﻿using Microsoft.Playwright;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Playwright;
+using MMLib.Alvo.Data;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
@@ -25,8 +27,8 @@ public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<A
     public async Task Every_button_and_link_reads_at_AA_on_the_screens_and_in_the_editors(ColorScheme scheme)
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, colorScheme: scheme);
-        await StageAFieldAsync(session);
-        var failures = new List<string>();
+        await StageAFieldAsync(session, scheme);
+        var failures = new List<string>(await SnackbarBelowAAAsync(session));
 
         foreach (var route in new[] { "/schema", "/data/regions", "/access", "/history", "/settings" })
         {
@@ -43,7 +45,16 @@ public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<A
         failures.AddRange((await ContrastProbe.ReadAsync(clear)).Where(r => r.Ratio < ContrastProbe.AA)
             .Select(r => $"the filter's clear: {r}"));
 
+        /* The row the cursor is on, drawn on the accent wash: the row's Edit is read against the wash, not the panel. */
+        await SeedARegionAsync(scheme);
         await session.GoAsync("/data/regions");
+        await session.Page.GetByTestId("grid-row").First.WaitForAsync();
+        await session.Page.Keyboard.PressAsync("j");
+        var selected = session.Page.GetByRole(AriaRole.Row, new() { Selected = true });
+        await selected.WaitForAsync();
+        failures.AddRange((await ContrastProbe.ReadAsync(selected.GetByRole(AriaRole.Button)))
+            .Where(r => r.Ratio < ContrastProbe.AA).Select(r => $"the selected row: {r}"));
+
         await session.Button("New record", exact: true).ClickAsync();
         await session.Dialog("record-sheet").WaitForAsync();
         failures.AddRange(await BelowAAAsync(session, "the record editor"));
@@ -56,11 +67,30 @@ public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<A
         failures.ShouldBeEmpty();
     }
 
-    private static async Task StageAFieldAsync(AdminSession session)
+    /// <summary>
+    /// A success snackbar's message and its close, on the success fill: the dark theme's close was white on bright green,
+    /// 1.6:1, until the palette gave each filled tone its contrast colour.
+    /// </summary>
+    private static async Task<IEnumerable<string>> SnackbarBelowAAAsync(AdminSession session)
+    {
+        var snackbar = session.Snackbars.Filter(new() { HasText = "Saved to the working copy" }).First;
+        await snackbar.WaitForAsync();
+        var readings = (await ContrastProbe.ReadAsync(snackbar)).Concat(await ContrastProbe.ReadAsync(snackbar.GetByRole(AriaRole.Button)));
+        return readings.Where(r => r.Ratio < ContrastProbe.AA).Select(r => $"the snackbar: {r}");
+    }
+
+    private async Task SeedARegionAsync(ColorScheme scheme)
+    {
+        using var scope = world.Services.CreateScope();
+        await FieldServiceSeed.RegionAsync(
+            scope.ServiceProvider.GetRequiredService<IAlvoData>(), AlvoContext.System(TenantId.New()), $"CONTRAST-{scheme}");
+    }
+
+    private static async Task StageAFieldAsync(AdminSession session, ColorScheme scheme)
     {
         await session.GoAsync("/schema/work_orders");
         await session.Page.GetByTestId("add-field").ClickAsync();
-        await session.Page.Locator("#new-field-name").FillAsync("contrast_probe");
+        await session.Page.Locator("#new-field-name").FillAsync($"contrast_probe_{scheme}".ToLowerInvariant());
         await session.Page.GetByTestId("field-save").ClickAsync();
         await session.Page.GetByTestId("pending-bar").WaitForAsync();
     }

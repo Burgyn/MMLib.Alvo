@@ -50,10 +50,12 @@
                 </ChildContent>
                 <Hint>@DescriptorNames.Hint</Hint>
             </Field>
-            <Field Label="Constraints">
+            <Field Label="Constraints" LabelId="new-entity-constraints">
                 <ChildContent>
-                    <MudCheckBox T="bool" Value="_scoped" ValueChanged="on => _scoped = on" Label="tenant-scoped" />
-                    <MudCheckBox T="bool" Value="_audited" ValueChanged="on => _audited = on" Label="audited" />
+                    <div class="a-row a-row--wrap" role="group" aria-labelledby="new-entity-constraints">
+                        <MudCheckBox T="bool" Value="_scoped" ValueChanged="on => _scoped = on" Label="tenant-scoped" />
+                        <MudCheckBox T="bool" Value="_audited" ValueChanged="on => _audited = on" Label="audited" />
+                    </div>
                 </ChildContent>
                 <Hint>
                     Scoped means every row belongs to a tenant and a caller with none is refused with 403.
@@ -424,10 +426,7 @@
             else
             {
                 <div class="a-row a-row--wrap a-row--inset">
-                    <label class="a-check">
-                        <input type="checkbox" checked="@_reactions" @onchange="ToggleReactions" />
-                        <span>Show reactions</span>
-                    </label>
+                    <MudCheckBox T="bool" Value="_reactions" ValueChanged="_ => ToggleReactions()" Label="Show reactions" />
                     <ChipGroup TValue="string" Items="_zooms" Selected="@(new[] { _actual ? ActualZoom : FitZoom })"
                                SelectedChanged="ChooseZoom" aria-label="Zoom" />
                     <span class="a-hint">✉ template · ↗ webhook · dashed: automation, declared and not run by this build</span>

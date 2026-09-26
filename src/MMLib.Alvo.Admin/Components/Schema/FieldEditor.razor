@@ -92,8 +92,8 @@
         }
 
         <div class="a-field">
-            <span class="a-label">Constraints</span>
-            <div class="a-row a-row--wrap">
+            <span class="a-label" id="new-field-constraints">Constraints</span>
+            <div class="a-row a-row--wrap" role="group" aria-labelledby="new-field-constraints">
                 @if (_facets.RequiredOffered)
                 {
                     <MudCheckBox T="bool" Value="_facets.Required" ValueChanged="on => _facets.Required = on" Label="required" />

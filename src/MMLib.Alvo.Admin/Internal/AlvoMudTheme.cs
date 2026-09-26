@@ -90,9 +90,22 @@ internal static class AlvoMudTheme
         palette.Success = Of("--ok-fg");
         palette.Warning = Of("--warn-fg");
         palette.Error = Of("--danger-fg");
-        palette.ErrorContrastText = Of("--panel");
         palette.Info = Of("--neutral-fg");
+        ContrastOn(palette, Of);
         return palette;
+    }
+
+    /// <summary>
+    /// The text and icons on each filled tone: a success snackbar's message and its close, a filled danger button. The
+    /// library's default is white on every fill, which on the dark theme's bright green was 1.6:1; each pair here is
+    /// the one AlvoMudThemeTests measures at AA in both themes.
+    /// </summary>
+    private static void ContrastOn(Palette palette, Func<string, string> of)
+    {
+        palette.SuccessContrastText = of("--accentText");
+        palette.WarningContrastText = of("--panel");
+        palette.ErrorContrastText = of("--panel");
+        palette.InfoContrastText = of("--panel");
     }
 
     /// <summary>Public Sans at 500 (the fonts folder ships no 400, study §3.2), and no uppercase buttons.</summary>

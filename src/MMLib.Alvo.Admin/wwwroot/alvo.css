@@ -1357,6 +1357,7 @@
      reference drawing, referenced by no component. Two meanings for one class is how a
      label silently became a box, which is exactly what happened when this rule was
      added beside it; the dead one is gone rather than both being kept apart by care. */
+  /* prototype-only: the dashboard's checkboxes are MudCheckBox (spec §3.8). */
   .a-check {
     display: inline-flex;
     align-items: center;
@@ -3003,11 +3004,14 @@
       min-height: 40px;
     }
 
+    /* A field's text is --text-lg on a phone (spec §3.8): iOS Safari zooms the page into any input whose text is
+       under 16 px as it takes focus, and every editor would open zoomed. */
     .a-input,
     /* prototype-only */
     .a-select,
     .mud-input.mud-input-outlined {
       min-height: 40px;
+      font-size: var(--text-lg);
     }
 
     /* The keyboard hint is a keyboard's, and this device has none. */
@@ -3148,7 +3152,8 @@
     max-width: 360px;
   }
 
-  /* An outlined input draws its own focused border; a second ring inside it is noise, not a signal. */
+  /* The focus ring is on the field's frame (.mud-input-outlined:focus-within); a second ring on the native element
+     inside it is noise, not a signal. */
   .mud-input-slot:focus-visible {
     box-shadow: none;
   }

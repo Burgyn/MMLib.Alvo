@@ -122,8 +122,17 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
 
         box.X.ShouldBe(0, 1);
         box.Width.ShouldBe(800, 1);
+        (await BoxAsync(session.Content)).Width.ShouldBeGreaterThanOrEqualTo(780, "the page keeps its own width under the pane");
         await session.AssertNoHorizontalScrollAsync();
 
+        /* The app bar stays above the pane, and its launcher is the way out as much as the pane's own close. */
+        var header = await BoxAsync(session.Page.GetByTestId("appbar"));
+        header.Y.ShouldBe(0, 1);
+        box.Y.ShouldBeGreaterThanOrEqualTo(header.Y + header.Height - 1, "the pane does not cover the app bar");
+        await session.Page.GetByTestId("assistant-launch").ClickAsync();
+        await session.Page.WaitForFunctionAsync("() => !document.getElementById('a-content')?.closest('[inert]')");
+
+        await session.Page.GetByTestId("assistant-launch").ClickAsync();
         await session.Page.GetByRole(AriaRole.Button, new() { Name = "Close the assistant" }).ClickAsync();
         await session.Page.WaitForFunctionAsync("() => !document.getElementById('a-content')?.closest('[inert]')");
         session.AssertConsoleClean();

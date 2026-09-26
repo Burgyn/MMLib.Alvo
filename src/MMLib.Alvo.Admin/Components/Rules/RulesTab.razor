@@ -56,7 +56,11 @@ else
         var declared = Declared(operation);
         <ListRow class="a-listrow--roomy a-listrow--stacked">
             <div class="a-stack a-stack--gap-3">
-                @* The operation and its route are the box's name, above it as every field's is (spec §3.8). *@
+                @*
+                    The operation and its route are the box's name, above it as every field's is (spec §3.8). The unsaved
+                    mark sits in the same row but out of the name, so the box is not renamed under a screen reader
+                    while it is typed into; the box is described by it instead.
+                *@
                 <Field For="@($"rule-{operation}")">
                     <LabelContent>
                         <span class="a-row">
@@ -64,13 +68,15 @@ else
                             <code class="a-ident">@Route(operation)</code>
                             @if (Drafts.IsDirty(operation, declared))
                             {
-                                <span class="a-badge a-badge--warn" data-testid="@($"rule-dirty-{operation}")">unsaved</span>
+                                <span class="a-badge a-badge--warn" id="@($"rule-{operation}-dirty")" aria-hidden="true"
+                                      data-testid="@($"rule-dirty-{operation}")">unsaved</span>
                             }
                         </span>
                     </LabelContent>
                     <ChildContent>
                         <MudTextField T="string" Variant="Variant.Outlined" Lines="2" Immediate="true" id="@($"rule-{operation}")"
                                       Class="a-mono" spellcheck="false" Placeholder="@EmptyHint"
+                                      aria-describedby="@(Drafts.IsDirty(operation, declared) ? $"rule-{operation}-dirty" : null)"
                                       Value="@Drafts.Text(operation, declared)" ValueChanged="text => Drafts.Set(operation, text ?? string.Empty)"
                                       OnKeyDown="args => KeyAsync(operation, args)" />
                     </ChildContent>

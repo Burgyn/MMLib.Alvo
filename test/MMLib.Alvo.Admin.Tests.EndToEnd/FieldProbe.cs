@@ -24,21 +24,22 @@ internal static class FieldProbe
           const visible = e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
             return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
           const rect = e => { const r = e.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, height: r.height }; };
-          const text = ['text', 'email', 'password', 'number', 'search', 'url', 'tel', ''];
+          const typed = ['text', 'email', 'password', 'number', 'search', 'url', 'tel', ''];
           const inputs = [...root.querySelectorAll('input, textarea, .mud-select .mud-input-slot')]
-            .filter(e => e.tagName !== 'INPUT' || text.includes((e.getAttribute('type') ?? '').toLowerCase()))
+            .filter(e => e.tagName !== 'INPUT' || typed.includes((e.getAttribute('type') ?? '').toLowerCase()))
             .filter(e => !(e.tagName === 'INPUT' && e.closest('.mud-select')))
             .filter(visible);
-          const nameOf = e => {
-            const labelled = (e.getAttribute('aria-labelledby') ?? '').split(/\s+/).filter(Boolean)
-              .map(id => document.getElementById(id)).find(Boolean);
-            return e.labels?.[0] ?? labelled ?? null;
-          };
+          const labelled = e => (e.getAttribute('aria-labelledby') ?? '').split(/\s+/).filter(Boolean)
+            .map(id => document.getElementById(id)).filter(Boolean);
+          const namesOf = e => [...(e.labels ?? []), ...labelled(e)];
+          const text = n => (n.textContent ?? '').replace(/\s+/g, ' ').trim();
           const fields = inputs.map(e => {
             const box = e.closest('.mud-input') ?? e;
             const b = getComputedStyle(box), own = getComputedStyle(e);
-            const label = nameOf(e);
+            const names = namesOf(e);
+            const label = names[0] ?? null;
             const shown = !!label && visible(label);
+            const control = e.closest('.mud-input-control') ?? box;
             const described = (e.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
             const field = e.closest('.a-field');
             const hints = field ? [...field.querySelectorAll(':scope > .a-hint')].filter(visible) : [];
@@ -54,15 +55,20 @@ internal static class FieldProbe
               Label: shown ? rect(label) : null,
               LabelFontSize: shown ? getComputedStyle(label).fontSize : '',
               AriaLabel: e.getAttribute('aria-label') ?? '',
-              NotchLegends: [...box.querySelectorAll('legend')].filter(l => visible(l) && l.textContent.trim().length > 0).length,
+              Name: names.length > 0 ? names.map(text).join(' ') : (e.getAttribute('aria-label') ?? ''),
+              ExtraNames: Math.max(0, names.filter(visible).length - 1)
+                + [...control.querySelectorAll('.mud-input-label')].filter(visible).length,
               UnlinkedHints: hints.filter(h => !h.id || !described.includes(h.id)).length,
             };
           });
           const checks = [...root.querySelectorAll('.mud-checkbox > .mud-typography, .mud-switch > .mud-typography')]
             .filter(visible).map(e => ({ Text: e.textContent.trim(), FontSize: getComputedStyle(e).fontSize }));
           const tokens = getComputedStyle(document.documentElement);
+          const phone = window.matchMedia('(max-width: 720px)').matches;
           return { Fields: fields, Checks: checks,
-            TextSize: tokens.getPropertyValue('--text-sm').trim(), Radius: tokens.getPropertyValue('--radius-xs').trim() };
+            TextSize: tokens.getPropertyValue('--text-sm').trim(),
+            ValueSize: tokens.getPropertyValue(phone ? '--text-lg' : '--text-sm').trim(),
+            Radius: tokens.getPropertyValue('--radius-xs').trim() };
         }
         """;
 
@@ -86,8 +92,14 @@ internal static class FieldProbe
         /// <summary>The checkbox and switch labels.</summary>
         public Check[] Checks { get; set; } = [];
 
-        /// <summary>The resolved <c>--text-sm</c>, the size a field's text, name and hint are drawn at.</summary>
+        /// <summary>The resolved <c>--text-sm</c>, the size a field's name and hint are drawn at.</summary>
         public string TextSize { get; set; } = string.Empty;
+
+        /// <summary>
+        /// The size a value is typed at: <c>--text-sm</c>, and <c>--text-lg</c> on a phone, where iOS zooms into a
+        /// smaller one on focus.
+        /// </summary>
+        public string ValueSize { get; set; } = string.Empty;
 
         /// <summary>The resolved <c>--radius-xs</c>, a field's corner.</summary>
         public string Radius { get; set; } = string.Empty;
@@ -129,8 +141,13 @@ internal static class FieldProbe
         /// <summary>Its <c>aria-label</c>, which names a search box.</summary>
         public string AriaLabel { get; set; } = string.Empty;
 
-        /// <summary>How many legends with text are drawn in its frame: the library's notch.</summary>
-        public int NotchLegends { get; set; }
+        /// <summary>Its accessible name's text: its labels, what it is labelled by, or its <c>aria-label</c>.</summary>
+        public string Name { get; set; } = string.Empty;
+
+        /// <summary>
+        /// How many names beyond one are drawn for it: a second label, or the library's own label inside its control.
+        /// </summary>
+        public int ExtraNames { get; set; }
 
         /// <summary>How many hints of its field the input does not point <c>aria-describedby</c> at.</summary>
         public int UnlinkedHints { get; set; }

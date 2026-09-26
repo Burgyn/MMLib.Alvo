@@ -3,9 +3,9 @@
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
-/// Every text input the dashboard draws has one look (spec §3.8): the value at <c>--text-sm</c>, one box with a
-/// <c>--radius-xs</c> corner, one single-line height, its name above the box and never on its border, and its hint
-/// linked to it. In both themes, and on the static sign-in page too.
+/// Every text input the dashboard draws has one look (spec §3.8): the value at <c>--text-sm</c> (<c>--text-lg</c> on a
+/// phone), one box with a <c>--radius-xs</c> corner, one single-line height, one name, above the box and never on its
+/// border, and its hint linked to it. In both themes, and on the static sign-in page too.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -16,7 +16,8 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// </para>
 /// <para>
 /// <b>The heights are compared across every screen a fact visits, the sign-in page included</b>, so a box that is one
-/// pixel taller on one screen fails here and not in a screenshot review.
+/// pixel taller on one screen fails here and not in a screenshot review. Each expected field is waited for by its
+/// name before the screen is read: the filter, the Data search, the rules and the AI form draw after a load.
 /// </para>
 /// </remarks>
 /// <param name="world">The running host and browser.</param>
@@ -35,16 +36,16 @@ public sealed class FieldConsistencyScenarios(AdminWorld world) : IClassFixture<
         await fields.ReadAsync(session.Content, "the entity filter", expect: ["Filter entities"]);
 
         await session.Button("New entity", exact: true).ClickAsync();
-        await fields.ReadAsync(session.Dialog("new-entity"), "the new entity editor", expect: ["new-entity-name"]);
+        await fields.ReadAsync(session.Dialog("new-entity"), "the new entity editor", expect: ["Name"]);
         await session.Page.Keyboard.PressAsync("Escape");
 
         await session.GoAsync("/schema/work_orders");
         await session.Page.GetByTestId("add-field").ClickAsync();
-        await fields.ReadAsync(session.Dialog("field-sheet"), "the new field editor", expect: ["new-field-name", "new-field-max"]);
+        await fields.ReadAsync(session.Dialog("field-sheet"), "the new field editor", expect: ["Name", "Max length"]);
         await session.Page.Keyboard.PressAsync("Escape");
 
         await session.OpenTabAsync("Rules");
-        await fields.ReadAsync(session.Content, "the rules editor", expect: ["rule-list", "rule-create"]);
+        await fields.ReadAsync(session.Content, "the rules editor", expect: ["GET /api/work_orders", "POST /api/work_orders"]);
 
         fields.Failures.ShouldBeEmpty();
         session.AssertConsoleClean();
@@ -62,15 +63,38 @@ public sealed class FieldConsistencyScenarios(AdminWorld world) : IClassFixture<
         await session.GoAsync("/data/regions");
         await fields.ReadAsync(session.Content, "the data search", expect: ["Search regions"]);
         await session.Button("New record", exact: true).ClickAsync();
-        await fields.ReadAsync(session.Dialog("record-sheet"), "the record editor", expect: ["rf-code", "rf-name"]);
+        await fields.ReadAsync(session.Dialog("record-sheet"), "the record editor", expect: ["Code", "Name"]);
         await session.Page.Keyboard.PressAsync("Escape");
 
+        var email = $"look-{scheme}@example.com".ToLowerInvariant();
         await session.GoAsync("/access");
         await session.Page.GetByTestId("person-new").ClickAsync();
-        await fields.ReadAsync(session.Dialog("person-create"), "the new person editor", expect: ["new-person-email"]);
+        await fields.ReadAsync(session.Dialog("person-create"), "the new person editor", expect: ["Email"]);
+        await session.Page.GetByLabel("Email", new() { Exact = true }).FillAsync(email);
+        await session.Page.Keyboard.PressAsync("Enter");
+        await session.SnackbarAsync($"Created {email}");
+
+        /* The one field that carries a refusal and a linked hint together. */
+        await session.Button($"Change {email}", exact: true).ClickAsync();
+        await fields.ReadAsync(session.Dialog("person-editor"), "the person editor", expect: ["Tenant"]);
 
         fields.Failures.ShouldBeEmpty();
         session.AssertConsoleClean();
+    }
+
+    /// <summary>On a phone a value is typed at 16 px, which is what keeps iOS from zooming into the field on focus.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task On_a_phone_every_field_is_typed_at_16_px_and_still_has_one_height()
+    {
+        var fields = new FieldLook();
+        await fields.ReadSignInAsync(world, ColorScheme.Light, width: 390);
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, width: 390);
+
+        await session.GoAsync("/data/regions");
+        await session.Button("New record", exact: true).ClickAsync();
+        await fields.ReadAsync(session.Dialog("record-sheet"), "the record editor on a phone", expect: ["Code", "Name"]);
+
+        fields.Failures.ShouldBeEmpty();
     }
 }
 
@@ -86,6 +110,8 @@ public sealed class FieldConsistencyScenarios(AdminWorld world) : IClassFixture<
 /// <param name="world">The running host and browser.</param>
 public sealed class ConfirmFieldConsistencyScenarios(AdminWorld world) : IClassFixture<AdminWorld>
 {
+    private const string TypeTheName = "Type field-service to allow it";
+
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task The_reason_and_the_typed_name_confirms_have_the_look_of_the_sign_in_page()
     {
@@ -124,8 +150,7 @@ public sealed class ConfirmFieldConsistencyScenarios(AdminWorld world) : IClassF
         await HistoryScenarios.PlanTheRollbackOfTheNewestAsync(session);
         await session.Page.GetByTestId("rollback-run").ClickAsync();
         var confirm = session.Dialog("rollback-confirm");
-        await EditorScenarios.WaitForFocusOnAsync(session, "confirm-name");
-        await fields.ReadAsync(confirm, $"the rollback confirm ({scheme})", expect: ["confirm-name"]);
+        await fields.ReadAsync(confirm, $"the rollback confirm ({scheme})", expect: [TypeTheName]);
         await session.Page.Keyboard.PressAsync("Escape");
         await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
     }
@@ -133,11 +158,10 @@ public sealed class ConfirmFieldConsistencyScenarios(AdminWorld world) : IClassF
     private static async Task ReadApplyConfirmAsync(AdminSession session, FieldLook fields, ColorScheme scheme)
     {
         await session.PreviewPendingAsync();
-        await fields.ReadAsync(session.Content, $"the apply's reason ({scheme})", expect: ["apply-reason"]);
+        await fields.ReadAsync(session.Content, $"the apply's reason ({scheme})", expect: ["Why"]);
         await session.Button("Apply these changes").ClickAsync();
         var confirm = session.Dialog("apply-confirm");
-        await EditorScenarios.WaitForFocusOnAsync(session, "confirm-name");
-        await fields.ReadAsync(confirm, $"the apply confirm ({scheme})", expect: ["confirm-name"]);
+        await fields.ReadAsync(confirm, $"the apply confirm ({scheme})", expect: [TypeTheName]);
         await session.Page.Keyboard.PressAsync("Escape");
         await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
     }
@@ -158,18 +182,17 @@ public sealed class AssistantFieldConsistencyScenarios(ConfigurableAssistantWorl
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, colorScheme: scheme);
 
         await session.GoAsync("/settings");
-        await fields.ReadAsync(session.Content, "the AI connection form", expect: ["ai-endpoint", "ai-model", "ai-key"]);
+        await fields.ReadAsync(session.Content, "the AI connection form", expect: ["Endpoint", "Model", "API key"]);
         if (await session.Page.GetByTestId("assistant-launch").CountAsync() == 0)
         {
-            await session.Page.FillAsync("#ai-endpoint", "http://127.0.0.1:1/v1");
-            await session.Page.FillAsync("#ai-model", "scripted");
+            await session.Content.GetByLabel("Endpoint", new() { Exact = true }).FillAsync("http://127.0.0.1:1/v1");
+            await session.Content.GetByLabel("Model", new() { Exact = true }).FillAsync("scripted");
             await session.Page.GetByTestId("ai-save").ClickAsync();
         }
 
         await session.Page.GetByTestId("assistant-launch").ClickAsync();
-        await EditorScenarios.WaitForFocusOnAsync(session, "assistant-message");
         var pane = session.Page.GetByRole(AriaRole.Complementary, new() { Name = "Ask Alvo", Exact = true });
-        await fields.ReadAsync(pane, "the assistant's question", expect: ["assistant-message"]);
+        await fields.ReadAsync(pane, "the assistant's question", expect: ["Your question"]);
 
         fields.Failures.ShouldBeEmpty();
         session.AssertConsoleClean();
@@ -190,27 +213,35 @@ internal sealed class FieldLook
     /// <summary>Reads the static sign-in page, in a context of its own, before anybody signs in.</summary>
     /// <param name="world">The running host.</param>
     /// <param name="scheme">The system theme.</param>
-    public async Task ReadSignInAsync(AdminWorld world, ColorScheme scheme)
+    /// <param name="width">The viewport width.</param>
+    public async Task ReadSignInAsync(AdminWorld world, ColorScheme scheme, int width = 1400)
     {
         await using var context = await world.Browser.NewContextAsync(new()
         {
-            ViewportSize = new ViewportSize { Width = 1400, Height = 950 },
+            ViewportSize = new ViewportSize { Width = width, Height = width < 720 ? 780 : 950 },
             ColorScheme = scheme,
         });
         var page = await context.NewPageAsync();
         await page.GotoAsync($"{world.BaseAddress}{AlvoAdmin.SignInPath}");
-        await ReadAsync(page.Locator("body"), $"the sign-in page ({scheme})", expect: ["email", "password"]);
+        await ReadAsync(page.Locator("body"), $"the sign-in page ({scheme}, {width} px)", expect: ["Email", "Password"]);
     }
 
-    /// <summary>Reads the fields under <paramref name="root"/> and records every breach of the rule.</summary>
+    /// <summary>
+    /// Waits for every expected field by its name, then reads the fields under <paramref name="root"/> and records every
+    /// breach of the rule.
+    /// </summary>
     /// <param name="root">The screen or the dialog.</param>
     /// <param name="where">What it is, for the failure message.</param>
-    /// <param name="expect">Fields that must be among those read, by id or by accessible name.</param>
+    /// <param name="expect">Names, or parts of names, of fields that must be among those read.</param>
     public async Task ReadAsync(ILocator root, string where, string[] expect)
     {
-        await root.WaitForAsync();
+        foreach (var name in expect)
+        {
+            await root.GetByLabel(name).First.WaitForAsync();
+        }
+
         var reading = await FieldProbe.ReadAsync(root);
-        foreach (var missing in expect.Where(name => reading.Fields.All(field => field.Id != name && field.AriaLabel != name)))
+        foreach (var missing in expect.Where(name => reading.Fields.All(field => !field.Name.Contains(name, StringComparison.Ordinal))))
         {
             Failures.Add($"{where}: {missing}: not read — the scenario did not reach it");
         }
@@ -232,9 +263,9 @@ internal sealed class FieldLook
     {
         void Fail(string what) => Failures.Add($"{where}: {field}: {what}");
 
-        if (field.FontSize != reading.TextSize)
+        if (field.FontSize != reading.ValueSize)
         {
-            Fail($"its text is {field.FontSize}, not {reading.TextSize}");
+            Fail($"its text is {field.FontSize}, not {reading.ValueSize}");
         }
 
         if (field.Radius != reading.Radius || field.BorderWidth != "1px" || field.BorderStyle != "solid")
@@ -242,9 +273,9 @@ internal sealed class FieldLook
             Fail($"its box is {field.BorderWidth} {field.BorderStyle} at {field.Radius}, not 1px solid at {reading.Radius}");
         }
 
-        if (field.NotchLegends > 0)
+        if (field.ExtraNames > 0)
         {
-            Fail("its name is drawn in a notch on the border");
+            Fail($"{field.ExtraNames} name(s) drawn beside its one label, the library's own label among them");
         }
 
         if (field.UnlinkedHints > 0)
@@ -255,7 +286,7 @@ internal sealed class FieldLook
         JudgeName(field, reading, Fail);
         if (!field.MultiLine)
         {
-            _singleLine.Add((where, field.Id, field.Box.Height));
+            _singleLine.Add((where, field.ToString(), field.Box.Height));
         }
     }
 
