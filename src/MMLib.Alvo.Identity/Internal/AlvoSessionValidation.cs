@@ -1,7 +1,11 @@
 ﻿using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using System.Security.Claims;
 
 namespace MMLib.Alvo.Identity.Internal;
@@ -25,8 +29,8 @@ namespace MMLib.Alvo.Identity.Internal;
 /// </para>
 /// <para>
 /// <b>So an identity-store outage fails closed, and loudly.</b> While the store is unreachable, every
-/// request that carries the cookie answers <c>500</c> — the dashboard, the Management API over the cookie,
-/// and the sign-in page itself when the browser still presents one. That is the default-deny reading of
+/// request that carries the cookie to an endpoint that guards something answers <c>500</c> — the dashboard's
+/// pages and the Blazor hub. The sign-in page and static assets guard nothing, are not checked, and stay up. That is the default-deny reading of
 /// "cannot tell whether this account is still enabled"; a request with no cookie is not checked and
 /// reaches the sign-in page, whose own sign-in then fails on the same outage.
 /// </para>
@@ -59,13 +63,51 @@ internal static class AlvoSessionValidation
         return await users.FindAsync(id, cancellationToken).ConfigureAwait(false) is { IsDisabled: false };
     }
 
+    /// <summary>Whether the request's endpoint is one a stale cookie could reach anything through.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Default-deny, with one skip.</b> The check runs for a request no endpoint matched (it cannot be
+    /// shown to guard nothing), for any endpoint with an authorization requirement — its own
+    /// <see cref="IAuthorizeData"/> or policy, or the host's fallback policy — and for a SignalR hub, because
+    /// the Blazor circuit's connection is where the cookie's principal becomes the circuit's authentication
+    /// state, and a hub carries no <c>[Authorize]</c> of its own. It is skipped only for an endpoint that
+    /// demonstrably guards nothing: no requirement, or an explicit <see cref="IAllowAnonymous"/>.
+    /// </para>
+    /// <para>
+    /// <b>Why skip at all.</b> A first page load sends every stylesheet, script and font at once with the
+    /// cookie, and each check is two store reads; and a store blip must not turn the sign-in page — the one
+    /// screen that works with no session — into a <c>500</c>. A disabled operator loading a stylesheet reaches
+    /// nothing, and their next request that does reach something is refused.
+    /// </para>
+    /// </remarks>
+    /// <param name="endpoint">The endpoint routing selected, or <see langword="null"/> when none matched.</param>
+    /// <param name="fallback">Whether the host set an authorization fallback policy.</param>
+    /// <returns><see langword="true"/> when the cookie must be re-checked.</returns>
+    internal static bool Guards(Endpoint? endpoint, bool fallback)
+    {
+        if (endpoint is null || endpoint.Metadata.GetMetadata<HubMetadata>() is not null)
+        {
+            return true;
+        }
+
+        if (endpoint.Metadata.GetMetadata<IAllowAnonymous>() is not null)
+        {
+            return false;
+        }
+
+        return fallback
+            || endpoint.Metadata.GetMetadata<IAuthorizeData>() is not null
+            || endpoint.Metadata.GetMetadata<AuthorizationPolicy>() is not null;
+    }
+
     /// <summary>
-    /// The cookie scheme's <c>OnValidatePrincipal</c>: re-reads the account on every request and
-    /// rejects — and clears — a cookie whose account is gone or disabled.
+    /// The cookie scheme's <c>OnValidatePrincipal</c>: re-reads the account on every request that guards
+    /// something, and rejects — and clears — a cookie whose account is gone or disabled.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Every request, with no throttle, deliberately.</b> The alternative is ASP.NET Core Identity's
+    /// <b>Every request that reaches something, with no throttle, deliberately</b> — <see cref="Guards"/> says
+    /// which requests those are. The alternative is ASP.NET Core Identity's
     /// <c>SecurityStampValidator</c> shape: skip the check while the cookie's <c>IssuedUtc</c> is younger
     /// than an interval, and renew the cookie on a successful check past it — which sliding expiration
     /// already does, so the throttle itself is cheap. What it costs is latency: a disabled operator's cookie
@@ -73,8 +115,8 @@ internal static class AlvoSessionValidation
     /// there is no reason to accept it, because the saving is small — after the first page load the
     /// dashboard is a Blazor circuit and makes almost no HTTP requests. Each check is two indexed reads
     /// (the user row, then its role memberships, because <see cref="IAlvoUserStore.FindAsync"/> projects
-    /// the roles), and on a first page load it runs for every static asset too, since authentication runs
-    /// ahead of the asset endpoints: tens of cheap reads per load at dashboard scale.
+    /// the roles). Authentication runs ahead of the static-asset endpoints, so without <see cref="Guards"/>
+    /// it would also run for every stylesheet, script and font of a first page load.
     /// </para>
     /// <para>
     /// The store comes from the request's own scope, which is fresh per request, and
@@ -88,6 +130,12 @@ internal static class AlvoSessionValidation
         ArgumentNullException.ThrowIfNull(context);
 
         var http = context.HttpContext;
+        var fallback = http.RequestServices.GetService<IOptions<AuthorizationOptions>>()?.Value.FallbackPolicy is not null;
+        if (!Guards(http.GetEndpoint(), fallback))
+        {
+            return;
+        }
+
         var users = http.RequestServices.GetRequiredService<IAlvoUserStore>();
         if (context.Principal is { } session
             && await StillStandsAsync(session, users, http.RequestAborted).ConfigureAwait(false))

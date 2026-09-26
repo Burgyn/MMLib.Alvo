@@ -16,7 +16,7 @@
     What makes that state move is the host's `AuthenticationStateProvider`. In the standalone image
     `AddAlvoIdentityCookieSignIn` registers a revalidating one that re-reads the operator every
     thirty seconds and drops a disabled or deleted account to anonymous, which lands here as
-    `NotAuthorized` and redirects to sign-in; the cookie itself is re-checked on every HTTP request.
+    `NotAuthorized` and redirects to sign-in; the cookie itself is re-checked on every HTTP request to a page.
     An embedded host with a plain provider gets neither, and the shell keeps navigating until the
     next page load. Authority never lingers either way: every management and data call re-resolves
     its caller and is refused at once — this is about the chrome, not the data.

@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Identity.Internal;
 using System.Net;
@@ -40,6 +41,7 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
     private const string Email = "eva@example.test";
 
     private readonly string _file = Path.Combine(Path.GetTempPath(), $"alvo-identity-{Guid.NewGuid():N}.db");
+    private readonly StoreProbe _probe = new();
     private WebApplication _app = null!;
     private HttpClient _client = null!;
 
@@ -53,6 +55,8 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
         builder.Logging.ClearProviders();
         builder.Services.AddAlvoIdentity(store => store.UseSqlite($"Data Source={_file}"));
         builder.Services.AddAlvoIdentityCookieSignIn("/sign-in");
+        builder.Services.Replace(ServiceDescriptor.Scoped<IAlvoUserStore>(provider => new ProbedStore(
+            ActivatorUtilities.CreateInstance<AlvoIdentityUserStore>(provider), _probe)));
 
         _app = builder.Build();
         _app.UseAuthentication();
@@ -60,6 +64,8 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
         _app.MapPost("/sign-in", async (string email, string password, AlvoSignIn signIn)
             => await signIn.PasswordSignInAsync(email, password) ? Results.Ok() : Results.Unauthorized());
         _app.MapGet("/me", () => Results.Ok()).RequireAuthorization();
+        _app.MapGet("/asset.css", () => Results.Ok());
+        _app.MapGet("/sign-in", () => Results.Ok()).AllowAnonymous();
 
         await _app.StartAsync(Ct);
         _client = _app.GetTestClient();
@@ -173,6 +179,117 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
         (await provider.StillStandsAsync(Session(id.ToString()), Ct)).ShouldBeTrue();
     }
 
+    /// <summary>
+    /// <b>Parallel cookie checks during identity writes are answered, not failed.</b> A first page load
+    /// sends every stylesheet, script and font at once, each with the cookie; an administration write in
+    /// flight on the same SQLite file must make them wait, never answer <c>500</c>.
+    /// </summary>
+    [Fact]
+    public async Task Parallel_cookie_checks_during_identity_writes_all_succeed()
+    {
+        var id = await CreateAsync();
+        var cookie = await SignInAsync();
+        var bystander = await CreateOtherAsync();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Ct);
+
+        var writes = Task.Run(async () =>
+        {
+            var count = 0;
+            while (!stop.IsCancellationRequested)
+            {
+                await AdministerAsync(people => people.SetTenantAsync(bystander, TenantId.New(), Ct));
+                count++;
+            }
+
+            return count;
+        }, Ct);
+
+        var statuses = new List<HttpStatusCode>();
+        for (var wave = 0; wave < 10; wave++)
+        {
+            var answers = await Task.WhenAll(Enumerable.Range(0, 30).Select(async _ =>
+            {
+                using var response = await GetMeAsync(cookie);
+                return response.StatusCode;
+            }));
+            statuses.AddRange(answers);
+        }
+
+        await stop.CancelAsync();
+        (await writes).ShouldBeGreaterThan(0, "the checks must really have raced writes");
+        statuses.ShouldAllBe(status => status == HttpStatusCode.OK);
+        id.ShouldNotBe(default);
+    }
+
+    /// <summary>
+    /// <b>The cookie is re-checked only where it guards something.</b> A request to an endpoint with no
+    /// authorization requirement — a stylesheet, a font, the sign-in page — never reads the store, so a first
+    /// page load is not a burst of store reads and a store blip cannot turn the sign-in page into a 500.
+    /// </summary>
+    [Fact]
+    public async Task A_request_to_an_endpoint_that_guards_nothing_does_not_read_the_store()
+    {
+        await CreateAsync();
+        var cookie = await SignInAsync();
+        var before = _probe.Reads;
+
+        (await GetAsync("/asset.css", cookie)).StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await GetAsync("/sign-in", cookie)).StatusCode.ShouldBe(HttpStatusCode.OK);
+        _probe.Reads.ShouldBe(before, "a stylesheet or the sign-in page has nothing for a stale cookie to reach");
+
+        (await GetMeAsync(cookie)).StatusCode.ShouldBe(HttpStatusCode.OK);
+        _probe.Reads.ShouldBe(before + 1, "a protected endpoint is re-checked on every request");
+    }
+
+    /// <summary>
+    /// A store outage fails a protected request closed, and leaves the requests that guard nothing — the
+    /// sign-in page among them — answering.
+    /// </summary>
+    [Fact]
+    public async Task A_store_outage_fails_a_protected_request_closed_and_leaves_the_sign_in_page_up()
+    {
+        await CreateAsync();
+        var cookie = await SignInAsync();
+        _probe.Down = true;
+
+        (await GetAsync("/sign-in", cookie)).StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await GetAsync("/asset.css", cookie)).StatusCode.ShouldBe(HttpStatusCode.OK);
+        await Should.ThrowAsync<InvalidOperationException>(async () => await GetMeAsync(cookie),
+            "could not tell whether the account is enabled is never a pass on a protected endpoint");
+    }
+
+    /// <summary>A disabled operator's cookie on an unprotected endpoint is not refused — and not honoured anywhere it matters.</summary>
+    [Fact]
+    public async Task A_disabled_operators_cookie_is_ignored_on_an_asset_and_refused_on_a_protected_route()
+    {
+        var id = await CreateAsync();
+        var cookie = await SignInAsync();
+        await AdministerAsync(people => people.SetDisabledAsync(id, disabled: true, Ct));
+
+        (await GetAsync("/asset.css", cookie)).StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await GetMeAsync(cookie)).StatusCode.ShouldBe(HttpStatusCode.Redirect);
+    }
+
+    /// <summary>
+    /// Which endpoints are re-checked: anything with an authorization requirement, a SignalR hub (the Blazor
+    /// circuit's connection carries the principal into the circuit), and a request no endpoint matched —
+    /// default-deny; only an endpoint that demonstrably guards nothing is skipped.
+    /// </summary>
+    [Fact]
+    public void The_check_runs_exactly_where_the_cookie_guards_something()
+    {
+        static Endpoint With(params object[] metadata) => new(_ => Task.CompletedTask, new EndpointMetadataCollection(metadata), "e");
+
+        AlvoSessionValidation.Guards(null, fallback: false).ShouldBeTrue();
+        AlvoSessionValidation.Guards(With(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute()), fallback: false).ShouldBeTrue();
+        AlvoSessionValidation.Guards(With(new Microsoft.AspNetCore.SignalR.HubMetadata(typeof(Microsoft.AspNetCore.SignalR.Hub))), fallback: false).ShouldBeTrue();
+        AlvoSessionValidation.Guards(With(), fallback: true).ShouldBeTrue("a fallback policy protects an endpoint that declares nothing");
+        AlvoSessionValidation.Guards(With(), fallback: false).ShouldBeFalse();
+        AlvoSessionValidation.Guards(
+            With(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute(), new Microsoft.AspNetCore.Authorization.AllowAnonymousAttribute()),
+            fallback: false).ShouldBeFalse();
+    }
+
     /// <summary>An authenticated principal with <paramref name="subject"/> as its user id claim.</summary>
     /// <param name="subject">The subject, or <see langword="null"/> for a principal with none.</param>
     /// <returns>The authentication state a circuit would hold.</returns>
@@ -191,6 +308,16 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
         var row = new AlvoIdentityUser { Id = Guid.CreateVersion7(), UserName = Email, Email = Email };
         (await users.CreateAsync(row, Password)).Succeeded.ShouldBeTrue();
         return new UserId(row.Id);
+    }
+
+    /// <summary>Creates a second person, whom the concurrent writes are aimed at.</summary>
+    /// <returns>Their identifier.</returns>
+    private async Task<UserId> CreateOtherAsync()
+    {
+        UserId other = default;
+        await AdministerAsync(async people =>
+            other = (await people.CreateAsync(new AlvoUserCreation("otto@example.test", []), Ct)).Id);
+        return other;
     }
 
     /// <summary>Signs in through the endpoint and returns the session cookie it set.</summary>
@@ -212,9 +339,15 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
     /// <summary>Asks for the protected endpoint, presenting <paramref name="cookie"/>.</summary>
     /// <param name="cookie">The session cookie.</param>
     /// <returns>The response.</returns>
-    private async Task<HttpResponseMessage> GetMeAsync(string? cookie)
+    private Task<HttpResponseMessage> GetMeAsync(string? cookie) => GetAsync("/me", cookie);
+
+    /// <summary>Asks for <paramref name="path"/>, presenting <paramref name="cookie"/>.</summary>
+    /// <param name="path">The endpoint.</param>
+    /// <param name="cookie">The session cookie.</param>
+    /// <returns>The response.</returns>
+    private async Task<HttpResponseMessage> GetAsync(string path, string? cookie)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, "/me");
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
         request.Headers.Add("Cookie", cookie.ShouldNotBeNull());
         return await _client.SendAsync(request, Ct);
     }
@@ -227,5 +360,43 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
         using var other = _app.Services.CreateScope();
         await write(other.ServiceProvider.GetRequiredKeyedService<IAlvoUserAdministration>(
             AlvoUserAdministration.UnguardedKey));
+    }
+
+    /// <summary>What the probed store was asked, and whether it is down.</summary>
+    private sealed class StoreProbe
+    {
+        private int _reads;
+
+        public int Reads => Volatile.Read(ref _reads);
+
+        public bool Down { get; set; }
+
+        public void Read()
+        {
+            Interlocked.Increment(ref _reads);
+            if (Down)
+            {
+                throw new InvalidOperationException("The identity store is unreachable.");
+            }
+        }
+    }
+
+    /// <summary>The real store, counting the id lookups the cookie check makes.</summary>
+    private sealed class ProbedStore(IAlvoUserStore inner, StoreProbe probe) : IAlvoUserStore
+    {
+        public ValueTask<AlvoUser?> FindAsync(UserId user, CancellationToken cancellationToken)
+        {
+            probe.Read();
+            return inner.FindAsync(user, cancellationToken);
+        }
+
+        public ValueTask<AlvoUser?> FindByEmailAsync(string email, CancellationToken cancellationToken)
+            => inner.FindByEmailAsync(email, cancellationToken);
+
+        public ValueTask<IReadOnlyList<AlvoUser>> ListAsync(CancellationToken cancellationToken)
+            => inner.ListAsync(cancellationToken);
+
+        public ValueTask SetRolesAsync(UserId user, IReadOnlyList<string> roleNames, CancellationToken cancellationToken)
+            => inner.SetRolesAsync(user, roleNames, cancellationToken);
     }
 }

@@ -37,7 +37,8 @@ public static class AlvoIdentityAuthenticationExtensions
     /// </para>
     /// <para>
     /// <b>A session is re-checked, not trusted for its eight hours.</b> The cookie is re-validated
-    /// against the store on every request, and a Blazor circuit's authentication state every thirty
+    /// against the store on every request to an endpoint that guards something (not static assets or
+    /// the sign-in page), and a Blazor circuit's authentication state every thirty
     /// seconds; a disabled or deleted account's cookie is rejected and cleared, and its open tab drops
     /// to sign-in. See <c>AlvoSessionValidation</c> and
     /// <c>AlvoIdentityRevalidatingAuthenticationStateProvider</c> for why each exists.

@@ -1,5 +1,8 @@
-﻿using Microsoft.AspNetCore.Components.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Auth;
 
@@ -81,6 +84,29 @@ public sealed class OpenTabIdentityTests : IAsyncLifetime
     public void The_host_revalidates_an_open_circuits_authentication_state()
         => _circuit!.ServiceProvider.GetRequiredService<AuthenticationStateProvider>()
             .ShouldBeAssignableTo<RevalidatingServerAuthenticationStateProvider>();
+
+    /// <summary>
+    /// <b>What the cookie check's skip rests on, pinned in the shipped route table.</b> The check runs only
+    /// where an endpoint carries an authorization requirement or is a SignalR hub; so every dashboard page but
+    /// sign-in must carry <c>[Authorize]</c>, and the Blazor circuit's hub must be a hub. A page that lost its
+    /// attribute would also lose the cookie re-check — and this is where that shows.
+    /// </summary>
+    [Fact]
+    public void Every_dashboard_page_and_the_circuit_hub_are_endpoints_the_cookie_check_guards()
+    {
+        var routes = _world!.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>().ToList();
+
+        /* The connection and its negotiation; /_blazor/disconnect and /initializers carry no principal into a circuit. */
+        var hubs = routes.Where(route => route.RoutePattern.RawText?.TrimEnd('/') is "/_blazor" or "/_blazor/negotiate").ToList();
+        hubs.Count.ShouldBeGreaterThanOrEqualTo(2);
+        hubs.Where(route => route.Metadata.GetMetadata<HubMetadata>() == null).Select(route => route.RoutePattern.RawText + " " + route.DisplayName).ShouldBeEmpty();
+
+        var pages = routes.Where(route =>
+            route.Metadata.GetMetadata<Microsoft.AspNetCore.Components.Endpoints.ComponentTypeMetadata>() != null
+            && route.RoutePattern.RawText?.Contains("sign-in", StringComparison.Ordinal) != true).ToList();
+        pages.ShouldNotBeEmpty();
+        pages.Where(route => route.Metadata.GetMetadata<IAuthorizeData>() == null).Select(route => route.RoutePattern.RawText + " " + route.DisplayName).ShouldBeEmpty();
+    }
 
     /// <summary>The public interface, from the circuit's scope, acting as the administrator.</summary>
     /// <returns>The guarded administration the dashboard's gateway holds.</returns>
