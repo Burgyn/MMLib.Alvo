@@ -8,6 +8,11 @@
 
     Opened after any editor closed: never over a dialog (spec §3.1). The first focusable element takes focus, which
     is the typed-name field when there is one and Cancel when there is not, the safe choice either way.
+
+    What the owner hands it (the references, the plan's steps) renders under MudDialogProvider, out of the layout's
+    ErrorBoundary's reach, so it sits in a ContainedFault: a render bug there draws the layout's panel with Reload
+    instead of ending the circuit, and the verb stays disabled while it does, because nobody consents to details
+    they could not read.
 *@
 <MudDialog Visible="Open" VisibleChanged="OnVisibleChangedAsync" Options="_options" Class="a-confirm-dialog"
            data-testid="@TestId">
@@ -15,7 +20,7 @@
     <DialogContent>
         <div class="a-stack">
             <p class="a-confirm-dialog__consequence">@Consequence</p>
-            @ChildContent
+            @ContainedFault.Around(ChildContent, FaultPanel, Faulted)
             @if (TypeToConfirm is { } expected)
             {
                 <Field For="confirm-name">
@@ -31,7 +36,7 @@
     <DialogActions>
         <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" data-testid="@CancelTestId" OnClick="CancelAsync">Cancel</AlvoButton>
         <AlvoButton Tone="AlvoButton.ButtonTone.Danger" Busy="@(Busy || _gate.Busy)" data-testid="@ConfirmTestId"
-                    Disabled="@(!ConfirmGate.CanConfirm(TypeToConfirm, _typed, Busy, Allowed))"
+                    Disabled="@(_faulted || !ConfirmGate.CanConfirm(TypeToConfirm, _typed, Busy, Allowed))"
                     OnClick="ConfirmAsync">@Verb</AlvoButton>
     </DialogActions>
 </MudDialog>
@@ -50,6 +55,7 @@
     };
 
     private string _typed = string.Empty;
+    private bool _faulted;
 
     /// <summary>Whether it is on screen.</summary>
     [Parameter]
@@ -112,11 +118,25 @@
         }
     }
 
+    /// <summary>The layout's own panel for a render fault, with its Reload, drawn where the fault happened.</summary>
+    private RenderFragment<ContainedFault.Caught> FaultPanel => caught =>
+        @<ErrorPanel Fault="@caught.Fault" TakeFocus="true">
+            <Actions>
+                <AlvoButton Small="true" data-testid="error-reload" OnClick="_ => caught.Recover()">Reload</AlvoButton>
+            </Actions>
+        </ErrorPanel>;
+
+    private void Faulted(bool faulted)
+    {
+        _faulted = faulted;
+        StateHasChanged();
+    }
+
     private void Typed(string? typed) => _typed = typed ?? string.Empty;
 
     private async Task ConfirmAsync()
     {
-        if (!ConfirmGate.CanConfirm(TypeToConfirm, _typed, Busy, Allowed) || !_gate.TryBegin())
+        if (_faulted || !ConfirmGate.CanConfirm(TypeToConfirm, _typed, Busy, Allowed) || !_gate.TryBegin())
         {
             return;
         }

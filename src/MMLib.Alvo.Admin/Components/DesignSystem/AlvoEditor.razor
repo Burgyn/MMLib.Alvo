@@ -20,7 +20,10 @@
     the trigger.
 
     The content renders inside MudDialogProvider, not under the page. A cascade from the page does not reach it, so
-    a CascadingValue the content needs (an AdminProblem for ErrorPanel) goes inside ChildContent.
+    a CascadingValue the content needs (an AdminProblem for ErrorPanel) goes inside ChildContent. Nor does the
+    layout's ErrorBoundary, so the content and the extra actions each sit in a ContainedFault: a render bug in a
+    field editor draws the layout's panel with Reload here instead of ending the circuit, and while it is on screen
+    the form cannot be submitted, because the operator can no longer see what it holds.
 *@
 @implements IAsyncDisposable
 @inject AdminInterop Interop
@@ -62,18 +65,18 @@
         *@
         <form id="@_formId" class="a-stack" hidden="@_guard.Asking" novalidate data-alvo-chord-submit
               @onsubmit="SubmitAsync">
-            @ChildContent
+            @ContainedFault.Around(ChildContent, FaultPanel, faulted => Faulted(ref _contentFaulted, faulted))
         </form>
     </DialogContent>
     <DialogActions>
         @if (!_guard.Asking)
         {
-            @ExtraActions
+            @ContainedFault.Around(ExtraActions, FaultPanel, faulted => Faulted(ref _actionsFaulted, faulted))
             <span class="a-spacer"></span>
             <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" data-testid="editor-cancel" data-alvo-escape
                         OnClick="RequestCloseAsync">Cancel</AlvoButton>
             <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" form="@_formId" Busy="@(Busy || _gate.Busy)"
-                        Disabled="@(!CanSubmit)" data-testid="@SubmitTestId">@SubmitText</AlvoButton>
+                        Disabled="@(!CanSubmit || HoldsFault)" data-testid="@SubmitTestId">@SubmitText</AlvoButton>
         }
     </DialogActions>
 </MudDialog>
@@ -95,6 +98,8 @@
     };
 
     private MudDialog? _dialog;
+    private bool _contentFaulted;
+    private bool _actionsFaulted;
     private ScrollLock? _scrollLock;
     private Func<Task>? _leave;
 
@@ -152,6 +157,22 @@
 
     private ScrollLock Lock => _scrollLock ??= new ScrollLock(Interop);
 
+    private bool HoldsFault => _contentFaulted || _actionsFaulted;
+
+    /// <summary>The layout's own panel for a render fault, with its Reload, drawn where the fault happened.</summary>
+    private RenderFragment<ContainedFault.Caught> FaultPanel => caught =>
+        @<ErrorPanel Fault="@caught.Fault" TakeFocus="true">
+            <Actions>
+                <AlvoButton Small="true" data-testid="error-reload" OnClick="_ => caught.Recover()">Reload</AlvoButton>
+            </Actions>
+        </ErrorPanel>;
+
+    private void Faulted(ref bool part, bool faulted)
+    {
+        part = faulted;
+        StateHasChanged();
+    }
+
     /// <inheritdoc />
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -163,7 +184,7 @@
 
     private async Task SubmitAsync()
     {
-        if (!CanSubmit || Busy || !_gate.TryBegin())
+        if (!CanSubmit || Busy || HoldsFault || !_gate.TryBegin())
         {
             return;
         }
