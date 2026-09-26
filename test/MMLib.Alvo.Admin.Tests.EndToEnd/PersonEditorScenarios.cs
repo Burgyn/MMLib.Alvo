@@ -101,6 +101,52 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
         (await session.Content.GetByText("Credential token for").CountAsync()).ShouldBe(0, "no panel at the top of the page");
     }
 
+    /// <summary>
+    /// A token is shown once, so leaving the editor by Escape, Save or Cancel before it was copied asks first, and
+    /// Keep editing keeps it on screen; once copied, the editor closes without a question (final review M14).
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Leaving_the_editor_before_the_token_is_copied_asks_first()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.Page.Context.GrantPermissionsAsync(["clipboard-read", "clipboard-write"]);
+        var person = await CreateAsync(session, "uncopied@example.com");
+        await OpenAsync(session, person);
+        var editor = session.Dialog("person-editor");
+        await editor.GetByTestId("person-issue-token").ClickAsync();
+        await editor.GetByTestId("person-token").WaitForAsync();
+
+        await session.Page.Keyboard.PressAsync("Escape");
+        await KeepTheTokenAsync(editor);
+        await editor.GetByTestId("person-save").ClickAsync();
+        await KeepTheTokenAsync(editor);
+
+        await editor.GetByTestId("editor-cancel").ClickAsync();
+        await editor.GetByTestId("editor-discard-question").WaitForAsync();
+        (await editor.GetByTestId("editor-discard").InnerTextAsync()).Trim().ShouldBe("Leave without copying");
+        await editor.GetByTestId("editor-discard").ClickAsync();
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+
+        await OpenAsync(session, person);
+        await editor.GetByTestId("person-issue-token").ClickAsync();
+        await editor.GetByTestId("person-token-copy").ClickAsync();
+        await session.SnackbarAsync("Token copied");
+        await editor.GetByTestId("editor-cancel").ClickAsync();
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>Answers the question about the uncopied token with Keep editing, and checks the token is still there.</summary>
+    private static async Task KeepTheTokenAsync(ILocator editor)
+    {
+        var question = editor.GetByTestId("editor-discard-question");
+        await question.WaitForAsync();
+        (await question.InnerTextAsync()).ShouldContain("Leave without copying the token?");
+        (await question.InnerTextAsync()).ShouldContain("It is shown only once.");
+        await editor.GetByTestId("editor-keep").ClickAsync();
+        await editor.GetByTestId("person-token").WaitForAsync();
+    }
+
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task Disabling_a_person_closes_the_editor_and_needs_a_confirm()
     {

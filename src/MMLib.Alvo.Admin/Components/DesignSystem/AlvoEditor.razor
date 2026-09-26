@@ -46,12 +46,12 @@
     <DialogContent>
         @if (_guard.Asking)
         {
-            <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" Title="Discard your changes?" TakeFocus="true"
-                       TestId="editor-discard-question">
-                <ChildContent>What you changed here has not been saved, and closing loses it.</ChildContent>
+            <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" Title="@(LeaveQuestion?.Title ?? "Discard your changes?")"
+                       TakeFocus="true" TestId="editor-discard-question">
+                <ChildContent>@QuestionBody</ChildContent>
                 <Actions>
                     <AlvoButton Tone="AlvoButton.ButtonTone.Danger" Small="true" data-testid="editor-discard"
-                                OnClick="DiscardAsync">Discard changes</AlvoButton>
+                                OnClick="DiscardAsync">@(LeaveQuestion?.Leave ?? "Discard changes")</AlvoButton>
                     <AlvoButton Small="true" data-testid="editor-keep" data-alvo-escape
                                 OnClick="KeepEditing">Keep editing</AlvoButton>
                 </Actions>
@@ -157,6 +157,17 @@
 
     private ScrollLock Lock => _scrollLock ??= new ScrollLock(Interop);
 
+    /// <summary>Something any way out would lose that the owner's draft does not hold, cascaded by the page that knows.</summary>
+    [CascadingParameter]
+    private EditorLeaveQuestion? LeaveQuestion { get; set; }
+
+    /// <summary>Whether closing, by any way out, loses something.</summary>
+    private bool LosesSomething => Dirty || LeaveQuestion is not null;
+
+    private string QuestionBody => LeaveQuestion is { } question
+        ? Dirty ? $"{question.Body} What you changed here has not been saved either." : question.Body
+        : "What you changed here has not been saved, and closing loses it.";
+
     private bool HoldsFault => _contentFaulted || _actionsFaulted;
 
     /// <summary>The layout's own panel for a render fault, with its Reload, drawn where the fault happened.</summary>
@@ -182,7 +193,13 @@
         }
     }
 
-    private async Task SubmitAsync()
+    /// <summary>
+    /// Submits, once the operator chose to leave when a cascaded question says the submit would lose something: a
+    /// submit closes the editor as surely as Cancel does.
+    /// </summary>
+    private Task SubmitAsync() => LeaveQuestion is null ? RunSubmitAsync() : LeaveAsync(RunSubmitAsync);
+
+    private async Task RunSubmitAsync()
     {
         if (!CanSubmit || Busy || HoldsFault || !_gate.TryBegin())
         {
@@ -208,7 +225,7 @@
     /// <remarks>Internal, so no member of the public component carries it (spec D5's reason).</remarks>
     internal async Task LeaveAsync(Func<Task> leave)
     {
-        if (_guard.RequestClose(Dirty))
+        if (_guard.RequestClose(LosesSomething))
         {
             _leave = null;
             await leave();

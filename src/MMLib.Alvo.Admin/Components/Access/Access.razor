@@ -124,11 +124,14 @@
 
 @if (_editing is { } editing)
 {
-    <PersonEditor Person="editing" Roles="_roles" IsSelf="editing.Id == _self"
-                  Token="@(_tokenFor == editing.Id ? _token : null)" Busy="_busy" Problem="EditorProblem"
-                  OnSave="change => SaveAsync(editing, change)" OnIssueToken="() => IssueTokenAsync(editing)"
-                  OnRequestDisable="() => AskToDisable(editing)" OnLetBackIn="() => LetBackInAsync(editing)"
-                  OnCopyToken="CopyTokenAsync" OnClose="CloseEditor" />
+    @* A token shown once and not yet copied is what every way out of the editor would lose, so it asks (M14). *@
+    <CascadingValue Value="@(_token is not null && !_tokenCopied ? EditorLeaveQuestion.UncopiedToken : null)">
+        <PersonEditor Person="editing" Roles="_roles" IsSelf="editing.Id == _self"
+                      Token="@(_tokenFor == editing.Id ? _token : null)" Busy="_busy" Problem="EditorProblem"
+                      OnSave="change => SaveAsync(editing, change)" OnIssueToken="() => IssueTokenAsync(editing)"
+                      OnRequestDisable="() => AskToDisable(editing)" OnLetBackIn="() => LetBackInAsync(editing)"
+                      OnCopyToken="CopyTokenAsync" OnClose="CloseEditor" />
+    </CascadingValue>
 }
 
 <AlvoConfirm Open="_disabling is not null" TestId="disable-person" ConfirmTestId="disable-person-run"
@@ -141,6 +144,9 @@
     private IReadOnlyList<string> _roles = [];
     private IReadOnlyList<KeyValuePair<string, string>> _levels = [];
     private AlvoCredentialToken? _token;
+
+    /// <summary>Whether the token on screen reached the clipboard, after which the editor may close without asking.</summary>
+    private bool _tokenCopied;
     private UserId? _tokenFor;
     private AdminProblem? _problem;
     private bool _problemFromWrite;
@@ -233,6 +239,7 @@
     {
         _editing = null;
         _token = null;
+        _tokenCopied = false;
         _tokenFor = null;
         _problem = null;
     }
@@ -312,6 +319,7 @@
     private Task IssueTokenAsync(AlvoUser person) => BusyAsync(async () =>
     {
         _token = await Gateway.IssueCredentialTokenAsync(person.Id, CancellationToken.None);
+        _tokenCopied = false;
         _tokenFor = person.Id;
         _problem = null;
     });
@@ -327,6 +335,7 @@
         try
         {
             await Interop.CopyAsync(token.Token);
+            _tokenCopied = true;
             Snackbar.Confirm("Token copied");
         }
         catch (JSException exception)
