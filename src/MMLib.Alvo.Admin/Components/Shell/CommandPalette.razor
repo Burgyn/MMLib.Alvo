@@ -26,10 +26,16 @@
         @* The arrows and Enter are the list's, heard here as they bubble from the input: the dialog's own key
            handler is its key interceptor's, which is wired for Escape and never saw an ArrowDown (measured). *@
         <div @onkeydown="OnKeyDown">
+            @*
+                The WAI-ARIA combobox pattern: focus stays in the box, the arrows move the list's active option, and
+                aria-activedescendant names it, so a screen reader reads each option as the arrows reach it.
+            *@
             <input class="a-palette__input" placeholder="Go to a section or an entity, or run an action…"
-                   @ref="_input" @bind="_query" @bind:event="oninput" aria-label="Search" data-testid="palette-input" />
+                   @ref="_input" @bind="_query" @bind:event="oninput" aria-label="Search" data-testid="palette-input"
+                   role="combobox" aria-expanded="true" aria-controls="palette-results" aria-autocomplete="list"
+                   aria-activedescendant="@(Matches.Count > 0 ? OptionId(Math.Min(_active, Matches.Count - 1)) : null)" autocomplete="off" />
             @FocusOnRender.On(() => _input)
-            <div role="listbox" class="a-palette__list">
+            <div role="listbox" class="a-palette__list" id="palette-results" aria-label="Results">
                 @if (Matches.Count == 0)
                 {
                     <div class="a-palette__item a-palette__item--empty">
@@ -42,7 +48,7 @@
                        for false — and ARIA wants the literal strings. `aria-selected=""` is what a
                        screen reader was being handed for the highlighted row, on the one control the
                        keyboard-only flow runs through. *@
-                    <button type="button" role="option"
+                    <button type="button" role="option" id="@OptionId(index)" tabindex="-1"
                             aria-selected="@((index == _active) ? "true" : "false")"
                             class="@($"a-palette__item{(index == _active ? " a-palette__item--active" : string.Empty)}")"
                             @onclick="() => Go(match)">
@@ -80,6 +86,9 @@
     private bool _open;
     private string _query = string.Empty;
     private int _active;
+
+    /// <summary>An option's id, which the box's <c>aria-activedescendant</c> names while it is the active one.</summary>
+    private static string OptionId(int index) => $"palette-option-{index}";
 
     private List<Entry> Matches => _entries
         .Where(entry => _query.Length == 0

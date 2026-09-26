@@ -26,6 +26,14 @@
 <MudDialogProvider DefaultFocus="DefaultFocus.FirstChild" BackdropClick="false" CloseButton="false" />
 <MudSnackbarProvider Class="a-snackbars" />
 
+@*
+    The first stop of Tab on every screen: past the app bar and the sections, straight to the screen's content
+    (WCAG 2.4.1). Drawn off screen until it has focus. Moves focus itself, because the router answers an in-page link
+    with a scroll and leaves focus where it was.
+*@
+<a class="a-skip" href="#a-content" data-testid="skip-to-content" @onclick="SkipToContentAsync"
+   @onclick:preventDefault="true">Skip to content</a>
+
 <MudLayout Class="@(PageCovered ? "a-shell a-shell--covered" : "a-shell")">
     <MudAppBar Dense="true" Elevation="0" Class="a-appbar" data-testid="appbar">
         <AlvoButton @ref="_sectionsButton" Tone="AlvoButton.ButtonTone.Ghost" Small="true" class="a-only-mobile" aria-label="Sections"
@@ -67,11 +75,12 @@
         layout between them and 720, which the stylesheet does not have.
 
         No MudNavMenu around the list. Its entries are SectionLink (V8), so it added only a second, unlabelled
-        <nav> inside this one: a navigation landmark with no name, and nothing else.
+        <nav> inside this one: a navigation landmark with no name, and nothing else. For the same reason the drawer's
+        own <aside> is role="none": it was an unnamed complementary landmark whose one child is the named <nav>.
     *@
     <MudDrawer Open="NavShown" OpenChanged="OnDrawerOpenChanged"
                Variant="@(_phone ? DrawerVariant.Temporary : DrawerVariant.Persistent)"
-               ClipMode="DrawerClipMode.Always" Elevation="0" Class="a-navdrawer">
+               ClipMode="DrawerClipMode.Always" Elevation="0" Class="a-navdrawer" role="none">
         <nav aria-label="Sections" data-testid="sidebar" class="a-navdrawer__nav" tabindex="-1" @ref="_drawerNav">
             <ProjectSwitcher />
             <NavList OnNavigate="CloseNavOnPhone" />
@@ -82,7 +91,7 @@
     <MudMainContent Class="a-main" inert="@PageCovered">
         <PendingBar />
 
-        <main class="a-content" id="a-content">
+        <main class="a-content" id="a-content" tabindex="-1" @ref="_main">
             @*
                 A screen that throws while rendering takes this panel instead of the circuit. Without the
                 boundary a render bug ends the session: the shell, the working copy's pending count and every
@@ -103,8 +112,9 @@
         </main>
 
         @* The pane's last row rather than the layout's, so it sits under the content on a phone and needs no
-           height of its own subtracted anywhere. *@
-        <nav class="a-bottomnav" aria-label="Sections" data-testid="bottom-nav">
+           height of its own subtracted anywhere. Named apart from the drawer's "Sections", which lists them all:
+           on a phone both are there, and two landmarks of one name read as one said twice. *@
+        <nav class="a-bottomnav" aria-label="Main sections" data-testid="bottom-nav">
             @foreach (var entry in AdminNavigation.Bar)
             {
                 @SectionLink.For(entry, "a-bottomnav__item", "a-bottomnav__item--active", BarContent(entry))
@@ -185,6 +195,7 @@
     private EventCallback _closeAssistant;
     private bool _assistantOpen;
     private ElementReference _drawerNav;
+    private ElementReference _main;
     private IAsyncDisposable? _dismiss;
     private FocusNext _focusNext;
     private bool _assistant;
@@ -372,6 +383,9 @@
     }
 
     private Task OpenPalette() => _palette?.OpenAsync() ?? Task.CompletedTask;
+
+    /// <summary>The skip link: focus to the screen's content, where the next Tab goes on from.</summary>
+    private async Task SkipToContentAsync() => await _main.FocusAsync();
 
     /// <summary>Opens or closes the phone's drawer; opening it takes focus into it (spec §3.4).</summary>
     private void ToggleNav()

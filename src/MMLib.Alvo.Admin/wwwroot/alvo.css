@@ -776,6 +776,32 @@
     border-color: var(--accentBorder);
   }
 
+  /* The skip link (WCAG 2.4.1): off screen until it has focus, then over the app bar's corner. */
+  .a-skip {
+    position: absolute;
+    top: var(--space-2);
+    left: var(--space-2);
+    z-index: var(--z-overlay);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    background: var(--panel);
+    color: var(--text);
+    font-size: var(--text-sm);
+    transform: translateY(-200%);
+  }
+
+  .a-skip:focus {
+    transform: none;
+  }
+
+  /* The content takes focus from the skip link; the ring would frame the whole screen. */
+  .a-content:focus,
+  .a-content:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+
   /* A pane reading again what it shows (spec §3.6): the bar lies over the pane's top edge in a slot of no height, so
      the rows under it stay where they are while it is drawn and when it goes. */
   .a-refresh {

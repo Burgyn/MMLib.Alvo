@@ -67,7 +67,9 @@ and the e2e suite asserts that things render, not that they behave.
    status, priority?", "Remove this beforeCreate hook?", "Disable dispatcher@…?") and acts on what it named, found
    again when it runs, never on a position captured at the press (M7).
 3. **Feedback.**
-   - **Snackbar** (`ISnackbar`, **bottom-left, never over an open editor's footer** — the editor is a right-hand
+   - **Snackbar** (`ISnackbar`, a `role=status` — amended 26 Sep, final review M15: the library writes `role=alert`,
+     which interrupts, and admin.js turns each of the dashboard's own into a status as it is added; **bottom-left,
+     never over an open editor's footer** — the editor is a right-hand
      sheet with its actions bottom-right; 4–6 s, at most two; its text and close on the tone's contrast colour, AA in
      both themes) for the brief confirmation of an action just taken:
      "Saved to the working copy", "Applied as revision 12", "Record deleted". Never the only copy of something the
@@ -107,6 +109,11 @@ and the e2e suite asserts that things render, not that they behave.
 7. **Navigation.** One app bar (search/⌘K, theme, the signed-in menu with Sign out), one nav drawer (responsive: a
    temporary drawer on a phone, plus the existing bottom bar), the pending-changes bar under the app bar. Page title
    row = title, subtitle, primary action, a `…` menu for the rest (the existing `PageHeader` rule).
+   *Landmarks* (added 26 Sep, final review M15): a skip link to the content is the first Tab stop; each navigation
+   landmark has its own name ("Sections" in the drawer, "Main sections" on the phone's bottom bar), and the drawer's
+   own `<aside>` is no landmark of its own; the command palette's box is a WAI-ARIA combobox over a listbox, with
+   `aria-activedescendant` on the active option. A phone's drawer is never drawn open, on the server's first paint or
+   while the circuit's first render learns the width (M17: it already held, and is now pinned for the circuit too).
    *Where a create lives* (added 26 Sep, final review M1): one place per level. A screen's create is its page
    header's **primary** action ("New entity", "New record", "New person"); a create inside a tab is in that section's
    head, right-aligned ("New field", "New index", "New hook"); never under a list. The trigger says "New <thing>", and

@@ -72,6 +72,30 @@ document.addEventListener('keydown', (event) => {
 });
 
 /**
+ * A snackbar is a status, not an alert (spec §3.3; final review M15). It only ever confirms an action just taken, and
+ * no error is ever one, but the library writes `role="alert"` on each, which a screen reader reads out over whatever
+ * it was saying. The library has no option for it, so the dashboard's own provider (`.a-snackbars`) has each
+ * snackbar's role turned into `status` as it is added, before it is announced.
+ */
+const quietSnackbar = (element) => {
+  if (!(element instanceof Element) || !element.closest('.a-snackbars')) {
+    return;
+  }
+
+  for (const bar of [element, ...element.querySelectorAll('[role="alert"]')]) {
+    if (bar.getAttribute('role') === 'alert') {
+      bar.setAttribute('role', 'status');
+    }
+  }
+};
+
+new MutationObserver((records) => {
+  for (const record of records) {
+    record.addedNodes.forEach(quietSnackbar);
+  }
+}).observe(document.body, { childList: true, subtree: true });
+
+/**
  * Forwards one `alvo:<name>` document event to a .NET object's method, and answers a token.
  *
  * The token, not the event name, is what `unsubscribe` takes: two components may listen to the same

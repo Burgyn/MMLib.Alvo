@@ -104,9 +104,9 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
 
     /// <summary>Waits for the snackbar that says <paramref name="text"/>.</summary>
     /// <remarks>
-    /// The library's own class is the handle: a snackbar is <c>role=alert</c>, and so is every error panel, and the
-    /// difference between those two is exactly what a scenario asserts (spec §3.3). This is the one library class the
-    /// suite names, here and nowhere in a scenario.
+    /// The library's own class is the handle: a snackbar is a <c>role=status</c> (admin.js turns the library's alert
+    /// into one), and so is an info or success alert in place, and the difference between those is exactly what a
+    /// scenario asserts (spec §3.3). This is the one library class the suite names, here and nowhere in a scenario.
     /// </remarks>
     /// <param name="text">What it says, or part of it.</param>
     public Task SnackbarAsync(string text)
