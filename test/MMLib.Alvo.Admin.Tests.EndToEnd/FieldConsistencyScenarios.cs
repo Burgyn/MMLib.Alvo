@@ -75,7 +75,7 @@ public sealed class FieldConsistencyScenarios(AdminWorld world) : IClassFixture<
         await session.SnackbarAsync($"Created {email}");
 
         /* The one field that carries a refusal and a linked hint together. */
-        await session.Button($"Change {email}", exact: true).ClickAsync();
+        await session.Button($"Edit {email}", exact: true).ClickAsync();
         await fields.ReadAsync(session.Dialog("person-editor"), "the person editor", expect: ["Tenant"]);
 
         fields.Failures.ShouldBeEmpty();

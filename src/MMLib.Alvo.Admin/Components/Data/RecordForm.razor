@@ -19,7 +19,7 @@
     <AlvoEditor>. This component is the form. Delete sits left of Cancel, away from the primary action.
 *@
 <AlvoEditor @ref="_editor" TestId="record-sheet" Eyebrow="@Entity.Name" Title="@Title"
-            SubmitText="@(RecordId is null ? "Create record" : "Save record")" SubmitTestId="record-save"
+            SubmitText="@(RecordId is null ? "Create record" : "Save changes")" SubmitTestId="record-save"
             Dirty="_draft.Dirty" Busy="_saving" OnSubmit="Save" OnClose="Cancel">
     <ExtraActions>
         @if (RecordId is not null)

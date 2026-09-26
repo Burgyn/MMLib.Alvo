@@ -229,7 +229,7 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
         return await PersonIdAsync(email).ConfigureAwait(false);
     }
 
-    /// <summary>Opens a person's editor from their row's Change.</summary>
+    /// <summary>Opens a person's editor from their row's Edit.</summary>
     /// <param name="id">The person's id, as their row carries it.</param>
     /// <returns>The editor.</returns>
     public async Task<ILocator> OpenPersonAsync(string id)

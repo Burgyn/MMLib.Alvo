@@ -97,7 +97,7 @@
                     *@
                     <div class="a-row a-row--inset">
                         <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" data-testid="ai-change"
-                                    OnClick="_ => OpenEditor()">Change the connection</AlvoButton>
+                                    OnClick="_ => OpenEditor()">Edit the connection</AlvoButton>
                     </div>
                 }
             </ChildContent>
@@ -118,9 +118,9 @@
 
 @if (_editing)
 {
-    <AlvoEditor TestId="ai-editor" Title="Change the AI connection" Eyebrow="Settings"
+    <AlvoEditor TestId="ai-editor" Title="Edit the AI connection" Eyebrow="Settings"
                 Subtitle="A save writes the whole connection to this host's secret store, encrypted."
-                SubmitText="Save the connection" SubmitTestId="ai-save" Dirty="Dirty" Busy="_saving"
+                SubmitText="Save changes" SubmitTestId="ai-save" Dirty="Dirty" Busy="_saving"
                 OnSubmit="SaveAsync" OnClose="CloseEditor">
         @RefusalPanel.Of(_problem)
 

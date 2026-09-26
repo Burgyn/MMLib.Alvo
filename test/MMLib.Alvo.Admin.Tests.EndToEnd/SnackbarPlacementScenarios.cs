@@ -22,7 +22,7 @@ public sealed class SnackbarPlacementScenarios(AdminWorld world) : IClassFixture
         await session.Page.Keyboard.PressAsync("Enter");
         await session.SnackbarAsync($"Created {email}");
 
-        await session.Button($"Change {email}", exact: true).ClickAsync();
+        await session.Button($"Edit {email}", exact: true).ClickAsync();
         var editor = session.Dialog("person-editor");
         await editor.GetByRole(AriaRole.Button, new() { Name = "Cancel" }).WaitForAsync();
         await session.Page.WaitForFunctionAsync("() => document.getAnimations().every(a => a.playState !== 'running')");

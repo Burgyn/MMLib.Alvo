@@ -14,11 +14,18 @@
 *@
 @inject AdminInterop Interop
 
+@* A create inside a tab sits in its section's head, right-aligned (spec §3.7). *@
 <SectionHead Title="On write">
     <Subtitle>
         Before-hooks run inside the transaction and can only refuse or change the row.
         After-hooks run once it is committed and are where anything that leaves the process belongs.
     </Subtitle>
+    <Actions>
+        @if (Editable)
+        {
+            <AlvoButton Small="true" data-testid="hook-new" OnClick="_ => _adding = true">New hook</AlvoButton>
+        }
+    </Actions>
 </SectionHead>
 
 @*
@@ -99,17 +106,9 @@ else
     @RevealOnRender.On($"#{added}", _reveals)
 }
 
-@* Under the list, where a new hook appears, for the Indexes tab's reason. *@
-@if (Editable)
-{
-    <div class="a-row a-row--inset">
-        <AlvoButton Small="true" data-testid="hook-new" OnClick="_ => _adding = true">Add a hook</AlvoButton>
-    </div>
-}
-
 @if (_adding)
 {
-    <AlvoEditor TestId="hook-editor" Title="New hook" SubmitText="Add the hook" SubmitTestId="hook-add"
+    <AlvoEditor TestId="hook-editor" Title="New hook" SubmitText="Add to the working copy" SubmitTestId="hook-add"
                 Subtitle="The point decides what the action may be. A before-hook runs in the transaction and may only refuse or patch the row; a beforeDelete may only refuse, because the row is going."
                 Dirty="Dirty" OnSubmit="AddAsync" OnClose="CloseAdding">
         @RefusalPanel.Of(_refusal, "That hook cannot be added")

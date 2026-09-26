@@ -31,7 +31,7 @@
     {
         <AlvoEditor TestId="rename-sheet" Title="@($"Rename {EntityName}")"
                     Subtitle="The apply moves the table. Its rows come with it."
-                    SubmitText="@(UnsavedRules ? "Discard the unsaved rule and rename" : "Rename in the working copy")"
+                    SubmitText="@(UnsavedRules ? "Discard the unsaved rule and rename" : "Save to the working copy")"
                     SubmitTestId="rename-save" Dirty="@(!string.Equals(_newName, EntityName, StringComparison.Ordinal))"
                     OnSubmit="RenameAsync" OnClose="CloseRename">
             @RefusalPanel.Of(_renameRefusal, "That name cannot be used")
@@ -210,7 +210,7 @@
             <Actions>
                 @if (Copy.Loaded)
                 {
-                    <AlvoButton Small="true" data-testid="add-field" OnClick="_ => AddField()">Add a field</AlvoButton>
+                    <AlvoButton Small="true" data-testid="add-field" OnClick="_ => AddField()">New field</AlvoButton>
                 }
             </Actions>
         </SectionHead>

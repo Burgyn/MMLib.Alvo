@@ -38,12 +38,20 @@ and the e2e suite asserts that things render, not that they behave.
 1. **Where editing happens.**
    - *Create or edit one item with more than one value* (entity, field, record, person, index, hook, AI connection):
      **`AlvoEditor`** — a right-hand modal side sheet (a right-positioned `MudDialog`: focus trap, Escape, focus return;
-     full-screen below 600 px). Title = "New …" / "Edit …"; primary action bottom-right ("Save to the working copy",
-     "Save record", "Create person"); Cancel beside it.
+     full-screen below 600 px). Title = "New …" / "Edit …"; primary action bottom-right; Cancel beside it.
+     *Submit wording, one per kind* (amended 26 Sep, final review M1): what applies at once is created with
+     "Create <thing>" ("Create record", "Create person") and edited with "Save changes"; what is staged in the working
+     copy is added with "Add to the working copy" and edited with "Save to the working copy" (the entity rename
+     included, titled "Rename <entity>" by its verb; the one other submit is "Discard the unsaved rule and rename",
+     which warns what it loses).
+     `PatternLanguageTests` scans every editor for both rules.
    - *Content read beside the main content* (History detail, Rules simulator, the assistant): a **standard,
      non-modal side pane** (`MudSplitPanel` / persistent end drawer with `role=complementary` and a label). No scrim.
-   - *One atomic value with an explicit commit* (rename in place, a toggle): inline, Enter commits, Escape cancels.
-     **No save-on-blur**, anywhere.
+   - *One atomic value with an explicit commit* (a rule's CEL box, a toggle): inline, an explicit Save or its chord
+     commits, Escape reverts. **No save-on-blur**, anywhere. *Amended 26 Sep (final review M10):* the example was
+     "rename in place", but the dashboard's one rename is an `AlvoEditor` — it needs a sentence saying the apply moves
+     the table and a warning when an unsaved rule would be lost, which an inline box cannot carry — so the inline
+     pattern's instances are the rule boxes.
    - Never a dialog over a dialog. An editor's destructive step replaces the editor's content or is a confirm after it
      closes.
 2. **Destructive actions** (delete record, remove field/index/hook/entity, disable person, discard the working copy,
@@ -90,6 +98,10 @@ and the e2e suite asserts that things render, not that they behave.
 7. **Navigation.** One app bar (search/⌘K, theme, the signed-in menu with Sign out), one nav drawer (responsive: a
    temporary drawer on a phone, plus the existing bottom bar), the pending-changes bar under the app bar. Page title
    row = title, subtitle, primary action, a `…` menu for the rest (the existing `PageHeader` rule).
+   *Where a create lives* (added 26 Sep, final review M1): one place per level. A screen's create is its page
+   header's **primary** action ("New entity", "New record", "New person"); a create inside a tab is in that section's
+   head, right-aligned ("New field", "New index", "New hook"); never under a list. The trigger says "New <thing>", and
+   the editor it opens is titled the same. An edit trigger on a row says "Edit". `CreateActionScenarios` scans them.
 8. **Fields** (added 26 Sep, after the screenshots of Task 9 showed three input looks in one editor and an outline
    striking through the typed-name confirm's label). One presentation for every text input, whichever element draws
    it — the library's `MudTextField`/`MudSelect`, or a native `<input>` where the library cannot run (sign-in, D10)
@@ -167,7 +179,7 @@ beyond the migration, all from the inventory:
 | Access | person editor in `AlvoEditor` (roles, tenant, token with Copy, Disable → `AlvoConfirm`); Add person → `AlvoEditor`; Create disabled while busy |
 | Schema | New entity → `AlvoEditor` (was the top strip); a filter over the entity list; field / index / hook editors → `AlvoEditor`; rules get an explicit Save + dirty marker (no save-on-blur); Remove field → `AlvoConfirm` |
 | Command palette | `MudDialog` (top) — Escape, focus, scroll lock from the dialog |
-| Settings | AI connection: a read-only summary with "Change the connection", which opens an `AlvoEditor` (§3.1; amended 26 Sep, final review I3 — it was left inline); save → snackbar "Saved"; refusal → `AlvoAlert` in the editor |
+| Settings | AI connection: a read-only summary with "Edit the connection", which opens an `AlvoEditor` (§3.1; amended 26 Sep, final review I3 — it was left inline); save → snackbar "Saved"; refusal → `AlvoAlert` in the editor |
 
 ## 5. Tests that must exist (behaviour, not rendering)
 

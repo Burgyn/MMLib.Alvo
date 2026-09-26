@@ -8,8 +8,17 @@
 <PageTitle>Access · Alvo</PageTitle>
 
 <div class="a-stack">
+    @* The screen's create action is its header's primary one (spec §3.7). *@
     <PageHeader Title="Access"
-                Subtitle="Two different things live here and they take effect at different times. Membership — who exists, what roles they have, which tenant they act in — is the identity store, and a change applies at once. The role catalogue and the three management levels are the descriptor, and a change to either waits for an apply." />
+                Subtitle="Two different things live here and they take effect at different times. Membership — who exists, what roles they have, which tenant they act in — is the identity store, and a change applies at once. The role catalogue and the three management levels are the descriptor, and a change to either waits for an apply.">
+        <Primary>
+            @if (Gateway.CanAdministerPeople && _people is not null)
+            {
+                <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" data-testid="person-new"
+                            OnClick="_ => OpenCreate()">New person</AlvoButton>
+            }
+        </Primary>
+    </PageHeader>
 
     @* A refusal while an editor is open is drawn inside it (EditorProblem); only the others land here. *@
     @if (!EditorOpen)
@@ -49,11 +58,6 @@
                 {
                     @RevealOnRender.On($"#person-{arrived.Value}", _reveals)
                 }
-
-                @* Under the list, where a new person appears: the editor hands focus back here on close. *@
-                <div class="a-row a-row--inset">
-                    <AlvoButton Small="true" data-testid="person-new" OnClick="_ => OpenCreate()">Add a person</AlvoButton>
-                </div>
             }
         </ChildContent>
     </Panel>
@@ -211,14 +215,14 @@
         await LoadAsync();
     }
 
-    /// <summary>Opens a person's editor, from their row's Change.</summary>
+    /// <summary>Opens a person's editor, from their row's Edit.</summary>
     private void Open(AlvoUser person)
     {
         _problem.Clear();
         _editing = person;
     }
 
-    /// <summary>Opens the Add a person editor.</summary>
+    /// <summary>Opens the New person editor.</summary>
     private void OpenCreate()
     {
         _problem.Clear();
@@ -235,7 +239,7 @@
         _problem.Clear();
     }
 
-    /// <summary>Closes the Add a person editor and forgets what was typed, so the next one starts empty.</summary>
+    /// <summary>Closes the New person editor and forgets what was typed, so the next one starts empty.</summary>
     private void CloseCreate()
     {
         _creating = false;

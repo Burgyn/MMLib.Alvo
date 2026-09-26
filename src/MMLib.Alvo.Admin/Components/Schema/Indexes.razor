@@ -10,11 +10,18 @@
 *@
 @inject AdminInterop Interop
 
+@* A create inside a tab sits in its section's head, right-aligned (spec §3.7), as New field does on Fields. *@
 <SectionHead Title="Indexes">
     <Subtitle>
         Declared in the descriptor. A unique field already has one and is not repeated here; a
         single-field index is the <code class="a-mono">index</code> facet on the field itself.
     </Subtitle>
+    <Actions>
+        @if (Editable)
+        {
+            <AlvoButton Small="true" data-testid="index-new" OnClick="_ => _adding = true">New index</AlvoButton>
+        }
+    </Actions>
 </SectionHead>
 
 @if (Declared.Count == 0)
@@ -70,20 +77,9 @@ else
     @RevealOnRender.On($"#index-row-{added}", _reveals)
 }
 
-@*
-    Under the list, where a new index appears: the editor hands focus back here on close, and the row it added is
-    right above it (spec §3.5).
-*@
-@if (Editable)
-{
-    <div class="a-row a-row--inset">
-        <AlvoButton Small="true" data-testid="index-new" OnClick="_ => _adding = true">Add index</AlvoButton>
-    </div>
-}
-
 @if (_adding)
 {
-    <AlvoEditor TestId="index-editor" Title="New index" SubmitText="Add the index" SubmitTestId="index-add"
+    <AlvoEditor TestId="index-editor" Title="New index" SubmitText="Add to the working copy" SubmitTestId="index-add"
                 Subtitle="Pick the fields in the order a query filters on them: an index on (a, b) serves a filter on a, and on a and b, and does nothing for b alone."
                 Dirty="@(_chosen.Count > 0 || _unique)" OnSubmit="AddAsync" OnClose="CloseAdding">
         @RefusalPanel.Of(_refusal, "That index cannot be added")

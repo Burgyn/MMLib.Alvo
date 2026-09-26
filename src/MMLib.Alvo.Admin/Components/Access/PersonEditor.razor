@@ -10,7 +10,7 @@
     the chips now have them, which the page turns into a grant or a revoke against the person as stored now
     (ManagementGateway.ChangeRolesAsync), never a whole set written back.
 *@
-<AlvoEditor @ref="_editor" TestId="person-editor" Title="@($"Edit {Person.Email}")" SubmitText="Save"
+<AlvoEditor @ref="_editor" TestId="person-editor" Title="@($"Edit {Person.Email}")" SubmitText="Save changes"
             SubmitTestId="person-save" Dirty="_draft.Dirty" Busy="Busy" OnSubmit="SaveAsync"
             OnClose="OnClose">
     <ExtraActions>

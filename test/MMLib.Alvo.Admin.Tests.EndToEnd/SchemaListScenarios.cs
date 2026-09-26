@@ -129,16 +129,17 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
     public async Task A_secondary_action_closes_the_phone_overflow_and_focus_comes_back_to_it()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
-        await session.GoAsync("/schema");
+        /* An entity's Rename: New entity is Schema's primary action now (spec §3.7), which stays on the row. */
+        await session.GoAsync("/schema/work_orders");
         await session.Page.GetByTestId("pagehead-overflow").ClickAsync();
         var region = session.Page.GetByTestId("pagehead-overflow-region");
 
-        await region.GetByRole(AriaRole.Button, new() { Name = "New entity", Exact = true }).ClickAsync();
+        await region.GetByRole(AriaRole.Button, new() { Name = "Rename", Exact = true }).ClickAsync();
 
-        await session.Dialog("new-entity").WaitForAsync();
+        await session.Dialog("rename-sheet").WaitForAsync();
         (await region.IsHiddenAsync()).ShouldBeTrue("pressing an action in the disclosure closes it");
         await session.Page.Keyboard.PressAsync("Escape");
-        await session.Page.GetByTestId("new-entity").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.Page.GetByTestId("rename-sheet").WaitForAsync(new() { State = WaitForSelectorState.Detached });
         await session.Page.WaitForFunctionAsync("() => document.activeElement?.dataset.testid === 'pagehead-overflow'");
     }
 

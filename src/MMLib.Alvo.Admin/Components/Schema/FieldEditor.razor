@@ -18,7 +18,7 @@
             Subtitle="@(IsEditing
                 ? "The change joins the working copy. Preview shows what it does to the table before anything runs."
                 : "It joins the working copy. Preview shows what it does to the table before anything runs.")"
-            SubmitText="Save to the working copy" SubmitTestId="field-save" Dirty="Dirty"
+            SubmitText="@(IsEditing ? "Save to the working copy" : "Add to the working copy")" SubmitTestId="field-save" Dirty="Dirty"
             OnSubmit="Add" OnClose="Cancel">
     <ExtraActions>
         @* An entity is rarely one field short: the second action stages this one and leaves the sheet open for

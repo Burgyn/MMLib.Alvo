@@ -12,13 +12,17 @@
 <PageTitle>Schema · Alvo</PageTitle>
 
 <div class="a-stack">
+    @* The screen's create action is its header's primary one (spec §3.7), as New record is on Data. *@
     <PageHeader Title="Schema">
         <Secondary>
             <ChipGroup TValue="string" Items="_views" Selected="@(new[] { _map ? MapView : ListView })"
                        SelectedChanged="ChooseView" aria-label="View" />
-            <AlvoButton Small="true" OnClick="_ => OpenAdding()">New entity</AlvoButton>
             <AlvoButton Small="true" Href="@AdminPaths.Transfer">Import / export</AlvoButton>
         </Secondary>
+        <Primary>
+            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" data-testid="entity-new"
+                        OnClick="_ => OpenAdding()">New entity</AlvoButton>
+        </Primary>
     </PageHeader>
 
     @if (_problem is not null)

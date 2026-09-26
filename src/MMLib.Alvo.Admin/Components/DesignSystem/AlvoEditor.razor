@@ -118,7 +118,10 @@
     [Parameter]
     public string? Subtitle { get; set; }
 
-    /// <summary>The primary action's label: "Save to the working copy", "Save record", "Create person".</summary>
+    /// <summary>
+    /// The primary action's label, by kind (spec §3.1): "Create record" / "Save changes" for what applies at once,
+    /// "Add to the working copy" / "Save to the working copy" for what is staged.
+    /// </summary>
     [Parameter, EditorRequired]
     public string SubmitText { get; set; } = string.Empty;
 
