@@ -104,12 +104,15 @@ public sealed class AlvoIdentityBootstrapTests : IAsyncLifetime
         host.GetRequiredService<IAlvoBootstrapAdmin>().IsBootstrapAdmin(UserId.New()).ShouldBeFalse();
     }
 
-    /// <summary>Runs the registered bootstrap, exactly as a host's start would.</summary>
+    /// <summary>Runs the registered bootstrap, exactly as a host's start would: starting, then started.</summary>
     /// <param name="host">The built container.</param>
     /// <returns>A task that completes when the bootstrap has run.</returns>
-    private static Task Start(ServiceProvider host) =>
-        host.GetServices<IHostedService>().OfType<AlvoIdentityBootstrap>().Single()
-            .StartAsync(TestContext.Current.CancellationToken);
+    private static async Task Start(ServiceProvider host)
+    {
+        var bootstrap = host.GetServices<IHostedService>().OfType<AlvoIdentityBootstrap>().Single();
+        await bootstrap.StartingAsync(TestContext.Current.CancellationToken);
+        await bootstrap.StartAsync(TestContext.Current.CancellationToken);
+    }
 
     /// <summary>Asks ASP.NET Core Identity whether the stored administrator still answers to a password.</summary>
     /// <param name="host">The built container.</param>

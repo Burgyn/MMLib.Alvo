@@ -14,6 +14,13 @@ namespace MMLib.Alvo.Identity.Internal;
 /// Brings the identity tables up and seeds the configured bootstrap administrator — both idempotent,
 /// because a container restarts on every deploy.
 /// </summary>
+/// <remarks>
+/// <b>In <see cref="IHostedLifecycleService.StartingAsync"/>, not <c>StartAsync</c>.</b> A web host's server is a
+/// hosted service too, and a request it accepts first reads the users table for its cookie check. Hosted services
+/// start in registration order only while <c>HostOptions.ServicesStartConcurrently</c> is false, and that option
+/// binds from configuration; every service's <c>StartingAsync</c> finishes before any <c>StartAsync</c> begins,
+/// either way. Alvo's own boot runs there for the same reason.
+/// </remarks>
 /// <param name="scopes">Creates the scope the scoped store and managers are resolved from.</param>
 /// <param name="options">The configured bootstrap administrator, if there is one.</param>
 /// <param name="admin">The port the seeded administrator is published through.</param>
@@ -22,10 +29,10 @@ internal sealed partial class AlvoIdentityBootstrap(
     IServiceScopeFactory scopes,
     IOptions<AlvoIdentityOptions> options,
     AlvoBootstrapAdmin admin,
-    ILogger<AlvoIdentityBootstrap> logger) : IHostedService
+    ILogger<AlvoIdentityBootstrap> logger) : IHostedLifecycleService
 {
     /// <inheritdoc/>
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public async Task StartingAsync(CancellationToken cancellationToken)
     {
         using var scope = scopes.CreateScope();
         await EnsureTablesAsync(scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
@@ -33,7 +40,19 @@ internal sealed partial class AlvoIdentityBootstrap(
     }
 
     /// <inheritdoc/>
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <inheritdoc/>
+    public Task StartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <inheritdoc/>
+    public Task StoppingAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <inheritdoc/>
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <inheritdoc/>
+    public Task StoppedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>Creates the identity tables when they are absent.</summary>
     /// <remarks>
@@ -86,21 +105,47 @@ internal sealed partial class AlvoIdentityBootstrap(
         }
     }
 
-    /// <summary>Probes for the identity tables with the cheapest query the model allows.</summary>
+    /// <summary>Probes for the identity tables with a query that reads no row.</summary>
+    /// <remarks>
+    /// <b>Sent on the store's own connection, not through a query of the model.</b> EF logs a command that fails at
+    /// error level before any catch sees it, so the model's <c>Users.AnyAsync()</c> printed "no such table" as a
+    /// <c>fail:</c> line on every first boot, the line an operator greps for when something is broken. The table's
+    /// name is the model's, delimited by the provider's own helper, and <c>SELECT 1 FROM t WHERE 1 = 0</c> is read the
+    /// same way by every engine Alvo ships.
+    /// </remarks>
     /// <param name="store">The identity store.</param>
     /// <param name="cancellationToken">Cancels the probe.</param>
     /// <returns><see langword="true"/> when the tables are already there.</returns>
     private static async Task<bool> TablesExistAsync(AlvoIdentityDbContext store, CancellationToken cancellationToken)
     {
+        await store.Database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await store.Users.AnyAsync(cancellationToken).ConfigureAwait(false);
+            await using var probe = store.Database.GetDbConnection().CreateCommand();
+            probe.CommandText = $"SELECT 1 FROM {UsersTable(store)} WHERE 1 = 0";
+            await probe.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
             return true;
         }
         catch (DbException)
         {
             return false;
         }
+        finally
+        {
+            await store.Database.CloseConnectionAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>The users table, as the provider writes its name into SQL.</summary>
+    /// <param name="store">The identity store.</param>
+    /// <returns>The delimited, schema-qualified name.</returns>
+    private static string UsersTable(AlvoIdentityDbContext store)
+    {
+        var users = store.Model.FindEntityType(typeof(AlvoIdentityUser))
+            ?? throw new InvalidOperationException("The identity model has no users table.");
+
+        return store.GetService<ISqlGenerationHelper>()
+            .DelimitIdentifier(users.GetTableName()!, users.GetSchema());
     }
 
     /// <summary>Creates the configured administrator, or finds the one an earlier start created.</summary>
