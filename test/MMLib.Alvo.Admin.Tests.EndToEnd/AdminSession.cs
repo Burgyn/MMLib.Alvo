@@ -115,6 +115,18 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     /// <summary>Every snackbar on screen, by the library's class for <see cref="SnackbarAsync"/>'s reason.</summary>
     public ILocator Snackbars => Page.Locator(".mud-snackbar");
 
+    /// <summary>
+    /// The underline of the tab strip that holds <paramref name="tab"/>, by the library's class for
+    /// <see cref="SnackbarAsync"/>'s reason: the slider is a drawing with no role or name of its own.
+    /// </summary>
+    /// <param name="tab">A tab of the strip.</param>
+    /// <returns>The strip's slider.</returns>
+    public static ILocator SliderOf(ILocator tab)
+    {
+        ArgumentNullException.ThrowIfNull(tab);
+        return tab.Locator("xpath=ancestor::*[contains(@class,'mud-tabs-tabbar')][1]").Locator(".mud-tab-slider");
+    }
+
     /// <summary>How many snackbars are on screen, or how many say <paramref name="text"/>.</summary>
     /// <remarks>
     /// For the two things a count proves and a wait cannot: an action that ran once said so once, and an error

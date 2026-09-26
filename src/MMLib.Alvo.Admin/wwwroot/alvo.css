@@ -938,6 +938,13 @@
     gap: var(--space-3);
   }
 
+  /* The controls of a bar never wrap or shrink (final screenshots S2: "New hook" broke onto two lines beside a long
+     subtitle); the text beside them takes the squeeze. */
+  .a-section--bar > :not(.a-section__text) {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
   .a-section__text {
     display: flex;
     min-width: 0;
@@ -1739,6 +1746,11 @@
 
   /* A refusal the operator can put away. Shut it is one line; open it is the framework's own wording,
      which is never shortened — the fold is about when it is read, not about saying less. */
+  /* Inside a panel it lines up with the panel's content, under its head's text rather than on the card's edge. */
+  .a-panel .a-refused--fold {
+    margin: var(--space-3) var(--space-5) 0;
+  }
+
   .a-refused--fold > summary {
     cursor: pointer;
     color: var(--warn-fg);
@@ -3155,6 +3167,12 @@
     border-radius: 0;
     display: flex;
     flex-direction: column;
+  }
+
+  /* A side sheet reaches the window's edge (spec §3.1), and on a phone it is the whole width: the library pads a
+     right-positioned dialog's container 32 px off the edge, which left a strip of scrim beside the sheet. */
+  .mud-dialog-container:has(> .a-editor) {
+    padding: 0;
   }
 
   .a-editor__head {
