@@ -32,12 +32,7 @@
     </ExtraActions>
     <ChildContent>
     <div class="a-stack">
-        @if (_refusal is { Length: > 0 })
-        {
-            @* Keyed by the attempt, so every refused save draws a new alert: it takes focus and is announced again. *@
-            <ErrorPanel @key="_refusals" TakeFocus="true" Title="@(IsEditing ? "That change cannot be saved" : "That field cannot be added")"
-                        Fix="@_refusal" />
-        }
+        @RefusalPanel.Of(_refusal, IsEditing ? "That change cannot be saved" : "That field cannot be added")
 
         <Field Label="Name" For="new-field-name">
             <ChildContent>

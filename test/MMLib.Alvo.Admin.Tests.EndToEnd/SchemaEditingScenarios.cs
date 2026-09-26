@@ -164,11 +164,12 @@ public sealed class IndexEditingScenarios(AdminWorld world) : IClassFixture<Admi
         {
             await session.Page.GetByTestId("index-add").FocusAsync();
             await session.Page.Keyboard.PressAsync("Enter");
-            await session.Page.WaitForFunctionAsync("() => document.activeElement?.dataset.testid === 'index-refusal'");
+            await session.Page.WaitForFunctionAsync("() => document.activeElement?.dataset.testid === 'error-panel'");
         }
 
-        (await session.Page.Locator("[data-testid='index-refusal']").InnerTextAsync())
-            .ShouldContain("at least one field");
+        /* The titled panel every editor's refusal is (final review M2), not a bare alert. */
+        (await session.Page.GetByTestId("error-title").InnerTextAsync()).ShouldBe("That index cannot be added");
+        (await session.Page.GetByTestId("error-panel").InnerTextAsync()).ShouldContain("at least one field");
         (await session.SnackbarCountAsync()).ShouldBe(0, "an error is never a snackbar");
         (await session.Page.Locator("[data-testid='index-row']").CountAsync()).ShouldBe(before);
 
@@ -431,10 +432,10 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeDelete", Exact = true }).ClickAsync();
         await session.Page.ClickAsync("[data-testid='hook-add']");
 
-        await session.Page.Locator("[data-testid='hook-refusal']").WaitForAsync();
-        await session.Page.WaitForFunctionAsync("() => document.activeElement?.dataset.testid === 'hook-refusal'");
-        (await session.Page.Locator("[data-testid='hook-refusal']").InnerTextAsync())
-            .ShouldContain("the message the caller reads");
+        await session.Page.GetByTestId("error-panel").WaitForAsync();
+        await session.Page.WaitForFunctionAsync("() => document.activeElement?.dataset.testid === 'error-panel'");
+        (await session.Page.GetByTestId("error-title").InnerTextAsync()).ShouldBe("That hook cannot be added");
+        (await session.Page.GetByTestId("error-panel").InnerTextAsync()).ShouldContain("the message the caller reads");
         (await session.Page.Locator("[data-testid='hook-row']").CountAsync()).ShouldBe(before);
 
         session.AssertConsoleClean();

@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Components;
+using MMLib.Alvo.Admin.Components.DesignSystem;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Management;
 using System.Text.Encodings.Web;
@@ -29,8 +30,7 @@ public partial class HooksTab
     };
 
     private readonly HookBuilder _hook = new();
-    private string? _refusal;
-    private int _refusals;
+    private readonly RefusalState<string> _refusal = new();
     private bool _adding;
     private HookAt? _removing;
     private string? _reveal;
@@ -96,7 +96,7 @@ public partial class HooksTab
     private void Choose(string point)
     {
         _hook.Choose(point);
-        _refusal = null;
+        _refusal.Clear();
     }
 
     /// <summary>
@@ -126,9 +126,9 @@ public partial class HooksTab
     /// <summary>Declares the hook <see cref="HookBuilder.Build"/> makes, or shows why it cannot be made.</summary>
     private async Task AddAsync()
     {
-        if (_hook.Build(out _refusal) is not { } action)
+        if (_hook.Build(out var refusal) is not { } action)
         {
-            _refusals++;
+            _refusal.Show(refusal);
             return;
         }
 
@@ -145,7 +145,7 @@ public partial class HooksTab
     private void CloseAdding()
     {
         _hook.Clear();
-        _refusal = null;
+        _refusal.Clear();
         _adding = false;
     }
 

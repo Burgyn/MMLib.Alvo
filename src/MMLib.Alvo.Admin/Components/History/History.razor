@@ -16,7 +16,7 @@
         after that — a revision that would not open, a refused rollback — is drawn in the detail pane, and the list
         and the selection stay where they were (spec §3.3, §3.6).
     *@
-    @if (_revisions is null && _problem is not null)
+    @if (_revisions is null && _problem.Shown)
     {
         @Refusal()
     }
@@ -50,7 +50,7 @@
             <SplitHandle Controls="history-revision" />
 
             <div class="a-split__aside a-stack" id="history-revision">
-                @if (_problem is not null)
+                @if (_problem.Shown)
                 {
                     @Refusal()
                 }
@@ -143,7 +143,7 @@
     /// <summary>The revision listed just before the selected one, which its change is read against.</summary>
     private ManagementRevisionDetail? _previous;
     private ManagementPlanSummary? _rollback;
-    private AdminProblem? _problem;
+    private readonly RefusalState<AdminProblem> _problem = new();
     private int _current;
 
     /// <summary>The applied descriptor as last read, which a clean working copy follows after a rollback.</summary>
@@ -151,12 +151,6 @@
     private bool _allowed;
     private bool _busy;
     private bool _confirmingRollback;
-
-    /// <summary>How many refusals this page has drawn, which keys the panel so each one takes focus again.</summary>
-    private int _problemsDrawn;
-
-    /// <summary>Whether the refusal on screen answered a press rather than the page's own load.</summary>
-    private bool _problemFromSubmit;
 
     /// <summary>The revision the operator last asked to open, which Reload opens again.</summary>
     private int? _asked;
@@ -186,11 +180,11 @@
     /// </summary>
     private async Task ReloadAsync()
     {
-        _problem = null;
+        _problem.Clear();
         _rollback = null;
         _allowed = false;
         await LoadAsync();
-        if (_problem is null && _asked is { } asked && _revisions!.Any(listed => listed.Revision == asked))
+        if (!_problem.Shown && _asked is { } asked && _revisions!.Any(listed => listed.Revision == asked))
         {
             await OpenAsync(asked);
         }
@@ -200,23 +194,13 @@
     /// Puts a refusal on screen, keyed so it is a new panel that takes focus when a press caused it; a dropped one (the
     /// circuit going away) draws nothing.
     /// </summary>
-    private void Refused(AdminProblem? problem, bool fromPress)
-    {
-        _problem = problem;
-        if (problem is null)
-        {
-            return;
-        }
-
-        _problemsDrawn++;
-        _problemFromSubmit = fromPress;
-    }
+    private void Refused(AdminProblem? problem, bool fromPress) => _problem.Show(problem, fromPress);
 
     private async Task OpenAsync(int revision)
     {
         _allowed = false;
         _rollback = null;
-        _problem = null;
+        _problem.Clear();
         _asked = revision;
         try
         {
@@ -250,7 +234,7 @@
         var target = _selected!.Version.Revision;
         await RollbackAsync();
         _allowed = false;
-        if (_problem is null)
+        if (!_problem.Shown)
         {
             Snackbar.Confirm($"Rolled back to r{target} as revision {_current}");
         }
@@ -286,7 +270,7 @@
     /// </remarks>
     private async Task FollowWithTheWorkingCopyAsync()
     {
-        if (_problem is not null || _head is null)
+        if (_problem.Shown || _head is null)
         {
             return;
         }
@@ -298,7 +282,7 @@
     private async Task<ManagementApplyResult?> SendRollbackAsync(bool dryRun, bool allowDestructive)
     {
         _busy = true;
-        _problem = null;
+        _problem.Clear();
         try
         {
             return await Gateway.RollbackAsync(
@@ -321,13 +305,10 @@
     /// The refusal on screen, keyed per refusal so every one draws a new panel and takes focus again (spec §3.3), with
     /// the way back: the history and the head read again.
     /// </summary>
-    private RenderFragment Refusal() => @<CascadingValue Value="_problem">
-        <ErrorPanel @key="_problemsDrawn" TakeFocus="_problemFromSubmit">
-            <Actions>
-                <AlvoButton Small="true" data-testid="history-reload" OnClick="ReloadAsync">Reload history</AlvoButton>
-            </Actions>
-        </ErrorPanel>
-    </CascadingValue>;
+    private RenderFragment Refusal() => RefusalPanel.Of(_problem, ReloadAction);
+
+    private RenderFragment ReloadAction => @<AlvoButton Small="true" data-testid="history-reload"
+                                                       OnClick="ReloadAsync">Reload history</AlvoButton>;
 
     /// <summary>
     /// The selected revision's change from the one before it, first, and its whole descriptor a tab away; the first

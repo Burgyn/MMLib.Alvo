@@ -12,9 +12,9 @@
                 Subtitle="Two different things live here and they take effect at different times. Membership — who exists, what roles they have, which tenant they act in — is the identity store, and a change applies at once. The role catalogue and the three management levels are the descriptor, and a change to either waits for an apply." />
 
     @* A refusal while an editor is open is drawn inside it (EditorProblem); only the others land here. *@
-    @if (_problem is not null && !EditorOpen)
+    @if (!EditorOpen)
     {
-        @ProblemPanel(_problemFromWrite)
+        @ProblemPanel
     }
 
     <Panel Title="People">
@@ -148,9 +148,7 @@
     /// <summary>Whether the token on screen reached the clipboard, after which the editor may close without asking.</summary>
     private bool _tokenCopied;
     private UserId? _tokenFor;
-    private AdminProblem? _problem;
-    private bool _problemFromWrite;
-    private int _problemsDrawn;
+    private readonly RefusalState<AdminProblem> _problem = new();
     private string _newEmail = string.Empty;
     private bool _creating;
     private bool _busy;
@@ -168,26 +166,18 @@
     private bool EditorOpen => _creating || _editing is not null;
 
     /// <summary>The refusal, drawn inside whichever editor is open, where the operator is looking.</summary>
-    private RenderFragment? EditorProblem => _problem is null ? null : ProblemPanel(true);
+    private RenderFragment? EditorProblem => _problem.Shown ? ProblemPanel : null;
 
     /// <summary>
-    /// The page's one refusal panel. Keyed by the attempt, so every refusal draws a new panel that takes focus again
-    /// (spec §3.3); a lost race also offers Reload, the one way to see the person as they now are.
+    /// The page's one refusal panel, a new one per refusal (spec §3.3); a lost race also offers Reload, the one way to
+    /// see the person as they now are.
     /// </summary>
-    private RenderFragment ProblemPanel(bool takeFocus) => @<CascadingValue Value="_problem">
-        @if (_problem?.Exception is AlvoPreconditionFailedException)
-        {
-            <ErrorPanel @key="_problemsDrawn" TakeFocus="takeFocus" Title="This person changed while the screen was open">
-                <Actions>
-                    <AlvoButton Small="true" data-testid="person-reload" OnClick="_ => ReloadAsync()">Reload</AlvoButton>
-                </Actions>
-            </ErrorPanel>
-        }
-        else
-        {
-            <ErrorPanel @key="_problemsDrawn" TakeFocus="takeFocus" />
-        }
-    </CascadingValue>;
+    private RenderFragment ProblemPanel => RefusalPanel.Of(_problem, LostRace ? ReloadAction : null);
+
+    private bool LostRace => _problem.Current?.Exception is AlvoPreconditionFailedException;
+
+    private RenderFragment ReloadAction => @<AlvoButton Small="true" data-testid="person-reload"
+                                                       OnClick="_ => ReloadAsync()">Reload</AlvoButton>;
 
     /// <inheritdoc />
     protected override async Task OnInitializedAsync() => await LoadAsync();
@@ -223,14 +213,14 @@
     /// <summary>Opens a person's editor, from their row's Change.</summary>
     private void Open(AlvoUser person)
     {
-        _problem = null;
+        _problem.Clear();
         _editing = person;
     }
 
     /// <summary>Opens the Add a person editor.</summary>
     private void OpenCreate()
     {
-        _problem = null;
+        _problem.Clear();
         _creating = true;
     }
 
@@ -241,7 +231,7 @@
         _token = null;
         _tokenCopied = false;
         _tokenFor = null;
-        _problem = null;
+        _problem.Clear();
     }
 
     /// <summary>Closes the Add a person editor and forgets what was typed, so the next one starts empty.</summary>
@@ -249,7 +239,7 @@
     {
         _creating = false;
         _newEmail = string.Empty;
-        _problem = null;
+        _problem.Clear();
         _fields.ClearAll();
     }
 
@@ -321,7 +311,7 @@
         _token = await Gateway.IssueCredentialTokenAsync(person.Id, CancellationToken.None);
         _tokenCopied = false;
         _tokenFor = person.Id;
-        _problem = null;
+        _problem.Clear();
     });
 
     /// <summary>Copies the token; a clipboard the browser withholds is said in place, beside the token itself.</summary>
@@ -408,7 +398,7 @@
         try
         {
             await write();
-            _problem = null;
+            _problem.Clear();
             await LoadAsync();
             Snackbar.Confirm(done);
         }
@@ -441,17 +431,12 @@
         => Show(AdminProblem.From(exception, Logger, ProblemSite.People));
 
     /// <summary>Draws <paramref name="problem"/> as a new panel that takes focus.</summary>
-    private void Show(AdminProblem? problem)
-    {
-        _problem = problem;
-        _problemFromWrite = true;
-        _problemsDrawn++;
-    }
+    private void Show(AdminProblem? problem, bool fromPress = true)
+        => _problem.Show(problem, fromPress, problem?.Exception is AlvoPreconditionFailedException
+            ? "This person changed while the screen was open"
+            : null);
 
     /// <summary>A refusal while reading: drawn, but not handed focus, which the router gave the heading.</summary>
     private void Refused(Exception exception)
-    {
-        _problem = AdminProblem.From(exception, Logger, ProblemSite.People);
-        _problemFromWrite = false;
-    }
+        => Show(AdminProblem.From(exception, Logger, ProblemSite.People), fromPress: false);
 }

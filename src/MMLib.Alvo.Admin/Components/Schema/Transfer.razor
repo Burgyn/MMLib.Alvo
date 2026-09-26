@@ -41,14 +41,7 @@
             copy, and the next screen is the same dry run every other change goes through.
         </Subtitle>
         <ChildContent>
-            @if (_refusal is { Length: > 0 })
-            {
-                @* Keyed per refusal, so every refused import draws a new panel and takes focus again (spec §3.3). *@
-                <ErrorPanel @key="_refusals" TakeFocus="true"
-                            Title="The apply would refuse this descriptor"
-                            Slug="descriptor-invalid"
-                            Fix="@_refusal" />
-            }
+            @RefusalPanel.Of(_refusal, "The apply would refuse this descriptor", "descriptor-invalid")
 
             <Field Label="Descriptor JSON" For="import-json">
                 <ChildContent>
@@ -88,10 +81,7 @@
     private ManagementDescriptor? _descriptor;
     private AdminProblem? _problem;
     private string _pasted = string.Empty;
-    private string? _refusal;
-
-    /// <summary>How many refusals this page has drawn, which keys the panel so each one takes focus again.</summary>
-    private int _refusals;
+    private readonly RefusalState<string> _refusal = new();
 
     /// <summary>Whether the question before an import over unapplied edits is on screen.</summary>
     private bool _replacing;
@@ -144,13 +134,14 @@
             return Task.CompletedTask;
         }
 
-        _refusal = DescriptorNames.FirstRefusal(_pasted)
-            ?? (CopyReplacement.IsObject(_pasted) ? null : "That is not a JSON object.");
-        if (_refusal is not null)
+        _refusal.Show(DescriptorNames.FirstRefusal(_pasted)
+            ?? (CopyReplacement.IsObject(_pasted) ? null : "That is not a JSON object."));
+        if (_refusal.Shown)
         {
-            _refusals++;
+            return Task.CompletedTask;
         }
-        else if (Copy.IsDirty)
+
+        if (Copy.IsDirty)
         {
             _replacing = true;
         }
@@ -174,8 +165,7 @@
     {
         if (!Copy.Replace(_pasted))
         {
-            _refusal = "That is not a JSON object.";
-            _refusals++;
+            _refusal.Show("That is not a JSON object.");
             return;
         }
 

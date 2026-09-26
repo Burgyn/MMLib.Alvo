@@ -84,11 +84,7 @@ else
     <AlvoEditor TestId="index-editor" Title="New index" SubmitText="Add the index" SubmitTestId="index-add"
                 Subtitle="Pick the fields in the order a query filters on them: an index on (a, b) serves a filter on a, and on a and b, and does nothing for b alone."
                 Dirty="@(_chosen.Count > 0 || _unique)" OnSubmit="AddAsync" OnClose="CloseAdding">
-        @if (_refusal is { Length: > 0 })
-        {
-            @* Keyed by the attempt, so every refused add draws a new alert that takes focus again. *@
-            <AlvoAlert @key="_refusals" Tone="AlvoAlert.AlertTone.Error" TakeFocus="true" TestId="index-refusal">@_refusal</AlvoAlert>
-        }
+        @RefusalPanel.Of(_refusal, "That index cannot be added")
 
         @*
             The declared fields first — they are what an index is usually for — and the columns Alvo
@@ -139,8 +135,7 @@ else
 
     private List<string> _chosen = [];
     private bool _unique;
-    private string? _refusal;
-    private int _refusals;
+    private readonly RefusalState<string> _refusal = new();
     private bool _adding;
     private int? _removing;
     private int? _reveal;
@@ -199,7 +194,7 @@ else
     /// </remarks>
     private void Choose(IReadOnlyList<string> fields)
     {
-        _refusal = null;
+        _refusal.Clear();
         _chosen = [.. fields];
     }
 
@@ -216,8 +211,7 @@ else
     {
         if (_chosen.Count == 0)
         {
-            _refusal = "An index covers at least one field. Pick one above.";
-            _refusals++;
+            _refusal.Show("An index covers at least one field. Pick one above.");
             return;
         }
 
@@ -234,7 +228,7 @@ else
     {
         _chosen = [];
         _unique = false;
-        _refusal = null;
+        _refusal.Clear();
         _adding = false;
     }
 

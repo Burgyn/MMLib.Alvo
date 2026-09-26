@@ -59,10 +59,7 @@
         Under the thread rather than in it: an alert announces itself, and inside the polite region it would be
         read twice. Keyed per question, so every failed turn draws a new panel and takes focus again (spec §3.3).
     *@
-    @if (_failure is { Length: > 0 })
-    {
-        <ErrorPanel @key="_asked" TakeFocus="true" Title="That turn could not be answered" Fix="@_failure" />
-    }
+    @RefusalPanel.Of(_failure, "That turn could not be answered")
 
     @if (_proposal is { } proposal)
     {
@@ -133,9 +130,8 @@
     private readonly List<string> _tools = [];
     private string _message = string.Empty;
     private string _streaming = string.Empty;
-    private string? _failure;
+    private readonly RefusalState<string> _failure = new();
     private bool _busy;
-    private int _asked;
     private bool _wasOpen;
     private ElementReference _thread;
     private MudTextField<string>? _question;
@@ -221,8 +217,7 @@
     private void Begin(string asked)
     {
         _busy = true;
-        _asked++;
-        _failure = null;
+        _failure.Clear();
         _proposal = null;
         _streaming = string.Empty;
         _tools.Clear();
@@ -256,7 +251,7 @@
                 _proposal = proposal;
                 break;
             case AssistantUpdate.Failed failed:
-                _failure = failed.Reason;
+                _failure.Show(failed.Reason);
                 break;
         }
     }

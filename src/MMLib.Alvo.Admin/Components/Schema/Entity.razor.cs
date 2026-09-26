@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.Extensions.Logging;
+using MMLib.Alvo.Admin.Components.DesignSystem;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;
@@ -37,8 +38,7 @@ public partial class Entity
     private IDisposable? _following;
     private bool _renaming;
     private string _newName = string.Empty;
-    private string? _renameRefusal;
-    private int _renameRefusals;
+    private readonly RefusalState<string> _renameRefusal = new();
     private AdminProblem? _problem;
     private EntityTab _tab = EntityTabs.First;
     private bool _followingAddress;
@@ -455,7 +455,7 @@ public partial class Entity
     private void OpenRename()
     {
         _newName = EntityName;
-        _renameRefusal = null;
+        _renameRefusal.Clear();
         _renaming = true;
     }
 
@@ -463,7 +463,7 @@ public partial class Entity
     private void CloseRename()
     {
         _renaming = false;
-        _renameRefusal = null;
+        _renameRefusal.Clear();
     }
 
     /// <summary>
@@ -478,8 +478,7 @@ public partial class Entity
     {
         if (Copy.RenameEntity(EntityName, _newName) is { } refusal)
         {
-            _renameRefusal = refusal;
-            _renameRefusals++;
+            _renameRefusal.Show(refusal);
             return;
         }
 

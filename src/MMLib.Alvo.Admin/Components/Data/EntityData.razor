@@ -21,12 +21,7 @@
         </Primary>
     </PageHeader>
 
-    @if (_problem is not null)
-    {
-        <CascadingValue Value="_problem">
-            <ErrorPanel @key="_problemsDrawn" TakeFocus="_problemFromWrite" />
-        </CascadingValue>
-    }
+    @RefusalPanel.Of(_problem)
 
     @if (_entity is null)
     {
@@ -34,7 +29,7 @@
         {
             <Skeleton Size="Skeleton.SkeletonSize.Lg" />
         }
-        else if (_problem is null)
+        else if (!_problem.Shown)
         {
             <EmptyState Title="@($"There is no entity called {EntityName}")"
                         Body="The schema this project serves does not declare it." />

@@ -12,13 +12,7 @@
 <div class="a-stack">
     <PageHeader Eyebrow="Schema" EyebrowHref="@AdminPaths.Schema" Title="Preview changes" />
 
-    @if (_problem is not null)
-    {
-        @* Keyed per refusal, so every refused attempt draws a new panel and takes focus again (spec §3.3). *@
-        <CascadingValue Value="_problem">
-            <ErrorPanel @key="_problemsDrawn" TakeFocus="_problemFromSubmit" Title="@_problemTitle" />
-        </CascadingValue>
-    }
+    @RefusalPanel.Of(_problem)
 
     @if (_kept is { } kept)
     {
@@ -228,7 +222,7 @@
     /// <summary>How many plans this page has been answered with — which one is showing, for a reader who asked again.</summary>
     private int _planRuns;
     private ManagementApplyResult? _applied;
-    private AdminProblem? _problem;
+    private readonly RefusalState<AdminProblem> _problem = new();
     private string _reason = string.Empty;
     private bool _allowed;
     private bool _busy;
@@ -239,15 +233,6 @@
     /// <summary>The head an apply found moved past its own revision while later edits were staged, until acted on.</summary>
     private KeptFollow? _kept;
 
-    /// <summary>How many refusals this page has drawn, which keys the panel so each one takes focus again.</summary>
-    private int _problemsDrawn;
-
-    /// <summary>Whether the refusal on screen answered a press rather than the page's own load.</summary>
-    private bool _problemFromSubmit;
-
-    /// <summary>A headline that says more than the refusal's type, for the one failure that follows a success.</summary>
-    private string? _problemTitle;
-
     protected override async Task OnInitializedAsync()
     {
         try
@@ -257,7 +242,7 @@
         }
         catch (Exception exception)
         {
-            _problem = AdminProblem.From(exception, Logger);
+            _problem.Show(AdminProblem.From(exception, Logger), fromPress: false);
         }
 
         /* A copy the assistant composed carries what it was asked for. Pre-filled rather than imposed: the
@@ -409,8 +394,7 @@
         }
 
         _busy = true;
-        _problem = null;
-        _problemTitle = null;
+        _problem.Clear();
 
         try
         {
@@ -442,9 +426,7 @@
         }
         catch (Exception exception)
         {
-            _problem = AdminProblem.From(exception, Logger, ProblemSite.SchemaApply);
-            _problemsDrawn++;
-            _problemFromSubmit = pressed;
+            _problem.Show(AdminProblem.From(exception, Logger, ProblemSite.SchemaApply), pressed);
         }
         finally
         {
@@ -485,10 +467,8 @@
         }
         catch (Exception exception)
         {
-            _problem = AdminProblem.From(exception, Logger);
-            _problemTitle = $"Applied as revision {result.Revision}; the screen could not reload it";
-            _problemsDrawn++;
-            _problemFromSubmit = true;
+            _problem.Show(AdminProblem.From(exception, Logger),
+                title: $"Applied as revision {result.Revision}; the screen could not reload it");
             return;
         }
 
@@ -513,9 +493,7 @@
         }
         catch (Exception exception)
         {
-            _problem = AdminProblem.From(exception, Logger);
-            _problemsDrawn++;
-            _problemFromSubmit = true;
+            _problem.Show(AdminProblem.From(exception, Logger));
         }
     }
 

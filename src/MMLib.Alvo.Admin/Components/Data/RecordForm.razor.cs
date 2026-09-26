@@ -18,8 +18,7 @@ public partial class RecordForm
     private static readonly TimeSpan _searchDelay = TimeSpan.FromMilliseconds(250);
 
     private AlvoEditor? _editor;
-    private AdminProblem? _problem;
-    private int _problemsDrawn;
+    private readonly RefusalState<AdminProblem> _problem = new();
     private bool _saving;
     private Dictionary<string, object?>? _opened;
     private RecordDraft _draft = new([], new Dictionary<string, object?>());
@@ -398,7 +397,7 @@ public partial class RecordForm
     /// <summary>Writes what changed; with nothing changed, closes without a write at all.</summary>
     private async Task Save()
     {
-        _problem = null;
+        _problem.Clear();
         if (!Creating && !_draft.Dirty)
         {
             await OnCancel.InvokeAsync();
@@ -474,7 +473,6 @@ public partial class RecordForm
     /// <remarks>Counted, so a second refusal draws a new panel, which takes focus and is announced again.</remarks>
     private void Refused(Exception exception)
     {
-        _problem = AdminProblem.From(exception, Logger, ProblemSite.RecordWrite);
-        _problemsDrawn++;
+        _problem.Show(AdminProblem.From(exception, Logger, ProblemSite.RecordWrite));
     }
 }

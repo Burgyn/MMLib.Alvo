@@ -29,12 +29,7 @@
         }
     </ExtraActions>
     <ChildContent>
-        @if (_problem is not null)
-        {
-            <CascadingValue Value="_problem">
-                <ErrorPanel @key="_problemsDrawn" TakeFocus="true" />
-            </CascadingValue>
-        }
+        @RefusalPanel.Of(_problem)
 
         <div class="a-stack">
             @foreach (var column in _editable)

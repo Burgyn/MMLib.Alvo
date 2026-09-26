@@ -19,10 +19,9 @@ public partial class FieldEditor
 
     private FieldFacets _facets = new();
     private MudBlazor.MudTextField<string>? _nameField;
-    private string? _refusal;
+    private readonly RefusalState<string> _refusal = new();
     private string? _prefilled;
     private string _opened = string.Empty;
-    private int _refusals;
     private readonly SubmitGate _another = new();
 
     private const string MaxBox = "new-field-max";
@@ -150,7 +149,7 @@ public partial class FieldEditor
         if (IsEditing && _prefilled != Editing)
         {
             _prefilled = Editing;
-            _refusal = null;
+            _refusal.Clear();
             _facets = FieldFacets.Prefill(Editing!, EditingJson);
             ForgetNumbers();
             prefilledNow = true;
@@ -188,7 +187,7 @@ public partial class FieldEditor
             _facets.Type = FieldType.Decimal;
         }
 
-        _refusal = null;
+        _refusal.Clear();
     }
 
     /// <summary>A type as the descriptor spells it.</summary>
@@ -307,9 +306,9 @@ public partial class FieldEditor
             return false;
         }
 
-        if (_facets.Build(Editing, EditingJson, Siblings, out _refusal) is not { } facets)
+        if (_facets.Build(Editing, EditingJson, Siblings, out var refusal) is not { } facets)
         {
-            _refusals++;
+            _refusal.Show(refusal);
             return false;
         }
 

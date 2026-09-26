@@ -37,11 +37,7 @@
         <AlvoEditor TestId="new-entity" Title="New entity" SubmitText="Add to the working copy"
                     Subtitle="It arrives with one required name field and opens on its Fields tab. Nothing reaches the database until you preview and apply."
                     Dirty="@(_name.Trim().Length > 0 || _scoped || !_audited)" OnSubmit="AddEntity" OnClose="CancelAdding">
-            @if (_refusal is { Length: > 0 })
-            {
-                @* Keyed by the attempt, so every refused add draws a new panel that takes focus again. *@
-                <ErrorPanel @key="_refusals" TakeFocus="true" Title="That entity cannot be added" Fix="@_refusal" />
-            }
+            @RefusalPanel.Of(_refusal, "That entity cannot be added")
             <Field Label="Name" For="new-entity-name">
                 <ChildContent>
                     <MudTextField T="string" Value="_name" ValueChanged="name => _name = name ?? string.Empty" Immediate="true"
@@ -160,8 +156,7 @@
     private (string Json, SystemGraph Graph)? _parsed;
     private string _name = string.Empty;
     private string _filter = string.Empty;
-    private string? _refusal;
-    private int _refusals;
+    private readonly RefusalState<string> _refusal = new();
     private bool _adding;
     private bool _scoped;
     private bool _audited = true;
@@ -255,8 +250,7 @@
 
         if (Refusal(_name) is { } refusal)
         {
-            _refusal = refusal;
-            _refusals++;
+            _refusal.Show(refusal);
             return;
         }
 
@@ -308,7 +302,7 @@
         _name = string.Empty;
         _scoped = false;
         _audited = true;
-        _refusal = null;
+        _refusal.Clear();
 
         if (IsNewEntityRequest(Navigation.Uri))
         {

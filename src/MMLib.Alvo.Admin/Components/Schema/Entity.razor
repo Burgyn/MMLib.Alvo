@@ -33,10 +33,7 @@
                     SubmitText="@(UnsavedRules ? "Discard the unsaved rule and rename" : "Rename in the working copy")"
                     SubmitTestId="rename-save" Dirty="@(!string.Equals(_newName, EntityName, StringComparison.Ordinal))"
                     OnSubmit="RenameAsync" OnClose="CloseRename">
-            @if (_renameRefusal is { Length: > 0 })
-            {
-                <ErrorPanel @key="_renameRefusals" TakeFocus="true" Title="That name cannot be used" Fix="@_renameRefusal" />
-            }
+            @RefusalPanel.Of(_renameRefusal, "That name cannot be used")
             @* Asked here, before anything is staged: the rename moves this screen to a new address, and a rule typed on
                the Rules tab and not saved would not come with it. *@
             @if (UnsavedRules)

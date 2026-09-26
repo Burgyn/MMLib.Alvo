@@ -122,12 +122,7 @@
                 Subtitle="A save writes the whole connection to this host's secret store, encrypted."
                 SubmitText="Save the connection" SubmitTestId="ai-save" Dirty="Dirty" Busy="_saving"
                 OnSubmit="SaveAsync" OnClose="CloseEditor">
-        @if (_problem is not null)
-        {
-            <CascadingValue Value="_problem">
-                <ErrorPanel @key="_refusalsDrawn" TakeFocus="true" Title="@_problemTitle" />
-            </CascadingValue>
-        }
+        @RefusalPanel.Of(_problem)
 
         <Field Label="Kind" LabelId="ai-kind">
             <ChipGroup TValue="string" Items="_kinds" Selected="[_kind]" aria-labelledby="ai-kind"
@@ -183,9 +178,7 @@
     private string _endpoint = string.Empty;
     private string _model = string.Empty;
     private string _apiKey = string.Empty;
-    private AdminProblem? _problem;
-    private string _problemTitle = NotSaved;
-    private int _refusalsDrawn;
+    private readonly RefusalState<AdminProblem> _problem = new();
     private bool _saving;
     private bool _editing;
 
@@ -223,7 +216,7 @@
     {
         (_kind, _endpoint, _model, _apiKey) = (StoredAiConnection.OpenAiCompatibleKind, string.Empty, string.Empty, string.Empty);
         _savedAsTyped = false;
-        _problem = null;
+        _problem.Clear();
         _fields.ClearAll();
     }
 
@@ -266,7 +259,7 @@
     /// </remarks>
     private async Task SaveAsync()
     {
-        _problem = null;
+        _problem.Clear();
         if (!Admissible())
         {
             return;
@@ -325,9 +318,7 @@
     /// <summary>Draws <paramref name="exception"/> as a new panel under <paramref name="title"/>, which takes focus.</summary>
     private void Show(string title, Exception exception)
     {
-        _problem = AdminProblem.From(exception, Logger);
-        _problemTitle = title;
-        _refusalsDrawn++;
+        _problem.Show(AdminProblem.From(exception, Logger), title: title);
     }
 
     /// <summary>

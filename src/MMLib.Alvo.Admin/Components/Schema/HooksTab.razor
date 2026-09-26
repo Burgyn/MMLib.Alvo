@@ -111,11 +111,7 @@ else
     <AlvoEditor TestId="hook-editor" Title="New hook" SubmitText="Add the hook" SubmitTestId="hook-add"
                 Subtitle="The point decides what the action may be. A before-hook runs in the transaction and may only refuse or patch the row; a beforeDelete may only refuse, because the row is going."
                 Dirty="Dirty" OnSubmit="AddAsync" OnClose="CloseAdding">
-        @if (_refusal is { Length: > 0 })
-        {
-            @* Keyed by the attempt, so every refused add draws a new alert that takes focus again. *@
-            <AlvoAlert @key="_refusals" Tone="AlvoAlert.AlertTone.Error" TakeFocus="true" TestId="hook-refusal">@_refusal</AlvoAlert>
-        }
+        @RefusalPanel.Of(_refusal, "That hook cannot be added")
 
         <Field Label="When" LabelId="hook-points-label">
             <ChipGroup TValue="string" Items="HookBuilder.Points" Selected="[_hook.Point]" aria-labelledby="hook-points-label"

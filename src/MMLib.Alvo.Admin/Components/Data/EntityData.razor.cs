@@ -28,8 +28,6 @@ public partial class EntityData
     private Guid? _created;
     private RowFocus? _focusRow;
     private AlvoButton? _newRecord;
-    private int _problemsDrawn;
-    private bool _problemFromWrite;
     private IReadOnlyDictionary<string, RowLabel> _targets = new Dictionary<string, RowLabel>(StringComparer.Ordinal);
     private IReadOnlyList<string> _searchable = [];
     private IReadOnlyDictionary<string, IReadOnlyDictionary<Guid, string>> _labels
@@ -38,7 +36,7 @@ public partial class EntityData
     private AlvoContext? _context;
     private Dictionary<string, object?>? _form;
     private Guid? _editing;
-    private AdminProblem? _problem;
+    private readonly RefusalState<AdminProblem> _problem = new();
     private string? _cursor;
     private string? _opened;
     private string _search = string.Empty;
@@ -120,7 +118,7 @@ public partial class EntityData
     private RecordGridScope GridScope
         => new(_page!, _columns, _masks, _label, _labels, _sort, HasPrevious: _cursors.Count > 0,
             SheetOpen: _form is not null || _deleting is not null, Created: _created, FocusRow: _focusRow,
-            Refusals: _problemsDrawn);
+            Refusals: _problem.Key);
 
     /// <summary>
     /// Reads the entity when the route names a new one, then opens whatever record the query names.
@@ -168,7 +166,7 @@ public partial class EntityData
     private void ResetForEntity()
     {
         _loading = true;
-        _problem = null;
+        _problem.Clear();
         _opened = EntityName;
         _search = string.Empty;
         _sort = null;
@@ -250,7 +248,7 @@ public partial class EntityData
 
             _page = page;
             _labels = labels;
-            _problem = null;
+            _problem.Clear();
         }
         catch (Exception exception)
         {
@@ -336,8 +334,7 @@ public partial class EntityData
     /// <summary>Turns a refusal into the panel, with the fix this entity's state calls for.</summary>
     private void Refused(Exception exception)
     {
-        _problem = AdminProblem.From(exception, Logger, Site);
-        _problemFromWrite = false;
+        _problem.Show(AdminProblem.From(exception, Logger, Site), fromPress: false);
     }
 
     /// <summary>
@@ -525,9 +522,7 @@ public partial class EntityData
     /// <summary>A refused delete: the panel on the page, which takes focus, and a new one for every refusal.</summary>
     private void RefusedWrite(Exception exception)
     {
-        _problem = AdminProblem.From(exception, Logger, ProblemSite.RecordWrite);
-        _problemFromWrite = true;
-        _problemsDrawn++;
+        _problem.Show(AdminProblem.From(exception, Logger, ProblemSite.RecordWrite));
     }
 
     /// <summary>What the operator asked to delete, held while the confirm is on screen.</summary>
