@@ -11,12 +11,14 @@
     <PageHeader Title="Configuration history"
                 Subtitle="Every apply appends a revision and none is ever rewritten. This is the audit trail of configuration — who changed what the backend is, when, and why. An audit trail of the data is a different thing and does not exist yet." />
 
-    @if (_problem is not null)
+    @*
+        The whole page is the panel only while there is no list to keep: the first read failed. Anything that fails
+        after that — a revision that would not open, a refused rollback — is drawn in the detail pane, and the list
+        and the selection stay where they were (spec §3.3, §3.6).
+    *@
+    @if (_revisions is null && _problem is not null)
     {
-        @* Keyed per refusal, so every refused rollback draws a new panel and takes focus again (spec §3.3). *@
-        <CascadingValue Value="_problem">
-            <ErrorPanel @key="_problemsDrawn" TakeFocus="_problemFromSubmit" />
-        </CascadingValue>
+        @Refusal()
     }
     else if (_revisions is null)
     {
@@ -47,7 +49,12 @@
 
             <SplitHandle Controls="history-revision" />
 
-            <div class="a-split__aside" id="history-revision">
+            <div class="a-split__aside a-stack" id="history-revision">
+                @if (_problem is not null)
+                {
+                    @Refusal()
+                }
+
                 @if (_selected is null)
                 {
                     <div class="a-card">
@@ -151,6 +158,9 @@
     /// <summary>Whether the refusal on screen answered a press rather than the page's own load.</summary>
     private bool _problemFromSubmit;
 
+    /// <summary>The revision the operator last asked to open, which Reload opens again.</summary>
+    private int? _asked;
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
@@ -163,14 +173,49 @@
         }
         catch (Exception exception)
         {
-            _problem = AdminProblem.From(exception, Logger);
+            Refused(AdminProblem.From(exception, Logger), fromPress: _revisions is not null);
         }
+    }
+
+    /// <summary>
+    /// Reads the history and the head again, then reopens the revision the operator last asked for when it is still
+    /// listed. A refused rollback is usually somebody else's apply in between; its plan is dropped, because it was
+    /// asked against a head that has moved.
+    /// </summary>
+    private async Task ReloadAsync()
+    {
+        _problem = null;
+        _rollback = null;
+        _allowed = false;
+        await LoadAsync();
+        if (_problem is null && _asked is { } asked && _revisions!.Any(listed => listed.Revision == asked))
+        {
+            await OpenAsync(asked);
+        }
+    }
+
+    /// <summary>
+    /// Puts a refusal on screen, keyed so it is a new panel that takes focus when a press caused it; a dropped one (the
+    /// circuit going away) draws nothing.
+    /// </summary>
+    private void Refused(AdminProblem? problem, bool fromPress)
+    {
+        _problem = problem;
+        if (problem is null)
+        {
+            return;
+        }
+
+        _problemsDrawn++;
+        _problemFromSubmit = fromPress;
     }
 
     private async Task OpenAsync(int revision)
     {
         _allowed = false;
         _rollback = null;
+        _problem = null;
+        _asked = revision;
         try
         {
             /* Both read before either is shown: drawn between the two reads, the last revision would stand beside
@@ -181,7 +226,7 @@
         }
         catch (Exception exception)
         {
-            _problem = AdminProblem.From(exception, Logger);
+            Refused(AdminProblem.From(exception, Logger), fromPress: true);
         }
     }
 
@@ -261,9 +306,7 @@
         }
         catch (Exception exception)
         {
-            _problem = AdminProblem.From(exception, Logger, ProblemSite.Rollback);
-            _problemsDrawn++;
-            _problemFromSubmit = true;
+            Refused(AdminProblem.From(exception, Logger, ProblemSite.Rollback), fromPress: true);
             return null;
         }
         finally
@@ -271,6 +314,18 @@
             _busy = false;
         }
     }
+
+    /// <summary>
+    /// The refusal on screen, keyed per refusal so every one draws a new panel and takes focus again (spec §3.3), with
+    /// the way back: the history and the head read again.
+    /// </summary>
+    private RenderFragment Refusal() => @<CascadingValue Value="_problem">
+        <ErrorPanel @key="_problemsDrawn" TakeFocus="_problemFromSubmit">
+            <Actions>
+                <AlvoButton Small="true" data-testid="history-reload" OnClick="ReloadAsync">Reload history</AlvoButton>
+            </Actions>
+        </ErrorPanel>
+    </CascadingValue>;
 
     /// <summary>
     /// The selected revision's change from the one before it, first, and its whole descriptor a tab away; the first

@@ -1,4 +1,6 @@
-﻿using Microsoft.Playwright;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Playwright;
+using MMLib.Alvo.Management;
 using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
@@ -105,6 +107,9 @@ public sealed partial class HistoryScenarios(AdminWorld world) : IClassFixture<A
         session.AssertConsoleClean();
     }
 
+    /// <summary>The detail pane beside the list.</summary>
+    internal static ILocator Pane(AdminSession session) => session.Page.Locator("#history-revision");
+
     private static ILocator Row(AdminSession session, string revision)
         => session.Page.GetByTestId("revision-row").Filter(new() { HasTextRegex = new Regex($@"\br{revision}\b") });
 
@@ -147,7 +152,10 @@ public sealed partial class HistoryScenarios(AdminWorld world) : IClassFixture<A
     private static partial Regex AddedLine();
 }
 
-/// <summary>A refused rollback is an alert that takes focus, and never a snackbar (spec §3.3).</summary>
+/// <summary>
+/// A refused rollback is an alert that takes focus, and never a snackbar (spec §3.3); it is drawn in the detail pane,
+/// and the list and the selection stay in place, with a Reload that reads the history again (spec §3.3, §3.6).
+/// </summary>
 /// <remarks>
 /// Its own world, because it applies behind the dashboard's back: the rollback is then asked against a revision that is
 /// no longer the head, which the contract refuses rather than writing over the other apply.
@@ -156,12 +164,13 @@ public sealed partial class HistoryScenarios(AdminWorld world) : IClassFixture<A
 public sealed class RefusedRollbackScenarios(AdminWorld world) : IClassFixture<AdminWorld>
 {
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task A_refused_rollback_is_an_alert_that_takes_focus_and_never_a_snackbar()
+    public async Task A_refused_rollback_is_an_alert_in_the_pane_that_takes_focus_and_Reload_reads_the_history_again()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await HistoryScenarios.ApplyNewEntityAsync(session, "vendors");
         await session.GoAsync("/history");
         await HistoryScenarios.PlanTheRollbackOfTheNewestAsync(session);
+        var rows = await session.Page.GetByTestId("revision-row").CountAsync();
 
         await ApplyScenarioSteps.ApplySomebodyElsesChangeAsync(world);
         await session.Page.GetByTestId("rollback-run").ClickAsync();
@@ -170,5 +179,62 @@ public sealed class RefusedRollbackScenarios(AdminWorld world) : IClassFixture<A
 
         await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
         (await session.SnackbarCountAsync("Rolled back")).ShouldBe(0, "no error is ever a snackbar");
+        await HistoryScenarios.Pane(session).GetByTestId("error-panel").WaitForAsync();
+        (await session.Page.GetByTestId("revision-row").CountAsync()).ShouldBe(rows, "the list stays in place");
+        (await session.Page.GetByTestId("rollback-plan-steps").IsVisibleAsync()).ShouldBeTrue("the selection stays");
+
+        await session.Page.GetByTestId("history-reload").ClickAsync();
+        await session.Page.GetByTestId("revision-row").Nth(rows).WaitForAsync();
+        (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
+        await session.Page.GetByTestId("rollback-plan").WaitForAsync(); /* reopened; its stale plan dropped */
+        session.AssertConsoleClean();
+    }
+}
+
+/// <summary>A host whose revision reads can be made to fail once, the way a store that is briefly unreachable does.</summary>
+public sealed class FailingRevisionReadWorld : AdminWorld
+{
+    private int _failures;
+
+    /// <summary>Makes the next revision read throw.</summary>
+    public void FailNextRevisionRead() => Interlocked.Exchange(ref _failures, 1);
+
+    /// <inheritdoc/>
+    protected override void Configure(IServiceCollection services)
+        => ManagementDecorator.Around(services, shipped => new Failing(shipped, this));
+
+    private bool TakeFailure() => Interlocked.Exchange(ref _failures, 0) == 1;
+
+    private sealed class Failing(IAlvoManagement inner, FailingRevisionReadWorld world) : ManagementDecorator(inner)
+    {
+        public override Task<ManagementRevisionDetail> GetRevisionAsync(
+            string project, int revision, CancellationToken ct = default)
+            => world.TakeFailure()
+                ? throw new InvalidOperationException("The revision store did not answer.")
+                : base.GetRevisionAsync(project, revision, ct);
+    }
+}
+
+/// <summary>A revision that would not open is a refusal in the pane, never the whole screen (spec §3.3, §3.6).</summary>
+/// <param name="world">A host whose next revision read can be made to fail.</param>
+public sealed class FailedRevisionReadScenarios(FailingRevisionReadWorld world) : IClassFixture<FailingRevisionReadWorld>
+{
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_revision_that_would_not_open_keeps_the_list_and_Reload_opens_it()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/history");
+        var rows = await session.Page.GetByTestId("revision-row").CountAsync();
+
+        world.FailNextRevisionRead();
+        await session.Page.GetByTestId("revision-row").Last.ClickAsync();
+
+        await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+        await HistoryScenarios.Pane(session).GetByTestId("error-panel").WaitForAsync();
+        (await session.Page.GetByTestId("revision-row").CountAsync()).ShouldBe(rows, "the list stays in place");
+
+        await session.Page.GetByTestId("history-reload").ClickAsync();
+        await session.Page.GetByTestId("revision-first").WaitForAsync();
+        (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
     }
 }

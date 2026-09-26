@@ -1,7 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Ai;
 using MMLib.Alvo.Management;
-using MMLib.Alvo.Schema;
 using MMLib.Alvo.Secrets;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
@@ -28,62 +27,24 @@ public sealed class SettingsWorld : ConfigurableAssistantWorld
     protected override void Configure(IServiceCollection services)
     {
         base.Configure(services);
-        var shipped = services.Last(entry => entry.ServiceType == typeof(IAlvoManagement) && !entry.IsKeyedService);
-        services.Remove(shipped);
-        services.Add(new ServiceDescriptor(
-            typeof(IAlvoManagement), provider => new Armed(Build(shipped, provider), this), shipped.Lifetime));
+        ManagementDecorator.Around(services, shipped => new Armed(shipped, this));
     }
 
-    private static IAlvoManagement Build(ServiceDescriptor shipped, IServiceProvider provider)
-        => (IAlvoManagement)(shipped.ImplementationFactory?.Invoke(provider)
-            ?? shipped.ImplementationInstance
-            ?? ActivatorUtilities.CreateInstance(provider, shipped.ImplementationType!));
-
     /// <summary>The shipped port, with the info read and the connection save armable.</summary>
-    private sealed class Armed(IAlvoManagement inner, SettingsWorld world) : IAlvoManagement
+    private sealed class Armed(IAlvoManagement inner, SettingsWorld world) : ManagementDecorator(inner)
     {
-        public async Task<ManagementInfo> GetInfoAsync(CancellationToken ct = default)
+        public override async Task<ManagementInfo> GetInfoAsync(CancellationToken ct = default)
         {
             if (world.InfoDelay > TimeSpan.Zero)
             {
                 await Task.Delay(world.InfoDelay, ct).ConfigureAwait(false);
             }
 
-            return await inner.GetInfoAsync(ct).ConfigureAwait(false);
+            return await base.GetInfoAsync(ct).ConfigureAwait(false);
         }
 
-        public Task SetAiConnectionAsync(StoredAiConnection connection, CancellationToken ct = default)
-            => world.RefuseSaves is { } refusal ? throw refusal() : inner.SetAiConnectionAsync(connection, ct);
-
-        public Task<IReadOnlyList<ManagementProject>> ListProjectsAsync(CancellationToken ct = default)
-            => inner.ListProjectsAsync(ct);
-
-        public Task<ManagementDescriptor> GetDescriptorAsync(string project, CancellationToken ct = default)
-            => inner.GetDescriptorAsync(project, ct);
-
-        public Task<IReadOnlyList<ManagementRevision>> ListRevisionsAsync(string project, CancellationToken ct = default)
-            => inner.ListRevisionsAsync(project, ct);
-
-        public Task<ManagementRevisionDetail> GetRevisionAsync(string project, int revision, CancellationToken ct = default)
-            => inner.GetRevisionAsync(project, revision, ct);
-
-        public Task<SchemaModel> GetSchemaAsync(string project, CancellationToken ct = default)
-            => inner.GetSchemaAsync(project, ct);
-
-        public Task<ManagementCapabilities> GetCapabilitiesAsync(string project, CancellationToken ct = default)
-            => inner.GetCapabilitiesAsync(project, ct);
-
-        public Task<ManagementPolicyVerdict> SimulatePolicyAsync(
-            string project, ManagementPolicySimulation simulation, CancellationToken ct = default)
-            => inner.SimulatePolicyAsync(project, simulation, ct);
-
-        public Task<ManagementApplyResult> ApplyDescriptorAsync(
-            string project, ManagementApplyRequest request, CancellationToken ct = default)
-            => inner.ApplyDescriptorAsync(project, request, ct);
-
-        public Task<ManagementApplyResult> RollbackAsync(
-            string project, int targetRevision, ManagementRollbackRequest request, CancellationToken ct = default)
-            => inner.RollbackAsync(project, targetRevision, request, ct);
+        public override Task SetAiConnectionAsync(StoredAiConnection connection, CancellationToken ct = default)
+            => world.RefuseSaves is { } refusal ? throw refusal() : base.SetAiConnectionAsync(connection, ct);
     }
 }
 
