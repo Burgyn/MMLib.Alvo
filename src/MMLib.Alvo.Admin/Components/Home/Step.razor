@@ -8,7 +8,9 @@
         </span>
         <span class="a-grow">
             <span class="a-section__title">@Title</span>
-            <p class="a-section__sub a-then">@ChildContent</p>
+            @* A div, not a p: the content carries its own block of actions, and a p cannot hold a block, so the
+               prerendered page's parser closed it early and drew a different tree from the circuit's. *@
+            <div class="a-section__sub a-then">@ChildContent</div>
         </span>
     </div>
 </Panel>

@@ -91,10 +91,11 @@
                 }
                 else
                 {
-                    @if (_saveRefusal is { Length: > 0 })
+                    @if (_problem is not null)
                     {
-                        <ErrorPanel @key="_refusalsDrawn" TakeFocus="true" Title="That connection could not be saved"
-                                    Fix="@_saveRefusal" />
+                        <CascadingValue Value="_problem">
+                            <ErrorPanel @key="_refusalsDrawn" TakeFocus="true" Title="@_problemTitle" />
+                        </CascadingValue>
                     }
 
                     <div class="a-stack a-stack--inset">
@@ -161,18 +162,19 @@
 @code {
     private const string EndpointField = "ai-endpoint";
     private const string ModelField = "ai-model";
-    private const string OpenAiCompatible = "openai-compatible";
-    private const string AzureOpenAi = "azure-openai";
+    private const string NotSaved = "That connection could not be saved";
+    private const string NotReadBack = "The connection was saved, and this screen could not read it back";
 
-    private static readonly string[] _kinds = [OpenAiCompatible, AzureOpenAi];
+    private static readonly string[] _kinds = [StoredAiConnection.OpenAiCompatibleKind, StoredAiConnection.AzureOpenAiKind];
 
     private readonly FieldRefusals _fields = new();
     private ManagementInfo? _info;
-    private string _kind = OpenAiCompatible;
+    private string _kind = StoredAiConnection.OpenAiCompatibleKind;
     private string _endpoint = string.Empty;
     private string _model = string.Empty;
     private string _apiKey = string.Empty;
-    private string? _saveRefusal;
+    private AdminProblem? _problem;
+    private string _problemTitle = NotSaved;
     private int _refusalsDrawn;
     private bool _saving;
     private MudTextField<string>? _endpointField;
@@ -205,7 +207,7 @@
     /// </remarks>
     private async Task SaveAsync()
     {
-        _saveRefusal = null;
+        _problem = null;
         if (!Admissible())
         {
             return;
@@ -214,17 +216,10 @@
         _saving = true;
         try
         {
-            await Assistant.SaveConnectionAsync(
-                new AiConnectionForm(_kind, _endpoint, _model, _apiKey), CancellationToken.None);
-
-            _apiKey = string.Empty;
-            _info = await Gateway.InfoAsync(CancellationToken.None);
-            Snackbar.Confirm("Saved the AI connection");
-        }
-        catch (Exception exception)
-        {
-            _saveRefusal = AdminProblem.From(exception, Logger)?.Detail;
-            _refusalsDrawn++;
+            if (await SavedAsync())
+            {
+                await ReadBackAsync();
+            }
         }
         finally
         {
@@ -232,13 +227,63 @@
         }
     }
 
+    /// <summary>Writes the connection, or draws the refusal; whether it was written.</summary>
+    private async Task<bool> SavedAsync()
+    {
+        try
+        {
+            await Assistant.SaveConnectionAsync(
+                new AiConnectionForm(_kind, _endpoint, _model, _apiKey), CancellationToken.None);
+            _apiKey = string.Empty;
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Show(NotSaved, exception);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads the status the save changed, and only then says it saved; a failed read says the save stands, since
+    /// "could not be saved" would send the operator to redo a write that happened.
+    /// </summary>
+    private async Task ReadBackAsync()
+    {
+        try
+        {
+            _info = await Gateway.InfoAsync(CancellationToken.None);
+            Snackbar.Confirm("Saved the AI connection");
+        }
+        catch (Exception exception)
+        {
+            Show(NotReadBack, exception);
+        }
+    }
+
+    /// <summary>Draws <paramref name="exception"/> as a new panel under <paramref name="title"/>, which takes focus.</summary>
+    private void Show(string title, Exception exception)
+    {
+        _problem = AdminProblem.From(exception, Logger);
+        _problemTitle = title;
+        _refusalsDrawn++;
+    }
+
     /// <summary>
     /// Refuses, under its field, a value the connection resolver would read as no connection at all.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The store takes any text, and the resolver builds a connection only from an absolute endpoint and a model
     /// name; anything else it reads as none. Saved unchecked, the screen would say saved while the status stayed
-    /// "not configured", with nothing saying why. The same two conditions, asked before the write.
+    /// "not configured", with nothing saying why.
+    /// </para>
+    /// <para>
+    /// <b>A twin of <c>AiConnectionResolver.Build</c></b> (MMLib.Alvo), which this package cannot call; keep the two
+    /// in step. It is stricter by one condition: the endpoint's scheme is http or https, because the resolver's
+    /// "absolute" also admits <c>localhost:11434/v1</c> (scheme <c>localhost</c>) and, on Unix, <c>/v1</c> as a file
+    /// path, neither of which an adapter can dial. One shared validator is docs/todo-admin.md §8d item 40.
+    /// </para>
     /// </remarks>
     private bool Admissible()
     {
@@ -248,9 +293,10 @@
             _fields.Refuse(ModelField, "Type the model or deployment name, such as qwen3:8b.");
         }
 
-        if (!Uri.TryCreate(_endpoint, UriKind.Absolute, out _))
+        if (!Uri.TryCreate(_endpoint, UriKind.Absolute, out var address)
+            || (address.Scheme != Uri.UriSchemeHttp && address.Scheme != Uri.UriSchemeHttps))
         {
-            _fields.Refuse(EndpointField, "Type the whole base address, with its scheme, such as http://localhost:11434/v1.");
+            _fields.Refuse(EndpointField, "Type the whole base address, starting with http:// or https://, such as http://localhost:11434/v1.");
         }
 
         return !_fields.Any;

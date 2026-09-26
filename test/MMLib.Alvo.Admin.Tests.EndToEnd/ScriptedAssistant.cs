@@ -37,7 +37,7 @@ public sealed class AssistantWorld : AdminWorld
 /// of base64, generated per world, exactly as a deployment mounts one.
 /// </para>
 /// </remarks>
-public sealed class ConfigurableAssistantWorld : AdminWorld
+public class ConfigurableAssistantWorld : AdminWorld
 {
     /// <inheritdoc/>
     protected override void Configure(IServiceCollection services) =>

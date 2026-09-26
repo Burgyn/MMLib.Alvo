@@ -28,8 +28,8 @@
         {
             <AlvoAlert Tone="AlvoAlert.AlertTone.Info" Title="This project is new" TestId="overview-new">
                 <ChildContent>
-                    Three things make a backend: entities, the rules that guard them, and a tenant if
-                    the data is per-customer. The first run walks through them in that order.
+                    The first run walks through the three things a backend needs: entities, the rules that
+                    guard them, and a tenant if the data is per-customer.
                 </ChildContent>
                 <Actions>
                     <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" Href="@AdminPaths.Welcome">
@@ -110,7 +110,12 @@
                 @if (_revisions.Count == 0)
                 {
                     <EmptyState Title="Nothing has been applied yet"
-                                Body="The descriptor this host booted from has not been through an apply. Open Schema to make the first change." />
+                                Body="The descriptor this host booted from has not been through an apply.">
+                        <div class="a-actions">
+                            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" Href="@AdminPaths.Schema"
+                                        data-testid="overview-empty-schema">Make the first change in Schema</AlvoButton>
+                        </div>
+                    </EmptyState>
                 }
                 else
                 {

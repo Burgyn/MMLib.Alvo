@@ -29,13 +29,13 @@
                     }
 
                     @*
-                        Folded, so the page opens as the list of what is declared rather than as the longest block's
-                        JSON; the one sentence above already says whether there is anything to unfold.
+                        Open, because showing what is declared is the page's whole content; the fold is there for
+                        an operator who wants the list shorter.
                     *@
                     @if (Declared(block) is { Length: > 0 } json)
                     {
                         <MudExpansionPanels Elevation="0" Class="a-integration">
-                            <MudExpansionPanel Text="@($"The {block} block, as stored")">
+                            <MudExpansionPanel Text="@($"The {block} block, as stored")" Expanded="true">
                                 <CodeBlock Json="@json" />
                             </MudExpansionPanel>
                         </MudExpansionPanels>
