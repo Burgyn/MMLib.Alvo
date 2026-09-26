@@ -55,7 +55,7 @@ public sealed class DestructiveApplyScenarios(AdminWorld world) : IClassFixture<
         await session.Button("Apply these changes").ClickAsync();
         var confirm = session.Dialog("apply-confirm");
         await confirm.WaitForAsync();
-        await EditorScenarios.WaitForFocusOnAsync(session, "confirm-name");
+        await session.WaitForFocusOnAsync("confirm-name");
         await session.Page.Keyboard.TypeAsync("field-service");
         await session.Page.WaitForFunctionAsync(
             "() => !document.querySelector(\"[data-testid='apply-confirm-run']\")?.disabled");
@@ -95,7 +95,7 @@ public sealed class RefusedApplyScenarios(AdminWorld world) : IClassFixture<Admi
         {
             await session.Page.Locator("#apply-reason").FocusAsync();
             await session.Button("Apply these changes").ClickAsync();
-            await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+            await session.WaitForFocusInsideAsync("error-panel");
         }
 
         /* Counted by what they say: the staging's own snackbar may still be on screen, and rightly. */

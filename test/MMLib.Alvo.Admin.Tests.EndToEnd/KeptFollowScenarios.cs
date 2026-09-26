@@ -178,7 +178,7 @@ public sealed class KeptFollowScenarios(HeldApplyWorld world) : IClassFixture<He
         await kept.WaitForAsync();
         await applier.SnackbarAsync("Applied as revision");
         (await kept.InnerTextAsync()).ShouldContain("still lists the change you just applied as pending");
-        await EditorScenarios.WaitForFocusInsideAsync(applier, "apply-kept");
+        await applier.WaitForFocusInsideAsync("apply-kept");
         return kept;
     }
 

@@ -24,7 +24,7 @@ public sealed class RecordEditorScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Button("New record", exact: true).ClickAsync();
         var editor = session.Dialog("record-sheet");
         await editor.WaitForAsync();
-        await EditorScenarios.WaitForFocusOnAsync(session, "rf-code");
+        await session.WaitForFocusOnAsync("rf-code");
         (await session.FocusedAsync()).ShouldStartWith("input#rf-code");
         var code = session.Page.GetByLabel("Code", new() { Exact = true });
         (await code.GetAttributeAsync("id")).ShouldBe("rf-code", "the label names the native input, without its mark");
@@ -175,18 +175,18 @@ public sealed class RecordEditorScenarios(AdminWorld world) : IClassFixture<Admi
         await session.GoAsync("/data/regions");
         await session.Button("New record", exact: true).ClickAsync();
         var editor = session.Dialog("record-sheet");
-        await EditorScenarios.WaitForFocusOnAsync(session, "rf-code");
+        await session.WaitForFocusOnAsync("rf-code");
         await session.Page.FillAsync("#rf-code", "TAKEN-00");
         await session.Page.FillAsync("#rf-name", "Refused");
 
         await editor.GetByTestId("record-save").ClickAsync();
-        await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+        await session.WaitForFocusInsideAsync("error-panel");
 
         await session.Page.FocusAsync("#rf-name");
-        await EditorScenarios.WaitForFocusOnAsync(session, "rf-name");
+        await session.WaitForFocusOnAsync("rf-name");
         await editor.GetByTestId("record-save").ClickAsync();
 
-        await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+        await session.WaitForFocusInsideAsync("error-panel");
         (await editor.GetByTestId("error-panel").CountAsync()).ShouldBe(1);
         (await session.SnackbarCountAsync()).ShouldBe(0, "an error is never a snackbar");
         session.AssertConsoleClean();
@@ -206,14 +206,14 @@ public sealed class RecordEditorScenarios(AdminWorld world) : IClassFixture<Admi
         var confirm = await AskToDeleteAsync(session, "KEPT-00");
         await confirm.GetByTestId("delete-record-run").ClickAsync();
         await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
-        await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+        await session.WaitForFocusInsideAsync("error-panel");
         await session.Page.WaitForTimeoutAsync(500);
         (await session.FocusIsInsideAsync("error-panel")).ShouldBeTrue("the row did not take focus back");
 
         confirm = await AskToDeleteAsync(session, "KEPT-00");
         await confirm.GetByTestId("delete-record-run").ClickAsync();
         await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
-        await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+        await session.WaitForFocusInsideAsync("error-panel");
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(1);
         (await session.SnackbarCountAsync("Record deleted")).ShouldBe(0, "an error is never a snackbar");
         await Row(session, "KEPT-00").WaitForAsync();
@@ -301,7 +301,7 @@ public sealed class RecordPlacementScenarios(AdminWorld world) : IClassFixture<A
 
         await session.Button("New record", exact: true).ClickAsync();
         var editor = session.Dialog("record-sheet");
-        await EditorScenarios.WaitForFocusOnAsync(session, "rf-code");
+        await session.WaitForFocusOnAsync("rf-code");
         await session.Page.FillAsync("#rf-code", "PLACED");
         await session.Page.FillAsync("#rf-name", "Placed in view");
         await editor.GetByTestId("record-save").ClickAsync();

@@ -85,7 +85,7 @@ public sealed class DestructiveApplyConfirmScenarios(AdminWorld world) : IClassF
         var confirm = session.Dialog("apply-confirm");
         await confirm.WaitForAsync();
         (await confirm.GetAttributeAsync("aria-modal")).ShouldBe("true");
-        await EditorScenarios.WaitForFocusOnAsync(session, "confirm-name");
+        await session.WaitForFocusOnAsync("confirm-name");
         (await confirm.GetByTestId("apply-confirm-run").IsDisabledAsync()).ShouldBeTrue();
 
         await session.Page.Keyboard.TypeAsync("field-servic");
@@ -128,14 +128,14 @@ public sealed class StalePlanScenarios(AdminWorld world) : IClassFixture<AdminWo
 
         await session.Button("Apply these changes").ClickAsync();
         var confirm = session.Dialog("apply-confirm");
-        await EditorScenarios.WaitForFocusOnAsync(session, "confirm-name");
+        await session.WaitForFocusOnAsync("confirm-name");
         await session.Page.Keyboard.TypeAsync("field-service");
         await KeptFollowScenarios.StageEntityAsync(otherTab, "vendors");
 
         var stale = session.Page.GetByTestId("plan-stale");
         await stale.WaitForAsync();
         await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
-        await EditorScenarios.WaitForFocusInsideAsync(session, "plan-stale");
+        await session.WaitForFocusInsideAsync("plan-stale");
         (await session.Button("Apply these changes").CountAsync()).ShouldBe(0, "there is nothing to apply until it is planned");
         (await session.SnackbarCountAsync("Applied")).ShouldBe(0);
         (await ApplyScenarioSteps.RevisionCountAsync(otherTab)).ShouldBe(revisions, "nothing reached the database");

@@ -31,7 +31,7 @@ public sealed class TransferScenarios(AdminWorld world) : IClassFixture<AdminWor
         {
             await session.Page.Locator("#import-json").FocusAsync();
             await session.Page.Keyboard.PressAsync("Control+Enter");
-            await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+            await session.WaitForFocusInsideAsync("error-panel");
         }
 
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(1);

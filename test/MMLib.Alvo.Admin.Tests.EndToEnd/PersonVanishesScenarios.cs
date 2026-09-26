@@ -91,7 +91,7 @@ public sealed class PersonVanishesScenarios(VanishingPeopleWorld world) : IClass
         await editor.GetByTestId("person-save").ClickAsync();
 
         await editor.GetByTestId("error-panel").WaitForAsync();
-        await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+        await session.WaitForFocusInsideAsync("error-panel");
         (await session.SnackbarCountAsync("Saved")).ShouldBe(0, "a refused save never says it saved");
 
         await editor.GetByTestId("person-reload").ClickAsync();

@@ -236,13 +236,13 @@ public sealed class EditorScenarios(AdminWorld world) : IClassFixture<AdminWorld
         var editor = session.Dialog("field-sheet");
         await session.Page.FillAsync("#new-field-name", "Not A Name");
         await editor.GetByTestId("field-save").ClickAsync();
-        await WaitForFocusInsideAsync(session, "error-panel");
+        await session.WaitForFocusInsideAsync("error-panel");
 
         await session.Page.FocusAsync("#new-field-name");
-        await WaitForFocusOnAsync(session, "new-field-name");
+        await session.WaitForFocusOnAsync("new-field-name");
         await editor.GetByTestId("field-save").ClickAsync();
 
-        await WaitForFocusInsideAsync(session, "error-panel");
+        await session.WaitForFocusInsideAsync("error-panel");
         (await editor.GetByTestId("error-panel").CountAsync()).ShouldBe(1);
         session.AssertConsoleClean();
     }
@@ -266,20 +266,6 @@ public sealed class EditorScenarios(AdminWorld world) : IClassFixture<AdminWorld
         (await session.SnackbarCountAsync("Saved to the working copy")).ShouldBe(1);
         session.AssertConsoleClean();
     }
-
-    /// <summary>Waits until focus is inside the element with <paramref name="testId"/>.</summary>
-    internal static Task WaitForFocusInsideAsync(AdminSession session, string testId)
-        => session.Page.WaitForFunctionAsync(
-            "id => !!document.activeElement?.closest(`[data-testid='${id}']`)", testId, _polling);
-
-    /// <summary>Waits until the element with <paramref name="id"/> has focus.</summary>
-    internal static Task WaitForFocusOnAsync(AdminSession session, string id)
-        => session.Page.WaitForFunctionAsync("id => document.activeElement?.id === id", id, _polling);
-
-    /// <summary>Waits until the element with <paramref name="testId"/> has focus.</summary>
-    internal static Task WaitForFocusOnTestIdAsync(AdminSession session, string testId)
-        => session.Page.WaitForFunctionAsync(
-            "id => document.activeElement?.dataset.testid === id", testId, _polling);
 
     /// <summary>
     /// Gives a second submit, if one was sent, the time to arrive and draw: a count read at once would pass before it
@@ -341,13 +327,13 @@ public sealed class RenameAndOverflowScenarios(AdminWorld world) : IClassFixture
         var editor = session.Dialog("rename-sheet");
         await session.Page.FillAsync("#rename-entity-name", "Not A Name");
         await editor.GetByTestId("rename-save").ClickAsync();
-        await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+        await session.WaitForFocusInsideAsync("error-panel");
 
         await session.Page.FocusAsync("#rename-entity-name");
-        await EditorScenarios.WaitForFocusOnAsync(session, "rename-entity-name");
+        await session.WaitForFocusOnAsync("rename-entity-name");
         await editor.GetByTestId("rename-save").ClickAsync();
 
-        await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+        await session.WaitForFocusInsideAsync("error-panel");
         session.AssertConsoleClean();
     }
 
@@ -384,7 +370,7 @@ public sealed class RenameAndOverflowScenarios(AdminWorld world) : IClassFixture
         await region.WaitForAsync();
         await session.Page.Keyboard.PressAsync("Escape");
         await region.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
-        await EditorScenarios.WaitForFocusOnTestIdAsync(session, "pagehead-overflow");
+        await session.WaitForFocusOnTestIdAsync("pagehead-overflow");
         (await trigger.GetAttributeAsync("aria-expanded")).ShouldBe("false");
         session.AssertConsoleClean();
     }
@@ -400,12 +386,12 @@ public sealed class RenameAndOverflowScenarios(AdminWorld world) : IClassFixture
         await region.GetByTestId("rename-entity").ClickAsync();
         var editor = session.Dialog("rename-sheet");
         await editor.WaitForAsync();
-        await EditorScenarios.WaitForFocusOnAsync(session, "rename-entity-name");
+        await session.WaitForFocusOnAsync("rename-entity-name");
 
         await session.Page.Keyboard.PressAsync("Escape");
 
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
-        await EditorScenarios.WaitForFocusOnTestIdAsync(session, "pagehead-overflow");
+        await session.WaitForFocusOnTestIdAsync("pagehead-overflow");
         session.AssertConsoleClean();
     }
 }

@@ -78,7 +78,7 @@ public sealed class SettingsScenarios(SettingsWorld world) : IClassFixture<Setti
         await session.SnackbarAsync("Saved the AI connection");
         (await session.SnackbarCountAsync("Saved the AI connection")).ShouldBe(1, "one save, said once");
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
-        await EditorScenarios.WaitForFocusOnTestIdAsync(session, "ai-change");
+        await session.WaitForFocusOnTestIdAsync("ai-change");
         (await session.Content.GetByText("Saved.", new() { Exact = true }).CountAsync()).ShouldBe(0);
         session.AssertConsoleClean();
     }
@@ -104,7 +104,7 @@ public sealed class SettingsScenarios(SettingsWorld world) : IClassFixture<Setti
         await editor.GetByTestId("editor-cancel").ClickAsync();
         await editor.GetByTestId("editor-discard").ClickAsync();
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
-        await EditorScenarios.WaitForFocusOnTestIdAsync(session, "ai-change");
+        await session.WaitForFocusOnTestIdAsync("ai-change");
         (await session.SnackbarCountAsync()).ShouldBe(0, "nothing was saved");
         session.AssertConsoleClean();
     }
@@ -145,7 +145,7 @@ public sealed class SettingsScenarios(SettingsWorld world) : IClassFixture<Setti
         await session.Page.GetByTestId("ai-change").ClickAsync();
         var editor = session.Dialog("ai-editor");
         await editor.GetByTestId("ai-save").WaitForAsync();
-        await EditorScenarios.WaitForFocusInsideAsync(session, "ai-editor");
+        await session.WaitForFocusInsideAsync("ai-editor");
         return editor;
     }
 

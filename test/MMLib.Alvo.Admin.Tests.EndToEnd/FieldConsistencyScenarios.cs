@@ -119,7 +119,7 @@ public sealed class ConfirmFieldConsistencyScenarios(AdminWorld world) : IClassF
         await fields.ReadSignInAsync(world, ColorScheme.Light);
         await using (var session = await world.SignInAsync(TestContext.Current.CancellationToken))
         {
-            await HistoryScenarios.ApplyNewEntityAsync(session, "gauges");
+            await session.ApplyNewEntityAsync("gauges");
         }
 
         foreach (var scheme in new[] { ColorScheme.Light, ColorScheme.Dark })

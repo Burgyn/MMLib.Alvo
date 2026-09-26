@@ -396,7 +396,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         var toggle = session.Page.Locator("[data-testid='theme-toggle']");
         await session.Page.WaitForFunctionAsync(
             "document.querySelector(\"[data-testid='theme-toggle']\")?.getAttribute('aria-label')?.startsWith('Switch')");
-        var before = await Theme(session);
+        var before = await session.ThemeAsync();
 
         await session.Page.Keyboard.PressAsync("Meta+k");
         await session.Dialog("palette").WaitForAsync();
@@ -418,10 +418,6 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
 
         session.AssertConsoleClean();
     }
-
-    /// <summary>The theme the page resolves to — the stored choice, else the system's.</summary>
-    private static Task<string> Theme(AdminSession session) => session.Page.EvaluateAsync<string>(
-        "document.documentElement.dataset.theme ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')");
 
     /// <summary>
     /// An entity's tab is in its address: a reload opens on it, the arrows move it without a history step,

@@ -27,7 +27,7 @@ public sealed class SnackbarPlacementScenarios(AdminWorld world) : IClassFixture
         await editor.GetByRole(AriaRole.Button, new() { Name = "Cancel" }).WaitForAsync();
         await session.Page.WaitForFunctionAsync("() => document.getAnimations().every(a => a.playState !== 'running')");
 
-        var snackbar = await BoxAsync(session.Snackbars.First);
+        var snackbar = await AdminSession.SettledBoxAsync(session.Snackbars.First);
         foreach (var button in await editor.GetByRole(AriaRole.Button).AllAsync())
         {
             var box = await button.BoundingBoxAsync();
@@ -39,9 +39,6 @@ public sealed class SnackbarPlacementScenarios(AdminWorld world) : IClassFixture
 
         (snackbar.X + snackbar.Width).ShouldBeLessThan(700, "bottom-left, not bottom-right");
     }
-
-    private static async Task<LocatorBoundingBoxResult> BoxAsync(ILocator element)
-        => await element.BoundingBoxAsync() ?? throw new InvalidOperationException("the element is not laid out");
 
     private static bool Intersects(LocatorBoundingBoxResult a, LocatorBoundingBoxResult b)
         => a.X < b.X + b.Width && b.X < a.X + a.Width && a.Y < b.Y + b.Height && b.Y < a.Y + a.Height;

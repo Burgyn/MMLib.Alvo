@@ -55,23 +55,23 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
     public async Task The_editor_takes_focus_on_open_and_Escape_hands_it_back_to_the_row()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        var person = await CreateAsync(session, "focus@example.com");
+        var person = await CreatePersonAsync(session, "focus@example.com");
 
-        await OpenAsync(session, person);
-        await EditorScenarios.WaitForFocusInsideAsync(session, "person-editor");
+        await session.OpenPersonAsync(person);
+        await session.WaitForFocusInsideAsync("person-editor");
         await session.Page.Keyboard.PressAsync("Escape");
 
         await session.Dialog("person-editor").WaitForAsync(new() { State = WaitForSelectorState.Detached });
-        await EditorScenarios.WaitForFocusOnAsync(session, $"change-{person}");
+        await session.WaitForFocusOnAsync($"change-{person}");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task A_mistyped_tenant_is_refused_in_the_editor_with_focus_and_nothing_is_written()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        var person = await CreateAsync(session, "tenant@example.com");
+        var person = await CreatePersonAsync(session, "tenant@example.com");
 
-        await OpenAsync(session, person);
+        await session.OpenPersonAsync(person);
         await session.Page.FillAsync($"#tenant-{person}", "not-a-uuid");
         await session.Page.Keyboard.PressAsync("Enter");
 
@@ -87,9 +87,9 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.Page.Context.GrantPermissionsAsync(["clipboard-read", "clipboard-write"]);
-        var person = await CreateAsync(session, "token@example.com");
+        var person = await CreatePersonAsync(session, "token@example.com");
 
-        await OpenAsync(session, person);
+        await session.OpenPersonAsync(person);
         await session.Dialog("person-editor").GetByTestId("person-issue-token").ClickAsync();
         var token = session.Dialog("person-editor").GetByTestId("person-token");
         await token.WaitForAsync();
@@ -110,8 +110,8 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.Page.Context.GrantPermissionsAsync(["clipboard-read", "clipboard-write"]);
-        var person = await CreateAsync(session, "uncopied@example.com");
-        await OpenAsync(session, person);
+        var person = await CreatePersonAsync(session, "uncopied@example.com");
+        await session.OpenPersonAsync(person);
         var editor = session.Dialog("person-editor");
         await editor.GetByTestId("person-issue-token").ClickAsync();
         await editor.GetByTestId("person-token").WaitForAsync();
@@ -127,7 +127,7 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
         await editor.GetByTestId("editor-discard").ClickAsync();
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
-        await OpenAsync(session, person);
+        await session.OpenPersonAsync(person);
         await editor.GetByTestId("person-issue-token").ClickAsync();
         await editor.GetByTestId("person-token-copy").ClickAsync();
         await session.SnackbarAsync("Token copied");
@@ -151,9 +151,9 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
     public async Task Disabling_a_person_closes_the_editor_and_needs_a_confirm()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        var person = await CreateAsync(session, "leaver@example.com");
+        var person = await CreatePersonAsync(session, "leaver@example.com");
 
-        await OpenAsync(session, person);
+        await session.OpenPersonAsync(person);
         await session.Dialog("person-editor").GetByTestId("person-disable").ClickAsync();
         var confirm = session.Dialog("disable-person");
         await confirm.WaitForAsync();
@@ -163,7 +163,7 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
         (await Row(session, person).InnerTextAsync()).ShouldNotContain("disabled");
         await WaitForFocusOnRowAsync(session, person);
 
-        await OpenAsync(session, person);
+        await session.OpenPersonAsync(person);
         await session.Dialog("person-editor").GetByTestId("person-disable").ClickAsync();
         await session.Dialog("disable-person").GetByTestId("disable-person-run").ClickAsync();
         await session.SnackbarAsync("Disabled leaver@example.com");
@@ -175,9 +175,9 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
     public async Task Roles_change_on_save_and_an_unsaved_change_is_guarded()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        var person = await CreateAsync(session, "roles@example.com");
+        var person = await CreatePersonAsync(session, "roles@example.com");
 
-        await OpenAsync(session, person);
+        await session.OpenPersonAsync(person);
         await session.Dialog("person-editor").GetByRole(AriaRole.Button, new() { Name = "dispatcher", Exact = true }).ClickAsync();
         await session.Page.Keyboard.PressAsync("Escape");
         await session.Dialog("person-editor").GetByTestId("editor-discard-question").WaitForAsync();
@@ -201,7 +201,7 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
     internal static async Task AssertFieldRefusedAsync(AdminSession session, string id, string because)
     {
         await session.Page.Locator($"#{id}[aria-invalid='true']").WaitForAsync();
-        await EditorScenarios.WaitForFocusOnAsync(session, id);
+        await session.WaitForFocusOnAsync(id);
         var description = await session.Page.EvaluateAsync<string>(
             "id => (document.getElementById(id).getAttribute('aria-describedby') ?? '').split(' ')"
             + ".map(part => document.getElementById(part)?.textContent ?? '').join(' ')", id);
@@ -215,21 +215,10 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
             + " return !!row && !!at && at !== document.body && (at.contains(row) || row.contains(at)); }",
             $"person-{id}");
 
-    private static async Task OpenAsync(AdminSession session, string id)
-    {
-        await session.Page.Locator($"#change-{id}").ClickAsync();
-        await session.Dialog("person-editor").WaitForAsync();
-    }
-
-    /// <summary>Creates a person through the editor and answers the id their row carries.</summary>
-    private static async Task<string> CreateAsync(AdminSession session, string email)
+    /// <summary>Opens Access and creates a person there; answers their id.</summary>
+    private static async Task<string> CreatePersonAsync(AdminSession session, string email)
     {
         await session.GoAsync("/access");
-        await session.Page.GetByTestId("person-new").ClickAsync();
-        await session.Page.FillAsync("#new-person-email", email);
-        await session.Page.Keyboard.PressAsync("Enter");
-        await session.SnackbarAsync($"Created {email}");
-        var row = session.Content.Locator("[id^='person-']").Filter(new() { HasText = email });
-        return (await row.GetAttributeAsync("id"))!["person-".Length..];
+        return await session.CreatePersonAsync(email);
     }
 }

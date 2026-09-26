@@ -160,6 +160,101 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
             """, handle, _polling).ConfigureAwait(false);
     }
 
+    /// <summary>Waits until focus is inside the element with <paramref name="testId"/>.</summary>
+    /// <param name="testId">The container's test id.</param>
+    public Task WaitForFocusInsideAsync(string testId)
+        => Page.WaitForFunctionAsync("id => !!document.activeElement?.closest(`[data-testid='${id}']`)", testId, _polling);
+
+    /// <summary>Waits until the element with <paramref name="id"/> has focus.</summary>
+    /// <param name="id">The element's id.</param>
+    public Task WaitForFocusOnAsync(string id)
+        => Page.WaitForFunctionAsync("id => document.activeElement?.id === id", id, _polling);
+
+    /// <summary>Waits until the element with <paramref name="testId"/> has focus.</summary>
+    /// <param name="testId">The element's test id.</param>
+    public Task WaitForFocusOnTestIdAsync(string testId)
+        => Page.WaitForFunctionAsync("id => document.activeElement?.dataset.testid === id", testId, _polling);
+
+    /// <summary>The theme the page is drawn in: alvo.js always writes a resolved one before paint.</summary>
+    /// <returns><c>light</c> or <c>dark</c>.</returns>
+    public Task<string> ThemeAsync()
+        => Page.EvaluateAsync<string>(
+            "() => document.documentElement.dataset.theme ?? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')");
+
+    /// <summary>The element's box once nothing on the page is moving.</summary>
+    /// <remarks>
+    /// A pane slides in and the page beside it narrows with it; a box read mid-slide is the animation's, not the
+    /// layout's. Every running animation is waited out rather than a guessed number of milliseconds.
+    /// </remarks>
+    /// <param name="element">The element, which must be laid out.</param>
+    /// <returns>Its box.</returns>
+    public static async Task<LocatorBoundingBoxResult> SettledBoxAsync(ILocator element)
+    {
+        ArgumentNullException.ThrowIfNull(element);
+        await element.Page.WaitForFunctionAsync(
+            "() => document.getAnimations().every(a => a.playState !== 'running')", null, _polling).ConfigureAwait(false);
+        return await element.BoundingBoxAsync().ConfigureAwait(false)
+            ?? throw new InvalidOperationException("the element is not laid out");
+    }
+
+    /// <summary>Stages a new entity, plans it and applies it; answers the revision it became.</summary>
+    /// <param name="name">The entity's name.</param>
+    /// <returns>The revision, as the success panel says it.</returns>
+    public async Task<string> ApplyNewEntityAsync(string name)
+    {
+        await GoAsync("/schema").ConfigureAwait(false);
+        await Button("New entity", exact: true).ClickAsync().ConfigureAwait(false);
+        await Page.FillAsync("#new-entity-name", name).ConfigureAwait(false);
+        await Page.Keyboard.PressAsync("Enter").ConfigureAwait(false);
+        await Page.WaitForURLAsync($"**/schema/{name}").ConfigureAwait(false);
+        await PreviewPendingAsync().ConfigureAwait(false);
+        await Page.FillAsync("#apply-reason", $"Add {name}").ConfigureAwait(false);
+        await Button("Apply these changes").ClickAsync().ConfigureAwait(false);
+        var announced = Content.GetByText("Applied as revision").First;
+        await announced.WaitForAsync().ConfigureAwait(false);
+        return System.Text.RegularExpressions.Regex.Match(
+            await announced.InnerTextAsync().ConfigureAwait(false), @"revision (\d+)").Groups[1].Value;
+    }
+
+    /// <summary>Creates a person from the Access screen it is on, and answers the id their row carries.</summary>
+    /// <param name="email">Who to create.</param>
+    /// <returns>The person's id.</returns>
+    public async Task<string> CreatePersonAsync(string email)
+    {
+        await Page.GetByTestId("person-new").ClickAsync().ConfigureAwait(false);
+        await Dialog("person-create").WaitForAsync().ConfigureAwait(false);
+        await Page.FillAsync("#new-person-email", email).ConfigureAwait(false);
+        await Page.Keyboard.PressAsync("Enter").ConfigureAwait(false);
+        await SnackbarAsync($"Created {email}").ConfigureAwait(false);
+        return await PersonIdAsync(email).ConfigureAwait(false);
+    }
+
+    /// <summary>Opens a person's editor from their row's Change.</summary>
+    /// <param name="id">The person's id, as their row carries it.</param>
+    /// <returns>The editor.</returns>
+    public async Task<ILocator> OpenPersonAsync(string id)
+    {
+        await Page.Locator($"#change-{id}").ClickAsync().ConfigureAwait(false);
+        var editor = Dialog("person-editor");
+        await editor.WaitForAsync().ConfigureAwait(false);
+        return editor;
+    }
+
+    /// <summary>The id of the person whose row names <paramref name="email"/>, off the row's own <c>id</c>.</summary>
+    /// <remarks>
+    /// Not a row located by its text: rows nest inside the panel, so a text-scoped locator can match an ancestor whose
+    /// Change belongs to somebody else.
+    /// </remarks>
+    /// <param name="email">Whose row.</param>
+    /// <returns>The uuid in the row's id.</returns>
+    public async Task<string> PersonIdAsync(string email)
+    {
+        var id = await Page.Locator("[id^='person-']", new() { HasText = email }).First
+            .GetAttributeAsync("id").ConfigureAwait(false);
+        id.ShouldNotBeNull($"no person row carries {email}");
+        return id["person-".Length..];
+    }
+
     /// <summary>Whether focus is inside the element with <paramref name="testId"/>.</summary>
     /// <param name="testId">The container's test id.</param>
     /// <returns><see langword="true"/> when the focused element is it or inside it.</returns>

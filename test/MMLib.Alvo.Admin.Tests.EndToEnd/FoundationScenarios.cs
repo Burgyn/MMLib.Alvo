@@ -79,7 +79,7 @@ public sealed class FoundationScenarios(AdminWorld world) : IClassFixture<AdminW
 
         await session.Page.GotoAsync(session.Page.Url, new() { WaitUntil = WaitUntilState.DOMContentLoaded });
 
-        (await ThemeAsync(session)).ShouldBe("dark");
+        (await session.ThemeAsync()).ShouldBe("dark");
         (await PrimaryAsync(session)).ShouldStartWith(DarkAccent);
         await session.SettleAsync();
         (await PrimaryAsync(session)).ShouldStartWith(DarkAccent);
@@ -93,7 +93,7 @@ public sealed class FoundationScenarios(AdminWorld world) : IClassFixture<AdminW
         await session.Page.EmulateMediaAsync(new() { ColorScheme = ColorScheme.Dark });
         await session.GoAsync("");
 
-        (await ThemeAsync(session)).ShouldBe("dark");
+        (await session.ThemeAsync()).ShouldBe("dark");
         (await PrimaryAsync(session)).ShouldStartWith(DarkAccent);
 
         await session.Page.EmulateMediaAsync(new() { ColorScheme = ColorScheme.Light });
@@ -150,9 +150,6 @@ public sealed class FoundationScenarios(AdminWorld world) : IClassFixture<AdminW
         (await PrimaryAsync(session)).ShouldStartWith(DarkAccent);
         await session.Page.EvaluateAsync("() => localStorage.removeItem('alvo.theme')");
     }
-
-    private static Task<string> ThemeAsync(AdminSession session)
-        => session.Page.EvaluateAsync<string>("() => document.documentElement.dataset.theme ?? ''");
 
     private static async Task<string> PrimaryAsync(AdminSession session)
         => (await session.Page.EvaluateAsync<string>(

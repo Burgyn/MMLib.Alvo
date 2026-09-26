@@ -75,9 +75,9 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
         (await session.Page.GetByTestId("assistant-thread").GetAttributeAsync("aria-live")).ShouldBe("polite");
         (await session.Page.GetByTestId("assistant-send").IsDisabledAsync()).ShouldBeTrue("nothing to send yet");
 
-        var box = await BoxAsync(pane);
-        var header = await BoxAsync(session.Page.GetByTestId("appbar"));
-        var content = await BoxAsync(session.Content);
+        var box = await AdminSession.SettledBoxAsync(pane);
+        var header = await AdminSession.SettledBoxAsync(session.Page.GetByTestId("appbar"));
+        var content = await AdminSession.SettledBoxAsync(session.Content);
         (box.Y + box.Height).ShouldBe(950, 1, "the pane reaches the bottom of the window");
         box.Y.ShouldBeGreaterThanOrEqualTo(header.Y + header.Height - 1, "the pane does not cover the header");
         (content.X + content.Width).ShouldBeLessThanOrEqualTo(box.X + 1, "the page beside the pane is not covered");
@@ -93,7 +93,7 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
 
         (await launcher.InnerTextAsync()).Trim().ShouldBeEmpty("an icon on a phone, named by its label");
         await launcher.ClickAsync();
-        var box = await BoxAsync(Pane(session));
+        var box = await AdminSession.SettledBoxAsync(Pane(session));
 
         box.X.ShouldBe(0, 1);
         box.Width.ShouldBe(375, 1);
@@ -118,15 +118,15 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
 
         await session.Page.GetByTestId("assistant-launch").ClickAsync();
         await session.Page.WaitForFunctionAsync("() => !!document.getElementById('a-content')?.closest('[inert]')");
-        var box = await BoxAsync(Pane(session));
+        var box = await AdminSession.SettledBoxAsync(Pane(session));
 
         box.X.ShouldBe(0, 1);
         box.Width.ShouldBe(800, 1);
-        (await BoxAsync(session.Content)).Width.ShouldBeGreaterThanOrEqualTo(780, "the page keeps its own width under the pane");
+        (await AdminSession.SettledBoxAsync(session.Content)).Width.ShouldBeGreaterThanOrEqualTo(780, "the page keeps its own width under the pane");
         await session.AssertNoHorizontalScrollAsync();
 
         /* The app bar stays above the pane, and its launcher is the way out as much as the pane's own close. */
-        var header = await BoxAsync(session.Page.GetByTestId("appbar"));
+        var header = await AdminSession.SettledBoxAsync(session.Page.GetByTestId("appbar"));
         header.Y.ShouldBe(0, 1);
         box.Y.ShouldBeGreaterThanOrEqualTo(header.Y + header.Height - 1, "the pane does not cover the app bar");
         await session.Page.GetByTestId("assistant-launch").ClickAsync();
@@ -148,7 +148,7 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
 
         await session.Page.GetByTestId("assistant-launch").ClickAsync();
         await sidebar.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
-        (await BoxAsync(session.Content)).Width.ShouldBeGreaterThanOrEqualTo(480, "the page beside the pane is still usable");
+        (await AdminSession.SettledBoxAsync(session.Content)).Width.ShouldBeGreaterThanOrEqualTo(480, "the page beside the pane is still usable");
         (await PageIsInertAsync(session)).ShouldBeFalse("beside the pane, not under it");
 
         await session.Page.Keyboard.PressAsync("Escape");
@@ -171,7 +171,7 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
         (await launcher.GetAttributeAsync("aria-expanded")).ShouldBe("false");
 
         await launcher.ClickAsync();
-        await WaitForFocusAsync(session, "assistant-message");
+        await session.WaitForFocusOnAsync("assistant-message");
         await session.Page.GetByRole(AriaRole.Button, new() { Name = "Close the assistant" }).ClickAsync();
         await Pane(session).WaitForAsync(new() { State = WaitForSelectorState.Hidden });
         (await session.FocusedAsync()).ShouldEndWith("[assistant-launch]");
@@ -237,7 +237,7 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
         await session.GoAsync("/schema");
         await session.Page.GetByTestId("assistant-launch").ClickAsync();
         await session.Page.GetByTestId("assistant-drawer").WaitForAsync();
-        await WaitForFocusAsync(session, "assistant-message");
+        await session.WaitForFocusOnAsync("assistant-message");
         return session;
     }
 
@@ -296,21 +296,4 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
         => await session.Page.GetByTestId("assistant-thread").EvaluateAsync(
             "e => new Promise(done => { e.addEventListener('scroll', () => done(), { once: true }); e.scrollTop = 0; })");
 
-    /// <summary>Waits until focus is on the element with <paramref name="id"/>; the pane slides in first.</summary>
-    private static async Task WaitForFocusAsync(AdminSession session, string id)
-        => await session.Page.WaitForFunctionAsync("id => document.activeElement?.id === id", id);
-
-    /// <summary>The element's box once nothing on the page is moving.</summary>
-    /// <remarks>
-    /// The pane slides in, and the page beside it narrows with it; a box read mid-slide is the animation's, not the
-    /// layout's. Every running animation is waited out rather than a guessed number of milliseconds.
-    /// </remarks>
-    private static async Task<LocatorBoundingBoxResult> BoxAsync(ILocator element)
-    {
-        await element.Page.WaitForFunctionAsync(
-            "() => document.getAnimations().every(a => a.playState !== 'running')");
-        var box = await element.BoundingBoxAsync();
-        box.ShouldNotBeNull();
-        return box;
-    }
 }

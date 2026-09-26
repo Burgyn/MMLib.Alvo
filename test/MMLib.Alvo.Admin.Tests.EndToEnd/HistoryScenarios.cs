@@ -24,8 +24,8 @@ public sealed partial class HistoryScenarios(AdminWorld world) : IClassFixture<A
     public async Task A_revision_opens_on_its_change_against_the_one_before()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        var first = await ApplyNewEntityAsync(session, "tickets");
-        var second = await ApplyNewEntityAsync(session, "invoices");
+        var first = await session.ApplyNewEntityAsync("tickets");
+        var second = await session.ApplyNewEntityAsync("invoices");
 
         await session.GoAsync("/history");
         await Row(session, second).ClickAsync();
@@ -63,7 +63,7 @@ public sealed partial class HistoryScenarios(AdminWorld world) : IClassFixture<A
     public async Task A_rollback_waits_for_the_project_name_and_Escape_runs_nothing()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await ApplyNewEntityAsync(session, "parts");
+        await session.ApplyNewEntityAsync("parts");
         await session.GoAsync("/history");
         var rows = await session.Page.GetByTestId("revision-row").CountAsync();
         await session.Page.GetByTestId("revision-row").Last.ClickAsync();
@@ -86,7 +86,7 @@ public sealed partial class HistoryScenarios(AdminWorld world) : IClassFixture<A
     public async Task A_rollback_that_destroys_data_says_so_and_reports_the_revision_it_appended()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await ApplyNewEntityAsync(session, "labels");
+        await session.ApplyNewEntityAsync("labels");
         await session.GoAsync("/history");
         var rows = await session.Page.GetByTestId("revision-row").CountAsync();
 
@@ -103,7 +103,7 @@ public sealed partial class HistoryScenarios(AdminWorld world) : IClassFixture<A
         (await session.Page.GetByTestId("revision-row").CountAsync()).ShouldBe(rows + 1);
 
         /* The operator's unedited working copy followed the rollback, so their next change is not refused as a conflict. */
-        await ApplyNewEntityAsync(session, "stickers");
+        await session.ApplyNewEntityAsync("stickers");
         session.AssertConsoleClean();
     }
 
@@ -126,25 +126,10 @@ public sealed partial class HistoryScenarios(AdminWorld world) : IClassFixture<A
 
     internal static async Task TypeTheProjectNameAsync(AdminSession session)
     {
-        await EditorScenarios.WaitForFocusOnAsync(session, "confirm-name");
+        await session.WaitForFocusOnAsync("confirm-name");
         await session.Page.Keyboard.TypeAsync("field-service");
         await session.Page.WaitForFunctionAsync(
             "() => !document.querySelector(\"[data-testid='rollback-confirm-run']\")?.disabled");
-    }
-
-    internal static async Task<string> ApplyNewEntityAsync(AdminSession session, string name)
-    {
-        await session.GoAsync("/schema");
-        await session.Button("New entity", exact: true).ClickAsync();
-        await session.Page.FillAsync("#new-entity-name", name);
-        await session.Page.Keyboard.PressAsync("Enter");
-        await session.Page.WaitForURLAsync($"**/schema/{name}");
-        await session.PreviewPendingAsync();
-        await session.Page.FillAsync("#apply-reason", $"Add {name}");
-        await session.Button("Apply these changes").ClickAsync();
-        var announced = session.Content.GetByText("Applied as revision").First;
-        await announced.WaitForAsync();
-        return Regex.Match(await announced.InnerTextAsync(), @"revision (\d+)").Groups[1].Value;
     }
 
     /// <summary>A line the diff adds: its gutter number, then the sign.</summary>
@@ -167,7 +152,7 @@ public sealed class RefusedRollbackScenarios(AdminWorld world) : IClassFixture<A
     public async Task A_refused_rollback_is_an_alert_in_the_pane_that_takes_focus_and_Reload_reads_the_history_again()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await HistoryScenarios.ApplyNewEntityAsync(session, "vendors");
+        await session.ApplyNewEntityAsync("vendors");
         await session.GoAsync("/history");
         await HistoryScenarios.PlanTheRollbackOfTheNewestAsync(session);
         var rows = await session.Page.GetByTestId("revision-row").CountAsync();
@@ -177,7 +162,7 @@ public sealed class RefusedRollbackScenarios(AdminWorld world) : IClassFixture<A
         await HistoryScenarios.TypeTheProjectNameAsync(session);
         await session.Dialog("rollback-confirm").GetByTestId("rollback-confirm-run").ClickAsync();
 
-        await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+        await session.WaitForFocusInsideAsync("error-panel");
         (await session.SnackbarCountAsync("Rolled back")).ShouldBe(0, "no error is ever a snackbar");
         await HistoryScenarios.Pane(session).GetByTestId("error-panel").WaitForAsync();
         (await session.Page.GetByTestId("revision-row").CountAsync()).ShouldBe(rows, "the list stays in place");
@@ -229,7 +214,7 @@ public sealed class FailedRevisionReadScenarios(FailingRevisionReadWorld world) 
         world.FailNextRevisionRead();
         await session.Page.GetByTestId("revision-row").Last.ClickAsync();
 
-        await EditorScenarios.WaitForFocusInsideAsync(session, "error-panel");
+        await session.WaitForFocusInsideAsync("error-panel");
         await HistoryScenarios.Pane(session).GetByTestId("error-panel").WaitForAsync();
         (await session.Page.GetByTestId("revision-row").CountAsync()).ShouldBe(rows, "the list stays in place");
 
