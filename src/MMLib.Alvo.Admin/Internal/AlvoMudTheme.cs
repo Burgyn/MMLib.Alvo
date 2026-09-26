@@ -82,6 +82,7 @@ internal static class AlvoMudTheme
         palette.TextPrimary = Of("--text");
         palette.TextSecondary = Of("--dim");
         palette.TextDisabled = Of("--faint");
+        palette.ActionDefault = Of("--dim");
         palette.LinesDefault = Of("--border");
         palette.LinesInputs = Of("--border2");
         palette.Divider = Of("--border");

@@ -123,7 +123,6 @@
     private bool _busy;
     private int _asked;
     private bool _wasOpen;
-    private bool _focusQuestion;
     private ElementReference _thread;
     private MudTextField<string>? _question;
     private AssistantUpdate.Proposal? _proposal;
@@ -132,22 +131,16 @@
     [CascadingParameter]
     private AssistantPane Pane { get; set; } = AssistantPane.None;
 
-    /// <summary>Opening the pane puts focus in the question box (spec §3.4); the layout returns it on close.</summary>
-    protected override void OnParametersSet()
-    {
-        _focusQuestion |= Pane.Open && !_wasOpen;
-        _wasOpen = Pane.Open;
-    }
-
     /// <summary>
-    /// Moves focus into a pane that just opened, then keeps the thread on its newest turn unless the operator
-    /// scrolled up (spec §3.5).
+    /// Moves focus into the question box of a pane that has just been drawn open (spec §3.4; the layout returns it
+    /// on close), then keeps the thread on its newest turn unless the operator scrolled up (spec §3.5).
     /// </summary>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_focusQuestion && _question is not null)
+        var opened = Pane.Open && !_wasOpen;
+        _wasOpen = Pane.Open;
+        if (opened && _question is not null)
         {
-            _focusQuestion = false;
             await _question.FocusAsync();
         }
 

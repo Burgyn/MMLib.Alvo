@@ -36,9 +36,14 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
         await session.Page.Keyboard.TypeAsync("line one");
         await session.Page.Keyboard.PressAsync("Enter");
         await session.Page.Keyboard.TypeAsync("line two");
-
         (await session.Page.InputValueAsync("#assistant-message")).ShouldBe("line one\nline two");
-        (await Turns(session).CountAsync()).ShouldBe(0);
+
+        /* Then sent on purpose. An Enter that had sent would have asked "line one" first, as a turn of its own:
+           the conversation is exactly one question and its answer, and the question carries both lines. */
+        await session.Page.Keyboard.PressAsync("Control+Enter");
+        await WaitForTurnToEndAsync(session, turns: 2);
+        (await Turns(session).CountAsync()).ShouldBe(2);
+        (await Turns(session).First.InnerTextAsync()).ShouldContain("line one\nline two");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -50,11 +55,14 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
             await AskAsync(session, $"question {turn}: add an invoices entity");
         }
 
-        (await AtBottomAsync(session)).ShouldBeTrue("the newest turn is in view");
+        await WaitForThreadAsync(session, "e => e.scrollHeight - e.scrollTop - e.clientHeight < 4");
 
         await ScrollToTopAsync(session);
+        (await Thread(session).GetAttributeAsync("data-alvo-follow")).ShouldBe("off", "the operator's scroll was heard");
         await AskAsync(session, "one more question");
-        (await session.Page.GetByTestId("assistant-thread").EvaluateAsync<double>("e => e.scrollTop")).ShouldBe(0);
+        await WaitForTurnToEndAsync(session, turns: 14);
+        await WaitForFollowDecisionAsync(session);
+        (await Thread(session).EvaluateAsync<double>("e => e.scrollTop")).ShouldBe(0, "the thread stayed where the operator put it");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -90,6 +98,28 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
         box.X.ShouldBe(0, 1);
         box.Width.ShouldBe(375, 1);
         await session.AssertNoHorizontalScrollAsync();
+        (await PageIsInertAsync(session)).ShouldBeTrue("the page under the pane is out of the tab order");
+
+        await session.Page.GetByRole(AriaRole.Button, new() { Name = "Close the assistant" }).ClickAsync();
+        await session.Page.WaitForFunctionAsync("() => !document.getElementById('a-content')?.closest('[inert]')");
+        session.AssertConsoleClean();
+    }
+
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Between_the_phone_and_1100_px_the_nav_drawer_steps_aside_so_the_page_keeps_its_width()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 1024);
+        await session.GoAsync("/schema");
+        var sidebar = session.Page.GetByTestId("sidebar");
+        await sidebar.WaitForAsync();
+
+        await session.Page.GetByTestId("assistant-launch").ClickAsync();
+        await sidebar.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
+        (await BoxAsync(session.Content)).Width.ShouldBeGreaterThanOrEqualTo(480, "the page beside the pane is still usable");
+        (await PageIsInertAsync(session)).ShouldBeFalse("beside the pane, not under it");
+
+        await session.Page.Keyboard.PressAsync("Escape");
+        await sidebar.WaitForAsync();
         session.AssertConsoleClean();
     }
 
@@ -129,8 +159,7 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
         (await send.IsDisabledAsync()).ShouldBeTrue("a second press would ask twice");
         (await session.Page.Locator("#assistant-message").IsEditableAsync()).ShouldBeTrue("the next question can be typed");
 
-        await session.Page.GetByTestId("assistant-proposal").WaitForAsync();
-        (await send.GetAttributeAsync("aria-busy")).ShouldBeNull();
+        await WaitForTurnToEndAsync(session, turns: 2);
         (await Turns(session).CountAsync()).ShouldBe(2);
     }
 
@@ -164,8 +193,8 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
         await session.Page.WaitForFunctionAsync(
             "() => !document.querySelector(\"[data-testid='assistant-send']\")?.disabled");
 
-        var contrast = await ContrastAsync(send);
-        contrast.Ratio.ShouldBeGreaterThanOrEqualTo(4.5, $"{contrast.Color} on {contrast.Background}");
+        var contrast = (await ContrastProbe.ReadAsync(send)).ShouldHaveSingleItem();
+        contrast.Ratio.ShouldBeGreaterThanOrEqualTo(ContrastProbe.AA, contrast.ToString());
     }
 
     private async Task<AdminSession> OpenAsync(CancellationToken cancel, int height = 900)
@@ -182,6 +211,37 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
     /// <summary>The pane, found as a screen reader finds it: the complementary region named for the assistant.</summary>
     private static ILocator Pane(AdminSession session)
         => session.Page.GetByRole(AriaRole.Complementary, new() { Name = "Ask Alvo", Exact = true });
+
+    private static Task<bool> PageIsInertAsync(AdminSession session)
+        => session.Page.EvaluateAsync<bool>("() => !!document.getElementById('a-content')?.closest('[inert]')");
+
+    private static ILocator Thread(AdminSession session) => session.Page.GetByTestId("assistant-thread");
+
+    /// <summary>
+    /// Waits until the thread holds <paramref name="turns"/> turns and the last has been filed: Ask is no longer
+    /// busy, which End() draws last. The count comes first, because before the turn starts Ask is not busy either.
+    /// </summary>
+    private static async Task WaitForTurnToEndAsync(AdminSession session, int turns)
+        => await session.Page.WaitForFunctionAsync(
+            """
+            n => document.querySelectorAll("[data-testid='assistant-turn']").length >= n
+              && !document.querySelector("[data-testid='assistant-send']")?.hasAttribute('aria-busy')
+            """, turns);
+
+    /// <summary>
+    /// Waits until followNewest has decided on the thread as it is now: the height it last decided on is the
+    /// thread's current one. Without this, a thread that did not follow is indistinguishable from one the
+    /// after-render call has not reached yet.
+    /// </summary>
+    private static Task WaitForFollowDecisionAsync(AdminSession session)
+        => WaitForThreadAsync(session, "e => e.dataset.alvoFollowedAt === String(e.scrollHeight)");
+
+    /// <summary>Waits, with the page's timeout, until <paramref name="predicate"/> holds for the thread.</summary>
+    private static async Task WaitForThreadAsync(AdminSession session, string predicate)
+    {
+        var thread = await Thread(session).ElementHandleAsync();
+        await session.Page.WaitForFunctionAsync($"e => ({predicate})(e)", thread);
+    }
 
     private static ILocator Turns(AdminSession session)
         => session.Page.GetByTestId("assistant-thread").GetByTestId("assistant-turn");
@@ -203,10 +263,6 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
         => await session.Page.GetByTestId("assistant-thread").EvaluateAsync(
             "e => new Promise(done => { e.addEventListener('scroll', () => done(), { once: true }); e.scrollTop = 0; })");
 
-    private static Task<bool> AtBottomAsync(AdminSession session)
-        => session.Page.GetByTestId("assistant-thread")
-            .EvaluateAsync<bool>("e => e.scrollHeight - e.scrollTop - e.clientHeight < 4");
-
     /// <summary>Waits until focus is on the element with <paramref name="id"/>; the pane slides in first.</summary>
     private static async Task WaitForFocusAsync(AdminSession session, string id)
         => await session.Page.WaitForFunctionAsync("id => document.activeElement?.id === id", id);
@@ -223,40 +279,5 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
         var box = await element.BoundingBoxAsync();
         box.ShouldNotBeNull();
         return box;
-    }
-
-    /// <summary>
-    /// The WCAG contrast ratio of an element's text against its own background, as the browser resolved both.
-    /// </summary>
-    private static async Task<Contrast> ContrastAsync(ILocator element)
-    {
-        /* A button eases from its disabled colours to its own; a pair read mid-transition is neither. */
-        await element.Page.WaitForFunctionAsync(
-            "() => document.getAnimations().every(a => a.playState !== 'running')");
-        return await element.EvaluateAsync<Contrast>(
-        """
-        e => {
-          /* Painted rather than parsed: a computed colour may be rgb(), oklch() or color(srgb …). */
-          const context = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
-          const rgb = v => { context.clearRect(0, 0, 1, 1); context.fillStyle = v; context.fillRect(0, 0, 1, 1);
-            return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3); };
-          const lum = ([r, g, b]) => [r, g, b].map(c => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; })
-            .reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i], 0);
-          const style = getComputedStyle(e);
-          const [a, b] = [lum(rgb(style.color)), lum(rgb(style.backgroundColor))];
-          return { Ratio: (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05), Color: style.color, Background: style.backgroundColor };
-        }
-        """);
-    }
-
-    /// <summary>A contrast ratio, with the two colours it was measured between.</summary>
-    /// <remarks>Settable properties, because Playwright builds a returned object with a parameterless constructor.</remarks>
-    private sealed class Contrast
-    {
-        public double Ratio { get; set; }
-
-        public string Color { get; set; } = string.Empty;
-
-        public string Background { get; set; } = string.Empty;
     }
 }

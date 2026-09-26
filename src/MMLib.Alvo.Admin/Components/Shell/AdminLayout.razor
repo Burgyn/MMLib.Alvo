@@ -68,7 +68,7 @@
         No MudNavMenu around the list. Its entries are SectionLink (V8), so it added only a second, unlabelled
         <nav> inside this one: a navigation landmark with no name, and nothing else.
     *@
-    <MudDrawer Open="_navOpen" OpenChanged="OnDrawerOpenChanged"
+    <MudDrawer Open="NavShown" OpenChanged="OnDrawerOpenChanged"
                Variant="@(_phone ? DrawerVariant.Temporary : DrawerVariant.Persistent)"
                ClipMode="DrawerClipMode.Always" Elevation="0" Class="a-navdrawer">
         <nav aria-label="Sections" data-testid="sidebar" class="a-navdrawer__nav" tabindex="-1" @ref="_drawerNav">
@@ -77,7 +77,8 @@
         </nav>
     </MudDrawer>
 
-    <MudMainContent Class="a-main">
+    @* Inert under the phone's full-width pane: covered controls must not stay in the tab order (WCAG 2.4.11). *@
+    <MudMainContent Class="a-main" inert="@PageCovered">
         <PendingBar />
 
         <main class="a-content" id="a-content">
@@ -115,9 +116,11 @@
         @*
             Beside the page, not over it (spec §3.1): a persistent end drawer at every width, with no scrim, no scroll
             lock and no focus trap, and labelled so a screen reader reaches it as a region. Clipped under the app bar,
-            and the page column narrows beside it, so neither the header nor the pending bar is covered. On a phone
-            it is the whole width below the app bar. Kept mounted while closed, because the thread lives in the
-            component and closing the pane must not end the conversation.
+            so the header is never covered. Above the phone width the page column narrows beside it, pending bar
+            and all, and up to 1100 px the nav drawer steps aside while it is open (see NavShown). On a phone it is
+            the whole width below the app bar and does cover the page, the pending bar and the bottom bar: that is
+            the trade-off of a full-width pane, and the page under it is inert until it closes. Kept mounted while
+            closed, because the thread lives in the component and closing the pane must not end the conversation.
         *@
         <MudDrawer Open="_assistantOpen" Anchor="Anchor.End" Variant="DrawerVariant.Persistent"
                    ClipMode="DrawerClipMode.Always" Elevation="0" Width="min(440px, 100vw)"
@@ -137,13 +140,24 @@
     /// <summary>The widest viewport that is a phone: alvo.css's one phone breakpoint, and the drawer's.</summary>
     private const int PhoneWidth = 720;
 
+    /// <summary>
+    /// The widest viewport where the nav drawer and the assistant's pane do not both fit beside the page: alvo.css's
+    /// other breakpoint. At 1024 px the two drawers (240 and 440 px) left the page column 344 px.
+    /// </summary>
+    private const int NarrowWidth = 1100;
+
     private static readonly string _phoneQuery = $"(max-width: {PhoneWidth}px)";
 
-    /// <summary>Two breakpoints, either side of the phone width, so the viewport reports crossing it and no other.</summary>
-    private static readonly MudBlazor.Services.ResizeOptions _phoneCrossing = new()
+    private static readonly string _narrowQuery = $"(max-width: {NarrowWidth}px)";
+
+    /// <summary>Breakpoints either side of the phone and the narrow width, so the viewport reports crossing those and no other.</summary>
+    private static readonly MudBlazor.Services.ResizeOptions _widthCrossings = new()
     {
         NotifyOnBreakpointOnly = true,
-        BreakpointDefinitions = new() { [Breakpoint.Xs] = 0, [Breakpoint.Sm] = PhoneWidth + 1 },
+        BreakpointDefinitions = new()
+        {
+            [Breakpoint.Xs] = 0, [Breakpoint.Sm] = PhoneWidth + 1, [Breakpoint.Md] = NarrowWidth + 1,
+        },
     };
 
     private readonly Guid _viewportWatch = Guid.NewGuid();
@@ -157,6 +171,7 @@
     private bool _assistant;
     private bool _navOpen = true;
     private bool _phone;
+    private bool _narrow;
 
     /// <summary>
     /// Whether to mount the assistant, asked at boot and again whenever the connection is saved.
@@ -215,16 +230,18 @@
     /// </summary>
     private async Task StartAsync()
     {
-        await Viewport.SubscribeAsync(_viewportWatch, OnViewportChanged, _phoneCrossing, fireImmediately: false);
+        await Viewport.SubscribeAsync(_viewportWatch, OnViewportChanged, _widthCrossings, fireImmediately: false);
+        _narrow = await Viewport.IsMediaQueryMatchAsync(_narrowQuery);
         ApplyWidth(await Viewport.IsMediaQueryMatchAsync(_phoneQuery));
         _dismiss = await Interop.SubscribeAsync("dismiss", _ => InvokeAsync(DismissDrawer));
         StateHasChanged();
         await Interop.MarkShellReadyAsync();
     }
 
-    /// <summary>The viewport crossed the phone width, one way or the other.</summary>
+    /// <summary>The viewport crossed the phone or the narrow width, one way or the other.</summary>
     private Task OnViewportChanged(BrowserViewportEventArgs change) => InvokeAsync(() =>
     {
+        _narrow = change.BrowserWindowSize.Width <= NarrowWidth;
         ApplyWidth(change.BrowserWindowSize.Width <= PhoneWidth);
         StateHasChanged();
     });
@@ -296,6 +313,16 @@
 
         _assistantOpen &= _assistant;
     }
+
+    /// <summary>
+    /// Whether the nav drawer is drawn. Between the phone width and 1100 px it steps aside while the assistant's pane
+    /// is open, rather than the pane going over the page: the pane is read beside what it proposes against, and the
+    /// sections are one close away. _navOpen keeps what the operator chose, so closing the pane brings it back.
+    /// </summary>
+    private bool NavShown => _navOpen && !(_assistantOpen && _narrow && !_phone);
+
+    /// <summary>Whether the phone's full-width pane covers the page, which is then inert.</summary>
+    private bool PageCovered => _assistantOpen && _phone;
 
     /// <summary>What the pane reads: whether it is open, and the close it asks for.</summary>
     private AssistantPane AssistantPane => new(_assistantOpen, _closeAssistant);

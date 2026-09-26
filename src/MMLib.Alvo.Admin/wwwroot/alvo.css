@@ -349,7 +349,6 @@
   }
 
   a {
-    color: inherit;
     text-decoration: none;
   }
 
@@ -364,8 +363,9 @@
   /* Alvo's own controls take the text colour around them. A library button does not: its palette gives a
      filled button its contrast text (--accentText on --accent, --panel on --danger-fg), and inheriting here,
      a layer above the library, painted --text on the fill instead: 3.09:1 on the light accent and 1.32:1 on the
-     dark one, where the pairs themselves are 5.39:1 and 10.24:1. */
-  :where(input, textarea, select, button):where(:not([class^='mud-'], [class*=' mud-'])) {
+     dark one, where the pairs themselves are 5.39:1 and 10.24:1. A link is the same case: a button with an
+     Href renders as an <a>, and the pending bar's Preview kept the 3.09:1 after the <button> rule was fixed. */
+  :where(a, input, textarea, select, button):where(:not([class^='mud-'], [class*=' mud-'])) {
     color: inherit;
   }
 

@@ -126,7 +126,6 @@ namespace MMLib.Alvo.Admin.Components.Assistant
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         public void Dispose() { }
         protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
-        protected override void OnParametersSet() { }
     }
 }
 namespace MMLib.Alvo.Admin.Components.Data

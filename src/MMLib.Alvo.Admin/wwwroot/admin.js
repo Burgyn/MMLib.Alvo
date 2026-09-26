@@ -149,6 +149,10 @@ export function followNewest(element) {
   if (element.dataset.alvoFollow === 'on') {
     element.scrollTop = element.scrollHeight;
   }
+
+  /* The height it last decided on, whether it followed or not: a list that grew and a thread that did not follow
+     look alike from outside until this says the decision was made on the grown one. */
+  element.dataset.alvoFollowedAt = String(element.scrollHeight);
 }
 
 /** Selects the text in an input, so a re-opened palette replaces rather than appends. */
