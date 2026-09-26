@@ -50,7 +50,8 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
         await session.GoAsync("/schema/work_orders");
 
-        var inline = session.Page.Locator(".a-pagehead__secondary a:has-text('Browse records')");
+        var inline = session.Page.GetByTestId("pagehead-secondary")
+            .GetByRole(Microsoft.Playwright.AriaRole.Link, new() { Name = "Browse records" });
         await inline.WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Hidden });
 
         await session.Page.GetByTestId("pagehead-overflow").ClickAsync();
@@ -70,7 +71,8 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/work_orders");
 
-        await session.Page.Locator(".a-pagehead__secondary a:has-text('Browse records')").WaitForAsync();
+        await session.Page.GetByTestId("pagehead-secondary")
+            .GetByRole(Microsoft.Playwright.AriaRole.Link, new() { Name = "Browse records" }).WaitForAsync();
         (await session.Page.Locator("[data-testid='pagehead-overflow']").IsVisibleAsync()).ShouldBeFalse();
 
         session.AssertConsoleClean();
@@ -96,11 +98,11 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
 
         /* The row this fact reads is the one it writes: the example ships no seed rows, and a fact that
            asserted over an empty table would pass for both the fixed layout and the broken one. */
-        await session.Page.ClickAsync("button:has-text('New record')");
+        await session.Button("New record", exact: true).ClickAsync();
         await session.Page.Locator("#rf-name").WaitForAsync();
         await session.Page.FillAsync("#rf-name", $"Visible at {width.ToString(CultureInfo.InvariantCulture)}");
         await session.Page.FillAsync("#rf-code", width <= 720 ? "PHN" : "WDE");
-        await session.Page.ClickAsync("button:has-text('Create')");
+        await session.Dialog("record-sheet").GetByTestId("record-save").ClickAsync();
 
         var rows = width <= 720
             ? session.Page.Locator("[data-testid='row-card']")
@@ -157,8 +159,8 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
         await session.GoAsync("");
 
-        var content = await session.Page.Locator("main.a-content").BoundingBoxAsync();
-        var bar = await session.Page.Locator("nav.a-bottomnav").BoundingBoxAsync();
+        var content = await session.Content.BoundingBoxAsync();
+        var bar = await session.Page.GetByTestId("bottom-nav").BoundingBoxAsync();
 
         content.ShouldNotBeNull();
         bar.ShouldNotBeNull();
@@ -234,7 +236,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
         await session.GoAsync("");
 
-        var items = session.Page.Locator(".a-bottomnav .a-bottomnav__item");
+        var items = session.Page.GetByTestId("bottom-nav").GetByRole(Microsoft.Playwright.AriaRole.Link);
         (await items.CountAsync()).ShouldBe(5);
 
         for (var index = 0; index < 5; index += 1)
@@ -293,7 +295,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
            selected, so pressing it before the typed query has round-tripped opens whatever the list
            held a moment ago — which on a slower runner is the unfiltered first entry, and the
            navigation this fact waits for never comes. */
-        await session.Page.Locator("[role='option'][aria-selected='true']:has-text('Access')")
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Option, new() { Name = "Access", Selected = true })
             .WaitForAsync();
 
         await session.Page.Keyboard.PressAsync("Enter");
@@ -400,7 +402,8 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await session.Dialog("palette").WaitForAsync();
         await session.Page.WaitForFunctionAsync("document.activeElement?.dataset.testid === 'palette-input'");
         await session.Page.Keyboard.TypeAsync("toggle theme");
-        await session.Page.Locator("[role='option'][aria-selected='true']:has-text('Toggle theme')").WaitForAsync();
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Option, new() { Name = "Toggle theme", Selected = true })
+            .WaitForAsync();
         await session.Page.Keyboard.PressAsync("Enter");
 
         var flipped = before == "dark" ? "light" : "dark";
@@ -476,7 +479,8 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await session.Page.WaitForFunctionAsync("document.activeElement?.dataset.testid === 'palette-input'");
 
         await session.Page.Keyboard.TypeAsync("new entity");
-        await session.Page.Locator("[role='option'][aria-selected='true']:has-text('New entity')").WaitForAsync();
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Option, new() { Name = "New entity", Selected = true })
+            .WaitForAsync();
         await session.Page.Keyboard.PressAsync("Enter");
 
         await session.Page.Locator("[data-testid='new-entity']").WaitForAsync();

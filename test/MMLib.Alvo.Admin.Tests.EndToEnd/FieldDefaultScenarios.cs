@@ -67,7 +67,7 @@ public sealed class FieldDefaultScenarios(AdminWorld world) : IClassFixture<Admi
 
         await session.Page.Locator("#apply-reason").WaitForAsync();
         await session.Page.FillAsync("#apply-reason", "Give regions a dispatch note");
-        await session.Page.ClickAsync("button:has-text('Apply these changes')");
+        await session.Button("Apply these changes").ClickAsync();
         await session.Page.GetByText("Applied as revision").First.WaitForAsync();
 
         await session.GoAsync("/schema/regions");
@@ -77,11 +77,11 @@ public sealed class FieldDefaultScenarios(AdminWorld world) : IClassFixture<Admi
         /* The point of the whole feature: a create that omits the field stores the default rather
            than nothing. */
         await session.GoAsync("/data/regions");
-        await session.Page.ClickAsync("button:has-text('New record')");
+        await session.Button("New record", exact: true).ClickAsync();
         await session.Page.Locator("#rf-name").WaitForAsync();
         await session.Page.FillAsync("#rf-name", "Northern");
         await session.Page.FillAsync("#rf-code", "NOR");
-        await session.Page.ClickAsync("button:has-text('Create')");
+        await session.Dialog("record-sheet").GetByTestId("record-save").ClickAsync();
 
         /* Visible, at this width, in whichever layout this width draws. The table is hidden below
            720 px and the row cards are hidden above it, so asserting on the table alone measured a

@@ -1272,12 +1272,14 @@
     opacity: 0.92;
   }
 
+  /* prototype-only: the dashboard's quiet buttons are AlvoButton's Ghost tone. */
   .a-btn--ghost {
     border-color: transparent;
     background: transparent;
     color: var(--dim);
   }
 
+  /* prototype-only */
   .a-btn--ghost:hover {
     background: var(--panel2);
     color: var(--text);
@@ -2181,16 +2183,6 @@
     animation: a-shimmer 1.4s ease infinite;
   }
 
-  /* gallery-only: two of the heights the gallery still draws, until it is redrawn on the library's skeleton. */
-  .a-skeleton--sm {
-    height: 96px;
-  }
-
-  /* gallery-only: see .a-skeleton--sm. */
-  .a-skeleton--md {
-    height: 180px;
-  }
-
   @keyframes a-shimmer {
     0% { background-position: 100% 50%; }
     100% { background-position: 0 50%; }
@@ -2426,6 +2418,7 @@
    =========================================================================== */
 
 @layer components {
+  /* prototype-only: the prototype's overlay backdrop; the dashboard's is the library's dialog overlay. */
   .a-scrim {
     position: fixed;
     inset: 0;
@@ -2550,8 +2543,7 @@
     overflow: auto;
   }
 
-  /* A destructive action asks for the name to be typed. Dropping a column and
-     rolling back both destroy data, and AllowDestructive is explicit in the API. */
+  /* prototype-only: the prototype's typed-name box; the dashboard's is AlvoConfirm's TypeToConfirm. */
   .a-confirm {
     display: flex;
     flex-direction: column;
@@ -2560,11 +2552,6 @@
     border: 1px solid var(--danger-fg);
     border-radius: var(--radius-md);
     background: var(--danger-bg);
-  }
-
-  /* The name to type, set a line below the sentence that says what it allows. */
-  .a-confirm__field {
-    margin-top: var(--space-3);
   }
 
   /* prototype-only: the prototype's palette frame; the dashboard's is the library's dialog. */
@@ -2810,72 +2797,6 @@
     display: none;
   }
 
-  /* Above 720 px the overlay is a centred dialog: a sheet rising from the bottom edge of a 1400 px
-     window is a phone gesture on a screen that has no bottom edge to speak of. One component, two
-     shapes — the shell's own argument about a second navigation applies to a second dialog just as
-     well, and the media query below is where the phone half lives. */
-  .a-sheet {
-    z-index: var(--z-overlay);
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    padding: var(--space-6);
-  }
-
-  .a-sheet__panel {
-    display: flex;
-    width: min(560px, 100%);
-    max-height: min(80vh, 720px);
-    flex-direction: column;
-    gap: var(--space-3);
-    padding: var(--space-5);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--panel);
-    box-shadow: var(--shadow-pop);
-    overflow: hidden;
-  }
-
-  .a-sheet__panel:focus-visible {
-    outline: none;
-  }
-
-  .a-sheet__head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--space-3);
-  }
-
-  /* The body scrolls, not the panel: the title and the close control stay put while a long form
-     moves under them, which is what keeps the way out reachable on a phone. */
-  /* The gutter is for the focus ring, not for looks. `overflow-y: auto` forces `overflow-x` to
-     compute to `auto` as well, and the ring is a box-shadow drawn 4 px OUTSIDE a control that is
-     `width: 100%` — so every focused input in a sheet had its ring sliced down both edges. The
-     negative margin gives the space back, so nothing moves. */
-  .a-sheet__body {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    gap: var(--space-3);
-    padding-inline: 4px;
-    margin-inline: -4px;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
-
-  /* The drag handle a phone sheet is recognised by. Decoration on a desktop dialog, so it is
-     hidden there rather than drawn as a stray line. */
-  .a-sheet__grip {
-    display: none;
-    width: 36px;
-    height: 4px;
-    margin: 0 auto var(--space-1);
-    border-radius: 2px;
-    background: var(--border);
-  }
-
   .a-bottomnav__item {
     display: flex;
     flex: 1;
@@ -2955,26 +2876,6 @@
 
     .a-only-desktop-block {
       display: none;
-    }
-
-    .a-sheet {
-      justify-content: flex-end;
-      align-items: stretch;
-      padding: 0;
-    }
-
-    .a-sheet__panel {
-      width: 100%;
-      max-height: 85vh;
-      gap: var(--space-2);
-      padding: var(--space-3) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
-      border: none;
-      border-top: 1px solid var(--border);
-      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    }
-
-    .a-sheet__grip {
-      display: block;
     }
 
     .a-row-card {

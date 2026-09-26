@@ -33,11 +33,10 @@ public sealed partial class FieldConventionTests
     /// <summary>
     /// The native controls the rule allows, by file: the static sign-in page, whose inputs cannot be the library's
     /// (D10); the record form's reference combobox, which is Alvo's for its <c>aria-activedescendant</c> (D7); the
-    /// command palette's search-and-go line, which is not a form field (§3.8); and the typed-name confirm Task 11
-    /// deletes.
+    /// command palette's search-and-go line, which is not a form field (§3.8).
     /// </summary>
     private static readonly string[] _nativeControlsAllowed =
-        ["Shell/SignIn.razor", "Data/RecordForm.razor", "Shell/CommandPalette.razor", "DesignSystem/ConfirmByName.razor"];
+        ["Shell/SignIn.razor", "Data/RecordForm.razor", "Shell/CommandPalette.razor"];
 
     [Fact]
     public void No_library_input_names_itself_or_carries_its_own_hint_or_density()

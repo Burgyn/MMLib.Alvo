@@ -110,14 +110,9 @@
     </div>
   </div>
   <div class="a-panel g-pad">
-    <div class="a-label" style="margin-bottom:var(--space-2)">A toast carries only what may be lost</div>
-    <div class="a-toast"><span class="a-badge a-badge--ok"><i class="a-dot"></i></span><div><strong style="font-size:var(--text-sm)">Revision 15 applied</strong><div style="color:var(--dim);font-size:var(--text-xs)">3 columns added · 0 destructive</div></div></div>
-    <div class="a-confirm" style="margin-top:var(--space-4)">
-      <strong style="font-size:var(--text-sm);color:var(--danger-fg)">This drops a column and its data</strong>
-      <span style="font-size:var(--text-xs)">Type <code style="font-family:var(--font-mono)">vehicles.notes</code> to confirm.</span>
-      <input class="a-input" placeholder="vehicles.notes">
-      <button class="a-btn a-btn--danger" disabled>Drop column</button>
-    </div>
+    <div class="a-label" style="margin-bottom:var(--space-2)">A snackbar carries only the brief confirmation of what was just done</div>
+    <div class="a-toast"><span class="a-badge a-badge--ok"><i class="a-dot"></i></span><div><strong style="font-size:var(--text-sm)">Applied as revision 15</strong><div style="color:var(--dim);font-size:var(--text-xs)">3 columns added · 0 destructive</div></div></div>
+    <p class="a-hint" style="margin-top:var(--space-3)">The dashboard's is the library's snackbar (<code>ISnackbar.Confirm</code>): <strong>bottom-left</strong>, so it never covers an open editor's actions at the bottom right; 4–6 s, at most two, its text and close on the tone's contrast colour. It is never an error, and never the only copy of something the operator must keep.</p>
   </div>
 </div>
 
@@ -228,10 +223,7 @@
 
     <!-- Skeleton Size="Sm|Md|Lg" -->
     <div class="a-panel a-panel--padded">
-      <div class="a-stack">
-        <div class="a-skeleton a-skeleton--sm"></div>
-        <div class="a-skeleton a-skeleton--md"></div>
-      </div>
+      <span class="a-hint">Skeleton — one, three or six MudSkeleton lines in a labelled <code class="a-mono">a-skeleton-frame</code> (<code class="a-mono">aria-busy</code>). The lines are the library's, so this page, which links only alvo.css, cannot draw them.</span>
     </div>
 
     <!-- NotYetPanel Title Subtitle Consequence -->
@@ -476,10 +468,7 @@ WHERE <span class="a-code-key">"owner_id"</span> = @p0 AND <span class="a-code-k
 
 <div class="g-two">
   <div class="a-panel g-pad">
-    <div class="a-skeleton" style="height:14px;width:40%"></div>
-    <div class="a-skeleton" style="height:12px;width:70%;margin-top:var(--space-3)"></div>
-    <div class="a-skeleton" style="height:12px;width:55%;margin-top:var(--space-2)"></div>
-    <div class="a-skeleton" style="height:12px;width:62%;margin-top:var(--space-2)"></div>
+    <p class="a-hint">Known-shape content loads as the <code>Skeleton</code> primitive above (spec §3.6); a refresh of content already on screen is a progress line at the top of its pane, and the content stays in place.</p>
   </div>
   <div class="a-panel">
     <div class="a-empty">
@@ -491,17 +480,138 @@ WHERE <span class="a-code-key">"owner_id"</span> = @p0 AND <span class="a-code-k
 </div>
 
 <!-- ====================================================================== -->
-<h2 class="g-h">Command palette</h2>
+<h2 class="g-h">Fields — one look for every text input</h2>
 
-<div class="a-panel g-pad" style="display:flex;justify-content:center">
-  <div class="a-palette">
-    <input class="a-palette__input" value="work" placeholder="Search entities, rules, revisions…">
-    <div class="a-palette__item a-palette__item--active"><span class="a-badge a-badge--accent">entity</span>work_orders<span style="margin-left:auto;color:var(--faint);font-size:var(--text-2xs)">1 204 records</span></div>
-    <div class="a-palette__item"><span class="a-badge">rule</span>work_orders · update</div>
-    <div class="a-palette__item"><span class="a-badge">revision</span>14 — add priority to work orders</div>
-    <div class="a-palette__item"><span class="a-notyet">Not yet</span>Automations — declared, never evaluated</div>
+<!-- Spec §3.8. The name is the Field's label, above the box; the library input under it carries no Label,
+     HelperText, Margin or Dense of its own (FieldConventionTests). The box below is .a-input, which is what
+     alvo.css draws the library's outlined input as, so the gallery can show the look without the library. -->
+<div class="g-two">
+  <div class="a-panel a-panel--padded">
+    <div class="a-stack">
+      <!-- Field For Label Hint, a required one -->
+      <div class="a-field">
+        <label class="a-label a-label--required" for="g-f-name">Name</label>
+        <input class="a-input a-mono" id="g-f-name" value="work_orders" aria-required="true" aria-describedby="g-f-name-hint">
+        <span class="a-hint" id="g-f-name-hint">Lowercase letters, digits and underscores; it becomes the table's name.</span>
+      </div>
+      <!-- Field with a refusal: box, hint, then the refusal (FieldRefusals) -->
+      <div class="a-field">
+        <label class="a-label" for="g-f-email">Email</label>
+        <input class="a-input" id="g-f-email" value="dispatch@" aria-invalid="true" aria-describedby="g-f-email-hint g-f-email-problem">
+        <span class="a-field__problem" id="g-f-email-problem">That is not an email address the store accepts.</span>
+        <span class="a-hint" id="g-f-email-hint">Where the sign-in link is sent.</span>
+      </div>
+      <!-- Disabled -->
+      <div class="a-field">
+        <label class="a-label" for="g-f-tenant">Tenant</label>
+        <input class="a-input" id="g-f-tenant" value="nordic-freight" disabled>
+      </div>
+    </div>
+  </div>
+  <div class="a-panel a-panel--padded">
+    <ul class="a-stack a-hint">
+      <li><strong>Name above the box</strong>, at <code>--text-sm</code> in <code>--dim</code>; never floating, never in a notch. One name only.</li>
+      <li><strong>Box</strong>: 1 px <code>--border</code>, <code>--border2</code> on hover, the focus ring on the frame, the buttons' corner.</li>
+      <li><strong>Text</strong> at <code>--text-sm</code>, and 16 px on a phone, where iOS would otherwise zoom into the field.</li>
+      <li><strong>Required</strong>: an accent <code>*</code> the stylesheet draws with empty alternative text; <code>aria-required</code> on the control.</li>
+      <li><strong>Field error</strong> (<code>FieldRefusals</code>): after the hint, in <code>--danger-fg</code>; the box is <code>aria-invalid</code>, its border turns, its <code>aria-describedby</code> lists hint then refusal, and a failed submit moves focus to it. A refusal no field owns is the <code>ErrorPanel</code>.</li>
+      <li><strong>Read-only</strong> is text, not a greyed box.</li>
+    </ul>
   </div>
 </div>
+
+<!-- ====================================================================== -->
+<h2 class="g-h">A destructive action names its verb, and the wide ones ask for the name</h2>
+
+<!-- AlvoConfirm TypeToConfirm: the frame is the library's centred dialog, so it is drawn here as a panel; the
+     content is what the wrapper renders inside it. -->
+<div class="g-two">
+  <div class="a-panel a-panel--padded">
+    <div class="a-stack">
+      <span class="a-section__title">Roll back to revision 13?</span>
+      <p class="a-confirm-dialog__consequence">Revision 14's column <code class="a-mono">work_orders.priority</code> and its data are dropped. This cannot be undone.</p>
+      <div class="a-field">
+        <label class="a-label" for="g-confirm-name">Type <code class="a-mono">field-service</code> to allow it</label>
+        <input class="a-input" id="g-confirm-name" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="a-row a-row--gap-2">
+        <span class="a-spacer"></span>
+        <button type="button" class="a-btn a-btn--ghost">Cancel</button>
+        <button type="button" class="a-btn a-btn--danger" disabled>Roll back</button>
+      </div>
+    </div>
+  </div>
+  <div class="a-panel a-panel--padded">
+    <p class="a-hint"><code>AlvoConfirm</code> with <code>TypeToConfirm</code>: centred, no light dismiss, Escape is Cancel, focus lands in the name box. The button stays disabled until the name is typed exactly — a checkbox would be one click from the button beside it. Used for a destructive apply, a rollback and removing an entity; every other destructive action is the same dialog without the name.</p>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<h2 class="g-h">The assistant — a pane beside the page, typed to like a chat</h2>
+
+<!-- AssistantDrawer's content, fitted to the page. In the dashboard it fills the layout's end drawer, full
+     height, non-modal (spec §3.1); here it is a fixed-height panel. -->
+<div class="g-two">
+  <div class="a-panel" style="height:420px">
+    <div class="a-assistant">
+      <div class="a-section">
+        <span class="a-section__title">Ask Alvo</span>
+        <span class="a-section__sub">It reads this project and proposes a descriptor. You apply it, from Preview.</span>
+      </div>
+      <div class="a-assistant__thread" aria-live="polite">
+        <div class="a-assistant__turn"><span class="a-assistant__who">You</span><span class="a-assistant__text">Add a priority to work orders: low, normal or high.</span></div>
+        <div class="a-assistant__turn"><span class="a-assistant__who">Alvo</span><span class="a-assistant__text">I added an enum field priority to work_orders, defaulting to normal.</span></div>
+        <div class="a-assistant__tools"><span class="a-badge a-mono">read_descriptor</span><span class="a-badge a-mono">propose_descriptor</span></div>
+        <div class="a-assistant__proposal">
+          <span class="a-section__title">A proposed change</span>
+          <span class="a-section__sub">Written against revision 14. Nothing has been applied.</span>
+          <div class="a-row"><button type="button" class="a-btn a-btn--sm">Open in Preview</button></div>
+        </div>
+      </div>
+      <div class="a-assistant__ask">
+        <label class="a-label" for="g-ask">Your question</label>
+        <textarea class="a-input" id="g-ask" rows="2" placeholder="Ctrl/Cmd+Enter sends"></textarea>
+      </div>
+    </div>
+  </div>
+  <div class="a-panel a-panel--padded">
+    <ul class="a-stack a-hint">
+      <li>Opened from the app bar; <code>role=complementary</code>, labelled, no scrim — the page stays usable beside it.</li>
+      <li>Enter is a newline; <strong>Ctrl/Cmd+Enter sends</strong>, and the box is emptied once it has.</li>
+      <li>Send is disabled while a turn streams; the thread is <code>aria-live=polite</code> and follows its newest turn unless the operator scrolled up.</li>
+      <li>It proposes and never applies: the proposal opens Preview, where the operator applies with their own button.</li>
+      <li>A failed turn is an <code>ErrorPanel</code> under the thread that takes focus — never a snackbar.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ====================================================================== -->
+<section id="wrappers">
+  <h2 class="g-h">Wrappers: the pattern language, implemented once</h2>
+  <p class="a-hint">
+    The screens are drawn with MudBlazor 9.10.0, imported beneath this stylesheet's layers. These five Alvo components
+    carry the policy the library cannot set globally; every screen uses them rather than the library directly for
+    these jobs (<code>docs/superpowers/specs/2026-09-24-f5-admin-mudblazor-design.md</code> §3). None takes a MudBlazor
+    type as a parameter. The command palette is the library's dialog at the top of the page, so it is not drawn here either.
+  </p>
+  <div class="a-panel">
+    <table class="a-grid">
+      <thead><tr><th>Component</th><th>Use it for</th><th>What it guarantees</th></tr></thead>
+      <tbody>
+        <tr><td><code>AlvoEditor</code></td><td>Creating or editing one item with more than one value</td>
+            <td>Right-hand modal side sheet; focus on the first field; Escape and Cancel ask “Discard your changes?” when dirty; Enter and Ctrl/Cmd+Enter submit; the submit is busy and cannot run twice.</td></tr>
+        <tr><td><code>AlvoConfirm</code></td><td>Any destructive action</td>
+            <td>Centred; no light dismiss; Escape = Cancel; the button names the verb; <code>TypeToConfirm</code> for an irreversible, wide-blast one (destructive apply, rollback).</td></tr>
+        <tr><td><code>AlvoAlert</code></td><td>State, and every error</td>
+            <td><code>role=alert</code> for errors and warnings, <code>role=status</code> otherwise; takes focus after a failed submit. Errors are never snackbars.</td></tr>
+        <tr><td><code>AlvoButton</code></td><td>Every button</td>
+            <td>Four tones (Primary, Secondary, Danger, Ghost); no ripple, shadow or uppercase; <code>Busy</code> disables it and shows progress.</td></tr>
+        <tr><td><code>AlvoTheme</code></td><td>The library’s palette</td>
+            <td>Both themes from this stylesheet’s tokens (pinned equal by <code>AlvoMudThemeTests</code>); dark is scoped to <code>[data-theme=dark]</code>, written before paint by alvo.js.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
 
 <p class="g-foot">Every colour on this page comes from <code>src/MMLib.Alvo.Admin/wwwroot/alvo.css</code>. Nothing here declares one of its own — <code>ComponentLayerTests</code> and <code>GalleryTests</code> both refuse it.</p>
 

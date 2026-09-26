@@ -73,10 +73,6 @@ internal sealed partial class AdminInterop(IJSRuntime js, ILogger<AdminInterop> 
     /// <summary>Says the shell rendered interactively, providers included; see <c>markShellReady</c> in admin.js.</summary>
     public Task MarkShellReadyAsync() => QuietlyAsync(module => module.InvokeVoidAsync("markShellReady"));
 
-    /// <summary>Moves focus into an input and selects its text, so what is typed next replaces it.</summary>
-    public Task FocusAndSelectAsync(ElementReference input)
-        => QuietlyAsync(module => module.InvokeVoidAsync("focusAndSelect", input));
-
     /// <summary>Focuses the <c>aria-selected</c> element inside <paramref name="container"/> and scrolls it into view.</summary>
     public Task FocusSelectedAsync(ElementReference container)
         => QuietlyAsync(module => module.InvokeVoidAsync("focusSelected", container));

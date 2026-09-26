@@ -155,14 +155,6 @@ export function followNewest(element) {
   element.dataset.alvoFollowedAt = String(element.scrollHeight);
 }
 
-/** Selects the text in an input, so a re-opened palette replaces rather than appends. */
-export function focusAndSelect(element) {
-  if (element && typeof element.select === 'function') {
-    element.focus();
-    element.select();
-  }
-}
-
 /** The stored theme, applied by alvo.js before paint; read back for the toggle's label. */
 export function theme() {
   return window.alvo?.resolvedTheme() ?? 'light';

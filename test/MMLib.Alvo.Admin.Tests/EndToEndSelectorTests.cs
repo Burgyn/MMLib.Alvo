@@ -26,9 +26,10 @@ namespace MMLib.Alvo.Admin.Tests;
 /// </remarks>
 public sealed partial class EndToEndSelectorTests
 {
-    /* These may only go down. Lower them in the commit that migrates a scenario; never raise them. */
-    private const int ClassSelectors = 6;
-    private const int HasTextSelectors = 10;
+    /* These may only go down, and the MudBlazor rebuild took both from 43 and 51 to none (spec §5): the ratchet now
+       holds a ban. Never raise them. */
+    private const int ClassSelectors = 0;
+    private const int HasTextSelectors = 0;
 
     private static readonly string _scenarios = string.Join('\n',
         Directory.EnumerateFiles(
