@@ -182,13 +182,20 @@ public sealed class AssistantFieldConsistencyScenarios(ConfigurableAssistantWorl
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, colorScheme: scheme);
 
         await session.GoAsync("/settings");
-        await fields.ReadAsync(session.Content, "the AI connection form", expect: ["Endpoint", "Model", "API key"]);
+        var editor = await SettingsScenarios.OpenConnectionEditorAsync(session);
+        await fields.ReadAsync(editor, "the AI connection form", expect: ["Endpoint", "Model", "API key"]);
         if (await session.Page.GetByTestId("assistant-launch").CountAsync() == 0)
         {
-            await session.Content.GetByLabel("Endpoint", new() { Exact = true }).FillAsync("http://127.0.0.1:1/v1");
-            await session.Content.GetByLabel("Model", new() { Exact = true }).FillAsync("scripted");
-            await session.Page.GetByTestId("ai-save").ClickAsync();
+            await editor.GetByLabel("Endpoint", new() { Exact = true }).FillAsync("http://127.0.0.1:1/v1");
+            await editor.GetByLabel("Model", new() { Exact = true }).FillAsync("scripted");
+            await editor.GetByTestId("ai-save").ClickAsync();
         }
+        else
+        {
+            await editor.GetByTestId("editor-cancel").ClickAsync();
+        }
+
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
         await session.Page.GetByTestId("assistant-launch").ClickAsync();
         var pane = session.Page.GetByRole(AriaRole.Complementary, new() { Name = "Ask Alvo", Exact = true });

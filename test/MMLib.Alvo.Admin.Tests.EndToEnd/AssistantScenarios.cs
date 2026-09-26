@@ -171,6 +171,7 @@ public sealed class ConfiguringTheAssistantScenarios(ConfigurableAssistantWorld 
         /* The premise: nothing is configured, so nothing is mounted. */
         (await session.Page.Locator("[data-testid='assistant-launch']").CountAsync()).ShouldBe(0);
 
+        await SettingsScenarios.OpenConnectionEditorAsync(session);
         await session.Page.FillAsync("#ai-endpoint", "http://127.0.0.1:1/v1");
         await session.Page.FillAsync("#ai-model", "scripted");
         await session.Page.ClickAsync("[data-testid='ai-save']");

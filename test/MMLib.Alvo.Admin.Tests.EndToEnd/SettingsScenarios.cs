@@ -1,4 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Playwright;
 using MMLib.Alvo.Ai;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Secrets;
@@ -48,24 +49,66 @@ public sealed class SettingsWorld : ConfigurableAssistantWorld
     }
 }
 
-/// <summary>Saving the AI connection is a snackbar, not a word left beside the button (spec §3.3; inventory §2d.3).</summary>
+/// <summary>
+/// The AI connection is changed in an editor (spec §3.1): a real form, where Enter submits, the dirty guard asks and a
+/// save is a snackbar, not a word left beside the button (spec §3.3, §3.4; inventory §2d.3; final review I3).
+/// </summary>
 /// <param name="world">A host with an agent installed and a writable secret store.</param>
 public sealed class SettingsScenarios(SettingsWorld world) : IClassFixture<SettingsWorld>
 {
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task Saving_the_connection_says_so_once_and_leaves_nothing_behind()
+    public async Task Enter_saves_the_connection_says_so_once_and_leaves_nothing_behind()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/settings");
 
+        var editor = await OpenConnectionEditorAsync(session);
         await session.Page.FillAsync("#ai-endpoint", "http://127.0.0.1:1/v1");
         await session.Page.FillAsync("#ai-model", "scripted");
-        await session.Page.GetByTestId("ai-save").ClickAsync();
+        await session.Page.Locator("#ai-model").PressAsync("Enter");
 
         await session.SnackbarAsync("Saved the AI connection");
         (await session.SnackbarCountAsync("Saved the AI connection")).ShouldBe(1, "one save, said once");
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await EditorScenarios.WaitForFocusOnTestIdAsync(session, "ai-change");
         (await session.Content.GetByText("Saved.", new() { Exact = true }).CountAsync()).ShouldBe(0);
         session.AssertConsoleClean();
+    }
+
+    /// <summary>A typed connection is not lost to Escape without a question; an untouched editor closes at once.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Escape_asks_before_it_loses_a_typed_connection()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/settings");
+
+        var editor = await OpenConnectionEditorAsync(session);
+        await session.Page.Keyboard.PressAsync("Escape");
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+
+        editor = await OpenConnectionEditorAsync(session);
+        await session.Page.FillAsync("#ai-model", "scripted");
+        await session.Page.Keyboard.PressAsync("Escape");
+        await editor.GetByTestId("editor-discard-question").WaitForAsync();
+        await editor.GetByTestId("editor-keep").ClickAsync();
+        (await session.Page.InputValueAsync("#ai-model")).ShouldBe("scripted", "Keep editing keeps what was typed");
+
+        await editor.GetByTestId("editor-cancel").ClickAsync();
+        await editor.GetByTestId("editor-discard").ClickAsync();
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await EditorScenarios.WaitForFocusOnTestIdAsync(session, "ai-change");
+        (await session.SnackbarCountAsync()).ShouldBe(0, "nothing was saved");
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>Opens the connection editor from its summary and waits for focus inside it.</summary>
+    internal static async Task<ILocator> OpenConnectionEditorAsync(AdminSession session)
+    {
+        await session.Page.GetByTestId("ai-change").ClickAsync();
+        var editor = session.Dialog("ai-editor");
+        await editor.GetByTestId("ai-save").WaitForAsync();
+        await EditorScenarios.WaitForFocusInsideAsync(session, "ai-editor");
+        return editor;
     }
 
     /// <summary>
@@ -86,18 +129,19 @@ public sealed class SettingsScenarios(SettingsWorld world) : IClassFixture<Setti
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/settings");
 
+        await OpenConnectionEditorAsync(session);
         await session.Page.FillAsync("#ai-endpoint", endpoint);
         await session.Page.FillAsync("#ai-model", "scripted");
         await session.Page.GetByTestId("ai-save").ClickAsync();
 
-        await session.Content.GetByTestId("field-problem").WaitForAsync();
+        await session.Page.GetByTestId("field-problem").WaitForAsync();
         (await session.FocusedAsync()).ShouldStartWith("input#ai-endpoint");
         (await session.Page.Locator("#ai-endpoint").GetAttributeAsync("aria-invalid")).ShouldBe("true");
         (await session.SnackbarCountAsync()).ShouldBe(0, "a refused save never says it saved");
 
         /* Box, hint, then the refusal (spec §3.8): the hint that says what to type stays under the box. */
         var hint = (await session.Page.Locator("#ai-endpoint-hint").BoundingBoxAsync()).ShouldNotBeNull();
-        var problem = (await session.Content.GetByTestId("field-problem").BoundingBoxAsync()).ShouldNotBeNull();
+        var problem = (await session.Page.GetByTestId("field-problem").BoundingBoxAsync()).ShouldNotBeNull();
         ((double)problem.Y).ShouldBeGreaterThanOrEqualTo(hint.Y + hint.Height - 0.5, "the refusal sits under the hint");
         session.AssertConsoleClean();
     }
@@ -113,6 +157,7 @@ public sealed class SettingsScenarios(SettingsWorld world) : IClassFixture<Setti
             await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
             await session.GoAsync("/settings");
 
+            await OpenConnectionEditorAsync(session);
             await session.Page.FillAsync("#ai-endpoint", "http://127.0.0.1:1/v1");
             await session.Page.FillAsync("#ai-model", "scripted");
             await session.Page.GetByTestId("ai-save").ClickAsync();
@@ -147,7 +192,7 @@ public sealed class SettingsScenarios(SettingsWorld world) : IClassFixture<Setti
         {
             await session.Page.GotoAsync($"{world.BaseAddress}{AlvoAdmin.BasePath}/settings");
             await session.Page.GetByLabel("Loading").First.WaitForAsync();
-            await session.Page.GetByTestId("ai-save").WaitForAsync();
+            await session.Page.GetByTestId("ai-change").WaitForAsync();
         }
         finally
         {

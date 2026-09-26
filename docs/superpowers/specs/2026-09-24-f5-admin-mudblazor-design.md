@@ -156,7 +156,7 @@ beyond the migration, all from the inventory:
 | Access | person editor in `AlvoEditor` (roles, tenant, token with Copy, Disable → `AlvoConfirm`); Add person → `AlvoEditor`; Create disabled while busy |
 | Schema | New entity → `AlvoEditor` (was the top strip); a filter over the entity list; field / index / hook editors → `AlvoEditor`; rules get an explicit Save + dirty marker (no save-on-blur); Remove field → `AlvoConfirm` |
 | Command palette | `MudDialog` (top) — Escape, focus, scroll lock from the dialog |
-| Settings | AI connection form → snackbar "Saved"; refusal → `AlvoAlert` |
+| Settings | AI connection: a read-only summary with "Change the connection", which opens an `AlvoEditor` (§3.1; amended 26 Sep, final review I3 — it was left inline); save → snackbar "Saved"; refusal → `AlvoAlert` in the editor |
 
 ## 5. Tests that must exist (behaviour, not rendering)
 

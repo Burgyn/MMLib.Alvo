@@ -92,63 +92,12 @@
                 else
                 {
                     @*
-                        Its own head, because the status above lists the same names (Model, Kind) as values, and the
-                        form's first field read as a second row of that list.
+                        Read here, changed in an editor (spec §3.1: the AI connection is one item with more than one
+                        value). Its own row under the status, because the status lists the same names as values.
                     *@
-                    <SectionHead Title="Change the connection" class="a-section--spaced">
-                        <Subtitle>A save writes the whole connection to this host's secret store, encrypted.</Subtitle>
-                    </SectionHead>
-
-                    @if (_problem is not null)
-                    {
-                        <CascadingValue Value="_problem">
-                            <ErrorPanel @key="_refusalsDrawn" TakeFocus="true" Title="@_problemTitle" />
-                        </CascadingValue>
-                    }
-
-                    <div class="a-stack a-stack--inset">
-                        <Field Label="Kind" LabelId="ai-kind">
-                            <ChipGroup TValue="string" Items="_kinds" Selected="[_kind]" aria-labelledby="ai-kind"
-                                       SelectedChanged="kinds => _kind = kinds[0]" />
-                        </Field>
-
-                        <Field Label="Endpoint" For="ai-endpoint">
-                            <ChildContent>
-                                <MudTextField @ref="_endpointField" T="string" Variant="Variant.Outlined" Immediate="true"
-                                              id="ai-endpoint" autocomplete="off"
-                                              aria-describedby="@_fields.DescribedBy(EndpointField, "ai-endpoint-hint")"
-                                              Error="@_fields.Has(EndpointField)" Placeholder="e.g. http://localhost:11434/v1"
-                                              Value="_endpoint" ValueChanged="TypeEndpoint" />
-                                @_fields.Under(EndpointField, () => _endpointField!.FocusAsync())
-                            </ChildContent>
-                            <Hint>The base address. It is never shown back, on this page or anywhere else.</Hint>
-                        </Field>
-
-                        <Field Label="Model" For="ai-model">
-                            <MudTextField @ref="_modelField" T="string" Variant="Variant.Outlined" Immediate="true"
-                                          id="ai-model" autocomplete="off" Placeholder="e.g. qwen3:8b"
-                                          aria-describedby="@_fields.DescribedBy(ModelField)" Error="@_fields.Has(ModelField)"
-                                          Value="_model" ValueChanged="TypeModel" />
-                            @_fields.Under(ModelField, () => _modelField!.FocusAsync())
-                        </Field>
-
-                        <Field Label="API key" For="ai-key">
-                            <ChildContent>
-                                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="ai-key"
-                                              InputType="InputType.Password" autocomplete="off"
-                                              aria-describedby="ai-key-hint" Placeholder="leave empty for a local model"
-                                              Value="_apiKey" ValueChanged="text => _apiKey = text ?? string.Empty" />
-                            </ChildContent>
-                            <Hint>
-                                Stored encrypted and never read back into this page. Saving replaces the whole
-                                connection, so type the key again if you change anything else.
-                            </Hint>
-                        </Field>
-
-                        <div class="a-row a-row--gap-2">
-                            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Busy="_saving" data-testid="ai-save"
-                                        OnClick="_ => SaveAsync()">Save the connection</AlvoButton>
-                        </div>
+                    <div class="a-row a-row--inset">
+                        <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" data-testid="ai-change"
+                                    OnClick="_ => OpenEditor()">Change the connection</AlvoButton>
                     </div>
                 }
             </ChildContent>
@@ -166,6 +115,59 @@
         </Panel>
     }
 </div>
+
+@if (_editing)
+{
+    <AlvoEditor TestId="ai-editor" Title="Change the AI connection" Eyebrow="Settings"
+                Subtitle="A save writes the whole connection to this host's secret store, encrypted."
+                SubmitText="Save the connection" SubmitTestId="ai-save" Dirty="Dirty" Busy="_saving"
+                OnSubmit="SaveAsync" OnClose="CloseEditor">
+        @if (_problem is not null)
+        {
+            <CascadingValue Value="_problem">
+                <ErrorPanel @key="_refusalsDrawn" TakeFocus="true" Title="@_problemTitle" />
+            </CascadingValue>
+        }
+
+        <Field Label="Kind" LabelId="ai-kind">
+            <ChipGroup TValue="string" Items="_kinds" Selected="[_kind]" aria-labelledby="ai-kind"
+                       SelectedChanged="kinds => _kind = kinds[0]" />
+        </Field>
+
+        <Field Label="Endpoint" For="ai-endpoint">
+            <ChildContent>
+                <MudTextField @ref="_endpointField" T="string" Variant="Variant.Outlined" Immediate="true"
+                              id="ai-endpoint" autocomplete="off"
+                              aria-describedby="@_fields.DescribedBy(EndpointField, "ai-endpoint-hint")"
+                              Error="@_fields.Has(EndpointField)" Placeholder="e.g. http://localhost:11434/v1"
+                              Value="_endpoint" ValueChanged="TypeEndpoint" />
+                @_fields.Under(EndpointField, () => _endpointField!.FocusAsync())
+            </ChildContent>
+            <Hint>The base address. It is never shown back, on this page or anywhere else.</Hint>
+        </Field>
+
+        <Field Label="Model" For="ai-model">
+            <MudTextField @ref="_modelField" T="string" Variant="Variant.Outlined" Immediate="true"
+                          id="ai-model" autocomplete="off" Placeholder="e.g. qwen3:8b"
+                          aria-describedby="@_fields.DescribedBy(ModelField)" Error="@_fields.Has(ModelField)"
+                          Value="_model" ValueChanged="TypeModel" />
+            @_fields.Under(ModelField, () => _modelField!.FocusAsync())
+        </Field>
+
+        <Field Label="API key" For="ai-key">
+            <ChildContent>
+                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="ai-key"
+                              InputType="InputType.Password" autocomplete="off"
+                              aria-describedby="ai-key-hint" Placeholder="leave empty for a local model"
+                              Value="_apiKey" ValueChanged="text => _apiKey = text ?? string.Empty" />
+            </ChildContent>
+            <Hint>
+                Stored encrypted and never read back into this page. Saving replaces the whole
+                connection, so type the key again if you change anything else.
+            </Hint>
+        </Field>
+    </AlvoEditor>
+}
 
 @code {
     private const string EndpointField = "ai-endpoint";
@@ -185,11 +187,38 @@
     private string _problemTitle = NotSaved;
     private int _refusalsDrawn;
     private bool _saving;
+    private bool _editing;
     private MudTextField<string>? _endpointField;
     private MudTextField<string>? _modelField;
 
     protected override async Task OnInitializedAsync()
         => _info = await Gateway.InfoAsync(CancellationToken.None);
+
+    /// <summary>Whether the editor holds anything closing it would lose: a kind picked, or any text typed.</summary>
+    private bool Dirty => _kind != StoredAiConnection.OpenAiCompatibleKind
+        || _endpoint.Length > 0 || _model.Length > 0 || _apiKey.Length > 0;
+
+    /// <summary>
+    /// Opens the editor empty: nothing stored is read back into it, so the endpoint and the key are never shown back.
+    /// </summary>
+    private void OpenEditor()
+    {
+        ClearForm();
+        _editing = true;
+    }
+
+    private void CloseEditor()
+    {
+        _editing = false;
+        ClearForm();
+    }
+
+    private void ClearForm()
+    {
+        (_kind, _endpoint, _model, _apiKey) = (StoredAiConnection.OpenAiCompatibleKind, string.Empty, string.Empty, string.Empty);
+        _problem = null;
+        _fields.ClearAll();
+    }
 
     private void TypeEndpoint(string? text)
     {
@@ -204,7 +233,8 @@
     }
 
     /// <summary>
-    /// Saves the connection and says so once the screen has read it back, or shows why it could not be saved.
+    /// Saves the connection and says so once the screen has read it back, or shows why it could not be saved, in the
+    /// editor. Pressed, Enter in a single-line field or Ctrl/Cmd+Enter: the editor is the one submit path (spec §3.4).
     /// </summary>
     /// <remarks>
     /// The refusal a shadowing configuration raises must reach the screen, because it is the one failure whose
@@ -253,14 +283,15 @@
     }
 
     /// <summary>
-    /// Reads the status the save changed, and only then says it saved; a failed read says the save stands, since
-    /// "could not be saved" would send the operator to redo a write that happened.
+    /// Reads the status the save changed, closes the editor and only then says it saved; a failed read says the save
+    /// stands, in the editor, since "could not be saved" would send the operator to redo a write that happened.
     /// </summary>
     private async Task ReadBackAsync()
     {
         try
         {
             _info = await Gateway.InfoAsync(CancellationToken.None);
+            CloseEditor();
             Snackbar.Confirm("Saved the AI connection");
         }
         catch (Exception exception)

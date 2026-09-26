@@ -709,11 +709,6 @@
     gap: var(--space-5);
   }
 
-  /* A form or a set of controls at the inset a panel draws around content with none of its own. */
-  .a-stack--inset {
-    padding: var(--space-5);
-  }
-
   .a-stack--gap-3 {
     gap: var(--space-3);
   }
