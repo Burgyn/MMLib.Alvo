@@ -91,6 +91,14 @@
                 }
                 else
                 {
+                    @*
+                        Its own head, because the status above lists the same names (Model, Kind) as values, and the
+                        form's first field read as a second row of that list.
+                    *@
+                    <SectionHead Title="Change the connection" class="a-section--spaced">
+                        <Subtitle>A save writes the whole connection to this host's secret store, encrypted.</Subtitle>
+                    </SectionHead>
+
                     @if (_problem is not null)
                     {
                         <CascadingValue Value="_problem">

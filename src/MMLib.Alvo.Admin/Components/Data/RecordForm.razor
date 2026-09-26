@@ -41,7 +41,7 @@
             {
                 <div class="a-field">
                     @*
-                        The label above the control, the control, the sentence that refuses it, then the hint: the
+                        The label above the control, the control, the hint, then the sentence that refuses it: the
                         order of every field (spec §3.8). A <label for> may only name a labelable element, and an
                         enum's chips are a group of buttons, not one control, so the group names this label by id.
                     *@
@@ -51,13 +51,13 @@
                                for="@(column.Type == FieldType.Enum ? null : ControlId(column))">@GridColumns.Header(column)</label>
                     }
                     @Control(column)
+                    <span class="a-hint" id="@HintId(column)" title="@column.FormatPattern">
+                        <span class="a-ident">@column.Name · @TypeOf(column)</span>@Hint(column)
+                    </span>
                     @if (_problems.TryGetValue(column.Name, out var problem))
                     {
                         <span class="a-field__problem" id="@ProblemId(column)" data-testid="field-problem">@problem</span>
                     }
-                    <span class="a-hint" id="@HintId(column)" title="@column.FormatPattern">
-                        <span class="a-ident">@column.Name · @TypeOf(column)</span>@Hint(column)
-                    </span>
                 </div>
             }
         </div>

@@ -35,10 +35,10 @@ internal static class AlvoMudTheme
         new("--text", "#1c1e26", "#e8eaf0"),
         new("--dim", "#5f6577", "#9aa0b8"),
         new("--faint", "#6b7180", "#8b92ab"),
-        new("--ok-fg", "#0f7a48", "#39e991"),
+        new("--ok-fg", "#0b653b", "#39e991"),
         new("--warn-fg", "#8a5a00", "#f5c451"),
         new("--danger-fg", "#b3261e", "#ff8f8f"),
-        new("--neutral-fg", "#5f6577", "#9aa0b8"),
+        new("--neutral-fg", "#535969", "#b3b9cd"),
     ];
 
     /// <summary>The theme written on <c>:root</c>; its light palette is the one in force by default.</summary>

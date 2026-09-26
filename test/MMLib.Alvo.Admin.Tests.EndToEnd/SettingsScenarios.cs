@@ -133,6 +133,11 @@ public sealed class SettingsScenarios(SettingsWorld world) : IClassFixture<Setti
         (await session.FocusedAsync()).ShouldStartWith("input#ai-endpoint");
         (await session.Page.Locator("#ai-endpoint").GetAttributeAsync("aria-invalid")).ShouldBe("true");
         (await session.SnackbarCountAsync()).ShouldBe(0, "a refused save never says it saved");
+
+        /* Box, hint, then the refusal (spec §3.8): the hint that says what to type stays under the box. */
+        var hint = (await session.Page.Locator("#ai-endpoint-hint").BoundingBoxAsync()).ShouldNotBeNull();
+        var problem = (await session.Content.GetByTestId("field-problem").BoundingBoxAsync()).ShouldNotBeNull();
+        ((double)problem.Y).ShouldBeGreaterThanOrEqualTo(hint.Y + hint.Height - 0.5, "the refusal sits under the hint");
         session.AssertConsoleClean();
     }
 

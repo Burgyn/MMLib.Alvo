@@ -116,9 +116,13 @@ and the e2e suite asserts that things render, not that they behave.
      own MudBlazor UI; a wrapper component cannot be internal and still be a tag (Razor discovers public components
      only), and a public one would add a Mud-shaped parameter surface to PublicApi (D5). So the look is alvo.css's,
      and the two attributes each call site writes (`Variant.Outlined`, `aria-describedby`) are enforced by the test.
-   - **Field error** (`FieldRefusals`, the record form's own read errors): the sentence directly under the box,
+   - **Field error** (`FieldRefusals`, the record form's own read errors): the sentence **after the hint** (directly
+     under the box when there is none), so every field reads box, hint, refusal — the order its `aria-describedby`
+     lists them in, and the hint that says what the box takes stays in view while the refusal says what was wrong
+     (decided 26 Sep, after the Task 10 screenshots showed the refusal wedged between the box and its hint).
      `.a-field__problem` at `--text-sm` in `--danger-fg`, with an id the input's `aria-describedby` lists after the
-     hint; the input is `aria-invalid` (`Error`) and its border takes `--danger-fg`. Focus moves to it on a failed
+     hint. A `Field`'s refusal is written inside its content, before the hint the `Field` draws, so alvo.css moves it
+     last (`order`) rather than the `Field` growing a public parameter for it; the input is `aria-invalid` (`Error`) and its border takes `--danger-fg`. Focus moves to it on a failed
      submit (§3.3). A refusal no field owns is the `ErrorPanel`.
    - **Disabled**: `--panel2` background, `--faint` text. **Read-only**: not a box — a value that can never be changed
      is text (the record form's *Calculated* readout), because a greyed box reads as a broken control.

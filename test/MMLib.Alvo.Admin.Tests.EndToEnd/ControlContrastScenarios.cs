@@ -35,6 +35,7 @@ public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<A
         await StageAFieldAsync(session, scheme);
         var failures = new List<string>(await SnackbarBelowAAAsync(session));
         failures.AddRange(await SignInBelowAAAsync(scheme));
+        failures.AddRange(await BadgesBelowAAAsync(session));
 
         foreach (var route in _screens)
         {
@@ -71,6 +72,20 @@ public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<A
         failures.AddRange(await BelowAAAsync(session, "the new person editor"));
 
         failures.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Two badges, which are small text on a translucent wash of their own: the drawer's "Not yet" pill (neutral) and
+    /// the overview's applied revision (ok). Both read at or under AA by pixel sampling until their inks moved.
+    /// </summary>
+    private static async Task<IEnumerable<string>> BadgesBelowAAAsync(AdminSession session)
+    {
+        await session.GoAsync("");
+        await session.Page.GetByTestId("overview-revision").WaitForAsync();
+        var badges = session.Page.GetByTestId("overview-revision").Or(session.Page.GetByTestId("nav-not-yet"));
+        var readings = await ContrastProbe.ReadAsync(badges);
+        readings.Count.ShouldBeGreaterThanOrEqualTo(3, "the revision badge and both Not yet pills");
+        return readings.Where(r => r.Ratio < ContrastProbe.AA).Select(r => $"the badge: {r}");
     }
 
     /// <summary>The static sign-in page's one button, in a context of its own, before anybody signs in.</summary>

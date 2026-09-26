@@ -161,18 +161,24 @@
     --accent: light-dark(#0f7a48, #39e991);
     --accentText: light-dark(#ffffff, #12241a);
     --accentSoft: light-dark(rgba(15, 122, 72, 0.09), rgba(57, 233, 145, 0.13));
+    /* The accent as text on its own soft wash (the accent badge, a pressed chip, the active nav item), where #0f7a48
+     is 4.3:1 on --panel2. */
+    --accentInk: light-dark(#0b653b, #39e991);
     --accentBorder: light-dark(rgba(15, 122, 72, 0.28), rgba(57, 233, 145, 0.36));
 
     /* --- Semantic state. Named by meaning rather than by the reference
        drawing's CRM domain (won/offer/lead/lost): this system dresses an admin
        tool, not a sales pipeline. --- */
-    --ok-fg: light-dark(#0f7a48, #39e991);
+    /* The light ok and both neutral inks are a step past plain AA: a badge sets them at 11 px on its own
+       translucent wash, which lowers the ratio against every surface under it (measured composited, in
+       ControlContrastScenarios). #0f7a48 was 4.2:1 on --panel2 through --ok-bg. */
+    --ok-fg: light-dark(#0b653b, #39e991);
     --ok-bg: light-dark(rgba(15, 122, 72, 0.11), rgba(57, 233, 145, 0.14));
     --warn-fg: light-dark(#8a5a00, #f5c451);
     --warn-bg: light-dark(rgba(214, 158, 46, 0.14), rgba(245, 196, 81, 0.14));
     --danger-fg: light-dark(#b3261e, #ff8f8f);
     --danger-bg: light-dark(rgba(211, 47, 47, 0.1), rgba(255, 143, 143, 0.13));
-    --neutral-fg: light-dark(#5f6577, #9aa0b8);
+    --neutral-fg: light-dark(#535969, #b3b9cd);
     --neutral-bg: light-dark(rgba(95, 101, 119, 0.1), rgba(154, 160, 184, 0.13));
 
     --shadow-panel: light-dark(0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 2px rgba(0, 0, 0, 0.32));
@@ -673,7 +679,7 @@
 
   .a-nav-item--active {
     background: var(--accentSoft);
-    color: var(--accent);
+    color: var(--accentInk);
     font-weight: var(--weight-medium);
   }
 
@@ -1391,6 +1397,12 @@
     font-size: var(--text-sm);
   }
 
+  /* Box, hint, then the refusal, in every field (spec §3.8): the order aria-describedby reads them in. A Field's
+     refusal is written inside its content, before the hint the Field draws after it, so it is moved last here. */
+  .a-field > .a-field__problem {
+    order: 1;
+  }
+
   /* A reference's search box and the rows it found. The list sits in the flow under the box rather
      than floating over the form, because the sheet's body scrolls and a floating list is cut off at
      its edge when the field is near the bottom. */
@@ -1772,7 +1784,7 @@
   .a-badge--ok { background: var(--ok-bg); color: var(--ok-fg); }
   .a-badge--warn { background: var(--warn-bg); color: var(--warn-fg); }
   .a-badge--danger { background: var(--danger-bg); color: var(--danger-fg); }
-  .a-badge--accent { background: var(--accentSoft); color: var(--accent); }
+  .a-badge--accent { background: var(--accentSoft); color: var(--accentInk); }
 
   /* One value of an enum, drawn as a value rather than as a state: neutral, so a status column is not
      read as a row of warnings, and tabular, so codes of one length line up. */
@@ -2435,7 +2447,7 @@
   .a-chip[aria-pressed='true'] {
     border-color: var(--accentBorder);
     background: var(--accentSoft);
-    color: var(--accent);
+    color: var(--accentInk);
     font-weight: var(--weight-medium);
   }
 
@@ -2610,7 +2622,7 @@
 
   .a-palette__item--active {
     background: var(--accentSoft);
-    color: var(--accent);
+    color: var(--accentInk);
   }
 
   /* No match: a sentence in the list's place, not a row that can be chosen. */
