@@ -31,7 +31,7 @@ public sealed class FacetNumberScenarios(AdminWorld world) : IClassFixture<Admin
 
         await sheet.Locator("#new-field-precision").FillAsync("12");
         await sheet.GetByTestId("field-save").ClickAsync();
-        await session.SnackbarAsync("Saved to the working copy");
+        await session.SnackbarAsync("added to the working copy");
         session.AssertConsoleClean();
     }
 

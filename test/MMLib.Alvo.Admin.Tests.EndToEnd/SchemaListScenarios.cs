@@ -23,7 +23,7 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
         await session.Page.Keyboard.PressAsync("Enter");
 
         await session.Page.WaitForURLAsync("**/schema/tickets");
-        await session.SnackbarAsync("Added tickets to the working copy");
+        await session.SnackbarAsync("Entity tickets added to the working copy");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -168,7 +168,7 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
             .GetByRole(AriaRole.Button, new() { Name = "name", Exact = true }).ClickAsync();
         await editor.GetByTestId("index-add").DblClickAsync();
 
-        await session.SnackbarAsync("Index added to the working copy");
+        await session.SnackbarAsync("added to the working copy");
         (await session.Page.GetByTestId("index-row").CountAsync()).ShouldBe(before + 1);
     }
 
@@ -190,7 +190,7 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
         await editor.GetByTestId("index-fields")
             .GetByRole(AriaRole.Button, new() { Name = "priority", Exact = true }).ClickAsync();
         await editor.GetByTestId("index-add").ClickAsync();
-        await session.SnackbarAsync("Index added to the working copy");
+        await session.SnackbarAsync("added to the working copy");
 
         var added = session.Page.GetByTestId("index-row").Nth(before);
         await added.WaitForAsync();
@@ -213,7 +213,7 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
         await editor.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "afterDelete", Exact = true }).ClickAsync();
         await session.Page.FillAsync("#hook-endpoint", "dispatch");
         await editor.GetByTestId("hook-add").ClickAsync();
-        await session.SnackbarAsync("Hook added to the working copy");
+        await session.SnackbarAsync("Hook afterDelete added to the working copy");
 
         var added = session.Page.Locator("[data-testid='hook-row'][data-alvo-new]");
         await added.WaitForAsync();
@@ -232,7 +232,7 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
             .GetByRole(AriaRole.Button, new() { Name = "name", Exact = true }).ClickAsync();
         await session.Dialog("index-editor").GetByTestId("index-add").ClickAsync();
         /* Counted once the add has landed: the click returns before the re-render that draws the row. */
-        await session.SnackbarAsync("Index added to the working copy");
+        await session.SnackbarAsync("added to the working copy");
         var rows = await session.Page.GetByTestId("index-row").CountAsync();
 
         await session.Page.GetByTestId("index-remove").Last.ClickAsync();

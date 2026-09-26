@@ -21,7 +21,7 @@ public sealed class CreatedItemScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.GetByTestId("add-field").ClickAsync();
         await session.Page.FillAsync("#new-field-name", "arrival_note");
         await session.Page.Keyboard.PressAsync("Enter");
-        await session.SnackbarAsync("Saved to the working copy");
+        await session.SnackbarAsync("added to the working copy");
 
         var row = session.Page.GetByTestId("field-row-arrival_note");
         await session.WaitForInViewAsync(row);

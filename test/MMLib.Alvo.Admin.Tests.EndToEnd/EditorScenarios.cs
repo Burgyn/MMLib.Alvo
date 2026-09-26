@@ -75,12 +75,12 @@ public sealed class EditorScenarios(AdminWorld world) : IClassFixture<AdminWorld
 
         await session.Dialog("field-sheet").GetByTestId("field-save").DblClickAsync();
 
-        await session.SnackbarAsync("Saved to the working copy");
+        await session.SnackbarAsync("added to the working copy");
         await session.Page.GetByTestId("field-row-loyalty_tier").WaitForAsync();
         await OutwaitASecondSubmitAsync(session);
         (await session.Page.GetByTestId("field-row-loyalty_tier").CountAsync()).ShouldBe(1);
         (await session.Page.GetByTestId("staged-loyalty_tier").CountAsync()).ShouldBe(1);
-        (await session.SnackbarCountAsync("Saved to the working copy")).ShouldBe(1, "one save, said once");
+        (await session.SnackbarCountAsync("added to the working copy")).ShouldBe(1, "one save, said once");
         session.AssertConsoleClean();
     }
 
@@ -100,10 +100,10 @@ public sealed class EditorScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.Page.Locator("#new-field-name").PressAsync("Control+Enter");
 
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
-        await session.SnackbarAsync("Saved to the working copy");
+        await session.SnackbarAsync("added to the working copy");
         await OutwaitASecondSubmitAsync(session);
         (await session.Page.GetByTestId("staged-chord_single").CountAsync()).ShouldBe(1);
-        (await session.SnackbarCountAsync("Saved to the working copy")).ShouldBe(1, "one chord, one submit");
+        (await session.SnackbarCountAsync("added to the working copy")).ShouldBe(1, "one chord, one submit");
         session.AssertConsoleClean();
     }
 
@@ -130,10 +130,10 @@ public sealed class EditorScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await expression.PressAsync("Control+Enter");
 
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
-        await session.SnackbarAsync("Saved to the working copy");
+        await session.SnackbarAsync("added to the working copy");
         await OutwaitASecondSubmitAsync(session);
         (await session.Page.GetByTestId("staged-chord_multi").CountAsync()).ShouldBe(1);
-        (await session.SnackbarCountAsync("Saved to the working copy")).ShouldBe(1, "one chord, one submit");
+        (await session.SnackbarCountAsync("added to the working copy")).ShouldBe(1, "one chord, one submit");
         session.AssertConsoleClean();
     }
 
@@ -266,7 +266,7 @@ public sealed class EditorScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await OutwaitASecondSubmitAsync(session);
         (await session.Page.GetByTestId("staged-another_once").CountAsync()).ShouldBe(1);
         (await editor.GetByTestId("error-panel").CountAsync()).ShouldBe(0, "the cleared form was not submitted");
-        (await session.SnackbarCountAsync("Saved to the working copy")).ShouldBe(1);
+        (await session.SnackbarCountAsync("added to the working copy")).ShouldBe(1);
         session.AssertConsoleClean();
     }
 

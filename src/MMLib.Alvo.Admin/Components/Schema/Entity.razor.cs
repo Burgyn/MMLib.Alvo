@@ -369,7 +369,9 @@ public partial class Entity
         }
 
         ReadWorking();
-        Snackbar.Confirm("Saved to the working copy");
+        Snackbar.Confirm(editing is { Length: > 0 }
+            ? StagedWords.Saved("Field", added.Name)
+            : StagedWords.Added("Field", added.Name));
     }
 
     /// <summary>Opens the editor over a field the descriptor already declares.</summary>
@@ -420,7 +422,7 @@ public partial class Entity
     {
         Copy.AddIndex(EntityName, index.Fields, index.Unique);
         ReadWorking();
-        Snackbar.Confirm("Index added to the working copy");
+        Snackbar.Confirm(StagedWords.Added("Index", $"on {string.Join(", ", index.Fields)}"));
     }
 
     /// <summary>
@@ -452,7 +454,7 @@ public partial class Entity
     {
         Copy.AddHook(EntityName, added.Point, added.Condition, added.Action);
         ReadWorking();
-        Snackbar.Confirm("Hook added to the working copy");
+        Snackbar.Confirm(StagedWords.Added("Hook", added.Point));
     }
 
     /// <summary>Opens the rename sheet, prefilled with the name it has.</summary>

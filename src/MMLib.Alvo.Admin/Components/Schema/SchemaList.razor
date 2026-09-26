@@ -260,7 +260,7 @@
 
         var name = _name;
         Copy.AddEntity(name, _scoped, _audited);
-        Snackbar.Confirm($"Added {name} to the working copy");
+        Snackbar.Confirm(StagedWords.Added("Entity", name));
         RememberCreated(name);
         Navigation.NavigateTo(AdminPaths.Entity(name));
     }

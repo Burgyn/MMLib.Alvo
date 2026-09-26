@@ -70,12 +70,15 @@ and the e2e suite asserts that things render, not that they behave.
    status, priority?", "Remove this beforeCreate hook?", "Disable dispatcher@…?") and acts on what it named, found
    again when it runs, never on a position captured at the press (M7).
 3. **Feedback.**
-   - **Snackbar** (`ISnackbar`, a `role=status` — amended 26 Sep, final review M15: the library writes `role=alert`,
-     which interrupts, and admin.js turns each of the dashboard's own into a status as it is added; **bottom-left,
-     never over an open editor's footer** — the editor is a right-hand
+   - **Snackbar** (`ISnackbar`, read out by one polite live region — amended 26 Sep, final review M15 and batch-B
+     re-review N2: the dashboard's provider is `role=status aria-live=polite`, on the page before any message, and
+     admin.js takes the library's own `role=alert`/`aria-live` off each snackbar as it is added, so the one region
+     reads it once; **bottom-left, never over an open editor's footer** — the editor is a right-hand
      sheet with its actions bottom-right; 4–6 s, at most two; its text and close on the tone's contrast colour, AA in
      both themes) for the brief confirmation of an action just taken:
-     "Saved to the working copy", "Applied as revision 12", "Record deleted". Never the only copy of something the
+     "Field notes added to the working copy", "Applied as revision 12", "Record deleted". A staged schema change says
+     one sentence (N6, `StagedWords`): "<Kind> <name> added to the working copy", or "… saved to the working copy" for
+     an edit. Never the only copy of something the
      operator must keep (a credential token goes in the dialog with a Copy button).
      *Amended 26 Sep (final review I6):* these rules are set **per message** (`AdminSnackbar`) and by a class on the
      dashboard's own provider (`.a-snackbars`), never in the library's options: those are one object per container,

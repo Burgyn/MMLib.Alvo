@@ -125,7 +125,7 @@ public sealed class ControlContrastScenarios(AdminWorld world) : IClassFixture<A
     /// </summary>
     private static async Task<IEnumerable<string>> SnackbarBelowAAAsync(AdminSession session)
     {
-        var snackbar = session.Snackbars.Filter(new() { HasText = "Saved to the working copy" }).First;
+        var snackbar = session.Snackbars.Filter(new() { HasText = "added to the working copy" }).First;
         await snackbar.WaitForAsync();
         var readings = (await ContrastProbe.ReadAsync(snackbar)).Concat(await ContrastProbe.ReadAsync(snackbar.GetByRole(AriaRole.Button)));
         return readings.Where(r => r.Ratio < ContrastProbe.AA).Select(r => $"the snackbar: {r}");
