@@ -199,7 +199,7 @@ public sealed class KeptFollowScenarios(HeldApplyWorld world) : IClassFixture<He
     }
 
     /// <summary>Stages one new entity from the schema list.</summary>
-    private static async Task StageEntityAsync(AdminSession session, string name)
+    internal static async Task StageEntityAsync(AdminSession session, string name)
     {
         await session.GoAsync("/schema");
         await session.Button("New entity", exact: true).ClickAsync();

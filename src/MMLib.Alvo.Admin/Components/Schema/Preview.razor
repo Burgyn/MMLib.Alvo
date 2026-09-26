@@ -134,14 +134,39 @@
                     Discard them
                 </AlvoButton>
                 <span class="a-spacer"></span>
-                <span class="a-hint">
-                    Applying as yourself, against revision @Copy.Revision. If somebody applies first, this is
-                    refused rather than written over theirs.
-                </span>
-                <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Busy="_busy" OnClick="_ => RequestApplyAsync()">
-                    Apply these changes
-                </AlvoButton>
+                @if (!_stale)
+                {
+                    <span class="a-hint">
+                        Applying as yourself, against revision @(_planned?.Revision ?? Copy.Revision). If somebody applies first, this is
+                        refused rather than written over theirs.
+                    </span>
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Busy="_busy" OnClick="_ => RequestApplyAsync()">
+                        Apply these changes
+                    </AlvoButton>
+                }
             </div>
+
+            @*
+                The plan is of the copy as it stood when it was asked, and what an apply sends is that same copy — the
+                steps above are what the operator reads and, for a destructive plan, types the project's name over. Once
+                the copy has moved (the assistant composed into it, another tab edited it) the plan describes something
+                that is no longer there, so there is nothing to apply until it is asked again.
+            *@
+            @if (_stale)
+            {
+                <AlvoAlert @key="_staleDrawn" Tone="AlvoAlert.AlertTone.Warning" TestId="plan-stale" TakeFocus="_staleTakesFocus"
+                           Title="The working copy changed after this plan — plan again">
+                    <ChildContent>
+                        The diff above is the copy as it is now; the steps are of the copy as it was. Nothing is applied
+                        until the plan is asked again.
+                    </ChildContent>
+                    <Actions>
+                        <AlvoButton Small="true" data-testid="plan-stale-replan" Disabled="_busy" OnClick="_ => PlanAsync()">
+                            Plan again
+                        </AlvoButton>
+                    </Actions>
+                </AlvoAlert>
+            }
         }
     }
 
@@ -187,6 +212,18 @@
     private readonly ComponentLifetime _lifetime = new();
 
     private ManagementApplyResult? _plan;
+
+    /// <summary>The copy <see cref="_plan"/> is of, document and base revision: exactly what an apply sends.</summary>
+    private (string Json, int Revision)? _planned;
+
+    /// <summary>Whether the copy has moved since <see cref="_plan"/> was asked, so there is nothing to apply.</summary>
+    private bool _stale;
+
+    /// <summary>How many times the plan has gone stale, which keys its warning so each one is drawn anew.</summary>
+    private int _staleDrawn;
+
+    /// <summary>Whether the stale warning replaced something the operator was acting on, and so takes focus.</summary>
+    private bool _staleTakesFocus;
 
     /// <summary>How many plans this page has been answered with — which one is showing, for a reader who asked again.</summary>
     private int _planRuns;
@@ -254,7 +291,27 @@
             _kept = null;
         }
 
+        var wasStale = _stale;
+        _stale = CopyMovedPastThePlan();
+        if (_stale && !wasStale)
+        {
+            /* The steps the operator may be typing the name over are no longer what an apply would send. */
+            MarkStale(takesFocus: _confirming);
+            _confirming = false;
+        }
+
         StateHasChanged();
+    }
+
+    /// <summary>Whether the copy has moved since the plan on screen was asked: read now, under the copy's gate.</summary>
+    private bool CopyMovedPastThePlan() => _plan is not null && _planned is { } planned && Copy.Snapshot() != planned;
+
+    /// <summary>Draws the stale warning anew; it takes focus when it stands in for what the operator was pressing.</summary>
+    private void MarkStale(bool takesFocus)
+    {
+        _stale = true;
+        _staleDrawn++;
+        _staleTakesFocus = takesFocus;
     }
 
     /// <summary>
@@ -271,6 +328,7 @@
     {
         _discarding = false;
         _plan = null;
+        _planned = null;
         _applied = null;
         _kept = null;
         Navigation.NavigateTo(AdminPaths.Schema);
@@ -282,11 +340,27 @@
 
     private Task PlanAsync() => SendAsync(dryRun: true);
 
-    private Task ApplyAsync() => SendAsync(dryRun: false);
+    /// <summary>Applies the copy the plan on screen is of, unless the copy has moved since.</summary>
+    private Task ApplyAsync()
+    {
+        if (_planned is null || CopyMovedPastThePlan())
+        {
+            MarkStale(takesFocus: true);
+            return Task.CompletedTask;
+        }
+
+        return SendAsync(dryRun: false);
+    }
 
     /// <summary>A destructive plan asks for the project's name first; any other applies at once.</summary>
     private Task RequestApplyAsync()
     {
+        if (CopyMovedPastThePlan())
+        {
+            MarkStale(takesFocus: true);
+            return Task.CompletedTask;
+        }
+
         if (_plan?.Plan.HasDestructiveChanges == true)
         {
             _confirming = true;
@@ -337,7 +411,8 @@
                project's name "above", and that control renders only once there is a plan — so a
                destructive change could be composed and never reviewed or applied from here. Nothing
                is destroyed by describing it. */
-            var (sent, revision) = Copy.Snapshot();
+            /* An apply sends the copy its plan was of, never the live one: the consent was given to those steps. */
+            var (sent, revision) = dryRun ? Copy.Snapshot() : _planned!.Value;
             var result = await Gateway.ApplyAsync(
                 sent, revision, allowDestructive: dryRun || _allowed, dryRun,
                 author: await Gateway.AuthorAsync(),
@@ -347,6 +422,8 @@
             if (dryRun)
             {
                 _plan = result;
+                _planned = (sent, revision);
+                _stale = CopyMovedPastThePlan();
                 _planRuns++;
             }
             else
@@ -387,6 +464,7 @@
     {
         _applied = result;
         _plan = null;
+        _planned = null;
         _kept = null;
         try
         {

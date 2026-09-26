@@ -100,3 +100,50 @@ public sealed class DestructiveApplyConfirmScenarios(AdminWorld world) : IClassF
         session.AssertConsoleClean();
     }
 }
+
+/// <summary>
+/// The typed-name consent and the apply are about one descriptor (final review I1): the plan's own copy is what an apply
+/// sends, and once the working copy moves past it the plan is stale, the confirm is withdrawn and nothing is applied
+/// until the plan is asked again.
+/// </summary>
+/// <remarks>
+/// Its own world: it stages a drop and an entity into the one working copy its operator has. The copy is moved from a
+/// second tab of the same operator, which is the same path the assistant's "Review it in Preview" takes into it.
+/// </remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class StalePlanScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+{
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_destructive_plan_the_copy_moved_past_is_withdrawn_and_nothing_is_applied()
+    {
+        var cancel = TestContext.Current.CancellationToken;
+        await using var session = await world.SignInAsync(cancel);
+        await using var otherTab = await world.SignInAsync(cancel);
+        var revisions = await ApplyScenarioSteps.RevisionCountAsync(otherTab);
+        await session.GoAsync("/schema/regions");
+        await session.Page.GetByTestId("remove-field-code").ClickAsync();
+        await session.Dialog("remove-field-sheet").GetByTestId("remove-field-anyway").ClickAsync();
+        await session.PreviewPendingAsync();
+        await session.Page.GetByTestId("plan-destroys").WaitForAsync();
+
+        await session.Button("Apply these changes").ClickAsync();
+        var confirm = session.Dialog("apply-confirm");
+        await EditorScenarios.WaitForFocusOnAsync(session, "confirm-name");
+        await session.Page.Keyboard.TypeAsync("field-service");
+        await KeptFollowScenarios.StageEntityAsync(otherTab, "vendors");
+
+        var stale = session.Page.GetByTestId("plan-stale");
+        await stale.WaitForAsync();
+        await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await EditorScenarios.WaitForFocusInsideAsync(session, "plan-stale");
+        (await session.Button("Apply these changes").CountAsync()).ShouldBe(0, "there is nothing to apply until it is planned");
+        (await session.SnackbarCountAsync("Applied")).ShouldBe(0);
+        (await ApplyScenarioSteps.RevisionCountAsync(otherTab)).ShouldBe(revisions, "nothing reached the database");
+
+        await session.Page.GetByTestId("plan-stale-replan").ClickAsync();
+        await stale.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        (await session.Page.GetByTestId("plan").InnerTextAsync()).ShouldContain("vendors", Case.Insensitive);
+        await session.Button("Apply these changes").WaitForAsync();
+        session.AssertConsoleClean();
+    }
+}
