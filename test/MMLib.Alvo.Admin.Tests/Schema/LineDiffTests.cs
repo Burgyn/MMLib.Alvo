@@ -74,4 +74,57 @@ public class LineDiffTests
     public void An_addition_carries_its_line_number_in_the_new_document() =>
         LineDiff.Between("a\nb", "a\nnew\nb")
             .Single(line => line.Change == LineChange.Added).Number.ShouldBe(2);
+
+    /// <summary>
+    /// One change in a long descriptor builds no table the size of both (final review M18): History opens a diff on
+    /// every revision click, on a shared server, and the lines both documents begin and end with need none.
+    /// </summary>
+    [Fact]
+    public void One_change_in_a_long_document_costs_what_the_change_does()
+    {
+        var before = Numbered(5000);
+        var after = before.Replace("line 2500\n", "line 2500 changed\n", StringComparison.Ordinal);
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread();
+        var diff = LineDiff.Between(before, after);
+        allocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
+
+        allocated.ShouldBeLessThan(4 * 1024 * 1024, "a 5 000 by 5 000 table is 100 MB");
+        diff.Single(line => line.Change == LineChange.Added).ShouldBe(new DiffLine(LineChange.Added, "line 2500 changed", 2501));
+        diff.Single(line => line.Change == LineChange.Removed).Number.ShouldBe(2501);
+        diff.First(line => line.Change == LineChange.Same && line.Text != LineDiff.Elision).Number.ShouldBe(2498);
+    }
+
+    /// <summary>
+    /// Two long documents with nothing in common are shown as the one removed and the other added, never aligned by
+    /// a table past <see cref="LineDiff.MaxCells"/> cells: the answer is still a correct diff, only not the shortest.
+    /// </summary>
+    [Fact]
+    public void Two_long_documents_with_nothing_in_common_are_capped()
+    {
+        var before = Numbered(3000);
+        var after = before.Replace("line", "row", StringComparison.Ordinal);
+
+        var allocated = GC.GetAllocatedBytesForCurrentThread();
+        var diff = LineDiff.Between(before, after);
+        allocated = GC.GetAllocatedBytesForCurrentThread() - allocated;
+
+        allocated.ShouldBeLessThan(8 * 1024 * 1024, "a 3 000 by 3 000 table is 36 MB");
+        diff.Count(line => line.Change == LineChange.Removed).ShouldBe(3000);
+        diff.Count(line => line.Change == LineChange.Added).ShouldBe(3000);
+    }
+
+    /// <summary>A change right at the start and one right at the end are found with the trimming in place.</summary>
+    [Fact]
+    public void Changes_at_both_ends_are_found()
+    {
+        var diff = LineDiff.Between("a\nb\nc\nd", "A\nb\nc\nD");
+
+        diff.Where(line => line.Change == LineChange.Removed).Select(line => line.Text).ShouldBe(["a", "d"]);
+        diff.Where(line => line.Change == LineChange.Added).Select(line => (line.Text, line.Number))
+            .ShouldBe([("A", 1), ("D", 4)]);
+    }
+
+    private static string Numbered(int lines)
+        => string.Concat(Enumerable.Range(0, lines).Select(index => $"line {index}\n"));
 }

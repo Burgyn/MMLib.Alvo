@@ -47,7 +47,25 @@ else
     [Parameter]
     public string? Identical { get; set; }
 
-    protected override void OnParametersSet() => _lines = LineDiff.Between(Before, After);
+    /// <summary>The pair <see cref="_lines"/> was computed for.</summary>
+    private (string Before, string After)? _diffed;
+
+    /// <summary>
+    /// Diffs once per pair of documents (final review M18): the screen around it redraws for many reasons, Preview on
+    /// every change to the copy and History on every click, and the documents seldom change with it. Comparing two
+    /// strings is a pass over them; diffing them is a table.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        if (_diffed is { } diffed && string.Equals(diffed.Before, Before, StringComparison.Ordinal)
+            && string.Equals(diffed.After, After, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _diffed = (Before, After);
+        _lines = LineDiff.Between(Before, After);
+    }
 
     private static string ClassFor(DiffLine line) => line.Change switch
     {

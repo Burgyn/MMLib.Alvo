@@ -50,6 +50,12 @@ internal static class LineDiff
     internal const string Elision = "⋯";
 
     /// <summary>
+    /// The largest alignment table built, in cells (16 MB of <see cref="int"/>): past it, what lies between the
+    /// documents' common head and tail is shown removed and then added, whole.
+    /// </summary>
+    internal const long MaxCells = 4_000_000;
+
+    /// <summary>
     /// The changed lines of <paramref name="after"/> against <paramref name="before"/>, with a few
     /// lines of context around each change and the untouched stretches elided.
     /// </summary>
@@ -60,9 +66,81 @@ internal static class LineDiff
     {
         var old = Split(before);
         var updated = Split(after);
-        var full = Walk(old, updated, LongestCommonSubsequence(old, updated));
+        var full = Align(old, updated);
 
         return full.Any(line => line.Change is not LineChange.Same) ? Elide(full) : [];
+    }
+
+    /// <summary>
+    /// The whole diff: the lines both documents begin and end with are the same without a table, and only what lies
+    /// between them is aligned (final review M18).
+    /// </summary>
+    /// <remarks>
+    /// A change to a descriptor touches a few lines of hundreds, so the table used to be the size of both documents
+    /// (815 by 815 for bike-workshop, 2.6 MB, on every revision a History reader opened) to find what the head and the
+    /// tail already say. What is left between them is aligned while its table stays under <see cref="MaxCells"/>; past
+    /// that, it is shown removed and then added: still a correct diff, only not the shortest one.
+    /// </remarks>
+    private static List<DiffLine> Align(string[] old, string[] updated)
+    {
+        var head = CommonHead(old, updated);
+        var tail = CommonTail(old, updated, head);
+        var lines = new List<DiffLine>(Math.Max(old.Length, updated.Length));
+
+        for (var index = 0; index < head; index += 1)
+        {
+            lines.Add(new DiffLine(LineChange.Same, updated[index], index + 1));
+        }
+
+        lines.AddRange(Middle(old[head..^tail], updated[head..^tail], head));
+
+        for (var index = updated.Length - tail; index < updated.Length; index += 1)
+        {
+            lines.Add(new DiffLine(LineChange.Same, updated[index], index + 1));
+        }
+
+        return lines;
+    }
+
+    private static int CommonHead(string[] old, string[] updated)
+    {
+        var head = 0;
+        while (head < old.Length && head < updated.Length && string.Equals(old[head], updated[head], StringComparison.Ordinal))
+        {
+            head += 1;
+        }
+
+        return head;
+    }
+
+    /// <summary>How many lines both end with, never reaching back into the head.</summary>
+    private static int CommonTail(string[] old, string[] updated, int head)
+    {
+        var tail = 0;
+        while (tail < old.Length - head && tail < updated.Length - head
+               && string.Equals(old[^(tail + 1)], updated[^(tail + 1)], StringComparison.Ordinal))
+        {
+            tail += 1;
+        }
+
+        return tail;
+    }
+
+    /// <summary>What lies between the common head and tail, aligned, or removed then added past the cap.</summary>
+    /// <param name="old">The old document's middle.</param>
+    /// <param name="updated">The new document's middle.</param>
+    /// <param name="offset">How many lines precede the middle in both documents.</param>
+    private static List<DiffLine> Middle(string[] old, string[] updated, int offset)
+    {
+        if ((long)(old.Length + 1) * (updated.Length + 1) > MaxCells)
+        {
+            var whole = new List<DiffLine>(old.Length + updated.Length);
+            AppendRemainder(whole, old, 0, LineChange.Removed, offset);
+            AppendRemainder(whole, updated, 0, LineChange.Added, offset);
+            return whole;
+        }
+
+        return Walk(old, updated, LongestCommonSubsequence(old, updated), offset);
     }
 
     private static string[] Split(string document)
@@ -89,7 +167,7 @@ internal static class LineDiff
         return lengths;
     }
 
-    private static List<DiffLine> Walk(string[] old, string[] updated, int[,] lengths)
+    private static List<DiffLine> Walk(string[] old, string[] updated, int[,] lengths, int offset)
     {
         var lines = new List<DiffLine>();
         int left = 0, right = 0;
@@ -98,33 +176,33 @@ internal static class LineDiff
         {
             if (string.Equals(old[left], updated[right], StringComparison.Ordinal))
             {
-                lines.Add(new DiffLine(LineChange.Same, updated[right], right + 1));
+                lines.Add(new DiffLine(LineChange.Same, updated[right], offset + right + 1));
                 left += 1;
                 right += 1;
             }
             else if (lengths[left + 1, right] >= lengths[left, right + 1])
             {
-                lines.Add(new DiffLine(LineChange.Removed, old[left], left + 1));
+                lines.Add(new DiffLine(LineChange.Removed, old[left], offset + left + 1));
                 left += 1;
             }
             else
             {
-                lines.Add(new DiffLine(LineChange.Added, updated[right], right + 1));
+                lines.Add(new DiffLine(LineChange.Added, updated[right], offset + right + 1));
                 right += 1;
             }
         }
 
-        AppendRemainder(lines, old, left, LineChange.Removed);
-        AppendRemainder(lines, updated, right, LineChange.Added);
+        AppendRemainder(lines, old, left, LineChange.Removed, offset);
+        AppendRemainder(lines, updated, right, LineChange.Added, offset);
 
         return lines;
     }
 
-    private static void AppendRemainder(List<DiffLine> lines, string[] document, int from, LineChange change)
+    private static void AppendRemainder(List<DiffLine> lines, string[] document, int from, LineChange change, int offset)
     {
         for (var index = from; index < document.Length; index += 1)
         {
-            lines.Add(new DiffLine(change, document[index], index + 1));
+            lines.Add(new DiffLine(change, document[index], offset + index + 1));
         }
     }
 
