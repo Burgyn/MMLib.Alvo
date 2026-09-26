@@ -78,6 +78,14 @@ internal sealed class FieldRefusals
     public string? DescribedBy(string field) => Has(field) ? ProblemId(field) : null;
 
     /// <summary>
+    /// The ids <paramref name="field"/> is described by: its hint, then the sentence that says why it is refused
+    /// while it is (spec §3.8).
+    /// </summary>
+    /// <param name="field">The input's id.</param>
+    /// <param name="hint">The id of the hint under it, the <c>Field</c>'s <c>{For}-hint</c>.</param>
+    public string DescribedBy(string field, string hint) => Has(field) ? $"{hint} {ProblemId(field)}" : hint;
+
+    /// <summary>
     /// The markup under <paramref name="field"/>: the sentence that says why it is refused, and the focus handed to
     /// it after the render that refused it. Nothing when the field is not refused.
     /// </summary>

@@ -87,12 +87,19 @@
         else
         {
             <div class="a-stack a-stack--gap-3">
-                <MudTextField @ref="_tenantField" T="string" Value="_tenantText" ValueChanged="TypeTenant" Immediate="true"
-                              Variant="Variant.Outlined" Label="Tenant" id="@TenantField" Class="a-mono"
-                              autocomplete="off" spellcheck="false"
-                              Error="@_fields.Has(TenantField)" aria-describedby="@_fields.DescribedBy(TenantField)"
-                              HelperText="A tenant id (a uuid). One tenant, not a set: a tenant-scoped entity refuses a person with none before any rule runs." />
-                @_fields.Under(TenantField, () => _tenantField!.FocusAsync())
+                <Field Label="Tenant" For="@TenantField">
+                    <ChildContent>
+                        <MudTextField @ref="_tenantField" T="string" Value="_tenantText" ValueChanged="TypeTenant"
+                                      Immediate="true" Variant="Variant.Outlined" id="@TenantField" Class="a-mono"
+                                      autocomplete="off" spellcheck="false" Error="@_fields.Has(TenantField)"
+                                      aria-describedby="@_fields.DescribedBy(TenantField, TenantHint)" />
+                        @_fields.Under(TenantField, () => _tenantField!.FocusAsync())
+                    </ChildContent>
+                    <Hint>
+                        A tenant id (a uuid). One tenant, not a set: a tenant-scoped entity refuses a person with none
+                        before any rule runs.
+                    </Hint>
+                </Field>
                 <div class="a-row a-row--gap-2">
                     <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true"
                                 id="@($"clear-tenant-{Person.Id.Value}")" Disabled="@(_draft.Tenant.Length == 0)"
@@ -112,6 +119,9 @@
     private MudTextField<string>? _tenantField;
 
     private string TenantField => $"tenant-{Person.Id.Value}";
+
+    /// <summary>The Field's hint under the tenant box, which the box is described by.</summary>
+    private string TenantHint => $"{TenantField}-hint";
 
     /// <summary>The person being edited, as the list last read them.</summary>
     [Parameter, EditorRequired]

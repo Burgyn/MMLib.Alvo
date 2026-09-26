@@ -103,24 +103,26 @@
 
                         <Field Label="Endpoint" For="ai-endpoint">
                             <ChildContent>
-                                <input class="a-input" id="ai-endpoint" value="@_endpoint" autocomplete="off"
-                                       placeholder="e.g. http://localhost:11434/v1"
-                                       @oninput="args => _endpoint = args.Value?.ToString() ?? string.Empty" />
+                                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="ai-endpoint"
+                                              autocomplete="off" aria-describedby="ai-endpoint-hint"
+                                              Placeholder="e.g. http://localhost:11434/v1"
+                                              Value="_endpoint" ValueChanged="text => _endpoint = text ?? string.Empty" />
                             </ChildContent>
                             <Hint>The base address. It is never shown back, on this page or anywhere else.</Hint>
                         </Field>
 
                         <Field Label="Model" For="ai-model">
-                            <input class="a-input" id="ai-model" value="@_model" autocomplete="off"
-                                   placeholder="e.g. qwen3:8b"
-                                   @oninput="args => _model = args.Value?.ToString() ?? string.Empty" />
+                            <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="ai-model"
+                                          autocomplete="off" Placeholder="e.g. qwen3:8b"
+                                          Value="_model" ValueChanged="text => _model = text ?? string.Empty" />
                         </Field>
 
                         <Field Label="API key" For="ai-key">
                             <ChildContent>
-                                <input class="a-input" id="ai-key" type="password" value="@_apiKey" autocomplete="off"
-                                       placeholder="leave empty for a local model"
-                                       @oninput="args => _apiKey = args.Value?.ToString() ?? string.Empty" />
+                                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="ai-key"
+                                              InputType="InputType.Password" autocomplete="off"
+                                              aria-describedby="ai-key-hint" Placeholder="leave empty for a local model"
+                                              Value="_apiKey" ValueChanged="text => _apiKey = text ?? string.Empty" />
                             </ChildContent>
                             <Hint>
                                 Stored encrypted and never read back into this page. Saving replaces the whole

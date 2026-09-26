@@ -73,6 +73,47 @@ and the e2e suite asserts that things render, not that they behave.
 7. **Navigation.** One app bar (search/⌘K, theme, the signed-in menu with Sign out), one nav drawer (responsive: a
    temporary drawer on a phone, plus the existing bottom bar), the pending-changes bar under the app bar. Page title
    row = title, subtitle, primary action, a `…` menu for the rest (the existing `PageHeader` rule).
+8. **Fields** (added 26 Sep, after the screenshots of Task 9 showed three input looks in one editor and an outline
+   striking through the typed-name confirm's label). One presentation for every text input, whichever element draws
+   it — the library's `MudTextField`/`MudSelect`, or a native `<input>` where the library cannot run (sign-in, D10)
+   or is not used (the record form's reference combobox, D7):
+   - **Name above the box**, never floating and never in a notch: the `Field` component's `<label for>` (or, for a
+     group, a label a group names with `aria-labelledby`), left-aligned with the box, `--text-sm`, `--dim`, medium
+     weight. A library input carries **no `Label`, `HelperText`, `Margin` or `Dense`** of its own
+     (`FieldConventionTests`). The one exception is a **search over a list** (the entity filter, the Data search):
+     no visible name, its placeholder says what it searches and `aria-label` names it.
+   - **Box**: the outlined variant, drawn as `.a-input` is — 1 px `--border`, `--border2` on hover, the focus ring on
+     the frame, `--panel` background, a `--radius-xs` corner (the buttons' — the theme's `DefaultBorderRadius` — so a
+     field and its submit have one edge). The library's own outline and its legend are never drawn.
+   - **Text**: `--text-sm` at line-height 1.5, in the font around it (`a-mono` for names and CEL). The value, the name
+     and the hint are one size, so a field reads as one thing. *Deviation from the brief's "body text size"*:
+     `--text-sm`, not `--text-base`, because it is the size every Alvo form control (`.a-input`, `.a-label`,
+     `.a-hint`, `.a-check`) and the static sign-in page already use; `--text-base` is running text.
+   - **Rhythm**: one single-line height everywhere — `--space-2 × --density` above and below one line, `--space-3`
+     at the sides, 40 px minimum on a phone; a field has no margin of its own (the stack spaces it, `--space-1`
+     between name, box and hint). Multi-line = `Lines="n"` rows of the same line-height.
+   - **Required**: an accent `*` after the name, drawn by the stylesheet (`.a-label--required`) with empty
+     alternative text, so the accessible name stays the field's name; `aria-required` on the control says the rest.
+     Never the browser's `required` (it would validate ahead of the engine).
+   - **Hint** under the box, `.a-hint` at `--text-sm`; the `Field` gives it the id `{For}-hint` and the input lists it
+     in `aria-describedby`.
+   - **Field error** (`FieldRefusals`, the record form's own read errors): the sentence directly under the box,
+     `.a-field__problem` at `--text-sm` in `--danger-fg`, with an id the input's `aria-describedby` lists after the
+     hint; the input is `aria-invalid` (`Error`) and its border takes `--danger-fg`. Focus moves to it on a failed
+     submit (§3.3). A refusal no field owns is the `ErrorPanel`.
+   - **Disabled**: `--panel2` background, `--faint` text. **Read-only**: not a box — a value that can never be changed
+     is text (the record form's *Calculated* readout), because a greyed box reads as a broken control.
+   - **Select**: `MudSelect` outlined, named by a `Field` label through `aria-labelledby`, the same box.
+   - **Checkbox / switch**: the library's, its label beside it at `--text-sm`; a group of them sits under a `Field`
+     label ("Constraints"). **Chip groups** (`ChipGroup`) stay Alvo's, under a `Field` label, as V7 has them.
+   - Not a field: the command palette's input, which is the palette's own search-and-go line (§3.7).
+
+   *This item supersedes the plan's control-migration rule on two points*: a library input is not given the
+   `Field`'s label as `Label` nor its hint as `HelperText`; the `Field` stays around it. Reason: the library draws a
+   label on an outlined box in a notch sized by a classless `legend` (which alvo.css's base-layer restore reached),
+   floats it into the box when empty, pads its helper text with an `!important` utility no layer above the library
+   can outrank, and turns the label red with another `!important`. A name the library never draws cannot be drawn any
+   of those ways. `FieldConsistencyScenarios` measures the rule in a browser, both themes, sign-in included.
 
 ## 4. Screen map
 

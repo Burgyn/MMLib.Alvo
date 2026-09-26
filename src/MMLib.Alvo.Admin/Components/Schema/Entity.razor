@@ -45,10 +45,17 @@
                     Renaming discards it. Cancel and save it first to keep it.
                 </AlvoAlert>
             }
-            <MudTextField T="string" Value="_newName" ValueChanged="name => _newName = name ?? string.Empty"
-                          Immediate="true" Variant="Variant.Outlined" Label="New name" id="rename-entity-name"
-                          autocomplete="off" Class="a-mono"
-                          HelperText="@($"{DescriptorNames.Hint} The change is carried by renamedFrom, so the apply moves the table instead of dropping it.")" />
+            <Field Label="New name" For="rename-entity-name">
+                <ChildContent>
+                    <MudTextField T="string" Value="_newName" ValueChanged="name => _newName = name ?? string.Empty"
+                                  Immediate="true" Variant="Variant.Outlined" id="rename-entity-name"
+                                  autocomplete="off" Class="a-mono" aria-describedby="rename-entity-name-hint" />
+                </ChildContent>
+                <Hint>
+                    @DescriptorNames.Hint The change is carried by <code class="a-mono">renamedFrom</code>, so the apply
+                    moves the table instead of dropping it.
+                </Hint>
+            </Field>
         </AlvoEditor>
     }
 

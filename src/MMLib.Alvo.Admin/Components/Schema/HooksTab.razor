@@ -122,7 +122,6 @@ else
                        data-testid="hook-points" SelectedChanged="points => Choose(points[0])" />
         </Field>
 
-        @* The hint carries markup, so the Field keeps it and the box takes its name from the Field's label. *@
         <Field Label="Only when (optional)" For="hook-condition">
             <ChildContent>
                 <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-condition" Class="a-mono"
@@ -130,7 +129,7 @@ else
                               Value="_hook.Condition" ValueChanged="text => _hook.Condition = text ?? string.Empty" />
             </ChildContent>
             <Hint>
-                <span id="hook-condition-hint" data-testid="hook-condition-hint">
+                <span data-testid="hook-condition-hint">
                     CEL over @((MarkupString)_hook.Images) and <code class="a-mono">@@user</code>. Left empty, the hook
                     runs on every write.
                 </span>
@@ -160,7 +159,7 @@ else
                 <Field Label="Refuse with" For="hook-reject">
                     <ChildContent>
                         <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-reject" autocomplete="off"
-                                      MaxLength="500" Placeholder="A completed work order cannot be reopened."
+                                      aria-describedby="hook-reject-hint" MaxLength="500" Placeholder="A completed work order cannot be reopened."
                                       Value="_hook.RejectMessage" ValueChanged="text => _hook.RejectMessage = text ?? string.Empty" />
                     </ChildContent>
                     <Hint>
@@ -171,13 +170,15 @@ else
                 break;
             case HookBuilder.Mutate:
                 <div class="a-field-row">
-                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-mutate-field" Label="Field"
-                                  Class="a-mono" autocomplete="off" Placeholder="completed_on"
-                                  Value="_hook.MutateField" ValueChanged="text => _hook.MutateField = text ?? string.Empty" />
+                    <Field Label="Field" For="hook-mutate-field">
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-mutate-field"
+                                      Class="a-mono" autocomplete="off" Placeholder="completed_on"
+                                      Value="_hook.MutateField" ValueChanged="text => _hook.MutateField = text ?? string.Empty" />
+                    </Field>
                     <Field Label="Set to" For="hook-mutate-value">
                         <ChildContent>
                             <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-mutate-value"
-                                          Class="a-mono" autocomplete="off" Placeholder="now()"
+                                          aria-describedby="hook-mutate-value-hint" Class="a-mono" autocomplete="off" Placeholder="now()"
                                           Value="_hook.MutateValue" ValueChanged="text => _hook.MutateValue = text ?? string.Empty" />
                         </ChildContent>
                         <Hint>
@@ -191,7 +192,7 @@ else
                 <Field Label="Endpoint" For="hook-endpoint">
                     <ChildContent>
                         <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-endpoint" Class="a-mono"
-                                      autocomplete="off" Placeholder="dispatch"
+                                      aria-describedby="hook-endpoint-hint" autocomplete="off" Placeholder="dispatch"
                                       Value="_hook.Endpoint" ValueChanged="text => _hook.Endpoint = text ?? string.Empty" />
                     </ChildContent>
                     <Hint>
@@ -202,12 +203,16 @@ else
                 break;
             case HookBuilder.Email:
                 <div class="a-field-row">
-                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-template" Label="Template"
-                                  Class="a-mono" autocomplete="off" Placeholder="work_order_completed"
-                                  Value="_hook.Template" ValueChanged="text => _hook.Template = text ?? string.Empty" />
-                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-to" Label="To"
-                                  Class="a-mono" autocomplete="off" Placeholder="{{new.contact_email}}"
-                                  Value="_hook.To" ValueChanged="text => _hook.To = text ?? string.Empty" />
+                    <Field Label="Template" For="hook-template">
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-template"
+                                      Class="a-mono" autocomplete="off" Placeholder="work_order_completed"
+                                      Value="_hook.Template" ValueChanged="text => _hook.Template = text ?? string.Empty" />
+                    </Field>
+                    <Field Label="To" For="hook-to">
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-to"
+                                      Class="a-mono" autocomplete="off" Placeholder="{{new.contact_email}}"
+                                      Value="_hook.To" ValueChanged="text => _hook.To = text ?? string.Empty" />
+                    </Field>
                 </div>
                 break;
         }

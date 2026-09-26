@@ -29,13 +29,15 @@
         *@
         @if (_schema.Entities.Count > TabStripLimit)
         {
-            <MudSelect T="string" Value="Selected" ValueChanged="Choose" Label="Entity" Variant="Variant.Outlined"
-                       data-testid="rules-entity" Class="a-mono a-field--narrow">
-                @foreach (var entity in _schema.Entities)
-                {
-                    <MudSelectItem Value="@entity.Name">@entity.Name</MudSelectItem>
-                }
-            </MudSelect>
+            <Field Label="Entity" LabelId="rules-entity-label" class="a-field--narrow">
+                <MudSelect T="string" Value="Selected" ValueChanged="Choose" Variant="Variant.Outlined"
+                           aria-labelledby="rules-entity-label" data-testid="rules-entity" Class="a-mono">
+                    @foreach (var entity in _schema.Entities)
+                    {
+                        <MudSelectItem Value="@entity.Name">@entity.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </Field>
         }
         else
         {

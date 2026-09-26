@@ -41,28 +41,23 @@
             {
                 <div class="a-field">
                     @*
-                        A Mud input draws its own label. An enum's chips and a reference's combobox are Alvo's,
-                        so they keep this one: a <label for> may only name a labelable element, and an enum's
-                        chips are a group of buttons, not one control, so the group names this label by id instead.
+                        The label above the control, the control, the sentence that refuses it, then the hint: the
+                        order of every field (spec §3.8). A <label for> may only name a labelable element, and an
+                        enum's chips are a group of buttons, not one control, so the group names this label by id.
                     *@
                     @if (OwnLabel(column))
                     {
-                        <label class="a-label" id="@LabelId(column)" for="@(column.Type == FieldType.Enum ? null : ControlId(column))">
-                            @GridColumns.Header(column)
-                            @if (column.Required)
-                            {
-                                <span class="a-label__required" aria-hidden="true"> *</span>
-                            }
-                        </label>
+                        <label class="@(column.Required ? "a-label a-label--required" : "a-label")" id="@LabelId(column)"
+                               for="@(column.Type == FieldType.Enum ? null : ControlId(column))">@GridColumns.Header(column)</label>
+                    }
+                    @Control(column)
+                    @if (_problems.TryGetValue(column.Name, out var problem))
+                    {
+                        <span class="a-field__problem" id="@ProblemId(column)" data-testid="field-problem">@problem</span>
                     }
                     <span class="a-hint" id="@HintId(column)" title="@column.FormatPattern">
                         <span class="a-ident">@column.Name · @TypeOf(column)</span>@Hint(column)
                     </span>
-                    @Control(column)
-                    @if (_problems.TryGetValue(column.Name, out var problem))
-                    {
-                        <span class="a-field__problem" data-testid="field-problem">@problem</span>
-                    }
                 </div>
             }
         </div>
@@ -102,17 +97,15 @@
         FieldType.Boolean => Flag(column),
         FieldType.Enum => Choice(column),
         FieldType.Text => @<MudTextField T="string" Variant="Variant.Outlined" Lines="4" Immediate="true"
-                                         id="@ControlId(column)" Label="@GridColumns.Header(column)"
-                                         Class="@RequiredMark(column)" aria-required="@Required(column)"
-                                         aria-describedby="@HintId(column)"
+                                         id="@ControlId(column)" aria-required="@Required(column)"
+                                         Error="@Refused(column)" aria-describedby="@DescribedBy(column)"
                                          Value="@_draft.Text(column.Name)"
                                          ValueChanged="text => Set(column.Name, text)" />,
         _ when _pickers.TryGetValue(column.Name, out var picker) => Reference(picker),
         _ => @<MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="@ControlId(column)"
                            InputType="@MudInputType(column)" InputMode="@MudInputMode(column)"
-                           Label="@GridColumns.Header(column)" Class="@RequiredMark(column)"
-                           aria-required="@Required(column)"
-                           aria-describedby="@HintId(column)" Value="@_draft.Text(column.Name)"
+                           aria-required="@Required(column)" Error="@Refused(column)"
+                           aria-describedby="@DescribedBy(column)" Value="@_draft.Text(column.Name)"
                            ValueChanged="text => Set(column.Name, text)" />,
     };
 
@@ -122,13 +115,13 @@
         return @<MudSwitch T="bool" Value="on" ValueChanged="_ => Toggle(column.Name)" Color="Color.Primary"
                            Label="@GridColumns.Header(column)" Class="@RequiredMark(column)"
                            id="@ControlId(column)" aria-required="@Required(column)"
-                           aria-describedby="@HintId(column)" />;
+                           aria-describedby="@DescribedBy(column)" />;
     }
 
     private RenderFragment Choice(FieldSchema column) => @<ChipGroup TValue="string" Items="@(column.EnumValues ?? [])"
                                                                      Selected="@([_draft.Text(column.Name)])"
                                                                      id="@ControlId(column)" aria-labelledby="@LabelId(column)"
-                                                                     aria-describedby="@HintId(column)" aria-required="@Required(column)"
+                                                                     aria-describedby="@DescribedBy(column)" aria-required="@Required(column)"
                                                                      SelectedChanged="options => Set(column.Name, options[0])" />;
 
     /// <summary>
@@ -151,7 +144,8 @@
                    aria-autocomplete="list" aria-expanded="@(picker.Open ? "true" : "false")"
                    aria-controls="@(picker.Open ? list : null)"
                    aria-activedescendant="@(picker.ActiveOption is { } active ? OptionId(column, active) : null)"
-                   aria-required="@Required(column)" aria-describedby="@HintId(column)"
+                   aria-required="@Required(column)" aria-describedby="@DescribedBy(column)"
+                   aria-invalid="@(Refused(column) ? "true" : null)"
                    placeholder="@Placeholder(picker)" title="@_draft.Text(column.Name)" value="@picker.Term"
                    data-testid="ref-input"
                    @oninput="args => RefTypedAsync(picker, args.Value?.ToString())"

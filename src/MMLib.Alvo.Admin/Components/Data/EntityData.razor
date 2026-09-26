@@ -67,7 +67,7 @@
             @if (_searchable.Count > 0)
             {
                 <div class="a-grid-search">
-                    <MudTextField T="string" Variant="Variant.Outlined" Margin="Margin.Dense" Immediate="true"
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true"
                                   InputType="InputType.Search" data-testid="grid-search" data-alvo-search
                                   Placeholder="@($"Search {EntityName}…")" aria-label="@($"Search {EntityName}")"
                                   title="@($"Looks in {string.Join(", ", _searchable)}")"

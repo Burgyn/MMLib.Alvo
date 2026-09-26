@@ -105,8 +105,32 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
         session.AssertConsoleClean();
     }
 
+    /// <summary>
+    /// Above the phone and up to 920 px the pane still covers the page: beside it the page column would be narrower than
+    /// the 480 px a table needs (360 px at 800), while the bottom bar and the nav drawer stay a desktop's.
+    /// </summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task Between_the_phone_and_1100_px_the_nav_drawer_steps_aside_so_the_page_keeps_its_width()
+    public async Task Up_to_920_px_the_pane_covers_the_page_which_is_inert_until_it_closes()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 800);
+        await session.GoAsync("/schema");
+        (await session.Page.GetByTestId("bottom-nav").IsVisibleAsync()).ShouldBeFalse("800 px is not a phone");
+
+        await session.Page.GetByTestId("assistant-launch").ClickAsync();
+        await session.Page.WaitForFunctionAsync("() => !!document.getElementById('a-content')?.closest('[inert]')");
+        var box = await BoxAsync(Pane(session));
+
+        box.X.ShouldBe(0, 1);
+        box.Width.ShouldBe(800, 1);
+        await session.AssertNoHorizontalScrollAsync();
+
+        await session.Page.GetByRole(AriaRole.Button, new() { Name = "Close the assistant" }).ClickAsync();
+        await session.Page.WaitForFunctionAsync("() => !document.getElementById('a-content')?.closest('[inert]')");
+        session.AssertConsoleClean();
+    }
+
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Between_920_and_1100_px_the_nav_drawer_steps_aside_so_the_page_keeps_its_width()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 1024);
         await session.GoAsync("/schema");

@@ -111,6 +111,15 @@ public partial class RecordForm
 
     private static string LabelId(FieldSchema column) => $"rf-{column.Name}-label";
 
+    private static string ProblemId(FieldSchema column) => $"rf-{column.Name}-problem";
+
+    /// <summary>What the control is described by: its hint, and the sentence under it while it is refused (spec §3.8).</summary>
+    private string DescribedBy(FieldSchema column)
+        => _problems.ContainsKey(column.Name) ? $"{HintId(column)} {ProblemId(column)}" : HintId(column);
+
+    /// <summary>Whether the control is refused, which draws it in the error tone and marks it <c>aria-invalid</c>.</summary>
+    private bool Refused(FieldSchema column) => _problems.ContainsKey(column.Name);
+
     private static string TypeOf(FieldSchema column) => column.Reference is { } reference
         ? $"ref to {reference.TargetEntity}"
         : column.Type.ToString().ToLowerInvariant();
@@ -305,10 +314,10 @@ public partial class RecordForm
         => column.Type == FieldType.Decimal ? MudBlazor.InputMode.@decimal : MudBlazor.InputMode.text;
 
     /// <summary>
-    /// Whether the field draws Alvo's own label: the enum's chip group and the reference's combobox are Alvo's
-    /// controls, and every other kind is a Mud input that draws its label itself.
+    /// Whether the field is named by a label above its control, as every field is (spec §3.8). A boolean is not: its
+    /// switch is named by the text beside it, the way a checkbox is.
     /// </summary>
-    private bool OwnLabel(FieldSchema column) => column.Type == FieldType.Enum || _pickers.ContainsKey(column.Name);
+    private static bool OwnLabel(FieldSchema column) => column.Type != FieldType.Boolean;
 
     /// <summary>What the schema says about this field, in the words an author would recognise.</summary>
     private string Hint(FieldSchema column)

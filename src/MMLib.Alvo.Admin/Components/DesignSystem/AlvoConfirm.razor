@@ -18,8 +18,13 @@
             @ChildContent
             @if (TypeToConfirm is { } expected)
             {
-                <MudTextField T="string" Value="_typed" ValueChanged="Typed" Immediate="true" Variant="Variant.Outlined"
-                              Label="@($"Type {expected} to allow it")" id="confirm-name" autocomplete="off" spellcheck="false" />
+                <Field For="confirm-name">
+                    <LabelContent>Type <code class="a-mono">@expected</code> to allow it</LabelContent>
+                    <ChildContent>
+                        <MudTextField T="string" Value="_typed" ValueChanged="Typed" Immediate="true"
+                                      Variant="Variant.Outlined" id="confirm-name" autocomplete="off" spellcheck="false" />
+                    </ChildContent>
+                </Field>
             }
         </div>
     </DialogContent>

@@ -93,10 +93,14 @@
             }
 
             <Panel Padded="true">
-                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" Label="Why" id="apply-reason"
-                              HelperText="Configuration history shows this on the revision forever."
-                              Placeholder="@ReasonPlaceholder" Value="_reason"
-                              ValueChanged="text => _reason = text ?? string.Empty" />
+                <Field Label="Why" For="apply-reason">
+                    <ChildContent>
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="apply-reason"
+                                      aria-describedby="apply-reason-hint" Placeholder="@ReasonPlaceholder" Value="_reason"
+                                      ValueChanged="text => _reason = text ?? string.Empty" />
+                    </ChildContent>
+                    <Hint>Configuration history shows this on the revision forever.</Hint>
+                </Field>
             </Panel>
 
             <div class="a-toolbar">

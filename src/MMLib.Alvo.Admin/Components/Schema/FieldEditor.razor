@@ -44,7 +44,8 @@
                 @* The hint carries markup, so the Field keeps it and names the box; the sheet's first field takes
                    focus when it opens (DefaultFocus), so it is typed into straight away. *@
                 <MudTextField T="string" @ref="_nameField" Variant="Variant.Outlined" Immediate="true" id="new-field-name"
-                              Placeholder="e.g. scheduled_for" autocomplete="off" Class="a-mono"
+                              aria-describedby="new-field-name-hint" Placeholder="e.g. scheduled_for" autocomplete="off"
+                              Class="a-mono"
                               Value="_facets.Name" ValueChanged="name => _facets.Name = name ?? string.Empty" />
             </ChildContent>
             <Hint>
@@ -129,30 +130,49 @@
             @switch (_facets.Type)
             {
                 case FieldType.String:
-                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-max" Label="Max length"
-                                  InputType="InputType.Number" min="1" Placeholder="no limit"
-                                  HelperText="Leave it empty for no limit — the schema's own default."
-                                  Value="@_facets.MaxLength?.ToString(CultureInfo.InvariantCulture)"
-                                  ValueChanged="text => _facets.MaxLength = OptionalNumber(text)" />
+                    <Field Label="Max length" For="new-field-max">
+                        <ChildContent>
+                            <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-max"
+                                          InputType="InputType.Number" min="1" Placeholder="no limit"
+                                          aria-describedby="new-field-max-hint"
+                                          Value="@_facets.MaxLength?.ToString(CultureInfo.InvariantCulture)"
+                                          ValueChanged="text => _facets.MaxLength = OptionalNumber(text)" />
+                        </ChildContent>
+                        <Hint>Leave it empty for no limit — the schema's own default.</Hint>
+                    </Field>
                     break;
                 case FieldType.Decimal:
                     <div class="a-field-row">
-                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-precision"
-                                      Label="Precision" InputType="InputType.Number"
-                                      HelperText="Total digits, not the ones before the point."
-                                      Value="@_facets.Precision.ToString(CultureInfo.InvariantCulture)"
-                                      ValueChanged="text => _facets.Precision = Number(text, 10)" />
-                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-scale"
-                                      Label="Scale" InputType="InputType.Number" HelperText="Digits after the point."
-                                      Value="@_facets.Scale.ToString(CultureInfo.InvariantCulture)"
-                                      ValueChanged="text => _facets.Scale = Number(text, 2)" />
+                        <Field Label="Precision" For="new-field-precision">
+                            <ChildContent>
+                                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-precision"
+                                              InputType="InputType.Number" aria-describedby="new-field-precision-hint"
+                                              Value="@_facets.Precision.ToString(CultureInfo.InvariantCulture)"
+                                              ValueChanged="text => _facets.Precision = Number(text, 10)" />
+                            </ChildContent>
+                            <Hint>Total digits, not the ones before the point.</Hint>
+                        </Field>
+                        <Field Label="Scale" For="new-field-scale">
+                            <ChildContent>
+                                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-scale"
+                                              InputType="InputType.Number" aria-describedby="new-field-scale-hint"
+                                              Value="@_facets.Scale.ToString(CultureInfo.InvariantCulture)"
+                                              ValueChanged="text => _facets.Scale = Number(text, 2)" />
+                            </ChildContent>
+                            <Hint>Digits after the point.</Hint>
+                        </Field>
                     </div>
                     break;
                 case FieldType.Enum:
-                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-values" Label="Values"
-                                  Placeholder="e.g. scheduled, in_progress, completed"
-                                  HelperText="Comma separated. An enum with no values is refused by the schema."
-                                  Value="_facets.Values" ValueChanged="text => _facets.Values = text ?? string.Empty" />
+                    <Field Label="Values" For="new-field-values">
+                        <ChildContent>
+                            <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-values"
+                                          Placeholder="e.g. scheduled, in_progress, completed"
+                                          aria-describedby="new-field-values-hint"
+                                          Value="_facets.Values" ValueChanged="text => _facets.Values = text ?? string.Empty" />
+                        </ChildContent>
+                        <Hint>Comma separated. An enum with no values is refused by the schema.</Hint>
+                    </Field>
                     break;
                 case FieldType.Ref:
                     <Field Label="Points at" LabelId="new-field-target">
@@ -220,10 +240,18 @@
 
         @if (_facets.Kind == FieldKind.Computed)
         {
-            <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" Lines="2" id="new-field-computed"
-                          Label="Expression" Class="a-mono" spellcheck="false" Placeholder="e.g. unit_price * amount"
-                          HelperText="CEL over this row's own fields — and its rollups. No constants: the column is DDL, which carries no bound value. The apply compiles it, and Preview shows its refusal in the framework's own words."
-                          Value="_facets.Computed" ValueChanged="text => _facets.Computed = text ?? string.Empty" />
+            <Field Label="Expression" For="new-field-computed">
+                <ChildContent>
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" Lines="2" id="new-field-computed"
+                                  Class="a-mono" spellcheck="false" Placeholder="e.g. unit_price * amount"
+                                  aria-describedby="new-field-computed-hint"
+                                  Value="_facets.Computed" ValueChanged="text => _facets.Computed = text ?? string.Empty" />
+                </ChildContent>
+                <Hint>
+                    CEL over this row's own fields — and its rollups. No constants: the column is DDL, which carries no
+                    bound value. The apply compiles it, and Preview shows its refusal in the framework's own words.
+                </Hint>
+            </Field>
         }
 
         @if (_facets.DrawsDefault)
@@ -243,7 +271,8 @@
                     else
                     {
                         <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-default"
-                                      Placeholder="@_facets.DefaultPlaceholder" autocomplete="off"
+                                      aria-describedby="new-field-default-hint" Placeholder="@_facets.DefaultPlaceholder"
+                                      autocomplete="off"
                                       Value="_facets.Default" ValueChanged="text => _facets.Default = text ?? string.Empty" />
                     }
                 </ChildContent>

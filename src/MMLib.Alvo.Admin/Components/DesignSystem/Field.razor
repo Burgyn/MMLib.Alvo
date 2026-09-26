@@ -7,21 +7,23 @@
     a <label> pointing at nothing is a label a screen reader announces for no control.
 
     The hint is `.a-hint`, not the section subtitle. The two were one class with two meanings, and a field's
-    hint then changed whenever a section's subtitle did.
+    hint then changed whenever a section's subtitle did. It sits under the control, and when the label names one
+    control the hint has the id `{For}-hint`, which that control lists in its aria-describedby (spec §3.8): a
+    screen reader landing on the box hears what it takes, not only what it is called.
 *@
 <div @attributes="Attributes" class="@CssClass.Of("a-field", Attributes)">
     @if (For is { Length: > 0 })
     {
-        <label class="a-label" id="@LabelId" for="@For">@Text@Marker</label>
+        <label class="@LabelClass" id="@LabelId" for="@For">@Text</label>
     }
     else
     {
-        <span class="a-label" id="@LabelId">@Text@Marker</span>
+        <span class="@LabelClass" id="@LabelId">@Text</span>
     }
     @ChildContent
     @if (Hint is not null)
     {
-        <span class="a-hint">@Hint</span>
+        <span class="a-hint" id="@HintId">@Hint</span>
     }
 </div>
 
@@ -65,9 +67,11 @@
     [Parameter(CaptureUnmatchedValues = true)]
     public IReadOnlyDictionary<string, object>? Attributes { get; set; }
 
+    private string? HintId => For is { Length: > 0 } ? $"{For}-hint" : null;
+
     private RenderFragment Text => LabelContent ?? (builder => builder.AddContent(0, Label));
 
-    private RenderFragment? Marker => Required
-        ? @<span class="a-label__required" aria-hidden="true"> *</span>
-        : null;
+    /* The mark is drawn by the stylesheet with empty alternative text, so it is in no accessible name: the box is
+       called "Code", not "Code *", and aria-required on the control says the rest. */
+    private string LabelClass => Required ? "a-label a-label--required" : "a-label";
 }

@@ -55,22 +55,30 @@ else
     {
         var declared = Declared(operation);
         <ListRow class="a-listrow--roomy a-listrow--stacked">
-            <div class="a-row">
-                <span class="@($"a-badge {(declared is { Length: > 0 } ? "a-badge--accent" : string.Empty)}")">@operation</span>
-                <code class="a-ident">@Route(operation)</code>
-                @if (Drafts.IsDirty(operation, declared))
-                {
-                    <span class="a-badge a-badge--warn" data-testid="@($"rule-dirty-{operation}")">unsaved</span>
-                }
-            </div>
-            <MudTextField T="string" Variant="Variant.Outlined" Lines="2" Immediate="true" id="@($"rule-{operation}")"
-                          Class="a-mono" spellcheck="false" Label="@($"{operation} rule")"
-                          Placeholder="@EmptyHint"
-                          Value="@Drafts.Text(operation, declared)" ValueChanged="text => Drafts.Set(operation, text ?? string.Empty)"
-                          OnKeyDown="args => KeyAsync(operation, args)" />
-            <div class="a-row">
-                <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" data-testid="@($"rule-save-{operation}")"
-                            Disabled="@(!Drafts.IsDirty(operation, declared))" OnClick="_ => SaveAsync(operation)">Save rule</AlvoButton>
+            <div class="a-stack a-stack--gap-3">
+                @* The operation and its route are the box's name, above it as every field's is (spec §3.8). *@
+                <Field For="@($"rule-{operation}")">
+                    <LabelContent>
+                        <span class="a-row">
+                            <span class="@($"a-badge {(declared is { Length: > 0 } ? "a-badge--accent" : string.Empty)}")">@operation</span>
+                            <code class="a-ident">@Route(operation)</code>
+                            @if (Drafts.IsDirty(operation, declared))
+                            {
+                                <span class="a-badge a-badge--warn" data-testid="@($"rule-dirty-{operation}")">unsaved</span>
+                            }
+                        </span>
+                    </LabelContent>
+                    <ChildContent>
+                        <MudTextField T="string" Variant="Variant.Outlined" Lines="2" Immediate="true" id="@($"rule-{operation}")"
+                                      Class="a-mono" spellcheck="false" Placeholder="@EmptyHint"
+                                      Value="@Drafts.Text(operation, declared)" ValueChanged="text => Drafts.Set(operation, text ?? string.Empty)"
+                                      OnKeyDown="args => KeyAsync(operation, args)" />
+                    </ChildContent>
+                </Field>
+                <div class="a-row">
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" data-testid="@($"rule-save-{operation}")"
+                                Disabled="@(!Drafts.IsDirty(operation, declared))" OnClick="_ => SaveAsync(operation)">Save rule</AlvoButton>
+                </div>
             </div>
         </ListRow>
     }

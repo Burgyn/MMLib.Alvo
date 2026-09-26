@@ -96,11 +96,16 @@
         be asked twice.
     *@
     <div class="a-assistant__ask">
-        <MudTextField @ref="_question" T="string" Variant="Variant.Outlined" Lines="3" Immediate="true" id="assistant-message"
-                      Label="Your question" Placeholder="Add a nullable note column to work orders"
-                      HelperText="Ctrl+Enter or ⌘+Enter sends. Enter is a new line."
-                      Value="_message" ValueChanged="text => _message = text ?? string.Empty"
-                      OnKeyDown="KeyAsync" />
+        <Field Label="Your question" For="assistant-message">
+            <ChildContent>
+                <MudTextField @ref="_question" T="string" Variant="Variant.Outlined" Lines="3" Immediate="true"
+                              id="assistant-message" aria-describedby="assistant-message-hint"
+                              Placeholder="Add a nullable note column to work orders"
+                              Value="_message" ValueChanged="text => _message = text ?? string.Empty"
+                              OnKeyDown="KeyAsync" />
+            </ChildContent>
+            <Hint>Ctrl+Enter or ⌘+Enter sends. Enter is a new line.</Hint>
+        </Field>
         <div class="a-row a-row--gap-2">
             <AlvoButton Tone="AlvoButton.ButtonTone.Primary" data-testid="assistant-send" Busy="_busy"
                         Disabled="@(_message.Trim().Length == 0)" OnClick="_ => AskAsync()">

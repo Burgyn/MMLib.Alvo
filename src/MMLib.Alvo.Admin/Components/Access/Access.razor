@@ -112,11 +112,13 @@
                 Dirty="@(_newEmail.Trim().Length > 0)"
                 OnSubmit="CreateAsync" OnClose="CloseCreate">
         @EditorProblem
-        <MudTextField @ref="_emailField" T="string" Value="_newEmail" ValueChanged="TypeEmail"
-                      Immediate="true" Variant="Variant.Outlined" Label="Email" InputType="InputType.Email"
-                      id="@EmailField" Placeholder="dispatcher@example.com"
-                      Error="@_fields.Has(EmailField)" aria-describedby="@_fields.DescribedBy(EmailField)" />
-        @_fields.Under(EmailField, () => _emailField!.FocusAsync())
+        <Field Label="Email" For="@EmailField">
+            <MudTextField @ref="_emailField" T="string" Value="_newEmail" ValueChanged="TypeEmail"
+                          Immediate="true" Variant="Variant.Outlined" InputType="InputType.Email"
+                          id="@EmailField" Placeholder="dispatcher@example.com"
+                          Error="@_fields.Has(EmailField)" aria-describedby="@_fields.DescribedBy(EmailField)" />
+            @_fields.Under(EmailField, () => _emailField!.FocusAsync())
+        </Field>
     </AlvoEditor>
 }
 

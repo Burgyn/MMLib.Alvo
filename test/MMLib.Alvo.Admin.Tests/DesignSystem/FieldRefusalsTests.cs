@@ -33,6 +33,16 @@ public sealed class FieldRefusalsTests
     }
 
     [Fact]
+    public void A_hinted_field_is_described_by_its_hint_and_while_refused_by_the_reason_too()
+    {
+        var refusals = new FieldRefusals();
+
+        refusals.DescribedBy("tenant", "tenant-hint").ShouldBe("tenant-hint");
+        refusals.Refuse("tenant", "Not a uuid.");
+        refusals.DescribedBy("tenant", "tenant-hint").ShouldBe("tenant-hint tenant-problem");
+    }
+
+    [Fact]
     public void Every_refusal_is_a_new_attempt_so_the_same_field_takes_focus_again()
     {
         var refusals = new FieldRefusals();

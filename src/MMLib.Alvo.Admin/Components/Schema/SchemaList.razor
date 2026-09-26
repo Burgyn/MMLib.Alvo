@@ -42,9 +42,14 @@
                 @* Keyed by the attempt, so every refused add draws a new panel that takes focus again. *@
                 <ErrorPanel @key="_refusals" TakeFocus="true" Title="That entity cannot be added" Fix="@_refusal" />
             }
-            <MudTextField T="string" Value="_name" ValueChanged="name => _name = name ?? string.Empty" Immediate="true"
-                          Variant="Variant.Outlined" Label="Name" id="new-entity-name" autocomplete="off"
-                          Class="a-mono" Placeholder="e.g. invoices" HelperText="@DescriptorNames.Hint" />
+            <Field Label="Name" For="new-entity-name">
+                <ChildContent>
+                    <MudTextField T="string" Value="_name" ValueChanged="name => _name = name ?? string.Empty" Immediate="true"
+                                  Variant="Variant.Outlined" id="new-entity-name" autocomplete="off" Class="a-mono"
+                                  Placeholder="e.g. invoices" aria-describedby="new-entity-name-hint" />
+                </ChildContent>
+                <Hint>@DescriptorNames.Hint</Hint>
+            </Field>
             <Field Label="Constraints">
                 <ChildContent>
                     <MudCheckBox T="bool" Value="_scoped" ValueChanged="on => _scoped = on" Label="tenant-scoped" />
@@ -75,9 +80,11 @@
     }
     else
     {
+        @* A search over the list, so it is named by its placeholder and aria-label, not a label above it (spec §3.8),
+           and drawn like the Data screen's search. *@
         <MudTextField T="string" Value="_filter" ValueChanged="term => _filter = term ?? string.Empty" Immediate="true"
-                      Variant="Variant.Outlined" Label="Filter entities" Clearable="true" id="entity-filter"
-                      data-testid="entity-filter" autocomplete="off" Class="a-filter" />
+                      Variant="Variant.Outlined" Placeholder="Filter entities" aria-label="Filter entities"
+                      Clearable="true" id="entity-filter" data-testid="entity-filter" autocomplete="off" Class="a-filter" />
 
         var pending = EntityFilter.Apply(Pending, _filter);
         var applied = EntityFilter.Apply(_schema.Entities.Select(entity => entity.Name), _filter);

@@ -50,9 +50,15 @@
                             Fix="@_refusal" />
             }
 
-            <MudTextField T="string" Variant="Variant.Outlined" Lines="12" Immediate="true" id="import-json" Class="a-mono"
-                          spellcheck="false" Label="Descriptor JSON" HelperText="@ImportHint"
-                          Value="_pasted" ValueChanged="text => _pasted = text ?? string.Empty" OnKeyDown="ImportKeyAsync" />
+            <Field Label="Descriptor JSON" For="import-json">
+                <ChildContent>
+                    <MudTextField T="string" Variant="Variant.Outlined" Lines="12" Immediate="true" id="import-json"
+                                  Class="a-mono" spellcheck="false" aria-describedby="import-json-hint"
+                                  Value="_pasted" ValueChanged="text => _pasted = text ?? string.Empty"
+                                  OnKeyDown="ImportKeyAsync" />
+                </ChildContent>
+                <Hint>@ImportHint</Hint>
+            </Field>
 
             <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Disabled="@(_pasted.Trim().Length == 0)"
                         data-testid="import-run" OnClick="_ => Import()">

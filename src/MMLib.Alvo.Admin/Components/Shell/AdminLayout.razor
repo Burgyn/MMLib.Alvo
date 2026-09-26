@@ -25,7 +25,7 @@
 <MudDialogProvider DefaultFocus="DefaultFocus.FirstChild" BackdropClick="false" CloseButton="false" />
 <MudSnackbarProvider />
 
-<MudLayout Class="a-shell">
+<MudLayout Class="@(PageCovered ? "a-shell a-shell--covered" : "a-shell")">
     <MudAppBar Dense="true" Elevation="0" Class="a-appbar" data-testid="appbar">
         <AlvoButton @ref="_sectionsButton" Tone="AlvoButton.ButtonTone.Ghost" Small="true" class="a-only-mobile" aria-label="Sections"
                     aria-expanded="@(_navOpen ? "true" : "false")" data-testid="more-sections" OnClick="_ => ToggleNav()">
@@ -116,14 +116,15 @@
         @*
             Beside the page, not over it (spec §3.1): a persistent end drawer at every width, with no scrim, no scroll
             lock and no focus trap, and labelled so a screen reader reaches it as a region. Clipped under the app bar,
-            so the header is never covered. Above the phone width the page column narrows beside it, pending bar
-            and all, and up to 1100 px the nav drawer steps aside while it is open (see NavShown). On a phone it is
-            the whole width below the app bar and does cover the page, the pending bar and the bottom bar: that is
-            the trade-off of a full-width pane, and the page under it is inert until it closes. Kept mounted while
-            closed, because the thread lives in the component and closing the pane must not end the conversation.
+            so the header is never covered. Where the page keeps a usable column beside it the page narrows, pending
+            bar and all, and up to 1100 px the nav drawer steps aside while it is open (see NavShown). Up to
+            AssistantCoverWidth there is no such column, so it is the whole width below the app bar and does cover
+            the page, the pending bar and the bottom bar: that is the trade-off of a full-width pane, and the page
+            under it is inert until it closes. Kept mounted while closed, because the thread lives in the component
+            and closing the pane must not end the conversation.
         *@
         <MudDrawer Open="_assistantOpen" Anchor="Anchor.End" Variant="DrawerVariant.Persistent"
-                   ClipMode="DrawerClipMode.Always" Elevation="0" Width="min(440px, 100vw)"
+                   ClipMode="DrawerClipMode.Always" Elevation="0" Width="@AssistantWidth"
                    Class="a-assistant-drawer" role="complementary" aria-label="Ask Alvo">
             <CascadingValue Value="AssistantPane">
                 <AssistantDrawer />
@@ -146,17 +147,34 @@
     /// </summary>
     private const int NarrowWidth = 1100;
 
+    /// <summary>
+    /// The widest viewport where the assistant's pane covers the page rather than standing beside it: the pane's 440 px
+    /// and the 480 px the narrowest usable page column needs. Its own width and not <see cref="PhoneWidth"/>, which also
+    /// decides the bottom bar and the temporary nav drawer: at 800 px the page beside the pane was 360 px, a column
+    /// too narrow to read a table in, while the rest of the shell is a desktop's.
+    /// </summary>
+    private const int AssistantCoverWidth = 920;
+
+    /// <summary>The pane's width beside the page.</summary>
+    private const string AssistantPaneWidth = "min(440px, 100vw)";
+
     private static readonly string _phoneQuery = $"(max-width: {PhoneWidth}px)";
 
     private static readonly string _narrowQuery = $"(max-width: {NarrowWidth}px)";
 
-    /// <summary>Breakpoints either side of the phone and the narrow width, so the viewport reports crossing those and no other.</summary>
+    private static readonly string _coverQuery = $"(max-width: {AssistantCoverWidth}px)";
+
+    /// <summary>
+    /// Breakpoints either side of the phone, the cover and the narrow width, so the viewport reports crossing those and
+    /// no other.
+    /// </summary>
     private static readonly MudBlazor.Services.ResizeOptions _widthCrossings = new()
     {
         NotifyOnBreakpointOnly = true,
         BreakpointDefinitions = new()
         {
-            [Breakpoint.Xs] = 0, [Breakpoint.Sm] = PhoneWidth + 1, [Breakpoint.Md] = NarrowWidth + 1,
+            [Breakpoint.Xs] = 0, [Breakpoint.Sm] = PhoneWidth + 1, [Breakpoint.Md] = AssistantCoverWidth + 1,
+            [Breakpoint.Lg] = NarrowWidth + 1,
         },
     };
 
@@ -172,6 +190,7 @@
     private bool _navOpen = true;
     private bool _phone;
     private bool _narrow;
+    private bool _cover;
 
     /// <summary>
     /// Whether to mount the assistant, asked at boot and again whenever the connection is saved.
@@ -232,6 +251,7 @@
     {
         await Viewport.SubscribeAsync(_viewportWatch, OnViewportChanged, _widthCrossings, fireImmediately: false);
         _narrow = await Viewport.IsMediaQueryMatchAsync(_narrowQuery);
+        _cover = await Viewport.IsMediaQueryMatchAsync(_coverQuery);
         ApplyWidth(await Viewport.IsMediaQueryMatchAsync(_phoneQuery));
         _dismiss = await Interop.SubscribeAsync("dismiss", _ => InvokeAsync(DismissDrawer));
         StateHasChanged();
@@ -242,6 +262,7 @@
     private Task OnViewportChanged(BrowserViewportEventArgs change) => InvokeAsync(() =>
     {
         _narrow = change.BrowserWindowSize.Width <= NarrowWidth;
+        _cover = change.BrowserWindowSize.Width <= AssistantCoverWidth;
         ApplyWidth(change.BrowserWindowSize.Width <= PhoneWidth);
         StateHasChanged();
     });
@@ -321,8 +342,11 @@
     /// </summary>
     private bool NavShown => _navOpen && !(_assistantOpen && _narrow && !_phone);
 
-    /// <summary>Whether the phone's full-width pane covers the page, which is then inert.</summary>
-    private bool PageCovered => _assistantOpen && _phone;
+    /// <summary>Whether the full-width pane covers the page, which is then inert.</summary>
+    private bool PageCovered => _assistantOpen && _cover;
+
+    /// <summary>The whole width where the pane covers the page; its own width where it stands beside it.</summary>
+    private string AssistantWidth => _cover ? "100vw" : AssistantPaneWidth;
 
     /// <summary>What the pane reads: whether it is open, and the close it asks for.</summary>
     private AssistantPane AssistantPane => new(_assistantOpen, _closeAssistant);
