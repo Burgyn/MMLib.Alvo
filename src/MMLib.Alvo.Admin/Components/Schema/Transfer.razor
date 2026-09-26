@@ -68,6 +68,12 @@
     </Panel>
 </div>
 
+@* A copy with edits in it is asked about first; Cancel keeps both the copy and the pasted text (spec §3.2). *@
+<AlvoConfirm Open="_replacing" TestId="import-replace-confirm" ConfirmTestId="import-replace-run"
+             CancelTestId="import-replace-cancel" Title="@CopyReplacement.Title(Copy.PendingCount)"
+             Consequence="@CopyReplacement.Consequence("The pasted descriptor")" Verb="Discard and import"
+             OnConfirm="ReplaceConfirmed" OnCancel="() => _replacing = false" />
+
 @code {
     /// <summary>
     /// This operator's working copy, resolved from the store rather than injected.
@@ -86,6 +92,9 @@
 
     /// <summary>How many refusals this page has drawn, which keys the panel so each one takes focus again.</summary>
     private int _refusals;
+
+    /// <summary>Whether the question before an import over unapplied edits is on screen.</summary>
+    private bool _replacing;
 
     protected override async Task OnInitializedAsync()
     {
@@ -115,6 +124,11 @@
     /// </summary>
     /// <remarks>
     /// <para>
+    /// A copy that holds unapplied edits is asked about first (<see cref="CopyReplacement"/>); a clean one is replaced
+    /// at once. The text is checked before the question, so nobody is asked to discard their edits for a paste that
+    /// would then be refused.
+    /// </para>
+    /// <para>
     /// The check is the boundary, not a validation pass: everything else about the descriptor is
     /// judged by the apply on the next screen, which is the authority. What is refused here is the
     /// class of input that must never reach a renderer — see <see cref="DescriptorNames"/>.
@@ -125,25 +139,47 @@
     /// </remarks>
     private Task Import()
     {
-        if (_pasted.Trim().Length == 0)
+        if (_pasted.Trim().Length == 0 || _replacing)
         {
             return Task.CompletedTask;
         }
 
-        _refusal = DescriptorNames.FirstRefusal(_pasted);
-        if (_refusal is null && !Copy.Replace(_pasted))
-        {
-            _refusal = "That is not a JSON object.";
-        }
-
+        _refusal = DescriptorNames.FirstRefusal(_pasted)
+            ?? (CopyReplacement.IsObject(_pasted) ? null : "That is not a JSON object.");
         if (_refusal is not null)
         {
             _refusals++;
-            return Task.CompletedTask;
+        }
+        else if (Copy.IsDirty)
+        {
+            _replacing = true;
+        }
+        else
+        {
+            Load();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>The operator chose to lose the staged edits for the pasted descriptor.</summary>
+    private void ReplaceConfirmed()
+    {
+        _replacing = false;
+        Load();
+    }
+
+    /// <summary>Loads the pasted descriptor, already checked, into the copy and opens its plan.</summary>
+    private void Load()
+    {
+        if (!Copy.Replace(_pasted))
+        {
+            _refusal = "That is not a JSON object.";
+            _refusals++;
+            return;
         }
 
         Navigation.NavigateTo(AdminPaths.Changes);
-        return Task.CompletedTask;
     }
 
     /// <summary>

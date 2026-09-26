@@ -92,6 +92,15 @@
     }
 
     @*
+        Taking a proposal to Preview replaces the working copy, and the proposal is written against the applied
+        revision, not the copy: a copy with edits in it is asked about first (spec §3.2). Cancel keeps both.
+    *@
+    <AlvoConfirm Open="@(_reviewing is not null)" TestId="assistant-replace-confirm" ConfirmTestId="assistant-replace-run"
+                 CancelTestId="assistant-replace-cancel" Title="@CopyReplacement.Title(_pendingAtAsk)"
+                 Consequence="@CopyReplacement.Consequence("The proposed descriptor")" Verb="Discard and review it"
+                 OnConfirm="ReviewConfirmedAsync" OnCancel="() => _reviewing = null" />
+
+    @*
         Not disabled while a turn runs: the operator may type the next question. Only Ask is busy, so it cannot
         be asked twice.
     *@
@@ -131,6 +140,12 @@
     private ElementReference _thread;
     private MudTextField<string>? _question;
     private AssistantUpdate.Proposal? _proposal;
+
+    /// <summary>The proposal waiting on the question about the copy's unapplied edits, while it is asked.</summary>
+    private AssistantUpdate.Proposal? _reviewing;
+
+    /// <summary>How many changes the copy held when the question was asked, which it names.</summary>
+    private int _pendingAtAsk;
 
     /// <summary>Whether the pane is open and how it closes, from the layout that owns both.</summary>
     [CascadingParameter]
@@ -247,7 +262,8 @@
     }
 
     /// <summary>
-    /// Puts the proposal in the working copy and opens the diff.
+    /// Puts the proposal in the working copy and opens the diff — after asking, when the copy holds unapplied edits
+    /// the proposal would replace (<see cref="CopyReplacement"/>).
     /// </summary>
     /// <remarks>
     /// <b>This is the whole path from a draft to the database, and it goes through the operator.</b> The
@@ -257,6 +273,30 @@
     private async Task Review(AssistantUpdate.Proposal proposal)
     {
         var copy = await Session.CopyAsync(_lifetime.Token);
+        if (copy.IsDirty)
+        {
+            _pendingAtAsk = copy.PendingCount;
+            _reviewing = proposal;
+            return;
+        }
+
+        TakeToPreview(copy, proposal);
+    }
+
+    /// <summary>The operator chose to lose the staged edits for the proposal.</summary>
+    private async Task ReviewConfirmedAsync()
+    {
+        if (_reviewing is not { } proposal)
+        {
+            return;
+        }
+
+        _reviewing = null;
+        TakeToPreview(await Session.CopyAsync(_lifetime.Token), proposal);
+    }
+
+    private void TakeToPreview(WorkingCopy copy, AssistantUpdate.Proposal proposal)
+    {
         copy.Replace(proposal.DescriptorJson);
         copy.SuggestReason(ReasonFor());
 

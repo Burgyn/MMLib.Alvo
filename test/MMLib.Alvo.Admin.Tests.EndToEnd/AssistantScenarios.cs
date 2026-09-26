@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Tests.EndToEnd;
+﻿using Microsoft.Playwright;
+
+namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
 /// The assistant, driven — with a connection and without one.
@@ -210,5 +212,54 @@ public sealed class NoAssistantScenarios(AdminWorld world) : IClassFixture<Admin
         }
 
         session.AssertConsoleClean();
+    }
+}
+
+/// <summary>
+/// Taking a proposal to Preview over unapplied edits asks first, in the discard's own words, and Cancel keeps both the
+/// edits and the proposal; over a clean copy it goes straight to Preview (spec §3.2, final review I4).
+/// </summary>
+/// <remarks>Its own world: it stages into, and then replaces, the one working copy its operator has.</remarks>
+/// <param name="world">The running host and browser, with a scripted assistant in it.</param>
+public sealed class ProposalOverEditsScenarios(AssistantWorld world) : IClassFixture<AssistantWorld>
+{
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Reviewing_a_proposal_over_unapplied_edits_asks_first_and_over_a_clean_copy_does_not()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await KeptFollowScenarios.StageEntityAsync(session, "vendors");
+        await AskForInvoicesAsync(session);
+
+        var confirm = session.Dialog("assistant-replace-confirm");
+        await session.Page.GetByTestId("assistant-review").ClickAsync();
+        await confirm.GetByText("Discard 1 unapplied change?", new() { Exact = true }).WaitForAsync();
+        await confirm.GetByTestId("assistant-replace-cancel").ClickAsync();
+        await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        session.Page.Url.ShouldEndWith("/schema/vendors");
+        (await session.Page.GetByTestId("pending-count").InnerTextAsync()).ShouldBe("1", "Cancel keeps the staged edit");
+        await session.Page.GetByTestId("assistant-proposal").WaitForAsync();
+
+        await session.Page.GetByTestId("assistant-review").ClickAsync();
+        await confirm.GetByTestId("assistant-replace-run").ClickAsync();
+        await session.Page.WaitForURLAsync("**/changes");
+        await session.WaitForPlanAsync();
+        (await session.Content.InnerTextAsync()).ShouldNotContain("vendors");
+
+        await session.Page.GetByTestId("discard").First.ClickAsync();
+        await session.Dialog("discard-sheet").GetByTestId("discard-confirm").ClickAsync();
+        await session.Page.WaitForURLAsync("**/schema");
+        await session.Page.GetByTestId("assistant-review").ClickAsync();
+        await session.Page.WaitForURLAsync("**/changes");
+        await session.WaitForPlanAsync();
+        (await confirm.CountAsync()).ShouldBe(0, "a clean copy has nothing to lose");
+        session.AssertConsoleClean();
+    }
+
+    private static async Task AskForInvoicesAsync(AdminSession session)
+    {
+        await session.Page.GetByTestId("assistant-launch").ClickAsync();
+        await session.Page.FillAsync("#assistant-message", "add an invoices entity");
+        await session.Page.GetByTestId("assistant-send").ClickAsync();
+        await session.Page.GetByTestId("assistant-proposal").WaitForAsync();
     }
 }

@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Nodes;
+﻿using Microsoft.Playwright;
+using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
@@ -57,5 +58,56 @@ public sealed class TransferScenarios(AdminWorld world) : IClassFixture<AdminWor
         await session.WaitForPlanAsync();
         (await session.Content.InnerTextAsync()).ShouldContain("Imported through the box.");
         session.AssertConsoleClean();
+    }
+}
+
+/// <summary>
+/// An import over unapplied edits asks first, in the discard's own words, and Cancel keeps everything; over a clean copy
+/// it goes straight to its plan (spec §3.2, final review I4).
+/// </summary>
+/// <remarks>Its own world: it stages into, and then replaces, the one working copy its operator has.</remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class ImportOverEditsScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+{
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task An_import_over_unapplied_edits_asks_first_and_over_a_clean_copy_does_not()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await KeptFollowScenarios.StageEntityAsync(session, "vendors");
+        await session.GoAsync("/transfer");
+        await PasteAsync(session, "Imported over the edits.");
+
+        var confirm = session.Dialog("import-replace-confirm");
+        await session.Page.GetByTestId("import-run").ClickAsync();
+        await confirm.GetByText("Discard 1 unapplied change?", new() { Exact = true }).WaitForAsync();
+        await confirm.GetByTestId("import-replace-cancel").ClickAsync();
+        await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        session.Page.Url.ShouldEndWith("/transfer");
+        (await session.Page.GetByTestId("pending-count").InnerTextAsync()).ShouldBe("1", "Cancel keeps the staged edit");
+
+        await session.Page.GetByTestId("import-run").ClickAsync();
+        await confirm.GetByTestId("import-replace-run").ClickAsync();
+        await session.Page.WaitForURLAsync("**/changes");
+        await session.WaitForPlanAsync();
+        var plan = await session.Content.InnerTextAsync();
+        plan.ShouldContain("Imported over the edits.");
+        plan.ShouldNotContain("vendors");
+
+        await session.Page.GetByTestId("discard").First.ClickAsync();
+        await session.Dialog("discard-sheet").GetByTestId("discard-confirm").ClickAsync();
+        await session.Page.WaitForURLAsync("**/schema");
+        await session.GoAsync("/transfer");
+        await PasteAsync(session, "Imported over a clean copy.");
+        await session.Page.GetByTestId("import-run").ClickAsync();
+        await session.Page.WaitForURLAsync("**/changes");
+        (await confirm.CountAsync()).ShouldBe(0, "a clean copy has nothing to lose");
+        session.AssertConsoleClean();
+    }
+
+    private static Task PasteAsync(AdminSession session, string description)
+    {
+        var descriptor = JsonNode.Parse(Descriptors.FieldService)!.AsObject();
+        descriptor["description"] = description;
+        return session.Page.FillAsync("#import-json", descriptor.ToJsonString());
     }
 }
