@@ -2203,6 +2203,17 @@
     font-size: var(--text-sm);
   }
 
+  /* The snackbars (spec §3.3): bottom-left, where no editor's footer is — an editor is a right-hand sheet with its
+     actions bottom-right. Placed by the dashboard's own class on its provider, not the library's position option,
+     which is shared by the whole container and would move an embedding host's snackbars as well. The library's
+     default place is top-right, so both of its sides are released. */
+  .a-snackbars {
+    top: auto;
+    right: auto;
+    bottom: var(--space-6);
+    left: var(--space-6);
+  }
+
   /* An error is not a toast. RFC 7807 gives a title, a detail and often a fix, so
      it lands at the field it concerns and it stays there. A message that
      disappears in three seconds loses information in a configuration tool. */

@@ -57,6 +57,10 @@ and the e2e suite asserts that things render, not that they behave.
      both themes) for the brief confirmation of an action just taken:
      "Saved to the working copy", "Applied as revision 12", "Record deleted". Never the only copy of something the
      operator must keep (a credential token goes in the dialog with a Copy button).
+     *Amended 26 Sep (final review I6):* these rules are set **per message** (`AdminSnackbar`) and by a class on the
+     dashboard's own provider (`.a-snackbars`), never in the library's options: those are one object per container,
+     so an embedding host's own MudBlazor snackbars would move with them. Recorded trade-off: a host that sets the
+     library's options still reaches the dashboard's snackbars through the stacking order and the most shown at once.
    - **`AlvoAlert`** (persistent, in place, `role=alert` / `role=status`) for state and **every error**, with Alvo's
      structured fix as its action. On a failed submit, focus moves to it. **No error ever goes to a snackbar.**
    - **Field error** under the input for a field-specific refusal.

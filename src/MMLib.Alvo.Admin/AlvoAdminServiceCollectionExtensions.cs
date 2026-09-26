@@ -6,7 +6,6 @@ using MMLib.Alvo.Admin.Components.Schema;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Management;
-using MudBlazor;
 using MudBlazor.Services;
 
 namespace MMLib.Alvo.Admin;
@@ -125,31 +124,19 @@ public static class AlvoAdminServiceCollectionExtensions
     }
 
     /// <summary>
-    /// The component library's services, configured for the dashboard's feedback rules.
+    /// The component library's services, as the library ships them.
     /// </summary>
     /// <remarks>
-    /// Registered here so an embedded host never learns the library exists (study §1.3). The snackbar settings
-    /// are spec §3.3: bottom-left, where no editor's footer is (an editor is a right-hand sheet whose actions sit
-    /// bottom-right), a few seconds, at most two, and never a duplicate. The breakpoint is Alvo's
-    /// one phone width (720 px, pinned by StylesheetHygieneTests), so the responsive drawer turns temporary where
-    /// the bottom bar appears rather than at Mud's own 600.
+    /// Registered here so an embedded host never learns the library exists (study §1.3). <b>Nothing process-wide is
+    /// configured</b>: the library's options are one object per container, so a snackbar position or a breakpoint
+    /// set here would move an embedding host's own MudBlazor UI too — the argument spec §3.8 makes against shared
+    /// input defaults (final review I6). The dashboard says what it needs where only it is reached: each
+    /// confirmation carries its own duration, close button and duplicate rule and keeps at most two on screen
+    /// (<c>AdminSnackbar</c>), and its snackbar provider is placed bottom-left by a class of its own in
+    /// <c>alvo.css</c>. The drawer follows Alvo's 720 px phone width through <c>AdminLayout</c>'s own viewport
+    /// subscription, so no library breakpoint needs to move. The trade-off, recorded: a host that sets the library's
+    /// options still reaches the dashboard's snackbars through the two the provider reads for itself, the stacking
+    /// order and the most shown at once.
     /// </remarks>
-    private static void AddLibrary(IServiceCollection services)
-        => services.AddMudServices(library =>
-        {
-            library.SnackbarConfiguration.PositionClass = Defaults.Classes.Position.BottomLeft;
-            library.SnackbarConfiguration.VisibleStateDuration = 5000;
-            library.SnackbarConfiguration.MaxDisplayedSnackbars = 2;
-            library.SnackbarConfiguration.PreventDuplicates = true;
-            library.SnackbarConfiguration.ShowCloseIcon = true;
-            library.ResizeOptions.BreakpointDefinitions = new Dictionary<Breakpoint, int>
-            {
-                [Breakpoint.Xs] = 0,
-                [Breakpoint.Sm] = 720,
-                [Breakpoint.Md] = 960,
-                [Breakpoint.Lg] = 1280,
-                [Breakpoint.Xl] = 1920,
-                [Breakpoint.Xxl] = 2560,
-            };
-        });
+    private static void AddLibrary(IServiceCollection services) => services.AddMudServices();
 }

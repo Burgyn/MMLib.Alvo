@@ -18,12 +18,13 @@
     The library's four providers, in the interactive layout because the library does not render them statically
     (study §1.3). Exactly one popover provider: a second throws. Dialog defaults are the pattern language's:
     focus lands on the first field, and a click on the scrim never dismisses (spec §3.1-3.2). Each wrapper still
-    states its own options.
+    states its own options. The snackbars are placed by a class of the dashboard's own rather than the library's
+    position option, which is one object per container and would move an embedding host's snackbars too.
 *@
 <AlvoTheme />
 <MudPopoverProvider />
 <MudDialogProvider DefaultFocus="DefaultFocus.FirstChild" BackdropClick="false" CloseButton="false" />
-<MudSnackbarProvider />
+<MudSnackbarProvider Class="a-snackbars" />
 
 <MudLayout Class="@(PageCovered ? "a-shell a-shell--covered" : "a-shell")">
     <MudAppBar Dense="true" Elevation="0" Class="a-appbar" data-testid="appbar">
