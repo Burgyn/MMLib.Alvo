@@ -230,6 +230,36 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
         contrast.Ratio.ShouldBeGreaterThanOrEqualTo(ContrastProbe.AA, contrast.ToString());
     }
 
+    /// <summary>
+    /// A render of the shell for anything but the thread asks the browser nothing about the thread (final review M16):
+    /// the pane redrew and ran the follow on every layout render, streamed or not, open or closed.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Moving_between_screens_asks_the_thread_nothing()
+    {
+        await using var session = await OpenAsync(TestContext.Current.CancellationToken);
+        await AskAsync(session, "add an invoices entity");
+        await WaitForTurnToEndAsync(session, turns: 2);
+        await session.Page.WaitForTimeoutAsync(300);
+        await session.Page.GetByTestId("assistant-thread").EvaluateAsync(
+            """
+            thread => {
+              window.__alvoFollows = 0;
+              new MutationObserver(records => { window.__alvoFollows += records.length; })
+                .observe(thread, { attributes: true, attributeFilter: ['data-alvo-followed-at'] });
+            }
+            """);
+
+        foreach (var section in new[] { "Data", "Access", "Schema" })
+        {
+            await session.Page.GetByTestId("sidebar").GetByRole(AriaRole.Link, new() { Name = section, Exact = true }).ClickAsync();
+            await session.Page.GetByRole(AriaRole.Heading, new() { Level = 1, Name = section }).WaitForAsync();
+        }
+
+        await session.Page.WaitForTimeoutAsync(300);
+        (await session.Page.EvaluateAsync<int>("() => window.__alvoFollows")).ShouldBe(0, "no layout render follows the thread");
+    }
+
     private async Task<AdminSession> OpenAsync(CancellationToken cancel, int height = 900)
     {
         var session = await world.SignInAsync(cancel);

@@ -137,7 +137,7 @@
         <MudDrawer Open="_assistantOpen" Anchor="Anchor.End" Variant="DrawerVariant.Persistent"
                    ClipMode="DrawerClipMode.Always" Elevation="0" Width="@AssistantWidth"
                    Class="a-assistant-drawer" role="complementary" aria-label="Ask Alvo">
-            <CascadingValue Value="AssistantPane">
+            <CascadingValue Value="_pane" IsFixed="true">
                 <AssistantDrawer />
             </CascadingValue>
         </MudDrawer>
@@ -192,7 +192,7 @@
     private readonly Guid _viewportWatch = Guid.NewGuid();
     private AlvoButton? _sectionsButton;
     private AlvoButton? _assistantLauncher;
-    private EventCallback _closeAssistant;
+    private AssistantPane _pane = AssistantPane.None;
     private bool _assistantOpen;
     private ElementReference _drawerNav;
     private ElementReference _main;
@@ -224,7 +224,7 @@
     /// </remarks>
     protected override async Task OnInitializedAsync()
     {
-        _closeAssistant = EventCallback.Factory.Create(this, CloseAssistant);
+        _pane = new AssistantPane(EventCallback.Factory.Create(this, CloseAssistant));
         Assistant.ConnectionChanged += OnConnectionChanged;
         await RefreshAssistantAsync();
     }
@@ -344,7 +344,7 @@
             _assistant = false;
         }
 
-        _assistantOpen &= _assistant;
+        SetAssistantOpen(_assistantOpen && _assistant);
     }
 
     /// <summary>
@@ -360,8 +360,12 @@
     /// <summary>The whole width where the pane covers the page; its own width where it stands beside it.</summary>
     private string AssistantWidth => _cover ? "100vw" : AssistantPaneWidth;
 
-    /// <summary>What the pane reads: whether it is open, and the close it asks for.</summary>
-    private AssistantPane AssistantPane => new(_assistantOpen, _closeAssistant);
+    /// <summary>Opens or closes the pane, and tells the pane, which redraws only then (<see cref="AssistantPane"/>).</summary>
+    private void SetAssistantOpen(bool open)
+    {
+        _assistantOpen = open;
+        _pane.Set(open);
+    }
 
     /// <summary>The launcher opens the pane or closes it; the pane moves focus into itself as it opens.</summary>
     private void ToggleAssistant()
@@ -372,13 +376,13 @@
             return;
         }
 
-        _assistantOpen = true;
+        SetAssistantOpen(true);
     }
 
     /// <summary>Closes the pane, from its close button, Escape inside it, or the launcher, and focus goes back to the launcher.</summary>
     private void CloseAssistant()
     {
-        _assistantOpen = false;
+        SetAssistantOpen(false);
         _focusNext = FocusNext.Launcher;
     }
 

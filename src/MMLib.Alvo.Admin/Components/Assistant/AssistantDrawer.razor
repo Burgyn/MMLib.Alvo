@@ -147,12 +147,40 @@
     [CascadingParameter]
     private AssistantPane Pane { get; set; } = AssistantPane.None;
 
+    /// <summary>The thread as it was last followed: its turns, the answer streamed so far, and the tools it ran.</summary>
+    private (int Turns, int Streamed, int Tools) _followed;
+
+    /// <summary>The pane whose open and close this redraws on; one per layout, cascaded as fixed.</summary>
+    private AssistantPane? _heard;
+
+    /// <summary>
+    /// Hears the pane open and close, which is the only time the layout needs this redrawn. From the after-render this
+    /// already has, not an override of its own, which would be one more member of the package's contract.
+    /// </summary>
+    private void Hear()
+    {
+        if (!ReferenceEquals(_heard, Pane))
+        {
+            if (_heard is not null)
+            {
+                _heard.Changed -= Redraw;
+            }
+
+            _heard = Pane;
+            _heard.Changed += Redraw;
+        }
+    }
+
+    private void Redraw() => _ = InvokeAsync(StateHasChanged);
+
     /// <summary>
     /// Moves focus into the question box of a pane that has just been drawn open (spec §3.4; the layout returns it
-    /// on close), then keeps the thread on its newest turn unless the operator scrolled up (spec §3.5).
+    /// on close), then keeps the thread on its newest turn unless the operator scrolled up (spec §3.5), only when the
+    /// thread grew since it last did: a render for anything else asks the browser nothing.
     /// </summary>
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        Hear();
         var opened = Pane.Open && !_wasOpen;
         _wasOpen = Pane.Open;
         if (opened && _question is not null)
@@ -160,7 +188,12 @@
             await _question.FocusAsync();
         }
 
-        await Interop.FollowNewestAsync(_thread);
+        var thread = (_turns.Count, _streaming.Length, _tools.Count);
+        if (Pane.Open && (opened || thread != _followed))
+        {
+            _followed = thread;
+            await Interop.FollowNewestAsync(_thread);
+        }
     }
 
     /// <summary>
@@ -170,8 +203,16 @@
     private Task OnKeyDownAsync(KeyboardEventArgs args)
         => args.Key == "Escape" ? Pane.Close.InvokeAsync() : Task.CompletedTask;
 
-    /// <summary>Cancels a turn still in flight when the operator leaves.</summary>
-    public void Dispose() => _lifetime.Dispose();
+    /// <summary>Cancels a turn still in flight when the operator leaves, and stops hearing the pane.</summary>
+    public void Dispose()
+    {
+        if (_heard is not null)
+        {
+            _heard.Changed -= Redraw;
+        }
+
+        _lifetime.Dispose();
+    }
 
     /// <summary>
     /// Asks one turn, redrawing as the answer arrives.

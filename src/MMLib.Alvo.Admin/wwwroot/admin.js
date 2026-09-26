@@ -214,17 +214,36 @@ export function lockScroll(locked) {
   document.documentElement.toggleAttribute('data-scroll-locked', scrollLocks > 0);
 }
 
+/** The threads a follow is already asked for, to run on the next frame. */
+const followPending = new WeakSet();
+
 /**
- * Keeps a growing list's newest item in view, unless the operator has scrolled up to read something older.
- *
- * "Scrolled up" is remembered from the operator's own scrolling, not measured after the list grew: once the new
- * turn is in, every list is "not at the bottom", and a check made then would never follow.
+ * Keeps a growing list's newest item in view, unless the operator has scrolled up to read something older; see
+ * `follow`. Coalesced to one per frame (final review M16): a streamed answer redraws the thread for every chunk, and
+ * each redraw asks. A page that is not drawn gets no frames, so it gets a timer instead.
  */
 export function followNewest(element) {
-  if (!(element instanceof HTMLElement)) {
+  if (!(element instanceof HTMLElement) || followPending.has(element)) {
     return;
   }
 
+  followPending.add(element);
+  const run = () => {
+    followPending.delete(element);
+    follow(element);
+  };
+  if (document.visibilityState === 'visible') {
+    requestAnimationFrame(run);
+  } else {
+    setTimeout(run, 16);
+  }
+}
+
+/**
+ * "Scrolled up" is remembered from the operator's own scrolling, not measured after the list grew: once the new
+ * turn is in, every list is "not at the bottom", and a check made then would never follow.
+ */
+function follow(element) {
   if (!element.dataset.alvoFollow) {
     element.dataset.alvoFollow = 'on';
     element.addEventListener('scroll', () => {
