@@ -606,7 +606,7 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     `decimal` with no reason given (FF:68); Add entity writes `audit: false` / `tenancy: global`
     explicitly; Overview shows the `dynamicEntities` warning for `enabled: false`; apply sends no
     idempotency key.
-30. **A person the dashboard creates can never sign in.** Access → *Add a person* creates the account
+30. ✅ **A person the dashboard creates can never sign in.** Access → *Add a person* creates the account
     **without a password** (deliberately — `IAlvoUserAdministration.CreateAsync` remarks), and *Issue a
     credential token* mints a single-use token (`IssueCredentialTokenAsync`, ASP.NET Identity's reset
     token) "for them to set their own password" — but **nothing in the build redeems it**: no endpoint, no
@@ -618,6 +618,7 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     sign-in, the token consumed through `UserManager.ResetPasswordAsync`, the refusal wording not saying
     which half was wrong), and the Access token panel showing the link to it. Security-sensitive — the
     `alvo-security-core-review` checklist and `/security-review` apply.
+    **Done:** design `docs/superpowers/specs/2026-09-27-f5-admin-set-password-design.md`. Identity (edbb91b, ddd85f7, 3b6a154): `AlvoSignIn.SetPasswordAsync` redeems the token once (policy first, then the account, then Identity's reset; one `Refused` for unknown, disabled, bootstrap, expired, used and foreign), the NIST policy (15–128, no composition, no address; a new bootstrap seed under it is refused at start), and the session check compares the security stamp, so a password set and a disable end every cookie and open tab. The sign-in timing oracle §0.3 found was **fixed**, not filed (spec §10.3): every refusal Identity makes without hashing now pays one dummy verification by the registered hasher. Dashboard and host (79d561d, 12f9f49, 11a0c8f): the token panel shows the set-password link (address and token in the fragment) with Copy link; the static page `/admin/set-password` and its endpoint; a two-layer credential limit (20 a minute per client and subject, 200 per client) charged after antiforgery; a 16 KB body bound on the anonymous posts. End to end (`test(f5): a created person sets a password and signs in`): create → issue → open the link in a fresh browser → no fragment after load → set → sign in as them; a used link gets the generic refusal; with JavaScript off the token is pasted by hand; an open tab drops to sign-in after a password is set elsewhere. `docs/architecture/host.md` documents the limit, its residuals, forwarded headers, the key ring and the policy. The per-account lockout's denial-of-service trade-off is item 46; the dashboard under a PathBase is item 45.
 31. **Settings can say "connected" for a connection whose key is missing.** The live case that drove F5's
     failure-text work (24 Sep 2026): `Alvo:Ai:ApiKeySecretRef` named a secret nobody had saved, the OpenAI
     client sent its own placeholder credential in the key's place, and every turn failed with a 401 the

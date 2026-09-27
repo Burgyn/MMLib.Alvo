@@ -55,6 +55,13 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
         var text = await editor.InnerTextAsync();
         text.ShouldContain("Credential token");
         text.ShouldContain("out of band");
+
+        /* The token is handed over as the set-password link, the address and token in its fragment and both escaped
+           (design §1.2): the one thing the person needs is something to open. */
+        var link = (await editor.GetByTestId("person-token-link").InnerTextAsync()).Trim();
+        link.ShouldStartWith($"{world.BaseAddress}{AlvoAdmin.SetPasswordPath}#email=dispatcher%40alvo.test&token=");
+        var token = (await editor.GetByTestId("person-token").InnerTextAsync()).Trim();
+        link.ShouldEndWith($"&token={Uri.EscapeDataString(token)}");
         session.AssertConsoleClean();
     }
 

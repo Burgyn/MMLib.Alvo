@@ -237,7 +237,24 @@ public class AdminWorld : IAsyncLifetime
     /// one; the browser's own default when <see langword="null"/>.
     /// </param>
     /// <returns>The session.</returns>
-    public async Task<AdminSession> SignInAsync(CancellationToken cancel, int width = 1400, ColorScheme? colorScheme = null)
+    public Task<AdminSession> SignInAsync(CancellationToken cancel, int width = 1400, ColorScheme? colorScheme = null)
+        => SignInAsAsync(AdminEmail, AdminPassword, cancel, width, colorScheme);
+
+    /// <summary>
+    /// Opens a page, signed in as <paramref name="email"/>, with the console asserted clean.
+    /// </summary>
+    /// <remarks>
+    /// For a scenario whose person is not the bootstrap administrator — one the dashboard created, who set their
+    /// own password from a credential token's link. Everything else is <see cref="SignInAsync"/>'s.
+    /// </remarks>
+    /// <param name="email">Who signs in.</param>
+    /// <param name="password">Their password: a test value the scenario itself set.</param>
+    /// <param name="cancel">The scenario's own token, as <see cref="SignInAsync"/> takes it.</param>
+    /// <param name="width">The viewport width.</param>
+    /// <param name="colorScheme">The system theme the browser reports, or its own default.</param>
+    /// <returns>The session.</returns>
+    public async Task<AdminSession> SignInAsAsync(
+        string email, string password, CancellationToken cancel, int width = 1400, ColorScheme? colorScheme = null)
     {
         cancel.ThrowIfCancellationRequested();
 
@@ -256,8 +273,8 @@ public class AdminWorld : IAsyncLifetime
         session.Watch();
 
         await session.Page.GotoAsync($"{BaseAddress}{AlvoAdmin.SignInPath}").ConfigureAwait(false);
-        await session.Page.FillAsync("#email", AdminEmail).ConfigureAwait(false);
-        await session.Page.FillAsync("#password", AdminPassword).ConfigureAwait(false);
+        await session.Page.FillAsync("#email", email).ConfigureAwait(false);
+        await session.Page.FillAsync("#password", password).ConfigureAwait(false);
         cancel.ThrowIfCancellationRequested();
         await session.Page.ClickAsync("button[type=submit]").ConfigureAwait(false);
 
