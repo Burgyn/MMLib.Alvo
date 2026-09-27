@@ -291,15 +291,17 @@ would have two empty states. `configured` answers the first question; `kind` and
 recognises; `source` is `configuration`, `store` or `null`, which is what turns "why is it still using the
 old model" into one glance.
 
-`keyState` is `present`, `missing`, `notNeeded`, or `none` when nothing is configured (`AiKeyState`, serialised by
-name). **Read it beside `configured`, never after it:** a connection whose key is `missing` is configured and refused
+`keyState` is `present`, `missing`, `not-needed`, or `none` when nothing is configured (`AiKeyState`, serialised by
+name, in the kebab case of its sibling `kind`). **Read it beside `configured`, never after it:** a connection whose key is `missing` is configured and refused
 on every call — the live case (24 Sep 2026) where `Alvo:Ai:ApiKeySecretRef` named a secret nobody had saved, `info`
 said configured, and every turn was a 401. The resolver decides it, because only the resolver knows a reference went
-unanswered: a reference that resolves nothing (absent, undecryptable, or not a secret name) is `missing` whatever
-the endpoint; with no reference and no stored key, `api.openai.com` and `*.openai.azure.com` — hosts that refuse
-every unauthenticated call — are `missing`, and any other endpoint is `notNeeded`, because a local Ollama or vLLM
-is keyless on purpose. It is a state only: never the key, and not the secret's name either, which the host's log
-carries (event 6102) and the deployment's own configuration already holds.
+unanswered: a reference that resolves nothing (absent, undecryptable, blank, or not a secret name) is `missing`
+whatever the endpoint; with no reference and no stored key, the known key-only hosts — `api.openai.com`,
+`*.openai.azure.com`, `*.cognitiveservices.azure.com`, `*.services.ai.azure.com` — are `missing`, and any other
+endpoint is `not-needed`, because a local Ollama or vLLM is keyless on purpose. It is a state only: never the key,
+and not the secret's name either, which the host's log carries (event 6102) and the deployment's own configuration
+already holds. A reference that is not a secret name is logged by its length alone (event 6104): it is most likely
+the key itself, pasted into the setting that should name it.
 
 **There is no endpoint, and there never will be one.** The reasoning is `WebhookDelivery`'s: an address is
 where a credential ends up in practice — in a query string, in a userinfo segment — and an internal host name

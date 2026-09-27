@@ -83,8 +83,14 @@
                 @if (_info.Ai.KeyState == AiKeyState.Missing)
                 {
                     <div class="a-stack a-row--inset">
+                        @*
+                            The fix is the alert's action (spec §3.3) when it is this screen's: a saved connection is
+                            changed here. When the deployment's configuration pinned it, no control here can change it,
+                            so the fix stays prose naming the setting.
+                        *@
                         <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" TestId="ai-key-missing"
-                                   Title="Key missing — every request will be refused">
+                                   Title="Key missing — every request will be refused"
+                                   Actions="@(FixedHere(_info.Ai) ? ChangeConnection : null)">
                             @if (FromConfiguration(_info.Ai))
                             {
                                 @:This deployment's <code class="a-mono">Alvo:Ai:ApiKeySecretRef</code> names a secret
@@ -94,8 +100,8 @@
                             }
                             else
                             {
-                                @:The saved connection has no API key, and its endpoint always needs one. Edit the
-                                @:connection below and type the key.
+                                @:The saved connection has no API key, and its endpoint always needs one. Change the
+                                @:connection and type the key.
                             }
                         </AlvoAlert>
                     </div>
@@ -237,6 +243,13 @@
         { KeyState: AiKeyState.Missing } => "key missing",
         _ => "connected",
     };
+
+    /// <summary>Whether this screen can fix a missing key: the connection is a saved one, and the store takes a save.</summary>
+    private bool FixedHere(ManagementAi ai) => !FromConfiguration(ai) && Assistant.IsInstalled && Assistant.CanWriteConnection;
+
+    /// <summary>The missing-key alert's action: the connection editor, where the key is typed.</summary>
+    private RenderFragment ChangeConnection => @<AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true"
+                                                            data-testid="ai-key-fix" OnClick="_ => OpenEditor()">Change the connection</AlvoButton>;
 
     /// <summary>Whether the deployment's own configuration pinned the connection, so the fix is there and not here.</summary>
     private static bool FromConfiguration(ManagementAi ai) => string.Equals(ai.Source, "configuration", StringComparison.Ordinal);

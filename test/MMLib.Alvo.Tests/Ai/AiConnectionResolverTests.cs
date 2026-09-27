@@ -335,6 +335,57 @@ public class AiConnectionResolverTests
         (await Resolver(new InMemorySecretStore(), Configured("http://localhost:11434/v1", "OpenAI Key"))
             .ResolveAsync(Ct)).KeyState.ShouldBe(AiKeyState.Missing);
 
+    /// <summary>
+    /// A key pasted where its name goes is never written to a log — the most likely way to get this setting wrong,
+    /// since it is literally named <c>ApiKey…</c>. The warning says what the setting must hold, and nothing of what it
+    /// does.
+    /// </summary>
+    [Fact]
+    public async Task A_key_pasted_in_place_of_its_name_never_reaches_a_log_line()
+    {
+        const string pasted = "sk-proj-Q7vX2mLp9RtY4wZ8nB3kD6fH1jS5aE0cU-yNoTaRealKeyButShapedLikeOne1234567890";
+        using var capturing = new CapturingLogger();
+        using var loggers = LoggerFactory.Create(logging => logging.AddProvider(capturing));
+
+        var resolved = await Resolver(
+            new InMemorySecretStore(),
+            Configured("https://api.openai.com/v1", pasted),
+            loggers.CreateLogger<AiConnectionResolver>()).ResolveAsync(Ct);
+
+        resolved.KeyState.ShouldBe(AiKeyState.Missing);
+        capturing.Entries.ShouldNotBeEmpty("the misconfiguration is still reported");
+        capturing.Entries.ShouldAllBe(entry => !entry.Message.Contains("sk-proj", StringComparison.Ordinal)
+            && !entry.Message.Contains("Q7vX2mLp9RtY4wZ8", StringComparison.Ordinal));
+        capturing.Warnings.ShouldHaveSingleItem().ShouldContain(
+            "Alvo:Ai:ApiKeySecretRef is not a secret name — it must name a secret, never hold the key itself");
+    }
+
+    /// <summary>A secret whose value is only whitespace is no key.</summary>
+    [Fact]
+    public async Task A_referenced_secret_of_only_whitespace_is_a_missing_key()
+    {
+        var store = new InMemorySecretStore();
+        await store.SetAsync(SecretName.Parse("openai.key"), "   ", Ct);
+
+        var resolved = await Resolver(store, Configured("https://api.openai.com/v1", "openai.key")).ResolveAsync(Ct);
+
+        resolved.KeyState.ShouldBe(AiKeyState.Missing);
+        resolved.Connection!.ApiKey.ShouldBeNull();
+    }
+
+    /// <summary>And a saved connection whose key is only whitespace has none.</summary>
+    [Fact]
+    public async Task A_stored_key_of_only_whitespace_is_no_key()
+    {
+        var store = new InMemorySecretStore();
+        await store.SetAsync(
+            AiConnectionResolver.StoredName,
+            """{"kind":"openai-compatible","endpoint":"https://api.openai.com/v1","model":"gpt-5","apiKey":"  "}""",
+            Ct);
+
+        (await Resolver(store, new AlvoAiOptions()).ResolveAsync(Ct)).KeyState.ShouldBe(AiKeyState.Missing);
+    }
+
     /// <summary>And so is a referenced key this build cannot decrypt.</summary>
     [Fact]
     public async Task A_referenced_key_this_build_cannot_decrypt_is_a_missing_key() =>
@@ -348,6 +399,8 @@ public class AiConnectionResolverTests
     [Theory]
     [InlineData("https://api.openai.com/v1")]
     [InlineData("https://contoso.openai.azure.com")]
+    [InlineData("https://contoso.cognitiveservices.azure.com")]
+    [InlineData("https://contoso.services.ai.azure.com/models")]
     public async Task An_endpoint_that_always_needs_a_key_with_none_referenced_is_a_missing_key(string endpoint) =>
         (await Resolver(new InMemorySecretStore(), Configured(endpoint, reference: null))
             .ResolveAsync(Ct)).KeyState.ShouldBe(AiKeyState.Missing);
@@ -375,6 +428,9 @@ public class AiConnectionResolverTests
     [InlineData("http://localhost:11434/v1", AiKeyState.NotNeeded)]
     [InlineData("https://api.openai.com/v1", AiKeyState.Missing)]
     [InlineData("https://contoso.openai.azure.com", AiKeyState.Missing)]
+    [InlineData("https://contoso.cognitiveservices.azure.com", AiKeyState.Missing)]
+    [InlineData("https://contoso.services.ai.azure.com", AiKeyState.Missing)]
+    [InlineData("https://azure.com.example", AiKeyState.NotNeeded)]
     public async Task A_stored_connection_with_no_key_is_judged_by_its_host(string endpoint, AiKeyState expected)
     {
         var store = new InMemorySecretStore();

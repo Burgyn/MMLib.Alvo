@@ -139,6 +139,72 @@ public sealed class SettingsScenarios(SettingsWorld world) : IClassFixture<Setti
         (await session.Page.GetByTestId("editor-discard-question").CountAsync()).ShouldBe(0, "nothing is lost by closing");
     }
 
+    /// <summary>
+    /// A saved keyless connection to a local endpoint says so, and nothing warns (§8d item 31: "no key needed").
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_saved_keyless_local_connection_says_no_key_is_needed()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/settings");
+        await SaveAsync(session, "http://127.0.0.1:1/v1", key: null);
+
+        await session.Content.GetByText("no key needed", new() { Exact = true }).WaitForAsync();
+        (await session.Page.GetByTestId("ai-key-missing").CountAsync()).ShouldBe(0, "a keyless local model is not a fault");
+        (await session.Content.GetByText("connected", new() { Exact = true }).CountAsync()).ShouldBe(1);
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>A saved connection with its key adds nothing to the status — and the key is never drawn back.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_saved_connection_with_its_key_adds_nothing()
+    {
+        const string key = "sk-e2e-present-key";
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/settings");
+        await SaveAsync(session, "https://api.openai.com/v1", key);
+
+        await session.Content.GetByText("connected", new() { Exact = true }).WaitForAsync();
+        (await session.Page.GetByTestId("ai-key-missing").CountAsync()).ShouldBe(0);
+        (await session.Content.GetByText("no key needed", new() { Exact = true }).CountAsync()).ShouldBe(0);
+        (await session.Page.ContentAsync()).ShouldNotContain(key, Case.Sensitive, "the key is never shown back");
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// A saved connection to a host that always needs a key, saved without one, is the warning — and its action opens
+    /// the connection editor, because here the fix is this screen's (spec §3.3: the fix is the alert's action).
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_saved_connection_missing_its_key_offers_to_change_it()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/settings");
+        await SaveAsync(session, "https://api.openai.com/v1", key: null);
+
+        var alert = session.Page.GetByTestId("ai-key-missing");
+        await alert.WaitForAsync();
+        await alert.GetByRole(AriaRole.Button, new() { Name = "Change the connection" }).ClickAsync();
+        await session.Dialog("ai-editor").GetByTestId("ai-save").WaitForAsync();
+        await session.WaitForFocusInsideAsync("ai-editor");
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>Saves a connection through the editor and waits for the screen to say so.</summary>
+    private static async Task SaveAsync(AdminSession session, string endpoint, string? key)
+    {
+        await OpenConnectionEditorAsync(session);
+        await session.Page.FillAsync("#ai-endpoint", endpoint);
+        await session.Page.FillAsync("#ai-model", "scripted");
+        if (key is not null)
+        {
+            await session.Page.FillAsync("#ai-key", key);
+        }
+
+        await session.Page.GetByTestId("ai-save").ClickAsync();
+        await session.SnackbarAsync("Saved the AI connection");
+    }
+
     /// <summary>Opens the connection editor from its summary and waits for focus inside it.</summary>
     internal static async Task<ILocator> OpenConnectionEditorAsync(AdminSession session)
     {

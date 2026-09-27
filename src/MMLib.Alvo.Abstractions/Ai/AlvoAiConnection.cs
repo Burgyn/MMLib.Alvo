@@ -46,8 +46,9 @@ public enum AiConnectionSource
 /// whether one will be sent.
 /// </para>
 /// <para>
-/// <b>Serialised by name</b>, in the descriptor enums' camel case, so a client branches on <c>missing</c> rather
-/// than on a number that means nothing on its own.
+/// <b>Serialised by name</b>, in the kebab case of its sibling <c>ai.kind</c> (<c>openai-compatible</c>), so a
+/// client branches on <c>missing</c> rather than on a number that means nothing on its own, and one object spells
+/// its multi-word values one way.
 /// </para>
 /// </remarks>
 [JsonConverter(typeof(JsonStringEnumConverter<AiKeyState>))]
@@ -72,7 +73,7 @@ public enum AiKeyState
     /// No key was asked for and the endpoint is not one known to need one — a local Ollama or vLLM, run keyless on
     /// purpose.
     /// </summary>
-    [JsonStringEnumMemberName("notNeeded")]
+    [JsonStringEnumMemberName("not-needed")]
     NotNeeded = 3,
 }
 

@@ -35,7 +35,7 @@ public class ManagementInfoHttpTests
         ai["keyState"]!.GetValue<string>().ShouldBe("missing");
     }
 
-    /// <summary>A keyless local endpoint is reported as needing none, in the wire's camel case.</summary>
+    /// <summary>A keyless local endpoint is reported as needing none, in the kebab case of its sibling <c>ai.kind</c>.</summary>
     [Fact]
     public async Task A_local_endpoint_with_no_reference_is_reported_as_needing_no_key()
     {
@@ -46,7 +46,7 @@ public class ManagementInfoHttpTests
             Model = "qwen3:8b",
         });
 
-        ai["keyState"]!.GetValue<string>().ShouldBe("notNeeded");
+        ai["keyState"]!.GetValue<string>().ShouldBe("not-needed");
     }
 
     /// <summary>No connection reports <c>none</c>, never a missing key it was never asked to have.</summary>

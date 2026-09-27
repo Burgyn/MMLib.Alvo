@@ -103,7 +103,7 @@ internal sealed partial class AiConnectionResolver(
         var key = SecretName.TryParse(named, out var reference)
             ? await ReferencedKeyAsync(reference!, ct).ConfigureAwait(false)
             : Unresolvable(named);
-        key = string.IsNullOrEmpty(key) ? null : key;
+        key = string.IsNullOrWhiteSpace(key) ? null : key;
 
         return new AiConnectionResolution(
             connection with { ApiKey = key },
@@ -111,10 +111,15 @@ internal sealed partial class AiConnectionResolver(
             key is null ? AiKeyState.Missing : AiKeyState.Present);
     }
 
-    /// <summary>A reference that is not a secret name: logged as the missing secret it is, and no key.</summary>
+    /// <summary>A reference that is not a secret name: reported by its length only, and no key.</summary>
+    /// <remarks>
+    /// <b>Never its value.</b> The likeliest way to write something here that is not a secret name is to paste the
+    /// key itself into a setting called <c>ApiKey…</c> — and a key never matches the name pattern, so logging the text
+    /// would put the credential in the host log on every request that resolves the connection.
+    /// </remarks>
     private string? Unresolvable(string named)
     {
-        ReferencedSecretMissing(logger, named);
+        ReferenceIsNotASecretName(logger, named.Length);
         return null;
     }
 
@@ -168,9 +173,19 @@ internal sealed partial class AiConnectionResolver(
     }
 
     /// <summary>Whether <paramref name="host"/> is one this build knows always refuses an unauthenticated call.</summary>
+    /// <remarks>
+    /// <b>The known key-only hosts, not every host that needs a key.</b> OpenAI itself, and the three Azure host
+    /// families this build dials with a key and nothing else (the adapter has no Entra path): Azure OpenAI, the
+    /// Cognitive Services endpoint and Azure AI Foundry's. A host not listed with no key reads as
+    /// <see cref="AiKeyState.NotNeeded"/> — the lenient side, since a local model or a proxy is routinely keyless.
+    /// </remarks>
     private static bool AlwaysNeedsAKey(string host) =>
         string.Equals(host, "api.openai.com", StringComparison.OrdinalIgnoreCase)
-        || host.EndsWith(".openai.azure.com", StringComparison.OrdinalIgnoreCase);
+        || _keyOnlyHostSuffixes.Any(suffix => host.EndsWith(suffix, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The Azure host families <see cref="AlwaysNeedsAKey"/> matches by suffix.</summary>
+    private static readonly string[] _keyOnlyHostSuffixes =
+        [".openai.azure.com", ".cognitiveservices.azure.com", ".services.ai.azure.com"];
 
     /// <summary>The saved connection, or <see langword="null"/> when there is none this build can read.</summary>
     private async ValueTask<AlvoAiConnection?> FromStoreAsync(CancellationToken ct)
@@ -237,7 +252,7 @@ internal sealed partial class AiConnectionResolver(
         }
 
         return Uri.TryCreate(endpoint, UriKind.Absolute, out var address)
-            ? new AlvoAiConnection(parsed, address, model, string.IsNullOrEmpty(apiKey) ? null : apiKey)
+            ? new AlvoAiConnection(parsed, address, model, string.IsNullOrWhiteSpace(apiKey) ? null : apiKey)
             : null;
     }
 
@@ -286,4 +301,12 @@ internal sealed partial class AiConnectionResolver(
         Message = "This connection dials '{Host}', which always needs a key, and Alvo:Ai:ApiKeySecretRef names "
             + "none — every call to it is sent without one.")]
     private static partial void EndpointAlwaysNeedsAKey(ILogger logger, string host);
+
+    [LoggerMessage(
+        EventId = 6104,
+        Level = LogLevel.Warning,
+        Message = "Alvo:Ai:ApiKeySecretRef is not a secret name — it must name a secret, never hold the key itself; "
+            + "the configured value ({Length} characters) is not logged. Set it to a name matching "
+            + "^[a-z][a-z0-9._-]{{0,63}}$ and save the key under that name. The connection is used without a key.")]
+    private static partial void ReferenceIsNotASecretName(ILogger logger, int length);
 }

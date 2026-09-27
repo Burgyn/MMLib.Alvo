@@ -86,6 +86,10 @@ and the e2e suite asserts that things render, not that they behave.
      library's options still reaches the dashboard's snackbars through the stacking order and the most shown at once.
    - **`AlvoAlert`** (persistent, in place, `role=alert` / `role=status`) for state and **every error**, with Alvo's
      structured fix as its action. On a failed submit, focus moves to it. **No error ever goes to a snackbar.**
+     *Note (27 Sep, B7, §8d item 31):* when the fix is not the dashboard's to make — Settings' missing-key warning for
+     a connection the deployment's configuration pinned — the alert carries the fix as prose naming the setting
+     (`Alvo:Ai:ApiKeySecretRef`) and no action, since no control on the screen could change it; for a saved
+     connection the same alert's action is "Change the connection", which opens its editor.
    - **Field error** under the input for a field-specific refusal.
 4. **Forms and keys.** Enter submits a single-line form — every one (amended 26 Sep, final review M6): Preview's
    Why applies exactly as its primary does, and the typed-name box confirms once the name matches (before that the verb

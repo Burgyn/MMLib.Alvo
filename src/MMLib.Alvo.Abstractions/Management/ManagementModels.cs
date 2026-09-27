@@ -44,7 +44,7 @@ public sealed record ManagementInfo(
 /// </param>
 /// <param name="KeyState">
 /// Whether the connection has the key its endpoint needs — on the wire <c>present</c>, <c>missing</c>,
-/// <c>notNeeded</c>, or <c>none</c> when unconfigured. <b>Read it beside <paramref name="Configured"/>, never
+/// <c>not-needed</c>, or <c>none</c> when unconfigured. <b>Read it beside <paramref name="Configured"/>, never
 /// after it:</b> a connection whose key is <c>missing</c> is configured and refused on every call, which is the
 /// state "configured" alone used to report as working (docs/todo-admin.md §8d item 31). A state only: neither
 /// the key nor the name of the secret it was looked for under.

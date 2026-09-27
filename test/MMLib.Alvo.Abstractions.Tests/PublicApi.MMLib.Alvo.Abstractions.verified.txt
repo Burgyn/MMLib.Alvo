@@ -38,7 +38,7 @@ namespace MMLib.Alvo.Ai
         Present = 1,
         [System.Text.Json.Serialization.JsonStringEnumMemberName("missing")]
         Missing = 2,
-        [System.Text.Json.Serialization.JsonStringEnumMemberName("notNeeded")]
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("not-needed")]
         NotNeeded = 3,
     }
     public sealed class AlvoAiConnection : System.IEquatable<MMLib.Alvo.Ai.AlvoAiConnection>
