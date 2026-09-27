@@ -17,4 +17,10 @@ internal static class StagedWords
     /// <param name="name">What names it.</param>
     /// <returns>The sentence.</returns>
     public static string Saved(string kind, string name) => $"{kind} {name} saved to the working copy";
+
+    /// <summary>What a removal staged: "<paramref name="kind"/> <paramref name="name"/> removed from the working copy".</summary>
+    /// <param name="kind">What it is, capitalised.</param>
+    /// <param name="name">What names it.</param>
+    /// <returns>The sentence.</returns>
+    public static string Removed(string kind, string name) => $"{kind} {name} removed from the working copy";
 }

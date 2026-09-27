@@ -89,8 +89,40 @@ internal sealed partial class WorkingCopy
         return refusal;
     }
 
-    /// <summary>Removes an entity.</summary>
+    /// <summary>Removes an entity. The screen asks <see cref="ReferencesToEntity"/> first.</summary>
+    /// <param name="name">The entity's name in the working copy.</param>
     public void RemoveEntity(string name) => Edit(root => (root["entities"] as JsonObject)?.Remove(name) is true);
+
+    /// <summary>What points at an entity from outside it, and which of those would make the apply refuse its removal.</summary>
+    /// <param name="entity">The entity's name in the working copy.</param>
+    public IReadOnlyList<DescriptorReference> ReferencesToEntity(string entity)
+        => Read<IReadOnlyList<DescriptorReference>>(
+            () => _working is JsonObject root ? EntityReferences.Inbound(root, entity) : []);
+
+    /// <summary>
+    /// The applied entities this copy removed: no longer declared, and not renamed either, so the apply drops their
+    /// tables.
+    /// </summary>
+    /// <remarks>
+    /// A renamed entity is not one of them — its declaration's <c>renamedFrom</c> names the applied table it moves —
+    /// and an entity only the copy declared never had a table, so it is not one either. The schema list strikes these
+    /// through: an applied row drawn as served after its removal is the staged-row lie <c>Entity.ReadWorking</c>
+    /// describes.
+    /// </remarks>
+    public IReadOnlyList<string> RemovedEntities => Read<IReadOnlyList<string>>(() =>
+    {
+        if (_applied?["entities"] is not JsonObject applied)
+        {
+            return [];
+        }
+
+        var working = _working?["entities"] as JsonObject;
+        var moved = working?.Select(entity => entity.Value?["renamedFrom"]).OfType<JsonValue>()
+            .Select(origin => origin.TryGetValue<string>(out var name) ? name : null).OfType<string>()
+            .ToHashSet(StringComparer.Ordinal) ?? [];
+        return [.. applied.Select(entity => entity.Key)
+            .Where(name => working?[name] is null && !moved.Contains(name))];
+    });
 
     /// <summary>The name this entity is applied under, which is what a field's origin has to be read against.</summary>
     /// <param name="entity">The entity's name in the working copy.</param>

@@ -585,8 +585,9 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     **Done:** PendingSchema reads index, default (literal only), nullable, rollup and computed, and resolves a missing tenancy through tenancy.enabled; applied and staged rows are badged by one FieldBadges, which also badges an explicit nullability.
 23. **People beyond the first 50 are unreachable.** `new AlvoUserQuery()` — no search, no next page
     (Access.razor:153). The port already takes `Search` and `After`.
-24. **An entity cannot be removed.** `WorkingCopy.RemoveEntity` has no caller (WC.Entities:93). Probably
+24. ✅ **An entity cannot be removed.** `WorkingCopy.RemoveEntity` has no caller (WC.Entities:93). Probably
     a Remove beside Rename, behind `ConfirmByName`, naming the refs and rollups that point at it.
+    **Done:** Remove sits beside Rename; the confirm (`AlvoConfirm`, spec §3.2's typed name) names every ref, rollup, entity.update action and trigger that points at the entity (EntityReferences.Inbound), refuses while one would make the apply refuse, and otherwise asks for the entity's name before calling WorkingCopy.RemoveEntity. An applied entity the copy removed is badged "removed — not applied yet" on the schema list and its own screen.
 25. **Data writes are last-writer-wins.** No precondition on update/delete although audited entities
     carry a version (DataGateway.cs:123,130). Then the lesser gaps: structured filters beyond `ilike`,
     multi-sort, batch, replace.

@@ -217,7 +217,11 @@
 
     private void Open(string entity) => Navigation.NavigateTo(AdminPaths.Entity(entity));
 
-    /// <summary>One applied entity's row: its name, its description and the facets that decide how it is served.</summary>
+    /// <summary>
+    /// One applied entity's row: its name, its description and the facets that decide how it is served — and, once the
+    /// working copy removed it, a badge saying so, because a row drawn as served after its removal reads as a removal
+    /// that did nothing (docs/todo-admin.md §8d item 24).
+    /// </summary>
     private RenderFragment EntityRow(EntitySchema entity) => @<ListRow class="a-listrow--inline"
                                                                       data-testid="@($"entity-row-{entity.Name}")"
                                                                       OnClick="() => Open(entity.Name)">
@@ -227,6 +231,10 @@
             <span class="a-meta">@(entity.Description ?? "No description in the descriptor")</span>
         </span>
         <span class="a-row a-row--gap-2 a-listrow__aside">
+            @if (Copy.Loaded && Copy.RemovedEntities.Contains(entity.Name, StringComparer.Ordinal))
+            {
+                <span class="a-badge a-badge--danger">removed — not applied yet</span>
+            }
             <span class="a-badge">@entity.Fields.Count fields</span>
             @if (entity.Tenancy == TenancyMode.Scoped)
             {

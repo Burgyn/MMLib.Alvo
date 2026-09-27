@@ -19,6 +19,10 @@
             {
                 <AlvoButton Small="true" data-testid="rename-entity" OnClick="_ => OpenRename()">Rename</AlvoButton>
             }
+            @if (DeclaredHere)
+            {
+                <AlvoButton Small="true" data-testid="remove-entity" OnClick="_ => OpenRemoveEntity()">Remove</AlvoButton>
+            }
         </Secondary>
     </PageHeader>
 
@@ -81,6 +85,42 @@
         }
     </AlvoConfirm>
 
+    @*
+        Removing an entity is wide-blast-radius (spec §3.2 names it): the apply drops its table and every row, so the
+        confirm types the name. What points at it is named first; while one of those would leave a descriptor the apply
+        refuses, there is no name to type and the verb stays disabled (docs/todo-admin.md §8d item 24).
+    *@
+    <AlvoConfirm Open="_removingEntity" TestId="remove-entity-sheet" ConfirmTestId="remove-entity-confirm"
+                 CancelTestId="remove-entity-cancel" Title="@($"Remove {EntityName}?")"
+                 Consequence="@RemoveEntityConsequence" Verb="Remove entity"
+                 TypeToConfirm="@(EntityRemovalBlocked ? null : EntityName)" Allowed="@(!EntityRemovalBlocked)"
+                 OnConfirm="RemoveEntity" OnCancel="CloseRemoveEntity">
+        @if (_inbound.Count == 0)
+        {
+            <p class="a-hint" data-testid="remove-entity-unreferenced">Nothing else in the descriptor points at it.</p>
+        }
+        @foreach (var reference in _inbound)
+        {
+            <ListRow data-testid="entity-reference">
+                <code class="a-mono a-listrow__key">@reference.Place</code>
+                <span class="@($"a-badge {(reference.Blocks ? "a-badge--danger" : "a-badge--warn")}")">
+                    @(reference.Blocks ? "points here" : "names it")
+                </span>
+            </ListRow>
+        }
+        @if (EntityRemovalBlocked)
+        {
+            <Refusal data-testid="remove-entity-blocked">
+                A ref, a rollup or an action still points here, and the apply refuses a descriptor that points at an
+                entity it does not declare. Change or remove them first.
+            </Refusal>
+        }
+        else if (_inbound.Count > 0)
+        {
+            <p class="a-hint">A trigger that names it stops firing. The apply warns about it; it does not refuse it.</p>
+        }
+    </AlvoConfirm>
+
     @if (_problem is not null)
     {
         <CascadingValue Value="_problem">
@@ -105,6 +145,10 @@
             @if (_pending)
             {
                 <span class="a-badge a-badge--warn">not applied yet</span>
+            }
+            else if (Copy.Loaded && Copy.RemovedEntities.Contains(EntityName, StringComparer.Ordinal))
+            {
+                <span class="a-badge a-badge--danger" data-testid="entity-removed">removed — not applied yet</span>
             }
             <span class="a-badge">@(_entity.Tenancy == TenancyMode.Scoped ? "tenancy: scoped" : "tenancy: global")</span>
             <span class="a-badge">@(_entity.Audit ? "audited" : "not audited")</span>
