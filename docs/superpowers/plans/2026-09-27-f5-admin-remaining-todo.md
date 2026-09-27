@@ -12,6 +12,8 @@
 3. Where a key's subsystem is not built (storage: dynamic → #41, auth.providers → #36, realtime → #38, automation webhooks → #33/#120), "done" is a precise notice in the dashboard + a core warning where the triage says so, never a half-built subsystem.
 4. Abstractions grows only in B7 and B8, each symbol justified (alvo-architecture-rules); OpenAPI / e2e pins move once per batch.
 
+5. **Narrowed by the maintainer (27 Sep): only what quality day-to-day use of the admin needs; everything else becomes a separate issue.** Kept: B1 (#267 read, #269 rest, field description display, 42); B2 (21 notice, 27 honest notices; editors stay in #271); B4 (25, 44); B7 reduced to 31 (+ the ManagementWarnedBlock.Block / ManagementCapabilities.Warned doc fixes carried from B2); B8 reduced to 39 + an operator Unlock (46 part i). Deferred to issues: 26 → #276, 29 → #277, 32 → #278, 36 → #279, 40 → #280, 41 → #281, 45 (B9) → #282, 37 → #283, 38 → #284, 43 → #285, 46(ii) → #286; kept open with a scope comment: #265, #267 edit half, #268 identity/editors, #270 (B6), #271 editors. Tasks 5, 6, 8 below are therefore dropped; Task 7 and 9 are reduced as stated.
+
 ## Global Constraints
 
 - Security core (B6, B8, and B9's returnUrl): `.claude/skills/alvo-security-core-review`; default-deny; `needs-deep-review`; the maintainer's `/security-review` before the PR is marked ready.
