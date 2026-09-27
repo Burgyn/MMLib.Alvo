@@ -102,22 +102,47 @@ internal static partial class AlvoAdminSetPassword
 
     /// <summary>The form as posted, with the token repaired.</summary>
     /// <param name="Email">The address.</param>
-    /// <param name="Token">The token, trimmed, with every space turned back into a <c>+</c>.</param>
+    /// <param name="Token">The token, repaired by <see cref="RepairToken"/>.</param>
     /// <param name="Password">The new password.</param>
     /// <param name="Repeat">The new password, typed again.</param>
     private sealed record Posted(string Email, string Token, string Password, string Repeat)
     {
         /// <summary>Reads the four fields.</summary>
-        /// <remarks>
-        /// A base64 token never contains a space, so a space in one is a <c>+</c> that went through
-        /// <c>URLSearchParams</c> or a form encoding on the way; turning it back repairs the token and can make no
-        /// other token valid.
-        /// </remarks>
         public static Posted From(IFormCollection form) => new(
             form["email"].ToString(),
-            form["token"].ToString().Trim().Replace(' ', '+'),
+            RepairToken(form["token"].ToString()),
             form["password"].ToString(),
             form["repeat"].ToString());
+
+        /// <summary>
+        /// The token as issued, from one that went through <c>URLSearchParams</c> or a form encoding (every <c>+</c>
+        /// read as a space) and was pasted with whitespace around it.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// A base64 token never contains a space, so a space inside one is a <c>+</c>. Turning it back repairs the
+        /// token and can make no other token valid: the repaired string is still redeemed, and still refused unless
+        /// it is the token as issued.
+        /// </para>
+        /// <para>
+        /// <b>Trimming alone would eat a trailing <c>+</c></b>: a token that ends in one arrives ending in a space,
+        /// which is indistinguishable from pasted whitespace. Base64 (RFC 4648 §4) comes in quartets of characters,
+        /// so the spaces straight after the trimmed token give back as many <c>+</c> as its last quartet is short,
+        /// and never more than one quartet's worth. An issued token starts with the data-protection header, never
+        /// with a <c>+</c>, so the leading whitespace is always whitespace.
+        /// </para>
+        /// </remarks>
+        /// <param name="posted">The token field as posted.</param>
+        /// <returns>The repaired token; empty when nothing but whitespace was posted.</returns>
+        private static string RepairToken(string posted)
+        {
+            var trimmed = posted.Trim();
+            var after = posted.AsSpan(posted.Length - posted.TrimStart().Length + trimmed.Length);
+            var spacesAfter = after.IndexOfAnyExcept(' ') is var end and >= 0 ? end : after.Length;
+            var missing = trimmed.Length is 0 ? 0 : (4 - (trimmed.Length % 4)) % 4;
+
+            return trimmed.Replace(' ', '+') + new string('+', Math.Min(missing, spacesAfter));
+        }
 
         /// <summary>
         /// Where a post that must not reach the store goes: over-long or missing input, a password over the policy's

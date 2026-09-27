@@ -144,11 +144,36 @@ public sealed partial class SetPasswordEndpointTests
     public async Task A_token_whose_plus_signs_became_spaces_still_redeems()
     {
         await using var world = await AlvoHostWorld.StartAsync(Descriptor);
-        var token = await IssueWithAPlusAsync(world, await CreateAsync(world, Eva));
+        var token = await IssueShapedAsync(world, await CreateAsync(world, Eva), TokenShape.PlusInside);
 
         using var response = await new Browser(world).SetPasswordAsync(Eva, $"  {token.Replace('+', ' ')} ", NewPassword);
 
         LocationOf(response).ShouldBe($"{AlvoAdmin.SignInPath}?passwordSet=true");
+    }
+
+    /// <summary>
+    /// <b>A token that ends in <c>+</c> survives the same trip</b>, with pasted whitespace after it: the space that was
+    /// its last <c>+</c> is not trimmed away with the whitespace, because base64 comes in quartets of characters.
+    /// </summary>
+    [Fact]
+    public async Task A_token_whose_last_plus_became_a_space_still_redeems_after_pasted_whitespace()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+        var token = await IssueShapedAsync(world, await CreateAsync(world, Eva), TokenShape.PlusAtTheEnd);
+
+        using var response = await new Browser(world).SetPasswordAsync(Eva, $"  {token.Replace('+', ' ')}  \n", NewPassword);
+
+        LocationOf(response).ShouldBe($"{AlvoAdmin.SignInPath}?passwordSet=true");
+    }
+
+    /// <summary>A token shape a fact needs, found among issued tokens rather than assumed of one.</summary>
+    private enum TokenShape
+    {
+        /// <summary>At least one <c>+</c>, and not as the last character.</summary>
+        PlusInside,
+
+        /// <summary>A <c>+</c> as the last character of an unpadded quartet.</summary>
+        PlusAtTheEnd,
     }
 
     /// <summary>
@@ -619,19 +644,31 @@ public sealed partial class SetPasswordEndpointTests
             AlvoUserAdministration.UnguardedKey).IssueCredentialTokenAsync(user, Ct)).Token;
     }
 
-    /// <summary>Issues tokens until one carries a <c>+</c>, which a base64 token does about as often as not.</summary>
-    private static async Task<string> IssueWithAPlusAsync(AlvoHostWorld world, UserId user)
+    /// <summary>
+    /// Issues tokens until one has the <paramref name="shape"/> a fact is about, so the fact is never vacuous: an
+    /// issued token is random, and one that ends in <c>+</c> comes about once in seventy.
+    /// </summary>
+    /// <remarks>2048 tries leave a chance of about one in 10<sup>13</sup> of finding none.</remarks>
+    private static async Task<string> IssueShapedAsync(AlvoHostWorld world, UserId user, TokenShape shape)
     {
-        for (var attempt = 0; attempt < 64; attempt++)
+        for (var attempt = 0; attempt < 2048; attempt++)
         {
-            if (await IssueAsync(world, user) is { } token && token.Contains('+', StringComparison.Ordinal))
+            var token = await IssueAsync(world, user);
+            if (Has(token, shape))
             {
                 return token;
             }
         }
 
-        throw new InvalidOperationException("64 tokens and not one '+': the token is no longer base64");
+        throw new InvalidOperationException($"2048 tokens and not one of shape {shape}: the token is no longer base64");
     }
+
+    private static bool Has(string token, TokenShape shape) => shape switch
+    {
+        TokenShape.PlusInside => token.Contains('+', StringComparison.Ordinal) && !token.EndsWith('+'),
+        TokenShape.PlusAtTheEnd => token.EndsWith('+') && token.Length % 4 == 0,
+        _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, null),
+    };
 
     private static async Task AdministerAsync(AlvoHostWorld world, Func<IAlvoUserAdministration, Task> write)
     {
