@@ -34,6 +34,18 @@ export const CAPABILITIES = {
     {
       "block": "functions",
       "consequence": "no function is ever invoked, on any trigger or schedule it declares"
+    },
+    {
+      "block": "auth.providers",
+      "consequence": "only local credentials exist in this build — a person signs in with an address and a password Alvo holds; google, microsoft, github, apple and oidc sign-in are #36 (F7), so a declared provider other than local offers no way in"
+    },
+    {
+      "block": "entity.storage",
+      "consequence": "an entity declared with 'storage: dynamic' is not created: this build has no dynamic schema-registry driver (F7, #41), so the entity gets no table, no Data API route and no records, and the apply drops it without refusing it"
+    },
+    {
+      "block": "entity.realtime",
+      "consequence": "no change is published over a realtime channel, because this build has none (#38, F7) — whatever an entity's 'realtime' says, and its default is true, nothing is sent and nothing can subscribe"
     }
   ],
   "refused": [

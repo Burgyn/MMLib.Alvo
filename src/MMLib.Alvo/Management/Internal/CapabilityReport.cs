@@ -29,6 +29,24 @@ namespace MMLib.Alvo.Management.Internal;
 /// nothing else. Some consequences name an issue inside the prose and some name none, so minting a number
 /// here would be inventing data — the prose is served as written and carries whatever its author put in it.
 /// </para>
+/// <para>
+/// <b><c>warned</c> carries qualified slots as well as top-level blocks</b> (§8d items 21 and 27):
+/// <see cref="UnhonouredSubsystems.WithinBlocks"/>' <c>auth.providers</c> and <c>entity.storage</c>, and
+/// <see cref="UnhonouredSubsystems.ReportedOnly"/>' <c>entity.realtime</c>, after the blocks, spelled as
+/// <c>refused</c>'s slots already are (<c>field.default</c>). A client keyed on a top-level block name matches
+/// none of them, so no existing badge moves. <c>ManagementWarnedBlock.Block</c>'s own summary still says "top-level
+/// block name"; correcting that sentence is an Abstractions change, left to the batch that grows Abstractions
+/// (B7), and this paragraph is where the wider meaning is stated until then.
+/// </para>
+/// <para>
+/// <b>Deliberate deviation: the report and the apply warning are no longer the same list.</b> Until §8d item 27
+/// the warned half was exactly what the apply warns about. <c>entity.realtime</c> is now reported and never
+/// warned, because its schema default is <c>true</c> — a line at apply would fire on every descriptor ever
+/// applied (the reasoning is <see cref="UnhonouredSubsystems"/>' and <c>docs/architecture/data-api.md</c>'s, #38)
+/// — while a dashboard that says nothing about it lets an operator believe changes are published. The triage's
+/// alternative, a dashboard note citing #38 by link, would have put a sentence about the build in a client, which
+/// is the second spelling this type exists to prevent.
+/// </para>
 /// </remarks>
 internal static class CapabilityReport
 {
@@ -56,7 +74,10 @@ internal static class CapabilityReport
     /// <summary>What this build honours, warns about, and refuses.</summary>
     internal static ManagementCapabilities Project() => new(
         Honoured,
-        [.. UnhonouredSubsystems.All.Select(block => new ManagementWarnedBlock(block.Block, block.Consequence))],
+        [.. UnhonouredSubsystems.All
+            .Concat(UnhonouredSubsystems.WithinBlocks)
+            .Concat(UnhonouredSubsystems.ReportedOnly)
+            .Select(block => new ManagementWarnedBlock(block.Block, block.Consequence))],
         [.. UnhonouredFeatures.EveryRefusal.Select(refusal =>
             new ManagementRefusedFeature(refusal.Slot, refusal.Consequence, refusal.Fix))]);
 }

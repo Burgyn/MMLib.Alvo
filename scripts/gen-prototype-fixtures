@@ -10,7 +10,7 @@ three files this script writes are the only source, and `--check` fails when the
 Sources, and nothing else:
 
   src/MMLib.Alvo/Descriptor/Internal/UnhonouredFeatures.cs     -> capabilities.refused (11 slots)
-  src/MMLib.Alvo/Descriptor/Internal/UnhonouredSubsystems.cs   -> capabilities.warned   (5 blocks)
+  src/MMLib.Alvo/Descriptor/Internal/UnhonouredSubsystems.cs   -> capabilities.warned   (5 blocks, 3 slots)
   src/MMLib.Alvo/Management/Internal/CapabilityReport.cs       -> capabilities.honoured
   src/MMLib.Alvo/Management/Internal/ManagementEndpoints.cs    -> the management route table
   src/MMLib.Alvo/Management/Access/ManagementOperations.cs     -> the level each route needs
@@ -195,12 +195,13 @@ def _arm_end(tail: str) -> int:
 
 
 def warned() -> list[dict]:
-    """`UnhonouredSubsystems.All`, in the schema's own declaration order, verbatim."""
+    """What `CapabilityReport.Project` serves as warned, verbatim: `UnhonouredSubsystems.All` (in the
+    schema's own declaration order), then `WithinBlocks`, then `ReportedOnly`."""
     text = SUBSYSTEMS.read_text(encoding="utf-8")
-    block = block_after(text, "All { get; } =", "[", "]")
     out = []
-    for literals in entries_of(block):
-        out.append({"block": literals[0], "consequence": literals[1]})
+    for anchor in ("All { get; } =", "WithinBlocks { get; } =", "ReportedOnly { get; } ="):
+        for literals in entries_of(block_after(text, anchor, "[", "]")):
+            out.append({"block": literals[0], "consequence": literals[1]})
     return out
 
 
