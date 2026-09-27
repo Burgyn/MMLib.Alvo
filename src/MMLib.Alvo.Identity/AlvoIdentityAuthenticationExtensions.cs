@@ -77,7 +77,8 @@ public static class AlvoIdentityAuthenticationExtensions
         services.AddScoped(provider => new AlvoSignIn(
             provider.GetRequiredService<SignInManager<AlvoIdentityUser>>(),
             provider.GetRequiredService<IAlvoBootstrapAdmin>(),
-            provider.GetRequiredService<AlvoIdentityDbContext>()));
+            provider.GetRequiredService<AlvoIdentityDbContext>(),
+            provider.GetRequiredService<AlvoTimingParity>()));
 
         services
             .AddAuthentication(IdentityConstants.ApplicationScheme)

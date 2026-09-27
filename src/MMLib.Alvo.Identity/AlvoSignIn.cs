@@ -30,26 +30,10 @@ namespace MMLib.Alvo.Identity;
 /// </remarks>
 public sealed class AlvoSignIn
 {
-    /// <summary>The password <see cref="TimingParityHash"/> is the hash of; nobody can sign in with it.</summary>
-    internal const string TimingParityPassword = "alvo-sign-in-timing-parity";
-
-    /// <summary>
-    /// A fixed Identity v3 hash (PBKDF2-HMAC-SHA512, 100 000 iterations — the default the stored hashes carry)
-    /// that a sign-in against an address with no usable account verifies against, so it costs what a wrong
-    /// password costs.
-    /// </summary>
-    /// <remarks>
-    /// A constant rather than one computed at first use, so the first unknown address does not cost two hashes.
-    /// The verification reads its iteration count from the hash itself, as a real stored hash's does; a host
-    /// that raises <c>PasswordHasherOptions.IterationCount</c> makes new accounts' hashes slower than this one
-    /// until it is regenerated, which the credential rate limit bounds.
-    /// </remarks>
-    internal const string TimingParityHash =
-        "AQAAAAIAAYagAAAAEAABAgMEBQYHCAkKCwwNDg9CD1L4hZU4WCFwymx+Q9880O18dJnpYw7YjOrsAgP9GA==";
-
     private readonly SignInManager<AlvoIdentityUser> _signIn;
     private readonly IAlvoBootstrapAdmin _bootstrap;
     private readonly AlvoIdentityDbContext _store;
+    private readonly AlvoTimingParity _parity;
 
     /// <summary>
     /// Constructs the service over Identity's sign-in manager.
@@ -64,12 +48,17 @@ public sealed class AlvoSignIn
     /// <param name="signIn">ASP.NET Core Identity's sign-in manager over the Alvo identity store.</param>
     /// <param name="bootstrap">Who the bootstrap administrator is, whom redemption refuses.</param>
     /// <param name="store">The identity store, whose unit of work a redemption runs in.</param>
+    /// <param name="parity">The hash a refused sign-in verifies against.</param>
     internal AlvoSignIn(
-        SignInManager<AlvoIdentityUser> signIn, IAlvoBootstrapAdmin bootstrap, AlvoIdentityDbContext store)
+        SignInManager<AlvoIdentityUser> signIn,
+        IAlvoBootstrapAdmin bootstrap,
+        AlvoIdentityDbContext store,
+        AlvoTimingParity parity)
     {
         _signIn = signIn;
         _bootstrap = bootstrap;
         _store = store;
+        _parity = parity;
     }
 
     private UserManager<AlvoIdentityUser> Users => _signIn.UserManager;
@@ -86,11 +75,15 @@ public sealed class AlvoSignIn
     /// identical from outside.
     /// </para>
     /// <para>
-    /// <b>And it takes as long.</b> An address with no account, an account with no password yet, and a
-    /// disabled or locked-out one are all refused without Identity hashing anything, which made the answer
-    /// fast exactly when the address was not a working account. Each verifies the password against
-    /// <see cref="TimingParityHash"/> first, so every refusal costs one PBKDF2 verification, like a wrong
-    /// password (design §10.3).
+    /// <b>And it takes as long, to within a write.</b> An address with no account, an account with no password
+    /// yet, and a disabled or locked-out one are all refused without Identity hashing anything, which made the
+    /// answer fast exactly when the address was not a working account. Each verifies the password against a hash
+    /// the registered hasher made (<see cref="AlvoTimingParity"/>), so every refusal costs one verification at the
+    /// host's own cost, like a wrong password (design §10.3). One residue remains, deliberately: a wrong password
+    /// for a live account also writes its failed-attempt count (and, at the threshold, the lockout), about a
+    /// millisecond against a verification's tens; the shared credential rate limit bounds how many samples of it
+    /// a client can take. No dummy write is added to match it, because writing to a row that does not exist is
+    /// not possible and writing somewhere else would be a cost with no guarantee of equality.
     /// </para>
     /// <para>
     /// <c>isPersistent: false</c> — the session ends with the browser. A configuration tool that
@@ -108,7 +101,8 @@ public sealed class AlvoSignIn
         var user = await Users.FindByEmailAsync(email).ConfigureAwait(false);
         if (user?.PasswordHash is null || await Users.IsLockedOutAsync(user).ConfigureAwait(false))
         {
-            _ = Users.PasswordHasher.VerifyHashedPassword(new AlvoIdentityUser(), TimingParityHash, password);
+            var hasher = Users.PasswordHasher;
+            _ = hasher.VerifyHashedPassword(new AlvoIdentityUser(), _parity.For(hasher), password);
             return false;
         }
 

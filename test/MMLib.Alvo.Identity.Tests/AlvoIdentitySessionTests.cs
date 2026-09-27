@@ -83,7 +83,12 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
     {
         _client.Dispose();
         await _app.DisposeAsync();
-        SqliteConnection.ClearAllPools();
+        /* This file's pool only: clearing every pool in the process races the other classes' open connections. */
+        using (var connection = new SqliteConnection($"Data Source={_file}"))
+        {
+            SqliteConnection.ClearPool(connection);
+        }
+
         File.Delete(_file);
     }
 
@@ -254,19 +259,64 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// A role change does <b>not</b> end the session: Identity rotates the stamp only on a credential write, so the
-    /// new check ends sessions on a password change and on nothing an administrator does to access.
+    /// A role or tenant change does <b>not</b> end the session, on either transport: neither rotates the stamp, so the
+    /// stamp check ends sessions on a password change and a disable, and on nothing else an administrator does.
     /// </summary>
     [Fact]
     public async Task A_role_or_tenant_change_does_not_end_the_session()
     {
         var id = await CreateAsync();
         var cookie = await SignInAsync();
+        var circuit = Session(id.ToString(), await StampAsync(id));
 
         await AdministerAsync(people => people.SetRolesAsync(id, ["developer"], Ct));
         await AdministerAsync(people => people.SetTenantAsync(id, TenantId.New(), Ct));
 
         (await GetMeAsync(cookie)).StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await CircuitStandsAsync(circuit)).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// <b>Letting a person back in does not revive a session from before the disable.</b> The disable rotates the
+    /// stamp, so a cookie that was not presented while they were disabled — a stolen one, say — stays dead after the
+    /// re-enable, and they sign in again (OWASP: end sessions when an account is disabled).
+    /// </summary>
+    [Fact]
+    public async Task A_cookie_from_before_a_disable_stays_refused_after_the_person_is_let_back_in()
+    {
+        var id = await CreateAsync();
+        var cookie = await SignInAsync();
+
+        await AdministerAsync(people => people.SetDisabledAsync(id, disabled: true, Ct));
+        await AdministerAsync(people => people.SetDisabledAsync(id, disabled: false, Ct));
+
+        (await GetMeAsync(cookie)).StatusCode.ShouldBe(HttpStatusCode.Redirect);
+        (await SignInAsync()).ShouldNotBeNull("a person let back in signs in again");
+    }
+
+    /// <summary>The circuit's half: an open tab from before a disable does not stand again after the re-enable.</summary>
+    [Fact]
+    public async Task A_circuit_from_before_a_disable_does_not_stand_after_the_person_is_let_back_in()
+    {
+        var id = await CreateAsync();
+        var before = Session(id.ToString(), await StampAsync(id));
+
+        await AdministerAsync(people => people.SetDisabledAsync(id, disabled: true, Ct));
+        await AdministerAsync(people => people.SetDisabledAsync(id, disabled: false, Ct));
+
+        (await CircuitStandsAsync(before)).ShouldBeFalse();
+        (await CircuitStandsAsync(Session(id.ToString(), await StampAsync(id)))).ShouldBeTrue();
+    }
+
+    /// <summary>Asks the registered circuit provider, from a scope of its own, whether a state still stands.</summary>
+    /// <param name="state">The circuit's authentication state.</param>
+    /// <returns>Whether it stands.</returns>
+    private async Task<bool> CircuitStandsAsync(AuthenticationState state)
+    {
+        using var scope = _app.Services.CreateScope();
+        var provider = (AlvoIdentityRevalidatingAuthenticationStateProvider)
+            scope.ServiceProvider.GetRequiredService<AuthenticationStateProvider>();
+        return await provider.StillStandsAsync(state, Ct);
     }
 
     /// <summary>

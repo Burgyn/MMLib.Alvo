@@ -37,6 +37,10 @@ internal sealed partial class AlvoIdentityBootstrap(
         using var scope = scopes.CreateScope();
         await EnsureTablesAsync(scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
         await SeedAsync(scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
+
+        /* Before the server accepts a request, so no sign-in pays for the timing-parity hash. */
+        _ = scope.ServiceProvider.GetRequiredService<AlvoTimingParity>()
+            .For(scope.ServiceProvider.GetRequiredService<IPasswordHasher<AlvoIdentityUser>>());
     }
 
     /// <inheritdoc/>
@@ -205,8 +209,9 @@ internal sealed partial class AlvoIdentityBootstrap(
 
     /// <summary>Creates the administrator account and grants it the built-in administrative role.</summary>
     /// <remarks>
-    /// <b>A new seed shorter than the password policy fails the start with a sentence of its own</b>, rather than
-    /// with Identity's error surfacing from inside <c>CreateAsync</c>. Only here, on the branch that creates the
+    /// <b>A new seed the password policy refuses fails the start with a sentence of its own</b> — too short, too
+    /// long, or containing the address — rather than with Identity's error surfacing from inside
+    /// <c>CreateAsync</c>. Only here, on the branch that creates the
     /// account: an administrator an earlier start seeded is never rewritten, so a secret that no longer meets
     /// the policy is not a reason to refuse a restart. The options validation cannot make this check — it does
     /// not know whether the account exists, and it deliberately never reads the secret.
@@ -220,20 +225,38 @@ internal sealed partial class AlvoIdentityBootstrap(
         IServiceProvider scope, UserManager<AlvoIdentityUser> users, string email, CancellationToken cancellationToken)
     {
         var password = await ReadPasswordAsync(cancellationToken).ConfigureAwait(false);
-        var required = users.Options.Password.RequiredLength;
-        if (password.Length < required)
+        var created = new AlvoIdentityUser { Id = Guid.NewGuid(), UserName = email, Email = email };
+        if (await PolicyRefusalsAsync(users, created, password).ConfigureAwait(false) is { Count: > 0 } refusals)
         {
-            throw new InvalidOperationException(AlvoIdentityConfiguration.ShortBootstrapPassword(
-                options.Value.BootstrapPasswordFile!, email, required));
+            throw new InvalidOperationException(AlvoIdentityConfiguration.RefusedBootstrapPassword(
+                options.Value.BootstrapPasswordFile!, email, users.Options.Password.RequiredLength, refusals));
         }
 
-        var created = new AlvoIdentityUser { Id = Guid.NewGuid(), UserName = email, Email = email };
 
         Require(await users.CreateAsync(created, password).ConfigureAwait(false), email);
         await EnsureAdminRoleAsync(scope).ConfigureAwait(false);
         Require(await users.AddToRoleAsync(created, Role.Admin.Name).ConfigureAwait(false), email);
 
         return new UserId(created.Id);
+    }
+
+    /// <summary>What every registered password validator says about the seed, in Identity's own words.</summary>
+    /// <remarks>The descriptions name rules, never the secret, so they are safe in a start failure.</remarks>
+    /// <param name="users">ASP.NET Core Identity's user manager.</param>
+    /// <param name="created">The account about to be seeded.</param>
+    /// <param name="password">The seed.</param>
+    /// <returns>The refusals; empty when the policy accepts the seed.</returns>
+    private static async Task<IReadOnlyList<string>> PolicyRefusalsAsync(
+        UserManager<AlvoIdentityUser> users, AlvoIdentityUser created, string password)
+    {
+        var refusals = new List<string>();
+        foreach (var validator in users.PasswordValidators)
+        {
+            var result = await validator.ValidateAsync(users, created, password).ConfigureAwait(false);
+            refusals.AddRange(result.Errors.Select(error => error.Description));
+        }
+
+        return refusals;
     }
 
     /// <summary>Creates the built-in administrative role row when it is not there yet.</summary>

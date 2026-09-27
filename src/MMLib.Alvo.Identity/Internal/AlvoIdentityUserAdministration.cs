@@ -205,6 +205,16 @@ internal sealed class AlvoIdentityUserAdministration(
                 .ConfigureAwait(false),
             user.ToString());
 
+        /* A disable also rotates the security stamp, in the same unit of work, so every cookie and circuit the
+           person holds ends and every credential token outstanding for them dies. The lockout alone refuses
+           them only while it stands: a cookie not presented during the disable — a stolen one, say — would
+           stand again after "let them back in". OWASP's session guidance ends sessions on a disable; the cost
+           is that a person let back in signs in again, and needs a new token if they had not set a password. */
+        if (disabled)
+        {
+            Succeeded(await users.UpdateSecurityStampAsync(row).ConfigureAwait(false), user.ToString());
+        }
+
         return await ProjectAsync(row).ConfigureAwait(false);
     }
 

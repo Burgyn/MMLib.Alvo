@@ -27,7 +27,12 @@ public sealed class AlvoIdentityBootstrapLifecycleTests : IAsyncLifetime
     /// <inheritdoc/>
     public ValueTask DisposeAsync()
     {
-        SqliteConnection.ClearAllPools();
+        /* This file's pool only: clearing every pool in the process races the other classes' open connections. */
+        using (var connection = new SqliteConnection($"Data Source={_file}"))
+        {
+            SqliteConnection.ClearPool(connection);
+        }
+
         File.Delete(_file);
         return ValueTask.CompletedTask;
     }

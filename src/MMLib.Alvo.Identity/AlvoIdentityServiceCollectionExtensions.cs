@@ -63,6 +63,7 @@ public static class AlvoIdentityServiceCollectionExtensions
 
         services.TryAddScoped<IAlvoUserStore, AlvoIdentityUserStore>();
         services.TryAddSingleton<AlvoBootstrapAdmin>();
+        services.TryAddSingleton<AlvoTimingParity>();
         services.Replace(ServiceDescriptor.Singleton<IAlvoBootstrapAdmin>(
             provider => provider.GetRequiredService<AlvoBootstrapAdmin>()));
         services.AddKeyedScoped<IAlvoContextResolver, AlvoIdentityContextResolver>(AlvoIdentity.ResolverKey);

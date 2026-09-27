@@ -3,6 +3,8 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using MMLib.Alvo.Identity.Internal;
 
 namespace MMLib.Alvo.Identity.Tests;
@@ -34,9 +36,9 @@ public sealed class AlvoSignInSetPasswordTests : IAsyncLifetime
     /// <inheritdoc/>
     public async ValueTask InitializeAsync()
     {
+        /* Started as a host starts it: the bootstrap creates the tables and makes the timing-parity hash. */
         _provider = Build(services => { });
-        using var scope = _provider.CreateScope();
-        await scope.ServiceProvider.GetRequiredService<AlvoIdentityDbContext>().Database.EnsureCreatedAsync(Ct);
+        await StartAsync(_provider);
     }
 
     /// <inheritdoc/>
@@ -180,10 +182,11 @@ public sealed class AlvoSignInSetPasswordTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// <b>A disabled person is refused, and the token is not consumed</b>: it works once they are let back in.
+    /// <b>A disabled person is refused, and the disable ends every token they held</b>: it rotates the security
+    /// stamp, so a token issued before it does not come back with "let back in" — a new one is needed.
     /// </summary>
     [Fact]
-    public async Task A_disabled_person_is_refused_and_the_token_survives_being_let_back_in()
+    public async Task A_disabled_person_is_refused_and_being_let_back_in_does_not_revive_the_old_token()
     {
         var eva = await CreateAsync(Eva, OldPassword);
         var token = await IssueAsync(eva);
@@ -193,7 +196,48 @@ public sealed class AlvoSignInSetPasswordTests : IAsyncLifetime
         (await RowAsync(Eva)).LockoutEnd.ShouldBe(AlvoIdentityLockout.Disabled, "still disabled");
 
         await AdministerAsync(people => people.SetDisabledAsync(eva, disabled: false, Ct));
-        (await RedeemAsync(Eva, token, NewPassword)).ShouldBe(AlvoPasswordSetOutcome.Set);
+        (await RedeemAsync(Eva, token, NewPassword)).ShouldBe(AlvoPasswordSetOutcome.Refused);
+        (await RedeemAsync(Eva, await IssueAsync(eva), NewPassword)).ShouldBe(AlvoPasswordSetOutcome.Set);
+    }
+
+    /// <summary>
+    /// <b>A refusal writes nothing</b>: the failed-attempt count and the lockout are exactly what they were, so a
+    /// stranger redeeming garbage against an address can neither lock it out nor unlock it.
+    /// </summary>
+    [Fact]
+    public async Task A_refused_redemption_leaves_the_failed_count_and_the_lockout_as_they_were()
+    {
+        await CreateAsync(Eva, OldPassword);
+        var otto = await CreateAsync(Otto, OldPassword);
+        await FailSignInsAsync(Eva, times: 2);
+        var eva = new UserId((await RowAsync(Eva)).Id);
+        var token = await IssueAsync(eva);
+        var used = await IssueAsync(eva);
+        (await RedeemAsync(Eva, used, NewPassword)).ShouldBe(AlvoPasswordSetOutcome.Set);
+        await FailSignInsAsync(Eva, times: 2);
+
+        (await RedeemAsync(Eva, await IssueAsync(otto), "another long passphrase")).ShouldBe(AlvoPasswordSetOutcome.Refused);
+        (await RedeemAsync(Eva, token[..^12], "another long passphrase")).ShouldBe(AlvoPasswordSetOutcome.Refused);
+        (await RedeemAsync(Eva, used, "another long passphrase")).ShouldBe(AlvoPasswordSetOutcome.Refused);
+
+        var row = await RowAsync(Eva);
+        row.AccessFailedCount.ShouldBe(2);
+        row.LockoutEnd.ShouldBeNull();
+    }
+
+    /// <summary>A refusal of a temporarily locked-out person leaves the lockout in place.</summary>
+    [Fact]
+    public async Task A_refused_redemption_does_not_clear_a_temporary_lockout()
+    {
+        var eva = await CreateAsync(Eva, OldPassword);
+        await LockOutAsync(Eva);
+        var lockedUntil = (await RowAsync(Eva)).LockoutEnd;
+
+        (await RedeemAsync(Eva, (await IssueAsync(eva))[..^12], NewPassword)).ShouldBe(AlvoPasswordSetOutcome.Refused);
+
+        var row = await RowAsync(Eva);
+        row.LockoutEnd.ShouldBe(lockedUntil);
+        row.AccessFailedCount.ShouldBe(0, "Identity resets the count when it writes the lockout");
     }
 
     /// <summary>
@@ -255,12 +299,16 @@ public sealed class AlvoSignInSetPasswordTests : IAsyncLifetime
         var otto = await CreateAsync(Otto, OldPassword);
         var token = await IssueAsync(eva);
         var ottos = await IssueAsync(otto);
+        var admin = await CreateAsync("admin@example.test", OldPassword);
+        var admins = await IssueAsync(admin);
+        _provider.GetRequiredService<AlvoBootstrapAdmin>().Publish(admin);
         _hashes.Reset();
 
         await RedeemAsync("nobody@example.test", token, NewPassword);
         await RedeemAsync(Eva, ottos, NewPassword);
         await RedeemAsync(Eva, token[..^12], NewPassword);
         await RedeemAsync(Eva, token, "fourteen-chars");
+        await RedeemAsync("admin@example.test", admins, NewPassword);
         await AdministerAsync(people => people.SetDisabledAsync(eva, disabled: true, Ct));
         await RedeemAsync(Eva, token, NewPassword);
 
@@ -280,6 +328,7 @@ public sealed class AlvoSignInSetPasswordTests : IAsyncLifetime
         (await HashesForSignInAsync(Eva, "a wrong password here")).ShouldBe(1);
         (await HashesForSignInAsync("nobody@example.test", "a wrong password here")).ShouldBe(1);
         (await HashesForSignInAsync(Otto, "a wrong password here")).ShouldBe(1, "no password yet is no oracle either");
+        (await RowAsync(Otto)).AccessFailedCount.ShouldBe(0, "an account with no password has nothing to lock out");
 
         var eva = await RowAsync(Eva);
         await AdministerAsync(people => people.SetDisabledAsync(new UserId(eva.Id), disabled: true, Ct));
@@ -287,16 +336,60 @@ public sealed class AlvoSignInSetPasswordTests : IAsyncLifetime
     }
 
     /// <summary>
-    /// The fixed hash the unknown-address path verifies against is a real v3 hash — a malformed one would be
-    /// refused before PBKDF2 ran, and cost nothing.
+    /// <b>The timing-parity hash is the registered hasher's own</b>, so it costs what a stored hash costs: under a
+    /// configured iteration count, the dummy carries that count.
     /// </summary>
     [Fact]
-    public void The_timing_parity_hash_is_a_full_cost_v3_hash()
+    public async Task The_parity_hash_carries_the_configured_iteration_count()
     {
-        var hasher = new PasswordHasher<AlvoIdentityUser>();
+        await using var slow = Build(services => services.Configure<PasswordHasherOptions>(
+            hashing => hashing.IterationCount = 200_000));
+        await StartAsync(slow);
 
-        hasher.VerifyHashedPassword(new AlvoIdentityUser(), AlvoSignIn.TimingParityHash, AlvoSignIn.TimingParityPassword)
-            .ShouldBe(PasswordVerificationResult.Success);
+        var hash = Convert.FromBase64String(slow.GetRequiredService<AlvoTimingParity>().Hash.ShouldNotBeNull());
+
+        hash[0].ShouldBe((byte)0x01, "an Identity v3 hash");
+        System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(hash.AsSpan(5, 4)).ShouldBe(200_000u);
+    }
+
+    /// <summary>
+    /// <b>A host that replaces the hasher gets parity from its own hasher</b> — an Argon2id replacement handed a v3
+    /// blob would refuse it after a format check, in microseconds, and the oracle would be back.
+    /// </summary>
+    [Fact]
+    public async Task A_replaced_hasher_makes_and_verifies_the_parity_hash()
+    {
+        var tagging = new TaggingHasher();
+        await using var replaced = Build(services => services.Replace(
+            ServiceDescriptor.Scoped<IPasswordHasher<AlvoIdentityUser>>(_ => tagging)));
+        await StartAsync(replaced);
+
+        using var scope = replaced.CreateScope();
+        (await scope.ServiceProvider.GetRequiredService<AlvoSignIn>()
+            .PasswordSignInAsync("nobody@example.test", "a wrong password here")).ShouldBeFalse();
+
+        tagging.Verified.ShouldHaveSingleItem().ShouldStartWith(TaggingHasher.Tag);
+        tagging.Verified[0].ShouldBe(replaced.GetRequiredService<AlvoTimingParity>().Hash);
+    }
+
+    /// <summary>
+    /// Without a start (an embedded host that never runs the hosted services, a test) the hash is made on first
+    /// use, once: that one sign-in costs a hash more, every later one exactly one verification.
+    /// </summary>
+    [Fact]
+    public async Task Without_a_start_the_parity_hash_is_made_once_on_first_use()
+    {
+        await using var unstarted = Build(services => { });
+        _hashes.Reset();
+
+        foreach (var expected in new[] { 2, 1, 1 })
+        {
+            using var scope = unstarted.CreateScope();
+            _hashes.Reset();
+            (await scope.ServiceProvider.GetRequiredService<AlvoSignIn>()
+                .PasswordSignInAsync("nobody@example.test", "a wrong password here")).ShouldBeFalse();
+            _hashes.Calls.ShouldBe(expected);
+        }
     }
 
     /// <summary>The token's stated expiry is its issue time plus the configured lifetime, not "about a day".</summary>
@@ -354,9 +447,27 @@ public sealed class AlvoSignInSetPasswordTests : IAsyncLifetime
         services.AddAlvoIdentity(store => store.UseSqlite($"Data Source={_file}"));
         services.AddAlvoIdentityCookieSignIn("/sign-in");
         services.Replace(ServiceDescriptor.Scoped<IPasswordHasher<AlvoIdentityUser>>(
-            _ => new CountingHasher(new PasswordHasher<AlvoIdentityUser>(), _hashes)));
+            provider => new CountingHasher(
+                new PasswordHasher<AlvoIdentityUser>(provider.GetRequiredService<IOptions<PasswordHasherOptions>>()),
+                _hashes)));
         configure(services);
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+    }
+
+    /// <summary>Runs the identity bootstrap's start, as a host's start would.</summary>
+    private static async Task StartAsync(ServiceProvider host)
+        => await host.GetServices<IHostedService>().OfType<AlvoIdentityBootstrap>().Single().StartingAsync(Ct);
+
+    /// <summary>Wrong sign-ins through Identity, each counted as a failed attempt.</summary>
+    private async Task FailSignInsAsync(string email, int times)
+    {
+        using var scope = _provider.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<AlvoIdentityUser>>();
+        var row = (await users.FindByEmailAsync(email)).ShouldNotBeNull();
+        for (var attempt = 0; attempt < times; attempt++)
+        {
+            await users.AccessFailedAsync(row);
+        }
     }
 
     private async Task<UserId> CreateAsync(string email, string? password, ServiceProvider? host = null)
@@ -458,6 +569,29 @@ public sealed class AlvoSignInSetPasswordTests : IAsyncLifetime
         public void Count() => Interlocked.Increment(ref _calls);
 
         public void Reset() => Volatile.Write(ref _calls, 0);
+    }
+
+    /// <summary>A stand-in for a replacement hasher with a format of its own; it records what it verified.</summary>
+    private sealed class TaggingHasher : IPasswordHasher<AlvoIdentityUser>
+    {
+        public const string Tag = "tagged$";
+
+        public List<string> Verified { get; } = [];
+
+        public string HashPassword(AlvoIdentityUser user, string password) => Tag + password;
+
+        public PasswordVerificationResult VerifyHashedPassword(
+            AlvoIdentityUser user, string hashedPassword, string providedPassword)
+        {
+            lock (Verified)
+            {
+                Verified.Add(hashedPassword);
+            }
+
+            return hashedPassword == Tag + providedPassword
+                ? PasswordVerificationResult.Success
+                : PasswordVerificationResult.Failed;
+        }
     }
 
     /// <summary>The real hasher, counting every call.</summary>

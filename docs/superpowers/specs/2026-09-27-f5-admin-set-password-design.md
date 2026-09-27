@@ -166,12 +166,17 @@ in `AddIdentityCore`:
   `RequireUppercase` and `RequireNonAlphanumeric` all `false`, `RequiredUniqueChars = 1`.
 - A new internal `AlvoPasswordValidator : IPasswordValidator<AlvoIdentityUser>` refuses more than 128
   characters, and refuses a password equal to or containing the address or its local part (case-
-  insensitive). That is the context-specific blocklist NIST asks for.
+  insensitive; the local part only from three characters, §8.12). That is the context-specific blocklist
+  NIST asks for.
 - Paste is allowed; there is no rotation and no hint.
 - This is **one policy for everyone**, so it also governs the bootstrap seed. An already-seeded account
-  is never rewritten, and a new deployment with a shorter secret is refused at start.
-  `AlvoIdentityOptionsValidation` gains a length check that gives a structured
-  `AlvoIdentityConfiguration` sentence, instead of Identity's error surfacing from the seed.
+  is never rewritten, and a new deployment whose secret the policy refuses (too short, over 128, or
+  containing the address) is refused at start. The check lives in `AlvoIdentityBootstrap.CreateAsync`,
+  on the branch that creates the account, and gives a structured `AlvoIdentityConfiguration` sentence
+  instead of Identity's error surfacing from the seed. **Not** in `AlvoIdentityOptionsValidation`
+  (this design's first draft): options validation cannot tell a new seed from an already seeded
+  account, so it would refuse the restart of a deployment ruling 10.2 says keeps working, and that
+  class deliberately never reads the secret (§8.11).
   Every repository fixture is ≥ 15 (e2e 21, demo 21, identity tests 15).
 - The Admin package cannot reference Identity, so it keeps its own `15` for `minlength` and the policy
   text, and a Host test pins the two together (the `TenantClaimType` precedent).
@@ -188,11 +193,13 @@ Both transports share this method:
 - **Circuit**: the 30-second revalidation drops an open tab to sign-in.
 
 This is the check of ASP.NET's `SecurityStampValidator`, without its 30-minute throttle, for the reason
-the class already gives. Role, tenant and disable writes do not rotate the stamp in `UserManager`
-(only password, email, username, login and 2FA writes do), so the new check ends sessions only on a
-credential change. It adds one PK read per guarded HTTP request, and the remarks' "two reads" becomes
-three. The class and the revalidating provider's remarks ("a disable moves the lockout, not the
-stamp") are updated.
+the class already gives. Role and tenant writes do not rotate the stamp in `UserManager` (only
+password, email, username, login and 2FA writes do). **A disable does rotate it** (ruling 10.5): the
+administration calls `UpdateSecurityStampAsync` in the disable's own unit of work, so every cookie and
+circuit the person holds ends, every outstanding credential token dies, and "let them back in" revives
+neither; the person signs in again. So the check ends sessions on a credential change and on a disable,
+never on a change to what a person may do. It adds one PK read per guarded HTTP request, and the
+remarks' "two reads" becomes three. The class and the revalidating provider's remarks are updated.
 
 ## 5. Public API impact
 
@@ -224,8 +231,9 @@ send the change to `alvo-architecture-rules`, and the justification is this tabl
 - `src/MMLib.Alvo.Identity/Internal/AlvoIdentityUserAdministration.cs`: `ExpiresAt` from options.
 - `src/MMLib.Alvo.Identity/Internal/AlvoSessionValidation.cs` and
   `AlvoIdentityRevalidatingAuthenticationStateProvider.cs`: the stamp check and its remarks.
-- `src/MMLib.Alvo.Identity/Internal/AlvoIdentityOptionsValidation.cs` and
-  `AlvoIdentityConfiguration.cs`: the bootstrap length refusal.
+- `src/MMLib.Alvo.Identity/Internal/AlvoIdentityBootstrap.cs` (`CreateAsync`) and
+  `AlvoIdentityConfiguration.cs`: the bootstrap seed's policy refusal (§3, §8.11); `StartingAsync` also
+  makes the timing-parity hash (`AlvoTimingParity`, new, §8.14).
 - `src/MMLib.Alvo.Abstractions/Identity/IAlvoUserAdministration.cs`: remarks only.
 - `src/MMLib.Alvo.Admin/AlvoAdmin.cs`: the two constants.
 - `src/MMLib.Alvo.Admin/Components/Shell/SetPassword.razor` (new); `SignIn.razor`: the
@@ -238,7 +246,8 @@ send the change to `alvo-architecture-rules`, and the justification is this tabl
 - `src/MMLib.Alvo.Host/Internal/AlvoAdminSignIn.cs`: the endpoint and the rate-limit metadata on both
   posts. `src/MMLib.Alvo.Host/AlvoHost.cs`: `AddRateLimiter`, `UseRateLimiter`, ordering comment.
 - Docs: `docs/architecture/host.md` (set-password, rate limit, forwarded headers, key ring, policy
-  ≥ 15); `docs/todo-admin.md` item 30 ✅ plus a new item for the sign-in timing oracle.
+  ≥ 15); `docs/todo-admin.md` item 30 ✅ (the sign-in timing oracle is fixed in T1, ruling 10.3, so it
+  needs no new item).
 
 ## 7. Tests (adversarial cases in bold)
 
@@ -251,7 +260,8 @@ send the change to `alvo-architecture-rules`, and the justification is this tabl
 - **unknown email** → `Refused`;
 - **another user's token** → `Refused`;
 - **tampered or truncated token** → `Refused`;
-- **disabled** → `Refused`, and the token still works after "let back in" (it was not consumed);
+- **disabled** → `Refused`; the disable rotated the stamp, so the old token stays `Refused` after "let
+  back in" and a new one works (ruling 10.5);
 - **bootstrap token minted through the keyed unguarded implementation** → `Refused`, and the file
   password still signs in;
 - **weak** (14 chars; contains the email) → `PasswordRejected`, both for a real address and an unknown
@@ -322,8 +332,25 @@ Extend `A_second_person_can_be_created_and_gets_a_credential_token` to assert th
    password, and the holder just proved possession of an admin-issued token.
 9. **Disabled accounts and the bootstrap admin are refused at redemption.** Identity's
    `ResetPasswordAsync` would reset both.
-10. Unchanged and recorded: Identity v3 PBKDF2 hashing, where baas-analyza says Argon2id; and the
-    sign-in timing oracle (§0.3).
+10. Unchanged and recorded: Identity v3 PBKDF2 hashing, where baas-analyza says Argon2id. The sign-in
+    timing oracle (§0.3) is **fixed** by ruling 10.3 (see 13 and 14); a residue of about a millisecond
+    remains (a wrong password for a live account also writes its failed-attempt count), bounded by the
+    shared credential rate limit.
+11. **The bootstrap seed's policy check is in `AlvoIdentityBootstrap.CreateAsync`, not in
+    `AlvoIdentityOptionsValidation`** (§3): only the create branch knows the seed is new.
+12. **The local part is a blocklist word only from three characters.** `ab@…` would otherwise refuse every
+    password containing "ab", a policy nobody could satisfy by intent. The whole address is refused at any
+    length.
+13. **The dummy verification covers every sign-in refusal Identity makes without hashing**: an unknown
+    address, an account with no password yet, and a locked-out or disabled one. They were the same
+    enumeration oracle. A no-password account therefore no longer counts a failed attempt (it has no
+    password to protect).
+14. **The dummy hash is made by the registered `IPasswordHasher`, once, at start** (`StartingAsync`, lazily
+    on first use as a fallback), never a fixed v3 blob (ruling 10.4): a raised iteration count or a
+    replaced hasher (Argon2id) keeps the dummy at the stored hashes' cost.
+15. **A disable rotates the security stamp** (ruling 10.5), which Identity does not do: OWASP ends
+    sessions on a disable, and without it a cookie unused during the disable stood again after "let back
+    in". The cost: a person let back in signs in again, and needs a new token if they had none set.
 
 ## 9. Task list (SDD)
 
@@ -339,7 +366,7 @@ Extend `A_second_person_can_be_created_and_gets_a_credential_token` to assert th
   posts with its configuration key, and the headers. Tests: host integration and Admin unit cases in
   §7. Admin PublicApi grows by two constants.
 - **T3: E2E and docs.** The four e2e scenarios, raising the e2e world's attempt limit, `host.md`, and
-  todo item 30 ✅ plus the new timing-oracle item. Then run the full `scripts/test-admin-e2e`,
+  todo item 30 ✅ (no timing-oracle item: fixed in T1). Then run the full `scripts/test-admin-e2e`,
   plan-guard, and the PR report.
 
 ## 10. Rulings (controller, 27 Sep 2026)
@@ -352,3 +379,10 @@ Extend `A_second_person_can_be_created_and_gets_a_credential_token` to assert th
 3. §0.3's sign-in timing oracle is **fixed in T1**, not filed: T1 already rewrites `AlvoSignIn`, and the fix is
    one dummy verification (the hasher against a fixed hash) on the unknown-email path, bounded by the new
    limiter. The deviation list's item 10 changes accordingly.
+
+Rulings on the T1 review (controller, 27 Sep 2026):
+
+4. The dummy hash is generated once through the registered `IPasswordHasher` (at `StartingAsync`, lazy
+   fallback), never hard-coded (§8.14). The three T1 deviations (§8.11–13) are accepted.
+5. Disabling a person rotates their security stamp in the same unit of work, so every existing cookie and
+   circuit ends and "let back in" never revives an old session (§4, §8.15).

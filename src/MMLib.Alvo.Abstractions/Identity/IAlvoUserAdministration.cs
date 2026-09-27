@@ -91,11 +91,18 @@ public interface IAlvoUserAdministration
 
     /// <summary>Bars a person from signing in, or lets them back.</summary>
     /// <remarks>
+    /// <para>
     /// <b>Refuses the bootstrap administrator by name.</b> The context resolver answers
     /// <see langword="null"/> for a disabled account <em>before</em> anything consults the bootstrap
     /// branch, and the seed does not reset an existing row — so a deployment whose <c>access</c>
     /// block admits nobody else, which is the default, would be locked out of its own management
     /// surface with no way back but editing the identity database by hand.
+    /// </para>
+    /// <para>
+    /// <b>A disable ends every session the person holds and every credential token outstanding for
+    /// them</b>, and letting them back in does not revive either: they sign in again, and a person who had
+    /// not set a password yet needs a new token.
+    /// </para>
     /// </remarks>
     /// <param name="user">Whom to disable or restore.</param>
     /// <param name="disabled">Whether they are barred.</param>

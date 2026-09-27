@@ -73,24 +73,30 @@ internal static class AlvoIdentityConfiguration
         "  Note:       a bare address only — a display-name form such as "
             + "'Eva <eva@example.com>' is not a sign-in address.");
 
-    /// <summary>The refusal for a new bootstrap seed shorter than the password policy's floor.</summary>
+    /// <summary>The refusal for a new bootstrap seed the password policy refuses.</summary>
     /// <remarks>
-    /// It names the file and the floor, never the secret or its length: a start failure is printed to a
-    /// container log, and the length of a credential is a fact about it.
+    /// It names the file, the policy and Identity's reasons, never the secret or its length: a start failure is
+    /// printed to a container log, and the length of a credential is a fact about it.
     /// </remarks>
     /// <param name="passwordFile">The file the secret was read from.</param>
     /// <param name="email">The administrator the seed is for.</param>
     /// <param name="requiredLength">The policy's minimum length.</param>
+    /// <param name="reasons">What the password validators said, in their words.</param>
     /// <returns>The refusal.</returns>
-    internal static string ShortBootstrapPassword(string passwordFile, string email, int requiredLength)
+    internal static string RefusedBootstrapPassword(
+        string passwordFile, string email, int requiredLength, IReadOnlyList<string> reasons)
     {
-        var floor = requiredLength.ToString(CultureInfo.InvariantCulture);
+        var policy = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{requiredLength} to {AlvoPasswordValidator.MaximumLength} characters, not containing the address");
         return Sentence(
-            $"Alvo cannot start: the bootstrap password in {passwordFile} is shorter than {floor} characters, "
+            $"Alvo cannot start: the bootstrap password in {passwordFile} does not meet the password policy, "
                 + $"so the administrator '{email}' cannot be seeded.",
-            $"  Write:      a passphrase of at least {floor} characters to {passwordFile}",
+            $"  Because:    {string.Join(" ", reasons)}",
+            $"  Write:      a passphrase of {policy}, to {passwordFile}",
             $"  Or set:     {PasswordFileVariable} to a file that holds one.",
-            "  Note:       an administrator an earlier start seeded is never rewritten; this applies only to a new one.");
+            "  Note:       an administrator an earlier start seeded is never rewritten; "
+                + "this applies only to a new one.");
     }
 
     /// <summary>A headline an operator can act on, a blank line, and the fixes.</summary>

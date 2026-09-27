@@ -25,7 +25,12 @@ public sealed class AlvoIdentityBootstrapTests : IAsyncLifetime
     /// <inheritdoc/>
     public ValueTask DisposeAsync()
     {
-        SqliteConnection.ClearAllPools();
+        /* This file's pool only: clearing every pool in the process races the other classes' open connections. */
+        using (var connection = new SqliteConnection($"Data Source={_file}"))
+        {
+            SqliteConnection.ClearPool(connection);
+        }
+
         File.Delete(_passwordFile);
         File.Delete(_file);
         return ValueTask.CompletedTask;
@@ -109,6 +114,42 @@ public sealed class AlvoIdentityBootstrapTests : IAsyncLifetime
         refused.Message.ShouldContain(AlvoIdentityConfiguration.PasswordFileVariable);
         refused.Message.ShouldNotContain("Short!Passw0rd");
         (await UsersOf(host).ListAsync(TestContext.Current.CancellationToken)).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// <b>Every other policy refusal of a new seed fails the start with the same sentence</b>: a secret that contains
+    /// the address, or is longer than the ceiling, is named as such, not surfaced as Identity's error.
+    /// </summary>
+    /// <param name="secret">The seed.</param>
+    /// <param name="because">What the sentence must say is wrong.</param>
+    [Theory]
+    [InlineData("my admin@example.test passphrase", "must not contain the email address")]
+    [InlineData("ADMIN-is-the-seeded-one", "must not contain the email address")]
+    public async Task A_new_bootstrap_seed_the_policy_refuses_fails_the_start_by_name(string secret, string because)
+    {
+        File.WriteAllText(_passwordFile, secret + "\n");
+        await using var host = Host(bootstrapEmail: "admin@example.test");
+
+        var refused = await Should.ThrowAsync<InvalidOperationException>(() => Start(host));
+
+        refused.Message.ShouldStartWith("Alvo cannot start: the bootstrap password in " + _passwordFile);
+        refused.Message.ShouldContain(because);
+        refused.Message.ShouldContain(AlvoIdentityConfiguration.PasswordFileVariable);
+        refused.Message.ShouldNotContain(secret);
+        (await UsersOf(host).ListAsync(TestContext.Current.CancellationToken)).ShouldBeEmpty();
+    }
+
+    /// <summary>A seed longer than the policy's ceiling fails the start with the same sentence.</summary>
+    [Fact]
+    public async Task A_new_bootstrap_seed_longer_than_the_ceiling_fails_the_start_by_name()
+    {
+        File.WriteAllText(_passwordFile, new string('q', 129));
+        await using var host = Host(bootstrapEmail: "admin@example.test");
+
+        var refused = await Should.ThrowAsync<InvalidOperationException>(() => Start(host));
+
+        refused.Message.ShouldStartWith("Alvo cannot start: the bootstrap password in " + _passwordFile);
+        refused.Message.ShouldContain("at most 128 characters");
     }
 
     /// <summary>

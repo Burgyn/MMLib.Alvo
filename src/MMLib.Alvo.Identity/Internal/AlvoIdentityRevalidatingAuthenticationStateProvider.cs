@@ -16,9 +16,9 @@ namespace MMLib.Alvo.Identity.Internal;
 /// <c>OnValidatePrincipal</c> never runs again and <c>AuthorizeRouteView</c> keeps re-asking a state
 /// captured when the circuit opened. This is ASP.NET Core's own remedy — the same base class the
 /// Identity template's provider derives from — asking <see cref="AlvoSessionValidation"/>, which compares the
-/// security stamp as the template's provider does <em>and</em> reads the disable, because a disable in this
-/// package moves the lockout, not the stamp. A password set elsewhere rotates the stamp, so an open tab of that
-/// person drops to sign-in on its next revalidation.
+/// security stamp as the template's provider does <em>and</em> reads the disable. A password set elsewhere and a
+/// disable both rotate the stamp, so an open tab of that person drops to sign-in on its next revalidation, and
+/// stays out after the person is let back in.
 /// </para>
 /// <para>
 /// <b>Thirty seconds.</b> Short enough that a disabled operator's shell stops navigating within a
