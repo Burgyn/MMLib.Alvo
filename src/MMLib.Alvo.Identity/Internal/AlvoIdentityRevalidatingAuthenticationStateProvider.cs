@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Components.Server;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace MMLib.Alvo.Identity.Internal;
 
@@ -24,7 +25,8 @@ namespace MMLib.Alvo.Identity.Internal;
 /// <b>Thirty seconds.</b> Short enough that a disabled operator's shell stops navigating within a
 /// moment of the disable; long enough that an open tab costs three indexed reads per half minute. It
 /// governs only the shell: every management and data call re-resolves its caller on its own and is
-/// refused at once, so the interval is how long the chrome lingers, never how long authority does.
+/// refused at once, so the interval is how long the chrome lingers, never how long authority does. A test may
+/// shorten it, never lengthen it, through the internal key <see cref="AlvoSessionRevalidationOptions"/> names.
 /// </para>
 /// <para>
 /// <b>A fresh scope per check.</b> The circuit's own scope lives as long as the tab, and a store
@@ -39,15 +41,17 @@ namespace MMLib.Alvo.Identity.Internal;
 /// </remarks>
 /// <param name="loggers">The base class's logger source.</param>
 /// <param name="scopes">Creates the scope each check reads the store from.</param>
+/// <param name="interval">How often the check runs: thirty seconds unless a test shortened it.</param>
 internal sealed class AlvoIdentityRevalidatingAuthenticationStateProvider(
     ILoggerFactory loggers,
-    IServiceScopeFactory scopes) : RevalidatingServerAuthenticationStateProvider(loggers)
+    IServiceScopeFactory scopes,
+    IOptions<AlvoSessionRevalidationOptions> interval) : RevalidatingServerAuthenticationStateProvider(loggers)
 {
     /// <summary>How often an open circuit's operator is re-checked.</summary>
-    internal static TimeSpan Interval { get; } = TimeSpan.FromSeconds(30);
+    internal TimeSpan Every { get; } = interval.Value.Interval;
 
     /// <inheritdoc/>
-    protected override TimeSpan RevalidationInterval => Interval;
+    protected override TimeSpan RevalidationInterval => Every;
 
     /// <summary>Whether the circuit's operator still holds a session, read from a scope of its own.</summary>
     /// <param name="state">The circuit's current authentication state.</param>

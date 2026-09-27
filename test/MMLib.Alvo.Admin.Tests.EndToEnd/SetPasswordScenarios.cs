@@ -15,11 +15,12 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// </para>
 /// <para>
 /// <b>Its own world</b>: it creates people and changes their passwords. Each fact creates its own person, because
-/// xUnit v3 runs a class's facts in no set order. The passwords are test values, set here, never a real one.
+/// xUnit v3 runs a class's facts in no set order. The passwords are test values, set here, never a real one. It is
+/// a <see cref="SetPasswordWorld"/>, whose open tabs are re-checked every two seconds rather than thirty.
 /// </para>
 /// </remarks>
 /// <param name="world">The running host and browser.</param>
-public sealed class SetPasswordScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+public sealed class SetPasswordScenarios(SetPasswordWorld world) : IClassFixture<SetPasswordWorld>
 {
     /// <summary>The first password each person sets: a test value, 15 characters or more, not their address.</summary>
     private const string FirstPassword = "Alvo-e2e-Person-Pass-1";
@@ -31,11 +32,12 @@ public sealed class SetPasswordScenarios(AdminWorld world) : IClassFixture<Admin
     private const string Role = "dispatcher";
 
     /// <summary>
-    /// How long an open tab may keep its state after its password changed elsewhere: the circuit's revalidation
-    /// interval (thirty seconds, <c>AlvoIdentityRevalidatingAuthenticationStateProvider.Interval</c>), plus room for
-    /// the check itself and the redirect.
+    /// How long an open tab may keep its state after its password changed elsewhere: this world's two-second
+    /// revalidation interval (<see cref="SetPasswordWorld.RevalidationSeconds"/>) several times over, for the check
+    /// itself, the redirect and a loaded machine — and still well under the shipped thirty seconds, so a tab that
+    /// dropped for any reason slower than the circuit's re-check fails here.
     /// </summary>
-    private const int RevalidationWait = 45_000;
+    private const int RevalidationWait = 10_000;
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task A_person_the_dashboard_creates_can_set_a_password_and_sign_in()
@@ -123,10 +125,10 @@ public sealed class SetPasswordScenarios(AdminWorld world) : IClassFixture<Admin
     /// their password gets. The redemption rotates the stamp, and the open circuit's next revalidation reads it.
     /// </para>
     /// <para>
-    /// <b>The interval is the shipped thirty seconds, not a shortened one.</b> It is a constant of the identity
-    /// package with no configuration seam, and adding one to make a test faster would be a knob a deployment could
-    /// turn; this scenario pays the half minute instead. <b>No page load in the tab</b> between the change and the
-    /// wait, which is the whole point: a page load re-checks the cookie and would pass without the circuit check.
+    /// <b>The interval is shortened to two seconds</b> by the identity package's internal, test-only key, which
+    /// can only shorten it (<c>AlvoSessionRevalidationOptions</c>), so the wait is a bounded ten-second poll rather
+    /// than the half minute. <b>No page load in the tab</b> between the change and the wait, which is the whole
+    /// point: a page load re-checks the cookie and would pass without the circuit check.
     /// </para>
     /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -256,4 +258,27 @@ public sealed class SetPasswordScenarios(AdminWorld world) : IClassFixture<Admin
     /// <param name="Link">The set-password link.</param>
     /// <param name="Token">The token alone.</param>
     private sealed record Handover(string Link, string Token);
+}
+
+/// <summary>
+/// The ordinary world, with an open tab's session re-checked every two seconds instead of thirty.
+/// </summary>
+/// <remarks>
+/// Its own world rather than the base's setting, because a short interval changes what another class measures:
+/// <c>OpenCircuitRevocationScenarios</c> relies on its click landing inside the shipped thirty seconds, before the
+/// circuit drops the disabled operator to sign-in. The key is the identity package's internal test seam, which refuses
+/// anything above thirty at start, so this world cannot lengthen the interval either.
+/// </remarks>
+public sealed class SetPasswordWorld : AdminWorld
+{
+    /// <summary>How often this world's open tabs are re-checked.</summary>
+    public const int RevalidationSeconds = 2;
+
+    /// <inheritdoc/>
+    protected override void Configure(IDictionary<string, string?> settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        settings["Alvo:Admin:SessionRevalidationSeconds"] =
+            RevalidationSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
 }

@@ -271,23 +271,19 @@ tables deliberately. Nothing in this repository sets a non-default prefix, and t
 neither problem — the tables were already misplaced — but an operator crossing this version
 deserves the sentence rather than the surprise.
 
-*Superseded since F5:* the paragraph below records why the seam was registered before it had a consumer. The
-dashboard now is that consumer — the cookie scheme, sign-in, and the set-password page are described in
-[The dashboard's credentials](#the-dashboards-credentials-sign-in-set-password-and-their-limits).
-
-**Identity's request path is a seam with no consumer yet, and that is deliberate.** The host
-calls `AddAlvoIdentity` unconditionally, so every standalone deployment creates the seven
-`<prefix>_identity_*` tables and seeds the configured bootstrap administrator. What that
-administrator can do today is reached through an **API key** whose record carries their user
-id — `ManagementAccessEvaluator` consults `IAlvoBootstrapAdmin` and admits them at `admin`
-regardless of the `access` block. What they cannot do is *sign in*: nothing in `src/` resolves
-`AlvoIdentity.ResolverKey`, no cookie authentication scheme is added, and there is no sign-in
-endpoint. The cookie `IAlvoContextResolver` is registered keyed precisely so that installing
-the package cannot turn a user's uuid into a working API key, and it stays unreached until the
-dashboard (#227's second half) mounts the sign-in surface that consumes it. Registering the
-seam now keeps the bootstrap account, its tables and its validation on one schedule instead of
-arriving with the dashboard as a migration; it is stated here because "seeds an account nobody
-can sign in as" reads as a defect if you do not know it is the plan.
+**Identity's request path is the dashboard's.** The host calls `AddAlvoIdentity` unconditionally, so every
+standalone deployment creates the seven `<prefix>_identity_*` tables and seeds the configured bootstrap
+administrator, and it adds the cookie scheme with `AddAlvoIdentityCookieSignIn(AlvoAdmin.SignInPath)`. A person
+signs in on the dashboard's sign-in page; a person the dashboard created first sets a password from a credential
+token's link (see [The dashboard's credentials](#the-dashboards-credentials-sign-in-set-password-and-their-limits)).
+The dashboard resolves the signed-in person through the cookie `IAlvoContextResolver`, which is registered **keyed**
+(`AlvoIdentity.ResolverKey`, reached only through the host's `AlvoAdminCallerResolver`) so that installing the
+package cannot turn a user's uuid into a working API key: the unkeyed resolver is the one the Data API hands a raw
+API-key header to. The bootstrap administrator can also still act through an **API key** whose record carries their
+user id: `ManagementAccessEvaluator` consults `IAlvoBootstrapAdmin` and admits them at `admin` whatever the
+`access` block says. Before F5 the seam was registered with no consumer, so that the bootstrap account, its tables
+and its validation arrived on one schedule rather than as a migration with the dashboard; the dashboard is now that
+consumer.
 
 ## The dashboard's credentials: sign-in, set-password, and their limits
 
@@ -309,7 +305,9 @@ administrator) is one byte-identical redirect. The Management API is unchanged: 
 CLI or an agent composes the link from `AlvoAdmin.SetPasswordPath`. A token works **once** and for **24 hours**
 (Identity's default, now stated): redeeming it rotates the person's security stamp, which kills every other
 token outstanding for them. That rotation — and a disable, which rotates it too — **ends every session the
-person holds**: a cookie on its next request, an open dashboard tab within the circuit's 30-second revalidation.
+person holds**: a cookie on its next request, an open dashboard tab within the circuit's 30-second revalidation (`Alvo:Admin:SessionRevalidationSeconds` is an
+internal, test-only key that may only shorten it, 1 to 30, refused at start otherwise; the dashboard's end-to-end
+world sets 2, and no deployment has a reason to set it).
 
 **The password policy is NIST SP 800-63B-4's, one policy for everyone**: at least **15** characters, at most
 **128**, no composition rules, and not the address or (from three characters) its local part. It governs a new

@@ -100,6 +100,7 @@ public static class AlvoIdentityAuthenticationExtensions
            its plain provider with TryAdd, so this wins whichever of the two a host calls first, and
            the last registration is the one the container hands out. */
         services.AddScoped<AuthenticationStateProvider, AlvoIdentityRevalidatingAuthenticationStateProvider>();
+        AlvoSessionRevalidationOptions.Register(services);
 
         services.AddAuthorization();
 
