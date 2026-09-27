@@ -58,7 +58,8 @@ public interface IAlvoUserAdministration
     /// <remarks>
     /// <b>No password.</b> A credential that travels as a value is readable by whoever handles it —
     /// the same reason this repository refuses a bootstrap password supplied as configuration. The
-    /// new operator sets their own through <see cref="IssueCredentialTokenAsync"/>.
+    /// new operator sets their own by redeeming a token from <see cref="IssueCredentialTokenAsync"/> —
+    /// in the standalone image, on the dashboard's set-password page.
     /// </remarks>
     /// <param name="creation">The address, the roles and the tenant.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
@@ -115,8 +116,10 @@ public interface IAlvoUserAdministration
     /// <para>
     /// <b>Nothing in this build delivers the token.</b> There is no mail transport, and
     /// <c>templates</c> is a warned subsystem whose reach is an after-hook on an entity write
-    /// rather than an identity event. It is returned for an administrator to hand over out of band,
-    /// and a screen that renders it says so.
+    /// rather than an identity event. It is returned for an administrator to hand over out of band —
+    /// the dashboard renders it as a link to its set-password page, where the person redeems it once
+    /// and then signs in — and a screen that renders it says so. Redeeming it ends every session the
+    /// person held.
     /// </para>
     /// </remarks>
     /// <param name="user">Who is setting a password.</param>

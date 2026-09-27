@@ -92,6 +92,44 @@ public sealed class AlvoIdentityBootstrapTests : IAsyncLifetime
         (await PasswordHoldsAsync(second, "AnotherStr0ng!Passw0rd")).ShouldBeFalse("rotation is not a restart");
     }
 
+    /// <summary>
+    /// <b>A new seed shorter than the policy is refused at start</b>, with a sentence naming the file and the fix
+    /// rather than Identity's error surfacing from inside the seeding — and without quoting the secret.
+    /// </summary>
+    [Fact]
+    public async Task A_new_bootstrap_seed_shorter_than_the_policy_fails_the_start_by_name()
+    {
+        File.WriteAllText(_passwordFile, "Short!Passw0rd\n");
+        await using var host = Host(bootstrapEmail: "admin@example.test");
+
+        var refused = await Should.ThrowAsync<InvalidOperationException>(() => Start(host));
+
+        refused.Message.ShouldContain(_passwordFile);
+        refused.Message.ShouldContain("15");
+        refused.Message.ShouldContain(AlvoIdentityConfiguration.PasswordFileVariable);
+        refused.Message.ShouldNotContain("Short!Passw0rd");
+        (await UsersOf(host).ListAsync(TestContext.Current.CancellationToken)).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// <b>An account an earlier start seeded is never rewritten, and never refused</b>: the length rule applies to
+    /// a new seed, so a deployment whose file is now shorter keeps starting and keeps its credential.
+    /// </summary>
+    [Fact]
+    public async Task An_already_seeded_administrator_still_starts_when_the_file_is_now_short()
+    {
+        await using (var first = Host(bootstrapEmail: "admin@example.test"))
+        {
+            await Start(first);
+        }
+
+        File.WriteAllText(_passwordFile, "short\n");
+        await using var second = Host(bootstrapEmail: "admin@example.test");
+
+        await Start(second);
+        (await PasswordHoldsAsync(second, "Str0ng!Passw0rd")).ShouldBeTrue();
+    }
+
     /// <summary>The image ships no credential: without configuration, nothing is created and nobody is named.</summary>
     [Fact]
     public async Task No_configured_email_creates_no_account_and_names_no_bootstrap_admin()

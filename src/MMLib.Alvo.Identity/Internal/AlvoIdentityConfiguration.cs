@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Identity.Internal;
+﻿using System.Globalization;
+
+namespace MMLib.Alvo.Identity.Internal;
 
 /// <summary>
 /// The bootstrap administrator's configuration vocabulary: the names an operator sets, and the
@@ -70,6 +72,26 @@ internal static class AlvoIdentityConfiguration
         $"  Set:        {EmailVariable}=admin@example.com",
         "  Note:       a bare address only — a display-name form such as "
             + "'Eva <eva@example.com>' is not a sign-in address.");
+
+    /// <summary>The refusal for a new bootstrap seed shorter than the password policy's floor.</summary>
+    /// <remarks>
+    /// It names the file and the floor, never the secret or its length: a start failure is printed to a
+    /// container log, and the length of a credential is a fact about it.
+    /// </remarks>
+    /// <param name="passwordFile">The file the secret was read from.</param>
+    /// <param name="email">The administrator the seed is for.</param>
+    /// <param name="requiredLength">The policy's minimum length.</param>
+    /// <returns>The refusal.</returns>
+    internal static string ShortBootstrapPassword(string passwordFile, string email, int requiredLength)
+    {
+        var floor = requiredLength.ToString(CultureInfo.InvariantCulture);
+        return Sentence(
+            $"Alvo cannot start: the bootstrap password in {passwordFile} is shorter than {floor} characters, "
+                + $"so the administrator '{email}' cannot be seeded.",
+            $"  Write:      a passphrase of at least {floor} characters to {passwordFile}",
+            $"  Or set:     {PasswordFileVariable} to a file that holds one.",
+            "  Note:       an administrator an earlier start seeded is never rewritten; this applies only to a new one.");
+    }
 
     /// <summary>A headline an operator can act on, a blank line, and the fixes.</summary>
     /// <param name="headline">What is wrong, naming the offending value.</param>

@@ -39,8 +39,9 @@ public static class AlvoIdentityAuthenticationExtensions
     /// <b>A session is re-checked, not trusted for its eight hours.</b> The cookie is re-validated
     /// against the store on every request to an endpoint that guards something (not static assets or
     /// the sign-in page), and a Blazor circuit's authentication state every thirty
-    /// seconds; a disabled or deleted account's cookie is rejected and cleared, and its open tab drops
-    /// to sign-in. See <c>AlvoSessionValidation</c> and
+    /// seconds; the cookie of a disabled or deleted account, or of one whose password was set since the
+    /// cookie was minted (its security stamp no longer matches), is rejected and cleared, and its open tab
+    /// drops to sign-in. See <c>AlvoSessionValidation</c> and
     /// <c>AlvoIdentityRevalidatingAuthenticationStateProvider</c> for why each exists.
     /// </para>
     /// <para>
@@ -74,7 +75,9 @@ public static class AlvoIdentityAuthenticationExtensions
             IUserClaimsPrincipalFactory<AlvoIdentityUser>, AlvoIdentityClaimsFactory>();
         services.AddScoped<SignInManager<AlvoIdentityUser>>();
         services.AddScoped(provider => new AlvoSignIn(
-            provider.GetRequiredService<SignInManager<AlvoIdentityUser>>()));
+            provider.GetRequiredService<SignInManager<AlvoIdentityUser>>(),
+            provider.GetRequiredService<IAlvoBootstrapAdmin>(),
+            provider.GetRequiredService<AlvoIdentityDbContext>()));
 
         services
             .AddAuthentication(IdentityConstants.ApplicationScheme)

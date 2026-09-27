@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Builder;
+﻿using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server;
 using Microsoft.AspNetCore.Hosting;
@@ -68,6 +69,10 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
         _app.MapGet("/sign-in", () => Results.Ok()).AllowAnonymous();
         _app.MapGet("/open", () => Results.Ok());
         _app.MapGet("/requirement", () => Results.Ok()).WithMetadata(new RequiresAuthentication());
+        _app.MapPost("/sign-in-without-stamp", async (string id, HttpContext http) => await http.SignInAsync(
+            IdentityConstants.ApplicationScheme,
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, id)], "test"))))
+            .AllowAnonymous();
 
         await _app.StartAsync(Ct);
         _client = _app.GetTestClient();
@@ -137,11 +142,12 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
             .ShouldBeOfType<AlvoIdentityRevalidatingAuthenticationStateProvider>();
         provider.ShouldBeAssignableTo<RevalidatingServerAuthenticationStateProvider>();
 
-        (await provider.StillStandsAsync(Session(id.ToString()), Ct)).ShouldBeTrue();
+        var session = Session(id.ToString(), await StampAsync(id));
+        (await provider.StillStandsAsync(session, Ct)).ShouldBeTrue();
 
         await AdministerAsync(people => people.SetDisabledAsync(id, disabled: true, Ct));
 
-        (await provider.StillStandsAsync(Session(id.ToString()), Ct)).ShouldBeFalse(
+        (await provider.StillStandsAsync(session, Ct)).ShouldBeFalse(
             "a disabled operator's open circuit drops to sign-in on the next revalidation");
     }
 
@@ -178,7 +184,89 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
         var provider = (AlvoIdentityRevalidatingAuthenticationStateProvider)
             scope.ServiceProvider.GetRequiredService<AuthenticationStateProvider>();
 
-        (await provider.StillStandsAsync(Session(id.ToString()), Ct)).ShouldBeTrue();
+        (await provider.StillStandsAsync(Session(id.ToString(), await StampAsync(id)), Ct)).ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// <b>A password set elsewhere ends a session minted before it</b>: the cookie is refused and cleared on its
+    /// next guarded request — baas-analyza §2.2's "password change → old sessions dead".
+    /// </summary>
+    [Fact]
+    public async Task A_cookie_minted_before_a_password_is_set_is_refused_and_cleared_on_its_next_request()
+    {
+        var id = await CreateAsync();
+        var cookie = await SignInAsync();
+        (await GetMeAsync(cookie)).StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        await SetPasswordAsync(id, "an entirely new passphrase");
+
+        using var refused = await GetMeAsync(cookie);
+        refused.StatusCode.ShouldBe(HttpStatusCode.Redirect);
+        refused.Headers.GetValues("Set-Cookie").ShouldContain(
+            header => header.StartsWith("alvo.session=;", StringComparison.Ordinal));
+    }
+
+    /// <summary>An open circuit's state from before a password was set drops on its next revalidation.</summary>
+    [Fact]
+    public async Task A_circuit_state_from_before_a_password_is_set_does_not_stand()
+    {
+        var id = await CreateAsync();
+        var before = Session(id.ToString(), await StampAsync(id));
+        using var scope = _app.Services.CreateScope();
+        var provider = (AlvoIdentityRevalidatingAuthenticationStateProvider)
+            scope.ServiceProvider.GetRequiredService<AuthenticationStateProvider>();
+        (await provider.StillStandsAsync(before, Ct)).ShouldBeTrue();
+
+        await SetPasswordAsync(id, "an entirely new passphrase");
+
+        (await provider.StillStandsAsync(before, Ct)).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// <b>A cookie carrying no security stamp is refused</b> (default-deny), even for an enabled account: every
+    /// cookie this package mints carries one, so a cookie without it was not minted by a sign-in.
+    /// </summary>
+    [Fact]
+    public async Task A_cookie_without_a_security_stamp_is_refused()
+    {
+        var id = await CreateAsync();
+        using var response = await _client.PostAsync($"/sign-in-without-stamp?id={id}", null, Ct);
+        var cookie = response.Headers.GetValues("Set-Cookie").Select(header => header.Split(';')[0])
+            .Single(header => header.StartsWith("alvo.session=", StringComparison.Ordinal));
+
+        (await GetMeAsync(cookie)).StatusCode.ShouldBe(HttpStatusCode.Redirect);
+    }
+
+    /// <summary>A circuit whose principal carries no stamp, or a stamp that is not the stored one, does not stand.</summary>
+    /// <param name="stamp">The stamp claim, or <see langword="null"/> for none.</param>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("NOT-THE-STORED-STAMP")]
+    public async Task A_circuit_without_the_stored_stamp_does_not_stand(string? stamp)
+    {
+        var id = await CreateAsync();
+        using var scope = _app.Services.CreateScope();
+        var provider = (AlvoIdentityRevalidatingAuthenticationStateProvider)
+            scope.ServiceProvider.GetRequiredService<AuthenticationStateProvider>();
+
+        (await provider.StillStandsAsync(Session(id.ToString(), stamp), Ct)).ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// A role change does <b>not</b> end the session: Identity rotates the stamp only on a credential write, so the
+    /// new check ends sessions on a password change and on nothing an administrator does to access.
+    /// </summary>
+    [Fact]
+    public async Task A_role_or_tenant_change_does_not_end_the_session()
+    {
+        var id = await CreateAsync();
+        var cookie = await SignInAsync();
+
+        await AdministerAsync(people => people.SetRolesAsync(id, ["developer"], Ct));
+        await AdministerAsync(people => people.SetTenantAsync(id, TenantId.New(), Ct));
+
+        (await GetMeAsync(cookie)).StatusCode.ShouldBe(HttpStatusCode.OK);
     }
 
     /// <summary>
@@ -348,11 +436,46 @@ public sealed class AlvoIdentitySessionTests : IAsyncLifetime
 
     /// <summary>An authenticated principal with <paramref name="subject"/> as its user id claim.</summary>
     /// <param name="subject">The subject, or <see langword="null"/> for a principal with none.</param>
+    /// <param name="stamp">The security stamp claim, or <see langword="null"/> for a principal with none.</param>
     /// <returns>The authentication state a circuit would hold.</returns>
-    private static AuthenticationState Session(string? subject)
+    private static AuthenticationState Session(string? subject, string? stamp = null)
     {
-        var claims = subject is null ? [] : new[] { new Claim(ClaimTypes.NameIdentifier, subject) };
+        var claims = new List<Claim>();
+        if (subject is not null)
+        {
+            claims.Add(new Claim(ClaimTypes.NameIdentifier, subject));
+        }
+
+        if (stamp is not null)
+        {
+            claims.Add(new Claim(new IdentityOptions().ClaimsIdentity.SecurityStampClaimType, stamp));
+        }
+
         return new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity(claims, "test")));
+    }
+
+    /// <summary>The stamp the store holds for <paramref name="id"/> now — what a sign-in would put in the cookie.</summary>
+    /// <param name="id">The operator.</param>
+    /// <returns>The stored stamp.</returns>
+    private async Task<string> StampAsync(UserId id)
+    {
+        using var scope = _app.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<AlvoIdentityUser>>();
+        return await users.GetSecurityStampAsync((await users.FindByIdAsync(id.ToString())).ShouldNotBeNull());
+    }
+
+    /// <summary>Issues a credential token and redeems it, as the set-password page does, from scopes of their own.</summary>
+    /// <param name="id">Whose password to set.</param>
+    /// <param name="password">The new password.</param>
+    /// <returns>A task that completes when the password is set.</returns>
+    private async Task SetPasswordAsync(UserId id, string password)
+    {
+        AlvoCredentialToken token = null!;
+        await AdministerAsync(async people => token = await people.IssueCredentialTokenAsync(id, Ct));
+
+        using var scope = _app.Services.CreateScope();
+        (await scope.ServiceProvider.GetRequiredService<AlvoSignIn>().SetPasswordAsync(Email, token.Token, password))
+            .ShouldBe(AlvoPasswordSetOutcome.Set);
     }
 
     /// <summary>Creates the operator with a password, from a scope of its own.</summary>

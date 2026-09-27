@@ -204,6 +204,13 @@ internal sealed partial class AlvoIdentityBootstrap(
     }
 
     /// <summary>Creates the administrator account and grants it the built-in administrative role.</summary>
+    /// <remarks>
+    /// <b>A new seed shorter than the password policy fails the start with a sentence of its own</b>, rather than
+    /// with Identity's error surfacing from inside <c>CreateAsync</c>. Only here, on the branch that creates the
+    /// account: an administrator an earlier start seeded is never rewritten, so a secret that no longer meets
+    /// the policy is not a reason to refuse a restart. The options validation cannot make this check — it does
+    /// not know whether the account exists, and it deliberately never reads the secret.
+    /// </remarks>
     /// <param name="scope">The scope the role manager is resolved from.</param>
     /// <param name="users">ASP.NET Core Identity's user manager.</param>
     /// <param name="email">The configured address.</param>
@@ -213,6 +220,13 @@ internal sealed partial class AlvoIdentityBootstrap(
         IServiceProvider scope, UserManager<AlvoIdentityUser> users, string email, CancellationToken cancellationToken)
     {
         var password = await ReadPasswordAsync(cancellationToken).ConfigureAwait(false);
+        var required = users.Options.Password.RequiredLength;
+        if (password.Length < required)
+        {
+            throw new InvalidOperationException(AlvoIdentityConfiguration.ShortBootstrapPassword(
+                options.Value.BootstrapPasswordFile!, email, required));
+        }
+
         var created = new AlvoIdentityUser { Id = Guid.NewGuid(), UserName = email, Email = email };
 
         Require(await users.CreateAsync(created, password).ConfigureAwait(false), email);

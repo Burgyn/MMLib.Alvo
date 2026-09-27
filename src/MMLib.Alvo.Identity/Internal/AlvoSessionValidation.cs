@@ -5,7 +5,9 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.StaticAssets;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using System.Security.Claims;
 
 namespace MMLib.Alvo.Identity.Internal;
@@ -24,7 +26,7 @@ namespace MMLib.Alvo.Identity.Internal;
 /// <para>
 /// <b>Default-deny, and every refusal is <see langword="false"/>:</b> no subject claim, a subject that is
 /// not a usable <see cref="UserId"/> (the all-zero value included), a subject the store does not hold,
-/// and a disabled account. A store that throws is not a refusal and not a pass: the exception propagates
+/// a disabled account, and a security stamp claim that is missing or is not the stored one. A store that throws is not a refusal and not a pass: the exception propagates
 /// and the request fails, which is the only honest answer to "could not tell".
 /// </para>
 /// <para>
@@ -41,19 +43,38 @@ namespace MMLib.Alvo.Identity.Internal;
 /// the account — dropping every session to sign-in on an empty project would loop the one operator who
 /// could apply the first descriptor. Whether the account may hold a session is the store's question.
 /// </para>
+/// <para>
+/// <b>The security stamp ends every session on a credential change.</b> Setting a password rotates the stamp,
+/// and a principal whose stamp claim no longer equals the stored one was minted before it — baas-analyza
+/// §2.2's "password change → old sessions dead". It is ASP.NET Core Identity's <c>SecurityStampValidator</c>
+/// check without its thirty-minute throttle, for the reason <see cref="ValidateCookieAsync"/> gives. A missing
+/// claim is a refusal: every cookie <c>UserClaimsPrincipalFactory</c> mints carries one, because the EF store
+/// supports stamps. Role, tenant and disable writes do not rotate the stamp in <c>UserManager</c> (only
+/// password, email, user name, login and two-factor writes do), so this check ends sessions on a credential
+/// change and on nothing an administrator does to access — the disable has its own condition above.
+/// </para>
+/// <para>
+/// <b>The stamp is read as an untracked scalar by primary key</b>, straight from the identity store rather
+/// than through <c>UserManager</c>: a tracked read on a scope that outlives it is exactly what the
+/// administration's unit of work exists to avoid, and <see cref="IAlvoUserStore"/>, being a port every host
+/// implements, has no notion of a stamp.
+/// </para>
 /// </remarks>
 internal static class AlvoSessionValidation
 {
-    /// <summary>Decides whether <paramref name="session"/> still names an enabled account.</summary>
+    /// <summary>
+    /// Decides whether <paramref name="session"/> still names an enabled account whose credential has not
+    /// changed since the session was minted.
+    /// </summary>
     /// <param name="session">The principal the cookie or the circuit holds.</param>
-    /// <param name="users">The membership store, read as of this call.</param>
-    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <param name="scope">The scope to read the membership store and the identity store from, as of this call.</param>
+    /// <param name="cancellationToken">Cancels the reads.</param>
     /// <returns><see langword="true"/> when the session may continue.</returns>
     internal static async ValueTask<bool> StillStandsAsync(
-        ClaimsPrincipal session, IAlvoUserStore users, CancellationToken cancellationToken)
+        ClaimsPrincipal session, IServiceProvider scope, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(session);
-        ArgumentNullException.ThrowIfNull(users);
+        ArgumentNullException.ThrowIfNull(scope);
 
         var subject = session.FindFirstValue(ClaimTypes.NameIdentifier);
         if (!UserId.TryParse(subject, null, out var id) || id == default)
@@ -61,7 +82,37 @@ internal static class AlvoSessionValidation
             return false;
         }
 
-        return await users.FindAsync(id, cancellationToken).ConfigureAwait(false) is { IsDisabled: false };
+        var users = scope.GetRequiredService<IAlvoUserStore>();
+        if (await users.FindAsync(id, cancellationToken).ConfigureAwait(false) is not { IsDisabled: false })
+        {
+            return false;
+        }
+
+        return await StampStandsAsync(session, id, scope, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Whether the session's security stamp claim is the one the store holds now.</summary>
+    /// <param name="session">The principal the cookie or the circuit holds.</param>
+    /// <param name="id">The principal's subject, already parsed.</param>
+    /// <param name="scope">The scope the identity store and Identity's options are read from.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns><see langword="true"/> when the claim is present and equals the stored stamp.</returns>
+    private static async ValueTask<bool> StampStandsAsync(
+        ClaimsPrincipal session, UserId id, IServiceProvider scope, CancellationToken cancellationToken)
+    {
+        var claimType = scope.GetRequiredService<IOptions<IdentityOptions>>().Value.ClaimsIdentity.SecurityStampClaimType;
+        if (session.FindFirstValue(claimType) is not { Length: > 0 } presented)
+        {
+            return false;
+        }
+
+        var stored = await scope.GetRequiredService<AlvoIdentityDbContext>().Users.AsNoTracking()
+            .Where(row => row.Id == id.Value)
+            .Select(row => row.SecurityStamp)
+            .FirstOrDefaultAsync(cancellationToken)
+            .ConfigureAwait(false);
+
+        return string.Equals(presented, stored, StringComparison.Ordinal);
     }
 
     /// <summary>Whether the request's endpoint must have its cookie re-checked.</summary>
@@ -87,7 +138,7 @@ internal static class AlvoSessionValidation
     /// </para>
     /// <para>
     /// <b>Why skip at all.</b> A first page load sends every stylesheet, script and font at once with the
-    /// cookie, and each check is two store reads; and a store blip must not turn the sign-in page — the one
+    /// cookie, and each check is three store reads; and a store blip must not turn the sign-in page — the one
     /// screen that works with no session — into a <c>500</c>. A disabled operator loading a stylesheet reaches
     /// nothing, and their next request that does reach something is refused.
     /// </para>
@@ -107,7 +158,8 @@ internal static class AlvoSessionValidation
 
     /// <summary>
     /// The cookie scheme's <c>OnValidatePrincipal</c>: re-reads the account on every request that guards
-    /// something, and rejects — and clears — a cookie whose account is gone or disabled.
+    /// something, and rejects — and clears — a cookie whose account is gone or disabled, or whose password
+    /// was set after the cookie was minted.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -118,14 +170,14 @@ internal static class AlvoSessionValidation
     /// already does, so the throttle itself is cheap. What it costs is latency: a disabled operator's cookie
     /// would keep passing for up to one interval, the same lag the circuit's thirty seconds accepts. On HTTP
     /// there is no reason to accept it, because the saving is small — after the first page load the
-    /// dashboard is a Blazor circuit and makes almost no HTTP requests. Each check is two indexed reads
+    /// dashboard is a Blazor circuit and makes almost no HTTP requests. Each check is three indexed reads
     /// (the user row, then its role memberships, because <see cref="IAlvoUserStore.FindAsync"/> projects
-    /// the roles). Authentication runs ahead of the static-asset endpoints, so without <see cref="Guards"/>
+    /// the roles, then the security stamp by primary key). Authentication runs ahead of the static-asset endpoints, so without <see cref="Guards"/>
     /// it would also run for every stylesheet, script and font of a first page load.
     /// </para>
     /// <para>
-    /// The store comes from the request's own scope, which is fresh per request, and
-    /// <see cref="IAlvoUserStore"/>'s reads are untracked by contract.
+    /// The stores come from the request's own scope, which is fresh per request;
+    /// <see cref="IAlvoUserStore"/>'s reads are untracked by contract, and the stamp read is untracked here.
     /// </para>
     /// </remarks>
     /// <param name="context">The cookie handler's validation context.</param>
@@ -140,9 +192,8 @@ internal static class AlvoSessionValidation
             return;
         }
 
-        var users = http.RequestServices.GetRequiredService<IAlvoUserStore>();
         if (context.Principal is { } session
-            && await StillStandsAsync(session, users, http.RequestAborted).ConfigureAwait(false))
+            && await StillStandsAsync(session, http.RequestServices, http.RequestAborted).ConfigureAwait(false))
         {
             return;
         }

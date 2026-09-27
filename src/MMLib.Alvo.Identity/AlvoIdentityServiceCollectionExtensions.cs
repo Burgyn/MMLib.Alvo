@@ -122,12 +122,34 @@ public static class AlvoIdentityServiceCollectionExtensions
             ServiceDescriptor.Singleton<IValidateOptions<AlvoIdentityOptions>, AlvoIdentityOptionsValidation>());
     }
 
-    /// <summary>Adds ASP.NET Core Identity's user and role managers over the Alvo identity store.</summary>
+    /// <summary>
+    /// Adds ASP.NET Core Identity's user and role managers over the Alvo identity store, with the package's
+    /// password policy and credential-token lifetime.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The password policy is NIST SP 800-63B-4's, not Identity's.</b> A password that is the only factor is
+    /// at least fifteen characters, at most 128, and has no composition rules: Identity's defaults (six
+    /// characters, one of each class) are the rules NIST withdrew because they produce <c>Passw0rd!</c>. The
+    /// ceiling and the address blocklist are <see cref="AlvoPasswordValidator"/>'s. It is one policy for
+    /// everyone, so it also governs the bootstrap seed; an account an earlier start seeded is never rewritten.
+    /// </para>
+    /// <para>
+    /// <b>The credential token's lifetime is stated, not inherited.</b> One day is Identity's default for a
+    /// data-protector token; saying it here is what lets the administration report the exact expiry instead
+    /// of "about a day". A host that calls <c>Configure&lt;DataProtectionTokenProviderOptions&gt;</c> after
+    /// this method overrides it, and the reported expiry follows.
+    /// </para>
+    /// </remarks>
     /// <param name="services">The service collection to register into.</param>
-    private static void AddIdentityCore(IServiceCollection services) =>
-        services.AddIdentityCore<AlvoIdentityUser>()
+    private static void AddIdentityCore(IServiceCollection services)
+    {
+        services.Configure<DataProtectionTokenProviderOptions>(tokens => tokens.TokenLifespan = TimeSpan.FromDays(1));
+
+        services.AddIdentityCore<AlvoIdentityUser>(ApplyPasswordPolicy)
             .AddRoles<AlvoIdentityRole>()
             .AddEntityFrameworkStores<AlvoIdentityDbContext>()
+            .AddPasswordValidator<AlvoPasswordValidator>()
             /* One token provider, named, rather than AddDefaultTokenProviders().
 
                It is what `IAlvoUserAdministration.IssueCredentialTokenAsync` stands on: without it
@@ -141,4 +163,17 @@ public static class AlvoIdentityServiceCollectionExtensions
                cannot deliver anything. One provider, for the one operation that exists. */
             .AddTokenProvider<DataProtectorTokenProvider<AlvoIdentityUser>>(
                 TokenOptions.DefaultProvider);
+    }
+
+    /// <summary>Sets Identity's own validator to the policy's floor and switches every composition rule off.</summary>
+    /// <param name="identity">Identity's options.</param>
+    private static void ApplyPasswordPolicy(IdentityOptions identity)
+    {
+        identity.Password.RequiredLength = AlvoPasswordValidator.MinimumLength;
+        identity.Password.RequiredUniqueChars = 1;
+        identity.Password.RequireDigit = false;
+        identity.Password.RequireLowercase = false;
+        identity.Password.RequireUppercase = false;
+        identity.Password.RequireNonAlphanumeric = false;
+    }
 }

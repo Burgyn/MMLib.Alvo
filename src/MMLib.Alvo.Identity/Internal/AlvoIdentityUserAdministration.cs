@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace MMLib.Alvo.Identity.Internal;
 
@@ -29,11 +30,13 @@ namespace MMLib.Alvo.Identity.Internal;
 /// <param name="roles">Identity's role manager, for the rows a membership needs.</param>
 /// <param name="store">The identity store, for the paged read.</param>
 /// <param name="bootstrap">Who the bootstrap administrator is, for the refusals the core applies.</param>
+/// <param name="tokens">The credential token's lifetime, so the stated expiry is the real one.</param>
 internal sealed class AlvoIdentityUserAdministration(
     UserManager<AlvoIdentityUser> users,
     RoleManager<AlvoIdentityRole> roles,
     AlvoIdentityDbContext store,
-    IAlvoBootstrapAdmin bootstrap) : IAlvoUserAdministration
+    IAlvoBootstrapAdmin bootstrap,
+    IOptions<DataProtectionTokenProviderOptions> tokens) : IAlvoUserAdministration
 {
     /// <inheritdoc/>
     /// <remarks>
@@ -214,13 +217,15 @@ internal sealed class AlvoIdentityUserAdministration(
     private async Task<AlvoCredentialToken> MintCredentialTokenAsync(UserId user)
     {
         var row = await RequireAsync(user).ConfigureAwait(false);
-        var token = await users.GeneratePasswordResetTokenAsync(row).ConfigureAwait(false);
 
-        /* Identity's own lifetime for a data-protector token is one day, and it is not readable
-           from here without reaching into the provider's options — so the expiry is stated as the
-           default rather than computed, and a screen that renders it says "about". Overstating it
-           would be worse than approximating it. */
-        return new AlvoCredentialToken(user, token, DateTimeOffset.UtcNow.AddDays(1));
+        /* The issue time is read before the provider stamps its own, so the stated expiry is at most
+           microseconds early and never late: the lifetime is the options the provider itself reads,
+           which the package states and a host may override. Issuing does not rotate the security
+           stamp, so an earlier outstanding token keeps working until the first redemption (design
+           §8.4): rotating here would sign the person out because an administrator clicked a button. */
+        var issued = DateTimeOffset.UtcNow;
+        var token = await users.GeneratePasswordResetTokenAsync(row).ConfigureAwait(false);
+        return new AlvoCredentialToken(user, token, issued + tokens.Value.TokenLifespan);
     }
 
     /// <summary>Who the bootstrap administrator is, so the core's refusals can name them.</summary>

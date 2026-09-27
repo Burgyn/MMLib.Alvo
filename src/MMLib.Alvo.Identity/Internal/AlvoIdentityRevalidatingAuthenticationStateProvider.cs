@@ -15,12 +15,14 @@ namespace MMLib.Alvo.Identity.Internal;
 /// after the first page load, navigating between screens issues no HTTP request, so the cookie's
 /// <c>OnValidatePrincipal</c> never runs again and <c>AuthorizeRouteView</c> keeps re-asking a state
 /// captured when the circuit opened. This is ASP.NET Core's own remedy — the same base class the
-/// Identity template's provider derives from — asking <see cref="AlvoSessionValidation"/> instead of
-/// comparing security stamps, because a disable in this package moves the lockout, not the stamp.
+/// Identity template's provider derives from — asking <see cref="AlvoSessionValidation"/>, which compares the
+/// security stamp as the template's provider does <em>and</em> reads the disable, because a disable in this
+/// package moves the lockout, not the stamp. A password set elsewhere rotates the stamp, so an open tab of that
+/// person drops to sign-in on its next revalidation.
 /// </para>
 /// <para>
 /// <b>Thirty seconds.</b> Short enough that a disabled operator's shell stops navigating within a
-/// moment of the disable; long enough that an open tab costs one indexed read per half minute. It
+/// moment of the disable; long enough that an open tab costs three indexed reads per half minute. It
 /// governs only the shell: every management and data call re-resolves its caller on its own and is
 /// refused at once, so the interval is how long the chrome lingers, never how long authority does.
 /// </para>
@@ -56,8 +58,7 @@ internal sealed class AlvoIdentityRevalidatingAuthenticationStateProvider(
         ArgumentNullException.ThrowIfNull(state);
 
         await using var scope = scopes.CreateAsyncScope();
-        var users = scope.ServiceProvider.GetRequiredService<IAlvoUserStore>();
-        return await AlvoSessionValidation.StillStandsAsync(state.User, users, cancellationToken)
+        return await AlvoSessionValidation.StillStandsAsync(state.User, scope.ServiceProvider, cancellationToken)
             .ConfigureAwait(false);
     }
 
