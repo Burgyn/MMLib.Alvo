@@ -45,6 +45,7 @@ public class AdminPathsTests
         { AdminPaths.Functions, typeof(Components.Shell.NotYet) },
         { AdminPaths.Settings, typeof(Components.Settings.Settings) },
         { AdminPaths.SignIn, typeof(Components.Shell.SignIn) },
+        { AdminPaths.SetPassword, typeof(Components.Shell.SetPassword) },
     };
 
     [Theory]

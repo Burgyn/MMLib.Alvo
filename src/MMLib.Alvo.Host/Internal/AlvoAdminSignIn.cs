@@ -10,7 +10,7 @@ using MMLib.Alvo.Identity;
 namespace MMLib.Alvo.Host.Internal;
 
 /// <summary>
-/// The two endpoints the dashboard's sign-in screen posts to.
+/// The endpoints the dashboard's sign-in and set-password screens post to.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -33,7 +33,7 @@ namespace MMLib.Alvo.Host.Internal;
 internal static class AlvoAdminSignIn
 {
     /// <summary>
-    /// Maps the sign-in and sign-out endpoints, unless the dashboard is turned off.
+    /// Maps the sign-in, sign-out and set-password endpoints, unless the dashboard is turned off.
     /// </summary>
     /// <remarks>
     /// <b>It honours the same switch <c>MapAlvoAdmin</c> does, and the two must not drift.</b>
@@ -52,9 +52,13 @@ internal static class AlvoAdminSignIn
         }
 
         /* AllowAnonymous says what these are, and it is what the identity package's cookie re-check skips on:
-           signing in and out must work with no session, and while the identity store is unreachable. */
-        app.MapPost(AlvoAdmin.SignInEndpoint, SignInAsync).AllowAnonymous().ExcludeFromDescription();
+           signing in and out, and setting a password, must work with no session. The two posts that take a
+           credential share one rate limit, so a client has one budget across both forms (design §2). */
+        app.MapPost(AlvoAdmin.SignInEndpoint, SignInAsync).AllowAnonymous().ExcludeFromDescription()
+            .RequireRateLimiting(AlvoAdminCredentialLimit.PolicyName);
         app.MapPost(AlvoAdmin.SignOutEndpoint, SignOutAsync).AllowAnonymous().ExcludeFromDescription();
+        app.MapPost(AlvoAdmin.SetPasswordEndpoint, AlvoAdminSetPassword.SetPasswordAsync).AllowAnonymous()
+            .ExcludeFromDescription().RequireRateLimiting(AlvoAdminCredentialLimit.PolicyName);
     }
 
     /// <summary>
@@ -106,7 +110,7 @@ internal static class AlvoAdminSignIn
     /// is a form left open until its token expired, and a person who reads "Bad Request" has no
     /// idea that submitting again would work.
     /// </remarks>
-    private static async Task<bool> ValidAsync(HttpContext http, IAntiforgery antiforgery)
+    internal static async Task<bool> ValidAsync(HttpContext http, IAntiforgery antiforgery)
     {
         try
         {

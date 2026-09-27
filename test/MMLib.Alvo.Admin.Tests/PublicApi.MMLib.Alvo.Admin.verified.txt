@@ -8,6 +8,8 @@ namespace MMLib.Alvo.Admin
     {
         public const string BasePath = "/admin";
         public const string ConfigurationSection = "Alvo:Admin:Dashboard";
+        public const string SetPasswordEndpoint = "/admin/set-password/submit";
+        public const string SetPasswordPath = "/admin/set-password";
         public const string SignInEndpoint = "/admin/sign-in/submit";
         public const string SignInPath = "/admin/sign-in";
         public const string SignOutEndpoint = "/admin/sign-out";
@@ -938,6 +940,16 @@ namespace MMLib.Alvo.Admin.Components.Shell
     public class RedirectToSignIn : Microsoft.AspNetCore.Components.ComponentBase
     {
         public RedirectToSignIn() { }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnInitialized() { }
+    }
+    [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+    [Microsoft.AspNetCore.Components.ExcludeFromInteractiveRouting]
+    [Microsoft.AspNetCore.Components.Layout(typeof(MMLib.Alvo.Admin.Components.Shell.SignInLayout?))]
+    [Microsoft.AspNetCore.Components.Route("/admin/set-password")]
+    public class SetPassword : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public SetPassword() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
         protected override void OnInitialized() { }
     }

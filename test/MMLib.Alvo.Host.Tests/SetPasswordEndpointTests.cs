@@ -1,0 +1,522 @@
+﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using MMLib.Alvo.Admin;
+using MMLib.Alvo.Admin.Internal;
+using System.Net;
+using System.Text.RegularExpressions;
+
+namespace MMLib.Alvo.Host.Tests;
+
+/// <summary>
+/// <b>The set-password page and the endpoint it posts to, over the shipped composition.</b>
+/// </summary>
+/// <remarks>
+/// <para>
+/// Every fact runs through <see cref="AlvoHostWorld"/>, because what is under test is the arrangement: the page the
+/// dashboard renders, the endpoint the host maps beside it, the antiforgery pair between them, the shared credential
+/// limiter in front of both posts, and the redemption the identity package owns. Each piece has its own suite; this
+/// one is about whether the host joins them the way design §2 says.
+/// </para>
+/// <para>
+/// The browser's part (the fragment read, the address bar cleared) is the end-to-end suite's. Here a form is posted
+/// the way a browser posts it: the antiforgery cookie from the page's response, and the token from its markup.
+/// </para>
+/// </remarks>
+public sealed partial class SetPasswordEndpointTests
+{
+    private const string Descriptor = "host-user-admin.alvo.json";
+    private const string Eva = "eva@alvo.test";
+    private const string Otto = "otto@alvo.test";
+    private const string NewPassword = "correct horse battery staple";
+    private const string Failed = $"{AlvoAdmin.SetPasswordPath}?failed=true";
+    private const string BootstrapEmail = "bootstrap-admin@alvo.test";
+    private const string BootstrapPassword = "the bootstrap passphrase";
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    /// <summary>A good post sets the password, answers 303 to sign-in with the notice, and the password signs in.</summary>
+    [Fact]
+    public async Task A_good_post_sets_the_password_and_sends_the_person_to_sign_in()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+        var token = await IssueAsync(world, await CreateAsync(world, Eva));
+
+        using var response = await new Browser(world).SetPasswordAsync(Eva, token, NewPassword);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.SeeOther);
+        LocationOf(response).ShouldBe($"{AlvoAdmin.SignInPath}?passwordSet=true");
+        response.Headers.CacheControl?.NoStore.ShouldBeTrue();
+        using var signedIn = await new Browser(world).SignInAsync(Eva, NewPassword);
+        LocationOf(signedIn).ShouldBe(AlvoAdmin.BasePath, "the password the page set is the one sign-in accepts");
+    }
+
+    /// <summary><b>A post without an antiforgery token changes nothing</b>, and the token is still redeemable.</summary>
+    [Fact]
+    public async Task A_post_without_an_antiforgery_token_changes_nothing()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+        var token = await IssueAsync(world, await CreateAsync(world, Eva));
+
+        using var forged = await new Browser(world).PostAsync(AlvoAdmin.SetPasswordEndpoint, Form(Eva, token, NewPassword));
+
+        forged.StatusCode.ShouldBe(HttpStatusCode.SeeOther);
+        LocationOf(forged).ShouldBe(AlvoAdmin.SetPasswordPath);
+        using var genuine = await new Browser(world).SetPasswordAsync(Eva, token, NewPassword);
+        LocationOf(genuine).ShouldBe($"{AlvoAdmin.SignInPath}?passwordSet=true", "the forged post consumed nothing");
+    }
+
+    /// <summary>
+    /// <b>The login-CSRF analogue is refused</b>: a cross-site form carries the attacker's own antiforgery token, and
+    /// the victim's browser sends the victim's antiforgery cookie with it; the pair does not match.
+    /// </summary>
+    [Fact]
+    public async Task A_form_carrying_another_browsers_antiforgery_token_is_refused()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+        var token = await IssueAsync(world, await CreateAsync(world, Eva));
+        var attacker = new Browser(world);
+        var victim = new Browser(world);
+        var attackersToken = await attacker.AntiforgeryTokenAsync(AlvoAdmin.SetPasswordPath);
+        _ = await victim.AntiforgeryTokenAsync(AlvoAdmin.SetPasswordPath);
+
+        using var crossSite = await victim.PostAsync(
+            AlvoAdmin.SetPasswordEndpoint, Form(Eva, token, NewPassword, antiforgery: attackersToken));
+
+        LocationOf(crossSite).ShouldBe(AlvoAdmin.SetPasswordPath);
+        using var genuine = await victim.SetPasswordAsync(Eva, token, NewPassword);
+        LocationOf(genuine).ShouldBe($"{AlvoAdmin.SignInPath}?passwordSet=true");
+    }
+
+    /// <summary>
+    /// <b>Every refusal is the same bytes</b>: an unknown address, a wrong token, a disabled person, the bootstrap
+    /// administrator and an expired token all answer one <c>Location</c>, and it carries no fragment.
+    /// </summary>
+    [Fact]
+    public async Task Every_refusal_answers_one_location_with_no_fragment()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor, Bootstrap(WriteSecret()));
+        var eva = await CreateAsync(world, Eva);
+        var otto = await CreateAsync(world, Otto);
+        var evasToken = await IssueAsync(world, eva);
+        var ottosToken = await IssueAsync(world, otto);
+        await AdministerAsync(world, people => people.SetDisabledAsync(otto, disabled: true, Ct));
+        var bootstrapToken = await IssueAsync(world, await IdOfAsync(world, BootstrapEmail));
+
+        string[] locations =
+        [
+            await RefusalAsync(world, "nobody@alvo.test", evasToken),
+            await RefusalAsync(world, Eva, evasToken[..^12]),
+            await RefusalAsync(world, Otto, ottosToken),
+            await RefusalAsync(world, BootstrapEmail, bootstrapToken),
+            await ExpiredRefusalAsync(),
+        ];
+
+        locations.ShouldAllBe(location => location == Failed);
+        using var bootstrap = await new Browser(world).SignInAsync(BootstrapEmail, BootstrapPassword);
+        LocationOf(bootstrap).ShouldBe(AlvoAdmin.BasePath, "the bootstrap administrator's file password still signs in");
+    }
+
+    /// <summary>Two different passwords, and a weak one, come back to the page with the link's fragment carried back.</summary>
+    [Fact]
+    public async Task A_mismatch_and_a_weak_password_return_to_the_page_with_the_fragment()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+        var token = await IssueAsync(world, await CreateAsync(world, Eva));
+        var fragment = SetPasswordLink.Fragment(Eva, token);
+
+        using var mismatch = await new Browser(world).SetPasswordAsync(Eva, token, NewPassword, repeat: NewPassword + "!");
+        using var weak = await new Browser(world).SetPasswordAsync(Eva, token, "too short");
+        using var huge = await new Browser(world).SetPasswordAsync(Eva, token, new string('q', 129));
+
+        LocationOf(mismatch).ShouldBe($"{AlvoAdmin.SetPasswordPath}?problem=mismatch{fragment}");
+        LocationOf(weak).ShouldBe($"{AlvoAdmin.SetPasswordPath}?problem=weak{fragment}");
+        LocationOf(huge).ShouldBe($"{AlvoAdmin.SetPasswordPath}?problem=weak{fragment}");
+        using var genuine = await new Browser(world).SetPasswordAsync(Eva, token, NewPassword);
+        LocationOf(genuine).ShouldBe($"{AlvoAdmin.SignInPath}?passwordSet=true", "neither consumed the token");
+    }
+
+    /// <summary>A token that went through <c>URLSearchParams</c> (every <c>+</c> read as a space) is repaired.</summary>
+    [Fact]
+    public async Task A_token_whose_plus_signs_became_spaces_still_redeems()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+        var token = await IssueWithAPlusAsync(world, await CreateAsync(world, Eva));
+
+        using var response = await new Browser(world).SetPasswordAsync(Eva, $"  {token.Replace('+', ' ')} ", NewPassword);
+
+        LocationOf(response).ShouldBe($"{AlvoAdmin.SignInPath}?passwordSet=true");
+    }
+
+    /// <summary>
+    /// <b>Over-long input is refused before the store is touched</b>: an address over 256 characters or a token over
+    /// 2048 is a refusal like any other.
+    /// </summary>
+    [Fact]
+    public async Task Input_over_its_bound_is_a_refusal()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+        var token = await IssueAsync(world, await CreateAsync(world, Eva));
+
+        (await RefusalAsync(world, new string('e', 250) + "@alvo.test", token)).ShouldBe(Failed);
+        (await RefusalAsync(world, Eva, token + new string('A', 2048))).ShouldBe(Failed);
+    }
+
+    /// <summary><b>With the limit set to 3, the fourth post is throttled</b>: a 303 back to the page, with Retry-After.</summary>
+    [Fact]
+    public async Task The_fourth_post_in_a_minute_is_throttled_back_to_the_page()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor, Limit(3));
+        var browser = new Browser(world);
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            using var allowed = await browser.SetPasswordAsync("nobody@alvo.test", "not-a-token", NewPassword);
+            LocationOf(allowed).ShouldBe(Failed);
+        }
+
+        using var throttled = await browser.SetPasswordAsync("nobody@alvo.test", "not-a-token", NewPassword);
+
+        throttled.StatusCode.ShouldBe(HttpStatusCode.SeeOther);
+        LocationOf(throttled).ShouldBe($"{AlvoAdmin.SetPasswordPath}?throttled=true");
+        throttled.Headers.RetryAfter.ShouldNotBeNull();
+        throttled.Headers.CacheControl?.NoStore.ShouldBeTrue();
+    }
+
+    /// <summary><b>The budget is shared</b>: three failed sign-ins throttle the set-password post, and the reverse.</summary>
+    [Fact]
+    public async Task Sign_in_and_set_password_share_one_budget_per_client()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor, Limit(3));
+        var browser = new Browser(world);
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            using var failed = await browser.SignInAsync("nobody@alvo.test", "a wrong password here");
+            LocationOf(failed).ShouldStartWith($"{AlvoAdmin.SignInPath}?failed=true");
+        }
+
+        using var setPassword = await browser.SetPasswordAsync("nobody@alvo.test", "not-a-token", NewPassword);
+        using var signIn = await browser.SignInAsync("nobody@alvo.test", "a wrong password here");
+
+        LocationOf(setPassword).ShouldBe($"{AlvoAdmin.SetPasswordPath}?throttled=true");
+        LocationOf(signIn).ShouldBe($"{AlvoAdmin.SignInPath}?throttled=true");
+    }
+
+    /// <summary>A limit that is not a positive number is refused at start.</summary>
+    /// <param name="limit">The configured value.</param>
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-5")]
+    public async Task A_limit_that_is_not_positive_is_refused_at_start(string limit)
+    {
+        var refusal = await Should.ThrowAsync<OptionsValidationException>(
+            () => AlvoHostWorld.StartAsync(Descriptor, Limit(limit)));
+
+        refusal.Message.ShouldContain("Alvo__Admin__CredentialAttemptsPerMinute");
+    }
+
+    /// <summary>With the dashboard turned off, the page and the endpoint are both gone.</summary>
+    [Fact]
+    public async Task With_the_dashboard_off_the_page_and_the_endpoint_are_404()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor, new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            [$"{AlvoAdmin.ConfigurationSection}:Enabled"] = "false",
+        });
+
+        using var page = await world.SendAnonymouslyAsync(HttpMethod.Get, AlvoAdmin.SetPasswordPath);
+        using var post = await world.SendAnonymouslyAsync(HttpMethod.Post, AlvoAdmin.SetPasswordEndpoint);
+
+        page.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        post.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    /// <summary>
+    /// The page is served with <c>Cache-Control: no-store</c> and <c>Referrer-Policy: no-referrer</c>, and its form is
+    /// the one design §1 describes: a real post to the endpoint, the policy on the box, the autocomplete hints.
+    /// </summary>
+    [Fact]
+    public async Task The_page_is_not_stored_sends_no_referrer_and_posts_a_real_form()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+
+        using var response = await world.SendAnonymouslyAsync(HttpMethod.Get, AlvoAdmin.SetPasswordPath);
+        var html = await response.Content.ReadAsStringAsync(Ct);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Headers.CacheControl?.NoStore.ShouldBeTrue();
+        response.Headers.GetValues("Referrer-Policy").ShouldBe(["no-referrer"]);
+        html.ShouldContain($"action=\"{AlvoAdmin.SetPasswordEndpoint}\"");
+        html.ShouldContain("data-enhance=\"false\"");
+        html.ShouldContain("autocomplete=\"username\"");
+        CountOf(html, "autocomplete=\"new-password\"").ShouldBe(2);
+        html.ShouldContain($"minlength=\"{SetPasswordPolicy.MinimumLength}\"");
+        html.ShouldContain($"maxlength=\"{SetPasswordPolicy.MaximumLength}\"");
+        html.ShouldContain("spellcheck=\"false\"");
+    }
+
+    /// <summary>Each state the endpoint redirects to renders its sentence, and none says which half was wrong.</summary>
+    /// <param name="query">The query the endpoint redirects with.</param>
+    /// <param name="sentence">What the page says.</param>
+    [Theory]
+    [InlineData("failed=true", "This link does not work. It may have been used already, have expired, or been copied incompletely. Ask your administrator for a new one.")]
+    [InlineData("problem=mismatch", "The two passwords are not the same.")]
+    [InlineData("problem=weak", "Choose a password of at least 15 characters that is not your email address.")]
+    [InlineData("throttled=true", "Too many attempts from this network. Wait a minute and try again.")]
+    public async Task Each_state_renders_its_sentence(string query, string sentence)
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+
+        using var response = await world.SendAnonymouslyAsync(HttpMethod.Get, $"{AlvoAdmin.SetPasswordPath}?{query}");
+
+        TextOf(await response.Content.ReadAsStringAsync(Ct)).ShouldContain(sentence);
+    }
+
+    /// <summary>The sign-in page says the password is set, and says when the shared limit throttled it.</summary>
+    /// <param name="query">The query a redirect lands on sign-in with.</param>
+    /// <param name="sentence">What the page says.</param>
+    [Theory]
+    [InlineData("passwordSet=true", "Your password is set. Sign in with it.")]
+    [InlineData("throttled=true", "Too many attempts from this network. Wait a minute and try again.")]
+    public async Task The_sign_in_page_renders_the_notice_it_is_sent_back_with(string query, string sentence)
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+
+        using var response = await world.SendAnonymouslyAsync(HttpMethod.Get, $"{AlvoAdmin.SignInPath}?{query}");
+
+        TextOf(await response.Content.ReadAsStringAsync(Ct)).ShouldContain(sentence);
+    }
+
+    /// <summary><b>No log record holds the token, the password or the address</b>, whatever the outcome.</summary>
+    [Fact]
+    public async Task No_log_record_holds_the_token_the_password_or_the_address()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+        var token = await IssueAsync(world, await CreateAsync(world, Eva));
+
+        (await new Browser(world).SetPasswordAsync(Eva, token, NewPassword, repeat: "different entirely")).Dispose();
+        (await new Browser(world).SetPasswordAsync(Eva, token, "too short")).Dispose();
+        (await new Browser(world).SetPasswordAsync(Eva, token[..^12], NewPassword)).Dispose();
+        (await new Browser(world).SetPasswordAsync(Eva, token, NewPassword)).Dispose();
+
+        var logged = string.Join('\n', world.Logs.Entries.Select(entry => $"{entry.Message} {entry.Exception}"));
+        logged.ShouldNotContain(token[..24]);
+        logged.ShouldNotContain(Uri.EscapeDataString(token)[..24]);
+        logged.ShouldNotContain(NewPassword);
+        logged.ShouldNotContain(Eva);
+        logged.ShouldContain("A password was set with a credential token", Case.Sensitive, "the success is recorded");
+    }
+
+    /// <summary>
+    /// The OpenAPI document describes neither post: both are <c>ExcludeFromDescription</c>, and the TeaPie suite pins
+    /// the document's path set by equality.
+    /// </summary>
+    [Fact]
+    public async Task The_openapi_document_describes_neither_credential_post()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+
+        using var response = await world.SendAnonymouslyAsync(HttpMethod.Get, AlvoHost.OpenApiDocumentPath);
+        var document = await response.ReadJsonObjectAsync();
+
+        document["paths"]!.AsObject().Select(path => path.Key)
+            .Where(path => path.StartsWith(AlvoAdmin.BasePath, StringComparison.Ordinal)).ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// The dashboard's own <c>15</c> (the box's <c>minlength</c>, the sentence under it) is the identity package's
+    /// <c>RequiredLength</c>: the dashboard cannot reference the package, so this is where the two are one number.
+    /// </summary>
+    [Fact]
+    public async Task The_dashboards_minimum_length_is_the_identity_policys()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+
+        world.Services.GetRequiredService<IOptions<IdentityOptions>>().Value.Password.RequiredLength
+            .ShouldBe(SetPasswordPolicy.MinimumLength);
+    }
+
+    private static async Task<string> RefusalAsync(AlvoHostWorld world, string email, string token)
+    {
+        using var response = await new Browser(world).SetPasswordAsync(email, token, NewPassword);
+        response.StatusCode.ShouldBe(HttpStatusCode.SeeOther);
+        return response.Headers.Location!.OriginalString;
+    }
+
+    /// <summary>An expired token's refusal, from a host of its own whose tokens live one millisecond.</summary>
+    private static async Task<string> ExpiredRefusalAsync()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor, configure: builder =>
+            builder.Services.Configure<DataProtectionTokenProviderOptions>(
+                tokens => tokens.TokenLifespan = TimeSpan.FromMilliseconds(1)));
+        var token = await IssueAsync(world, await CreateAsync(world, Eva));
+        await Task.Delay(TimeSpan.FromMilliseconds(50), Ct);
+        return await RefusalAsync(world, Eva, token);
+    }
+
+    private static string LocationOf(HttpResponseMessage response) => response.Headers.Location!.OriginalString;
+
+    /// <summary>A page's text as a reader reads it: the tags gone, and every run of whitespace one space.</summary>
+    private static string TextOf(string html)
+        => WebUtility.HtmlDecode(Whitespace().Replace(Tag().Replace(html, " "), " "));
+
+    [GeneratedRegex("<[^>]+>")]
+    private static partial Regex Tag();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex Whitespace();
+
+    private static int CountOf(string text, string needle) => Regex.Count(text, Regex.Escape(needle));
+
+    private static Dictionary<string, string?> Limit(object perMinute) => new(StringComparer.Ordinal)
+    {
+        ["Alvo:Admin:CredentialAttemptsPerMinute"] = perMinute.ToString(),
+    };
+
+    private static Dictionary<string, string?> Bootstrap(string secret) => new(StringComparer.Ordinal)
+    {
+        ["Alvo:Admin:BootstrapEmail"] = BootstrapEmail,
+        ["Alvo:Admin:BootstrapPasswordFile"] = secret,
+    };
+
+    private static string WriteSecret()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"alvo-set-password-{Guid.NewGuid():N}.txt");
+        File.WriteAllText(path, BootstrapPassword);
+        return path;
+    }
+
+    private static Dictionary<string, string> Form(
+        string email, string token, string password, string? repeat = null, string? antiforgery = null)
+    {
+        var form = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["email"] = email,
+            ["token"] = token,
+            ["password"] = password,
+            ["repeat"] = repeat ?? password,
+        };
+        if (antiforgery is not null)
+        {
+            form["__RequestVerificationToken"] = antiforgery;
+        }
+
+        return form;
+    }
+
+    private static async Task<UserId> CreateAsync(AlvoHostWorld world, string email)
+    {
+        UserId id = default;
+        await AdministerAsync(world, async people =>
+            id = (await people.CreateAsync(new AlvoUserCreation(email, []), Ct)).Id);
+        return id;
+    }
+
+    private static async Task<UserId> IdOfAsync(AlvoHostWorld world, string email)
+    {
+        using var scope = world.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<IAlvoUserStore>();
+        return (await users.FindByEmailAsync(email, Ct)).ShouldNotBeNull().Id;
+    }
+
+    private static async Task<string> IssueAsync(AlvoHostWorld world, UserId user)
+    {
+        using var scope = world.Services.CreateScope();
+        return (await scope.ServiceProvider.GetRequiredKeyedService<IAlvoUserAdministration>(
+            AlvoUserAdministration.UnguardedKey).IssueCredentialTokenAsync(user, Ct)).Token;
+    }
+
+    /// <summary>Issues tokens until one carries a <c>+</c>, which a base64 token does about as often as not.</summary>
+    private static async Task<string> IssueWithAPlusAsync(AlvoHostWorld world, UserId user)
+    {
+        for (var attempt = 0; attempt < 64; attempt++)
+        {
+            if (await IssueAsync(world, user) is { } token && token.Contains('+', StringComparison.Ordinal))
+            {
+                return token;
+            }
+        }
+
+        throw new InvalidOperationException("64 tokens and not one '+': the token is no longer base64");
+    }
+
+    private static async Task AdministerAsync(AlvoHostWorld world, Func<IAlvoUserAdministration, Task> write)
+    {
+        using var scope = world.Services.CreateScope();
+        await write(scope.ServiceProvider.GetRequiredKeyedService<IAlvoUserAdministration>(
+            AlvoUserAdministration.UnguardedKey));
+    }
+
+    /// <summary>
+    /// One browser: a cookie jar over the world's client, and the two forms posted the way a browser posts them,
+    /// with the antiforgery cookie from the page's response and the token from its markup.
+    /// </summary>
+    /// <param name="world">The host.</param>
+    private sealed partial class Browser(AlvoHostWorld world)
+    {
+        private readonly Dictionary<string, string> _cookies = new(StringComparer.Ordinal);
+
+        /// <summary>Opens the page and fills in the set-password form.</summary>
+        public async Task<HttpResponseMessage> SetPasswordAsync(
+            string email, string token, string password, string? repeat = null)
+        {
+            var antiforgery = await AntiforgeryTokenAsync(AlvoAdmin.SetPasswordPath);
+            return await PostAsync(AlvoAdmin.SetPasswordEndpoint, Form(email, token, password, repeat, antiforgery));
+        }
+
+        /// <summary>Opens the sign-in page and signs in.</summary>
+        public async Task<HttpResponseMessage> SignInAsync(string email, string password)
+        {
+            var antiforgery = await AntiforgeryTokenAsync(AlvoAdmin.SignInPath);
+            return await PostAsync(AlvoAdmin.SignInEndpoint, new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["email"] = email,
+                ["password"] = password,
+                ["returnUrl"] = string.Empty,
+                ["__RequestVerificationToken"] = antiforgery,
+            });
+        }
+
+        /// <summary>The antiforgery token the page at <paramref name="path"/> renders, keeping its cookie.</summary>
+        public async Task<string> AntiforgeryTokenAsync(string path)
+        {
+            using var response = await SendAsync(new HttpRequestMessage(HttpMethod.Get, path));
+            var html = await response.Content.ReadAsStringAsync(Ct);
+            var token = WebUtility.HtmlDecode(AntiforgeryInput().Match(html).Groups["value"].Value);
+            token.ShouldNotBeNullOrEmpty($"{path} rendered no antiforgery token");
+            return token;
+        }
+
+        /// <summary>Posts <paramref name="form"/> with this browser's cookies.</summary>
+        public Task<HttpResponseMessage> PostAsync(string path, Dictionary<string, string> form)
+            => SendAsync(new HttpRequestMessage(HttpMethod.Post, path) { Content = new FormUrlEncodedContent(form) });
+
+        private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request)
+        {
+            using (request)
+            {
+                if (_cookies.Count > 0)
+                {
+                    request.Headers.Add("Cookie", string.Join("; ", _cookies.Select(cookie => $"{cookie.Key}={cookie.Value}")));
+                }
+
+                var response = await world.Client.SendAsync(request, Ct);
+                Keep(response);
+                return response;
+            }
+        }
+
+        private void Keep(HttpResponseMessage response)
+        {
+            foreach (var header in response.Headers.TryGetValues("Set-Cookie", out var values) ? values : [])
+            {
+                var pair = header.Split(';', 2)[0].Split('=', 2);
+                _cookies[pair[0]] = pair[1];
+            }
+        }
+
+        [GeneratedRegex("name=\"__RequestVerificationToken\"[^>]*value=\"(?<value>[^\"]+)\"")]
+        private static partial Regex AntiforgeryInput();
+    }
+}

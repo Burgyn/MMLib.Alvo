@@ -115,6 +115,11 @@ public class AdminWorld : IAsyncLifetime
             ["Alvo:Admin:BootstrapEmail"] = AdminEmail,
             ["Alvo:Admin:BootstrapPasswordFile"] = password,
 
+            /* Every scenario signs in, from the one loopback address, and a class runs many scenarios a minute:
+               the shipped limit of 20 credential posts per client per minute would throttle the suite rather than
+               a stranger. The throttling scenario sets its own low limit. */
+            ["Alvo:Admin:CredentialAttemptsPerMinute"] = "100000",
+
             /* Quiet, and this is not cosmetic. The host runs INSIDE the test process, so every
                log line it writes goes through the test platform's own output sink — and at the
                default level that is one line per EF command, which a screen like Rules produces

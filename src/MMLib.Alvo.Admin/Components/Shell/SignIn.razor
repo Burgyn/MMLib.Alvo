@@ -31,7 +31,18 @@
     <Panel Title="Sign in" class="a-signin__panel">
         <Subtitle>The administrator this host was configured with, or an account they created.</Subtitle>
         <ChildContent>
-            @if (Failed)
+            @if (PasswordSet)
+            {
+                <AlvoAlert Tone="AlvoAlert.AlertTone.Success" TestId="sign-in-password-set">
+                    Your password is set. Sign in with it.
+                </AlvoAlert>
+            }
+
+            @if (Throttled)
+            {
+                <ErrorPanel Title="Too many attempts from this network." Fix="Wait a minute and try again." />
+            }
+            else if (Failed)
             {
                 <ErrorPanel Title="That email and password do not match"
                             Fix="If this is a new deployment, the account is the one named by Alvo:Admin:BootstrapEmail, with the password in the file Alvo:Admin:BootstrapPasswordFile points at." />
@@ -81,4 +92,16 @@
     /// </remarks>
     [SupplyParameterFromQuery(Name = "returnUrl")]
     public string? ReturnUrl { get; set; }
+
+    /// <summary>Set by the set-password endpoint once the person's new password is stored.</summary>
+    /// <remarks>
+    /// The person signs in with it here rather than being signed in by the endpoint: a password typed once more
+    /// is a password the browser saved correctly, and an intercepted link stays a password link, never a session.
+    /// </remarks>
+    [SupplyParameterFromQuery(Name = "passwordSet")]
+    private bool PasswordSet { get; set; }
+
+    /// <summary>Set by the host's credential limiter, which sign-in shares with the set-password page.</summary>
+    [SupplyParameterFromQuery(Name = "throttled")]
+    private bool Throttled { get; set; }
 }

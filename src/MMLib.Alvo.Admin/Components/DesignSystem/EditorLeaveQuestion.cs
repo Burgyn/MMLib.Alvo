@@ -17,14 +17,14 @@
 /// the operator chose to leave: a submit closes the editor too.
 /// </para>
 /// </remarks>
-/// <param name="Title">The question, such as "Leave without copying the token?".</param>
+/// <param name="Title">The question, such as "Leave without copying the link?".</param>
 /// <param name="Body">What is lost, first.</param>
 /// <param name="Leave">The button that leaves anyway, naming what it gives up.</param>
 internal sealed record EditorLeaveQuestion(string Title, string Body, string Leave)
 {
-    /// <summary>A credential token that was shown and not copied (final review M14).</summary>
+    /// <summary>A credential token's set-password link that was shown and not copied (final review M14).</summary>
     public static EditorLeaveQuestion UncopiedToken { get; } = new(
-        "Leave without copying the token?",
+        "Leave without copying the link?",
         "It is shown only once. Closing this editor loses it, and a new one has to be issued.",
         "Leave without copying");
 }

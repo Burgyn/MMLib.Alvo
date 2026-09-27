@@ -83,7 +83,7 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task The_token_stays_in_the_editor_until_it_is_closed_and_Copy_puts_it_on_the_clipboard()
+    public async Task The_token_stays_in_the_editor_until_it_is_closed_and_Copy_link_puts_its_link_on_the_clipboard()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.Page.Context.GrantPermissionsAsync(["clipboard-read", "clipboard-write"]);
@@ -91,13 +91,14 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
 
         await session.OpenPersonAsync(person);
         await session.Dialog("person-editor").GetByTestId("person-issue-token").ClickAsync();
-        var token = session.Dialog("person-editor").GetByTestId("person-token");
-        await token.WaitForAsync();
+        var link = session.Dialog("person-editor").GetByTestId("person-token-link");
+        await link.WaitForAsync();
         await session.Dialog("person-editor").GetByTestId("person-token-copy").ClickAsync();
 
-        await session.SnackbarAsync("Token copied");
+        await session.SnackbarAsync("Link copied");
         var copied = await session.Page.EvaluateAsync<string>("() => navigator.clipboard.readText()");
-        (await token.InnerTextAsync()).ShouldContain(copied);
+        (await link.InnerTextAsync()).Trim().ShouldBe(copied);
+        copied.ShouldContain($"{AlvoAdmin.SetPasswordPath}#email=");
         (await session.Content.GetByText("Credential token for").CountAsync()).ShouldBe(0, "no panel at the top of the page");
     }
 
@@ -130,7 +131,7 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
         await session.OpenPersonAsync(person);
         await editor.GetByTestId("person-issue-token").ClickAsync();
         await editor.GetByTestId("person-token-copy").ClickAsync();
-        await session.SnackbarAsync("Token copied");
+        await session.SnackbarAsync("Link copied");
         await editor.GetByTestId("editor-cancel").ClickAsync();
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
         session.AssertConsoleClean();
@@ -141,7 +142,7 @@ public sealed class PersonEditorScenarios(AdminWorld world) : IClassFixture<Admi
     {
         var question = editor.GetByTestId("editor-discard-question");
         await question.WaitForAsync();
-        (await question.InnerTextAsync()).ShouldContain("Leave without copying the token?");
+        (await question.InnerTextAsync()).ShouldContain("Leave without copying the link?");
         (await question.InnerTextAsync()).ShouldContain("It is shown only once.");
         await editor.GetByTestId("editor-keep").ClickAsync();
         await editor.GetByTestId("person-token").WaitForAsync();

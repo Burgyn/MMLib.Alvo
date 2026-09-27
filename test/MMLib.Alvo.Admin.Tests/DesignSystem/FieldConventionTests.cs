@@ -31,12 +31,12 @@ public sealed partial class FieldConventionTests
     private static readonly string[] _refused = ["Label", "HelperText", "Margin", "Dense", "@attributes"];
 
     /// <summary>
-    /// The native controls the rule allows, by file: the static sign-in page, whose inputs cannot be the library's
-    /// (D10); the record form's reference combobox, which is Alvo's for its <c>aria-activedescendant</c> (D7); the
+    /// The native controls the rule allows, by file: the static sign-in and set-password pages, whose inputs cannot be
+    /// the library's (D10); the record form's reference combobox, which is Alvo's for its <c>aria-activedescendant</c> (D7); the
     /// command palette's search-and-go line, which is not a form field (§3.8).
     /// </summary>
     private static readonly string[] _nativeControlsAllowed =
-        ["Shell/SignIn.razor", "Data/RecordForm.razor", "Shell/CommandPalette.razor"];
+        ["Shell/SignIn.razor", "Shell/SetPassword.razor", "Data/RecordForm.razor", "Shell/CommandPalette.razor"];
 
     [Fact]
     public void No_library_input_names_itself_or_carries_its_own_hint_or_density()

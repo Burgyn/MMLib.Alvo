@@ -1,7 +1,8 @@
 ﻿@*
     One person's roles and tenant, edited in an AlvoEditor and written on Save (spec §3.1), in place of the row that
-    expanded under itself (inventory §2a.2). A credential token issued from here stays here, with a Copy button,
-    until the editor closes (inventory defect #10): a token is shown once, so it is never only a snackbar.
+    expanded under itself (inventory §2a.2). A credential token issued from here stays here, as its set-password link
+    with a Copy link button, until the editor closes (inventory defect #10): a token is shown once, so it is never
+    only a snackbar.
 
     Disable and Let them back in leave the editor first (AlvoEditor.LeaveAsync, which asks "Discard your changes?"
     when there are any): Disable is confirmed in an AlvoConfirm, and a confirm never opens over a dialog.
@@ -10,6 +11,8 @@
     the chips now have them, which the page turns into a grant or a revoke against the person as stored now
     (ManagementGateway.ChangeRolesAsync), never a whole set written back.
 *@
+@inject NavigationManager Navigation
+
 <AlvoEditor @ref="_editor" TestId="person-editor" Title="@($"Edit {Person.Email}")" SubmitText="Save changes"
             SubmitTestId="person-save" Dirty="_draft.Dirty" Busy="Busy" OnSubmit="SaveAsync"
             OnClose="OnClose">
@@ -30,19 +33,24 @@
     <ChildContent>
         @Problem
 
-        @if (Token is { } token)
+        @if (Token is { } token && CredentialHandover.For(Navigation, Person, token) is var handover)
         {
+            @* The link is what the person needs: they open it and set a password (design §1). The bare token stays
+               under it for a browser with JavaScript off, where the page asks for it to be pasted. *@
             <AlvoAlert Tone="AlvoAlert.AlertTone.Info" Title="Credential token" TestId="person-token-panel">
                 <ChildContent>
-                    <p class="a-section__sub">
-                        Hand this over out of band: this build sends no email. It works once, until
-                        @token.ExpiresAt.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture).
-                    </p>
-                    <pre class="a-code" data-testid="person-token"><code>@token.Token</code></pre>
+                    <p class="a-section__sub">@handover.Instruction</p>
+                    @if (handover.DisabledNote is { } note)
+                    {
+                        <p class="a-section__sub" data-testid="person-token-disabled">@note</p>
+                    }
+                    <pre class="a-code" data-testid="person-token-link"><code>@handover.Link</code></pre>
+                    <p class="a-note">The token alone, for a browser that runs no JavaScript:</p>
+                    <pre class="a-code" data-testid="person-token"><code>@handover.Token</code></pre>
                 </ChildContent>
                 <Actions>
                     <AlvoButton Small="true" data-testid="person-token-copy"
-                                OnClick="_ => OnCopyToken.InvokeAsync()">Copy</AlvoButton>
+                                OnClick="_ => OnCopyToken.InvokeAsync()">Copy link</AlvoButton>
                 </Actions>
             </AlvoAlert>
         }
@@ -162,7 +170,7 @@
     [Parameter]
     public EventCallback OnClose { get; set; }
 
-    /// <summary>Raised by the token's Copy button.</summary>
+    /// <summary>Raised by the token's Copy link button.</summary>
     [Parameter]
     public EventCallback OnCopyToken { get; set; }
 

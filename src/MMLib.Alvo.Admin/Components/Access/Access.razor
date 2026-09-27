@@ -4,6 +4,7 @@
 @inject ILogger<Access> Logger
 @inject ISnackbar Snackbar
 @inject AdminInterop Interop
+@inject NavigationManager Navigation
 
 <PageTitle>Access · Alvo</PageTitle>
 
@@ -189,7 +190,7 @@
 
 <AlvoConfirm Open="_disabling is not null" TestId="disable-person" ConfirmTestId="disable-person-run"
              CancelTestId="disable-person-cancel" Title="@($"Disable {_disabling?.Email}?")"
-             Consequence="They can no longer sign in, and every session they hold stops at its next request. You can let them back in later."
+             Consequence="They can no longer sign in, every session they hold stops at its next request, and a credential token already issued to them stops working. You can let them back in later; they then sign in again."
              Verb="Disable person" OnConfirm="DisableConfirmedAsync" OnCancel="CancelDisable" />
 
 
@@ -503,24 +504,27 @@
         _problem.Clear();
     });
 
-    /// <summary>Copies the token; a clipboard the browser withholds is said in place, beside the token itself.</summary>
+    /// <summary>
+    /// Copies the set-password link the panel shows (CredentialHandover); a clipboard the browser withholds is said in
+    /// place, beside the link itself.
+    /// </summary>
     private async Task CopyTokenAsync()
     {
-        if (_token is not { } token)
+        if (_token is not { } token || _editing is not { } person)
         {
             return;
         }
 
         try
         {
-            await Interop.CopyAsync(token.Token);
+            await Interop.CopyAsync(CredentialHandover.For(Navigation, person, token).Clipboard);
             _tokenCopied = true;
-            Snackbar.Confirm("Token copied");
+            Snackbar.Confirm("Link copied");
         }
         catch (JSException exception)
         {
-            Show(new AdminProblem("The token could not be copied", "The browser did not let this page use the clipboard.",
-                "Select the token above and copy it by hand.", exception, IsFault: false));
+            Show(new AdminProblem("The link could not be copied", "The browser did not let this page use the clipboard.",
+                "Select the link above and copy it by hand.", exception, IsFault: false));
         }
     }
 

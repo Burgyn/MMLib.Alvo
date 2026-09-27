@@ -98,6 +98,50 @@ new MutationObserver((records) => {
 }).observe(document.body, { childList: true, subtree: true });
 
 /**
+ * The set-password page (design §1.3): its link carries the address and the credential token in the fragment,
+ * which no browser sends to the server, to a proxy's log or in `Referer`. This fills the two boxes from it, makes
+ * the address read-only and hides the token's box, and then takes the fragment out of the address bar and the
+ * history, so the bearer credential does not stay in either. It runs once, when the page loads this module; on any
+ * other page there is no such form and it does nothing.
+ *
+ * `URLSearchParams` reads a `+` as a space, and the dashboard escapes every value with `Uri.EscapeDataString`, so
+ * a `+` in the token arrives as `%2B` and comes back intact. The endpoint also turns a stray space back into `+`,
+ * for a token that was pasted or re-encoded on the way.
+ *
+ * Also the one client-side hint the form has: two passwords that differ are said at the second box before the
+ * post, in the endpoint's own words. The endpoint checks again, because this runs only when JavaScript does.
+ */
+const fillSetPasswordForm = () => {
+  const form = document.querySelector('form[data-alvo-set-password]');
+  if (!form) {
+    return;
+  }
+
+  const values = new URLSearchParams(window.location.hash.slice(1));
+  const email = values.get('email');
+  const token = values.get('token');
+  if (email && token) {
+    form.elements.email.value = email;
+    form.elements.email.readOnly = true;
+    form.elements.token.value = token;
+    form.querySelector('[data-alvo-token-field]')?.setAttribute('hidden', '');
+    form.elements.password.focus();
+  }
+
+  if (window.location.hash) {
+    history.replaceState(history.state, '', window.location.pathname + window.location.search);
+  }
+
+  const { password, repeat } = form.elements;
+  const hint = () =>
+    repeat.setCustomValidity(repeat.value && repeat.value !== password.value ? 'The two passwords are not the same.' : '');
+  password.addEventListener('input', hint);
+  repeat.addEventListener('input', hint);
+};
+
+fillSetPasswordForm();
+
+/**
  * Forwards one `alvo:<name>` document event to a .NET object's method, and answers a token.
  *
  * The token, not the event name, is what `unsubscribe` takes: two components may listen to the same

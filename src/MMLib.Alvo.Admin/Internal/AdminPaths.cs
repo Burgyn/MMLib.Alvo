@@ -62,6 +62,9 @@ internal static class AdminPaths
     /// <summary>The sign-in screen — the public constant, read rather than repeated.</summary>
     public const string SignIn = AlvoAdmin.SignInPath;
 
+    /// <summary>The set-password page a credential token's link opens — the public constant, read rather than repeated.</summary>
+    public const string SetPassword = AlvoAdmin.SetPasswordPath;
+
     /// <summary>An entity's schema screen, open on <paramref name="tab"/> when one is named.</summary>
     public static string Entity(string name, EntityTab? tab = null) => tab is null
         ? $"{Schema}/{Segment(name)}"

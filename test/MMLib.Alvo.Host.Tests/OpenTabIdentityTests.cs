@@ -88,7 +88,7 @@ public sealed class OpenTabIdentityTests : IAsyncLifetime
     /// <summary>
     /// <b>What the cookie check's skip rests on, pinned in the shipped route table.</b> The check runs only
     /// where an endpoint carries an authorization requirement or is a SignalR hub; so every dashboard page but
-    /// sign-in must carry <c>[Authorize]</c>, and the Blazor circuit's hub must be a hub. A page that lost its
+    /// sign-in and set-password must carry <c>[Authorize]</c>, and the Blazor circuit's hub must be a hub. A page that lost its
     /// attribute would also lose the cookie re-check — and this is where that shows.
     /// </summary>
     [Fact]
@@ -103,18 +103,22 @@ public sealed class OpenTabIdentityTests : IAsyncLifetime
 
         var pages = routes.Where(route =>
             route.Metadata.GetMetadata<Microsoft.AspNetCore.Components.Endpoints.ComponentTypeMetadata>() != null
-            && route.RoutePattern.RawText?.Contains("sign-in", StringComparison.Ordinal) != true).ToList();
+            && !IsAnonymousByDesign(route)).ToList();
         pages.ShouldNotBeEmpty();
 
-        /* The other half: what the check skips must say so. The sign-in page and its two posts are the only
-           non-asset endpoints the re-check skips, and they are skipped because they are marked anonymous. */
-        var anonymous = routes.Where(route => route.RoutePattern.RawText?.Contains("sign-in", StringComparison.Ordinal) == true
-            || route.RoutePattern.RawText?.Contains("sign-out", StringComparison.Ordinal) == true).ToList();
-        anonymous.Count.ShouldBeGreaterThanOrEqualTo(3);
+        /* The other half: what the check skips must say so. The sign-in and set-password pages and their three posts
+           are the only non-asset endpoints the re-check skips, and they are skipped because they are marked anonymous. */
+        var anonymous = routes.Where(IsAnonymousByDesign).ToList();
+        anonymous.Count.ShouldBeGreaterThanOrEqualTo(5);
         anonymous.Where(route => route.Metadata.GetMetadata<IAllowAnonymous>() == null)
             .Select(route => route.RoutePattern.RawText).ShouldBeEmpty();
         pages.Where(route => route.Metadata.GetMetadata<IAuthorizeData>() == null).Select(route => route.RoutePattern.RawText + " " + route.DisplayName).ShouldBeEmpty();
     }
+
+    /// <summary>The routes that exist for a person with no session: signing in and out, and setting a password.</summary>
+    private static bool IsAnonymousByDesign(RouteEndpoint route)
+        => route.RoutePattern.RawText is { } text && (text.Contains("sign-in", StringComparison.Ordinal)
+            || text.Contains("sign-out", StringComparison.Ordinal) || text.Contains("set-password", StringComparison.Ordinal));
 
     /// <summary>The public interface, from the circuit's scope, acting as the administrator.</summary>
     /// <returns>The guarded administration the dashboard's gateway holds.</returns>
