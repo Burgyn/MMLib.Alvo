@@ -20,10 +20,20 @@ public static class AlvoIdentityServiceCollectionExtensions
     /// bootstrap administrator.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>The cookie resolver is registered keyed, deliberately.</b> The unkeyed
     /// <see cref="IAlvoContextResolver"/> is the one the Data API hands the raw API-key header to, and
     /// this one's "presented key" is a subject ASP.NET Core already authenticated — so replacing the
     /// unkeyed registration would make a user's uuid a working API key. A fact holds that line.
+    /// </para>
+    /// <para>
+    /// <b>The identity store's database must exist before any hosted service starts.</b> The bootstrap creates the
+    /// identity tables and seeds the administrator in <c>IHostedLifecycleService.StartingAsync</c>, which every hosted
+    /// service finishes before any <c>StartAsync</c> begins, so that the web server, which is one, never answers a
+    /// request before the users table is there. A host that provisions the database itself (a migration runner in a
+    /// plain <c>StartAsync</c>, say) must do it before the host starts, or in a <c>StartingAsync</c> registered before
+    /// this call; otherwise the start fails, naming what the read of the tables said.
+    /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into.</param>
     /// <param name="configureStore">Configures the identity store's database — the provider and its connection.</param>

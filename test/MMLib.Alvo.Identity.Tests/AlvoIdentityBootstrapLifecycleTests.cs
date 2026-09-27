@@ -65,6 +65,28 @@ public sealed class AlvoIdentityBootstrapLifecycleTests : IAsyncLifetime
         log.Errors.ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// A probe that fails for another reason than a missing table fails the start with what it said, not with the
+    /// creation's "already exists" (batch-B re-review N5): here the users "table" is a view over a table dropped since.
+    /// </summary>
+    [Fact]
+    public async Task A_probe_that_fails_for_another_reason_fails_the_start_with_its_own_error()
+    {
+        await using (var connection = new SqliteConnection($"Data Source={_file}"))
+        {
+            await connection.OpenAsync(TestContext.Current.CancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = "CREATE TABLE elsewhere (id INTEGER); CREATE VIEW alvo_identity_users AS SELECT * FROM elsewhere; DROP TABLE elsewhere;";
+            await command.ExecuteNonQueryAsync(TestContext.Current.CancellationToken);
+        }
+
+        using var host = Build(concurrently: false, new FirstReader(), new Captured());
+
+        var refused = await Should.ThrowAsync<InvalidOperationException>(() => host.StartAsync(TestContext.Current.CancellationToken));
+        refused.Message.ShouldStartWith("Alvo's identity tables could not be read, and could not be created.");
+        refused.Message.ShouldContain("elsewhere", Case.Sensitive, "the read's own words say what is wrong");
+    }
+
     private IHost Build(bool concurrently, FirstReader reader, Captured log)
     {
         var builder = Host.CreateApplicationBuilder();

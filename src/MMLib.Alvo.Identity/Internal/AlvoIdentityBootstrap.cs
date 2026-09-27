@@ -56,13 +56,20 @@ internal sealed partial class AlvoIdentityBootstrap(
 
     /// <summary>Creates the identity tables when they are absent.</summary>
     /// <remarks>
+    /// <para>
     /// <b><c>EnsureCreated</c> is not usable and migrations are not either.</b> <c>EnsureCreated</c>
     /// refuses a database that already has tables, and Alvo's own are already there; EF migrations are
     /// generated per provider, so shipping them would mean one migration assembly per engine and would
-    /// put the provider choice inside this package. So the probe is a query against the users table and
-    /// the creation is EF's own per-provider DDL, which is exactly the pair those two mechanisms would
-    /// have wrapped. The catch is narrowed to <see cref="DbException"/>: a missing table is the only
-    /// failure a bare <c>ANY</c> over an empty table can raise, and anything else must still fail the start.
+    /// put the provider choice inside this package. So the probe is a query of the users table that reads no row, and
+    /// the creation is EF's own per-provider DDL, which is exactly the pair those two mechanisms would have wrapped.
+    /// </para>
+    /// <para>
+    /// <b>A probe can fail for more than a missing table</b>: a permission refused, a lock, a view where the table
+    /// should be. The creation then fails too, with "already exists" or its engine's words for it, which says nothing
+    /// about why. So a creation that fails after a failed probe fails the start with the probe's own error, the one
+    /// that says what is wrong, and the creation's as the detail (batch-B re-review N5). The probe's failure is logged
+    /// at Debug either way: on a first boot it is the expected "no such table".
+    /// </para>
     /// </remarks>
     /// <param name="scope">The scope the store is resolved from.</param>
     /// <param name="cancellationToken">Cancels the start.</param>
@@ -70,15 +77,36 @@ internal sealed partial class AlvoIdentityBootstrap(
     private async Task EnsureTablesAsync(IServiceProvider scope, CancellationToken cancellationToken)
     {
         var store = scope.GetRequiredService<AlvoIdentityDbContext>();
-        if (await TablesExistAsync(store, cancellationToken).ConfigureAwait(false))
+        if (await ProbeAsync(store, cancellationToken).ConfigureAwait(false) is not { } probed)
         {
             await ReconcileColumnsAsync(store, cancellationToken).ConfigureAwait(false);
             return;
         }
 
-        var creator = store.GetService<IRelationalDatabaseCreator>();
-        await creator.CreateTablesAsync(cancellationToken).ConfigureAwait(false);
+        ProbeFoundNoTables(logger, probed.Message);
+        await CreateTablesAsync(store, probed, cancellationToken).ConfigureAwait(false);
         CreatedIdentityTables(logger);
+    }
+
+    /// <summary>Creates the tables, or fails the start with the probe's error when that fails too.</summary>
+    /// <param name="store">The identity store.</param>
+    /// <param name="probed">Why the probe found no tables.</param>
+    /// <param name="cancellationToken">Cancels the creation.</param>
+    /// <returns>A task that completes when the tables are created.</returns>
+    /// <exception cref="InvalidOperationException">Neither the read nor the creation worked.</exception>
+    private static async Task CreateTablesAsync(
+        AlvoIdentityDbContext store, DbException probed, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await store.GetService<IRelationalDatabaseCreator>().CreateTablesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (DbException created)
+        {
+            throw new InvalidOperationException(
+                $"Alvo's identity tables could not be read, and could not be created. Reading them said: {probed.Message} "
+                + $"(creating them said: {created.Message})", probed);
+        }
     }
 
     /// <summary>Adds columns an older build's database does not have yet.</summary>
@@ -115,8 +143,8 @@ internal sealed partial class AlvoIdentityBootstrap(
     /// </remarks>
     /// <param name="store">The identity store.</param>
     /// <param name="cancellationToken">Cancels the probe.</param>
-    /// <returns><see langword="true"/> when the tables are already there.</returns>
-    private static async Task<bool> TablesExistAsync(AlvoIdentityDbContext store, CancellationToken cancellationToken)
+    /// <returns><see langword="null"/> when the tables are there; the probe's failure when they are not, or cannot be read.</returns>
+    private static async Task<DbException?> ProbeAsync(AlvoIdentityDbContext store, CancellationToken cancellationToken)
     {
         await store.Database.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -124,11 +152,11 @@ internal sealed partial class AlvoIdentityBootstrap(
             await using var probe = store.Database.GetDbConnection().CreateCommand();
             probe.CommandText = $"SELECT 1 FROM {UsersTable(store)} WHERE 1 = 0";
             await probe.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-            return true;
+            return null;
         }
-        catch (DbException)
+        catch (DbException failure)
         {
-            return false;
+            return failure;
         }
         finally
         {
@@ -234,6 +262,12 @@ internal sealed partial class AlvoIdentityBootstrap(
                 + string.Join("; ", result.Errors.Select(error => error.Description)));
         }
     }
+
+    /// <summary>Logs why the probe found no identity tables: on a first boot, the expected missing table.</summary>
+    /// <param name="logger">The logger.</param>
+    /// <param name="probeFailure">What the probe's read said.</param>
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Alvo's identity tables were not found: {ProbeFailure}")]
+    private static partial void ProbeFoundNoTables(ILogger logger, string probeFailure);
 
     /// <summary>Logs that the identity tables were created.</summary>
     /// <param name="logger">The logger.</param>
