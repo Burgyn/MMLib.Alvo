@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Management;
+﻿using MMLib.Alvo.Ai;
+
+namespace MMLib.Alvo.Management;
 
 /// <summary>What this Alvo instance is.</summary>
 /// <param name="Version">The informational version of the running <c>MMLib.Alvo</c> assembly.</param>
@@ -40,7 +42,15 @@ public sealed record ManagementInfo(
 /// <c>configuration</c>, <c>store</c>, or <see langword="null"/> when unconfigured — which is what tells an
 /// operator whether their deployment pinned this or somebody saved it from the dashboard.
 /// </param>
-public sealed record ManagementAi(bool Configured, string? Kind, string? Model, string? Source);
+/// <param name="KeyState">
+/// Whether the connection has the key its endpoint needs — on the wire <c>present</c>, <c>missing</c>,
+/// <c>notNeeded</c>, or <c>none</c> when unconfigured. <b>Read it beside <paramref name="Configured"/>, never
+/// after it:</b> a connection whose key is <c>missing</c> is configured and refused on every call, which is the
+/// state "configured" alone used to report as working (docs/todo-admin.md §8d item 31). A state only: neither
+/// the key nor the name of the secret it was looked for under.
+/// </param>
+public sealed record ManagementAi(
+    bool Configured, string? Kind, string? Model, string? Source, AiKeyState KeyState);
 
 /// <summary>One project this instance serves.</summary>
 /// <param name="Name">The project name — the descriptor's own <c>name</c>.</param>

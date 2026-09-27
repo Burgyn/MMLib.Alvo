@@ -74,7 +74,37 @@
         <Panel Title="AI assistant">
             <Subtitle>The model the schema assistant talks to. It proposes changes; you apply them.</Subtitle>
             <ChildContent>
-                <Detail Label="Status" Value="@(_info.Ai.Configured ? "connected" : "not configured")" />
+                <Detail Label="Status" Value="@AiStatus(_info.Ai)" />
+                @*
+                    The key's state beside the status, because "connected" alone was the live defect: a reference to a
+                    secret nobody saved, and every turn a 401 (§8d item 31). Only the state is drawn, never the key; a
+                    present key is the ordinary case and adds nothing.
+                *@
+                @if (_info.Ai.KeyState == AiKeyState.Missing)
+                {
+                    <div class="a-stack a-row--inset">
+                        <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" TestId="ai-key-missing"
+                                   Title="Key missing — every request will be refused">
+                            @if (FromConfiguration(_info.Ai))
+                            {
+                                @:This deployment's <code class="a-mono">Alvo:Ai:ApiKeySecretRef</code> names a secret
+                                @:this instance does not have, or names none for an endpoint that always needs a key.
+                                @:Save the key as a secret under the name it gives, or point it at one that exists;
+                                @:this host's log names the secret it looked for.
+                            }
+                            else
+                            {
+                                @:The saved connection has no API key, and its endpoint always needs one. Edit the
+                                @:connection below and type the key.
+                            }
+                        </AlvoAlert>
+                    </div>
+                }
+                else if (_info.Ai.KeyState == AiKeyState.NotNeeded)
+                {
+                    <Detail Label="Key" Value="no key needed"
+                            Note="The endpoint is dialled without a key, as a local model such as Ollama usually is." />
+                }
                 @if (_info.Ai.Configured)
                 {
                     <Detail Label="Model" Value="@_info.Ai.Model" />
@@ -196,6 +226,20 @@
     private bool _savedAsTyped;
     private MudTextField<string>? _endpointField;
     private MudTextField<string>? _modelField;
+
+    /// <summary>
+    /// The connection's status in one word or two: never "connected" for a connection whose key is missing, which is
+    /// configured and refused on every call.
+    /// </summary>
+    private static string AiStatus(ManagementAi ai) => ai switch
+    {
+        { Configured: false } => "not configured",
+        { KeyState: AiKeyState.Missing } => "key missing",
+        _ => "connected",
+    };
+
+    /// <summary>Whether the deployment's own configuration pinned the connection, so the fix is there and not here.</summary>
+    private static bool FromConfiguration(ManagementAi ai) => string.Equals(ai.Source, "configuration", StringComparison.Ordinal);
 
     /// <summary>The build's sentence on realtime, from <c>capabilities.warned</c>, when it reports one.</summary>
     private ManagementWarnedBlock? _realtime;

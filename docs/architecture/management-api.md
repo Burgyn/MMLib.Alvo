@@ -285,11 +285,21 @@ writes them, and one with no mounted encryption key has no writable store at all
 
 ## `ai` says whether one is configured, never where it dials
 
-`ai` is `{ configured, kind, model, source }`, always present — an older instance that did not report AI and
+`ai` is `{ configured, kind, model, source, keyState }`, always present — an older instance that did not report AI and
 an instance with none are two different things, and a screen that had to tell them apart from an absent field
 would have two empty states. `configured` answers the first question; `kind` and `model` are what a reader
 recognises; `source` is `configuration`, `store` or `null`, which is what turns "why is it still using the
 old model" into one glance.
+
+`keyState` is `present`, `missing`, `notNeeded`, or `none` when nothing is configured (`AiKeyState`, serialised by
+name). **Read it beside `configured`, never after it:** a connection whose key is `missing` is configured and refused
+on every call — the live case (24 Sep 2026) where `Alvo:Ai:ApiKeySecretRef` named a secret nobody had saved, `info`
+said configured, and every turn was a 401. The resolver decides it, because only the resolver knows a reference went
+unanswered: a reference that resolves nothing (absent, undecryptable, or not a secret name) is `missing` whatever
+the endpoint; with no reference and no stored key, `api.openai.com` and `*.openai.azure.com` — hosts that refuse
+every unauthenticated call — are `missing`, and any other endpoint is `notNeeded`, because a local Ollama or vLLM
+is keyless on purpose. It is a state only: never the key, and not the secret's name either, which the host's log
+carries (event 6102) and the deployment's own configuration already holds.
 
 **There is no endpoint, and there never will be one.** The reasoning is `WebhookDelivery`'s: an address is
 where a credential ends up in practice — in a query string, in a userinfo segment — and an internal host name

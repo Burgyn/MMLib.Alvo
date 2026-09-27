@@ -157,7 +157,9 @@ public sealed class AlvoAssistantTests
 #pragma warning disable CA2012
         resolver.ResolveAsync(Arg.Any<CancellationToken>())
             .Returns(_ => new ValueTask<AiConnectionResolution>(new AiConnectionResolution(
-                connection, connection is null ? AiConnectionSource.None : AiConnectionSource.Store)));
+                connection,
+                connection is null ? AiConnectionSource.None : AiConnectionSource.Store,
+                connection is null ? AiKeyState.None : AiKeyState.Present)));
 #pragma warning restore CA2012
 
         return resolver;

@@ -296,6 +296,111 @@ public class AiConnectionResolverTests
         capturing.Warnings.ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// A key the configured reference resolves is present — the one state Settings draws nothing extra for.
+    /// </summary>
+    [Fact]
+    public async Task A_configured_key_the_reference_resolves_is_present()
+    {
+        var store = new InMemorySecretStore();
+        await store.SetAsync(SecretName.Parse("openai.key"), "sk-live", Ct);
+
+        var resolved = await Resolver(store, Configured("https://api.openai.com/v1", "openai.key")).ResolveAsync(Ct);
+
+        resolved.KeyState.ShouldBe(AiKeyState.Present);
+    }
+
+    /// <summary>
+    /// A reference to a secret this instance does not have is a missing key, whatever the endpoint — the live
+    /// case (24 Sep 2026) where Settings said "connected" and every turn was a 401.
+    /// </summary>
+    /// <remarks>
+    /// The local endpoint is the point: it is one that would otherwise read as "no key needed", and the
+    /// operator who named a secret has said a key is needed.
+    /// </remarks>
+    [Theory]
+    [InlineData("https://api.openai.com/v1")]
+    [InlineData("http://localhost:11434/v1")]
+    public async Task A_reference_to_a_secret_this_instance_does_not_have_is_a_missing_key(string endpoint)
+    {
+        var resolved = await Resolver(new InMemorySecretStore(), Configured(endpoint, "openai.key")).ResolveAsync(Ct);
+
+        resolved.Connection.ShouldNotBeNull("a connection with no key is still a connection, just one that is refused");
+        resolved.KeyState.ShouldBe(AiKeyState.Missing);
+    }
+
+    /// <summary>A reference that is not a secret name at all resolves nothing, so the key is missing too.</summary>
+    [Fact]
+    public async Task A_reference_that_is_not_a_secret_name_is_a_missing_key() =>
+        (await Resolver(new InMemorySecretStore(), Configured("http://localhost:11434/v1", "OpenAI Key"))
+            .ResolveAsync(Ct)).KeyState.ShouldBe(AiKeyState.Missing);
+
+    /// <summary>And so is a referenced key this build cannot decrypt.</summary>
+    [Fact]
+    public async Task A_referenced_key_this_build_cannot_decrypt_is_a_missing_key() =>
+        (await Resolver(new RefusingStore(), Configured("https://api.openai.com/v1", "openai.key"))
+            .ResolveAsync(Ct)).KeyState.ShouldBe(AiKeyState.Missing);
+
+    /// <summary>
+    /// A host that always needs a key, dialled with no reference at all, is a missing key rather than a
+    /// keyless connection.
+    /// </summary>
+    [Theory]
+    [InlineData("https://api.openai.com/v1")]
+    [InlineData("https://contoso.openai.azure.com")]
+    public async Task An_endpoint_that_always_needs_a_key_with_none_referenced_is_a_missing_key(string endpoint) =>
+        (await Resolver(new InMemorySecretStore(), Configured(endpoint, reference: null))
+            .ResolveAsync(Ct)).KeyState.ShouldBe(AiKeyState.Missing);
+
+    /// <summary>A local endpoint with no reference is keyless on purpose, which is not a warning.</summary>
+    [Fact]
+    public async Task A_local_endpoint_with_no_reference_needs_no_key() =>
+        (await Resolver(new InMemorySecretStore(), Configured("http://localhost:11434/v1", reference: null))
+            .ResolveAsync(Ct)).KeyState.ShouldBe(AiKeyState.NotNeeded);
+
+    /// <summary>A saved connection that carries its key has one.</summary>
+    [Fact]
+    public async Task A_stored_connection_with_a_key_has_one()
+    {
+        var store = new InMemorySecretStore();
+        await store.SetAsync(AiConnectionResolver.StoredName, StoredJson(model: "qwen3:8b"), Ct);
+
+        (await Resolver(store, new AlvoAiOptions()).ResolveAsync(Ct)).KeyState.ShouldBe(AiKeyState.Present);
+    }
+
+    /// <summary>
+    /// A saved connection with no key is judged by the host it dials, the same rule a configured one is.
+    /// </summary>
+    [Theory]
+    [InlineData("http://localhost:11434/v1", AiKeyState.NotNeeded)]
+    [InlineData("https://api.openai.com/v1", AiKeyState.Missing)]
+    [InlineData("https://contoso.openai.azure.com", AiKeyState.Missing)]
+    public async Task A_stored_connection_with_no_key_is_judged_by_its_host(string endpoint, AiKeyState expected)
+    {
+        var store = new InMemorySecretStore();
+        await store.SetAsync(
+            AiConnectionResolver.StoredName,
+            $$"""{"kind":"openai-compatible","endpoint":"{{endpoint}}","model":"gpt-5"}""",
+            Ct);
+
+        (await Resolver(store, new AlvoAiOptions()).ResolveAsync(Ct)).KeyState.ShouldBe(expected);
+    }
+
+    /// <summary>No connection has no key to speak of.</summary>
+    [Fact]
+    public async Task No_connection_has_no_key_state() =>
+        (await Resolver(new InMemorySecretStore(), new AlvoAiOptions()).ResolveAsync(Ct))
+            .KeyState.ShouldBe(AiKeyState.None);
+
+    /// <summary>An OpenAI-compatible connection this deployment pins, with the reference it names.</summary>
+    private static AlvoAiOptions Configured(string endpoint, string? reference) => new()
+    {
+        Kind = "openai-compatible",
+        Endpoint = endpoint,
+        Model = "gpt-5",
+        ApiKeySecretRef = reference,
+    };
+
     /// <summary>A store whose every read is a value it cannot authenticate.</summary>
     private sealed class RefusingStore : ISecretStore
     {

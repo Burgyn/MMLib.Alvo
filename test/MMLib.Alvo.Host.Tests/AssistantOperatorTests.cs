@@ -139,7 +139,8 @@ public sealed class AssistantOperatorTests
         public ValueTask<AiConnectionResolution> ResolveAsync(CancellationToken ct = default) =>
             ValueTask.FromResult(new AiConnectionResolution(
                 new AlvoAiConnection(AiConnectionKind.OpenAiCompatible, new Uri("http://model.invalid/v1"), "m", null),
-                AiConnectionSource.Configuration));
+                AiConnectionSource.Configuration,
+                AiKeyState.NotNeeded));
     }
 
     /// <summary>The operator: an <c>admin</c>, which the descriptor's <c>access</c> block admits as a viewer.</summary>

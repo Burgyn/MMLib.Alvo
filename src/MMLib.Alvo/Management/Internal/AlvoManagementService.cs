@@ -117,11 +117,11 @@ internal sealed partial class AlvoManagementService(
     /// </remarks>
     private async ValueTask<ManagementAi> AiAsync(CancellationToken ct)
     {
-        var (connection, source) = await ai.ResolveAsync(ct).ConfigureAwait(false);
+        var (connection, source, key) = await ai.ResolveAsync(ct).ConfigureAwait(false);
 
         return connection is null
-            ? new ManagementAi(Configured: false, Kind: null, Model: null, Source: null)
-            : new ManagementAi(Configured: true, KindOf(connection), connection.Model, Lower(source));
+            ? new ManagementAi(Configured: false, Kind: null, Model: null, Source: null, AiKeyState.None)
+            : new ManagementAi(Configured: true, KindOf(connection), connection.Model, Lower(source), key);
     }
 
     /// <summary>The wire spelling of a resolved connection's kind — what an operator configured, not the enum.</summary>

@@ -68,7 +68,8 @@ internal sealed class AlwaysConfigured : IAiConnectionResolver
         new(new AiConnectionResolution(
             new AlvoAiConnection(
                 AiConnectionKind.OpenAiCompatible, new Uri("http://127.0.0.1:1/v1"), "scripted", null),
-            AiConnectionSource.Store));
+            AiConnectionSource.Store,
+            AiKeyState.NotNeeded));
 }
 
 /// <summary>

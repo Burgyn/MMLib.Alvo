@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Ai;
+﻿using System.Text.Json.Serialization;
+
+namespace MMLib.Alvo.Ai;
 
 /// <summary>Which protocol an AI endpoint speaks.</summary>
 /// <remarks>
@@ -29,6 +31,49 @@ public enum AiConnectionSource
 
     /// <summary>A record somebody saved, held in the secret store.</summary>
     Store = 2,
+}
+
+/// <summary>Whether a resolved connection has the key its endpoint needs.</summary>
+/// <remarks>
+/// <para>
+/// <b>Reported because "configured" alone was a lie in the one case that matters</b> (docs/todo-admin.md §8d item
+/// 31, 24 Sep 2026): <c>Alvo:Ai:ApiKeySecretRef</c> named a secret nobody had saved, <c>GET {m}/info</c> said
+/// the connection was configured, and every turn was a 401 the operator had no way to see coming. Only the resolver
+/// knows a reference went unanswered, so it is the resolver that says so.
+/// </para>
+/// <para>
+/// <b>A state, never the key.</b> Nothing here says what the key is, how long it is or where it is kept — only
+/// whether one will be sent.
+/// </para>
+/// <para>
+/// <b>Serialised by name</b>, in the descriptor enums' camel case, so a client branches on <c>missing</c> rather
+/// than on a number that means nothing on its own.
+/// </para>
+/// </remarks>
+[JsonConverter(typeof(JsonStringEnumConverter<AiKeyState>))]
+public enum AiKeyState
+{
+    /// <summary>There is no connection, so there is no key to speak of.</summary>
+    [JsonStringEnumMemberName("none")]
+    None = 0,
+
+    /// <summary>A key resolved, and it is sent with every call.</summary>
+    [JsonStringEnumMemberName("present")]
+    Present = 1,
+
+    /// <summary>
+    /// A key is needed and none resolved, so every call is refused: the configured reference names a secret this
+    /// instance does not have (or cannot read), or the endpoint is one that always needs a key and none was given.
+    /// </summary>
+    [JsonStringEnumMemberName("missing")]
+    Missing = 2,
+
+    /// <summary>
+    /// No key was asked for and the endpoint is not one known to need one — a local Ollama or vLLM, run keyless on
+    /// purpose.
+    /// </summary>
+    [JsonStringEnumMemberName("notNeeded")]
+    NotNeeded = 3,
 }
 
 /// <summary>

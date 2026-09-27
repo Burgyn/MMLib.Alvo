@@ -42,14 +42,32 @@ internal sealed partial class AiConnectionResolver(
     {
         if (FromConfiguration() is { } configured)
         {
-            return new AiConnectionResolution(
-                await WithKeyAsync(configured, ct).ConfigureAwait(false), AiConnectionSource.Configuration);
+            return await WithKeyAsync(configured, ct).ConfigureAwait(false);
         }
 
         var stored = await FromStoreAsync(ct).ConfigureAwait(false);
 
-        return new AiConnectionResolution(
-            stored, stored is null ? AiConnectionSource.None : AiConnectionSource.Store);
+        return stored is null
+            ? new AiConnectionResolution(null, AiConnectionSource.None, AiKeyState.None)
+            : new AiConnectionResolution(stored, AiConnectionSource.Store, KeyStateOf(stored));
+    }
+
+    /// <summary>
+    /// Whether <paramref name="connection"/> carries the key its endpoint needs, judged from the connection alone.
+    /// </summary>
+    /// <remarks>
+    /// A connection with no key is <see cref="AiKeyState.Missing"/> only on a host this build knows always refuses
+    /// an unauthenticated call; anywhere else it is keyless on purpose until something says otherwise. What says
+    /// otherwise is a reference that went unanswered, which only <see cref="WithKeyAsync"/> knows.
+    /// </remarks>
+    private static AiKeyState KeyStateOf(AlvoAiConnection connection)
+    {
+        if (connection.ApiKey is not null)
+        {
+            return AiKeyState.Present;
+        }
+
+        return AlwaysNeedsAKey(connection.Endpoint.Host) ? AiKeyState.Missing : AiKeyState.NotNeeded;
     }
 
     /// <summary>The connection this deployment pinned, or <see langword="null"/> when it pinned none.</summary>
@@ -64,16 +82,40 @@ internal sealed partial class AiConnectionResolver(
         return Build(configured.Kind, configured.Endpoint, configured.Model, apiKey: null);
     }
 
-    /// <summary>The same connection with the key its configuration referenced, resolved through the store.</summary>
-    private async ValueTask<AlvoAiConnection?> WithKeyAsync(AlvoAiConnection connection, CancellationToken ct)
+    /// <summary>
+    /// The configured connection with the key its configuration referenced, resolved through the store, and whether
+    /// that key is there.
+    /// </summary>
+    /// <remarks>
+    /// <b>A reference that resolves nothing is a missing key, whatever the endpoint</b> — including a local one that
+    /// would otherwise read as keyless: the operator who named a secret has said a key is needed. A reference that is
+    /// not a secret name at all resolves nothing either, so it is the same state rather than a silent "no key".
+    /// </remarks>
+    private async ValueTask<AiConnectionResolution> WithKeyAsync(AlvoAiConnection connection, CancellationToken ct)
     {
-        if (!SecretName.TryParse(options.CurrentValue.ApiKeySecretRef, out var reference))
+        var named = options.CurrentValue.ApiKeySecretRef;
+        if (string.IsNullOrWhiteSpace(named))
         {
             WarnIfEndpointAlwaysNeedsAKey(connection);
-            return connection;
+            return new AiConnectionResolution(connection, AiConnectionSource.Configuration, KeyStateOf(connection));
         }
 
-        return connection with { ApiKey = await ReferencedKeyAsync(reference!, ct).ConfigureAwait(false) };
+        var key = SecretName.TryParse(named, out var reference)
+            ? await ReferencedKeyAsync(reference!, ct).ConfigureAwait(false)
+            : Unresolvable(named);
+        key = string.IsNullOrEmpty(key) ? null : key;
+
+        return new AiConnectionResolution(
+            connection with { ApiKey = key },
+            AiConnectionSource.Configuration,
+            key is null ? AiKeyState.Missing : AiKeyState.Present);
+    }
+
+    /// <summary>A reference that is not a secret name: logged as the missing secret it is, and no key.</summary>
+    private string? Unresolvable(string named)
+    {
+        ReferencedSecretMissing(logger, named);
+        return null;
     }
 
     /// <summary>

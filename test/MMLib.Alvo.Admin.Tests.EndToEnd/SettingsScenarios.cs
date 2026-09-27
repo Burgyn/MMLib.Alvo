@@ -238,3 +238,55 @@ public sealed class SettingsScenarios(SettingsWorld world) : IClassFixture<Setti
         }
     }
 }
+
+/// <summary>
+/// A host whose deployment pins a connection to an endpoint that always needs a key, and whose
+/// <c>Alvo:Ai:ApiKeySecretRef</c> names a secret nobody saved — the live case of §8d item 31 (24 Sep 2026).
+/// </summary>
+/// <remarks>
+/// The resolver is the real one, as <see cref="ConfigurableAssistantWorld"/>'s is: the question is whether the
+/// shipped read path says the key is missing, and a substituted resolver would answer it by construction.
+/// </remarks>
+public sealed class MissingKeyWorld : ConfigurableAssistantWorld
+{
+    /// <summary>The secret the configuration names and nothing has written.</summary>
+    internal const string AbsentSecret = "openai.key";
+
+    /// <inheritdoc/>
+    protected override void Configure(IDictionary<string, string?> settings)
+    {
+        base.Configure(settings);
+        settings["Alvo:Ai:Kind"] = StoredAiConnection.OpenAiCompatibleKind;
+        settings["Alvo:Ai:Endpoint"] = "https://api.openai.com/v1";
+        settings["Alvo:Ai:Model"] = "gpt-5";
+        settings["Alvo:Ai:ApiKeySecretRef"] = AbsentSecret;
+    }
+}
+
+/// <summary>
+/// Settings never reads "connected" for a connection whose key is missing: it says every request will be refused,
+/// and where the fix is (docs/todo-admin.md §8d item 31).
+/// </summary>
+/// <param name="world">A host whose configured key reference names an absent secret.</param>
+public sealed class MissingKeyScenarios(MissingKeyWorld world) : IClassFixture<MissingKeyWorld>
+{
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_reference_to_an_absent_secret_is_a_warning_with_its_fix_not_connected()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/settings");
+
+        var alert = session.Page.GetByTestId("ai-key-missing");
+        await alert.WaitForAsync();
+        (await alert.GetAttributeAsync("role")).ShouldBe("alert", "a warning is read out, not only drawn");
+        var text = await alert.InnerTextAsync();
+        text.ShouldContain("Key missing — every request will be refused");
+        text.ShouldContain("Alvo:Ai:ApiKeySecretRef", Case.Sensitive, "the fix names where the reference is set");
+
+        (await session.Content.GetByText("key missing", new() { Exact = true }).CountAsync())
+            .ShouldBe(1, "the status says the key is missing");
+        (await session.Content.GetByText("connected", new() { Exact = true }).CountAsync())
+            .ShouldBe(0, "the status never reads \"connected\" alone while the key is missing");
+        session.AssertConsoleClean();
+    }
+}

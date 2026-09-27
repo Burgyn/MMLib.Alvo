@@ -18,8 +18,9 @@ namespace MMLib.Alvo.Ai
     }
     public readonly struct AiConnectionResolution : System.IEquatable<MMLib.Alvo.Ai.AiConnectionResolution>
     {
-        public AiConnectionResolution(MMLib.Alvo.Ai.AlvoAiConnection? Connection, MMLib.Alvo.Ai.AiConnectionSource Source) { }
+        public AiConnectionResolution(MMLib.Alvo.Ai.AlvoAiConnection? Connection, MMLib.Alvo.Ai.AiConnectionSource Source, MMLib.Alvo.Ai.AiKeyState KeyState) { }
         public MMLib.Alvo.Ai.AlvoAiConnection? Connection { get; init; }
+        public MMLib.Alvo.Ai.AiKeyState KeyState { get; init; }
         public MMLib.Alvo.Ai.AiConnectionSource Source { get; init; }
     }
     public enum AiConnectionSource
@@ -27,6 +28,18 @@ namespace MMLib.Alvo.Ai
         None = 0,
         Configuration = 1,
         Store = 2,
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Ai.AiKeyState>))]
+    public enum AiKeyState
+    {
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("none")]
+        None = 0,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("present")]
+        Present = 1,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("missing")]
+        Missing = 2,
+        [System.Text.Json.Serialization.JsonStringEnumMemberName("notNeeded")]
+        NotNeeded = 3,
     }
     public sealed class AlvoAiConnection : System.IEquatable<MMLib.Alvo.Ai.AlvoAiConnection>
     {
@@ -1260,8 +1273,9 @@ namespace MMLib.Alvo.Management
     }
     public sealed class ManagementAi : System.IEquatable<MMLib.Alvo.Management.ManagementAi>
     {
-        public ManagementAi(bool Configured, string? Kind, string? Model, string? Source) { }
+        public ManagementAi(bool Configured, string? Kind, string? Model, string? Source, MMLib.Alvo.Ai.AiKeyState KeyState) { }
         public bool Configured { get; init; }
+        public MMLib.Alvo.Ai.AiKeyState KeyState { get; init; }
         public string? Kind { get; init; }
         public string? Model { get; init; }
         public string? Source { get; init; }

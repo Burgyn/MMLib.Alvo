@@ -7,7 +7,14 @@
 /// <param name="Source">
 /// Which layer answered, or <see cref="AiConnectionSource.None"/> when neither did.
 /// </param>
-public readonly record struct AiConnectionResolution(AlvoAiConnection? Connection, AiConnectionSource Source);
+/// <param name="KeyState">
+/// Whether the connection has the key its endpoint needs; <see cref="AiKeyState.None"/> exactly when
+/// <paramref name="Connection"/> is <see langword="null"/>. <b>Required rather than defaulted</b>: a resolver that
+/// did not say would report a connection it resolved as having no key state at all, which is the silence this
+/// member exists to end.
+/// </param>
+public readonly record struct AiConnectionResolution(
+    AlvoAiConnection? Connection, AiConnectionSource Source, AiKeyState KeyState);
 
 /// <summary>
 /// Resolves the AI connection this instance would use right now.
