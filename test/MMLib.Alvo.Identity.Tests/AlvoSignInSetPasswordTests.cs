@@ -482,7 +482,24 @@ public sealed class AlvoSignInSetPasswordTests : IAsyncLifetime
         issued.ExpiresAt.ShouldBeInRange(before + lifetime, after + lifetime);
     }
 
-    /// <summary>The default lifetime is Identity's one day, now stated by the package.</summary>
+    /// <summary>
+    /// <b>A lifetime the host configured before <c>AddAlvoIdentity</c> survives it</b> (final branch review, item 16):
+    /// the package restating Identity's default in registration order silently overrode a host that configured first.
+    /// </summary>
+    [Fact]
+    public async Task A_lifetime_the_host_configured_before_the_package_survives_it()
+    {
+        var services = new ServiceCollection();
+        services.Configure<DataProtectionTokenProviderOptions>(tokens => tokens.TokenLifespan = TimeSpan.FromHours(3));
+        services.AddLogging();
+        services.AddAlvoIdentity(store => store.UseSqlite($"Data Source={_file}"));
+        await using var host = services.BuildServiceProvider();
+
+        host.GetRequiredService<IOptions<DataProtectionTokenProviderOptions>>().Value.TokenLifespan
+            .ShouldBe(TimeSpan.FromHours(3));
+    }
+
+    /// <summary>The default lifetime is Identity's one day, which the stated expiry reads.</summary>
     [Fact]
     public void The_default_token_lifetime_is_one_day()
     {

@@ -125,7 +125,7 @@ public static class AlvoIdentityServiceCollectionExtensions
 
     /// <summary>
     /// Adds ASP.NET Core Identity's user and role managers over the Alvo identity store, with the package's
-    /// password policy and credential-token lifetime.
+    /// password policy.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -136,17 +136,17 @@ public static class AlvoIdentityServiceCollectionExtensions
     /// everyone, so it also governs the bootstrap seed; an account an earlier start seeded is never rewritten.
     /// </para>
     /// <para>
-    /// <b>The credential token's lifetime is stated, not inherited.</b> One day is Identity's default for a
-    /// data-protector token; saying it here is what lets the administration report the exact expiry instead
-    /// of "about a day". A host that calls <c>Configure&lt;DataProtectionTokenProviderOptions&gt;</c> after
-    /// this method overrides it, and the reported expiry follows.
+    /// <b>The credential token's lifetime is Identity's own, and the host's to change.</b> Identity's default for a
+    /// data-protector token is one day; the administration reports the exact expiry by reading
+    /// <c>DataProtectionTokenProviderOptions.TokenLifespan</c>, whatever set it. The package does not configure it:
+    /// restating the default here overrode, in registration order, a host that had called
+    /// <c>Configure&lt;DataProtectionTokenProviderOptions&gt;</c> before this method (final branch review, item 16).
+    /// A host's <c>Configure</c>, before or after, is the lifetime, and the reported expiry follows.
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into.</param>
     private static void AddIdentityCore(IServiceCollection services)
     {
-        services.Configure<DataProtectionTokenProviderOptions>(tokens => tokens.TokenLifespan = TimeSpan.FromDays(1));
-
         services.AddIdentityCore<AlvoIdentityUser>(ApplyPasswordPolicy)
             .AddRoles<AlvoIdentityRole>()
             .AddEntityFrameworkStores<AlvoIdentityDbContext>()

@@ -150,6 +150,10 @@ redirect.
 - `AddIdentityCore` gains `services.Configure<DataProtectionTokenProviderOptions>(o => o.TokenLifespan
   = TimeSpan.FromDays(1))`. This is the Identity default, now stated. A host that registers its own
   `Configure` afterwards overrides it.
+  *Amended 27 Sep (final branch review, item 16):* dropped. Restating the default in registration order
+  silently overrode a host that configured the lifetime **before** `AddAlvoIdentity`; the package now leaves
+  the option to Identity's default and the host, and the reported expiry still reads it exactly (pinned: a
+  lifetime configured before the package survives it).
 - `MintCredentialTokenAsync` reads `IOptions<DataProtectionTokenProviderOptions>` and reports
   `ExpiresAt = issued + TokenLifespan` exactly. This replaces the "stated as the default" comment.
 - Single use comes from the stamp: redeeming rotates it, so the used token **and every other

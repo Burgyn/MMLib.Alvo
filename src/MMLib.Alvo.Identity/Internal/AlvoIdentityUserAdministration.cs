@@ -264,7 +264,7 @@ internal sealed class AlvoIdentityUserAdministration(
 
         /* The issue time is read before the provider stamps its own, so the stated expiry is at most
            microseconds early and never late: the lifetime is the options the provider itself reads,
-           which the package states and a host may override. Issuing does not rotate the security
+           Identity's one-day default unless the host configured its own. Issuing does not rotate the security
            stamp, so an earlier outstanding token keeps working until the first redemption (design
            §8.4): rotating here would sign the person out because an administrator clicked a button. */
         var issued = DateTimeOffset.UtcNow;
