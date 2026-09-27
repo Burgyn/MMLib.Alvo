@@ -105,7 +105,7 @@
 
                 @if (_focusAfterRender is { } focus)
                 {
-                    @FocusFirstOnRender.On(focus, _focusMoves)
+                    @FocusFirstOnRender.On(focus, _focusMoves, () => _focusAfterRender = null)
                 }
             }
         </ChildContent>
@@ -323,9 +323,15 @@
     }
 
     /// <summary>Takes what was typed into the search, and runs it once typing pauses, from the first page.</summary>
+    /// <remarks>
+    /// Typing ends a reveal at once, not after the pause: the line saying the list shows the person just created would
+    /// otherwise sit beside text it no longer describes. It also drops a focus move still waiting to be drawn.
+    /// </remarks>
     private async Task SearchTyped(string? search)
     {
         _searchText = search ?? string.Empty;
+        _paging.StopRevealing();
+        _focusAfterRender = null;
         var version = ++_searchVersion;
         await Task.Delay(_searchDelay);
         if (version == _searchVersion)

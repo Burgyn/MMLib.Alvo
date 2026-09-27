@@ -68,6 +68,18 @@ public class PeoplePagingTests
     }
 
     [Fact]
+    public void Typing_ends_a_reveal_before_the_search_it_types_runs()
+    {
+        var paging = new PeoplePaging();
+        paging.Reveal("zz@alvo.test");
+
+        paging.StopRevealing();
+
+        paging.Revealing.ShouldBeFalse();
+        paging.Query.Search.ShouldBe("zz@alvo.test", "the list stays as it is until the typed search runs");
+    }
+
+    [Fact]
     public void Only_an_unsearched_single_page_with_room_on_it_shows_everybody()
     {
         new PeoplePaging().ShowsEverybody(new AlvoUserPage(_one)).ShouldBeTrue();

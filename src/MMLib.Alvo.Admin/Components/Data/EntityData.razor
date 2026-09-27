@@ -102,7 +102,7 @@
                 @* After the grid, so the pager it names is drawn when this runs (FocusFirstOnRender). *@
                 @if (_focusAfterRender is { } focus)
                 {
-                    @FocusFirstOnRender.On(focus, _focusMoves)
+                    @FocusFirstOnRender.On(focus, _focusMoves, () => _focusAfterRender = null)
                 }
             }
         }

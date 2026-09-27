@@ -96,35 +96,74 @@ public sealed class PeoplePagingScenarios(AdminWorld world) : IClassFixture<Admi
 
 /// <summary>
 /// The Data grid's pager keeps focus when the pressed button goes with the page it led away from (spec §3.2's
-/// "never &lt;body&gt;", applied to a pager; the Access list does the same). Its own world: 26 regions, one more than a
-/// page.
+/// "never &lt;body&gt;", applied to a pager; the Access list does the same) — once: a later redraw of the grid never
+/// takes focus back to the pager. Its own world: 26 regions and 26 customers, one more than a page each.
 /// </summary>
 /// <param name="world">The running host and browser.</param>
 public sealed class GridPagerFocusScenarios(AdminWorld world) : IClassFixture<AdminWorld>
 {
-    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task The_last_page_hands_focus_from_Next_to_Previous_and_back()
-    {
-        using (var scope = world.Services.CreateScope())
-        {
-            var data = scope.ServiceProvider.GetRequiredService<IAlvoData>();
-            for (var i = 0; i < 26; i++)
-            {
-                await FieldServiceSeed.RegionAsync(
-                    data, AlvoContext.System(TenantId.New()), string.Create(System.Globalization.CultureInfo.InvariantCulture, $"PAGE-{i:D2}"));
-            }
-        }
+    private static readonly TenantId _tenant = TenantId.New();
 
+    /// <summary>Whether focus is on either pager button.</summary>
+    private const string FocusOnThePager
+        = "() => !!document.activeElement?.closest(\"[data-testid='grid-next'], [data-testid='grid-previous']\")";
+
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_pager_hands_focus_on_once_and_a_redrawn_grid_does_not_take_it_back()
+    {
+        await SeedAsync();
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/data/regions");
 
+        // --- the last page hands focus from Next to Previous, and the first page back
         await session.Page.GetByTestId("grid-next").ClickAsync();
         await session.Page.GetByTestId("grid-next").WaitForAsync(new() { State = WaitForSelectorState.Detached });
         await session.WaitForFocusInsideAsync("grid-previous");
-
         await session.Page.GetByTestId("grid-previous").ClickAsync();
         await session.Page.GetByTestId("grid-previous").WaitForAsync(new() { State = WaitForSelectorState.Detached });
         await session.WaitForFocusInsideAsync("grid-next");
+
+        // --- a search that empties the grid and fills it again leaves focus in the box being typed into
+        await session.Page.GetByTestId("grid-next").ClickAsync();
+        await session.WaitForFocusInsideAsync("grid-previous");
+        var search = session.Page.GetByTestId("grid-search");
+        await search.FillAsync("nothing-is-called-this");
+        await session.Page.GetByTestId("grid-row").First.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await search.FillAsync(string.Empty);
+        await session.Page.GetByTestId("grid-next").WaitForAsync();
+        await StaysOffThePagerAsync(session, "the search box keeps focus when the rows come back");
+        await session.WaitForFocusInsideAsync("grid-search");
+
+        // --- another entity's grid, drawn in place, does not take focus to its pager either
+        await session.Page.GetByTestId("grid-next").ClickAsync();
+        await session.WaitForFocusInsideAsync("grid-previous");
+        await session.Page.EvaluateAsync("path => Blazor.navigateTo(path)", $"{AlvoAdmin.BasePath}/data/customers");
+        await session.Page.GetByTestId("grid-next").WaitForAsync();
+        await StaysOffThePagerAsync(session, "a new entity's pager is not where focus was");
         session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// Gives a replayed focus move the time it would take (it polls every 20 ms once the pager is drawn), then asserts
+    /// it did not happen.
+    /// </summary>
+    private static async Task StaysOffThePagerAsync(AdminSession session, string because)
+    {
+        await session.Page.WaitForTimeoutAsync(400);
+        (await session.Page.EvaluateAsync<bool>(FocusOnThePager)).ShouldBeFalse(because);
+    }
+
+    private async Task SeedAsync()
+    {
+        using var scope = world.Services.CreateScope();
+        await FieldServiceSeed.GrantTheOperatorAsync(scope.ServiceProvider, _tenant);
+        var data = scope.ServiceProvider.GetRequiredService<IAlvoData>();
+        var system = AlvoContext.System(_tenant);
+        for (var i = 0; i < 26; i++)
+        {
+            var n = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{i:D2}");
+            await FieldServiceSeed.RegionAsync(data, system, $"PAGE-{n}");
+            await FieldServiceSeed.CustomerAsync(data, system, _tenant, $"Customer {n}");
+        }
     }
 }

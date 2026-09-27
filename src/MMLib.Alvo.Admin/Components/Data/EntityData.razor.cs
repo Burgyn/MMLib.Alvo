@@ -392,9 +392,11 @@ public partial class EntityData
         await LoadAsync();
     }
 
+    /// <summary>Back to the first page, for a new entity, search or sort — and a pager focus move no longer applies.</summary>
     private void ResetPaging()
     {
         _created = null;
+        _focusAfterRender = null;
         _cursors.Clear();
         _cursor = null;
     }

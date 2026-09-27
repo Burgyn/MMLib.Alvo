@@ -57,6 +57,9 @@ internal sealed class PeoplePaging
         Revealing = true;
     }
 
+    /// <summary>Ends a reveal as the operator starts typing, before the search they type is run.</summary>
+    public void StopRevealing() => Revealing = false;
+
     /// <summary>
     /// Whether <paramref name="page"/> is the whole directory with room on it — no search, no page either side, and
     /// fewer people than a page holds — so a person created now is certainly on it when it is read again.

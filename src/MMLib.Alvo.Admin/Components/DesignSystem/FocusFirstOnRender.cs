@@ -18,12 +18,21 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem;
 /// would hand focus to an element about to be removed, which leaves it on <c>&lt;body&gt;</c>. Keyed by the attempt,
 /// so every press draws a new one.
 /// </para>
+/// <para>
+/// <b>One-shot</b>: it reports <see cref="Honoured"/>, and the owner stops drawing it. A request left drawn would be
+/// honoured again by every branch that unmounts and redraws it — a search that empties the grid and fills it again —
+/// taking focus from the box being typed into.
+/// </para>
 /// </remarks>
 internal sealed class FocusFirstOnRender : ComponentBase
 {
     /// <summary>CSS selectors, most wanted first.</summary>
     [Parameter, EditorRequired]
     public IReadOnlyList<string> Selectors { get; set; } = [];
+
+    /// <summary>Raised once focus has been asked for, so the owner forgets the request.</summary>
+    [Parameter, EditorRequired]
+    public Action Honoured { get; set; } = default!;
 
     [Inject]
     private AdminInterop Interop { get; set; } = default!;
@@ -34,11 +43,13 @@ internal sealed class FocusFirstOnRender : ComponentBase
     /// </summary>
     /// <param name="selectors">Where focus may go, most wanted first.</param>
     /// <param name="attempt">A count the owner raises per move, so each one happens.</param>
-    public static RenderFragment On(IReadOnlyList<string> selectors, int attempt) => builder =>
+    /// <param name="honoured">Clears the owner's request, so no later render draws it again.</param>
+    public static RenderFragment On(IReadOnlyList<string> selectors, int attempt, Action honoured) => builder =>
     {
         builder.OpenComponent<FocusFirstOnRender>(0);
         builder.SetKey(attempt);
         builder.AddComponentParameter(1, nameof(Selectors), selectors);
+        builder.AddComponentParameter(2, nameof(Honoured), honoured);
         builder.CloseComponent();
     };
 
@@ -47,6 +58,7 @@ internal sealed class FocusFirstOnRender : ComponentBase
     {
         if (firstRender)
         {
+            Honoured();
             await Interop.FocusFirstOnceShownAsync(Selectors);
         }
     }
