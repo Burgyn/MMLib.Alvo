@@ -141,7 +141,7 @@ and the e2e suite asserts that things render, not that they behave.
    the editor it opens is titled the same. An edit trigger on a row says "Edit". `CreateActionScenarios` scans them.
 8. **Fields** (added 26 Sep, after the screenshots of Task 9 showed three input looks in one editor and an outline
    striking through the typed-name confirm's label). One presentation for every text input, whichever element draws
-   it — the library's `MudTextField`/`MudSelect`, or a native `<input>` where the library cannot run (sign-in, D10)
+   it — the library's `MudTextField`/`MudSelect`, or a native `<input>` where the library cannot run (sign-in and set-password, D10)
    or is not used (the record form's reference combobox, D7):
    - **Name above the box**, never floating and never in a notch: the `Field` component's `<label for>` (or, for a
      group, a label a group names with `aria-labelledby`), left-aligned with the box, `--text-sm`, `--dim`, medium
@@ -170,8 +170,10 @@ and the e2e suite asserts that things render, not that they behave.
      alternative text, so the accessible name stays the field's name; `aria-required` on the control says the rest.
      Never the browser's `required` (it would validate ahead of the engine). A required **switch** carries the class
      `a-required`, which draws the same mark after its text. *Exemption, D10*: the static sign-in page's two inputs
-     are native and carry `required` — a form posted without a circuit has no other way to say "empty"; both fields
-     are required, so no mark is drawn there.
+     and the static set-password page's four (address, token, new password, the password again; amended 27 Sep, final
+     branch review item 10) are native and carry `required` — a form posted without a circuit has no other way to say
+     "empty"; every field on both is required, so no mark is drawn there. `FieldConventionTests` allows exactly these
+     two pages' native inputs, beside D7's combobox and the palette's line.
    - **Hint** under the box, `.a-hint` at `--text-sm`. The `Field` gives it the id `{For}-hint`, and **the call site
      writes `aria-describedby="{For}-hint"` on the input** (with `FieldRefusals.DescribedBy(id, hint)` when the field
      can be refused): a `Field` cannot set an attribute on the component inside it. `FieldConventionTests` fails a
