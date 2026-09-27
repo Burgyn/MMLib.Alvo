@@ -334,3 +334,11 @@ export function download(name, text) {
 export async function copyText(text) {
   await navigator.clipboard.writeText(text);
 }
+
+/**
+ * The browser's offset from UTC, in minutes east: what a time the server renders needs to read in the operator's own
+ * zone, since the server's is nobody's. The sign is flipped from getTimezoneOffset, which counts minutes west.
+ */
+export function utcOffsetMinutes() {
+  return -new Date().getTimezoneOffset();
+}

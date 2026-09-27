@@ -368,6 +368,10 @@ internal sealed class ManagementGateway(
     public Task<AlvoUser> SetDisabledAsync(UserId user, bool disabled, CancellationToken ct)
         => AsOperatorAsync(() => Administration.SetDisabledAsync(user, disabled, ct), ct);
 
+    /// <summary>Ends a person's temporary lockout from failed sign-ins now.</summary>
+    public Task<AlvoUser> ClearLockoutAsync(UserId user, CancellationToken ct)
+        => AsOperatorAsync(() => Administration.ClearLockoutAsync(user, ct), ct);
+
     /// <summary>Mints the single-use token with which somebody sets their own password.</summary>
     public Task<AlvoCredentialToken> IssueCredentialTokenAsync(UserId user, CancellationToken ct)
         => AsOperatorAsync(() => Administration.IssueCredentialTokenAsync(user, ct), ct);

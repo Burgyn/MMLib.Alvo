@@ -102,6 +102,31 @@ internal sealed partial class AdminInterop(IJSRuntime js, ILogger<AdminInterop> 
     public Task FollowNewestAsync(ElementReference thread)
         => QuietlyAsync(module => module.InvokeVoidAsync("followNewest", thread));
 
+    /// <summary>The operator's offset from UTC, once <see cref="LearnUtcOffsetAsync"/> has read it from the browser.</summary>
+    /// <remarks>
+    /// Kept here, on the circuit's one path into the browser, because it is a fact about the browser and every screen
+    /// of the circuit reads the same one; <see langword="null"/> until it is read, or when the circuit has gone.
+    /// </remarks>
+    public TimeSpan? UtcOffset { get; private set; }
+
+    /// <summary>Reads the browser's offset from UTC once per circuit (<c>utcOffsetMinutes</c> in admin.js).</summary>
+    /// <remarks>
+    /// Read once rather than per instant: what the dashboard shows in local time is minutes away (a lockout's end),
+    /// so a daylight-saving change inside that window is the one case it misreads, by the change.
+    /// </remarks>
+    /// <returns>Whether this call learned it, so the caller knows to draw again.</returns>
+    public async Task<bool> LearnUtcOffsetAsync()
+    {
+        if (UtcOffset is not null)
+        {
+            return false;
+        }
+
+        var minutes = await QuietlyAsync<int?>(module => module.InvokeAsync<int?>("utcOffsetMinutes"));
+        UtcOffset = minutes is { } east ? TimeSpan.FromMinutes(east) : null;
+        return UtcOffset is not null;
+    }
+
     /// <summary>The theme in force, or <see langword="null"/> when the circuit has gone.</summary>
     public Task<string?> ThemeAsync() => QuietlyAsync<string?>(module => module.InvokeAsync<string?>("theme"));
 

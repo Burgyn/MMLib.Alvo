@@ -2,7 +2,11 @@
     One person on the Access screen: who they are, their roles and their tenant, and an Edit that opens their
     editor (docs/architecture/admin-dashboard-review.md, F-13). The row holds nothing being edited: every change is
     made in PersonEditor, which the page owns, and the row reads the list again after it.
+
+    A temporary lockout from failed sign-ins is said in the meta, in the operator's time (LockoutWords): an operator
+    asked why somebody cannot sign in otherwise sees an ordinary, enabled person (docs/todo-admin.md §8d item 39).
 *@
+@inject AdminInterop Interop
 @* A stable id per person, so a row can be addressed by who it is rather than by where it sits in a list
    that reorders. *@
 <ListRow id="@($"person-{Person.Id.Value}")" class="a-listrow--roomy a-listrow--inline a-listrow--center">
@@ -14,6 +18,10 @@
             @if (Person.IsDisabled)
             {
                 <text> · disabled</text>
+            }
+            @if (LockoutWords.Of(Person, Interop.UtcOffset) is { } locked)
+            {
+                <text> · </text><span data-testid="person-locked">@locked</span>
             }
         </span>
     </span>

@@ -5,13 +5,16 @@
     only a snackbar.
 
     Disable and Let them back in leave the editor first (AlvoEditor.LeaveAsync, which asks "Discard your changes?"
-    when there are any): Disable is confirmed in an AlvoConfirm, and a confirm never opens over a dialog.
+    when there are any): Disable is confirmed in an AlvoConfirm, and a confirm never opens over a dialog. A temporary
+    lockout from failed sign-ins is a state, said in an alert at the top with Unlock as its action (spec §3.3); Unlock
+    leaves the editor the same way, for the page's confirm (docs/todo-admin.md §8d items 39, 46(i)).
 
     The page writes everything. This holds only the draft, and says on Save which parts of it changed: the roles as
     the chips now have them, which the page turns into a grant or a revoke against the person as stored now
     (ManagementGateway.ChangeRolesAsync), never a whole set written back.
 *@
 @inject NavigationManager Navigation
+@inject AdminInterop Interop
 
 <AlvoEditor @ref="_editor" TestId="person-editor" Title="@($"Edit {Person.Email}")" SubmitText="Save changes"
             SubmitTestId="person-save" Dirty="_draft.Dirty" Busy="Busy" OnSubmit="SaveAsync"
@@ -32,6 +35,22 @@
     </ExtraActions>
     <ChildContent>
         @Problem
+
+        @if (LockoutWords.Of(Person, Interop.UtcOffset) is { } locked)
+        {
+            <AlvoAlert Tone="AlvoAlert.AlertTone.Info" Title="@locked" TestId="person-lockout">
+                <ChildContent>
+                    <p class="a-section__sub">
+                        Too many wrong passwords in a row lock an account for a few minutes, whoever typed them. It
+                        ends by itself; Unlock ends it now.
+                    </p>
+                </ChildContent>
+                <Actions>
+                    <AlvoButton Small="true" data-testid="person-unlock" Disabled="Busy"
+                                OnClick="_ => LeaveForAsync(OnRequestUnlock)">Unlock</AlvoButton>
+                </Actions>
+            </AlvoAlert>
+        }
 
         @if (Token is { } token && CredentialHandover.For(Navigation, Person, token) is var handover)
         {
@@ -161,6 +180,10 @@
     /// <summary>Raised, once the editor may close, to ask whether the person should be disabled.</summary>
     [Parameter]
     public EventCallback OnRequestDisable { get; set; }
+
+    /// <summary>Raised, once the editor may close, to ask whether a temporary lockout should end now.</summary>
+    [Parameter]
+    public EventCallback OnRequestUnlock { get; set; }
 
     /// <summary>Raised, once the editor may close, to let a disabled person sign in again.</summary>
     [Parameter]

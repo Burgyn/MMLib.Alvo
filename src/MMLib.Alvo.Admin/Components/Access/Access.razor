@@ -184,6 +184,7 @@
                       Token="@(_tokenFor == editing.Id ? _token : null)" Busy="_busy" Problem="EditorProblem"
                       OnSave="change => SaveAsync(editing, change)" OnIssueToken="() => IssueTokenAsync(editing)"
                       OnRequestDisable="() => AskToDisable(editing)" OnLetBackIn="() => LetBackInAsync(editing)"
+                      OnRequestUnlock="() => AskToUnlock(editing)"
                       OnCopyToken="CopyTokenAsync" OnClose="CloseEditor" />
     </CascadingValue>
 }
@@ -192,6 +193,13 @@
              CancelTestId="disable-person-cancel" Title="@($"Disable {_disabling?.Email}?")"
              Consequence="They can no longer sign in, every session they hold stops at its next request, and a credential token already issued to them stops working. You can let them back in later; they then sign in again."
              Verb="Disable person" OnConfirm="DisableConfirmedAsync" OnCancel="CancelDisable" />
+
+@* Not destructive, and still asked (spec §3.2's shape, deliberately): the lockout is the account's guard against
+   somebody guessing its password, so ending it early is a decision, and the body says what it does and does not. *@
+<AlvoConfirm Open="_unlocking is not null" TestId="unlock-person" ConfirmTestId="unlock-person-run"
+             CancelTestId="unlock-person-cancel" Title="@($"Unlock {_unlocking?.Email}?")"
+             Consequence="@LockoutWords.Consequence" Verb="Unlock" OnConfirm="UnlockConfirmedAsync"
+             OnCancel="CancelUnlock" />
 
 
 @code {
@@ -209,6 +217,9 @@
     private bool _busy;
     private AlvoUser? _editing;
     private AlvoUser? _disabling;
+
+    /// <summary>The person the Unlock confirm names, while it is open.</summary>
+    private AlvoUser? _unlocking;
     private UserId? _self;
     private UserId? _arrived;
     private int _reveals;
@@ -264,6 +275,19 @@
 
     /// <inheritdoc />
     protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    /// <summary>Asks the browser its offset from UTC once, so a lockout's end reads in the operator's own time.</summary>
+    /// <remarks>
+    /// After the first render because the browser is only reachable then; until it answers, the time says UTC
+    /// (<see cref="LockoutWords"/>), and it is drawn again once it has.
+    /// </remarks>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && await Interop.LearnUtcOffsetAsync())
+        {
+            StateHasChanged();
+        }
+    }
 
     /// <summary>Reads the descriptor's roles and levels, the operator's own id, and the people.</summary>
     private async Task LoadAsync()
@@ -565,6 +589,36 @@
         => _problem.Shown
             ? Task.CompletedTask
             : Interop.FocusFirstOnceClosedAsync([$"#change-{person.Id.Value}", "[data-testid='person-new']"]);
+
+    /// <summary>Closes the editor, then asks whether the lockout should end: never a confirm over a dialog.</summary>
+    private void AskToUnlock(AlvoUser person)
+    {
+        CloseEditor();
+        _unlocking = person;
+    }
+
+    /// <summary>Ends the lockout of the person the confirm names, says so once the list is read again, and focuses their row.</summary>
+    private async Task UnlockConfirmedAsync()
+    {
+        if (_unlocking is not { } person)
+        {
+            return;
+        }
+
+        /* Closed first, then written, then focused: the order every confirm follows (spec §3.2). */
+        _unlocking = null;
+        await WriteAsync(() => Gateway.ClearLockoutAsync(person.Id, CancellationToken.None),
+            $"{person.Email} can try to sign in again");
+        await FocusRowOfAsync(person);
+    }
+
+    /// <summary>Cancel and Escape leave the lockout standing; the Unlock that asked is gone with its editor.</summary>
+    private Task CancelUnlock()
+    {
+        var person = _unlocking;
+        _unlocking = null;
+        return person is null ? Task.CompletedTask : FocusRowOfAsync(person);
+    }
 
     /// <summary>Lets a disabled person sign in again: not destructive, so it asks nothing.</summary>
     private async Task LetBackInAsync(AlvoUser person)
