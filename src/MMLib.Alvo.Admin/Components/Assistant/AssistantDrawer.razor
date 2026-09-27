@@ -327,10 +327,14 @@
         TakeToPreview(await Session.CopyAsync(_lifetime.Token), proposal);
     }
 
+    /// <summary>Takes the proposal to Preview, or says in place why the copy would not hold it (never a snackbar).</summary>
     private void TakeToPreview(WorkingCopy copy, AssistantUpdate.Proposal proposal)
     {
-        copy.Replace(proposal.DescriptorJson);
-        copy.SuggestReason(ReasonFor());
+        if (ProposalTake.Into(copy, proposal.DescriptorJson, ReasonFor()) is { } refused)
+        {
+            _failure.Show(refused, title: ProposalTake.RefusedTitle);
+            return;
+        }
 
         Navigation.NavigateTo(AdminPaths.Changes);
     }
