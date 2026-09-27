@@ -8,6 +8,9 @@ internal enum RefusalScreen
     /// <summary>The field editor's refused-facets list.</summary>
     FieldEditor,
 
+    /// <summary>The Fields tab's rows: a staged field that carries the refused facet.</summary>
+    FieldsList,
+
     /// <summary>The entity header, beside the flags.</summary>
     EntityHeader,
 
@@ -35,10 +38,13 @@ internal enum RefusalScreen
 /// have drawn on the entity header. A slot is a feature's own name, and only a table can say where it belongs.
 /// </para>
 /// <para>
-/// <b>Admin-side, deliberately.</b> The core-side answer is an owner or area on <c>ManagementRefusedFeature</c>
-/// itself — a port change, and #269's to decide. Until then a slot this map does not place is <see cref="Unplaced"/>,
-/// which Overview shows and an end-to-end fact asserts is empty against the real host, so a new core slot is loud.
-/// The slots are the ones <c>UnhonouredFeatures.EveryRefusal</c> publishes
+/// <b>Admin-side, deliberately — and decided (#269, 27 Sep 2026).</b> The alternative was an owner or area on
+/// <c>ManagementRefusedFeature</c> itself, so the core would say where each refusal is shown. It is not added: it
+/// would grow Abstractions' public surface for one consumer, and "which screen" is this dashboard's layout, not a fact
+/// about the feature — another client of the Management API would place the same slot elsewhere. What keeps the map
+/// honest instead is that a slot it does not place is <see cref="Unplaced"/>, which Overview shows and an end-to-end
+/// fact (<c>RefusalPlacementScenarios</c>) asserts is empty against the real host, so a new core slot is loud rather
+/// than silently dropped. The slots are the ones <c>UnhonouredFeatures.EveryRefusal</c> publishes
 /// (src/MMLib.Alvo/Descriptor/Internal/UnhonouredFeatures.cs).
 /// </para>
 /// </remarks>
@@ -46,9 +52,9 @@ internal static class RefusalPlaces
 {
     private static readonly Dictionary<string, RefusalScreen[]> _owners = new(StringComparer.Ordinal)
     {
-        ["field.validation"] = [RefusalScreen.FieldEditor],
-        ["field.default"] = [RefusalScreen.FieldEditor],
-        ["rollup.where"] = [RefusalScreen.FieldEditor],
+        ["field.validation"] = [RefusalScreen.FieldEditor, RefusalScreen.FieldsList],
+        ["field.default"] = [RefusalScreen.FieldEditor, RefusalScreen.FieldsList],
+        ["rollup.where"] = [RefusalScreen.FieldEditor, RefusalScreen.FieldsList],
         ["entity.softDelete"] = [RefusalScreen.EntityHeader],
         ["function"] = [RefusalScreen.OnWrite],
         ["http.call"] = [RefusalScreen.OnWrite],

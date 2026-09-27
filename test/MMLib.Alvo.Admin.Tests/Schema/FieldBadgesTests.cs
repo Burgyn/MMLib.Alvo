@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Admin.Components.Schema;
+using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;
 using System.Text.Json;
 
@@ -69,6 +70,40 @@ public class FieldBadgesTests
                 new FieldSchema { Name = "code", Type = FieldType.String, Required = true, MaxLength = 12 },
                 Declared("""{"type":"string","required":true,"maxLength":12,"readOnly":true,"hidden":"false"}"""))
             .ShouldBe(["required", "hidden (conditional)", "readOnly", "max 12"]);
+
+    /// <summary>
+    /// A staged field carrying a facet the build refuses says so on its row, not only in the editor (#269): the three
+    /// field slots, each detected in the form the apply refuses.
+    /// </summary>
+    [Theory]
+    [InlineData("""{"type":"text","validation":"size(this) > 2"}""", "field.validation")]
+    [InlineData("""{"type":"text","default":{"$cel":"@user.id"}}""", "field.default")]
+    [InlineData("""{"type":"integer","rollup":{"from":"lines","op":"count","where":"x > 1"}}""", "rollup.where")]
+    public void A_refused_facet_is_found_on_the_row(string declaration, string slot)
+        => FieldBadges.Refused(Declared(declaration), _published).ShouldHaveSingleItem().Slot.ShouldBe(slot);
+
+    /// <summary>The form the build honours is not a refusal: a literal default, a rollup with no filter.</summary>
+    [Theory]
+    [InlineData("""{"type":"text","default":"x"}""")]
+    [InlineData("""{"type":"integer","rollup":{"from":"lines","op":"count"}}""")]
+    [InlineData("""{"type":"text","validation":null}""")]
+    public void An_honoured_form_is_not_refused(string declaration)
+        => FieldBadges.Refused(Declared(declaration), _published).ShouldBeEmpty();
+
+    /// <summary>The build is the authority: a slot it no longer publishes is not badged, whatever the field carries.</summary>
+    [Fact]
+    public void A_slot_the_build_does_not_publish_is_not_badged()
+        => FieldBadges.Refused(Declared("""{"type":"text","validation":"size(this) > 2"}"""), []).ShouldBeEmpty();
+
+    [Fact]
+    public void A_row_with_no_declaration_is_refused_nothing()
+        => FieldBadges.Refused(null, _published).ShouldBeEmpty();
+
+    private static readonly ManagementRefusedFeature[] _published =
+    [
+        new("field.validation", "c", "f"), new("field.default", "c", "f"), new("rollup.where", "c", "f"),
+        new("entity.softDelete", "c", "f"),
+    ];
 
     private static FieldSchema Text { get; } = new() { Name = "notes", Type = FieldType.Text, Nullable = true };
 

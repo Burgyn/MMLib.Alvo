@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Tests.EndToEnd;
+﻿using System.Text.Json.Nodes;
+
+namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
 /// The Fields tab shows what the descriptor declares of each field: its <c>hidden</c> and <c>readOnly</c> policy
@@ -34,5 +36,44 @@ public sealed class DeclaredFieldScenarios(AdminWorld world) : IClassFixture<Adm
         (await description.InnerTextAsync()).ShouldBe("One line describing the job.");
 
         session.AssertConsoleClean();
+    }
+}
+
+/// <summary>
+/// A staged field carrying a facet the build refuses says so on its Fields row, before it is opened (#269).
+/// </summary>
+/// <remarks>
+/// The field arrives through Import, which stages without applying: the field editor offers no <c>validation</c> box,
+/// because the build refuses it. Its own world, because the import replaces the operator's working copy.
+/// </remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class StagedFieldRefusalScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+{
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_staged_field_with_validation_is_badged_refused_on_its_row()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/transfer");
+        await session.Page.FillAsync("#import-json", WithValidatedField());
+        await session.Page.GetByTestId("import-run").ClickAsync();
+        await session.Page.WaitForURLAsync("**/changes");
+
+        await session.GoAsync("/schema/regions");
+        await session.Page.GetByTestId("field-refused-slug-field.validation").WaitForAsync();
+        (await session.Page.GetByTestId("field-row-name").InnerTextAsync()).ShouldNotContain("refused");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>field-service with one more field on <c>regions</c>, which declares a <c>validation</c>.</summary>
+    private static string WithValidatedField()
+    {
+        var descriptor = JsonNode.Parse(Descriptors.FieldService)!.AsObject();
+        descriptor["entities"]!["regions"]!["fields"]!["slug"] = new JsonObject
+        {
+            ["type"] = "string",
+            ["validation"] = "size(this) > 2",
+        };
+        return descriptor.ToJsonString();
     }
 }

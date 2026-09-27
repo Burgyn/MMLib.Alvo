@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Admin.Internal;
+using MMLib.Alvo.Management;
 using System.Text.Json;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
@@ -24,24 +25,35 @@ internal sealed class FieldDeclarations
 {
     private readonly IReadOnlyDictionary<string, JsonElement> _working;
     private readonly IReadOnlyDictionary<string, JsonElement> _applied;
+    private readonly IReadOnlyList<ManagementRefusedFeature> _refused;
 
     private FieldDeclarations(
-        IReadOnlyDictionary<string, JsonElement> working, IReadOnlyDictionary<string, JsonElement> applied)
+        IReadOnlyDictionary<string, JsonElement> working, IReadOnlyDictionary<string, JsonElement> applied,
+        IReadOnlyList<ManagementRefusedFeature> refused)
     {
         _working = working;
         _applied = applied;
+        _refused = refused;
     }
 
     /// <summary>No declarations — what the list reads when no entity screen cascaded any.</summary>
     public static FieldDeclarations None { get; } = new(
-        new Dictionary<string, JsonElement>(), new Dictionary<string, JsonElement>());
+        new Dictionary<string, JsonElement>(), new Dictionary<string, JsonElement>(), []);
 
     /// <summary>Reads one entity's field declarations out of the working and the applied document.</summary>
     /// <param name="workingJson">The working copy.</param>
     /// <param name="appliedJson">The applied revision the copy was taken from.</param>
     /// <param name="entity">The entity, by the name the copy gives it.</param>
-    public static FieldDeclarations From(string workingJson, string appliedJson, string entity)
-        => new(DescriptorLens.FieldDeclarations(workingJson, entity), DescriptorLens.FieldDeclarations(appliedJson, entity));
+    /// <param name="refused">Every refusal the build publishes, which a staged row may carry.</param>
+    public static FieldDeclarations From(
+        string workingJson, string appliedJson, string entity, IReadOnlyList<ManagementRefusedFeature> refused)
+        => new(
+            DescriptorLens.FieldDeclarations(workingJson, entity), DescriptorLens.FieldDeclarations(appliedJson, entity),
+            refused);
+
+    /// <summary>The build's refusals one field's declaration carries (<see cref="FieldBadges.Refused"/>).</summary>
+    /// <param name="field">The field's name.</param>
+    public IReadOnlyList<ManagementRefusedFeature> RefusedOf(string field) => FieldBadges.Refused(Of(field), _refused);
 
     /// <summary>One field's declaration, or <see langword="null"/> when neither document declares it.</summary>
     /// <param name="field">The field's name.</param>

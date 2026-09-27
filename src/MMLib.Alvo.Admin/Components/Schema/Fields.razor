@@ -20,6 +20,14 @@
                 <span class="@($"a-badge {(removed ? "a-badge--danger" : "a-badge--accent")}")"
                       data-testid="@($"staged-{field.Name}")">@Word(staged)</span>
             }
+            @*
+                First, and in the danger tone: a staged field the apply will refuse is the one thing on this row that
+                stops the next apply (#269). The editor says why; the row only has to be found.
+            *@
+            @foreach (var refusal in Declarations.RefusedOf(field.Name))
+            {
+                <span class="a-badge a-badge--danger" data-testid="@($"field-refused-{field.Name}-{refusal.Slot}")">@FieldBadges.RefusedWord(refusal.Slot)</span>
+            }
             @foreach (var facet in FieldBadges.Of(field, Declarations.Of(field.Name)))
             {
                 <span class="a-badge">@facet</span>

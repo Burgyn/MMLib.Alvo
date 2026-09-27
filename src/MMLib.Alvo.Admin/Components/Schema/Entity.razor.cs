@@ -276,7 +276,7 @@ public partial class Entity
             Copy.StagedHooksOf(EntityName),
             EventCallback.Factory.Create<string>(this, RestoreField));
         _rollupSources = RollupSources.For(Copy.Json, EntityName);
-        _declarations = Copy.Loaded ? FieldDeclarations.From(Copy.Json, Copy.AppliedJson, EntityName) : FieldDeclarations.None;
+        _declarations = Copy.Loaded ? FieldDeclarations.From(Copy.Json, Copy.AppliedJson, EntityName, _refused) : FieldDeclarations.None;
         ForgetStaleLeftovers();
     }
 

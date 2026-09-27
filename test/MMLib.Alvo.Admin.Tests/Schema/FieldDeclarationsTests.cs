@@ -22,15 +22,23 @@ public class FieldDeclarationsTests
 
     [Fact]
     public void A_field_the_copy_declares_is_read_from_the_copy()
-        => Kind(FieldDeclarations.From(Working, Applied, "orders"), "notes", "hidden").ShouldBe(JsonValueKind.String);
+        => Kind(FieldDeclarations.From(Working, Applied, "orders", []), "notes", "hidden").ShouldBe(JsonValueKind.String);
 
     [Fact]
     public void A_field_the_copy_removed_is_read_from_the_applied_revision()
-        => Kind(FieldDeclarations.From(Working, Applied, "orders"), "gone", "readOnly").ShouldBe(JsonValueKind.True);
+        => Kind(FieldDeclarations.From(Working, Applied, "orders", []), "gone", "readOnly").ShouldBe(JsonValueKind.True);
 
     [Fact]
     public void A_field_neither_declares_has_no_declaration()
-        => FieldDeclarations.From(Working, Applied, "orders").Of("absent").ShouldBeNull();
+        => FieldDeclarations.From(Working, Applied, "orders", []).Of("absent").ShouldBeNull();
+
+    /// <summary>The row's refusals come from the copy's declaration and the build's own list together.</summary>
+    [Fact]
+    public void A_staged_field_carrying_a_refused_facet_names_the_refusal()
+        => FieldDeclarations.From(
+                """{"entities":{"orders":{"fields":{"code":{"type":"string","validation":"size(this) > 1"}}}}}""",
+                Applied, "orders", [new("field.validation", "c", "f")])
+            .RefusedOf("code").ShouldHaveSingleItem().Slot.ShouldBe("field.validation");
 
     [Fact]
     public void Nothing_is_read_when_no_screen_cascaded_the_declarations()
