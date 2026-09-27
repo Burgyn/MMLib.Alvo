@@ -117,8 +117,10 @@ public sealed class RemoveAppliedEntityScenarios(AdminWorld world) : IClassFixtu
         await session.Page.GetByTestId("entity-tabpanel").WaitForAsync();
         (await session.Page.GetByTestId("rule-save-list").CountAsync()).ShouldBe(0, "the rules are read, not edited");
         await session.OpenTabAsync("On write");
+        await session.Page.GetByTestId("entity-tabpanel").WaitForAsync();
         (await session.Page.GetByTestId("hook-new").CountAsync()).ShouldBe(0);
         await session.OpenTabAsync("Indexes");
+        await session.Page.GetByTestId("entity-tabpanel").WaitForAsync();
         (await session.Page.GetByTestId("index-new").CountAsync()).ShouldBe(0);
         session.AssertConsoleClean();
     }
