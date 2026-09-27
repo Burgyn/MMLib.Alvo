@@ -5,6 +5,7 @@
 @inject ISnackbar Snackbar
 @inject AdminInterop Interop
 @inject NavigationManager Navigation
+@inject SetPasswordRoute SetPasswordPage
 
 <PageTitle>Access · Alvo</PageTitle>
 
@@ -519,8 +520,8 @@
     });
 
     /// <summary>
-    /// Copies the set-password link the panel shows (CredentialHandover); a clipboard the browser withholds is said in
-    /// place, beside the link itself.
+    /// Copies what the panel hands over (CredentialHandover): the set-password link, or the bare token on a host that
+    /// maps no set-password post; a clipboard the browser withholds is said in place, beside it.
     /// </summary>
     private async Task CopyTokenAsync()
     {
@@ -529,16 +530,18 @@
             return;
         }
 
+        var handover = CredentialHandover.For(Navigation, person, token, Interop.UtcOffset, SetPasswordPage.IsMapped);
         try
         {
-            await Interop.CopyAsync(CredentialHandover.For(Navigation, person, token, Interop.UtcOffset).Clipboard);
+            await Interop.CopyAsync(handover.Clipboard);
             _tokenCopied = true;
-            Snackbar.Confirm("Link copied");
+            Snackbar.Confirm(handover.Link is null ? "Token copied" : "Link copied");
         }
         catch (JSException exception)
         {
-            Show(new AdminProblem("The link could not be copied", "The browser did not let this page use the clipboard.",
-                "Select the link above and copy it by hand.", exception, IsFault: false));
+            Show(new AdminProblem(
+                $"The {handover.Copied} could not be copied", "The browser did not let this page use the clipboard.",
+                $"Select the {handover.Copied} above and copy it by hand.", exception, IsFault: false));
         }
     }
 

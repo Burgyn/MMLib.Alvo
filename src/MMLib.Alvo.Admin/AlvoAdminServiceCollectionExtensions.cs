@@ -30,12 +30,13 @@ public static class AlvoAdminServiceCollectionExtensions
     /// </para>
     /// <para>
     /// What is registered below — <c>ManagementGateway</c>, <c>DataGateway</c>,
-    /// <c>AssistantGateway</c>, <c>WorkingCopyStore</c>, <c>AdminSession</c> and <c>AdminInterop</c> — is
+    /// <c>AssistantGateway</c>, <c>WorkingCopyStore</c>, <c>AdminSession</c>, <c>AdminInterop</c> and
+    /// <c>SetPasswordRoute</c> — is
     /// internal, and every one of them is a thin adapter over <c>IAlvoManagement</c>, the ports in
     /// <c>MMLib.Alvo.Abstractions</c> or the browser rather than a service of the dashboard's own: a screen that
     /// needed one would be a screen doing work the core should be doing (<c>AdminSession</c> only composes the
-    /// others for a screen, and <c>AdminInterop</c> is the one path into the dashboard's script). None of these
-    /// six is public, and none is meant to be resolved by host code. Beside them it registers the component library
+    /// others for a screen, <c>AdminInterop</c> is the one path into the dashboard's script, and
+    /// <c>SetPasswordRoute</c> reads the host's own routing table). None of these seven is public, and none is meant to be resolved by host code. Beside them it registers the component library
     /// the screens are drawn with: MudBlazor's own services, through <c>AddLibrary</c>.
     /// </para>
     /// <para>
@@ -45,6 +46,16 @@ public static class AlvoAdminServiceCollectionExtensions
     /// host that mints its own sessions owns their revalidation, and without it a disabled operator's open tab
     /// keeps navigating until its next page load. Authority never lingers either way: every management and
     /// data call re-resolves its caller through <see cref="IAlvoAdminCallerResolver"/> and is refused at once.
+    /// </para>
+    /// <para>
+    /// <b>The set-password post is the host's to map.</b> Access hands a credential token over as a link to
+    /// <see cref="AlvoAdmin.SetPasswordPath"/>, whose form posts to <see cref="AlvoAdmin.SetPasswordEndpoint"/>.
+    /// Redeeming it needs the identity package, which this one does not reference, so <see cref="AlvoAdminEndpointRouteBuilderExtensions.MapAlvoAdmin"/> does
+    /// not map it: <c>MMLib.Alvo.Host</c> does, and an embedded host that registers <c>IAlvoUserAdministration</c>
+    /// maps its own <c>POST</c> there over <c>AlvoSignIn.SetPasswordAsync</c> (the host's
+    /// <c>AlvoAdminSetPassword</c> shows the order its checks must run in). Until it does, Access finds no such route
+    /// in the host's endpoints and hands over the bare token instead, with one sentence saying the host has no
+    /// set-password page — never a link to a form that posts nowhere.
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into.</param>
@@ -119,6 +130,9 @@ public static class AlvoAdminServiceCollectionExtensions
 
         /* Scoped for the same reason: one import of the dashboard's script per circuit. */
         services.TryAddScoped<AdminInterop>();
+
+        /* Whether the host maps the set-password post, read from its endpoints when a token is handed over. */
+        services.TryAddSingleton<SetPasswordRoute>();
 
         return services;
     }

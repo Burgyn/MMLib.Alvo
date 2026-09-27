@@ -577,6 +577,18 @@ public sealed partial class SetPasswordEndpointTests
             .ShouldBe(Identity.AlvoPasswordSetOutcome.PasswordRejected, "one character over it does not");
     }
 
+    /// <summary>
+    /// The standalone host maps the set-password post, so the dashboard hands a token over as the link to the page, not
+    /// as the bare token an embedded host without one gets (final branch review, item 15).
+    /// </summary>
+    [Fact]
+    public async Task The_standalone_host_has_a_set_password_page_for_the_dashboard_to_link_to()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+
+        world.Services.GetRequiredService<SetPasswordRoute>().IsMapped.ShouldBeTrue();
+    }
+
     private static async Task<string> RefusalAsync(AlvoHostWorld world, string email, string token)
     {
         using var response = await new Browser(world).SetPasswordAsync(email, token, NewPassword);

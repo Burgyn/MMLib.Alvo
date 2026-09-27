@@ -1,7 +1,8 @@
 ﻿@*
     One person's roles and tenant, edited in an AlvoEditor and written on Save (spec §3.1), in place of the row that
     expanded under itself (inventory §2a.2). A credential token issued from here stays here, as its set-password link
-    with a Copy link button, until the editor closes (inventory defect #10): a token is shown once, so it is never
+    with a Copy link button (the bare token with Copy token, on a host that maps no set-password post), until the
+    editor closes (inventory defect #10): a token is shown once, so it is never
     only a snackbar.
 
     Disable and Let them back in leave the editor first (AlvoEditor.LeaveAsync, which asks "Discard your changes?"
@@ -15,6 +16,7 @@
 *@
 @inject NavigationManager Navigation
 @inject AdminInterop Interop
+@inject SetPasswordRoute SetPasswordPage
 
 <AlvoEditor @ref="_editor" TestId="person-editor" Title="@($"Edit {Person.Email}")" SubmitText="Save changes"
             SubmitTestId="person-save" Dirty="_draft.Dirty" Busy="Busy" OnSubmit="SaveAsync"
@@ -52,7 +54,7 @@
             </AlvoAlert>
         }
 
-        @if (Token is { } token && CredentialHandover.For(Navigation, Person, token, Interop.UtcOffset) is var handover)
+        @if (Token is { } token && CredentialHandover.For(Navigation, Person, token, Interop.UtcOffset, SetPasswordPage.IsMapped) is var handover)
         {
             @* The link is what the person needs: they open it and set a password (design §1). The bare token stays
                under it for a browser with JavaScript off, where the page asks for it to be pasted. *@
@@ -63,13 +65,21 @@
                     {
                         <p class="a-section__sub" data-testid="person-token-disabled">@note</p>
                     }
-                    <pre class="a-code" data-testid="person-token-link"><code>@handover.Link</code></pre>
-                    <p class="a-note">The token alone, for a browser that runs no JavaScript:</p>
+                    @if (handover.Link is { } link)
+                    {
+                        <pre class="a-code" data-testid="person-token-link"><code>@link</code></pre>
+                        <p class="a-note">The token alone, for a browser that runs no JavaScript:</p>
+                    }
+                    else
+                    {
+                        @* A host that maps no set-password post: a link would open a form that posts nowhere. *@
+                        <p class="a-note" data-testid="person-token-no-page">@handover.NoPageNote</p>
+                    }
                     <pre class="a-code" data-testid="person-token"><code>@handover.Token</code></pre>
                 </ChildContent>
                 <Actions>
                     <AlvoButton Small="true" data-testid="person-token-copy"
-                                OnClick="_ => OnCopyToken.InvokeAsync()">Copy link</AlvoButton>
+                                OnClick="_ => OnCopyToken.InvokeAsync()">Copy @handover.Copied</AlvoButton>
                 </Actions>
             </AlvoAlert>
         }

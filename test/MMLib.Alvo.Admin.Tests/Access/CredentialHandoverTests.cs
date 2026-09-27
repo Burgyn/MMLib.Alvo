@@ -50,8 +50,27 @@ public sealed class CredentialHandoverTests
         For(Person(disabled: false), TimeSpan.Zero).DisabledNote.ShouldBeNull();
     }
 
+    /// <summary>
+    /// A host that maps no set-password post (an embedded one that did not map its own) gets the bare token, and one
+    /// sentence saying why: a link would open a form that posts nowhere (final branch review, item 15).
+    /// </summary>
+    [Fact]
+    public void Without_a_set_password_page_the_handover_is_the_bare_token_and_says_why()
+    {
+        var handover = CredentialHandover.For(
+            _navigation, Person(disabled: false), Token(), _issued, TimeSpan.Zero, hasSetPasswordPage: false);
+
+        handover.Link.ShouldBeNull();
+        handover.Clipboard.ShouldBe("CfDJ8+a/b=", "Copy copies the token when there is no page to link to");
+        handover.NoPageNote.ShouldBe("This host has no set-password page — hand the token to your own flow.");
+    }
+
+    [Fact]
+    public void With_a_set_password_page_there_is_no_such_note()
+        => For(Person(disabled: false), TimeSpan.Zero).NoPageNote.ShouldBeNull();
+
     private static CredentialHandover For(AlvoUser person, TimeSpan? offset)
-        => CredentialHandover.For(_navigation, person, Token(), _issued, offset);
+        => CredentialHandover.For(_navigation, person, Token(), _issued, offset, hasSetPasswordPage: true);
 
     private static AlvoUser Person(bool disabled) => new()
     {
