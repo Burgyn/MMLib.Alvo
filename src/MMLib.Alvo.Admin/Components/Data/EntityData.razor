@@ -23,7 +23,7 @@
         </Primary>
     </PageHeader>
 
-    @RefusalPanel.Of(_problem, RecordVersion.IsConflict(_problem.Current) ? ReloadAction : null)
+    @RefusalPanel.Of(_problem, LostWrite ? ReloadAction : null)
 
     @if (_entity is null)
     {
@@ -85,6 +85,14 @@
                 </div>
             }
 
+            @if (_revealLost)
+            {
+                <p class="a-note" data-testid="grid-reveal-lost">
+                    The record you created is no longer there to show: it was deleted, or the read rule no longer
+                    admits it. The grid is back to what it showed before.
+                </p>
+            }
+
             @if (_unreachable)
             {
                 <p class="a-note" data-testid="record-unreachable">
@@ -101,11 +109,6 @@
             else if (_page is null)
             {
                 @* The refusal above is the whole answer; a skeleton that never resolves is not. *@
-            }
-            else if (_page.Items.Count == 0 && _revealing is not null)
-            {
-                <EmptyState Title="The record you created is not one you can read"
-                            Body="It was created, but the read rule on this entity does not admit you. The Rules screen shows the predicate it applied." />
             }
             else if (_page.Items.Count == 0)
             {

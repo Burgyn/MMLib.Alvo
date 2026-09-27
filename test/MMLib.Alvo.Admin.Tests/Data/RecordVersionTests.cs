@@ -51,6 +51,16 @@ public class RecordVersionTests
     }
 
     [Fact]
+    public void An_audited_record_read_without_its_version_does_not_claim_the_entity_is_unaudited()
+    {
+        RecordVersion.Caveat(_unaudited, new Dictionary<string, object?>()).ShouldBe(RecordVersion.LastWriteWinsSentence);
+        RecordVersion.Caveat(_audited, new Dictionary<string, object?>())
+            .ShouldBe(RecordVersion.UnreadableVersionSentence);
+        RecordVersion.UnreadableVersionSentence.ShouldNotContain("audited");
+        RecordVersion.Caveat(_audited, new Dictionary<string, object?> { ["updated_at"] = _read }).ShouldBeNull();
+    }
+
+    [Fact]
     public void A_stale_version_and_a_vanished_record_are_both_conflicts_Reload_answers()
     {
         RecordVersion.IsConflict(Problem(new AlvoPreconditionFailedException())).ShouldBeTrue();

@@ -107,20 +107,82 @@ public sealed class RecordConflictScenarios(AdminWorld world) : IClassFixture<Ad
         session.AssertConsoleClean();
     }
 
-    /// <summary>Another writer changes the work order's title while the operator's editor is open.</summary>
-    private async Task ChangeElsewhereAsync(string reference, string title)
+    /// <summary>
+    /// An unaudited entity's delete carries no version — the port would refuse one it cannot answer — so it wins over
+    /// a change made meanwhile, which is what the editor's sentence said.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task An_unaudited_delete_carries_no_version_and_wins_over_a_change_made_meanwhile()
+    {
+        await RecordEditorScenarios.SeedWorkOrderAsync(world, _tenant, "WO-0304");
+        await SeedCustomerAsync("Unreferenced 0304");
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/data/customers");
+
+        var confirm = await RecordEditorScenarios.AskToDeleteAsync(session, "Unreferenced 0304");
+        await ElsewhereAsync(_tenant, "customers", "name", "Unreferenced 0304",
+            (data, id, system) => data.UpdateAsync("customers", id, new Dictionary<string, object?> { ["notes"] = "Changed" }, system));
+        await confirm.GetByTestId("delete-record-run").ClickAsync();
+
+        await session.SnackbarAsync("Record deleted");
+        await RecordEditorScenarios.Row(session, "Unreferenced 0304").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        (await session.Content.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>A save for a record another writer deleted is refused with Reload, and Reload closes the editor.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_save_for_a_record_deleted_meanwhile_is_refused_and_Reload_closes_the_editor()
+    {
+        await RecordEditorScenarios.SeedWorkOrderAsync(world, _tenant, "WO-0305");
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/data/work_orders");
+        await RecordEditorScenarios.RowEditAsync(session, "WO-0305");
+        var editor = session.Dialog("record-sheet");
+
+        await session.Page.FillAsync("#rf-title", "Mine, for a record that is gone");
+        await ElsewhereAsync(_tenant, "work_orders", "reference", "WO-0305",
+            (data, id, system) => data.DeleteAsync("work_orders", id, system));
+        await editor.GetByTestId("record-save").ClickAsync();
+
+        await editor.GetByTestId("error-panel").WaitForAsync();
+        await session.WaitForFocusInsideAsync("error-panel");
+        (await session.SnackbarCountAsync("Saved")).ShouldBe(0);
+        await editor.GetByTestId("record-reload").ClickAsync();
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await RecordEditorScenarios.Row(session, "WO-0305").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>A customer no work order points at, so nothing restricts its delete.</summary>
+    private async Task SeedCustomerAsync(string name)
     {
         using var scope = world.Services.CreateScope();
         var data = scope.ServiceProvider.GetRequiredService<IAlvoData>();
-        var system = AlvoContext.System(_tenant);
-        var page = await data.QueryAsync(
-            new AlvoQuery
-            {
-                Entity = "work_orders",
-                Filter = new AlvoComparison("reference", AlvoFilterOperator.Eq, reference),
-            },
-            system);
-        await data.UpdateAsync(
-            "work_orders", FieldServiceSeed.IdOf(page.Items.Single()), new Dictionary<string, object?> { ["title"] = title }, system);
+        await FieldServiceSeed.CustomerAsync(data, AlvoContext.System(_tenant), _tenant, name);
     }
+
+    /// <summary>Another writer changes the work order's title while the operator's editor is open.</summary>
+    private Task ChangeElsewhereAsync(string reference, string title)
+        => ElsewhereAsync(_tenant, "work_orders", "reference", reference,
+            (data, id, system) => data.UpdateAsync("work_orders", id, new Dictionary<string, object?> { ["title"] = title }, system));
+
+    /// <summary>
+    /// Another writer — the data port, as <paramref name="tenant"/>'s system caller — acts on the one row of
+    /// <paramref name="entity"/> whose <paramref name="field"/> is <paramref name="value"/>.
+    /// </summary>
+    internal static async Task ElsewhereAsync(
+        AdminWorld world, TenantId tenant, string entity, string field, string value, Func<IAlvoData, Guid, AlvoContext, Task> write)
+    {
+        using var scope = world.Services.CreateScope();
+        var data = scope.ServiceProvider.GetRequiredService<IAlvoData>();
+        var system = AlvoContext.System(tenant);
+        var page = await data.QueryAsync(
+            new AlvoQuery { Entity = entity, Filter = new AlvoComparison(field, AlvoFilterOperator.Eq, value) }, system);
+        await write(data, FieldServiceSeed.IdOf(page.Items.Single()), system);
+    }
+
+    private Task ElsewhereAsync(
+        TenantId tenant, string entity, string field, string value, Func<IAlvoData, Guid, AlvoContext, Task> write)
+        => ElsewhereAsync(world, tenant, entity, field, value, write);
 }

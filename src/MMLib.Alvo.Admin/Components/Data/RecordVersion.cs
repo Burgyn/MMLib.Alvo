@@ -19,8 +19,9 @@ namespace MMLib.Alvo.Admin.Components.Data;
 /// <para>
 /// <b>None where the entity keeps none.</b> <see cref="AlvoPrecondition.EnsureSupported"/> refuses a precondition on
 /// an entity with no version column, so an unaudited record is written unconditionally and the editor says, once,
-/// that the last write wins there. An audited record read without its version is written without one too, and says
-/// the same thing: the sentence follows what is sent, not what the entity declares.
+/// that the last write wins there. An audited record read without a version it can use (unreachable for a physical
+/// entity, whose managed columns cannot be masked; possible for a host-assembled schema) is written without one too,
+/// and the editor says that instead — it never claims the entity is unaudited when it asked for audit.
 /// </para>
 /// </remarks>
 internal static class RecordVersion
@@ -44,6 +45,27 @@ internal static class RecordVersion
             && values.TryGetValue(column, out var version) && version is DateTimeOffset read
                 ? new AlvoPrecondition(read)
                 : null;
+    }
+
+    /// <summary>What the editor of an audited record read without a usable version says, once.</summary>
+    public const string UnreadableVersionSentence =
+        "This record carries no readable version, so this save cannot be checked against a concurrent change: it "
+        + "replaces whatever anyone else wrote since you opened it.";
+
+    /// <summary>
+    /// The one sentence an editor says about a write that carries no version, or <see langword="null"/> when it carries
+    /// one.
+    /// </summary>
+    /// <param name="entity">The record's entity.</param>
+    /// <param name="values">The record as it was read.</param>
+    public static string? Caveat(EntitySchema entity, IReadOnlyDictionary<string, object?> values)
+    {
+        if (!LastWriteWins(entity, values))
+        {
+            return null;
+        }
+
+        return AlvoManagedColumns.VersionColumn(entity) is null ? LastWriteWinsSentence : UnreadableVersionSentence;
     }
 
     /// <summary>Whether a write of this record carries no version, so it replaces whatever is stored.</summary>

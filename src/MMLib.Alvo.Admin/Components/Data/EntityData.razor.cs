@@ -39,8 +39,11 @@ public partial class EntityData
     private PendingDelete? _deleting;
     private bool _deletingNow;
 
-    /// <summary>The record a delete was refused for, whose row Reload gives focus to.</summary>
+    /// <summary>The record a delete lost to another writer for, whose row Reload gives focus to.</summary>
     private Guid? _conflicted;
+
+    /// <summary>Whether the refusal on show is a write's, the one kind the page's Reload answers.</summary>
+    private bool _writeRefused;
     private Guid? _created;
 
     /// <summary>
@@ -48,6 +51,15 @@ public partial class EntityData
     /// certain to hold it (spec §3.5, amended 27 Sep; docs/todo-admin.md §8d item 44).
     /// </summary>
     private Guid? _revealing;
+
+    /// <summary>The search and page a reveal replaced, which ending it puts back.</summary>
+    private GridView? _beforeReveal;
+
+    /// <summary>
+    /// Whether a reveal ended because its record was no longer there to read — deleted by another writer, or no longer
+    /// admitted — which the grid says once, rather than an empty narrowed page naming a read rule.
+    /// </summary>
+    private bool _revealLost;
     private RowFocus? _focusRow;
     private AlvoButton? _newRecord;
     private IReadOnlyDictionary<string, RowLabel> _targets = new Dictionary<string, RowLabel>(StringComparer.Ordinal);
@@ -196,6 +208,7 @@ public partial class EntityData
         _search = string.Empty;
         _sort = null;
         _revealing = null;
+        _beforeReveal = null;
         _page = null;
         _created = null;
         _focusRow = null;
@@ -258,6 +271,18 @@ public partial class EntityData
     /// land after a faster later one — the grid would show the rows for a term no longer in the box.
     /// </remarks>
     private async Task LoadAsync()
+    {
+        await ReadPageAsync();
+        if (_revealing is not null && _page is { Items.Count: 0 })
+        {
+            EndReveal();
+            _revealLost = true;
+            await ReadPageAsync();
+        }
+    }
+
+    /// <summary>One read of the page, the labels it needs, and its refusal when there is one.</summary>
+    private async Task ReadPageAsync()
     {
         var version = ++_loadVersion;
         _refreshing = _page is not null;
@@ -363,8 +388,12 @@ public partial class EntityData
     /// <summary>Turns a refusal into the panel, with the fix this entity's state calls for.</summary>
     private void Refused(Exception exception)
     {
+        _writeRefused = false;
         _problem.Show(AdminProblem.From(exception, Logger, Site), fromPress: false);
     }
+
+    /// <summary>Whether the page offers Reload: only for a write that lost to another writer.</summary>
+    private bool LostWrite => _writeRefused && RecordVersion.IsConflict(_problem.Current);
 
     /// <summary>
     /// A scoped entity read with no tenant is refused by the tenant guard, and the fix says so rather than
@@ -380,6 +409,8 @@ public partial class EntityData
     {
         _search = search ?? string.Empty;
         _revealing = null;
+        _beforeReveal = null;
+        _revealLost = false;
         return SearchChanged();
     }
 
@@ -394,6 +425,7 @@ public partial class EntityData
             && GridQuery.ShowsEverything(_page, Searching || _revealing is not null, _cursors.Count > 0, PageSize);
         if (!whole)
         {
+            _beforeReveal ??= new GridView(_search, _cursor, [.. _cursors]);
             _searchVersion++;
             _search = string.Empty;
             ResetPaging();
@@ -403,14 +435,27 @@ public partial class EntityData
         _created = id;
     }
 
-    /// <summary>Ends a reveal: the grid's first page again, and focus to the search, or to New record without one.</summary>
+    /// <summary>
+    /// Ends a reveal: the search and page it replaced again, and focus to the search, or to New record without one.
+    /// </summary>
     private async Task ClearRevealAsync()
     {
-        _revealing = null;
-        ResetPaging();
+        EndReveal();
         await LoadAsync();
         _focusAfterRender = _searchThenNew;
         _focusMoves++;
+    }
+
+    /// <summary>Takes the reveal away and puts back the search and page it replaced; the record is no longer lit.</summary>
+    private void EndReveal()
+    {
+        var before = _beforeReveal ?? new GridView(string.Empty, null, []);
+        _revealing = null;
+        _beforeReveal = null;
+        ResetPaging();
+        _search = before.Search;
+        _cursor = before.Cursor;
+        _cursors.AddRange(before.Cursors);
     }
 
     /// <summary>Runs the search once typing pauses, from the first page.</summary>
@@ -438,6 +483,7 @@ public partial class EntityData
     private void ResetPaging()
     {
         _created = null;
+        _revealLost = false;
         _focusAfterRender = null;
         _cursors.Clear();
         _cursor = null;
@@ -623,14 +669,20 @@ public partial class EntityData
         {
             await Records.DeleteAsync(EntityName, target.Id, target.Version, CancellationToken.None);
             Snackbar.Confirm("Record deleted");
+            if (_revealing == target.Id)
+            {
+                /* The reveal's record is gone, and the operator knows why: the grid goes back to what it showed. */
+                EndReveal();
+            }
+
             await LoadAsync();
             _focusRow = RowAt(Math.Max(at, 0));
             return true;
         }
         catch (Exception exception)
         {
-            _conflicted = target.Id;
             RefusedWrite(exception);
+            _conflicted = RecordVersion.IsConflict(_problem.Current) ? target.Id : null;
             return false;
         }
     }
@@ -659,8 +711,15 @@ public partial class EntityData
     private void RefusedWrite(Exception exception)
     {
         var problem = AdminProblem.From(exception, Logger, ProblemSite.RecordWrite);
+        _writeRefused = true;
         _problem.Show(problem, title: RecordVersion.IsConflict(problem) ? RecordVersion.ConflictTitle : null);
     }
+
+    /// <summary>What a reveal replaced: the search, the cursor of the page on screen, and the cursors that led to it.</summary>
+    /// <param name="Search">The search term.</param>
+    /// <param name="Cursor">The page's cursor, or <see langword="null"/> for the first page.</param>
+    /// <param name="Cursors">The cursors of the pages before it, oldest first.</param>
+    private sealed record GridView(string Search, string? Cursor, IReadOnlyList<string> Cursors);
 
     /// <summary>What the operator asked to delete, held while the confirm is on screen.</summary>
     /// <param name="Id">The record's id.</param>

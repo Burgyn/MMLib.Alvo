@@ -35,9 +35,9 @@
             Said once, where the write is made, and only where no version goes with it (docs/todo-admin.md §8d
             item 25): elsewhere a save that lost to another writer is refused above, with Reload.
         *@
-        @if (!Creating && RecordVersion.LastWriteWins(Entity, Values))
+        @if (!Creating && RecordVersion.Caveat(Entity, Values) is { } caveat)
         {
-            <p class="a-note" data-testid="record-last-write-wins">@RecordVersion.LastWriteWinsSentence</p>
+            <p class="a-note" data-testid="record-last-write-wins">@caveat</p>
         }
 
         <div class="a-stack">
