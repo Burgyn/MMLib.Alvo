@@ -132,4 +132,33 @@ public class GridQueryTests
         query.Sort.ShouldBe([new AlvoSort("priority", Descending: true)]);
         query.Offset.ShouldBeNull("keyset paging survives a sort, so the grid never falls back to offsets");
     }
+
+    [Fact]
+    public void A_revealed_record_narrows_the_page_to_its_id_and_replaces_the_search()
+    {
+        var created = Guid.NewGuid();
+
+        GridQuery.Filter(["reference"], "WO", revealing: created)
+            .ShouldBe(new AlvoComparison("id", AlvoFilterOperator.Eq, created), "the Data API's eq on id (item 44)");
+        GridQuery.Filter(["reference"], "WO", revealing: null).ShouldBeOfType<AlvoOr>().Filters
+            .ShouldBe([new AlvoComparison("reference", AlvoFilterOperator.ILike, "%WO%")]);
+    }
+
+    [Theory]
+    [InlineData(3, false, false, null, true)]
+    [InlineData(25, false, false, null, false)]
+    [InlineData(3, true, false, null, false)]
+    [InlineData(3, false, true, null, false)]
+    [InlineData(3, false, false, "next", false)]
+    public void Only_the_whole_entity_with_room_on_the_page_is_certain_to_show_a_new_record(
+        int rows, bool narrowed, bool hasPrevious, string? next, bool whole)
+    {
+        var page = new AlvoPage
+        {
+            Items = [.. Enumerable.Range(0, rows).Select(_ => AlvoRecord.Empty)],
+            NextCursor = next,
+        };
+
+        GridQuery.ShowsEverything(page, narrowed, hasPrevious, limit: 25).ShouldBe(whole);
+    }
 }

@@ -72,6 +72,19 @@
                 </div>
             }
 
+            @*
+                The reveal replaced whatever the operator had searched for, or the page they were on, so it says so,
+                with the way back (spec §3.5, amended 27 Sep; the Access list's "Showing the person you created").
+            *@
+            @if (_revealing is not null)
+            {
+                <div class="a-row a-row--gap-2 a-row--inset" data-testid="grid-revealing">
+                    <span class="a-note">Showing the record you created.</span>
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="grid-reveal-clear"
+                                OnClick="_ => ClearRevealAsync()">Clear</AlvoButton>
+                </div>
+            }
+
             @if (_unreachable)
             {
                 <p class="a-note" data-testid="record-unreachable">
@@ -88,6 +101,11 @@
             else if (_page is null)
             {
                 @* The refusal above is the whole answer; a skeleton that never resolves is not. *@
+            }
+            else if (_page.Items.Count == 0 && _revealing is not null)
+            {
+                <EmptyState Title="The record you created is not one you can read"
+                            Body="It was created, but the read rule on this entity does not admit you. The Rules screen shows the predicate it applied." />
             }
             else if (_page.Items.Count == 0)
             {

@@ -106,7 +106,8 @@ and the e2e suite asserts that things render, not that they behave.
    Task 8 review):* a list that pages or searches keeps the created item on screen: when the list on screen is not the
    whole of it (a search, a page either side, or a full page), Access narrows it to the new person's address in the
    same one read, and says so beside the search ("Showing the person you created." with Clear the search). The Data
-   grid does not yet (docs/todo-admin.md §8d item 44). A list that grows
+   grid narrows to the new record by its id in the same one read, selects and lights it, and says so beside its search
+   ("Showing the record you created." with Clear; docs/todo-admin.md §8d item 44). A list that grows
    while the operator watches (the assistant thread, a log) **follows the newest item** unless the operator has
    scrolled up.
 6. **Loading, empty, error.** `MudSkeleton` for known-shape content; `MudProgressLinear` at the top of a pane for a

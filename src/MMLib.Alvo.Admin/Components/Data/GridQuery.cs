@@ -75,6 +75,42 @@ internal static class GridQuery
         return new AlvoOr([.. fields.Select(field => new AlvoComparison(field, AlvoFilterOperator.ILike, pattern))]);
     }
 
+    /// <summary>
+    /// The filter a page is read with: only the record just created while it is being revealed, else the search.
+    /// </summary>
+    /// <remarks>
+    /// A reveal replaces the search rather than joining it, the way Access's does (spec §3.5, amended 27 Sep): the
+    /// record was created to be seen, and one the search would exclude is the case the reveal exists for.
+    /// </remarks>
+    /// <param name="fields">The fields a search looks in.</param>
+    /// <param name="term">What was typed into the search.</param>
+    /// <param name="revealing">The record being revealed, or <see langword="null"/>.</param>
+    public static AlvoFilter? Filter(IReadOnlyList<string> fields, string? term, Guid? revealing)
+        => revealing is { } id ? Only(id) : Search(fields, term);
+
+    /// <summary>One record, by the Data API's <c>eq</c> on <c>id</c> — the filter a reveal narrows the grid to.</summary>
+    /// <param name="id">The record's id.</param>
+    public static AlvoFilter Only(Guid id) => new AlvoComparison(AlvoManagedColumns.Id, AlvoFilterOperator.Eq, id);
+
+    /// <summary>
+    /// Whether <paramref name="page"/> is the whole entity with room on it — no search, no page either side, fewer
+    /// rows than a page holds — so a record created now is certainly on it when it is read again.
+    /// </summary>
+    /// <remarks>
+    /// Access's <c>PeoplePaging.ShowsEverybody</c>, for the grid. Anything else may push the new record off the page
+    /// read next (a sort puts it on page two, a search excludes it), so the screen narrows to it instead.
+    /// </remarks>
+    /// <param name="page">The page on screen.</param>
+    /// <param name="narrowed">Whether a search or a reveal narrows it.</param>
+    /// <param name="hasPrevious">Whether there is a page before it.</param>
+    /// <param name="limit">How many rows a page holds.</param>
+    public static bool ShowsEverything(AlvoPage page, bool narrowed, bool hasPrevious, int limit)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+
+        return !narrowed && !hasPrevious && page.NextCursor is null && page.Items.Count < limit;
+    }
+
     /// <summary>The order a page is read in: the chosen sort, else newest first on an audited entity.</summary>
     public static IReadOnlyList<AlvoSort> Sort(EntitySchema entity, GridSort? chosen)
     {

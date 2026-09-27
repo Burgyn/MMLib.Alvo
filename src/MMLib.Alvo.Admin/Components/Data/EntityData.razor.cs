@@ -17,6 +17,7 @@ public partial class EntityData
 
     private static readonly string[] _nextThenPrevious = ["[data-testid='grid-next']", "[data-testid='grid-previous']"];
     private static readonly string[] _previousThenNext = ["[data-testid='grid-previous']", "[data-testid='grid-next']"];
+    private static readonly string[] _searchThenNew = ["[data-testid='grid-search']", "[data-testid='record-new']"];
 
     /// <summary>
     /// Where focus goes once the page just read is drawn: the pager button that was pressed unmounts on the first or
@@ -41,6 +42,12 @@ public partial class EntityData
     /// <summary>The record a delete was refused for, whose row Reload gives focus to.</summary>
     private Guid? _conflicted;
     private Guid? _created;
+
+    /// <summary>
+    /// The record just created that the grid is narrowed to, because the page it would have been read back on was not
+    /// certain to hold it (spec §3.5, amended 27 Sep; docs/todo-admin.md §8d item 44).
+    /// </summary>
+    private Guid? _revealing;
     private RowFocus? _focusRow;
     private AlvoButton? _newRecord;
     private IReadOnlyDictionary<string, RowLabel> _targets = new Dictionary<string, RowLabel>(StringComparer.Ordinal);
@@ -188,6 +195,7 @@ public partial class EntityData
         _opened = EntityName;
         _search = string.Empty;
         _sort = null;
+        _revealing = null;
         _page = null;
         _created = null;
         _focusRow = null;
@@ -209,7 +217,7 @@ public partial class EntityData
         _targets = Targets();
         _scope = _entity is null ? null : new RecordFormScope(
             _schema, _label, _masks, DescriptorLens.Locks(_descriptor, EntityName), _targets, Report,
-            id => _created = id, ReloadRecordAsync);
+            CreatedRecord, ReloadRecordAsync);
     }
 
     /// <summary>What the record form says after a write: a snackbar, because the write worked (spec §3.3).</summary>
@@ -256,7 +264,7 @@ public partial class EntityData
         try
         {
             var query = GridQuery.Page(
-                _entity!, GridQuery.Search(_searchable, _search), _sort, PageSize, _cursor);
+                _entity!, GridQuery.Filter(_searchable, _search, _revealing), _sort, PageSize, _cursor);
             var context = await Records.ContextAsync(CancellationToken.None);
             var page = await Records.PageAsync(query, context, CancellationToken.None);
             var labels = await LabelsAsync(page, context);
@@ -367,13 +375,43 @@ public partial class EntityData
             ? ProblemSite.ScopedRecordsWithoutTenant
             : ProblemSite.Records;
 
-    /// <summary>Takes what was typed into the search, and runs it once typing pauses.</summary>
+    /// <summary>Takes what was typed into the search, and runs it once typing pauses; typing ends a reveal at once.</summary>
     private Task SearchTyped(string? search)
     {
         _search = search ?? string.Empty;
+        _revealing = null;
         return SearchChanged();
     }
 
+    /// <summary>
+    /// Names the record a create wrote, so the grid selects and lights it once the page is read again; when the page on
+    /// screen is not the whole entity with room on it, the grid is narrowed to that record in the same one read.
+    /// </summary>
+    /// <param name="id">The record's id.</param>
+    private void CreatedRecord(Guid id)
+    {
+        var whole = _page is not null
+            && GridQuery.ShowsEverything(_page, Searching || _revealing is not null, _cursors.Count > 0, PageSize);
+        if (!whole)
+        {
+            _searchVersion++;
+            _search = string.Empty;
+            ResetPaging();
+            _revealing = id;
+        }
+
+        _created = id;
+    }
+
+    /// <summary>Ends a reveal: the grid's first page again, and focus to the search, or to New record without one.</summary>
+    private async Task ClearRevealAsync()
+    {
+        _revealing = null;
+        ResetPaging();
+        await LoadAsync();
+        _focusAfterRender = _searchThenNew;
+        _focusMoves++;
+    }
 
     /// <summary>Runs the search once typing pauses, from the first page.</summary>
     private async Task SearchChanged()
