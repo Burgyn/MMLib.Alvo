@@ -81,8 +81,7 @@ internal static partial class AlvoAdminSetPassword
         switch (await signIn.SetPasswordAsync(posted.Email, posted.Token, posted.Password).ConfigureAwait(false))
         {
             case AlvoPasswordSetOutcome.Set:
-                var person = await people.FindByEmailAsync(posted.Email, cancellationToken).ConfigureAwait(false);
-                PasswordSet(logger, person?.Id.ToString() ?? "unknown");
+                await LogPasswordSetAsync(posted.Email, people, logger, cancellationToken).ConfigureAwait(false);
                 return $"{AlvoAdmin.SignInPath}?passwordSet=true";
             case AlvoPasswordSetOutcome.PasswordRejected:
                 return posted.Back("weak");
@@ -92,9 +91,26 @@ internal static partial class AlvoAdminSetPassword
         }
     }
 
+    /// <summary>Records whose password was set, by id — never the address or the token.</summary>
+    /// <remarks>
+    /// Guarded by <see cref="ILogger.IsEnabled"/> because the lookup exists only for this line, so a host that does not
+    /// log at Information pays no read; and the id is passed as itself rather than as a string built at the call, so the
+    /// formatting is the generated logger's, done only when it writes (CA1873, an error in the Release build). A person
+    /// the store no longer finds is written as the logger's null, never a made-up id.
+    /// </remarks>
+    private static async Task LogPasswordSetAsync(
+        string email, IAlvoUserStore people, ILogger logger, CancellationToken cancellationToken)
+    {
+        if (logger.IsEnabled(LogLevel.Information))
+        {
+            var person = await people.FindByEmailAsync(email, cancellationToken).ConfigureAwait(false);
+            PasswordSet(logger, person?.Id);
+        }
+    }
+
     [LoggerMessage(EventId = 1, Level = LogLevel.Information,
         Message = "A password was set with a credential token for person {PersonId}.")]
-    private static partial void PasswordSet(ILogger logger, string personId);
+    private static partial void PasswordSet(ILogger logger, UserId? personId);
 
     [LoggerMessage(EventId = 2, Level = LogLevel.Information,
         Message = "A credential token was refused on the set-password page.")]
