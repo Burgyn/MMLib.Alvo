@@ -256,6 +256,12 @@ public partial class Entity
     /// </remarks>
     private void ReadWorking()
     {
+        /* Ref targets from the working copy, so an entity staged a moment ago can be pointed at (§8d item 28). */
+        if (Copy.Loaded)
+        {
+            _entities = Copy.Entities;
+        }
+
         _working = DescriptorLens.Rules(Copy.Json, EntityName);
         _indexes = Copy.IndexesOf(EntityName);
         _fieldNames = [.. Copy.FieldsOf(EntityName).Select(field => field.Key)];
@@ -277,9 +283,9 @@ public partial class Entity
     /// columns Alvo maintains.
     /// </summary>
     /// <remarks>
-    /// A field the applied schema already serves unchanged is drawn from it, because the resolved schema
-    /// knows facets the working copy's reader does not (a default, a rollup); a staged one can only be drawn
-    /// from the working copy, because the applied schema has never heard of it.
+    /// A field the applied schema already serves unchanged is drawn from it, because the resolved schema is
+    /// the authority on what was applied (a rollup's resolved <c>via</c>, for one); a staged one can only be
+    /// drawn from the working copy, whose reader carries the same facets the badges are read off (§8d item 22).
     /// </remarks>
     private EntitySchema FieldsView(EntitySchema entity)
     {
@@ -295,6 +301,24 @@ public partial class Entity
         return entity with
         {
             Fields = [.. declared, .. entity.Fields.Where(field => managed.Contains(field.Name))],
+        };
+    }
+
+    /// <summary>
+    /// The entity as the Indexes tab offers it: the working copy's declared fields — a staged one included, a
+    /// staged-removed one not — then the columns Alvo maintains (§8d item 28; §8a <c>indexes[].fields</c> row).
+    /// </summary>
+    private EntitySchema IndexView(EntitySchema entity)
+    {
+        if (!Copy.Loaded || PendingSchema.Read(Copy.Json, EntityName) is not { } working)
+        {
+            return entity;
+        }
+
+        var managed = AlvoManagedColumns.For(entity);
+        return entity with
+        {
+            Fields = [.. working.Fields.Where(field => !managed.Contains(field.Name)), .. entity.Fields.Where(field => managed.Contains(field.Name))],
         };
     }
 

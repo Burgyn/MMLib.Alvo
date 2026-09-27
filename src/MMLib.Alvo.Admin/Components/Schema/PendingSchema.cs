@@ -45,25 +45,39 @@ internal static class PendingSchema
 
         using (document)
         {
-            if (!document.RootElement.TryGetProperty("entities", out var entities)
-                || !entities.TryGetProperty(entity, out var declared))
+            var root = document.RootElement;
+            if (!root.TryGetProperty("entities", out var entities) || !entities.TryGetProperty(entity, out var declared))
             {
                 return null;
             }
 
-            return new EntitySchema
-            {
-                Name = entity,
-                Description = String(declared, "description"),
-                Tenancy = string.Equals(String(declared, "tenancy"), "scoped", StringComparison.Ordinal)
-                    ? TenancyMode.Scoped
-                    : TenancyMode.Global,
-                Audit = Flag(declared, "audit"),
-                SoftDelete = Flag(declared, "softDelete"),
-                Fields = Fields(declared),
-            };
+            var enabled = root.TryGetProperty("tenancy", out var tenancy) && tenancy.ValueKind == JsonValueKind.Object
+                && Flag(tenancy, "enabled");
+            return Entity(entity, declared, enabled);
         }
     }
+
+    private static EntitySchema Entity(string entity, JsonElement declared, bool tenancyEnabled) => new()
+    {
+        Name = entity,
+        Description = String(declared, "description"),
+        Tenancy = Tenancy(String(declared, "tenancy"), tenancyEnabled),
+        Audit = Flag(declared, "audit"),
+        SoftDelete = Flag(declared, "softDelete"),
+        Fields = Fields(declared),
+    };
+
+    /// <summary>
+    /// The mapper's own rule (<c>DescriptorToSchemaMapper.ResolveTenancy</c>): the declared tenancy, else scoped when
+    /// the project turns tenancy on, else none — a pending entity with no key used to be drawn global in a project
+    /// that would apply it scoped (§8a <c>tenancy.enabled</c> row).
+    /// </summary>
+    private static TenancyMode? Tenancy(string? declared, bool enabled) => declared switch
+    {
+        "scoped" => TenancyMode.Scoped,
+        "global" => TenancyMode.Global,
+        _ => enabled ? TenancyMode.Scoped : null,
+    };
 
     private static IReadOnlyList<FieldSchema> Fields(JsonElement entity)
     {
@@ -88,8 +102,27 @@ internal static class PendingSchema
             Format = String(field.Value, "format"),
             ComputedExpression = String(field.Value, "computed"),
             Rollup = Rollup(field.Value),
+            Indexed = Flag(field.Value, "index"),
+            Nullable = NullableOf(field.Value),
+            Default = Literal(field.Value),
         })];
     }
+
+    /// <summary>The declared nullability, or the one <c>required</c> implies — the mapper's <c>f.Nullable ?? f.Required != true</c>.</summary>
+    private static bool NullableOf(JsonElement field)
+        => field.TryGetProperty("nullable", out var declared) && declared.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? declared.ValueKind == JsonValueKind.True
+            : !Flag(field, "required");
+
+    /// <summary>
+    /// The declared literal default, cloned to outlive the document. A <c>$cel</c> object is not one — the build
+    /// refuses it and the mapper resolves it to nothing (<c>FieldDefault.Resolve</c>) — so it is left out here too.
+    /// </summary>
+    private static JsonElement? Literal(JsonElement field)
+        => field.TryGetProperty("default", out var declared) && declared.ValueKind != JsonValueKind.Null
+            && !(declared.ValueKind == JsonValueKind.Object && declared.TryGetProperty("$cel", out _))
+            ? declared.Clone()
+            : null;
 
     /// <summary>
     /// A staged rollup, so its row keeps the <c>rollup</c> badge the moment it is changed (§8d item 22).

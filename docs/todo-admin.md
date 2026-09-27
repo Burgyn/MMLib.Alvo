@@ -578,10 +578,11 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
 21. **`storage: dynamic` is mis-rendered, and the build drops it silently.** Listed as not-applied forever,
     badged `physical table` (SchemaList.razor:204, PS). Core question first: an entity the mapper
     discards without a warning (Map:44-46) is the silent case `UnhonouredSubsystems` exists to prevent.
-22. **The staged view of a field loses facets.** `PendingSchema` reads 11 facets; `rollup`, `computed`,
+22. ✅ **The staged view of a field loses facets.** `PendingSchema` reads 11 facets; `rollup`, `computed`,
     `index`, `default`, `nullable` vanish from a row the moment it is changed (EC:279-286, PS:78-89), and
     a pending entity without `tenancy` is drawn global. Probably: map the staged field through the same
     shape as the applied one, or badge from the JSON directly.
+    **Done:** PendingSchema reads index, default (literal only), nullable, rollup and computed, and resolves a missing tenancy through tenancy.enabled; applied and staged rows are badged by one FieldBadges, which also badges an explicit nullability.
 23. **People beyond the first 50 are unreachable.** `new AlvoUserQuery()` — no search, no next page
     (Access.razor:153). The port already takes `Search` and `After`.
 24. **An entity cannot be removed.** `WorkingCopy.RemoveEntity` has no caller (WC.Entities:93). Probably
@@ -596,8 +597,9 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
 27. **Keys the build ignores without a word** — `auth.providers`, `realtime`, `branding`, project
     `description`, `formats.*.description`. Extends #271/#268: the core should warn (they belong in
     `UnhonouredSubsystems` or a sibling), and the dashboard then renders that warning like the others.
-28. **Ref targets and index candidates are applied-only.** A pending entity cannot be a ref target
+28. ✅ **Ref targets and index candidates are applied-only.** A pending entity cannot be a ref target
     (EC:95); a staged field cannot join an index (Indexes.razor:125). Read both from the working copy.
+    **Done:** ref targets and index candidates come from the working copy (users is not offered — unverified).
 29. Cosmetic: `x-*` extensions never shown; `unique` not offered for `ref` (one-to-one), `enum`,
     `decimal` with no reason given (FF:68); Add entity writes `audit: false` / `tenancy: global`
     explicitly; Overview shows the `dynamicEntities` warning for `enabled: false`; apply sends no
