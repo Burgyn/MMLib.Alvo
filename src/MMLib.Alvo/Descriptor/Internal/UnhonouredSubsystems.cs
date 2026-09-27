@@ -92,7 +92,9 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// unconditional line every operator learns to filter out. It is recorded in
 /// <c>docs/architecture/data-api.md</c> and tracked on #38 — and, since §8d item 27, it is the one row of
 /// <see cref="ReportedOnly"/>: the capability report says it, so a dashboard can print the build's own
-/// sentence, while the apply stays quiet. That split is the deviation <c>CapabilityReport</c> records.
+/// sentence, while the apply stays quiet. That split is the deviation <c>CapabilityReport</c> records. Its
+/// predicate is the <em>explicit</em> <c>realtime: true</c> — the one case that is a declaration of the project's —
+/// and a client says the default-true case once, where it describes the build, never per project.
 /// </para>
 /// <para>
 /// <b>Keys inside an honoured block are their own table, <see cref="WithinBlocks"/>.</b> <c>auth</c> is honoured
@@ -187,7 +189,7 @@ internal static partial class UnhonouredSubsystems
     [
         new(
             "entity.realtime",
-            descriptor => descriptor.Entities?.Values.Any(entity => entity.Realtime != false) == true,
+            descriptor => descriptor.Entities?.Values.Any(entity => entity.Realtime == true) == true,
             "no change is published over a realtime channel, because this build has none (#38, F7) — whatever "
             + "an entity's 'realtime' says, and its default is true, nothing is sent and nothing can subscribe"),
     ];
@@ -274,7 +276,8 @@ internal static partial class UnhonouredSubsystems
 }
 
 /// <summary>
-/// One top-level descriptor block this build parses and honours nowhere.
+/// One top-level descriptor block, or one qualified key inside an honoured block, that this build parses and
+/// honours nowhere.
 /// </summary>
 /// <param name="Block">
 /// The block's key at the descriptor root, spelled exactly as <c>schema/project.schema.json</c> declares

@@ -66,8 +66,8 @@ public class DeclaredLimitsTests
             .ShouldBe(["entity.storage"]);
 
     [Fact]
-    public void A_physical_entity_that_publishes_nothing_lists_nothing()
-        => Slots("""{ "entities": { "notes": { "storage": "physical", "realtime": false } } }""").ShouldBeEmpty();
+    public void A_physical_entity_with_nothing_declared_lists_nothing()
+        => Slots("""{ "entities": { "notes": { "storage": "physical" } } }""").ShouldBeEmpty();
 
     /// <summary>A provider other than <c>local</c> names the provider slot, and <c>local</c> alone does not (§8d item 27).</summary>
     [Theory]
@@ -77,35 +77,37 @@ public class DeclaredLimitsTests
         => Slots(descriptor).Contains("auth.providers").ShouldBe(listed);
 
     /// <summary>
-    /// <c>realtime</c> defaults to true, so one entity that does not turn it off is enough for the row — the build
-    /// reports it and never warns at apply, and the Overview is where an operator reads it.
+    /// <c>realtime</c> is listed only where an entity declares <c>realtime: true</c>: the Overview says what the
+    /// project declared, and the default is said once on Settings, under this build (B2 review, finding 2).
     /// </summary>
     [Theory]
-    [InlineData("""{ "entities": { "notes": {} } }""", true)]
+    [InlineData("""{ "entities": { "notes": {} } }""", false)]
     [InlineData("""{ "entities": { "notes": { "realtime": true } } }""", true)]
     [InlineData("""{ "entities": { "notes": { "realtime": false } } }""", false)]
     [InlineData("""{ "entities": {} }""", false)]
-    public void Realtime_is_listed_while_any_entity_publishes_by_default(string descriptor, bool listed)
+    public void Realtime_is_listed_only_where_an_entity_declares_it(string descriptor, bool listed)
         => Slots(descriptor).Contains("entity.realtime").ShouldBe(listed);
 
     /// <summary>
-    /// The project's own metadata this dashboard does not render is said as the dashboard's sentence, not the build's —
-    /// the build honours metadata by definition (<c>CapabilityReport</c>), so no core row names it.
+    /// The project's own metadata this dashboard does not render is one quiet line, the dashboard's sentence and not
+    /// the build's: the build honours metadata by definition (<c>CapabilityReport</c>), so it is not in the panel that
+    /// says what the build does not honour (B2 review, finding 1).
     /// </summary>
     [Fact]
-    public void Project_metadata_this_dashboard_does_not_show_is_said()
-    {
-        var unshown = DeclaredLimits.Unshown(
-            """{ "description": "A workshop.", "branding": { "title": "Bikes" }, "formats": { "sku": { "pattern": "^S", "description": "A stock unit." } } }""");
+    public void Project_metadata_this_dashboard_does_not_show_is_one_line()
+        => DeclaredLimits.UnshownLine(
+                """{ "description": "A workshop.", "branding": { "title": "Bikes" }, "formats": { "sku": { "pattern": "^S", "description": "A stock unit." } } }""")
+            .ShouldBe("Declared metadata this dashboard does not show yet: description, branding, formats.*.description (#268, #271).");
 
-        unshown.Select(key => key.Key).ShouldBe(["description", "branding", "formats.*.description"]);
-        unshown.ShouldAllBe(key => key.Sentence.Contains('#'), "each names the issue that will show it");
-    }
+    [Fact]
+    public void The_line_names_only_the_issues_of_what_is_declared()
+        => DeclaredLimits.UnshownLine("""{ "branding": { "title": "Bikes" } }""")
+            .ShouldBe("Declared metadata this dashboard does not show yet: branding (#268).");
 
     [Fact]
     public void Metadata_that_is_absent_or_empty_is_not_said()
-        => DeclaredLimits.Unshown("""{ "description": "", "branding": {}, "formats": { "sku": { "pattern": "^S" } } }""")
-            .ShouldBeEmpty();
+        => DeclaredLimits.UnshownLine("""{ "description": "", "branding": {}, "formats": { "sku": { "pattern": "^S" } } }""")
+            .ShouldBeNull();
 
     /// <summary>Every qualified slot this screen detects, which a Host test holds against the real build's report.</summary>
     [Fact]

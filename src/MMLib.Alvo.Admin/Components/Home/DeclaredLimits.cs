@@ -5,8 +5,7 @@ namespace MMLib.Alvo.Admin.Components.Home;
 
 /// <summary>
 /// What one descriptor declares and this build does not honour — what Overview lists under "Declared, not honoured
-/// by this build": the build's warned slots the descriptor really declares, then the project metadata this dashboard
-/// does not show.
+/// by this build" — and, apart from it, the one quiet line naming the metadata this dashboard does not show.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,10 +22,10 @@ namespace MMLib.Alvo.Admin.Components.Home;
 /// subtitle says some rows run in part, and each consequence says which.
 /// </para>
 /// <para>
-/// <b>The metadata rows are the dashboard's own sentence, and they say so.</b> <c>description</c>, <c>branding</c>
-/// and a format's <c>description</c> are metadata, which the build honours by definition (<c>CapabilityReport</c>
-/// lists them in neither half), so no core sentence exists for them; what is not honoured is this dashboard's
-/// rendering of them, which is #268's and #271's. A sentence about the dashboard belongs to the dashboard.
+/// <b>The metadata is not in the panel, and is one line in the dashboard's own words.</b> <c>description</c>,
+/// <c>branding</c> and a format's <c>description</c> are metadata, which the build honours by definition
+/// (<c>CapabilityReport</c> lists them in neither half), so a row under "not honoured by this build" would be false;
+/// what is missing is this dashboard's rendering of them, which is #268's and #271's (B2 review, finding 1).
 /// </para>
 /// </remarks>
 internal static class DeclaredLimits
@@ -48,30 +47,33 @@ internal static class DeclaredLimits
         return [.. capabilities.Warned.Where(block => DeclaredSlots.Declares(root, block.Block))];
     }
 
-    /// <summary>The project metadata <paramref name="descriptorJson"/> declares that this dashboard does not show.</summary>
+    /// <summary>
+    /// The one line naming the project metadata <paramref name="descriptorJson"/> declares and this dashboard does not
+    /// show, with the issues that will show it; <see langword="null"/> when it declares none.
+    /// </summary>
     /// <param name="descriptorJson">The descriptor as stored.</param>
-    public static IReadOnlyList<UnshownKey> Unshown(string descriptorJson)
+    public static string? UnshownLine(string descriptorJson)
     {
         using var document = Parse(descriptorJson);
         if (document is null)
         {
-            return [];
+            return null;
         }
 
         var root = document.RootElement;
-        return [.. _metadata.Where(key => key.IsDeclaredBy(root)).Select(key => key.Row)];
+        var declared = _metadata.Where(key => key.IsDeclaredBy(root)).ToList();
+        return declared.Count == 0
+            ? null
+            : $"Declared metadata this dashboard does not show yet: {string.Join(", ", declared.Select(key => key.Key))} "
+                + $"({string.Join(", ", declared.Select(key => key.Issue).Distinct(StringComparer.Ordinal))}).";
     }
 
-    /// <summary>The metadata keys, each with the sentence the Overview gives it.</summary>
-    private static readonly IReadOnlyList<(UnshownKey Row, Func<JsonElement, bool> IsDeclaredBy)> _metadata =
+    /// <summary>The metadata keys, each with the issue that will show it.</summary>
+    private static readonly IReadOnlyList<(string Key, string Issue, Func<JsonElement, bool> IsDeclaredBy)> _metadata =
     [
-        (new("description", "The project's description is not shown anywhere in this dashboard yet (#268)."),
-            root => DeclaredSlots.NotEmpty(DeclaredSlots.Member(root, "description"))),
-        (new("branding", "The project's title and logo are not shown anywhere in this dashboard yet (#268)."),
-            root => DeclaredSlots.NotEmpty(DeclaredSlots.Member(root, "branding"))),
-        (new("formats.*.description", "The formats are honoured; what each one's description says is not shown "
-            + "anywhere in this dashboard yet (#271)."),
-            FormatDescribed),
+        ("description", "#268", root => DeclaredSlots.NotEmpty(DeclaredSlots.Member(root, "description"))),
+        ("branding", "#268", root => DeclaredSlots.NotEmpty(DeclaredSlots.Member(root, "branding"))),
+        ("formats.*.description", "#271", FormatDescribed),
     ];
 
     /// <summary>Whether any declared format carries a description.</summary>
@@ -100,8 +102,3 @@ internal static class DeclaredLimits
         return null;
     }
 }
-
-/// <summary>A declared metadata key this dashboard does not render, with the dashboard's sentence about it.</summary>
-/// <param name="Key">The key as the descriptor spells it; <c>*</c> stands for every format.</param>
-/// <param name="Sentence">What is not shown, and the issue that will show it.</param>
-internal sealed record UnshownKey(string Key, string Sentence);

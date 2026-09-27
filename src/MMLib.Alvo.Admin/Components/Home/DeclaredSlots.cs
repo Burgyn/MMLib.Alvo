@@ -17,9 +17,9 @@ namespace MMLib.Alvo.Admin.Components.Home;
 /// <b>Restated, not shared, and pinned rather than trusted.</b> The core's predicates are internal to
 /// <c>MMLib.Alvo</c>, which this assembly does not reference. A top-level block this file does not know falls back
 /// to "present and not empty", so a block the core warns about tomorrow still reaches the Overview; a qualified slot
-/// has no such fallback, so <see cref="Qualified"/> is held against the real build's report by
-/// <c>MMLib.Alvo.Host.Tests.DeclaredSlotsAgreementTests</c>, and a slot added in the core without a reader here fails
-/// there instead of never being drawn.
+/// has no such fallback. <c>MMLib.Alvo.Host.Tests.DeclaredSlotsAgreementTests</c> holds both halves to the real
+/// build: <see cref="Qualified"/> against the report's slot names, and <see cref="Declares"/> against the core's own
+/// predicate for every reported row, over every example descriptor and the cases declined by value.
 /// </para>
 /// </remarks>
 internal static class DeclaredSlots
@@ -30,7 +30,10 @@ internal static class DeclaredSlots
     /// <summary>An entity declares <c>storage: dynamic</c>.</summary>
     public const string EntityStorage = "entity.storage";
 
-    /// <summary>An entity publishes over realtime — the schema's default, so any entity that does not turn it off.</summary>
+    /// <summary>
+    /// An entity declares <c>realtime: true</c>. The schema's default is also true, but that is a fact about the build,
+    /// which Settings says once under "This build"; the Overview says what the project declared.
+    /// </summary>
     public const string EntityRealtime = "entity.realtime";
 
     /// <summary>Every qualified slot this file can detect.</summary>
@@ -47,7 +50,7 @@ internal static class DeclaredSlots
                 || provider.GetString() != "local"),
         EntityStorage => Entities(descriptor).Any(entity => Text(entity, "storage") == "dynamic"),
         EntityRealtime => Entities(descriptor).Any(entity =>
-            Member(entity, "realtime") is not { ValueKind: JsonValueKind.False }),
+            Member(entity, "realtime") is { ValueKind: JsonValueKind.True }),
         "dynamicEntities" => Member(descriptor, slot) is { } block
             && Member(block, "enabled") is { ValueKind: JsonValueKind.True },
         "webhooks" => Member(descriptor, slot) is { } webhooks && NotEmpty(Member(webhooks, "endpoints")),

@@ -1,5 +1,8 @@
 ﻿using MMLib.Alvo.Admin.Components.Home;
+using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Management.Internal;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Host.Tests;
 
@@ -16,7 +19,9 @@ namespace MMLib.Alvo.Host.Tests;
 /// </para>
 /// <para>
 /// This suite is the one that sees both assemblies' internals, so the agreement is asserted here, over the real
-/// <c>CapabilityReport</c> rather than a copy of its names.
+/// <c>CapabilityReport</c> rather than a copy of its names — and over <b>meaning</b>, not names alone: for every row
+/// the build reports, the core's <c>IsDeclaredBy</c> and the dashboard's <c>DeclaredSlots.Declares</c> give the same
+/// answer on every example descriptor and on each case declined by value (B2 review, finding 4).
 /// </para>
 /// </remarks>
 public sealed class DeclaredSlotsAgreementTests
@@ -34,5 +39,53 @@ public sealed class DeclaredSlotsAgreementTests
             ignoreOrder: true,
             "a slot the build reports and the Overview cannot detect is never drawn; a slot the Overview detects "
             + "and the build no longer reports is a reader of nothing");
+    }
+
+    /// <summary>The descriptors the agreement is measured over: every example, and the cases declined by value.</summary>
+    public static TheoryData<string> Descriptors()
+    {
+        var data = new TheoryData<string>();
+        foreach (var example in Directory.GetFiles(Path.Combine(RepositoryRoot.Find(), "examples"), "*.alvo.json", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
+        {
+            data.Add(File.ReadAllText(example));
+        }
+
+        foreach (var body in _declinedOrEdge)
+        {
+            /* The parser requires entities; a case about another block gets an empty set. */
+            var entities = body.Contains("\"entities\"", StringComparison.Ordinal) ? string.Empty : """, "entities": {}""";
+            data.Add($$"""{ "apiVersion": "alvo.dev/v1", "name": "agreement", {{body}}{{entities}} }""");
+        }
+
+        return data;
+    }
+
+    private static readonly string[] _declinedOrEdge =
+    [
+        """ "dynamicEntities": { "enabled": false, "maxEntitiesPerTenant": 5 }""",
+        """ "dynamicEntities": { "maxEntitiesPerTenant": 5 }""",
+        """ "dynamicEntities": { "enabled": true }""",
+        """ "automation": {}""",
+        """ "webhooks": { "endpoints": {} }""",
+        """ "functions": {}""",
+        """ "templates": {}""",
+        """ "auth": { "providers": ["local"] }, "entities": { "n": { "realtime": false, "fields": { "t": { "type": "string" } } } }""",
+        """ "auth": { "providers": ["local", "github"] }, "entities": { "n": { "realtime": true, "storage": "dynamic", "fields": { "t": { "type": "string" } } } }""",
+        """ "entities": { "n": { "storage": "physical", "fields": { "t": { "type": "string" } } } }""",
+    ];
+
+    [Theory]
+    [MemberData(nameof(Descriptors))]
+    public void The_overview_and_the_build_agree_on_what_is_declared(string json)
+    {
+        var descriptor = AlvoDescriptor.Parse(json);
+        using var document = JsonDocument.Parse(json);
+
+        foreach (var row in UnhonouredSubsystems.All.Concat(UnhonouredSubsystems.WithinBlocks).Concat(UnhonouredSubsystems.ReportedOnly))
+        {
+            DeclaredSlots.Declares(document.RootElement, row.Block).ShouldBe(
+                row.IsDeclaredBy(descriptor),
+                $"'{row.Block}': the Overview and the build must agree on whether this descriptor declares it");
+        }
     }
 }

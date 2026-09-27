@@ -83,6 +83,20 @@ public class UnhonouredKeysTests
     }
 
     /// <summary>
+    /// <b>The reported-only row counts as declared only where an entity says <c>realtime: true</c></b>: the default
+    /// is a fact about this build, said once where the build is described, not a declaration of the project's.
+    /// </summary>
+    [Theory]
+    [InlineData("""{ "notes": { "realtime": true, "fields": {} } }""", true)]
+    [InlineData("""{ "notes": { "fields": {} } }""", false)]
+    [InlineData("""{ "notes": { "realtime": false, "fields": {} } }""", false)]
+    public void Realtime_is_declared_only_where_an_entity_says_true(string entities, bool declared)
+        => UnhonouredSubsystems.ReportedOnly
+            .Single(entry => entry.Block == RealtimeSlot)
+            .IsDeclaredBy(Parse(entities, auth: null))
+            .ShouldBe(declared);
+
+    /// <summary>
     /// The showcase declares <c>google</c> beside <c>local</c>, so its one warning now names the provider slot as
     /// well as its five top-level blocks.
     /// </summary>

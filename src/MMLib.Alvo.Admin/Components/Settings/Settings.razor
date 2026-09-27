@@ -27,6 +27,16 @@
                 <Detail Label="Data provider" Value="@_info.DataProvider"
                         Note="The data layer this host registered. It is not the database engine, which Alvo does not report." />
                 <Detail Label="Startup mode" Value="@_info.StartupMode" />
+                @*
+                    Said once, here, because it is a fact about the build rather than a project's declaration: every
+                    entity's realtime defaults to true (§8d item 27, B2 review finding 2). The sentence is the build's.
+                *@
+                @if (_realtime is { } realtime)
+                {
+                    <div data-testid="settings-realtime">
+                        <Detail Label="Realtime" Value="not in this build" Note="@realtime.Consequence" />
+                    </div>
+                }
             </ChildContent>
         </Panel>
 
@@ -187,8 +197,15 @@
     private MudTextField<string>? _endpointField;
     private MudTextField<string>? _modelField;
 
+    /// <summary>The build's sentence on realtime, from <c>capabilities.warned</c>, when it reports one.</summary>
+    private ManagementWarnedBlock? _realtime;
+
     protected override async Task OnInitializedAsync()
-        => _info = await Gateway.InfoAsync(CancellationToken.None);
+    {
+        _info = await Gateway.InfoAsync(CancellationToken.None);
+        _realtime = (await Gateway.CapabilitiesAsync(CancellationToken.None)).Warned.FirstOrDefault(
+            block => string.Equals(block.Block, DeclaredSlots.EntityRealtime, StringComparison.Ordinal));
+    }
 
     /// <summary>
     /// Whether the editor holds anything closing it would lose: a kind picked, or any text typed, since the last save.

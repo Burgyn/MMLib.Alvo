@@ -53,6 +53,24 @@ public class PendingSchemaTests
         => PendingSchema.Dynamic("""{"entities":{"a":{"storage":"dynamic"},"b":{},"c":{"storage":"physical"}}}""")
             .ShouldBe(["a"]);
 
+    /// <summary>
+    /// The dynamic entities an apply would record without creating: added, or changed, against the applied descriptor —
+    /// what Preview names instead of "the schema is unchanged" (B2 review, finding 3).
+    /// </summary>
+    [Fact]
+    public void The_dynamic_entities_a_copy_adds_or_changes_are_named()
+    {
+        const string applied = """{"entities":{"kept":{"storage":"dynamic"},"edited":{"storage":"dynamic"},"plain":{}}}""";
+        const string copy = """{"entities":{"kept":{"storage":"dynamic"},"edited":{"storage":"dynamic","description":"x"},"added":{"storage":"dynamic"},"plain":{},"table":{}}}""";
+
+        PendingSchema.DynamicChanged(applied, copy).ShouldBe(["edited", "added"]);
+    }
+
+    [Fact]
+    public void An_unchanged_copy_changes_no_dynamic_entity()
+        => PendingSchema.DynamicChanged("""{"entities":{"a":{"storage":"dynamic"}}}""", """{ "entities": { "a": { "storage": "dynamic" } } }""")
+            .ShouldBeEmpty("the same declaration spelled with other whitespace is not a change");
+
     [Fact]
     public void A_copy_that_does_not_parse_has_no_dynamic_entities()
         => PendingSchema.Dynamic("{ nope").ShouldBeEmpty();

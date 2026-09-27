@@ -82,7 +82,7 @@
         }
         else
         {
-            <Panel Title="@PlanTitle(_plan.Plan)" data-testid="plan" data-plan-run="@_planRuns">
+            <Panel Title="@PlanTitle(_plan.Plan, _dynamic.Count > 0)" data-testid="plan" data-plan-run="@_planRuns">
                 @* Asked again while this one is on screen: the pane says so over its top, and the steps stay. *@
                 @*
                     The plan is of the working copy as it stood when it was asked, and the copy can move under
@@ -96,13 +96,18 @@
                     </AlvoButton>
                 </Actions>
                 <Subtitle>
-                    @(_plan.Plan.IsEmpty
-                        ? "A rules-only or access-only edit changes no table. It is still an apply, and it still appends a revision."
-                        : "In this order, in one transaction.")
+                    @(_plan.Plan.IsEmpty ? EmptyPlanWords(_dynamic) : "In this order, in one transaction.")
                 </Subtitle>
                 <ChildContent>
                     @RefreshBar.While(_busy)
                     <PlanSteps Steps="_plan.Plan.Steps" />
+                    @* A dynamic entity is recorded and never created (§8d item 21): each one says so, in the build's words. *@
+                    @foreach (var name in _dynamic)
+                    {
+                        <p class="a-note" data-testid="@($"plan-dynamic-{name}")">
+                            <code class="a-mono">@name</code> — @(_storageSentence ?? DynamicStorageWords.ListNote)
+                        </p>
+                    }
                 </ChildContent>
             </Panel>
 
@@ -333,9 +338,35 @@
         Navigation.NavigateTo(AdminPaths.Schema);
     }
 
-    private static string PlanTitle(ManagementPlanSummary plan) => plan.IsEmpty
-        ? "No migration — the schema is unchanged"
+    private static string PlanTitle(ManagementPlanSummary plan, bool dynamic) => plan.IsEmpty
+        ? dynamic ? "No migration — no table changes" : "No migration — the schema is unchanged"
         : $"{plan.Steps.Count} step{(plan.Steps.Count == 1 ? string.Empty : "s")} against the database";
+
+    /// <summary>
+    /// What an empty plan means: a rules-only or access-only edit, or — when the copy adds or changes a
+    /// <c>storage: dynamic</c> entity — entities an apply records and this build never creates (B2 review, finding 3).
+    /// </summary>
+    private static string EmptyPlanWords(IReadOnlyList<string> dynamic) => dynamic.Count == 0
+        ? "A rules-only or access-only edit changes no table. It is still an apply, and it still appends a revision."
+        : $"No table changes: {string.Join(", ", dynamic)} declare storage: dynamic, which this build does not create; "
+            + "applying records them in the descriptor and appends a revision.";
+
+    /// <summary>The dynamic entities the planned copy adds or changes against the applied descriptor.</summary>
+    private IReadOnlyList<string> _dynamic = [];
+
+    /// <summary>The build's <c>entity.storage</c> sentence, when it reports one.</summary>
+    private string? _storageSentence;
+
+    /// <summary>Reads what the plan on screen says about dynamic entities, for the copy it is of.</summary>
+    private async Task ReadDynamicAsync(string sent)
+    {
+        _dynamic = PendingSchema.DynamicChanged(Copy.AppliedJson, sent);
+        if (_dynamic.Count > 0 && _storageSentence is null)
+        {
+            _storageSentence = (await Gateway.CapabilitiesAsync(CancellationToken.None)).Warned.FirstOrDefault(
+                block => string.Equals(block.Block, DeclaredSlots.EntityStorage, StringComparison.Ordinal))?.Consequence;
+        }
+    }
 
     private Task PlanAsync() => SendAsync(dryRun: true);
 
@@ -430,6 +461,7 @@
             {
                 _plan = result;
                 _planned = (sent, revision);
+                await ReadDynamicAsync(sent);
                 _stale = CopyMovedPastThePlan();
                 _planRuns++;
             }

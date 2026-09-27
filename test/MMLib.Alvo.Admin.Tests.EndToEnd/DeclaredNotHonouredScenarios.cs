@@ -14,25 +14,60 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 public sealed class DeclaredNotHonouredScenarios(AdminWorld world) : IClassFixture<AdminWorld>
 {
     /// <summary>
-    /// field-service's entities publish over realtime by default and it declares a description, so the Overview says
-    /// both: the first in the build's sentence, the second in the dashboard's.
+    /// field-service declares none of the blocks or keys the build ignores, so the Overview draws no "not honoured"
+    /// panel at all; its description and its formats' descriptions, which the build honours and this dashboard does not show, is one quiet line.
     /// </summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task The_overview_says_what_the_applied_descriptor_declares_and_the_build_does_not_honour()
+    public async Task The_overview_says_nothing_is_ignored_when_nothing_is_and_names_the_unshown_metadata()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("");
 
-        var panel = session.Page.GetByTestId("overview-limits");
-        await panel.WaitForAsync();
-        (await panel.InnerTextAsync()).ShouldContain("Declared, not honoured by this build", Case.Sensitive);
+        var unshown = session.Page.GetByTestId("overview-unshown");
+        await unshown.WaitForAsync();
+        (await unshown.InnerTextAsync()).ShouldBe("Declared metadata this dashboard does not show yet: description, formats.*.description (#268, #271).");
+        (await session.Page.GetByTestId("overview-limits").CountAsync())
+            .ShouldBe(0, "realtime's default is a fact about the build, not a declaration of this project's");
 
-        var realtime = session.Page.GetByTestId("overview-limit-entity.realtime");
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>The default-true realtime is said once, where the build is described, in the build's sentence.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Settings_says_once_that_this_build_has_no_realtime()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/settings");
+
+        var realtime = session.Page.GetByTestId("settings-realtime");
+        await realtime.WaitForAsync();
         (await realtime.InnerTextAsync()).ShouldContain("no change is published over a realtime channel", Case.Sensitive,
             "the build's own sentence, served as entity.realtime");
-        (await session.Page.GetByTestId("overview-unshown-description").InnerTextAsync()).ShouldContain("#268");
-        (await session.Page.GetByTestId("overview-limit-auth.providers").CountAsync())
-            .ShouldBe(0, "field-service declares local sign-in only, which this build honours");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// A copy whose only change is a dynamic entity is not told "the schema is unchanged": Preview names it, with the
+    /// build's sentence, and says what an apply does with it.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Preview_names_a_dynamic_entity_the_apply_records_and_never_creates()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await StageAsync(session, WithDynamicArchive());
+
+        var plan = session.Page.GetByTestId("plan");
+        await plan.WaitForAsync();
+        var text = await plan.InnerTextAsync();
+        text.ShouldContain("No migration — no table changes", Case.Sensitive);
+        text.ShouldNotContain("the schema is unchanged");
+        text.ShouldContain(
+            "No table changes: archives declare storage: dynamic, which this build does not create; applying records them "
+            + "in the descriptor and appends a revision.",
+            Case.Sensitive);
+        (await session.Page.GetByTestId("plan-dynamic-archives").InnerTextAsync())
+            .ShouldContain("no dynamic schema-registry driver", Case.Sensitive, "the build's own sentence, entity.storage");
 
         session.AssertConsoleClean();
     }

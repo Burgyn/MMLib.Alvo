@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Schema;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
@@ -94,6 +95,36 @@ internal static class PendingSchema
         }
 
         return names;
+    }
+
+    /// <summary>
+    /// The <c>storage: dynamic</c> entities <paramref name="descriptorJson"/> adds, or declares differently, against
+    /// <paramref name="appliedJson"/> — what an apply records in the descriptor and never creates, which Preview names
+    /// rather than calling the schema unchanged (B2 review, finding 3).
+    /// </summary>
+    /// <param name="appliedJson">The applied descriptor.</param>
+    /// <param name="descriptorJson">The working document.</param>
+    public static IReadOnlyList<string> DynamicChanged(string appliedJson, string descriptorJson)
+    {
+        var dynamic = Dynamic(descriptorJson);
+        var applied = EntitiesOf(appliedJson);
+        return [.. EntitiesOf(descriptorJson)
+            .Where(entity => dynamic.Contains(entity.Key))
+            .Where(entity => applied[entity.Key] is not { } before || !JsonNode.DeepEquals(before, entity.Value))
+            .Select(entity => entity.Key)];
+    }
+
+    /// <summary>A document's entities, in declaration order, or none when it does not parse.</summary>
+    private static JsonObject EntitiesOf(string descriptorJson)
+    {
+        try
+        {
+            return JsonNode.Parse(descriptorJson)?["entities"] as JsonObject ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 
     /// <summary>The declared storage; the schema's default, physical, when it says none.</summary>
