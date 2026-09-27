@@ -168,10 +168,16 @@ public sealed class SystemMapScenarios(AdminWorld world) : IClassFixture<AdminWo
         await Box(session, "work_orders").WaitForAsync();
         (await Box(session, "regions").CountAsync()).ShouldBe(0, "regions is two hops from customers");
 
-        var whole = await session.Page.GetByRole(AriaRole.Link, new() { Name = "Open the whole map" })
-            .GetAttributeAsync("href") ?? string.Empty;
+        var link = session.Page.GetByRole(AriaRole.Link, new() { Name = "Open the whole map" });
+        var whole = await link.GetAttributeAsync("href") ?? string.Empty;
         whole.ShouldContain("/schema?view=map");
         whole.ShouldContain("centre=customers");
+
+        /* The section's action, in its head's bar at the end (§3.7): above the map, right-aligned with it. */
+        var at = (await link.BoundingBoxAsync()).ShouldNotBeNull();
+        var drawn = (await map.BoundingBoxAsync()).ShouldNotBeNull();
+        (at.Y + at.Height).ShouldBeLessThanOrEqualTo(drawn.Y, "the link heads the map, it does not trail it");
+        (at.X + at.Width).ShouldBeGreaterThan(drawn.X + (drawn.Width * 0.75f), "the link sits at the head's end");
         session.AssertConsoleClean();
     }
 

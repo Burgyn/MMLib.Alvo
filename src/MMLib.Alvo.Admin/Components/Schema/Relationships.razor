@@ -7,11 +7,15 @@
 *@
 @if (DescriptorJson is not null)
 {
+    @* The link is the section's own action, so it sits in the head's bar at its end, where a section's controls go
+       (§3.7), not flush under the map. *@
     <SectionHead Title="Around this entity">
         <Subtitle>This entity, what it points at and what points at it, with what they send out. The whole project is on the Schema map.</Subtitle>
+        <Actions>
+            <a class="a-link" href="@AdminPaths.SchemaMap(reactions: true, centre: Entity.Name)">Open the whole map</a>
+        </Actions>
     </SectionHead>
     <SystemMap DescriptorJson="@DescriptorJson" AppliedJson="@AppliedJson" Reactions="true" Centre="@Entity.Name" />
-    <p class="a-row"><a class="a-link" href="@AdminPaths.SchemaMap(reactions: true, centre: Entity.Name)">Open the whole map</a></p>
 }
 
 <SectionHead Title="Points at" class="@(DescriptorJson is not null ? "a-section--spaced" : null)">
