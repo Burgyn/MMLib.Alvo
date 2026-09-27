@@ -120,7 +120,7 @@ internal sealed class AlvoIdentityUserAdministration(
         AlvoUserCreation creation, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(creation);
-        return AlvoIdentityUnitOfWork.RunAsync(store, () => CreateRowAsync(creation));
+        return AlvoIdentityUnitOfWork.RunAsync(store, () => CreateRowAsync(creation), cancellationToken);
     }
 
     /// <inheritdoc cref="CreateAsync"/>
@@ -155,7 +155,7 @@ internal sealed class AlvoIdentityUserAdministration(
         UserId user, IReadOnlyList<string> roleNames, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(roleNames);
-        return AlvoIdentityUnitOfWork.RunAsync(store, () => ReplaceRolesAsync(user, roleNames));
+        return AlvoIdentityUnitOfWork.RunAsync(store, () => ReplaceRolesAsync(user, roleNames), cancellationToken);
     }
 
     /// <inheritdoc cref="SetRolesAsync"/>
@@ -183,12 +183,12 @@ internal sealed class AlvoIdentityUserAdministration(
             row.TenantId = tenant?.Value;
             Succeeded(await users.UpdateAsync(row).ConfigureAwait(false), user.ToString());
             return await ProjectAsync(row).ConfigureAwait(false);
-        });
+        }, cancellationToken);
 
     /// <inheritdoc/>
     public Task<AlvoUser> SetDisabledAsync(
         UserId user, bool disabled, CancellationToken cancellationToken = default)
-        => AlvoIdentityUnitOfWork.RunAsync(store, () => WriteDisabledAsync(user, disabled));
+        => AlvoIdentityUnitOfWork.RunAsync(store, () => WriteDisabledAsync(user, disabled), cancellationToken);
 
     /// <inheritdoc cref="SetDisabledAsync"/>
     private async Task<AlvoUser> WriteDisabledAsync(UserId user, bool disabled)
@@ -224,7 +224,7 @@ internal sealed class AlvoIdentityUserAdministration(
 
     /// <inheritdoc/>
     public Task<AlvoUser> ClearLockoutAsync(UserId user, CancellationToken cancellationToken = default)
-        => AlvoIdentityUnitOfWork.RunAsync(store, () => EndLockoutAsync(user));
+        => AlvoIdentityUnitOfWork.RunAsync(store, () => EndLockoutAsync(user), cancellationToken);
 
     /// <inheritdoc cref="ClearLockoutAsync"/>
     /// <remarks>
@@ -255,7 +255,7 @@ internal sealed class AlvoIdentityUserAdministration(
     /// <inheritdoc/>
     public Task<AlvoCredentialToken> IssueCredentialTokenAsync(
         UserId user, CancellationToken cancellationToken = default)
-        => AlvoIdentityUnitOfWork.RunAsync(store, () => MintCredentialTokenAsync(user));
+        => AlvoIdentityUnitOfWork.RunAsync(store, () => MintCredentialTokenAsync(user), cancellationToken);
 
     /// <inheritdoc cref="IssueCredentialTokenAsync"/>
     private async Task<AlvoCredentialToken> MintCredentialTokenAsync(UserId user)

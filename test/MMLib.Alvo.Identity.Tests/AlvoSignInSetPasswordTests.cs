@@ -93,6 +93,26 @@ public sealed class AlvoSignInSetPasswordTests : IAsyncLifetime
         (await SignsInAsync(Eva, NewPassword)).ShouldBeTrue("the refused second use changed nothing");
     }
 
+    /// <summary>
+    /// <b>A cancelled redemption throws and sets nothing</b>: the token is still good afterwards, because the unit of
+    /// work never ran (final branch review, item 2).
+    /// </summary>
+    [Fact]
+    public async Task A_cancelled_redemption_sets_nothing_and_leaves_the_token_good()
+    {
+        var token = await IssueAsync(await CreateAsync(Eva, OldPassword));
+
+        using (var scope = _provider.CreateScope())
+        {
+            await Should.ThrowAsync<OperationCanceledException>(() => scope.ServiceProvider
+                .GetRequiredService<AlvoSignIn>()
+                .SetPasswordAsync(Eva, token, NewPassword, new CancellationToken(canceled: true)));
+        }
+
+        (await SignsInAsync(Eva, OldPassword)).ShouldBeTrue("the cancelled redemption stored nothing");
+        (await RedeemAsync(Eva, token, NewPassword)).ShouldBe(AlvoPasswordSetOutcome.Set);
+    }
+
     /// <summary><b>Every outstanding token dies at the first redemption</b>, not only the one used.</summary>
     [Fact]
     public async Task Redeeming_one_of_two_outstanding_tokens_kills_the_other()
@@ -549,7 +569,8 @@ public sealed class AlvoSignInSetPasswordTests : IAsyncLifetime
         string email, string token, string password, ServiceProvider? host = null)
     {
         using var scope = (host ?? _provider).CreateScope();
-        return await scope.ServiceProvider.GetRequiredService<AlvoSignIn>().SetPasswordAsync(email, token, password);
+        return await scope.ServiceProvider.GetRequiredService<AlvoSignIn>()
+            .SetPasswordAsync(email, token, password, Ct);
     }
 
     private async Task AdministerAsync(Func<IAlvoUserAdministration, Task> write)

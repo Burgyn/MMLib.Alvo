@@ -47,20 +47,30 @@ internal static class AlvoIdentityUnitOfWork
     /// <typeparam name="T">What the write answers with.</typeparam>
     /// <param name="store">The identity store the write goes through.</param>
     /// <param name="work">The write.</param>
+    /// <param name="cancellationToken">
+    /// Cancels the unit before it starts, and its transaction's begin and commit: ASP.NET Core Identity's user manager
+    /// takes no token, so these are the points a caller's cancellation can reach, and a unit cancelled before its
+    /// commit rolls back whole.
+    /// </param>
     /// <returns>Whatever the write answered.</returns>
     /// <exception cref="AlvoPreconditionFailedException">The row was written by somebody else in between.</exception>
-    internal static async Task<T> RunAsync<T>(AlvoIdentityDbContext store, Func<Task<T>> work)
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled.</exception>
+    internal static async Task<T> RunAsync<T>(
+        AlvoIdentityDbContext store, Func<Task<T>> work, CancellationToken cancellationToken)
     {
         try
         {
             /* Through the execution strategy, because a host may configure a retrying one for its
                identity store, and a retrying strategy refuses a transaction opened outside it. A retry
                reruns the whole unit — from an empty tracker, so from a fresh read. */
-            return await store.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
-            {
-                store.ChangeTracker.Clear();
-                return await InTransactionAsync(store, work).ConfigureAwait(false);
-            }).ConfigureAwait(false);
+            return await store.Database.CreateExecutionStrategy().ExecuteAsync(
+                async cancelled =>
+                {
+                    cancelled.ThrowIfCancellationRequested();
+                    store.ChangeTracker.Clear();
+                    return await InTransactionAsync(store, work, cancelled).ConfigureAwait(false);
+                },
+                cancellationToken).ConfigureAwait(false);
         }
         catch (DbUpdateConcurrencyException raced)
         {
@@ -82,19 +92,21 @@ internal static class AlvoIdentityUnitOfWork
     /// <typeparam name="T">What the write answers with.</typeparam>
     /// <param name="store">The identity store the write goes through.</param>
     /// <param name="work">The write.</param>
+    /// <param name="cancellationToken">Cancels the transaction's begin and commit.</param>
     /// <returns>Whatever the write answered.</returns>
-    private static async Task<T> InTransactionAsync<T>(AlvoIdentityDbContext store, Func<Task<T>> work)
+    private static async Task<T> InTransactionAsync<T>(
+        AlvoIdentityDbContext store, Func<Task<T>> work, CancellationToken cancellationToken)
     {
         if (store.Database.CurrentTransaction is not null)
         {
             return await work().ConfigureAwait(false);
         }
 
-        var transaction = await store.Database.BeginTransactionAsync().ConfigureAwait(false);
+        var transaction = await store.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
         await using (transaction.ConfigureAwait(false))
         {
             var answer = await work().ConfigureAwait(false);
-            await transaction.CommitAsync().ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
             return answer;
         }
     }

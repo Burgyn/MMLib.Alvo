@@ -139,16 +139,22 @@ public sealed class AlvoSignIn
     /// <param name="email">The address the token was issued for.</param>
     /// <param name="token">The credential token.</param>
     /// <param name="newPassword">The password to set.</param>
+    /// <param name="cancellationToken">
+    /// Cancels the redemption. It reaches the unit of work's transaction, so a redemption cancelled before its commit
+    /// stores nothing and leaves the token good; Identity's own user manager takes no token of its own.
+    /// </param>
     /// <returns>
     /// <see cref="AlvoPasswordSetOutcome.PasswordRejected"/> when the policy refuses the password,
     /// <see cref="AlvoPasswordSetOutcome.Refused"/> for every other failure, and
     /// <see cref="AlvoPasswordSetOutcome.Set"/> when the password is stored.
     /// </returns>
-    public async Task<AlvoPasswordSetOutcome> SetPasswordAsync(string email, string token, string newPassword)
+    public async Task<AlvoPasswordSetOutcome> SetPasswordAsync(
+        string email, string token, string newPassword, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(email);
         ArgumentNullException.ThrowIfNull(token);
         ArgumentNullException.ThrowIfNull(newPassword);
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (!await PolicyAcceptsAsync(email, newPassword).ConfigureAwait(false))
         {
@@ -158,7 +164,7 @@ public sealed class AlvoSignIn
         try
         {
             return await AlvoIdentityUnitOfWork
-                .RunAsync(_store, () => RedeemAsync(email, token, newPassword))
+                .RunAsync(_store, () => RedeemAsync(email, token, newPassword), cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (AlvoPreconditionFailedException)

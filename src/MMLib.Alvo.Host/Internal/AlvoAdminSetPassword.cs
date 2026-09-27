@@ -78,7 +78,8 @@ internal static partial class AlvoAdminSetPassword
     private static async Task<string> RedeemAsync(
         Posted posted, AlvoSignIn signIn, IAlvoUserStore people, ILogger logger, CancellationToken cancellationToken)
     {
-        switch (await signIn.SetPasswordAsync(posted.Email, posted.Token, posted.Password).ConfigureAwait(false))
+        switch (await signIn.SetPasswordAsync(posted.Email, posted.Token, posted.Password, cancellationToken)
+            .ConfigureAwait(false))
         {
             case AlvoPasswordSetOutcome.Set:
                 await LogPasswordSetAsync(posted.Email, people, logger, cancellationToken).ConfigureAwait(false);

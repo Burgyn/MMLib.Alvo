@@ -191,6 +191,40 @@ public sealed class AlvoIdentityUserAdministrationLockoutTests : IAsyncLifetime
         _scope.ServiceProvider.GetRequiredService<AlvoIdentityDbContext>().ChangeTracker.Entries().ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// <b>A cancelled clear throws and writes nothing</b>: the token reaches the unit of work, so the lockout and the
+    /// failed-attempt count stay as they were (final branch review, item 18).
+    /// </summary>
+    [Fact]
+    public async Task A_cancelled_clear_writes_nothing()
+    {
+        var person = await CreateAsync("cancelled@alvo.test");
+        var until = DateTimeOffset.UtcNow.AddMinutes(5);
+        await WriteLockoutAsync(person, until, failedAttempts: 5);
+
+        await Should.ThrowAsync<OperationCanceledException>(
+            () => People.ClearLockoutAsync(person, new CancellationToken(canceled: true)));
+
+        var stored = await StoredAsync(person);
+        stored.LockoutEnd.ShouldNotBeNull().ShouldBe(until, TimeSpan.FromMilliseconds(1));
+        stored.AccessFailedCount.ShouldBe(5);
+    }
+
+    /// <summary>A cancelled disable throws and writes nothing, like every administration write (item 18's siblings).</summary>
+    [Fact]
+    public async Task A_cancelled_disable_writes_nothing()
+    {
+        var person = await CreateAsync("cancelled-disable@alvo.test");
+        var stamp = (await StoredAsync(person)).SecurityStamp;
+
+        await Should.ThrowAsync<OperationCanceledException>(
+            () => People.SetDisabledAsync(person, disabled: true, new CancellationToken(canceled: true)));
+
+        var stored = await StoredAsync(person);
+        AlvoIdentityLockout.IsDisabled(stored.LockoutEnd).ShouldBeFalse();
+        stored.SecurityStamp.ShouldBe(stamp);
+    }
+
     private static IAlvoUserAdministration Unguarded(IServiceScope scope)
         => scope.ServiceProvider.GetRequiredKeyedService<IAlvoUserAdministration>(AlvoUserAdministration.UnguardedKey);
 

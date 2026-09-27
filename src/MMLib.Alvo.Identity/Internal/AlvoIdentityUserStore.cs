@@ -75,7 +75,7 @@ internal sealed class AlvoIdentityUserStore(
     {
         ArgumentNullException.ThrowIfNull(roleNames);
 
-        await AlvoIdentityUnitOfWork.RunAsync(store, () => ReplaceRolesAsync(user, roleNames))
+        await AlvoIdentityUnitOfWork.RunAsync(store, () => ReplaceRolesAsync(user, roleNames), cancellationToken)
             .ConfigureAwait(false);
     }
 

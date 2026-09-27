@@ -27,7 +27,7 @@ namespace MMLib.Alvo.Identity
     public sealed class AlvoSignIn
     {
         public System.Threading.Tasks.Task<bool> PasswordSignInAsync(string email, string password) { }
-        public System.Threading.Tasks.Task<MMLib.Alvo.Identity.AlvoPasswordSetOutcome> SetPasswordAsync(string email, string token, string newPassword) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Identity.AlvoPasswordSetOutcome> SetPasswordAsync(string email, string token, string newPassword, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task SignOutAsync() { }
     }
 }
