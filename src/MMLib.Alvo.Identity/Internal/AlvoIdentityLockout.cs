@@ -31,4 +31,15 @@ internal static class AlvoIdentityLockout
     /// <param name="lockoutEnd">The stored <c>LockoutEnd</c>.</param>
     /// <returns><see langword="true"/> for a disabled account.</returns>
     internal static bool IsDisabled(DateTimeOffset? lockoutEnd) => lockoutEnd >= _disabledFloor;
+
+    /// <summary>When a temporary lockout ends, while one stands: a stored end in the future that is not a disable.</summary>
+    /// <remarks>
+    /// Read against the system clock because it is the clock Identity's own check reads
+    /// (<c>UserManager.IsLockedOutAsync</c> compares with <see cref="DateTimeOffset.UtcNow"/>), so the screen and the
+    /// sign-in agree on whether a lockout stands; a lockout already over is not projected at all.
+    /// </remarks>
+    /// <param name="lockoutEnd">The stored <c>LockoutEnd</c>.</param>
+    /// <returns>The end, or <see langword="null"/> for no lockout, one that has ended, and a disable.</returns>
+    internal static DateTimeOffset? LockedOutUntil(DateTimeOffset? lockoutEnd)
+        => lockoutEnd is { } end && end > DateTimeOffset.UtcNow && !IsDisabled(end) ? end : null;
 }

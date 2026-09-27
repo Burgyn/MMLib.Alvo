@@ -163,6 +163,7 @@ namespace MMLib.Alvo
         public required string Email { get; init; }
         public required MMLib.Alvo.UserId Id { get; init; }
         public bool IsDisabled { get; init; }
+        public System.DateTimeOffset? LockedOutUntil { get; init; }
         public required System.Collections.Generic.IReadOnlyList<string> RoleNames { get; init; }
         public MMLib.Alvo.TenantId? Tenant { get; init; }
     }
@@ -201,6 +202,7 @@ namespace MMLib.Alvo
     }
     public interface IAlvoUserAdministration
     {
+        System.Threading.Tasks.Task<MMLib.Alvo.AlvoUser> ClearLockoutAsync(MMLib.Alvo.UserId user, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.AlvoUser> CreateAsync(MMLib.Alvo.AlvoUserCreation creation, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.AlvoCredentialToken> IssueCredentialTokenAsync(MMLib.Alvo.UserId user, System.Threading.CancellationToken cancellationToken = default);
         System.Threading.Tasks.Task<MMLib.Alvo.AlvoUserPage> ListAsync(MMLib.Alvo.AlvoUserQuery query, System.Threading.CancellationToken cancellationToken = default);

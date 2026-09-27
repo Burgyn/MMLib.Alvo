@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Management;
 
 namespace MMLib.Alvo.Identity.Internal;
 
@@ -222,6 +223,36 @@ internal sealed class AlvoIdentityUserAdministration(
     }
 
     /// <inheritdoc/>
+    public Task<AlvoUser> ClearLockoutAsync(UserId user, CancellationToken cancellationToken = default)
+        => AlvoIdentityUnitOfWork.RunAsync(store, () => EndLockoutAsync(user));
+
+    /// <inheritdoc cref="ClearLockoutAsync"/>
+    /// <remarks>
+    /// The disable is checked on the row this unit of work just read, and the write that follows carries that read's
+    /// concurrency stamp: a disable committed in between fails the write as a lost race rather than being overwritten
+    /// by a lockout end of <see langword="null"/>, which is what a disable would otherwise quietly become. The security
+    /// stamp is left alone — no session changed hands.
+    /// </remarks>
+    private async Task<AlvoUser> EndLockoutAsync(UserId user)
+    {
+        var row = await RequireAsync(user).ConfigureAwait(false);
+        if (AlvoIdentityLockout.IsDisabled(row.LockoutEnd))
+        {
+            throw new ManagementRequestException(
+                $"{row.Email ?? user.ToString()} is disabled, not locked out after failed sign-ins, so there is no "
+                + "lockout to end. Let them back in instead: ending a lockout never undoes a disable.");
+        }
+
+        Succeeded(await users.ResetAccessFailedCountAsync(row).ConfigureAwait(false), user.ToString());
+        if (row.LockoutEnd is not null)
+        {
+            Succeeded(await users.SetLockoutEndDateAsync(row, null).ConfigureAwait(false), user.ToString());
+        }
+
+        return await ProjectAsync(row).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
     public Task<AlvoCredentialToken> IssueCredentialTokenAsync(
         UserId user, CancellationToken cancellationToken = default)
         => AlvoIdentityUnitOfWork.RunAsync(store, () => MintCredentialTokenAsync(user));
@@ -291,6 +322,7 @@ internal sealed class AlvoIdentityUserAdministration(
         Email = row.Email ?? row.UserName ?? string.Empty,
         RoleNames = [.. await users.GetRolesAsync(row).ConfigureAwait(false)],
         IsDisabled = AlvoIdentityLockout.IsDisabled(row.LockoutEnd),
+        LockedOutUntil = AlvoIdentityLockout.LockedOutUntil(row.LockoutEnd),
         Tenant = row.TenantId is { } tenant ? new TenantId(tenant) : null,
     };
 

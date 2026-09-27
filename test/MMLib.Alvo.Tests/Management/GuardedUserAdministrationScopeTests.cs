@@ -41,11 +41,12 @@ public sealed class GuardedUserAdministrationScopeTests
         await tab.SetDisabledAsync(target, disabled: true, TestContext.Current.CancellationToken);
         await tab.SetTenantAsync(target, TenantId.New(), TestContext.Current.CancellationToken);
         await tab.ListAsync(new AlvoUserQuery(), TestContext.Current.CancellationToken);
+        await tab.ClearLockoutAsync(target, TestContext.Current.CancellationToken);
 
         var circuitsOwn = circuit.ServiceProvider.GetRequiredService<ScopeTag>();
-        calls.Count.ShouldBe(3);
+        calls.Count.ShouldBe(4);
         calls.ShouldNotContain(circuitsOwn, "the circuit's scope must never hold the implementation's state");
-        calls.Distinct().Count().ShouldBe(3, "one scope per call, not one per decorator");
+        calls.Distinct().Count().ShouldBe(4, "one scope per call, not one per decorator");
         ended.ShouldBe(calls, "each call's scope is disposed when the call returns");
     }
 
@@ -121,6 +122,9 @@ public sealed class GuardedUserAdministrationScopeTests
             => Record(Person());
 
         public Task<AlvoUser> SetDisabledAsync(UserId user, bool disabled, CancellationToken cancellationToken = default)
+            => Record(Person());
+
+        public Task<AlvoUser> ClearLockoutAsync(UserId user, CancellationToken cancellationToken = default)
             => Record(Person());
 
         public Task<AlvoCredentialToken> IssueCredentialTokenAsync(UserId user, CancellationToken cancellationToken = default)

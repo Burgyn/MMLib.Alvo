@@ -349,7 +349,9 @@ real one is well under a kilobyte.
   from anywhere, keeps a known account locked — the bootstrap administrator's included**. The rate limit cannot
   help, because that attacker needs no more than that. It stays because it is the only defence against a guesser
   spread over many addresses, which no per-client limit sees; a scheme that does not hand the lever to strangers
-  is todo item 46. Token redemption has no lockout, by design: the token is a MAC'd data-protection payload and
+  is todo item 46 (#286). Until then an administrator sees the lockout on Access ("Locked until HH:mm after
+  failed sign-ins") and can end it there with **Unlock** (`IAlvoUserAdministration.ClearLockoutAsync`, `DELETE
+  …/users/{user}/lockout`), the bootstrap administrator's included. Token redemption has no lockout, by design: the token is a MAC'd data-protection payload and
   cannot be guessed.
 
 **Behind a proxy, the client is only the client with forwarded headers on.** The limiter partitions on

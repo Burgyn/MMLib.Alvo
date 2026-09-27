@@ -60,6 +60,9 @@ public sealed class VanishingPeopleWorld : AdminWorld
         public Task<AlvoUser> SetDisabledAsync(UserId user, bool disabled, CancellationToken cancellationToken = default)
             => inner.SetDisabledAsync(user, disabled, cancellationToken);
 
+        public Task<AlvoUser> ClearLockoutAsync(UserId user, CancellationToken cancellationToken = default)
+            => inner.ClearLockoutAsync(user, cancellationToken);
+
         public Task<AlvoCredentialToken> IssueCredentialTokenAsync(UserId user, CancellationToken cancellationToken = default)
             => inner.IssueCredentialTokenAsync(user, cancellationToken);
     }

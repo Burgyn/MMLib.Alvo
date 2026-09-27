@@ -116,6 +116,9 @@ public sealed class ManagementGatewayRoleChangeTests
         public Task<AlvoUser> SetDisabledAsync(UserId user, bool disabled, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 
+        public Task<AlvoUser> ClearLockoutAsync(UserId user, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
         public Task<AlvoCredentialToken> IssueCredentialTokenAsync(UserId user, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
     }

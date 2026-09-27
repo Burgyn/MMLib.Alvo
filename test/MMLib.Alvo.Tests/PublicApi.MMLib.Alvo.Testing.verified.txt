@@ -658,11 +658,13 @@ namespace MMLib.Alvo.Testing.Management
         public System.Threading.Tasks.Task A_caller_may_narrow_their_own_membership() { }
         public System.Threading.Tasks.Task A_caller_may_remove_their_own_tenant() { }
         public System.Threading.Tasks.Task A_caller_with_no_level_is_refused_every_member() { }
+        public System.Threading.Tasks.Task A_disabled_persons_lockout_cannot_be_cleared() { }
         protected abstract MMLib.Alvo.IAlvoUserAdministration AsAdministrator();
         protected abstract MMLib.Alvo.IAlvoUserAdministration AsUnprivilegedCaller();
         protected virtual void EnsureAvailable() { }
         public System.Threading.Tasks.Task The_bootstrap_administrator_cannot_be_disabled() { }
         public System.Threading.Tasks.Task The_bootstrap_administrators_credential_cannot_be_reset() { }
+        public System.Threading.Tasks.Task The_bootstrap_administrators_lockout_can_be_cleared() { }
         public System.Threading.Tasks.Task The_reserved_tenant_cannot_be_granted() { }
         public System.Threading.Tasks.Task The_reserved_tenant_cannot_be_granted_at_creation() { }
     }

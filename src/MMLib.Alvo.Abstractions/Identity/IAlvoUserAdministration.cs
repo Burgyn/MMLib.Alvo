@@ -112,6 +112,36 @@ public interface IAlvoUserAdministration
     Task<AlvoUser> SetDisabledAsync(
         UserId user, bool disabled, CancellationToken cancellationToken = default);
 
+    /// <summary>Ends a temporary lockout from failed sign-ins now, and forgets the failed attempts.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The operator's answer to a lockout somebody else caused.</b> Repeated wrong passwords lock an account
+    /// for a few minutes whoever typed them, so a stranger who knows an address can keep its owner out
+    /// (<c>docs/todo-admin.md</c> §8d item 46). This lets an administrator let the person try again at once. It
+    /// changes nothing else: the lockout still guards the account afterwards, and the next run of wrong
+    /// passwords locks it again. A person with no lockout standing is answered as they are — the call is safe
+    /// to repeat.
+    /// </para>
+    /// <para>
+    /// <b>Refuses a disabled person, with <see cref="Management.ManagementRequestException"/>.</b> A disable and
+    /// a lockout share a column in some stores, and an implementation that cleared it for a disabled person
+    /// would let them back in by a door that decides nothing about a disable. Letting a disabled person back in
+    /// is <see cref="SetDisabledAsync"/>. The check is made on the person as stored at the call, in the same
+    /// unit of work as the write, so a disable written meanwhile is never undone.
+    /// </para>
+    /// <para>
+    /// <b>Sessions are untouched.</b> Nothing about who holds a session changed, so, unlike a disable, it ends
+    /// none and invalidates no credential token. <b>The bootstrap administrator is not refused</b>: ending
+    /// their lockout gives back the one account that can always recover a project, rather than taking it away.
+    /// </para>
+    /// </remarks>
+    /// <param name="user">Whose lockout to end.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>The person as they now are.</returns>
+    /// <exception cref="Management.ManagementRequestException">The person is disabled, not locked out.</exception>
+    /// <exception cref="NotSupportedException">This host keeps no lockout to end.</exception>
+    Task<AlvoUser> ClearLockoutAsync(UserId user, CancellationToken cancellationToken = default);
+
     /// <summary>Mints a single-use token with which a person sets their own password.</summary>
     /// <remarks>
     /// <para>

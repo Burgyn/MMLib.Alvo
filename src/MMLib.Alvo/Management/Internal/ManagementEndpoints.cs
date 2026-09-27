@@ -68,7 +68,7 @@ internal static class ManagementEndpoints
     }
 
     /// <summary>
-    /// The six user-administration routes, mapped only when an implementation is registered.
+    /// The seven user-administration routes, mapped only when an implementation is registered.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -78,7 +78,7 @@ internal static class ManagementEndpoints
     /// the management surface already uses for a missing driver.
     /// </para>
     /// <para>
-    /// <b>All six are management routes at <c>admin</c>.</b> <c>ManageUsers</c> is already a
+    /// <b>All seven are management routes at <c>admin</c>.</b> <c>ManageUsers</c> is already a
     /// management operation at that level, and <i>everything the dashboard can do, the API can
     /// do</i> binds this surface as much as it binds the descriptor. The read is at <c>admin</c>
     /// too, deliberately: the people list is the one place a project's administrators are
@@ -137,6 +137,15 @@ internal static class ManagementEndpoints
                             new UserId(user), body.Tenant is { } tenant ? new TenantId(tenant) : null, ct))),
             new ManagementRoute(nameof(IAlvoUserAdministration.SetTenantAsync), ManagementOperation.ManageUsers));
 
+        MapSignInRoutes(group);
+    }
+
+    /// <summary>
+    /// The three user routes about whether a person can sign in: disable, a credential token, and ending a lockout.
+    /// </summary>
+    /// <param name="group">The group to map into.</param>
+    private static void MapSignInRoutes(RouteGroupBuilder group)
+    {
         Gate(
             group.MapPut(
                 "/projects/{project}/users/{user:guid}/disabled",
@@ -152,6 +161,15 @@ internal static class ManagementEndpoints
                     Answer(() => users.IssueCredentialTokenAsync(new UserId(user), ct))),
             new ManagementRoute(
                 nameof(IAlvoUserAdministration.IssueCredentialTokenAsync), ManagementOperation.ManageUsers));
+
+        /* DELETE on the lockout, not a POST of a verb: ending it is removing a resource the person has, and
+           DELETE says the call is safe to repeat, which it is. */
+        Gate(
+            group.MapDelete(
+                "/projects/{project}/users/{user:guid}/lockout",
+                (string project, Guid user, IAlvoUserAdministration users, CancellationToken ct) =>
+                    Answer(() => users.ClearLockoutAsync(new UserId(user), ct))),
+            new ManagementRoute(nameof(IAlvoUserAdministration.ClearLockoutAsync), ManagementOperation.ManageUsers));
     }
 
     /// <summary><c>GET {prefix}/info</c> — <see cref="IAlvoManagement.GetInfoAsync"/>.</summary>

@@ -79,6 +79,7 @@ public class UserAdministrationRouteTests
             (HttpMethod.Put, $"/management/projects/{project}/users/{Guid.Empty}/disabled",
                 JsonNode.Parse("""{"disabled":true}""")),
             (HttpMethod.Post, $"/management/projects/{project}/users/{Guid.Empty}/credential-reset", null),
+            (HttpMethod.Delete, $"/management/projects/{project}/users/{Guid.Empty}/lockout", null),
         };
 
         foreach (var (method, path, body) in calls)

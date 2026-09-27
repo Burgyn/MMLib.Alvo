@@ -100,6 +100,26 @@ internal sealed class GuardedUserAdministration(
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <b>The gate, and only the gate.</b> Ending a lockout raises no level and grants no tenant, so the
+    /// self-grant guards have nothing to compare; and it is not refused for the bootstrap administrator,
+    /// whose lockout is the one a stranger most wants to keep standing (<c>docs/todo-admin.md</c> §8d item 46) —
+    /// ending it gives back the account every recovery rests on rather than removing it.
+    /// </para>
+    /// <para>
+    /// <b>A disabled person is refused by the implementation, not here</b>, because only the implementation reads
+    /// the person in the unit of work that writes them: a check made here would read before a disable another
+    /// administrator commits and let the write undo it. The contract suite holds every implementation to it.
+    /// </para>
+    /// </remarks>
+    public Task<AlvoUser> ClearLockoutAsync(UserId user, CancellationToken cancellationToken = default)
+    {
+        EnsureMayManage();
+        return InScopeAsync(inner => inner.ClearLockoutAsync(user, cancellationToken));
+    }
+
+    /// <inheritdoc/>
     public Task<AlvoCredentialToken> IssueCredentialTokenAsync(
         UserId user, CancellationToken cancellationToken = default)
     {

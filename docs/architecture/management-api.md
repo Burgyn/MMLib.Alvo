@@ -26,7 +26,7 @@ because it is infrastructure configuration rather than a block a locked-out proj
 | `POST {m}/projects/{project}/revisions/{revision:int}/rollback` | `RollbackAsync` | `developer` |
 | `PUT {m}/ai/connection` | `SetAiConnectionAsync` | `admin` |
 
-And six more, from a second contract — see *Administering people*:
+And seven more, from a second contract — see *Administering people*:
 
 | Route | `IAlvoUserAdministration` member | Level |
 |---|---|---|
@@ -36,6 +36,7 @@ And six more, from a second contract — see *Administering people*:
 | `PUT {m}/projects/{project}/users/{user:guid}/tenant` | `SetTenantAsync` | `admin` |
 | `PUT {m}/projects/{project}/users/{user:guid}/disabled` | `SetDisabledAsync` | `admin` |
 | `POST {m}/projects/{project}/users/{user:guid}/credential-reset` | `IssueCredentialTokenAsync` | `admin` |
+| `DELETE {m}/projects/{project}/users/{user:guid}/lockout` | `ClearLockoutAsync` | `admin` |
 
 **This table is generated from nothing.** It is prose, and prose drifts — so it is not what holds the
 mapping. `ManagementContractTests` does, reflectively and in four directions: every member of
@@ -49,7 +50,7 @@ the code is right.
 one table mapping an operation to the level it needs, and an operation it does not list requires `admin` —
 the most restrictive answer, not the most convenient one. Two of the thirteen operations
 (`ManageApiKeys`, `DeleteProject`) have no route at all; see *What is deliberately absent*.
-`ManageUsers` gained six in F5 — see *Administering people*.
+`ManageUsers` gained seven in F5 — see *Administering people*.
 
 ### The one place a route's level is not the whole answer
 
@@ -318,8 +319,19 @@ branch on.
 
 ## Administering people
 
-Six routes over `IAlvoUserAdministration`, all at `admin` under the single `ManageUsers` operation —
+Seven routes over `IAlvoUserAdministration`, all at `admin` under the single `ManageUsers` operation —
 **including the read**, because listing a project's people enumerates its administrators.
+
+**Ending a lockout is its own route, and refuses a disabled person.** `DELETE …/users/{user}/lockout` ends a
+temporary lockout from failed sign-ins and resets the failed-attempt count (todo-admin §8d items 39, 46(i)); it
+is a `DELETE` because it removes something the person has and is safe to repeat. It changes nothing else — no
+security stamp, so no session ends — and it is admitted for the bootstrap administrator, whose lockout is the one
+a stranger most wants to keep. A disabled person is answered 422 with a sentence saying to let them back in:
+Identity keeps a disable and a lockout in one column, so clearing it would re-enable them by a door that decides
+nothing about a disable. The check runs in the implementation's unit of work, on the row it writes, not in the
+guard, which could only read before a concurrent disable commits; the contract suite
+(`UserAdministrationContractTests`) holds every implementation to it. `AlvoUser.LockedOutUntil` is how a caller
+sees the lockout in the first place.
 
 **They are management routes rather than a surface of their own**, because `ManageUsers` was already a
 `ManagementOperation` in the level table and a second surface would need a second gate. They are mapped only
