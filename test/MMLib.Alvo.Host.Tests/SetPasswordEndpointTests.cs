@@ -525,6 +525,26 @@ public sealed partial class SetPasswordEndpointTests
     }
 
     /// <summary>
+    /// The page's two records carry the host's own ranged event ids (63xx, beside the core's 61xx and the assistant's
+    /// 62xx), not <c>1</c> and <c>2</c>, which the dashboard's own records already use (final branch review, item 17).
+    /// </summary>
+    [Fact]
+    public async Task The_set_password_records_carry_the_hosts_ranged_event_ids()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+        var token = await IssueAsync(world, await CreateAsync(world, Eva));
+
+        (await new Browser(world).SetPasswordAsync(Eva, token[..^12], NewPassword)).Dispose();
+        (await new Browser(world).SetPasswordAsync(Eva, token, NewPassword)).Dispose();
+
+        EventIdOf(world, "A password was set").ShouldBe(6301);
+        EventIdOf(world, "A credential token was refused").ShouldBe(6302);
+    }
+
+    private static int EventIdOf(AlvoHostWorld world, string opening)
+        => world.Logs.Entries.Single(entry => entry.Message.StartsWith(opening, StringComparison.Ordinal)).EventId;
+
+    /// <summary>
     /// The OpenAPI document describes neither post: both are <c>ExcludeFromDescription</c>, and the TeaPie suite pins
     /// the document's path set by equality.
     /// </summary>

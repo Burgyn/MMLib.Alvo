@@ -498,11 +498,11 @@ internal sealed class CapturingLoggerProvider : ILoggerProvider
     {
     }
 
-    private void Record(LogLevel level, string message, Exception? exception)
+    private void Record(LogLevel level, string message, Exception? exception, int eventId)
     {
         lock (_records)
         {
-            _records.Add(new LoggedRecord(level, message, exception));
+            _records.Add(new LoggedRecord(level, message, exception, eventId));
         }
     }
 
@@ -520,7 +520,7 @@ internal sealed class CapturingLoggerProvider : ILoggerProvider
             Func<TState, Exception?, string> formatter)
         {
             ArgumentNullException.ThrowIfNull(formatter);
-            owner.Record(logLevel, formatter(state, exception), exception);
+            owner.Record(logLevel, formatter(state, exception), exception, eventId.Id);
         }
     }
 }
@@ -529,4 +529,5 @@ internal sealed class CapturingLoggerProvider : ILoggerProvider
 /// <param name="Level">The level it was written at.</param>
 /// <param name="Message">The formatted message.</param>
 /// <param name="Exception">The failure it carried, or <see langword="null"/> for an ordinary record.</param>
-internal sealed record LoggedRecord(LogLevel Level, string Message, Exception? Exception);
+/// <param name="EventId">The record's event id, <c>0</c> when it was written with none.</param>
+internal sealed record LoggedRecord(LogLevel Level, string Message, Exception? Exception, int EventId = 0);

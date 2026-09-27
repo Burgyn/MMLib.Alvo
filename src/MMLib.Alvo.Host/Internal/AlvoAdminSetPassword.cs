@@ -113,11 +113,13 @@ internal static partial class AlvoAdminSetPassword
         }
     }
 
-    [LoggerMessage(EventId = 1, Level = LogLevel.Information,
+    /* The host's own range, 63xx, beside the core's 61xx and the assistant's 62xx: 1 and 2 are the dashboard's own
+       records (AdminProblemLog), and a log query by id should not have to know the category too. */
+    [LoggerMessage(EventId = 6301, Level = LogLevel.Information,
         Message = "A password was set with a credential token for person {PersonId}.")]
     private static partial void PasswordSet(ILogger logger, UserId? personId);
 
-    [LoggerMessage(EventId = 2, Level = LogLevel.Information,
+    [LoggerMessage(EventId = 6302, Level = LogLevel.Information,
         Message = "A credential token was refused on the set-password page.")]
     private static partial void TokenRefused(ILogger logger);
 
