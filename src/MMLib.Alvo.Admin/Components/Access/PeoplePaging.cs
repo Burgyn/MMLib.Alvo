@@ -33,14 +33,37 @@ internal sealed class PeoplePaging
     /// <summary>What to ask the port for.</summary>
     public AlvoUserQuery Query => new(Search.Length > 0 ? Search : null, Limit, _after);
 
+    /// <summary>
+    /// Whether the search is the address of a person just created, put there by <see cref="Reveal"/> rather than
+    /// typed — which the screen says, since it replaced whatever the operator had searched for.
+    /// </summary>
+    public bool Revealing { get; private set; }
+
     /// <summary>Searches from the first page.</summary>
     /// <param name="search">What was typed; surrounding space is not part of an address.</param>
     public void Find(string search)
     {
         Search = search.Trim();
+        Revealing = false;
         _after = null;
         _earlier.Clear();
     }
+
+    /// <summary>Narrows the list to a person just created, so the new row is on screen to be revealed (spec §3.5).</summary>
+    /// <param name="email">Their address.</param>
+    public void Reveal(string email)
+    {
+        Find(email);
+        Revealing = true;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="page"/> is the whole directory with room on it — no search, no page either side, and
+    /// fewer people than a page holds — so a person created now is certainly on it when it is read again.
+    /// </summary>
+    /// <param name="page">The page on screen.</param>
+    public bool ShowsEverybody(AlvoUserPage page)
+        => Search.Length == 0 && !HasEarlier && page.NextCursor is null && page.Users.Count < Limit;
 
     /// <summary>Moves to the page that starts at <paramref name="cursor"/>.</summary>
     /// <param name="cursor">The page's <c>NextCursor</c>.</param>

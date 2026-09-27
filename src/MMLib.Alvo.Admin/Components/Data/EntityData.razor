@@ -99,6 +99,11 @@
                 <CascadingValue Value="GridScope">
                     <RecordGrid OnOpen="Open" OnSort="SortBy" OnNext="Next" OnPrevious="Previous" />
                 </CascadingValue>
+                @* After the grid, so the pager it names is drawn when this runs (FocusFirstOnRender). *@
+                @if (_focusAfterRender is { } focus)
+                {
+                    @FocusFirstOnRender.On(focus, _focusMoves)
+                }
             }
         }
     }

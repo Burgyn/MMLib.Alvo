@@ -57,10 +57,22 @@
                                   data-testid="people-search" autocomplete="off" Class="a-filter" />
                 </div>
 
+                @if (_paging.Revealing)
+                {
+                    @* The reveal replaced whatever the operator had searched for, so it says so, with the way back. *@
+                    <div class="a-row a-row--gap-2 a-row--inset" data-testid="people-revealing">
+                        <span class="a-note">Showing the person you created.</span>
+                        <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" OnClick="_ => ClearSearchAsync()">Clear the search</AlvoButton>
+                    </div>
+                }
+
                 @if (_people.Users.Count == 0 && _paging.Search.Length > 0)
                 {
                     <EmptyState Title="@($"Nobody’s address contains “{_paging.Search}”")"
-                                Body="The search looks in the address each person signs in with." />
+                                Body="The search looks in the address each person signs in with.">
+                        <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" data-testid="people-search-clear"
+                                    OnClick="_ => ClearSearchAsync()">Clear the search</AlvoButton>
+                    </EmptyState>
                 }
 
                 @foreach (var person in _people.Users)
@@ -77,11 +89,11 @@
                         <span class="a-spacer"></span>
                         @if (_paging.HasEarlier)
                         {
-                            <AlvoButton Small="true" data-testid="people-previous" OnClick="_ => PreviousAsync()">Previous page</AlvoButton>
+                            <AlvoButton Small="true" data-testid="people-previous" OnClick="_ => PreviousAsync()">Previous</AlvoButton>
                         }
                         @if (_people.NextCursor is { } next)
                         {
-                            <AlvoButton Small="true" data-testid="people-next" OnClick="_ => NextAsync(next)">Next page</AlvoButton>
+                            <AlvoButton Small="true" data-testid="people-next" OnClick="_ => NextAsync(next)">Next</AlvoButton>
                         }
                     </div>
                 }
@@ -89,6 +101,11 @@
                 @if (_arrived is { } arrived)
                 {
                     @RevealOnRender.On($"#person-{arrived.Value}", _reveals)
+                }
+
+                @if (_focusAfterRender is { } focus)
+                {
+                    @FocusFirstOnRender.On(focus, _focusMoves)
                 }
             }
         </ChildContent>
@@ -212,6 +229,16 @@
     /// <summary>Numbers each read of the people, so a slower earlier one never lands last.</summary>
     private int _peopleVersion;
 
+    /// <summary>Where focus goes once the next render is on screen, the first of these that is drawn.</summary>
+    private IReadOnlyList<string>? _focusAfterRender;
+
+    /// <summary>Counts focus moves, so each one draws its own <see cref="FocusFirstOnRender"/>.</summary>
+    private int _focusMoves;
+
+    private static readonly string[] _nextThenPrevious = ["[data-testid='people-next']", "[data-testid='people-previous']"];
+    private static readonly string[] _previousThenNext = ["[data-testid='people-previous']", "[data-testid='people-next']"];
+    private static readonly string[] _search = ["[data-testid='people-search']"];
+
     /// <summary>The pause in typing after which a search runs: the Data grid's.</summary>
     private static readonly TimeSpan _searchDelay = TimeSpan.FromMilliseconds(250);
 
@@ -308,34 +335,54 @@
         }
     }
 
-    /// <summary>Moves to the page after this one.</summary>
-    private Task NextAsync(string cursor)
+    /// <summary>Moves to the page after this one; focus stays on Next, or goes to Previous on the last page.</summary>
+    private async Task NextAsync(string cursor)
     {
         _paging.Next(cursor);
-        return LoadPeopleAsync();
+        await LoadPeopleAsync();
+        FocusAfterRender(_nextThenPrevious);
     }
 
-    /// <summary>Moves back to the page before this one.</summary>
-    private Task PreviousAsync()
+    /// <summary>Moves back to the page before this one; focus stays on Previous, or goes to Next on the first page.</summary>
+    private async Task PreviousAsync()
     {
         _paging.Previous();
-        return LoadPeopleAsync();
+        await LoadPeopleAsync();
+        FocusAfterRender(_previousThenNext);
+    }
+
+    /// <summary>Moves focus, after the render that draws what the last action read, to the first of these drawn.</summary>
+    private void FocusAfterRender(IReadOnlyList<string> selectors)
+    {
+        _focusAfterRender = selectors;
+        _focusMoves++;
+    }
+
+    /// <summary>Empties the search, from the no-match state or the reveal line, and gives focus to the box.</summary>
+    /// <remarks>Both controls that call it are gone once the list is back, so focus would otherwise fall to the page.</remarks>
+    private async Task ClearSearchAsync()
+    {
+        _searchVersion++;
+        _searchText = string.Empty;
+        _paging.Find(string.Empty);
+        await LoadPeopleAsync();
+        FocusAfterRender(_search);
     }
 
     /// <summary>
-    /// Makes sure the person just created is on screen, where §3.5 reveals them: they may sort onto another page, or
-    /// fall outside the search, so the list is narrowed to their address when they are not on the page it drew.
+    /// Reads the list once so the person just created is on it, where §3.5 reveals them: the same page when it is the
+    /// whole directory, else the list narrowed to their address — on any other page they may sort elsewhere or fall
+    /// outside the search, and knowing which would take a second read.
     /// </summary>
     private async Task ShowCreatedAsync(AlvoUser created)
     {
-        if (_people is null || _people.Users.Any(person => person.Id == created.Id))
+        if (_people is not null && !_paging.ShowsEverybody(_people))
         {
-            return;
+            _searchVersion++;
+            _searchText = created.Email;
+            _paging.Reveal(created.Email);
         }
 
-        _searchVersion++;
-        _searchText = created.Email;
-        _paging.Find(created.Email);
         await LoadPeopleAsync();
     }
 
@@ -537,7 +584,6 @@
         {
             var created = await Gateway.CreatePersonAsync(new AlvoUserCreation(email, []), CancellationToken.None);
             CloseCreate();
-            await LoadAsync();
             await ShowCreatedAsync(created);
             _arrived = created.Id;
             _reveals++;

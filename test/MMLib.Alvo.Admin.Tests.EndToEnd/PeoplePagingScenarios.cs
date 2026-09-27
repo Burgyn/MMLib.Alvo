@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
+using MMLib.Alvo.Data;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
@@ -21,13 +22,22 @@ public sealed class PeoplePagingScenarios(AdminWorld world) : IClassFixture<Admi
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/access");
 
+        // --- a page turn keeps focus on the pager, on the other button once the pressed one is gone
         (await session.Content.InnerTextAsync()).ShouldNotContain("person-50@alvo.test");
         await session.Page.GetByTestId("people-next").ClickAsync();
         await session.Page.GetByTestId("people-previous").WaitForAsync();
         (await session.Content.InnerTextAsync()).ShouldContain("person-50@alvo.test");
+        await session.WaitForFocusInsideAsync("people-previous");
 
+        await session.Page.GetByTestId("people-previous").ClickAsync();
+        await session.Page.GetByTestId("people-previous").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.WaitForFocusInsideAsync("people-next");
+        await session.Page.GetByTestId("people-next").ClickAsync();
+        await session.Page.GetByTestId("people-previous").WaitForAsync();
+
+        // --- a search starts from the first page, and ignores case as signing in does
         var search = session.Page.GetByRole(AriaRole.Searchbox, new() { Name = "Find a person by address" });
-        await search.FillAsync("person-07");
+        await search.FillAsync("PERSON-07");
         await session.Page.GetByTestId("people-previous").WaitForAsync(new() { State = WaitForSelectorState.Detached });
         await session.Content.GetByText("person-08@alvo.test").WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
@@ -35,26 +45,41 @@ public sealed class PeoplePagingScenarios(AdminWorld world) : IClassFixture<Admi
         found.ShouldContain("person-07@alvo.test");
         found.ShouldNotContain("person-08@alvo.test");
 
+        // --- a search that finds nobody offers the way back, which returns focus to the box
+        await search.FillAsync("nobody-matches");
+        await session.Page.GetByTestId("people-search-clear").ClickAsync();
+        await session.Page.GetByTestId("people-next").WaitForAsync();
+        await session.WaitForFocusInsideAsync("people-search");
+        (await search.InputValueAsync()).ShouldBeEmpty();
+
         session.AssertConsoleClean();
     }
 
     /// <summary>
     /// A person created while the list shows a search they do not match, or a page they do not sort onto, is still
-    /// drawn and revealed where the operator is looking (spec §3.5): the list narrows to their address.
+    /// drawn and revealed where the operator is looking (spec §3.5): the list narrows to their address, and says so.
     /// </summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task A_person_created_off_the_page_on_screen_is_still_shown()
+    public async Task A_person_created_off_the_page_on_screen_is_still_shown_and_lit()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/access");
         var search = session.Page.GetByRole(AriaRole.Searchbox, new() { Name = "Find a person by address" });
         await search.FillAsync("nobody-matches");
-        await session.Content.GetByText("Nobody’s address contains “nobody-matches”").WaitForAsync();
+        await session.Page.GetByTestId("people-search-clear").WaitForAsync();
 
-        await session.CreatePersonAsync("zz-arrived@alvo.test");
+        var id = await session.CreatePersonAsync("zz-arrived@alvo.test");
 
+        var row = session.Page.Locator($"#person-{id}");
+        await session.WaitForInViewAsync(row);
+        (await row.Locator("..").GetAttributeAsync("data-alvo-new")).ShouldBe("true", "a created person is lit");
         (await search.InputValueAsync()).ShouldBe("zz-arrived@alvo.test");
-        (await session.Content.InnerTextAsync()).ShouldNotContain("nobody-matches");
+        var revealing = session.Page.GetByTestId("people-revealing");
+        (await revealing.InnerTextAsync()).ShouldContain("Showing the person you created");
+
+        await revealing.GetByRole(AriaRole.Button, new() { Name = "Clear the search" }).ClickAsync();
+        await revealing.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        (await search.InputValueAsync()).ShouldBeEmpty();
         session.AssertConsoleClean();
     }
 
@@ -66,5 +91,40 @@ public sealed class PeoplePagingScenarios(AdminWorld world) : IClassFixture<Admi
         {
             await people.CreateAsync(new AlvoUserCreation(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"person-{i:D2}@alvo.test"), []));
         }
+    }
+}
+
+/// <summary>
+/// The Data grid's pager keeps focus when the pressed button goes with the page it led away from (spec §3.2's
+/// "never &lt;body&gt;", applied to a pager; the Access list does the same). Its own world: 26 regions, one more than a
+/// page.
+/// </summary>
+/// <param name="world">The running host and browser.</param>
+public sealed class GridPagerFocusScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+{
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_last_page_hands_focus_from_Next_to_Previous_and_back()
+    {
+        using (var scope = world.Services.CreateScope())
+        {
+            var data = scope.ServiceProvider.GetRequiredService<IAlvoData>();
+            for (var i = 0; i < 26; i++)
+            {
+                await FieldServiceSeed.RegionAsync(
+                    data, AlvoContext.System(TenantId.New()), string.Create(System.Globalization.CultureInfo.InvariantCulture, $"PAGE-{i:D2}"));
+            }
+        }
+
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/data/regions");
+
+        await session.Page.GetByTestId("grid-next").ClickAsync();
+        await session.Page.GetByTestId("grid-next").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.WaitForFocusInsideAsync("grid-previous");
+
+        await session.Page.GetByTestId("grid-previous").ClickAsync();
+        await session.Page.GetByTestId("grid-previous").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.WaitForFocusInsideAsync("grid-next");
+        session.AssertConsoleClean();
     }
 }

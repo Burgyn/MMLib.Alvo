@@ -48,4 +48,42 @@ public class PeoplePagingTests
 
         paging.Query.Search.ShouldBeNull();
     }
+
+    private static readonly AlvoUser[] _one = [Person("ada@alvo.test")];
+
+    [Fact]
+    public void A_created_person_is_revealed_by_their_address_and_a_search_typed_after_it_is_the_operators_own()
+    {
+        var paging = new PeoplePaging();
+        paging.Next("c1");
+
+        paging.Reveal("zz@alvo.test");
+
+        paging.Query.ShouldBe(new AlvoUserQuery("zz@alvo.test", 50, After: null));
+        paging.Revealing.ShouldBeTrue();
+        paging.HasEarlier.ShouldBeFalse();
+
+        paging.Find("zz");
+        paging.Revealing.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Only_an_unsearched_single_page_with_room_on_it_shows_everybody()
+    {
+        new PeoplePaging().ShowsEverybody(new AlvoUserPage(_one)).ShouldBeTrue();
+
+        new PeoplePaging().ShowsEverybody(new AlvoUserPage(_one, NextCursor: "c1")).ShouldBeFalse("there is a next page");
+        new PeoplePaging().ShowsEverybody(new AlvoUserPage([.. Enumerable.Repeat(_one[0], 50)]))
+            .ShouldBeFalse("a full page: one more person would start the next page");
+
+        var searched = new PeoplePaging();
+        searched.Find("ada");
+        searched.ShowsEverybody(new AlvoUserPage(_one)).ShouldBeFalse("a search hides whoever it does not match");
+
+        var later = new PeoplePaging();
+        later.Next("c1");
+        later.ShowsEverybody(new AlvoUserPage(_one)).ShouldBeFalse("there is a page before this one");
+    }
+
+    private static AlvoUser Person(string email) => new() { Id = UserId.New(), Email = email, RoleNames = [] };
 }

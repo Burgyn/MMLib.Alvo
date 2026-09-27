@@ -15,6 +15,18 @@ public partial class EntityData
     /// <summary>How long typing has to pause before the search runs.</summary>
     private static readonly TimeSpan _searchDelay = TimeSpan.FromMilliseconds(250);
 
+    private static readonly string[] _nextThenPrevious = ["[data-testid='grid-next']", "[data-testid='grid-previous']"];
+    private static readonly string[] _previousThenNext = ["[data-testid='grid-previous']", "[data-testid='grid-next']"];
+
+    /// <summary>
+    /// Where focus goes once the page just read is drawn: the pager button that was pressed unmounts on the first or
+    /// last page, and focus would otherwise fall to the page.
+    /// </summary>
+    private IReadOnlyList<string>? _focusAfterRender;
+
+    /// <summary>Counts focus moves, so each one draws its own <c>FocusFirstOnRender</c>.</summary>
+    private int _focusMoves;
+
     private readonly List<string> _cursors = [];
     private SchemaModel? _schema;
     private EntitySchema? _entity;
@@ -387,6 +399,7 @@ public partial class EntityData
         _cursor = null;
     }
 
+    /// <summary>Moves to the next page; focus stays on Next, or goes to Previous on the last page.</summary>
     private async Task Next()
     {
         if (_page?.NextCursor is { Length: > 0 } next)
@@ -394,9 +407,12 @@ public partial class EntityData
             _cursors.Add(_cursor ?? string.Empty);
             _cursor = next;
             await LoadAsync();
+            _focusAfterRender = _nextThenPrevious;
+            _focusMoves++;
         }
     }
 
+    /// <summary>Moves back a page; focus stays on Previous, or goes to Next on the first page.</summary>
     private async Task Previous()
     {
         if (_cursors.Count > 0)
@@ -404,6 +420,8 @@ public partial class EntityData
             _cursor = _cursors[^1] is { Length: > 0 } previous ? previous : null;
             _cursors.RemoveAt(_cursors.Count - 1);
             await LoadAsync();
+            _focusAfterRender = _previousThenNext;
+            _focusMoves++;
         }
     }
 

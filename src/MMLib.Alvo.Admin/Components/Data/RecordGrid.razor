@@ -116,11 +116,11 @@
     <span class="a-spacer"></span>
     @if (Scope.HasPrevious)
     {
-        <AlvoButton Small="true" OnClick="_ => OnPrevious.InvokeAsync()">Previous</AlvoButton>
+        <AlvoButton Small="true" data-testid="grid-previous" OnClick="_ => OnPrevious.InvokeAsync()">Previous</AlvoButton>
     }
     @if (Scope.Page.NextCursor is { Length: > 0 })
     {
-        <AlvoButton Small="true" OnClick="_ => OnNext.InvokeAsync()">Next</AlvoButton>
+        <AlvoButton Small="true" data-testid="grid-next" OnClick="_ => OnNext.InvokeAsync()">Next</AlvoButton>
     }
 </div>
 @code {
