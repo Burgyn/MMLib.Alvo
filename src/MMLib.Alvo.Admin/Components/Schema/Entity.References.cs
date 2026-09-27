@@ -82,6 +82,9 @@ public partial class Entity
     /// <summary>Whether something the confirm named would leave the apply refusing the descriptor without the entity.</summary>
     private bool EntityRemovalBlocked => _inbound.Any(reference => reference.Blocks);
 
+    /// <summary>Whether this is an applied entity the working copy removed, so the screen reads it and edits nothing.</summary>
+    private bool RemovedHere => !_pending && Copy.Loaded && Copy.RemovedEntities.Contains(EntityName, StringComparer.Ordinal);
+
     /// <summary>The confirm's first sentence: what goes, now and at the apply.</summary>
     private string RemoveEntityConsequence => _pending
         ? "It leaves the working copy with its fields, rules, hooks and indexes. It was never applied, so there is no table to drop."
@@ -109,8 +112,9 @@ public partial class Entity
     }
 
     /// <summary>
-    /// Removes the entity the confirm named, when what points at it — asked again now, not taken from the press —
-    /// still lets the apply accept the copy; otherwise the confirm stays open, naming what arrived since.
+    /// Removes the entity the confirm named, when what points at it — asked again under the copy's lock, in the same
+    /// edit as the removal, not taken from the press — still lets the apply accept the copy; otherwise the confirm stays
+    /// open, naming what arrived since.
     /// </summary>
     /// <remarks>
     /// The verb leaves the screen, so focus is the list's heading, which the router gives it (spec §3.2). The unsaved
@@ -119,18 +123,21 @@ public partial class Entity
     /// </remarks>
     private void RemoveEntity()
     {
-        _inbound = Copy.ReferencesToEntity(EntityName);
-        if (DeclaredHere && EntityRemovalBlocked)
+        var removed = EntityName;
+        var declared = DeclaredHere;
+        if (declared)
         {
-            return;
+            _inbound = Copy.RemoveEntityUnlessReferenced(removed);
+            if (EntityRemovalBlocked)
+            {
+                return;
+            }
         }
 
-        var removed = EntityName;
         _removingEntity = false;
         _ruleDrafts.Clear();
-        if (DeclaredHere)
+        if (declared)
         {
-            Copy.RemoveEntity(removed);
             Snackbar.Confirm(StagedWords.Removed("Entity", removed));
         }
 

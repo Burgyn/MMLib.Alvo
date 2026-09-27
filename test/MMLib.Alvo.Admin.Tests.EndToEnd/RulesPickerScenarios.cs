@@ -47,6 +47,35 @@ public sealed class RulesPickerScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.GetByTestId("simulate-pending").WaitForAsync();
         session.AssertConsoleClean();
     }
+
+    /// <summary>
+    /// The page follows the working copy (Task 7 fix round 1, ruling 6): a pending entity another tab removes takes its
+    /// tab away, and the page it was on leaves for the first entity's rules.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_pending_entity_removed_in_another_tab_leaves_the_rules_page()
+    {
+        await using var watcher = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await using var remover = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await remover.GoAsync("/schema");
+        await remover.Button("New entity", exact: true).ClickAsync();
+        await remover.Dialog("new-entity").GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync("quotes");
+        await remover.Button("Add to the working copy").ClickAsync();
+        await remover.Page.WaitForURLAsync("**/schema/quotes");
+
+        await watcher.GoAsync("/rules/quotes");
+        await watcher.Page.GetByTestId("rules-pending").WaitForAsync();
+
+        await remover.Page.GetByTestId("remove-entity").ClickAsync();
+        await remover.Dialog("remove-entity-sheet").GetByRole(AriaRole.Textbox).FillAsync("quotes");
+        await remover.Dialog("remove-entity-sheet").GetByTestId("remove-entity-confirm").ClickAsync();
+        await remover.Page.WaitForURLAsync("**/admin/schema");
+
+        await watcher.Page.WaitForURLAsync(url => url.EndsWith("/admin/rules", StringComparison.Ordinal));
+        await watcher.Page.GetByRole(AriaRole.Tab, new() { Name = "quotes", Exact = true })
+            .WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        watcher.AssertConsoleClean();
+    }
 }
 
 /// <summary>Past six entities the Rules picker is a select, and choosing an option opens that entity's rules.</summary>

@@ -656,18 +656,22 @@ public sealed class RenameScenarios(AdminWorld world) : IClassFixture<AdminWorld
     }
 
     /// <summary>An entity name the schema cannot carry is refused, with the pattern.</summary>
+    /// <remarks>
+    /// On <c>customers</c>, which no fact in this class renames: <see cref="An_entity_rename_is_carried_rather_than_dropped"/>
+    /// moves <c>regions</c>, and a screen whose entity the copy no longer declares offers no Rename (Task 7 fix round 1).
+    /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task An_entity_name_the_schema_cannot_carry_is_refused()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await session.GoAsync("/schema/regions");
+        await session.GoAsync("/schema/customers");
 
         await session.Page.ClickAsync("[data-testid='rename-entity']");
         await session.Page.FillAsync("#rename-entity-name", "Service Areas");
         await session.Page.ClickAsync("[data-testid='rename-save']");
 
         await session.Dialog("rename-sheet").GetByTestId("error-panel").WaitForAsync();
-        session.Page.Url.ShouldContain("/schema/regions");
+        session.Page.Url.ShouldContain("/schema/customers");
 
         session.AssertConsoleClean();
     }

@@ -5,6 +5,7 @@
 @inject AdminSession Session
 @inject NavigationManager Navigation
 @inject ILogger<Rules> Logger
+@implements IDisposable
 
 <PageTitle>Rules · Alvo</PageTitle>
 
@@ -144,6 +145,11 @@
     /// </summary>
     private IReadOnlyList<string> _names = [];
     private IReadOnlySet<string> _pending = new HashSet<string>();
+
+    /// <summary>This operator's working copy, followed so a pending tab comes and goes as the copy changes.</summary>
+    private WorkingCopy? _copy;
+    private string _appliedJson = "{}";
+    private readonly ComponentLifetime _lifetime = new();
     private IReadOnlyList<KeyValuePair<string, string>> _rules = [];
     private ManagementPolicyVerdict? _verdict;
     private AdminProblem? _problem;
@@ -187,9 +193,9 @@
         {
             _schema = await Gateway.SchemaAsync(CancellationToken.None);
             var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
-            var copy = await Session.WorkingCopyAsync(CancellationToken.None);
-            ReadEntities(copy);
-            _rules = DescriptorLens.Rules(SelectedIsPending ? copy.Json : descriptor.DescriptorJson, Selected);
+            _appliedJson = descriptor.DescriptorJson;
+            await FollowCopyAsync();
+            ReadEntities();
 
             if (_callers.Count == 0)
             {
@@ -234,14 +240,54 @@
         }
     }
 
-    /// <summary>The applied entities and, after them, the ones only the working copy declares (§8d item 28's rule).</summary>
-    /// <param name="copy">This operator's working copy, loaded.</param>
-    private void ReadEntities(WorkingCopy copy)
+    /// <inheritdoc />
+    public void Dispose() => _lifetime.Dispose();
+
+    /// <summary>
+    /// Takes this operator's copy and follows it, once: the parameters are set again on every move to another
+    /// entity, and the copy is the same across all of them (Entity's and Preview's idiom).
+    /// </summary>
+    private async Task FollowCopyAsync()
+    {
+        if (_copy is null)
+        {
+            _copy = await Session.WorkingCopyAsync(_lifetime.Token);
+            Session.Follow(_copy, InvokeAsync, OnCopyChanged, _lifetime.Token);
+        }
+    }
+
+    /// <summary>
+    /// The applied entities and, after them, the ones only the working copy declares (§8d item 28's rule), with the
+    /// selected entity's rules from whichever of the two it is in.
+    /// </summary>
+    private void ReadEntities()
     {
         var applied = _schema!.Entities.Select(entity => entity.Name).ToList();
-        _pending = copy.Entities.Where(name => !applied.Contains(name, StringComparer.Ordinal))
-            .ToHashSet(StringComparer.Ordinal);
-        _names = [.. applied, .. copy.Entities.Where(_pending.Contains)];
+        var declared = _copy?.Entities ?? [];
+        _pending = declared.Where(name => !applied.Contains(name, StringComparer.Ordinal)).ToHashSet(StringComparer.Ordinal);
+        _names = [.. applied, .. declared.Where(_pending.Contains)];
+        _rules = DescriptorLens.Rules(SelectedIsPending ? _copy!.Json : _appliedJson, Selected);
+    }
+
+    /// <summary>
+    /// Redraws the picker and a pending entity's rules when the copy changes — a Discard or a removal in another tab
+    /// takes its tab away, and an entity that is gone leaves for the first one rather than drawing rules for nothing.
+    /// </summary>
+    private void OnCopyChanged()
+    {
+        if (_schema is null)
+        {
+            return;
+        }
+
+        ReadEntities();
+        if (EntityName is { } named && !_names.Contains(named, StringComparer.Ordinal))
+        {
+            Navigation.NavigateTo(AdminPaths.Rules(), replace: true);
+            return;
+        }
+
+        StateHasChanged();
     }
 
     private void Choose(string entity) => Navigation.NavigateTo(AdminPaths.Rules(entity));

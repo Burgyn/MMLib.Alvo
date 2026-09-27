@@ -618,12 +618,13 @@ namespace MMLib.Alvo.Admin.Components.Rules
     [Microsoft.AspNetCore.Authorization.Authorize]
     [Microsoft.AspNetCore.Components.Route("/admin/rules")]
     [Microsoft.AspNetCore.Components.Route("/admin/rules/{EntityName}")]
-    public class Rules : Microsoft.AspNetCore.Components.ComponentBase
+    public class Rules : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public Rules() { }
         [Microsoft.AspNetCore.Components.Parameter]
         public string? EntityName { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
         protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
     }
     public class RulesTab : Microsoft.AspNetCore.Components.ComponentBase

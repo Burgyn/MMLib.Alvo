@@ -33,7 +33,7 @@ internal static class EntityReferences
     {
         if (root["entities"] is JsonObject entities)
         {
-            foreach (var field in entities.Select(entity => entity.Value?["fields"]).OfType<JsonObject>()
+            foreach (var field in entities.Where(entity => Enters(entity.Key)).Select(entity => entity.Value?["fields"]).OfType<JsonObject>()
                          .SelectMany(fields => fields.Select(pair => pair.Value)).OfType<JsonObject>())
             {
                 RenameInField(field, from, to);
@@ -77,23 +77,39 @@ internal static class EntityReferences
         }
     }
 
-    /// <summary>The objects under a node, taken before anything is rewritten, and never a payload's.</summary>
+    /// <summary>
+    /// The objects under a node, taken before anything is rewritten, and never a payload's, a <c>mutate</c>'s or an
+    /// <c>x-*</c> extension's: those hold data and free-form annotations, not names in the descriptor.
+    /// </summary>
     private static List<JsonObject> Children(JsonObject node)
-        => [.. node.Where(pair => !string.Equals(pair.Key, "payload", StringComparison.Ordinal))
+        => [.. node.Where(pair => Enters(pair.Key))
             .SelectMany(pair => pair.Value is JsonArray array ? (IEnumerable<JsonNode?>)array : [pair.Value])
             .OfType<JsonObject>()];
 
     /// <summary>
-    /// Every place outside the entity that names it, and whether removing the entity would leave the apply refusing
-    /// the descriptor — a ref (<c>DescriptorValidator.cs:419</c>), a rollup (<c>RollupResolver.cs:186</c>) or an
-    /// <c>entity.update</c> action does; a trigger pattern is named and does not block (automation is warned).
+    /// Whether a walk for names goes under <paramref name="key"/>: not into an action's <c>payload</c> or a before-hook's
+    /// <c>mutate</c> (values written to a record, where an object shaped like an action is a literal), nor into an
+    /// <c>x-*</c> extension (the schema's free-form annotations, which the build never reads).
+    /// </summary>
+    /// <param name="key">The key the child sits under.</param>
+    private static bool Enters(string key)
+        => !string.Equals(key, "payload", StringComparison.Ordinal)
+            && !string.Equals(key, "mutate", StringComparison.Ordinal)
+            && !key.StartsWith("x-", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Every place outside the entity that names it, each with what becomes of it; a place blocks the removal only when
+    /// the apply itself would refuse the descriptor left behind for it — a ref (<c>DescriptorValidator.cs:419</c>) or a
+    /// rollup's <c>from</c> (<c>RollupResolver.cs:186</c>).
     /// </summary>
     /// <remarks>
     /// <para>What the entity declares about itself — a self-ref, its own hooks — goes with it and is not named.</para>
     /// <para>
-    /// An <c>entity.update</c> action is refused by the apply today whatever it names (<c>ActionVocabulary.EntityUpdate</c>,
-    /// declared by the schema and refused when a descriptor is applied); it is named as blocking because the removal
-    /// would add a second reason, and the one that outlives the first once the action type is honoured.
+    /// <b>Named, and not blocking</b>, because nothing in this build refuses them for naming a missing entity:
+    /// an <c>entity.update</c> action in a hook is refused by the after-hook compiler whatever it names
+    /// (<c>AfterHookCompiler.RefuseAction</c>, <c>UnhonouredFeatures.UnhonouredAction</c>), so the removal adds no
+    /// refusal; one in an automation rule, and every trigger pattern, is never compiled — the <c>automation</c> and
+    /// <c>functions</c> blocks are only warned about as a whole (<c>UnhonouredSubsystems.All</c>).
     /// </para>
     /// </remarks>
     /// <param name="root">The working document.</param>
@@ -103,7 +119,7 @@ internal static class EntityReferences
         var found = new List<DescriptorReference>();
         if (root["entities"] is JsonObject entities)
         {
-            foreach (var (owner, node) in entities.Where(pair => pair.Key != entity))
+            foreach (var (owner, node) in entities.Where(pair => pair.Key != entity && Enters(pair.Key)))
             {
                 InboundFields(owner, node?["fields"] as JsonObject, entity, found);
             }
@@ -124,19 +140,20 @@ internal static class EntityReferences
         {
             if (Is(node?["type"], "ref") && Is(node?["entity"], entity))
             {
-                found.Add(new($"{owner}.{name}", Blocks: true));
+                found.Add(new($"{owner}.{name}", Blocks: true, EntityRemovalWords.Ref));
             }
 
             if (node?["rollup"] is JsonObject rollup && Is(rollup["from"], entity))
             {
-                found.Add(new($"{owner}.{name} rollup", Blocks: true));
+                found.Add(new($"{owner}.{name} rollup", Blocks: true, EntityRemovalWords.Rollup));
             }
         }
     }
 
     /// <summary>
     /// Walks the whole document for <c>entity.update</c> actions and trigger patterns naming the entity, past its own
-    /// declaration and every payload (<see cref="RenameInActionsAndTriggers"/>'s places, read instead of rewritten).
+    /// declaration and what <see cref="Enters"/> keeps out (<see cref="RenameInActionsAndTriggers"/>'s places, read
+    /// instead of rewritten).
     /// </summary>
     /// <param name="node">The object being read.</param>
     /// <param name="path">Its dotted path from the root, which is the place an operator is shown.</param>
@@ -146,16 +163,16 @@ internal static class EntityReferences
     {
         if (Is(node["type"], "entity.update") && Is(node["entity"], entity))
         {
-            found.Add(new(path, Blocks: true));
+            found.Add(new(path, Blocks: false, EntityRemovalWords.Action(path)));
         }
 
         if (node["event"] is JsonValue value && value.TryGetValue<string>(out var pattern)
             && pattern.StartsWith($"entity.{entity}.", StringComparison.Ordinal))
         {
-            found.Add(new(path, Blocks: false));
+            found.Add(new(path, Blocks: false, EntityRemovalWords.Trigger(path)));
         }
 
-        foreach (var (key, child) in node.Where(pair => pair.Key != "payload" && !(path == "entities" && pair.Key == entity)))
+        foreach (var (key, child) in node.Where(pair => Enters(pair.Key) && !(path == "entities" && pair.Key == entity)))
         {
             foreach (var (at, item) in Items(key, child))
             {

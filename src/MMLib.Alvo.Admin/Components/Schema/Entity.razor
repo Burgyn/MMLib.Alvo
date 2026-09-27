@@ -15,12 +15,10 @@
                 Subtitle="@(_entity is null ? null : _entity.Description ?? "This entity has no description in the descriptor.")">
         <Secondary>
             <AlvoButton Small="true" Href="@AdminPaths.Records(EntityName)">Browse records</AlvoButton>
-            @if (Copy.Loaded)
-            {
-                <AlvoButton Small="true" data-testid="rename-entity" OnClick="_ => OpenRename()">Rename</AlvoButton>
-            }
+            @* Every edit waits on DeclaredHere: on an entity the copy removed, each would be a control that did nothing. *@
             @if (DeclaredHere)
             {
+                <AlvoButton Small="true" data-testid="rename-entity" OnClick="_ => OpenRename()">Rename</AlvoButton>
                 <AlvoButton Small="true" data-testid="remove-entity" OnClick="_ => OpenRemoveEntity()">Remove</AlvoButton>
             }
         </Secondary>
@@ -102,8 +100,11 @@
         @foreach (var reference in _inbound)
         {
             <ListRow data-testid="entity-reference">
-                <code class="a-mono a-listrow__key">@reference.Place</code>
-                <span class="@($"a-badge {(reference.Blocks ? "a-badge--danger" : "a-badge--warn")}")">
+                <span class="a-grow">
+                    <code class="a-mono a-listrow__key">@reference.Place</code>
+                    <span class="a-meta">@reference.Why</span>
+                </span>
+                <span class="@($"a-badge {(reference.Blocks ? "a-badge--danger" : "a-badge--warn")} a-listrow__aside")">
                     @(reference.Blocks ? "points here" : "names it")
                 </span>
             </ListRow>
@@ -111,13 +112,9 @@
         @if (EntityRemovalBlocked)
         {
             <Refusal data-testid="remove-entity-blocked">
-                A ref, a rollup or an action still points here, and the apply refuses a descriptor that points at an
-                entity it does not declare. Change or remove them first.
+                A ref or a rollup still points here, and the apply refuses one that points at an entity the descriptor
+                does not declare. Change or remove them first.
             </Refusal>
-        }
-        else if (_inbound.Count > 0)
-        {
-            <p class="a-hint">A trigger that names it stops firing. The apply warns about it; it does not refuse it.</p>
         }
     </AlvoConfirm>
 
@@ -146,7 +143,7 @@
             {
                 <span class="a-badge a-badge--warn">not applied yet</span>
             }
-            else if (Copy.Loaded && Copy.RemovedEntities.Contains(EntityName, StringComparer.Ordinal))
+            else if (RemovedHere)
             {
                 <span class="a-badge a-badge--danger" data-testid="entity-removed">removed — not applied yet</span>
             }
@@ -169,6 +166,10 @@
             }
             <span class="a-badge">@(_entity.Storage == EntityStorage.Physical ? "physical table" : "dynamic")</span>
         </div>
+        @if (RemovedHere)
+        {
+            <p class="a-note" data-testid="entity-removed-note">Removed in the working copy — Discard or apply to change this.</p>
+        }
 
         @*
             MudTabs owns the WAI-ARIA tabs pattern now: the arrows move focus along the strip, Enter or Space opens
@@ -239,14 +240,14 @@
                                AppliedJson="@(Copy.Loaded ? Copy.AppliedJson : null)" />
                 break;
             case EntityTabs.Rules:
-                <RulesTab Rules="_working" Entity="@EntityName" Editable="true" OnChanged="SetRule" />
+                <RulesTab Rules="_working" Entity="@EntityName" Editable="DeclaredHere" OnChanged="SetRule" />
                 break;
             case EntityTabs.OnWrite:
-                <HooksTab Hooks="@_hooks" Editable="Copy.Loaded" Refused="_refused"
+                <HooksTab Hooks="@_hooks" Editable="DeclaredHere" Refused="_refused"
                           OnAdd="AddHook" OnRemove="RemoveHook" />
                 break;
             case EntityTabs.Indexes:
-                <Indexes Entity="@IndexView(_entity!)" Declared="_indexes" Editable="Copy.Loaded"
+                <Indexes Entity="@IndexView(_entity!)" Declared="_indexes" Editable="DeclaredHere"
                          OnAdd="AddIndex" OnRemove="RemoveIndex" />
                 break;
             case EntityTabs.Api:
@@ -263,7 +264,7 @@
     private RenderFragment FieldsTab => @<text>
         <SectionHead Title="Declared fields">
             <Actions>
-                @if (Copy.Loaded)
+                @if (DeclaredHere)
                 {
                     <AlvoButton Small="true" data-testid="add-field" OnClick="_ => AddField()">New field</AlvoButton>
                 }
