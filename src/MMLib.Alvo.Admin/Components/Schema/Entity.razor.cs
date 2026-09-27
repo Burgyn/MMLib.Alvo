@@ -33,6 +33,7 @@ public partial class Entity
     private IReadOnlyList<StagedField> _fields = [];
     private IReadOnlyList<RollupSource> _rollupSources = [];
     private StagedView _staged = StagedView.None;
+    private FieldDeclarations _declarations = FieldDeclarations.None;
     private readonly ComponentLifetime _lifetime = new();
     private WorkingCopy? _followed;
     private IDisposable? _following;
@@ -275,6 +276,7 @@ public partial class Entity
             Copy.StagedHooksOf(EntityName),
             EventCallback.Factory.Create<string>(this, RestoreField));
         _rollupSources = RollupSources.For(Copy.Json, EntityName);
+        _declarations = Copy.Loaded ? FieldDeclarations.From(Copy.Json, Copy.AppliedJson, EntityName) : FieldDeclarations.None;
         ForgetStaleLeftovers();
     }
 

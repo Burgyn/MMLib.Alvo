@@ -20,9 +20,14 @@
                 <span class="@($"a-badge {(removed ? "a-badge--danger" : "a-badge--accent")}")"
                       data-testid="@($"staged-{field.Name}")">@Word(staged)</span>
             }
-            @foreach (var facet in FieldBadges.Of(field))
+            @foreach (var facet in FieldBadges.Of(field, Declarations.Of(field.Name)))
             {
                 <span class="a-badge">@facet</span>
+            }
+            @* The schema says a field's description is for the admin UI (#268); on its own line under the facets. *@
+            @if (field.Description is { Length: > 0 } description)
+            {
+                <span class="a-listrow__note" data-testid="@($"field-description-{field.Name}")">@description</span>
             }
         </span>
         @*
@@ -110,6 +115,13 @@
     /// </remarks>
     [CascadingParameter]
     private StagedView Staged { get; set; } = StagedView.None;
+
+    /// <summary>
+    /// Each row's declaration, for the policy and refusals the resolved schema does not carry — cascaded by the entity
+    /// screen, for <see cref="Staged"/>'s reason.
+    /// </summary>
+    [CascadingParameter]
+    private FieldDeclarations Declarations { get; set; } = FieldDeclarations.None;
 
     /// <summary>The field just added, which is scrolled to and lit, cascaded by the entity screen that added it.</summary>
     [CascadingParameter]

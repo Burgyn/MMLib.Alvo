@@ -1082,6 +1082,14 @@
     gap: var(--space-1);
   }
 
+  /* A sentence under a row's facets — a field's description — on a line of its own, so a long one wraps under the
+     badges instead of pushing them along. */
+  .a-listrow__note {
+    flex-basis: 100%;
+    color: var(--dim);
+    font-size: var(--text-sm);
+  }
+
   /* An item that keeps its width while the text beside it wraps. */
   .a-listrow__aside {
     flex: none;

@@ -179,6 +179,43 @@ internal static class DescriptorLens
         return (always, conditional);
     }
 
+    /// <summary>
+    /// How one field declares a <c>boolOrCel</c> policy: <see cref="JsonValueKind.True"/> for every caller,
+    /// <see cref="JsonValueKind.String"/> for a CEL expression, or <see langword="null"/> when it declares none.
+    /// </summary>
+    /// <remarks>
+    /// The one reading of <c>hidden</c>/<c>readOnly</c> the Fields tab and the Data screen share: <c>false</c> is
+    /// no policy, and so is anything the schema would refuse, which the apply explains better than a badge.
+    /// </remarks>
+    /// <param name="field">The field's declaration, when there is one.</param>
+    /// <param name="key"><c>hidden</c> or <c>readOnly</c>.</param>
+    public static JsonValueKind? PolicyOf(JsonElement? field, string key)
+        => field is { } declared && KindOf(declared, key) is var kind and (JsonValueKind.True or JsonValueKind.String)
+            ? kind
+            : null;
+
+    /// <summary>Each field one entity declares, by name, as its declaration's JSON.</summary>
+    /// <param name="descriptorJson">The descriptor, applied or working.</param>
+    /// <param name="entity">The entity to read.</param>
+    /// <returns>The declarations, cloned to outlive the parse; empty when the entity declares none.</returns>
+    public static IReadOnlyDictionary<string, JsonElement> FieldDeclarations(string descriptorJson, string entity)
+    {
+        using var document = Parse(descriptorJson);
+        if (document is null
+            || !document.RootElement.TryGetProperty("entities", out var entities)
+            || entities.ValueKind != JsonValueKind.Object
+            || !entities.TryGetProperty(entity, out var declared)
+            || declared.ValueKind != JsonValueKind.Object
+            || !declared.TryGetProperty("fields", out var fields)
+            || fields.ValueKind != JsonValueKind.Object)
+        {
+            return new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        }
+
+        return fields.EnumerateObject()
+            .ToDictionary(field => field.Name, field => field.Value.Clone(), StringComparer.Ordinal);
+    }
+
     private static JsonValueKind KindOf(JsonElement field, string key)
         => field.ValueKind == JsonValueKind.Object && field.TryGetProperty(key, out var value)
             ? value.ValueKind

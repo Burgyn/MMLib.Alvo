@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Schema;
+﻿using MMLib.Alvo.Admin.Internal;
+using MMLib.Alvo.Schema;
 using System.Globalization;
 using System.Text.Json;
 
@@ -16,16 +17,42 @@ internal static class FieldBadges
 {
     private const int LiteralBadgeLimit = 24;
 
+    /// <summary>The two <c>boolOrCel</c> policies a field declares, in the order they are badged.</summary>
+    private static readonly string[] _policies = ["hidden", "readOnly"];
+
     /// <summary>The badges, ordered so the ones that change what a caller may send come first.</summary>
     /// <param name="field">The field, applied or staged.</param>
     /// <returns>Its badges, in the order the row draws them.</returns>
     /// <remarks>
     /// A reader scanning the column is looking for "what will this reject", not for the storage detail.
     /// </remarks>
-    public static IEnumerable<string> Of(FieldSchema field)
+    public static IEnumerable<string> Of(FieldSchema field) => Of(field, declared: null);
+
+    /// <summary>The badges, with the policy only the declaration carries.</summary>
+    /// <param name="field">The field, applied or staged.</param>
+    /// <param name="declared">Its declaration in the descriptor, when the screen has it.</param>
+    /// <returns>Its badges, in the order the row draws them.</returns>
+    /// <remarks>
+    /// <c>hidden</c> and <c>readOnly</c> are policy the resolved <see cref="FieldSchema"/> does not carry (#267), so
+    /// they are read off the declaration — the same reading <c>DescriptorLens.Masks</c>/<c>Locks</c> give the Data
+    /// screen. They follow the constraints: they change what a caller may send and see, not how a column is stored.
+    /// </remarks>
+    public static IEnumerable<string> Of(FieldSchema field, JsonElement? declared)
     {
         ArgumentNullException.ThrowIfNull(field);
-        return [.. Constraints(field), .. Storage(field), .. Maintenance(field)];
+        return [.. Constraints(field), .. Policy(declared), .. Storage(field), .. Maintenance(field)];
+    }
+
+    /// <summary><c>hidden</c>, then <c>readOnly</c>: <c>true</c> for every caller, a CEL string for some.</summary>
+    private static IEnumerable<string> Policy(JsonElement? declared)
+    {
+        foreach (var key in _policies)
+        {
+            if (DescriptorLens.PolicyOf(declared, key) is { } form)
+            {
+                yield return form == JsonValueKind.True ? key : $"{key} (conditional)";
+            }
+        }
     }
 
     /// <summary>What a caller may send: required, an explicit nullability, the default, unique, the format.</summary>
