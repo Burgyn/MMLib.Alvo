@@ -60,20 +60,28 @@
 
         @*
             A normal panel under the stats rather than the centred dashed callout it was: it lists
-            facts about blocks this project declared, and the callout's shape — kept for empty states —
-            made a list of consequences read as one. The heading claims only what is true of every row;
-            DeclaredLimits says why the rows are not split into "not running" and "partly running".
+            facts about what this project declared, and the callout's shape — kept for empty states —
+            made a list of consequences read as one. Every key the build ignores is said here (§8d item 27):
+            the build's warned rows in its own words, then the metadata this dashboard does not show, in the
+            dashboard's. DeclaredLimits says why the rows are not split into "not running" and "partly running".
         *@
-        @if (Declared.Count > 0)
+        @if (Declared.Count > 0 || Unshown.Count > 0)
         {
-            <Panel Title="Declared, with limits in this build" data-testid="overview-limits">
-                <Subtitle>Parts of these blocks are not honoured yet — each says which.</Subtitle>
+            <Panel Title="Declared, not honoured by this build" data-testid="overview-limits">
+                <Subtitle>Each row says what does not happen. Some of these blocks run in part, and their row says which.</Subtitle>
                 <ChildContent>
                     @foreach (var block in Declared)
                     {
                         <ListRow data-testid="@($"overview-limit-{block.Block}")">
                             <span class="a-listrow__type"><span class="a-badge a-badge--warn a-mono">@block.Block</span></span>
                             <p class="a-note">@block.Consequence</p>
+                        </ListRow>
+                    }
+                    @foreach (var key in Unshown)
+                    {
+                        <ListRow data-testid="@($"overview-unshown-{key.Key}")">
+                            <span class="a-listrow__type"><span class="a-badge a-mono">@key.Key</span></span>
+                            <p class="a-note">@key.Sentence</p>
                         </ListRow>
                     }
                 </ChildContent>
@@ -155,6 +163,9 @@
     /// <summary>The warned blocks this descriptor declares (§4.2) — see <see cref="DeclaredLimits"/>.</summary>
     private IReadOnlyList<ManagementWarnedBlock> Declared { get; set; } = [];
 
+    /// <summary>The project metadata this descriptor declares and this dashboard does not show — see <see cref="DeclaredLimits"/>.</summary>
+    private IReadOnlyList<UnshownKey> Unshown { get; set; } = [];
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -165,6 +176,7 @@
             _info = await Gateway.InfoAsync(CancellationToken.None);
             _revisions = await Gateway.RevisionsAsync(CancellationToken.None);
             Declared = DeclaredLimits.Of(_descriptor.DescriptorJson, _capabilities);
+            Unshown = DeclaredLimits.Unshown(_descriptor.DescriptorJson);
             _rules = DescriptorLens.RuleCount(_descriptor.DescriptorJson);
             _roles = DescriptorLens.DeclaredRoles(_descriptor.DescriptorJson).Count;
         }

@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Components.Routing;
 using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Admin.Components.DesignSystem;
+using MMLib.Alvo.Admin.Components.Home;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;
@@ -27,6 +28,9 @@ public partial class Entity
     private IReadOnlyList<KeyValuePair<string, string>> _hooks = [];
     private IReadOnlyList<string> _entities = [];
     private IReadOnlyList<ManagementRefusedFeature> _refused = [];
+
+    /// <summary>The build's sentence on a <c>storage: dynamic</c> entity, when it reports one (§8d item 21).</summary>
+    private ManagementWarnedBlock? _storageWarning;
     private IReadOnlyList<KeyValuePair<string, string>> _working = [];
     private IReadOnlyList<IndexSchema> _indexes = [];
     private IReadOnlyList<string> _fieldNames = [];
@@ -97,7 +101,10 @@ public partial class Entity
         _schema = await Gateway.SchemaAsync(ct);
         _entity = _schema.Entities.FirstOrDefault(
             entity => string.Equals(entity.Name, EntityName, StringComparison.Ordinal));
-        _refused = (await Gateway.CapabilitiesAsync(ct)).Refused;
+        var capabilities = await Gateway.CapabilitiesAsync(ct);
+        _refused = capabilities.Refused;
+        _storageWarning = capabilities.Warned.FirstOrDefault(
+            block => string.Equals(block.Block, DeclaredSlots.EntityStorage, StringComparison.Ordinal));
         _rules = DescriptorLens.Rules((await Gateway.DescriptorAsync(ct)).DescriptorJson, EntityName);
         _entities = [.. _schema.Entities.Select(entity => entity.Name)];
 

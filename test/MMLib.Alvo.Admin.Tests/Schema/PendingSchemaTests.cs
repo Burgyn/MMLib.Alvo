@@ -36,6 +36,27 @@ public class PendingSchemaTests
         => PendingSchema.Read("""{"entities":{"tickets":{"fields":{"t":{"type":"string"}}}}}""", "tickets")!
             .Tenancy.ShouldBeNull();
 
+    /// <summary>
+    /// A pending entity keeps its declared storage, so the header badges it <c>dynamic</c> rather than
+    /// <c>physical table</c> (docs/todo-admin.md §8d item 21).
+    /// </summary>
+    [Theory]
+    [InlineData(",\"storage\":\"dynamic\"", EntityStorage.Dynamic)]
+    [InlineData(",\"storage\":\"physical\"", EntityStorage.Physical)]
+    [InlineData("", EntityStorage.Physical)]
+    public void A_pending_entity_keeps_its_declared_storage(string storage, EntityStorage expected)
+        => PendingSchema.Read("""{"entities":{"notes":{"fields":{}""" + storage + "}}}", "notes")!
+            .Storage.ShouldBe(expected);
+
+    [Fact]
+    public void The_dynamic_entities_of_a_copy_are_named()
+        => PendingSchema.Dynamic("""{"entities":{"a":{"storage":"dynamic"},"b":{},"c":{"storage":"physical"}}}""")
+            .ShouldBe(["a"]);
+
+    [Fact]
+    public void A_copy_that_does_not_parse_has_no_dynamic_entities()
+        => PendingSchema.Dynamic("{ nope").ShouldBeEmpty();
+
     [Fact]
     public void A_staged_field_keeps_its_index_its_default_and_its_nullability()
     {

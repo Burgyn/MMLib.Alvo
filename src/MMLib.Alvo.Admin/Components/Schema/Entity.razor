@@ -139,7 +139,11 @@
     else
     {
         <div class="a-row a-row--gap-2 a-row--wrap">
-            @if (_pending)
+            @if (_pending && _entity.Storage == EntityStorage.Dynamic)
+            {
+                <span class="a-badge a-badge--warn" data-testid="entity-dynamic">@DynamicStorageWords.Badge</span>
+            }
+            else if (_pending)
             {
                 <span class="a-badge a-badge--warn">not applied yet</span>
             }
@@ -166,6 +170,11 @@
             }
             <span class="a-badge">@(_entity.Storage == EntityStorage.Physical ? "physical table" : "dynamic")</span>
         </div>
+        @if (_pending && _entity.Storage == EntityStorage.Dynamic && _storageWarning is { } storage)
+        {
+            @* The build's own sentence, served verbatim (§2.3). *@
+            <p class="a-note" data-testid="entity-dynamic-note"><code class="a-mono">storage: dynamic</code> — @storage.Consequence</p>
+        }
         @if (RemovedHere)
         {
             <p class="a-note" data-testid="entity-removed-note">Removed in the working copy — Discard or apply to change this.</p>

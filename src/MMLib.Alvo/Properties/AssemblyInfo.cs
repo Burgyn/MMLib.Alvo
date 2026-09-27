@@ -40,4 +40,6 @@
 // what lets them substitute the socket under the production HTTP client instead of asserting against a
 // hard-coded client name. The alternative was to repeat the string, and two authorities for the name of the
 // client a delivery goes through is how a fact comes to substitute a handler nothing resolves.
+// And a second: CapabilityReport, which DeclaredSlotsAgreementTests holds against the dashboard's own reader of
+// the warned slots — the one suite that sees both assemblies' internals (docs/todo-admin.md §8d item 27).
 [assembly: InternalsVisibleTo("MMLib.Alvo.Host.Tests")]

@@ -67,20 +67,6 @@ internal static class DescriptorLens
             .Sum();
     }
 
-    /// <summary>The top-level blocks this descriptor declares.</summary>
-    public static IReadOnlySet<string> DeclaredBlocks(string descriptorJson)
-    {
-        using var document = Parse(descriptorJson);
-        if (document?.RootElement.ValueKind != JsonValueKind.Object)
-        {
-            return new HashSet<string>(StringComparer.Ordinal);
-        }
-
-        return document.RootElement.EnumerateObject()
-            .Select(property => property.Name)
-            .ToHashSet(StringComparer.Ordinal);
-    }
-
     /// <summary>The role names <c>auth.roles</c> declares.</summary>
     public static IReadOnlyList<string> DeclaredRoles(string descriptorJson)
     {

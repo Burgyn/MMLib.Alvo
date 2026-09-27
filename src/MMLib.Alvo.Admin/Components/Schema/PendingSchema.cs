@@ -61,11 +61,46 @@ internal static class PendingSchema
     {
         Name = entity,
         Description = String(declared, "description"),
+        Storage = StorageOf(declared),
         Tenancy = Tenancy(String(declared, "tenancy"), tenancyEnabled),
         Audit = Flag(declared, "audit"),
         SoftDelete = Flag(declared, "softDelete"),
         Fields = Fields(declared),
     };
+
+    /// <summary>
+    /// The entities a working document declares with <c>storage: dynamic</c> — which this build never creates, so the
+    /// Schema list must not call them "not applied yet" forever (docs/todo-admin.md §8d item 21).
+    /// </summary>
+    /// <param name="descriptorJson">The working document.</param>
+    public static IReadOnlySet<string> Dynamic(string descriptorJson)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        try
+        {
+            using var document = JsonDocument.Parse(descriptorJson);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("entities", out var entities)
+                && entities.ValueKind == JsonValueKind.Object)
+            {
+                names.UnionWith(entities.EnumerateObject()
+                    .Where(entity => StorageOf(entity.Value) == EntityStorage.Dynamic)
+                    .Select(entity => entity.Name));
+            }
+        }
+        catch (JsonException)
+        {
+            /* A document that does not parse declares nothing; the preview explains it. */
+        }
+
+        return names;
+    }
+
+    /// <summary>The declared storage; the schema's default, physical, when it says none.</summary>
+    private static EntityStorage StorageOf(JsonElement entity)
+        => entity.ValueKind == JsonValueKind.Object && String(entity, "storage") == "dynamic"
+            ? EntityStorage.Dynamic
+            : EntityStorage.Physical;
 
     /// <summary>
     /// The mapper's own rule (<c>DescriptorToSchemaMapper.ResolveTenancy</c>): the declared tenancy, else scoped when

@@ -90,6 +90,8 @@
 
         var pending = EntityFilter.Apply(Pending, _filter);
         var applied = EntityFilter.Apply(_schema.Entities.Select(entity => entity.Name), _filter);
+        @* A dynamic entity is never applied by this build, so it is not "not applied yet" (§8d item 21). *@
+        var unbuilt = Copy.Loaded ? PendingSchema.Dynamic(Copy.Json) : new HashSet<string>();
         <Panel Title="@ListTitle(pending.Count + applied.Count)" data-testid="entity-list">
             <Subtitle>
                 What the Data API actually serves — the descriptor after everything that did not
@@ -112,9 +114,16 @@
                         <Icon Path="@Icons.Schema" />
                         <span class="a-grow">
                             <span class="a-mono a-name">@name</span>
-                            <span class="a-meta">In the working copy. It does not exist in the database until you apply.</span>
+                            <span class="a-meta">@(unbuilt.Contains(name) ? DynamicStorageWords.ListNote : "In the working copy. It does not exist in the database until you apply.")</span>
                         </span>
-                        <span class="a-badge a-badge--warn a-listrow__aside">not applied yet</span>
+                        @if (unbuilt.Contains(name))
+                        {
+                            <span class="a-badge a-badge--warn a-listrow__aside" data-testid="@($"entity-dynamic-{name}")">@DynamicStorageWords.Badge</span>
+                        }
+                        else
+                        {
+                            <span class="a-badge a-badge--warn a-listrow__aside">not applied yet</span>
+                        }
                     </ListRow>
                 }
 
