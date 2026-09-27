@@ -90,10 +90,25 @@ public class FieldBadgesTests
     public void An_honoured_form_is_not_refused(string declaration)
         => FieldBadges.Refused(Declared(declaration), _published).ShouldBeEmpty();
 
-    /// <summary>The build is the authority: a slot it no longer publishes is not badged, whatever the field carries.</summary>
+    /// <summary>
+    /// The build is the authority, slot by slot: with every other slot still published, the one it stopped publishing is
+    /// not badged — while the field's other refused facet still is.
+    /// </summary>
     [Fact]
     public void A_slot_the_build_does_not_publish_is_not_badged()
-        => FieldBadges.Refused(Declared("""{"type":"text","validation":"size(this) > 2"}"""), []).ShouldBeEmpty();
+    {
+        var declared = Declared("""{"type":"text","validation":"size(this) > 2","default":{"$cel":"@user.id"}}""");
+        var withoutValidation = _published.Where(refusal => refusal.Slot != "field.validation").ToArray();
+
+        FieldBadges.Refused(declared, _published).Select(refusal => refusal.Slot)
+            .ShouldBe(["field.validation", "field.default"]);
+        FieldBadges.Refused(declared, withoutValidation).ShouldHaveSingleItem().Slot.ShouldBe("field.default");
+    }
+
+    /// <summary>A published slot that belongs to another screen is not a Fields-row refusal, whatever it is called.</summary>
+    [Fact]
+    public void A_slot_another_screen_owns_is_not_badged_on_a_row()
+        => FieldBadges.Refused(Declared("""{"type":"text","softDelete":true}"""), _published).ShouldBeEmpty();
 
     [Fact]
     public void A_row_with_no_declaration_is_refused_nothing()
