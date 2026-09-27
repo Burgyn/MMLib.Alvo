@@ -1,4 +1,6 @@
 ﻿using MMLib.Alvo.Schema;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
@@ -11,6 +13,18 @@ internal sealed partial class FieldFacets
     {
         "type", "required", "unique", "index", "maxLength", "precision", "scale", "values", "entity", "default",
         "rollup", "computed",
+    };
+
+    /// <summary>How a note's value is written: as it was declared, not escaped for HTML.</summary>
+    /// <remarks>
+    /// The default encoder writes an apostrophe as <c>\u0027</c>, so a description reading "The ERP's code" was drawn
+    /// in "Not drawn here" as <c>The ERP\u0027s code</c>. Relaxed escaping is safe for the reason
+    /// <c>WorkingCopy._pretty</c> gives: a note is display text, and the component that draws it HTML-encodes it; it is
+    /// never markup and never a script.
+    /// </remarks>
+    private static readonly JsonSerializerOptions _asWritten = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
     /// <summary>Every declared facet this editor does not draw, with what the save does to it.</summary>
@@ -36,7 +50,7 @@ internal sealed partial class FieldFacets
     /// <summary>One undrawn facet: removed when it belongs to a type the field no longer has, else kept.</summary>
     private FacetNote Undrawn(string facet, JsonNode? value)
     {
-        var json = value?.ToJsonString() ?? "null";
+        var json = value?.ToJsonString(_asWritten) ?? "null";
 
         return _typedFacets.Contains(facet) && OwnerOf(facet) != Type
             ? new(facet, json, FacetFate.Removed, $"belongs to a {Word(OwnerOf(facet))}, which this field no longer is.")
@@ -52,7 +66,7 @@ internal sealed partial class FieldFacets
         }
 
         var reason = fate == FacetFate.Kept ? KeptDefaultReason(declared) : RemovedDefaultReason();
-        return new("default", declared.ToJsonString(), fate, reason);
+        return new("default", declared.ToJsonString(_asWritten), fate, reason);
     }
 
     private string KeptDefaultReason(JsonNode declared)

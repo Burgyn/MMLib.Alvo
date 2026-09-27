@@ -165,6 +165,29 @@ public class FieldFacetsWriteRulesTests
             .ShouldBe([("readOnly", FacetFate.Kept), ("description", FacetFate.Kept)], ignoreOrder: true);
     }
 
+    /// <summary>
+    /// A note's value reads as it was written: an apostrophe, an ampersand or an angle bracket in a description is
+    /// not drawn as <c>\u0027</c> (the audit ledger's Task 2 minor, final branch review item 4).
+    /// </summary>
+    [Fact]
+    public void A_notes_value_is_shown_as_written_not_escaped_for_html()
+    {
+        var editor = FieldFacets.Prefill(
+            "external_ref", """{"type":"string","description":"The ERP's <id> & code","x-note":{"why":"it's"}}""");
+
+        editor.Notes().Single(note => note.Facet == "description").Value.ShouldBe("\"The ERP's <id> & code\"");
+        editor.Notes().Single(note => note.Facet == "x-note").Value.ShouldBe("""{"why":"it's"}""");
+    }
+
+    [Fact]
+    public void A_json_fields_own_default_is_shown_as_written()
+    {
+        const string declared = """{"type":"json","default":{"label":"don't"}}""";
+
+        FieldFacets.Prefill("meta", declared).Notes().Single(note => note.Facet == "default").Value
+            .ShouldBe("""{"label":"don't"}""");
+    }
+
     [Fact]
     public void A_format_is_named_as_removed_once_the_field_is_no_longer_a_string()
     {
