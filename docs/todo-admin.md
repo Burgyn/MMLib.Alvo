@@ -268,8 +268,9 @@ None carries `ready`: they are gaps this audit found, not confirmed specificatio
     "declared, not editable here" panel, as Integrations already does for `webhooks`/`templates`)
     rather than five editors.
     **Partly done** in `aa402bf` + `45edf80` (B2, narrowed by the maintainer's ruling of 27 Sep): the Overview's
-    "Declared, not honoured by this build" panel says `auth.providers` (a provider other than `local`), `realtime`
-    and `dynamicEntities` in the build's own sentences, and `DeclaredLimits` honours `enabled: false` and every other
+    "Declared, not honoured by this build" panel says `auth.providers` (a provider other than `local`), an explicit
+    `realtime: true` and `dynamicEntities` in the build's own sentences (the default realtime is said once, on
+    Settings), and `DeclaredLimits` honours `enabled: false` and every other
     block declined by value. **Still open on #271:** the editors — the `tenancy.enabled` switch (with its plan step
     in Preview), the `formats` editor and the `field.format` picker — and showing `tenancy.enabled` and the declared
     `formats` themselves.
@@ -607,7 +608,9 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     `capabilities.warned`) — warned, not refused, because nothing is wrongly permitted; `PendingSchema` reads
     `storage`, so the list row and the entity header say "dynamic — not honoured by this build (F7, #41)" instead
     of "not applied yet", the header's storage badge reads `dynamic`, and the screen prints the build's sentence.
-    The driver itself stays F7 (#41).
+    Preview (`b903573`) no longer calls a copy that adds or changes a dynamic entity "the schema is unchanged": it
+    names each one, against the applied descriptor, with the build's `entity.storage` sentence, and says the apply
+    records them in the descriptor and appends a revision. The driver itself stays F7 (#41).
 22. ✅ **The staged view of a field loses facets.** `PendingSchema` reads 11 facets; `rollup`, `computed`,
     `index`, `default`, `nullable` vanish from a row the moment it is changed (EC:279-286, PS:78-89), and
     a pending entity without `tenancy` is drawn global. Probably: map the staged field through the same
@@ -629,13 +632,16 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
 27. ✅ **Keys the build ignores without a word** — `auth.providers`, `realtime`, `branding`, project
     `description`, `formats.*.description`. Extends #271/#268: the core should warn (they belong in
     `UnhonouredSubsystems` or a sibling), and the dashboard then renders that warning like the others.
-    **Done** in `aa402bf` + `45edf80`, one answer per key: `auth.providers` other than `local` is warned at apply
-    (slot `auth.providers`, #36); `realtime` is **reported, not warned** — `capabilities.warned` lists
-    `entity.realtime` while the apply stays quiet, since its default is `true` (the recorded deviation in
-    `CapabilityReport`, #38); `branding`, the project `description` and a format's `description` are metadata, so no
-    core row — the Overview says, in the dashboard's own sentence, that this dashboard does not show them yet
-    (#268, #271). All of it on Overview's "Declared, not honoured by this build" panel;
-    `DeclaredSlotsAgreementTests` holds the dashboard's slot reader to the real report.
+    **Done** in `aa402bf` + `45edf80` + `b903573` (B2 fix round 1), one answer per key: `auth.providers` other than
+    `local` is warned at apply (slot `auth.providers`, #36); `realtime` is **reported, not warned** —
+    `capabilities.warned` lists `entity.realtime` while the apply stays quiet, since its default is `true` (the
+    recorded deviation in `CapabilityReport`, #38) — and the default is said **once**, on Settings under *This build*,
+    while the Overview lists `entity.realtime` only where an entity declares `realtime: true`; `branding`, the project
+    `description` and a format's `description` are metadata the build honours, so no core row and no row under
+    "Declared, not honoured by this build" — one quiet line on Overview names what this dashboard does not show yet
+    (#268, #271). `DeclaredSlotsAgreementTests` holds the dashboard's slot names to the real report **and** each
+    reported row's declared-or-not answer to the core's own predicate, over every `examples/*.alvo.json` and the
+    cases declined by value.
 28. ✅ **Ref targets and index candidates are applied-only.** A pending entity cannot be a ref target
     (EC:95); a staged field cannot join an index (Indexes.razor:125). Read both from the working copy.
     **Done:** ref targets and index candidates come from the working copy, and so do the standalone Rules page's entity tabs (a pending entity shows the copy's rules, with no simulation). `users`, the reserved ref target the validator accepts beside the declared entities (`DescriptorValidator.ReservedUsersEntity`), is verified never offered — a separate, pre-existing gap this item did not touch.
