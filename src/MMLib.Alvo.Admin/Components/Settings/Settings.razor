@@ -37,6 +37,13 @@
                         <Detail Label="Realtime" Value="not in this build" Note="@realtime.Consequence" />
                     </div>
                 }
+                else if (_capabilitiesUnread)
+                {
+                    <p class="a-note" data-testid="settings-realtime-unread">
+                        What this build does not honour could not be read just now, so it is not listed here. Reload
+                        to try again.
+                    </p>
+                }
             </ChildContent>
         </Panel>
 
@@ -257,11 +264,35 @@
     /// <summary>The build's sentence on realtime, from <c>capabilities.warned</c>, when it reports one.</summary>
     private ManagementWarnedBlock? _realtime;
 
+    /// <summary>Whether the capabilities read failed, so the realtime row is replaced by one quiet line.</summary>
+    private bool _capabilitiesUnread;
+
     protected override async Task OnInitializedAsync()
     {
         _info = await Gateway.InfoAsync(CancellationToken.None);
-        _realtime = (await Gateway.CapabilitiesAsync(CancellationToken.None)).Warned.FirstOrDefault(
-            block => string.Equals(block.Block, DeclaredSlots.EntityRealtime, StringComparison.Ordinal));
+        await ReadRealtimeAsync();
+    }
+
+    /// <summary>
+    /// Reads the build's realtime sentence; a failure costs only that row (final branch review, item 8).
+    /// </summary>
+    /// <remarks>
+    /// The row is decoration on a page whose job is the build's facts and the AI connection, so a capabilities read
+    /// that fails is absorbed — logged as a fault when it is one — and said in one line, rather than taking every
+    /// other panel to the error boundary with it. The info read above is the page's own, and still fails the page.
+    /// </remarks>
+    private async Task ReadRealtimeAsync()
+    {
+        try
+        {
+            _realtime = (await Gateway.CapabilitiesAsync(CancellationToken.None)).Warned.FirstOrDefault(
+                block => string.Equals(block.Block, DeclaredSlots.EntityRealtime, StringComparison.Ordinal));
+        }
+        catch (Exception exception)
+        {
+            AdminProblem.Absorb(exception, Logger);
+            _capabilitiesUnread = true;
+        }
     }
 
     /// <summary>

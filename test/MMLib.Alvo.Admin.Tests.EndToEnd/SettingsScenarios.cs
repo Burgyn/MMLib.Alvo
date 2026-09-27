@@ -27,6 +27,9 @@ public sealed class SettingsWorld : ConfigurableAssistantWorld
     /// <summary>Whether every info read throws, the way a store that is briefly unreachable does.</summary>
     public bool FailInfoReads { get; set; }
 
+    /// <summary>Whether every capabilities read throws.</summary>
+    public bool FailCapabilityReads { get; set; }
+
     /// <inheritdoc/>
     protected override void Configure(IServiceCollection services)
     {
@@ -51,6 +54,11 @@ public sealed class SettingsWorld : ConfigurableAssistantWorld
 
             return await base.GetInfoAsync(ct).ConfigureAwait(false);
         }
+
+        public override Task<ManagementCapabilities> GetCapabilitiesAsync(string project, CancellationToken ct = default)
+            => world.FailCapabilityReads
+                ? throw new InvalidOperationException("The capability report did not answer.")
+                : base.GetCapabilitiesAsync(project, ct);
 
         public override Task SetAiConnectionAsync(StoredAiConnection connection, CancellationToken ct = default)
             => world.RefuseSaves is { } refusal ? throw refusal() : base.SetAiConnectionAsync(connection, ct);
@@ -113,6 +121,31 @@ public sealed class SettingsScenarios(SettingsWorld world) : IClassFixture<Setti
     /// A save whose read-back failed still happened: the editor says so, and closing it asks nothing, because the
     /// connection it holds is the one stored (final-fix-A re-review, finding 2).
     /// </summary>
+    /// <summary>
+    /// A failed capabilities read costs only the row it feeds (final branch review, item 8): the build's facts and the
+    /// AI connection are still drawn, and one quiet line says what could not be read, where the whole page used to
+    /// go to the error panel for one decorative row.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_failed_capabilities_read_drops_its_row_not_the_page()
+    {
+        world.FailCapabilityReads = true;
+        try
+        {
+            await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+            await session.GoAsync("/settings");
+
+            await session.Page.GetByTestId("settings-realtime-unread").WaitForAsync();
+            (await session.Page.GetByTestId("settings-realtime").CountAsync()).ShouldBe(0);
+            (await session.Page.GetByTestId("error-title").CountAsync()).ShouldBe(0, "the page is not the error panel");
+            (await session.Page.GetByTestId("ai-change").CountAsync()).ShouldBe(1, "the rest of Settings is drawn");
+        }
+        finally
+        {
+            world.FailCapabilityReads = false;
+        }
+    }
+
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task After_a_save_whose_read_back_failed_closing_asks_nothing()
     {
