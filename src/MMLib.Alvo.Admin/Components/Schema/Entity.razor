@@ -110,7 +110,18 @@
             <span class="a-badge">@(_entity.Audit ? "audited" : "not audited")</span>
             @if (_entity.SoftDelete)
             {
-                <span class="a-badge">soft delete</span>
+                @* Only a pending entity can carry it — the apply refuses it (UnhonouredFeatures.OnAnEntity) — and a plain
+                   badge read as a working flag (§8a softDelete row). *@
+                @if (RefusalPlaces.On(RefusalScreen.EntityHeader, _refused).FirstOrDefault() is { } refusal)
+                {
+                    <Refusal data-testid="refused-entity.softDelete">
+                        <code class="a-mono">softDelete</code> — @refusal.Consequence @refusal.Fix
+                    </Refusal>
+                }
+                else
+                {
+                    <span class="a-badge">soft delete</span>
+                }
             }
             <span class="a-badge">@(_entity.Storage == EntityStorage.Physical ? "physical table" : "dynamic")</span>
         </div>

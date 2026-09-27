@@ -80,6 +80,22 @@
             </Panel>
         }
 
+        @* A refusal no screen shows yet is a refusal nobody reads. RefusalPlaces explains why this is the fallback. *@
+        @if (RefusalPlaces.Unplaced(_capabilities!.Refused) is { Count: > 0 } unplaced)
+        {
+            <Panel Title="Refused by this build, shown on no screen yet" data-testid="overview-unplaced">
+                <ChildContent>
+                    @foreach (var refusal in unplaced)
+                    {
+                        <ListRow>
+                            <span class="a-listrow__type"><span class="a-badge a-badge--warn a-mono">@refusal.Slot</span></span>
+                            <p class="a-note">@refusal.Consequence @refusal.Fix</p>
+                        </ListRow>
+                    }
+                </ChildContent>
+            </Panel>
+        }
+
         @*
             The four places an operator goes next, each with the one number that says what is there.
             Only counts this screen already holds or reads from the descriptor it already has: a count

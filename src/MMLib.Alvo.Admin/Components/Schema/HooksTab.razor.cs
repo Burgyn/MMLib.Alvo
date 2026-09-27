@@ -83,14 +83,13 @@ public partial class HooksTab
     /// <param name="Position">Its position within that point's list.</param>
     public sealed record HookAt(string Point, int Position);
 
-    /// <summary>The refusals that are about an action type, which is the only kind this tab can show.</summary>
+    /// <summary>The refusals that are about a hook, which are the only kind this tab can show.</summary>
     /// <remarks>
-    /// Matched against the three discriminators rather than a prefix, because a refusal's slot is the
-    /// feature's own name for an action — <c>entity.update</c>, not <c>action.entity.update</c>.
+    /// The three action types this build never runs (<c>function</c>, <c>http.call</c>, <c>entity.update</c>), plus
+    /// the two refused forms of an after-action's values (<c>JSONata</c>, <c>email.data</c>) — placed by
+    /// <see cref="RefusalPlaces"/>, because a slot is the feature's own name and no prefix finds all five.
     /// </remarks>
-    private IReadOnlyList<ManagementRefusedFeature> ActionRefusals =>
-        [.. Refused.Where(refusal =>
-            refusal.Slot is "function" or "http.call" or "entity.update")];
+    private IReadOnlyList<ManagementRefusedFeature> HookRefusals => RefusalPlaces.On(RefusalScreen.OnWrite, Refused);
 
     /// <summary>Switches the point, which may switch the kind (<see cref="HookBuilder.Choose"/>).</summary>
     private void Choose(string point)

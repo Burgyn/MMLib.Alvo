@@ -33,14 +33,14 @@
     operator scrolled past a wall to reach what the entity actually declares. Shut, it is one line that
     still says the count and the names; the wording inside is the framework's own, unshortened.
 *@
-@if (ActionRefusals.Count > 0)
+@if (HookRefusals.Count > 0)
 {
     <details class="a-refused a-refused--fold" data-testid="hooks-refused">
         <summary>
-            @ActionRefusals.Count action type@(ActionRefusals.Count == 1 ? "" : "s") this build declares and does not run —
-            <span class="a-mono">@string.Join(", ", ActionRefusals.Select(refusal => refusal.Slot))</span>
+            @HookRefusals.Count thing@(HookRefusals.Count == 1 ? "" : "s") this build refuses on a hook —
+            <span class="a-mono">@string.Join(", ", HookRefusals.Select(refusal => refusal.Slot))</span>
         </summary>
-        @foreach (var refusal in ActionRefusals)
+        @foreach (var refusal in HookRefusals)
         {
             <span class="a-refused__reason">@refusal.Consequence</span>
         }

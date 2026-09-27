@@ -567,12 +567,14 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     (PlanSteps); a plan that destroys data asks its own typed confirm, and allowDestructive is sent only
     then (RollbackGate). No e2e: two revisions need a second in-process apply, which does not finish
     (ChangeTheBackendScenarios).
-19. **Four refusals are rendered nowhere** — `rollup.where`, wildcard `trigger.event`, `JSONata`,
+19. ✅ **Four refusals are rendered nowhere** — `rollup.where`, wildcard `trigger.event`, `JSONata`,
     `bodyFile`. Each screen filters `capabilities.refused` by a prefix none of them match
     (FieldEditor.razor.cs:81, HooksTab.razor.cs:86, Integrations.razor:71-77). Extends #269. Probably:
     give refusals an explicit owner/area in `ManagementRefusedFeature` instead of prefix matching.
-20. **The Automations page denies the block exists.** `"automations"` vs `"automation"`
+    **Done:** RefusalPlaces maps every published slot to its screens (field editor: rollup.where; On write: JSONata, email.data; Integrations: bodyFile; Automations/Functions: trigger.event; entity header: softDelete), and a slot it does not place is shown on Overview — an e2e fact fails on one. The core-side owner field stays #269's.
+20. ✅ **The Automations page denies the block exists.** `"automations"` vs `"automation"`
     (NotYet.razor:57, US:127). One-word fix plus a fact asserting each NotYet page finds its warning.
+    **Done:** the page reads "automation", and an e2e fact asserts both not-yet pages find their warned block.
 21. **`storage: dynamic` is mis-rendered, and the build drops it silently.** Listed as not-applied forever,
     badged `physical table` (SchemaList.razor:204, PS). Core question first: an entity the mapper
     discards without a warning (Map:44-46) is the silent case `UnhonouredSubsystems` exists to prevent.

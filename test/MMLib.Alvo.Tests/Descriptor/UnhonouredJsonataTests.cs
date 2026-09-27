@@ -103,17 +103,20 @@ public class UnhonouredJsonataTests
     /// <para>
     /// Each allowed file is allowed for a stated reason, and none of them can evaluate anything:
     /// <c>JsonataSlot.cs</c> is the classifier that refuses it, <c>UnhonouredFeatures.cs</c> words the
-    /// refusal, and <c>AfterHookCompiler.cs</c> is the one caller of the classifier. Comments are stripped
+    /// refusal, <c>AfterHookCompiler.cs</c> is the one caller of the classifier, and the admin dashboard's
+    /// <c>RefusalPlaces.cs</c> names the published slot to say which screen shows its refusal (a lookup key, read
+    /// by nothing that runs a transformation — docs/todo-admin.md §8d item 19). Comments are stripped
     /// before the search, so the XML docs that explain the absence are not mistaken for it.
     /// </para>
     /// </remarks>
     [Fact]
     public void No_jsonata_evaluator_exists_on_any_path()
         => ShippedSources.FileNamesMentioning("jsonata").ShouldBe(
-            ["JsonataSlot.cs", "UnhonouredFeatures.cs", "AfterHookCompiler.cs"],
+            ["JsonataSlot.cs", "UnhonouredFeatures.cs", "AfterHookCompiler.cs", "RefusalPlaces.cs"],
             ignoreOrder: true,
             "the only code mentioning JSONata is the classifier that refuses it, the table that words the "
-            + "refusal, and the compiler that asks the classifier; anything else is an evaluator "
+            + "refusal, the compiler that asks the classifier, and the dashboard's table of where the refusal is "
+            + "shown; anything else is an evaluator "
             + "(deviation 65, issue #149)");
 
     /// <summary>

@@ -104,11 +104,9 @@ public partial class FieldEditor
     }
 
     /// <summary>
-    /// The refusals that belong to a field, which are the ones a reader of this panel is missing a
-    /// control for.
+    /// The refusals that belong to a field — its facets and its rollup — by <see cref="RefusalPlaces"/>.
     /// </summary>
-    private IReadOnlyList<ManagementRefusedFeature> FieldRefusals =>
-        [.. Refused.Where(refusal => refusal.Slot.StartsWith("field.", StringComparison.Ordinal))];
+    private IReadOnlyList<ManagementRefusedFeature> FieldRefusals => RefusalPlaces.On(RefusalScreen.FieldEditor, Refused);
 
     private bool IsEditing => Editing is { Length: > 0 };
 

@@ -19,7 +19,7 @@
 
     @if (_warning is { } warning)
     {
-        <NotYetPanel Title="Not yet" Consequence="@warning.Consequence">
+        <NotYetPanel Title="Not yet" Consequence="@warning.Consequence" data-testid="not-yet-warned">
             <Subtitle>
                 This build parses <code class="a-mono">@warning.Block</code> and honours it nowhere.
                 A descriptor that declares it applies cleanly; nothing runs.
@@ -28,7 +28,7 @@
     }
     else if (_capabilities is not null)
     {
-        <NotYetPanel Title="Not yet">
+        <NotYetPanel Title="Not yet" data-testid="not-yet-unknown">
             <Subtitle>
                 This build does not report <code class="a-mono">@Block</code> among the blocks it
                 warns about, which means it is not part of the descriptor at all yet.
@@ -38,6 +38,13 @@
     else
     {
         <Skeleton />
+    }
+
+    @foreach (var refusal in RefusalPlaces.On(IsFunctions ? RefusalScreen.Functions : RefusalScreen.Automations, _capabilities?.Refused ?? []))
+    {
+        <Refusal data-testid="@($"refused-{refusal.Slot}")">
+            <code class="a-mono">@refusal.Slot</code> — @refusal.Consequence @refusal.Fix
+        </Refusal>
     }
 
     <Panel Padded="true">
@@ -54,7 +61,8 @@
 
     private string Title => IsFunctions ? "Functions" : "Automations";
 
-    private string Block => IsFunctions ? "functions" : "automations";
+    @* The build's own block name, singular (UnhonouredSubsystems.cs:127): "automations" found nothing, and the page denied the block existed (§8d item 20). *@
+    private string Block => IsFunctions ? "functions" : "automation";
 
     private string Alternative => IsFunctions
         ? "Nothing. A code editor designed before the runtime exists is a guess, so none is drawn."
