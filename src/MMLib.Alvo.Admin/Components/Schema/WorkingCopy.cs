@@ -319,28 +319,33 @@ internal sealed partial class WorkingCopy
     /// acceptable is the apply, and a second validator in the client is a second set of rules to
     /// disagree with. What the import screen does check first is the frozen schema's own name
     /// patterns, because a name the apply will refuse is worth refusing before it is rendered.
+    /// <para>
+    /// <b>Only an object replaces the copy</b> (docs/todo-admin.md §8d item 42). The text is parsed into a local and
+    /// assigned only when it is a JSON object: <c>null</c> used to empty the copy — which then read as unloaded to the
+    /// pending bar, Preview and every schema screen — and an array or a number was kept and reported as parsed. The
+    /// guard is here rather than only at the import screen, so the assistant's path, and any caller after it, cannot
+    /// leave the copy holding something that is not a descriptor.
+    /// </para>
     /// </remarks>
     /// <param name="descriptorJson">The descriptor to work from.</param>
-    /// <returns><see langword="true"/> when it parsed.</returns>
+    /// <returns><see langword="true"/> when it was a JSON object and the copy now holds it.</returns>
     public bool Replace(string descriptorJson)
     {
-        var parsed = false;
-        Edit(_ =>
+        JsonObject? parsed;
+        try
         {
-            try
-            {
-                _working = JsonNode.Parse(descriptorJson);
-            }
-            catch (JsonException)
-            {
-                return false;
-            }
+            parsed = JsonNode.Parse(descriptorJson) as JsonObject;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
 
-            parsed = _working is not null;
+        return parsed is not null && Edit(_ =>
+        {
+            _working = parsed;
             return true;
         });
-
-        return parsed;
     }
 
     /// <summary>
