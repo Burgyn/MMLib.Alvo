@@ -92,7 +92,7 @@ public partial class Entity
 
     /// <summary>Asks before the entity leaves the working copy, naming what points at it.</summary>
     /// <remarks>
-    /// <c>WorkingCopy.RemoveEntity</c> was written and no screen called it — the §5f <c>Discard</c> pattern again
+    /// An entity removal was written into the working copy and no screen called it — the §5f <c>Discard</c> pattern again
     /// (docs/todo-admin.md §8d item 24). A confirm with the typed name rather than an immediate removal with an Undo
     /// (spec §3.2 allows either for a staged removal): §3.2 names "remove entity" among the wide-blast-radius actions
     /// that type the name, the removal leaves this screen, whose address then names nothing, and the apply it prepares

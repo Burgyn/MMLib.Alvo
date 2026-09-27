@@ -117,7 +117,7 @@ public class WorkingCopyEntityRemovalTests
         copy.AddEntity("tickets", scoped: false, audited: false);
 
         copy.ReferencesToEntity("tickets").ShouldBeEmpty();
-        copy.RemoveEntity("tickets");
+        copy.RemoveEntityUnlessReferenced("tickets").ShouldNotContain(reference => reference.Blocks);
         copy.IsDirty.ShouldBeFalse();
     }
 
@@ -128,10 +128,11 @@ public class WorkingCopyEntityRemovalTests
     [Fact]
     public void An_applied_entity_the_copy_removed_is_listed_as_removed()
     {
-        var copy = Copy();
-        copy.RemoveEntity("lines");
+        var copy = new WorkingCopy();
+        copy.Take(Unreferenced, revision: 1);
+        copy.RemoveEntityUnlessReferenced("notes").ShouldBeEmpty();
 
-        copy.RemovedEntities.ShouldBe(["lines"]);
+        copy.RemovedEntities.ShouldBe(["notes"]);
     }
 
     /// <summary>A renamed entity is moved, not removed: its table comes with it, which <c>renamedFrom</c> says.</summary>
@@ -150,7 +151,7 @@ public class WorkingCopyEntityRemovalTests
     {
         var copy = Copy();
         copy.AddEntity("tickets", scoped: false, audited: false);
-        copy.RemoveEntity("tickets");
+        copy.RemoveEntityUnlessReferenced("tickets").ShouldNotContain(reference => reference.Blocks);
 
         copy.RemovedEntities.ShouldBeEmpty();
     }
@@ -184,6 +185,18 @@ public class WorkingCopyEntityRemovalTests
               "trigger": { "event": "entity.lines.created" },
               "actions": [ { "type": "entity.update", "entity": "lines", "payload": { "a": 1 } } ]
             }
+          }
+        }
+        """;
+
+    /// <summary>Two applied entities, neither naming the other: either can be removed.</summary>
+    private const string Unreferenced = """
+        {
+          "apiVersion": "alvo.dev/v1",
+          "name": "shop",
+          "entities": {
+            "orders": { "fields": { "total": { "type": "decimal", "precision": 10, "scale": 2 } } },
+            "notes": { "fields": { "body": { "type": "text" } } }
           }
         }
         """;

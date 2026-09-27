@@ -89,14 +89,14 @@ internal sealed partial class WorkingCopy
         return refusal;
     }
 
-    /// <summary>Removes an entity. The screen removes through <see cref="RemoveEntityUnlessReferenced"/>.</summary>
-    /// <param name="name">The entity's name in the working copy.</param>
-    public void RemoveEntity(string name) => Edit(root => (root["entities"] as JsonObject)?.Remove(name) is true);
-
     /// <summary>
     /// Removes an entity unless something outside it would leave the apply refusing the copy without it — asked and
     /// done under one lock, so a ref another tab stages between the confirm's read and the press is not removed over.
     /// </summary>
+    /// <remarks>
+    /// The only way to remove an entity: an unguarded <c>RemoveEntity</c> beside it had no caller but tests once the
+    /// screen moved here, the §5f "written and nobody calls it" pattern in miniature (final branch review, item 12).
+    /// </remarks>
     /// <param name="name">The entity's name in the working copy.</param>
     /// <returns>What points at it, read in the same edit; nothing in it blocks when the entity was removed.</returns>
     public IReadOnlyList<DescriptorReference> RemoveEntityUnlessReferenced(string name)

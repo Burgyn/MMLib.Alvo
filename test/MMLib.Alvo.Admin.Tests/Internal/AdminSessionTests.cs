@@ -95,7 +95,7 @@ public class AdminSessionTests
         var management = Management();
         var copy = new WorkingCopy();
         copy.Take(Applied, 1);
-        copy.RemoveEntity("orders");
+        copy.RemoveEntityUnlessReferenced("orders").ShouldNotContain(reference => reference.Blocks);
 
         await Session(management).EnsureLoadedAsync(copy, Ct);
 
@@ -112,7 +112,7 @@ public class AdminSessionTests
         management.GetDescriptorAsync("p", Arg.Any<CancellationToken>()).Returns(_ =>
         {
             copy.Take(Applied, 3);
-            copy.RemoveEntity("orders");
+            copy.RemoveEntityUnlessReferenced("orders").ShouldNotContain(reference => reference.Blocks);
             return new ManagementDescriptor("p", 3, Applied);
         });
 

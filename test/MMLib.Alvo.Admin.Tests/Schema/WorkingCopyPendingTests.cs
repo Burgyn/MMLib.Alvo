@@ -41,7 +41,7 @@ public class WorkingCopyPendingTests
         var copy = Copy();
 
         copy.AddEntity("invoices", scoped: false, audited: true);
-        copy.RemoveEntity("regions");
+        copy.RemoveEntityUnlessReferenced("regions").ShouldNotContain(reference => reference.Blocks);
         copy.Replace(copy.Json.Replace("\"roles\": []", "\"roles\": [ \"dispatcher\" ]", StringComparison.Ordinal));
 
         copy.PendingCount.ShouldBe(3);
@@ -229,7 +229,7 @@ public class WorkingCopyPendingTests
         copy.Changed += () => raised++;
 
         copy.RemoveField("customers", "no_such_field");
-        copy.RemoveEntity("no_such_entity");
+        copy.RemoveEntityUnlessReferenced("no_such_entity").ShouldNotContain(reference => reference.Blocks);
 
         raised.ShouldBe(0, "a redraw of every open tab for an edit that did not happen is noise");
     }
