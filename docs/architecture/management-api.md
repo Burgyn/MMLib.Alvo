@@ -301,8 +301,8 @@ whatever the endpoint; with no reference and no stored key, the known key-only h
 `*.openai.azure.com`, `*.cognitiveservices.azure.com`, `*.services.ai.azure.com` — are `missing`, and any other
 endpoint is `not-needed`, because a local Ollama or vLLM is keyless on purpose. It is a state only: never the key,
 and not the secret's name either, which the host's log carries (event 6102) and the deployment's own configuration
-already holds. A reference that is not a secret name is logged by its length alone (event 6104): it is most likely
-the key itself, pasted into the setting that should name it.
+already holds. A reference that is not a secret name is logged by its length alone (event 6104), once per value per
+process rather than on every resolve: it is most likely the key itself, pasted into the setting that should name it.
 
 **There is no endpoint, and there never will be one.** The reasoning is `WebhookDelivery`'s: an address is
 where a credential ends up in practice — in a query string, in a userinfo segment — and an internal host name

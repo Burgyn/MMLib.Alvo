@@ -360,6 +360,34 @@ public class AiConnectionResolverTests
             "Alvo:Ai:ApiKeySecretRef is not a secret name — it must name a secret, never hold the key itself");
     }
 
+    /// <summary>
+    /// <b>Warned once per distinct value, not on every resolve</b> (final branch review, item 9): the resolver runs on
+    /// every info read and every assistant turn, so a warning per call buried the host log in one line. A new value —
+    /// the setting changed without a restart — is warned once in its turn; the key stays missing on every call.
+    /// </summary>
+    [Fact]
+    public async Task A_reference_that_is_not_a_secret_name_is_warned_once_per_value_not_on_every_resolve()
+    {
+        using var capturing = new CapturingLogger();
+        using var loggers = LoggerFactory.Create(logging => logging.AddProvider(capturing));
+        var options = new ChangingOptions(Configured("https://api.openai.com/v1", "Not A Name"));
+        var resolver = new AiConnectionResolver(
+            options, new InMemorySecretStore(), loggers.CreateLogger<AiConnectionResolver>());
+
+        for (var call = 0; call < 3; call++)
+        {
+            (await resolver.ResolveAsync(Ct)).KeyState.ShouldBe(AiKeyState.Missing);
+        }
+
+        NotASecretNameWarnings(capturing).ShouldBe(1);
+
+        options.CurrentValue = Configured("https://api.openai.com/v1", "Another Bad Name");
+        await resolver.ResolveAsync(Ct);
+        await resolver.ResolveAsync(Ct);
+
+        NotASecretNameWarnings(capturing).ShouldBe(2, "a new value is warned once in its turn");
+    }
+
     /// <summary>A secret whose value is only whitespace is no key.</summary>
     [Fact]
     public async Task A_referenced_secret_of_only_whitespace_is_a_missing_key()
@@ -486,6 +514,19 @@ public class AiConnectionResolverTests
         $$"""
         {"kind":"openai-compatible","endpoint":"http://localhost:11434/v1","model":"{{model}}","apiKey":"sk-stored"}
         """;
+
+    private static int NotASecretNameWarnings(CapturingLogger capturing)
+        => capturing.Warnings.Count(warning => warning.Contains("is not a secret name", StringComparison.Ordinal));
+
+    /// <summary>Options a fact changes between calls, as a configuration reload would.</summary>
+    private sealed class ChangingOptions(AlvoAiOptions options) : IOptionsMonitor<AlvoAiOptions>
+    {
+        public AlvoAiOptions CurrentValue { get; set; } = options;
+
+        public AlvoAiOptions Get(string? name) => CurrentValue;
+
+        public IDisposable? OnChange(Action<AlvoAiOptions, string?> listener) => null;
+    }
 
     /// <summary>The bound options, without a host to bind them.</summary>
     private sealed class StaticOptions(AlvoAiOptions options) : IOptionsMonitor<AlvoAiOptions>

@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Secrets;
 
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text.Json;
 
@@ -36,6 +37,14 @@ internal sealed partial class AiConnectionResolver(
 {
     /// <summary>The name the saved connection is held under.</summary>
     internal static SecretName StoredName { get; } = SecretName.Parse(StoredAiConnection.SecretName);
+
+    /// <summary>The malformed references already warned about, so each is warned once per process.</summary>
+    /// <remarks>
+    /// Keyed by the configured value itself, which the bound options already hold for the process's life, so keeping
+    /// it here puts it nowhere it was not; it never reaches a log. It holds only values configuration supplied, one per
+    /// reload at most.
+    /// </remarks>
+    private readonly ConcurrentDictionary<string, byte> _warnedReferences = new(StringComparer.Ordinal);
 
     /// <inheritdoc/>
     public async ValueTask<AiConnectionResolution> ResolveAsync(CancellationToken ct = default)
@@ -111,15 +120,26 @@ internal sealed partial class AiConnectionResolver(
             key is null ? AiKeyState.Missing : AiKeyState.Present);
     }
 
-    /// <summary>A reference that is not a secret name: reported by its length only, and no key.</summary>
+    /// <summary>A reference that is not a secret name: reported by its length only, once per value, and no key.</summary>
     /// <remarks>
+    /// <para>
+    /// <b>Once per distinct value, not per resolve</b> (final branch review, item 9): this runs on every info read and
+    /// every assistant turn, and the same warning on each buried the host log in one line. A value the setting changes
+    /// to, without a restart, is warned in its turn.
+    /// </para>
+    /// <para>
     /// <b>Never its value.</b> The likeliest way to write something here that is not a secret name is to paste the
     /// key itself into a setting called <c>ApiKey…</c> — and a key never matches the name pattern, so logging the text
     /// would put the credential in the host log on every request that resolves the connection.
+    /// </para>
     /// </remarks>
     private string? Unresolvable(string named)
     {
-        ReferenceIsNotASecretName(logger, named.Length);
+        if (_warnedReferences.TryAdd(named, 0))
+        {
+            ReferenceIsNotASecretName(logger, named.Length);
+        }
+
         return null;
     }
 
