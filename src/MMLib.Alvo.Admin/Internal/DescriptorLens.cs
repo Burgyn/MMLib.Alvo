@@ -165,7 +165,8 @@ internal static class DescriptorLens
 
         foreach (var field in fields.EnumerateObject())
         {
-            var kind = KindOf(field.Value, key);
+            /* The Fields tab's reading too (FieldBadges), so a badge and a mask cannot disagree about one field. */
+            var kind = PolicyOf(field.Value, key);
             if (kind == JsonValueKind.True)
             {
                 always.Add(field.Name);
