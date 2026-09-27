@@ -99,6 +99,18 @@ internal static class AlvoIdentityConfiguration
                 + "this applies only to a new one.");
     }
 
+    /// <summary>The refusal for a registered password hasher that failed to make the timing-parity hash.</summary>
+    /// <param name="hasher">The registered hasher's type.</param>
+    /// <param name="failure">What it threw.</param>
+    /// <returns>The refusal.</returns>
+    internal static string HasherFailedAtStart(Type hasher, Exception failure) => Sentence(
+        $"Alvo cannot start: the registered password hasher {hasher.Name} failed to hash a password, "
+            + "so a refused sign-in cannot be made to cost what a real one costs.",
+        $"  Because:    {failure.GetType().Name}: {failure.Message}",
+        "  Check:      the IPasswordHasher<AlvoIdentityUser> registration. At start it is handed a user with "
+            + "no id, name or address, and a random password.",
+        "  Or remove:  the replacement, to use Identity's own hasher.");
+
     /// <summary>A headline an operator can act on, a blank line, and the fixes.</summary>
     /// <param name="headline">What is wrong, naming the offending value.</param>
     /// <param name="fixes">What to change, spelled as the environment variables a container sets.</param>

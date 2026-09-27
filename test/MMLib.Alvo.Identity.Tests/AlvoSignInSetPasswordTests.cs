@@ -201,6 +201,60 @@ public sealed class AlvoSignInSetPasswordTests : IAsyncLifetime
     }
 
     /// <summary>
+    /// <b>A token issued while the person is disabled works once they are let back in</b>, which is what the token
+    /// panel says ("They cannot use it until you let them back in"): the stamp moved at the disable, before the
+    /// token was minted, and letting them back in does not move it again.
+    /// </summary>
+    [Fact]
+    public async Task A_token_issued_while_disabled_is_refused_until_the_person_is_let_back_in()
+    {
+        var eva = await CreateAsync(Eva, OldPassword);
+        await AdministerAsync(people => people.SetDisabledAsync(eva, disabled: true, Ct));
+        var token = await IssueAsync(eva);
+
+        (await RedeemAsync(Eva, token, NewPassword)).ShouldBe(AlvoPasswordSetOutcome.Refused);
+
+        await AdministerAsync(people => people.SetDisabledAsync(eva, disabled: false, Ct));
+        (await RedeemAsync(Eva, token, NewPassword)).ShouldBe(AlvoPasswordSetOutcome.Set);
+    }
+
+    /// <summary>
+    /// <b>Only the move from enabled to disabled rotates the stamp.</b> Disabling a person already disabled changes
+    /// nothing, so it does not silently kill a token an administrator issued during the disable.
+    /// </summary>
+    [Fact]
+    public async Task Disabling_a_person_already_disabled_leaves_their_stamp_and_their_token_alone()
+    {
+        var eva = await CreateAsync(Eva, OldPassword);
+        await AdministerAsync(people => people.SetDisabledAsync(eva, disabled: true, Ct));
+        var stamp = (await RowAsync(Eva)).SecurityStamp;
+        var token = await IssueAsync(eva);
+
+        await AdministerAsync(people => people.SetDisabledAsync(eva, disabled: true, Ct));
+
+        (await RowAsync(Eva)).SecurityStamp.ShouldBe(stamp);
+        await AdministerAsync(people => people.SetDisabledAsync(eva, disabled: false, Ct));
+        (await RedeemAsync(Eva, token, NewPassword)).ShouldBe(AlvoPasswordSetOutcome.Set);
+    }
+
+    /// <summary>
+    /// <b>A replacement hasher that throws at start fails the start with a sentence</b> naming it, not with its raw
+    /// exception, which the sentence still carries as its cause.
+    /// </summary>
+    [Fact]
+    public async Task A_replaced_hasher_that_throws_at_start_fails_it_with_a_sentence_that_names_it()
+    {
+        await using var broken = Build(services => services.Replace(
+            ServiceDescriptor.Scoped<IPasswordHasher<AlvoIdentityUser>>(_ => new ThrowingHasher())));
+
+        var refusal = await Should.ThrowAsync<InvalidOperationException>(() => StartAsync(broken));
+
+        refusal.Message.ShouldStartWith("Alvo cannot start:");
+        refusal.Message.ShouldContain(nameof(ThrowingHasher));
+        refusal.InnerException.ShouldBeOfType<NullReferenceException>();
+    }
+
+    /// <summary>
     /// <b>A refusal writes nothing</b>: the failed-attempt count and the lockout are exactly what they were, so a
     /// stranger redeeming garbage against an address can neither lock it out nor unlock it.
     /// </summary>
@@ -592,6 +646,17 @@ public sealed class AlvoSignInSetPasswordTests : IAsyncLifetime
                 ? PasswordVerificationResult.Success
                 : PasswordVerificationResult.Failed;
         }
+    }
+
+    /// <summary>A replacement hasher that peppers with the user's name, and so throws on a user with none.</summary>
+    private sealed class ThrowingHasher : IPasswordHasher<AlvoIdentityUser>
+    {
+        public string HashPassword(AlvoIdentityUser user, string password)
+            => user.UserName!.ToUpperInvariant() + password;
+
+        public PasswordVerificationResult VerifyHashedPassword(
+            AlvoIdentityUser user, string hashedPassword, string providedPassword)
+            => PasswordVerificationResult.Failed;
     }
 
     /// <summary>The real hasher, counting every call.</summary>

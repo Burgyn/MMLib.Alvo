@@ -193,6 +193,7 @@ internal sealed class AlvoIdentityUserAdministration(
     private async Task<AlvoUser> WriteDisabledAsync(UserId user, bool disabled)
     {
         var row = await RequireAsync(user).ConfigureAwait(false);
+        var wasDisabled = AlvoIdentityLockout.IsDisabled(row.LockoutEnd);
 
         /* A lockout with no end is what "disabled" means here, and the resolver reads exactly that
            through AlvoIdentityLockout — which also says why a lockout *with* an end, the one failed
@@ -209,8 +210,10 @@ internal sealed class AlvoIdentityUserAdministration(
            person holds ends and every credential token outstanding for them dies. The lockout alone refuses
            them only while it stands: a cookie not presented during the disable — a stolen one, say — would
            stand again after "let them back in". OWASP's session guidance ends sessions on a disable; the cost
-           is that a person let back in signs in again, and needs a new token if they had not set a password. */
-        if (disabled)
+           is that a person let back in signs in again, and needs a new token if they had not set a password.
+           Only the move from enabled to disabled rotates it: disabling a person already disabled changes nothing,
+           so a token issued during the disable, which the panel says works once they are let back in, still does. */
+        if (disabled && !wasDisabled)
         {
             Succeeded(await users.UpdateSecurityStampAsync(row).ConfigureAwait(false), user.ToString());
         }

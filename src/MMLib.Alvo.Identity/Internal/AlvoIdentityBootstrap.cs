@@ -39,8 +39,28 @@ internal sealed partial class AlvoIdentityBootstrap(
         await SeedAsync(scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
 
         /* Before the server accepts a request, so no sign-in pays for the timing-parity hash. */
-        _ = scope.ServiceProvider.GetRequiredService<AlvoTimingParity>()
-            .For(scope.ServiceProvider.GetRequiredService<IPasswordHasher<AlvoIdentityUser>>());
+        MakeTimingParityHash(scope.ServiceProvider);
+    }
+
+    /// <summary>Makes the timing-parity hash with the registered hasher, or refuses the start in a sentence.</summary>
+    /// <remarks>
+    /// A replacement hasher that throws here (one that peppers with the user's name, handed a user with none)
+    /// would otherwise fail the start with its own raw exception and no word of what was being made or why. The
+    /// refusal names the hasher and carries its exception as the cause.
+    /// </remarks>
+    /// <param name="scope">The start's scope.</param>
+    private static void MakeTimingParityHash(IServiceProvider scope)
+    {
+        var hasher = scope.GetRequiredService<IPasswordHasher<AlvoIdentityUser>>();
+        try
+        {
+            _ = scope.GetRequiredService<AlvoTimingParity>().For(hasher);
+        }
+        catch (Exception failure) when (failure is not OperationCanceledException)
+        {
+            throw new InvalidOperationException(
+                AlvoIdentityConfiguration.HasherFailedAtStart(hasher.GetType(), failure), failure);
+        }
     }
 
     /// <inheritdoc/>
