@@ -1761,7 +1761,7 @@
 
   .a-refused--fold > summary {
     cursor: pointer;
-    color: var(--warn-fg);
+    color: var(--danger-fg);
     font-size: var(--text-xs);
     line-height: 1.5;
   }
@@ -2389,7 +2389,9 @@
   .a-refused__reason {
     display: block;
     margin-top: var(--space-1);
-    color: var(--warn-fg);
+    /* The danger tone, as every "the apply refuses this" is drawn (a field row's badge, the Overview's list); the
+       warning tone is the other state's, declared and not honoured (final branch review, item 11). */
+    color: var(--danger-fg);
     font-size: var(--text-sm);
     line-height: 1.5;
   }
