@@ -23,7 +23,7 @@
         </Primary>
     </PageHeader>
 
-    @RefusalPanel.Of(_problem)
+    @RefusalPanel.Of(_problem, RecordVersion.IsConflict(_problem.Current) ? ReloadAction : null)
 
     @if (_entity is null)
     {
@@ -121,3 +121,9 @@
              CancelTestId="delete-record-cancel" Title="@($"Delete {_deleting?.Label}?")"
              Consequence="@($"The record is deleted from {EntityName} for everyone who can read it. There is no undo.")"
              Verb="Delete record" OnConfirm="DeleteAsync" OnCancel="CancelDelete" />
+
+@code {
+    /// <summary>The way out of a delete that lost to another writer: the page read again, as it is now.</summary>
+    private RenderFragment ReloadAction => @<AlvoButton Small="true" data-testid="grid-reload"
+                                                       OnClick="_ => ReloadPageAsync()">Reload</AlvoButton>;
+}

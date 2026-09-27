@@ -29,7 +29,16 @@
         }
     </ExtraActions>
     <ChildContent>
-        @RefusalPanel.Of(_problem)
+        @RefusalPanel.Of(_problem, RecordVersion.IsConflict(_problem.Current) ? ReloadAction : null)
+
+        @*
+            Said once, where the write is made, and only where no version goes with it (docs/todo-admin.md §8d
+            item 25): elsewhere a save that lost to another writer is refused above, with Reload.
+        *@
+        @if (!Creating && RecordVersion.LastWriteWins(Entity, Values))
+        {
+            <p class="a-note" data-testid="record-last-write-wins">@RecordVersion.LastWriteWinsSentence</p>
+        }
 
         <div class="a-stack">
             @foreach (var column in _editable)
@@ -84,6 +93,10 @@
 </AlvoEditor>
 
 @code {
+    /// <summary>The way out of a lost write: the record read again, as it is now.</summary>
+    private RenderFragment ReloadAction => @<AlvoButton Small="true" data-testid="record-reload"
+                                                       OnClick="_ => ReloadAsync()">Reload</AlvoButton>;
+
     private RenderFragment Control(FieldSchema column) => column.Type switch
     {
         FieldType.Boolean => Flag(column),

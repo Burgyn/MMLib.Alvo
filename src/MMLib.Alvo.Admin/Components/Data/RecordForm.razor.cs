@@ -20,6 +20,9 @@ public partial class RecordForm
     private AlvoEditor? _editor;
     private readonly RefusalState<AdminProblem> _problem = new();
     private bool _saving;
+
+    /// <summary>Whether the values arriving next are a Reload's, which gives focus back to the form.</summary>
+    private bool _reloading;
     private Dictionary<string, object?>? _opened;
     private RecordDraft _draft = new([], new Dictionary<string, object?>());
     private IReadOnlyList<FieldSchema> _editable = [];
@@ -70,7 +73,10 @@ public partial class RecordForm
 
     private string Verb => Creating
         ? $"POST /api/{Entity.Name}"
-        : $"PATCH /api/{Entity.Name}/{RecordId}";
+        : $"PATCH /api/{Entity.Name}/{RecordId}{IfMatch}";
+
+    /// <summary>The header the Data API takes the version this save carries in, when it carries one.</summary>
+    private string IfMatch => RecordVersion.LastWriteWins(Entity, Values) ? string.Empty : " with If-Match";
 
     /// <summary>Opens the draft on the values it was given, once per record rather than once per render.</summary>
     protected override async Task OnParametersSetAsync()
@@ -87,11 +93,39 @@ public partial class RecordForm
         _pickers = _editable.Where(column => column.Reference is not null)
             .ToDictionary(column => column.Name, Picker, StringComparer.Ordinal);
         _refusals.ClearAll();
+        _problem.Clear();
 
         foreach (var picker in _pickers.Values)
         {
             await ResolveChosenAsync(picker);
         }
+
+        FocusAfterReload();
+    }
+
+    /// <summary>After a Reload, focus goes back to the form: the panel that had it is gone with the old values.</summary>
+    private void FocusAfterReload()
+    {
+        if (_reloading)
+        {
+            _reloading = false;
+            _editor?.FocusFirstControl();
+        }
+    }
+
+    /// <summary>
+    /// Reads the record again after a write lost to another writer, and opens it as it is now; what was changed here
+    /// is discarded, which the refusal's fix says (docs/todo-admin.md §8d item 25).
+    /// </summary>
+    private Task ReloadAsync()
+    {
+        if (RecordId is not { } id || Scope is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        _reloading = true;
+        return Scope.Reload(id);
     }
 
     private RefPicker Picker(FieldSchema column)
@@ -445,7 +479,8 @@ public partial class RecordForm
     {
         if (RecordId is { } id)
         {
-            return await Data.UpdateAsync(Entity.Name, id, payload, CancellationToken.None);
+            return await Data.UpdateAsync(
+                Entity.Name, id, payload, RecordVersion.Of(Entity, Values), CancellationToken.None);
         }
 
         /* A create into a tenant-scoped entity carries tenant_id, and it is the one managed
@@ -475,6 +510,7 @@ public partial class RecordForm
     /// <remarks>Counted, so a second refusal draws a new panel, which takes focus and is announced again.</remarks>
     private void Refused(Exception exception)
     {
-        _problem.Show(AdminProblem.From(exception, Logger, ProblemSite.RecordWrite));
+        var problem = AdminProblem.From(exception, Logger, ProblemSite.RecordWrite);
+        _problem.Show(problem, title: RecordVersion.IsConflict(problem) ? RecordVersion.ConflictTitle : null);
     }
 }

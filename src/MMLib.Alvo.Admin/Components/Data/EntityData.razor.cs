@@ -37,6 +37,9 @@ public partial class EntityData
     private RecordFormScope? _scope;
     private PendingDelete? _deleting;
     private bool _deletingNow;
+
+    /// <summary>The record a delete was refused for, whose row Reload gives focus to.</summary>
+    private Guid? _conflicted;
     private Guid? _created;
     private RowFocus? _focusRow;
     private AlvoButton? _newRecord;
@@ -206,7 +209,7 @@ public partial class EntityData
         _targets = Targets();
         _scope = _entity is null ? null : new RecordFormScope(
             _schema, _label, _masks, DescriptorLens.Locks(_descriptor, EntityName), _targets, Report,
-            id => _created = id);
+            id => _created = id, ReloadRecordAsync);
     }
 
     /// <summary>What the record form says after a write: a snackbar, because the write worked (spec §3.3).</summary>
@@ -371,6 +374,7 @@ public partial class EntityData
         return SearchChanged();
     }
 
+
     /// <summary>Runs the search once typing pauses, from the first page.</summary>
     private async Task SearchChanged()
     {
@@ -471,8 +475,63 @@ public partial class EntityData
     {
         if (_editing is { } id)
         {
+            var version = RecordVersion.Of(_entity!, _form!);
             CloseForm();
-            _deleting = new PendingDelete(id, label);
+            _deleting = new PendingDelete(id, label, version);
+        }
+    }
+
+    /// <summary>
+    /// After a save that lost to another writer: reads the page and the record again, and opens the record as it is
+    /// now — or closes the editor when it is gone, which the page read again then shows (item 25).
+    /// </summary>
+    /// <remarks>
+    /// Drawn here, because the editor calls it through its scope rather than an <c>EventCallback</c>, which would
+    /// have redrawn this screen for it — and a public parameter on the editor is what the scope exists to avoid.
+    /// </remarks>
+    /// <param name="id">The record the editor holds.</param>
+    private async Task ReloadRecordAsync(Guid id)
+    {
+        await LoadAsync();
+        await ReopenAsync(id);
+        StateHasChanged();
+    }
+
+    /// <summary>Opens the record as it is now, or closes the editor when it is gone or cannot be read.</summary>
+    private async Task ReopenAsync(Guid id)
+    {
+        try
+        {
+            if (await Records.GetAsync(EntityName, id, CancellationToken.None) is { } record)
+            {
+                Open(record);
+                return;
+            }
+        }
+        catch (Exception exception)
+        {
+            Refused(exception);
+        }
+
+        CloseForm();
+    }
+
+    /// <summary>
+    /// After a delete that lost to another writer: reads the page again, the refusal goes with the read, and focus
+    /// goes to the record's row, or to New record when it is gone.
+    /// </summary>
+    private async Task ReloadPageAsync()
+    {
+        var conflicted = _conflicted;
+        _conflicted = null;
+        await LoadAsync();
+        if (conflicted is { } id && _page?.Items.Any(row => RefLabels.IdOf(row[AlvoManagedColumns.Id]) == id) == true)
+        {
+            _focusRow = new RowFocus(id);
+        }
+        else
+        {
+            await FocusNewRecordAsync();
         }
     }
 
@@ -524,7 +583,7 @@ public partial class EntityData
         var at = _page?.Items.ToList().FindIndex(row => RefLabels.IdOf(row[AlvoManagedColumns.Id]) == target.Id) ?? -1;
         try
         {
-            await Records.DeleteAsync(EntityName, target.Id, CancellationToken.None);
+            await Records.DeleteAsync(EntityName, target.Id, target.Version, CancellationToken.None);
             Snackbar.Confirm("Record deleted");
             await LoadAsync();
             _focusRow = RowAt(Math.Max(at, 0));
@@ -532,6 +591,7 @@ public partial class EntityData
         }
         catch (Exception exception)
         {
+            _conflicted = target.Id;
             RefusedWrite(exception);
             return false;
         }
@@ -560,11 +620,13 @@ public partial class EntityData
     /// <summary>A refused delete: the panel on the page, which takes focus, and a new one for every refusal.</summary>
     private void RefusedWrite(Exception exception)
     {
-        _problem.Show(AdminProblem.From(exception, Logger, ProblemSite.RecordWrite));
+        var problem = AdminProblem.From(exception, Logger, ProblemSite.RecordWrite);
+        _problem.Show(problem, title: RecordVersion.IsConflict(problem) ? RecordVersion.ConflictTitle : null);
     }
 
     /// <summary>What the operator asked to delete, held while the confirm is on screen.</summary>
     /// <param name="Id">The record's id.</param>
     /// <param name="Label">What the confirm calls it.</param>
-    private sealed record PendingDelete(Guid Id, string Label);
+    /// <param name="Version">The version the record was opened with, which the delete carries (item 25).</param>
+    private sealed record PendingDelete(Guid Id, string Label, AlvoPrecondition? Version);
 }

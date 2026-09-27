@@ -100,6 +100,8 @@ internal static class AdminProblemFixes
             => "The write rule on this entity does not admit you, or the entity is tenant-scoped and you hold no tenant.",
         AlvoRecordNotFoundException
             => "The record is gone, or the read rule no longer admits it. Both answer 404, deliberately.",
+        AlvoPreconditionFailedException
+            => "Somebody else saved this record since you opened it, so your write was not made. Reload to see it as it is now, then make your change again; Reload discards what you changed here.",
         _ => null,
     };
 }

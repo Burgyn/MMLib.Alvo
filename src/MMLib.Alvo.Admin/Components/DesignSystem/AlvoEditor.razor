@@ -205,9 +205,25 @@
         }
     }
 
+    /// <summary>
+    /// Gives focus back to the form's first control, as Keep editing does: for an owner whose form was read again under
+    /// a panel that had focus, such as the record form's Reload after a lost write.
+    /// </summary>
+    /// <remarks>Internal, for <see cref="LeaveAsync"/>'s reason.</remarks>
+    internal void FocusFirstControl()
+    {
+        _refocus = true;
+        StateHasChanged();
+    }
+
     /// <summary>The form's first control, which takes focus back after Keep editing.</summary>
+    /// <remarks>
+    /// Not one inside an alert: a refusal's own action (Reload) is a control in the form too, and the library draws the
+    /// content a render after this component, so a panel on its way out is still there to be focused — and focus goes
+    /// with it to the page when it goes.
+    /// </remarks>
     private string FirstControl
-        => $"#{_formId} :is(input:not([type='hidden']), textarea, select, button, [tabindex]:not([tabindex='-1']))";
+        => $"#{_formId} :is(input:not([type='hidden']), textarea, select, button, [tabindex]:not([tabindex='-1'])):not([role='alert'] *)";
 
     /// <summary>
     /// Submits, once the operator chose to leave when a cascaded question says the submit would lose something: a

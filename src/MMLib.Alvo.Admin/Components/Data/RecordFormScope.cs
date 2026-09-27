@@ -24,6 +24,10 @@ namespace MMLib.Alvo.Admin.Components.Data;
 /// <param name="Targets">The label of each entity a reference points at, by entity; absent when it has none.</param>
 /// <param name="Report">Says what a successful write did, in one sentence.</param>
 /// <param name="Created">Names the record a create wrote, so the grid can show it where it landed (spec §3.5).</param>
+/// <param name="Reload">
+/// Reads the record again after a write lost to another writer, and opens it as it is now — or closes the editor when
+/// it is gone (docs/todo-admin.md §8d item 25).
+/// </param>
 internal sealed record RecordFormScope(
     SchemaModel Schema,
     RowLabel? Label,
@@ -31,4 +35,5 @@ internal sealed record RecordFormScope(
     FieldLocks Locks,
     IReadOnlyDictionary<string, RowLabel> Targets,
     Action<string> Report,
-    Action<Guid> Created);
+    Action<Guid> Created,
+    Func<Guid, Task> Reload);

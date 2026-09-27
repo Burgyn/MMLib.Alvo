@@ -116,17 +116,25 @@ internal sealed class DataGateway(
     }
 
     /// <summary>Changes the named fields of a record and leaves the rest alone.</summary>
+    /// <remarks>
+    /// <paramref name="precondition"/> is the version the record was opened with (<see cref="RecordVersion"/>), so a
+    /// save that lost to another writer is refused by the port inside its write transaction rather than overwriting
+    /// them; <see langword="null"/> only where the entity keeps no version, which the editor says.
+    /// </remarks>
     public async Task<AlvoRecord> UpdateAsync(
-        string entity, Guid id, IReadOnlyDictionary<string, object?> values, CancellationToken ct)
+        string entity, Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
+        CancellationToken ct)
     {
         var context = await ContextAsync(ct).ConfigureAwait(false);
-        return await data.UpdateAsync(entity, id, values, context, cancellationToken: ct).ConfigureAwait(false);
+        return await data.UpdateAsync(entity, id, values, context, precondition, cancellationToken: ct)
+            .ConfigureAwait(false);
     }
 
-    /// <summary>Deletes a record.</summary>
-    public async Task DeleteAsync(string entity, Guid id, CancellationToken ct)
+    /// <summary>Deletes a record, when it still holds the version it was opened with.</summary>
+    /// <remarks>A delete is guarded by <paramref name="precondition"/> for the reason an update is.</remarks>
+    public async Task DeleteAsync(string entity, Guid id, AlvoPrecondition? precondition, CancellationToken ct)
     {
         var context = await ContextAsync(ct).ConfigureAwait(false);
-        await data.DeleteAsync(entity, id, context, cancellationToken: ct).ConfigureAwait(false);
+        await data.DeleteAsync(entity, id, context, precondition, cancellationToken: ct).ConfigureAwait(false);
     }
 }
