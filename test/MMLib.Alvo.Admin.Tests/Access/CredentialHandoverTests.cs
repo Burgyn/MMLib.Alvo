@@ -13,28 +13,45 @@ public sealed class CredentialHandoverTests
     private static readonly NavigationManager _navigation = new FixedNavigation("https://alvo.example/");
     private static readonly DateTimeOffset _expires = new(2026, 9, 28, 14, 5, 0, TimeSpan.Zero);
 
+    /// <summary>When the token was issued: a day before it expires, so the expiry is on another day.</summary>
+    private static readonly DateTimeOffset _issued = _expires.AddDays(-1);
+
     [Fact]
     public void The_panel_shows_the_set_password_link_and_copy_puts_the_link_on_the_clipboard()
     {
-        var handover = CredentialHandover.For(_navigation, Person(disabled: false), Token());
+        var handover = For(Person(disabled: false), TimeSpan.Zero);
 
         handover.Link.ShouldBe(SetPasswordLink.For(_navigation, "eva@alvo.test", "CfDJ8+a/b="));
         handover.Clipboard.ShouldBe(handover.Link, "Copy link copies the link, not the bare token");
         handover.Token.ShouldBe("CfDJ8+a/b=");
     }
 
+    /// <summary>
+    /// The expiry is in the operator's own time, as the lockout above it in the same editor is (final branch review,
+    /// item 3): one editor, one clock.
+    /// </summary>
     [Fact]
-    public void The_panel_says_how_to_hand_it_over_and_until_when()
-        => CredentialHandover.For(_navigation, Person(disabled: false), Token()).Instruction
-            .ShouldBe("Hand this over out of band: this build sends no email. It works once, until 2026-09-28 14:05.");
+    public void The_panel_says_how_to_hand_it_over_and_until_when_in_the_operators_time()
+        => For(Person(disabled: false), TimeSpan.FromHours(2)).Instruction
+            .ShouldBe("Hand this over out of band: this build sends no email. It works once, until 2026-09-28 16:05.");
+
+    /// <summary>Before the browser has said its offset, the expiry is UTC and says so, like the lockout.</summary>
+    [Fact]
+    public void An_operator_whose_offset_is_not_known_yet_reads_the_expiry_in_UTC_said_as_such()
+        => For(Person(disabled: false), offset: null).Instruction
+            .ShouldBe(
+                "Hand this over out of band: this build sends no email. It works once, until 2026-09-28 14:05 UTC.");
 
     [Fact]
     public void A_disabled_person_is_told_they_cannot_use_it_until_they_are_let_back_in()
     {
-        CredentialHandover.For(_navigation, Person(disabled: true), Token()).DisabledNote
+        For(Person(disabled: true), TimeSpan.Zero).DisabledNote
             .ShouldBe("They cannot use it until you let them back in.");
-        CredentialHandover.For(_navigation, Person(disabled: false), Token()).DisabledNote.ShouldBeNull();
+        For(Person(disabled: false), TimeSpan.Zero).DisabledNote.ShouldBeNull();
     }
+
+    private static CredentialHandover For(AlvoUser person, TimeSpan? offset)
+        => CredentialHandover.For(_navigation, person, Token(), _issued, offset);
 
     private static AlvoUser Person(bool disabled) => new()
     {

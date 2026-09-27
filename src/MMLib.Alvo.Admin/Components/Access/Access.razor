@@ -531,7 +531,7 @@
 
         try
         {
-            await Interop.CopyAsync(CredentialHandover.For(Navigation, person, token).Clipboard);
+            await Interop.CopyAsync(CredentialHandover.For(Navigation, person, token, Interop.UtcOffset).Clipboard);
             _tokenCopied = true;
             Snackbar.Confirm("Link copied");
         }

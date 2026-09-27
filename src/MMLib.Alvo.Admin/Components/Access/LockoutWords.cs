@@ -1,5 +1,4 @@
 ﻿using MMLib.Alvo.Admin.Internal;
-using System.Globalization;
 
 namespace MMLib.Alvo.Admin.Components.Access;
 
@@ -46,12 +45,6 @@ internal static class LockoutWords
             return null;
         }
 
-        var zone = OperatorTime.Usable(offset);
-        var local = until.ToOffset(zone ?? TimeSpan.Zero);
-        var today = now.ToOffset(zone ?? TimeSpan.Zero).Date == local.Date;
-        var clock = local.ToString(today ? "HH:mm" : "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
-        return zone is null
-            ? $"Locked until {clock} UTC after failed sign-ins"
-            : $"Locked until {clock} after failed sign-ins";
+        return $"Locked until {OperatorTime.Clock(until, now, offset)} after failed sign-ins";
     }
 }

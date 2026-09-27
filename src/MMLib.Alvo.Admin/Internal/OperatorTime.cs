@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Internal;
+﻿using System.Globalization;
+
+namespace MMLib.Alvo.Admin.Internal;
 
 /// <summary>
 /// The operator's own time: which offset from UTC the dashboard may draw a time in (final branch review, item 7).
@@ -27,4 +29,26 @@ internal static class OperatorTime
         => offset is { } value && value.Duration() <= _widestZone && value.Ticks % TimeSpan.TicksPerMinute == 0
             ? value
             : null;
+
+    /// <summary>
+    /// <paramref name="instant"/> as the operator reads it: <c>HH:mm</c> in their zone, with the date when it is not
+    /// today there, and <c>UTC</c> after it while their offset is not usable.
+    /// </summary>
+    /// <remarks>
+    /// <b>The date only when it is not today</b> in the operator's zone: "until 00:10" read at 23:55 would otherwise
+    /// read as a day. One format for every time the dashboard draws, so two times in one editor (a lockout's end and a
+    /// credential token's expiry) are read on one clock.
+    /// </remarks>
+    /// <param name="instant">The time to draw.</param>
+    /// <param name="now">The instant "today" is decided at.</param>
+    /// <param name="offset">The operator's UTC offset, or <see langword="null"/> while it is not known.</param>
+    /// <returns>The time, for example <c>14:05</c>, <c>2026-09-28 14:05</c> or <c>14:05 UTC</c>.</returns>
+    public static string Clock(DateTimeOffset instant, DateTimeOffset now, TimeSpan? offset)
+    {
+        var zone = Usable(offset);
+        var local = instant.ToOffset(zone ?? TimeSpan.Zero);
+        var today = now.ToOffset(zone ?? TimeSpan.Zero).Date == local.Date;
+        var clock = local.ToString(today ? "HH:mm" : "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+        return zone is null ? $"{clock} UTC" : clock;
+    }
 }

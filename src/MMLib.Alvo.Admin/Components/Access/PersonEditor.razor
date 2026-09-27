@@ -52,7 +52,7 @@
             </AlvoAlert>
         }
 
-        @if (Token is { } token && CredentialHandover.For(Navigation, Person, token) is var handover)
+        @if (Token is { } token && CredentialHandover.For(Navigation, Person, token, Interop.UtcOffset) is var handover)
         {
             @* The link is what the person needs: they open it and set a password (design §1). The bare token stays
                under it for a browser with JavaScript off, where the page asks for it to be pasted. *@
