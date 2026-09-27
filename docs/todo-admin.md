@@ -583,8 +583,9 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     a pending entity without `tenancy` is drawn global. Probably: map the staged field through the same
     shape as the applied one, or badge from the JSON directly.
     **Done:** PendingSchema reads index, default (literal only), nullable, rollup and computed, and resolves a missing tenancy through tenancy.enabled; applied and staged rows are badged by one FieldBadges, which also badges an explicit nullability.
-23. **People beyond the first 50 are unreachable.** `new AlvoUserQuery()` — no search, no next page
+23. ✅ **People beyond the first 50 are unreachable.** `new AlvoUserQuery()` — no search, no next page
     (Access.razor:153). The port already takes `Search` and `After`.
+    **Done:** Access searches by address and pages forward and back through the port's own Search/After (PeoplePaging). The identity store's keyset cursor did not translate to SQL (`string.Compare(…, Ordinal)`), so every second page threw; it now compares by the database's collation, pinned by AlvoIdentityUserAdministrationPagingTests. A person created off the page on screen narrows the list to their address, so §3.5's reveal still finds them.
 24. ✅ **An entity cannot be removed.** `WorkingCopy.RemoveEntity` has no caller (WC.Entities:93). Probably
     a Remove beside Rename, behind `ConfirmByName`, naming the refs and rollups that point at it.
     **Done:** Remove sits beside Rename; the confirm (`AlvoConfirm`, spec §3.2's typed name) names every ref, rollup, entity.update action and trigger that points at the entity (EntityReferences.Inbound), each with what becomes of it (EntityRemovalWords); it refuses only while a ref or a rollup would make the apply refuse, and otherwise asks for the entity's name before WorkingCopy.RemoveEntityUnlessReferenced checks and removes under one lock. An applied entity the copy removed is badged "removed — not applied yet" on the schema list and its own screen, which then offers no edit.

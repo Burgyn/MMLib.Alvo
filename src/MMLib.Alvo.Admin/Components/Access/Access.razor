@@ -47,11 +47,42 @@
             else
             {
                 @RefreshBar.While(_refreshing)
+                @* A search over the list, so it is named by its placeholder and aria-label, not a label above it
+                   (spec §3.8). Outside every branch below, so a search that finds nobody, or everybody again, never
+                   unmounts the box being typed into. 254 is the longest address a mailbox can have (RFC 5321). *@
+                <div class="a-row a-row--inset">
+                    <MudTextField T="string" Value="_searchText" ValueChanged="SearchTyped" Immediate="true"
+                                  Variant="Variant.Outlined" InputType="InputType.Search" MaxLength="254"
+                                  Placeholder="Find by address" aria-label="Find a person by address"
+                                  data-testid="people-search" autocomplete="off" Class="a-filter" />
+                </div>
+
+                @if (_people.Users.Count == 0 && _paging.Search.Length > 0)
+                {
+                    <EmptyState Title="@($"Nobody’s address contains “{_paging.Search}”")"
+                                Body="The search looks in the address each person signs in with." />
+                }
+
                 @foreach (var person in _people.Users)
                 {
                     @* The wrapper carries the new-item wash, so the row's own contract stays who it is and Change. *@
                     <div @key="person.Id" data-alvo-new="@(person.Id == _arrived ? "true" : null)">
                         <PersonRow Person="person" OnOpen="() => Open(person)" />
+                    </div>
+                }
+
+                @if (_paging.HasEarlier || _people.NextCursor is not null)
+                {
+                    <div class="a-row a-row--gap-2 a-row--inset">
+                        <span class="a-spacer"></span>
+                        @if (_paging.HasEarlier)
+                        {
+                            <AlvoButton Small="true" data-testid="people-previous" OnClick="_ => PreviousAsync()">Previous page</AlvoButton>
+                        }
+                        @if (_people.NextCursor is { } next)
+                        {
+                            <AlvoButton Small="true" data-testid="people-next" OnClick="_ => NextAsync(next)">Next page</AlvoButton>
+                        }
                     </div>
                 }
 
@@ -169,6 +200,21 @@
     private bool _refreshing;
     private MudTextField<string>? _emailField;
 
+    /// <summary>The search and the cursors that led to the page of people on screen.</summary>
+    private readonly PeoplePaging _paging = new();
+
+    /// <summary>What is in the search box, which becomes the search once typing pauses.</summary>
+    private string _searchText = string.Empty;
+
+    /// <summary>Numbers each keystroke's search, so only the last one reads.</summary>
+    private int _searchVersion;
+
+    /// <summary>Numbers each read of the people, so a slower earlier one never lands last.</summary>
+    private int _peopleVersion;
+
+    /// <summary>The pause in typing after which a search runs: the Data grid's.</summary>
+    private static readonly TimeSpan _searchDelay = TimeSpan.FromMilliseconds(250);
+
     private const string EmailField = "new-person-email";
 
     /// <summary>Whether an editor is on screen, which is then where a refusal is drawn.</summary>
@@ -200,21 +246,97 @@
             _roles = DescriptorLens.DeclaredRoles(descriptor.DescriptorJson);
             _levels = DescriptorLens.AccessLevels(descriptor.DescriptorJson);
             _self ??= await Gateway.SelfAsync(CancellationToken.None);
-
-            if (Gateway.CanAdministerPeople)
-            {
-                _refreshing = _people is not null;
-                _people = await Gateway.PeopleAsync(new AlvoUserQuery(), CancellationToken.None);
-            }
         }
         catch (Exception exception)
         {
             Refused(exception);
+            return;
+        }
+
+        await LoadPeopleAsync();
+    }
+
+    /// <summary>Reads the page of people the search and the cursors say (<see cref="PeoplePaging"/>).</summary>
+    /// <remarks>
+    /// Numbered, like the Data grid's read: a search fires a read per pause in typing, and a slower earlier read must
+    /// not land after a faster later one — the list would show the people for a search no longer in the box.
+    /// </remarks>
+    private async Task LoadPeopleAsync()
+    {
+        if (!Gateway.CanAdministerPeople)
+        {
+            return;
+        }
+
+        var version = ++_peopleVersion;
+        _refreshing = _people is not null;
+        try
+        {
+            var people = await Gateway.PeopleAsync(_paging.Query, CancellationToken.None);
+            if (version == _peopleVersion)
+            {
+                _people = people;
+            }
+        }
+        catch (Exception exception)
+        {
+            /* A later read has already superseded this one, and its answer, not this refusal, is what is drawn. */
+            if (version == _peopleVersion)
+            {
+                Refused(exception);
+            }
         }
         finally
         {
-            _refreshing = false;
+            if (version == _peopleVersion)
+            {
+                _refreshing = false;
+            }
         }
+    }
+
+    /// <summary>Takes what was typed into the search, and runs it once typing pauses, from the first page.</summary>
+    private async Task SearchTyped(string? search)
+    {
+        _searchText = search ?? string.Empty;
+        var version = ++_searchVersion;
+        await Task.Delay(_searchDelay);
+        if (version == _searchVersion)
+        {
+            _paging.Find(_searchText);
+            await LoadPeopleAsync();
+        }
+    }
+
+    /// <summary>Moves to the page after this one.</summary>
+    private Task NextAsync(string cursor)
+    {
+        _paging.Next(cursor);
+        return LoadPeopleAsync();
+    }
+
+    /// <summary>Moves back to the page before this one.</summary>
+    private Task PreviousAsync()
+    {
+        _paging.Previous();
+        return LoadPeopleAsync();
+    }
+
+    /// <summary>
+    /// Makes sure the person just created is on screen, where §3.5 reveals them: they may sort onto another page, or
+    /// fall outside the search, so the list is narrowed to their address when they are not on the page it drew.
+    /// </summary>
+    private async Task ShowCreatedAsync(AlvoUser created)
+    {
+        if (_people is null || _people.Users.Any(person => person.Id == created.Id))
+        {
+            return;
+        }
+
+        _searchVersion++;
+        _searchText = created.Email;
+        _paging.Find(created.Email);
+        await LoadPeopleAsync();
     }
 
     /// <summary>After a lost race: closes the editor and reads the list again, so the next change starts from it.</summary>
@@ -416,6 +538,7 @@
             var created = await Gateway.CreatePersonAsync(new AlvoUserCreation(email, []), CancellationToken.None);
             CloseCreate();
             await LoadAsync();
+            await ShowCreatedAsync(created);
             _arrived = created.Id;
             _reveals++;
             Snackbar.Confirm($"Created {email}");
