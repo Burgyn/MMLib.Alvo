@@ -13,6 +13,9 @@ public partial class FieldEditor
 {
     private const int NoteValueLimit = 40;
 
+    /// <summary>The build's slot for a rollup's refused <c>where</c> filter (<c>UnhonouredFeatures.RollupWhere</c>).</summary>
+    private const string RollupWhereSlot = "rollup.where";
+
     private static readonly FieldType[] _types = Enum.GetValues<FieldType>();
     private static readonly string[] _flags = [string.Empty, "false", "true"];
     private static readonly FieldKind[] _kinds = Enum.GetValues<FieldKind>();
@@ -104,9 +107,17 @@ public partial class FieldEditor
     }
 
     /// <summary>
-    /// The refusals that belong to a field — its facets and its rollup — by <see cref="RefusalPlaces"/>.
+    /// The refusals that belong to a field — its facets and its rollup — by <see cref="RefusalPlaces"/>, less the one
+    /// already drawn at its control.
     /// </summary>
-    private IReadOnlyList<ManagementRefusedFeature> FieldRefusals => RefusalPlaces.On(RefusalScreen.FieldEditor, Refused);
+    /// <remarks>
+    /// <b>Drawn once.</b> While the rollup section is open, <c>rollup.where</c> is said beside the filter it refuses
+    /// (<c>rollup-where-refused</c>) — spec §3.8 puts a field's refusal at its control — so the fold leaves it out
+    /// rather than repeat the same sentence in one dialog. For any other kind the fold is the only place it is said.
+    /// </remarks>
+    private IReadOnlyList<ManagementRefusedFeature> FieldRefusals =>
+        [.. RefusalPlaces.On(RefusalScreen.FieldEditor, Refused)
+            .Where(refusal => !(_facets.Kind == FieldKind.Rollup && refusal.Slot == RollupWhereSlot))];
 
     private bool IsEditing => Editing is { Length: > 0 };
 
@@ -114,7 +125,7 @@ public partial class FieldEditor
     private bool Dirty => Fingerprint() != _opened;
 
     /// <summary>The build's refusal of a rollup filter, shown where the filter would be.</summary>
-    private ManagementRefusedFeature? WhereRefusal => Refused.FirstOrDefault(refusal => refusal.Slot == "rollup.where");
+    private ManagementRefusedFeature? WhereRefusal => Refused.FirstOrDefault(refusal => refusal.Slot == RollupWhereSlot);
 
     /// <summary>The sources a rollup may be chosen from: the ones the apply accepts.</summary>
     private IReadOnlyList<string> RollupFroms => [.. _facets.Sources.Where(source => source.Refusal is null).Select(source => source.Entity)];

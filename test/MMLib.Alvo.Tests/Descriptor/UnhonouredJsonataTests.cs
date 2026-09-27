@@ -103,9 +103,10 @@ public class UnhonouredJsonataTests
     /// <para>
     /// Each allowed file is allowed for a stated reason, and none of them can evaluate anything:
     /// <c>JsonataSlot.cs</c> is the classifier that refuses it, <c>UnhonouredFeatures.cs</c> words the
-    /// refusal, <c>AfterHookCompiler.cs</c> is the one caller of the classifier, and the admin dashboard's
-    /// <c>RefusalPlaces.cs</c> names the published slot to say which screen shows its refusal (a lookup key, read
-    /// by nothing that runs a transformation — docs/todo-admin.md §8d item 19). Comments are stripped
+    /// refusal, and <c>AfterHookCompiler.cs</c> is the one caller of the classifier — those three are the refusal
+    /// pipeline. <c>RefusalPlaces.cs</c> is allowed for a different reason: it is not part of that pipeline but a
+    /// UI consumer of the wire slot name, the admin dashboard's table of which screen shows the published refusal
+    /// (a lookup key, read by nothing that runs a transformation — docs/todo-admin.md §8d item 19). Comments are stripped
     /// before the search, so the XML docs that explain the absence are not mistaken for it.
     /// </para>
     /// </remarks>

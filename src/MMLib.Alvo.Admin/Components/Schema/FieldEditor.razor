@@ -230,7 +230,7 @@
 
             @* `where` is in the frozen schema and refused by this build, so it gets the build's sentence and no box. *@
             <Refusal data-testid="rollup-where-refused">
-                <code class="a-mono">where</code> — @(WhereRefusal?.Consequence ?? "a filter on the child rows is not offered here.")
+                <code class="a-mono">where</code> — @(WhereRefusal is { } where ? $"{where.Consequence} {where.Fix}" : "a filter on the child rows is not offered here.")
             </Refusal>
             @if (_facets.DeclaresRollupFilter)
             {
