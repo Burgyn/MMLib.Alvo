@@ -600,7 +600,7 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     `UnhonouredSubsystems` or a sibling), and the dashboard then renders that warning like the others.
 28. ✅ **Ref targets and index candidates are applied-only.** A pending entity cannot be a ref target
     (EC:95); a staged field cannot join an index (Indexes.razor:125). Read both from the working copy.
-    **Done:** ref targets and index candidates come from the working copy (users is not offered — unverified).
+    **Done:** ref targets and index candidates come from the working copy, and so do the standalone Rules page's entity tabs (a pending entity shows the copy's rules, with no simulation). `users`, the reserved ref target the validator accepts beside the declared entities (`DescriptorValidator.ReservedUsersEntity`), is verified never offered — a separate, pre-existing gap this item did not touch.
 29. Cosmetic: `x-*` extensions never shown; `unique` not offered for `ref` (one-to-one), `enum`,
     `decimal` with no reason given (FF:68); Add entity writes `audit: false` / `tenancy: global`
     explicitly; Overview shows the `dynamicEntities` warning for `enabled: false`; apply sends no

@@ -24,6 +24,29 @@ public sealed class RulesPickerScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.GetByRole(AriaRole.Tab, new() { Name = "customers", Selected = true }).WaitForAsync();
         session.AssertConsoleClean();
     }
+
+    /// <summary>
+    /// An entity only the working copy declares has its tab too, with the copy's rules and no simulation, which the
+    /// engine serving the applied schema cannot answer (task-6 review, minor 3: item 28's rule on this screen).
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_pending_entity_has_a_tab_with_the_working_copys_rules()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema");
+        await session.Button("New entity", exact: true).ClickAsync();
+        await session.Dialog("new-entity").GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync("invoices");
+        await session.Button("Add to the working copy").ClickAsync();
+        await session.Page.WaitForURLAsync("**/schema/invoices");
+
+        await session.GoAsync("/rules/work_orders");
+        await session.Page.GetByRole(AriaRole.Tab, new() { Name = "invoices", Exact = true }).ClickAsync();
+
+        await session.Page.WaitForURLAsync("**/rules/invoices");
+        await session.Page.GetByTestId("rules-pending").WaitForAsync();
+        await session.Page.GetByTestId("simulate-pending").WaitForAsync();
+        session.AssertConsoleClean();
+    }
 }
 
 /// <summary>Past six entities the Rules picker is a select, and choosing an option opens that entity's rules.</summary>

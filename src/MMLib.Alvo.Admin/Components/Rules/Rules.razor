@@ -27,14 +27,14 @@
             A strip reads at a glance while it fits; past a handful of entities it scrolls sideways and
             the one somebody wants is off the edge, so it becomes a select.
         *@
-        @if (_schema.Entities.Count > TabStripLimit)
+        @if (_names.Count > TabStripLimit)
         {
             <Field Label="Entity" LabelId="rules-entity-label" class="a-field--narrow">
                 <MudSelect T="string" Value="Selected" ValueChanged="Choose" Variant="Variant.Outlined"
                            aria-labelledby="rules-entity-label" data-testid="rules-entity" Class="a-mono">
-                    @foreach (var entity in _schema.Entities)
+                    @foreach (var name in _names)
                     {
-                        <MudSelectItem Value="@entity.Name">@entity.Name</MudSelectItem>
+                        <MudSelectItem Value="@name">@name</MudSelectItem>
                     }
                 </MudSelect>
             </Field>
@@ -43,9 +43,9 @@
         {
             <MudTabs ActivePanelIndex="@SelectedIndex" OnPreviewInteraction="ChooseAsync"
                      Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-ruletabs" id="rules-entities">
-                @foreach (var entity in _schema.Entities)
+                @foreach (var name in _names)
                 {
-                    <MudTabPanel Text="@entity.Name" />
+                    <MudTabPanel Text="@name" />
                 }
             </MudTabs>
             @TablistName.On("#rules-entities", "Entity")
@@ -53,6 +53,14 @@
 
         <div class="a-split">
             <Panel class="a-split__main a-grow">
+                @if (SelectedIsPending)
+                {
+                    <p class="a-note" data-testid="rules-pending">
+                        <span class="a-badge a-badge--warn">not applied yet</span>
+                        These are the working copy's rules for <code class="a-mono">@Selected</code>. Edit them on
+                        <a href="@AdminPaths.Entity(Selected)">its schema screen</a>.
+                    </p>
+                }
                 <RulesTab Rules="_rules" Entity="@Selected" />
             </Panel>
 
@@ -88,7 +96,14 @@
                     </Field>
 
                     @* Keyed per refusal by RefusalState, so a second failure after a press takes focus and is read again. *@
-                    @if (_simulationProblem.Shown)
+                    @if (SelectedIsPending)
+                    {
+                        <p class="a-note" data-testid="simulate-pending">
+                            The engine serves the applied schema, and <code class="a-mono">@Selected</code> is not in it
+                            yet, so there is nothing to ask. Preview and apply the working copy to simulate it.
+                        </p>
+                    }
+                    else if (_simulationProblem.Shown)
                     {
                         @RefusalPanel.Of(_simulationProblem, RetryAction)
                     }
@@ -102,8 +117,11 @@
                         Checking a rule against one stored row needs a read of that row, which this screen does
                         not make — scoring it here would make it a second policy evaluator that could disagree
                         with the engine. To check one row, open it in Data as yourself.
-                        <AlvoButton Small="true" class="a-actions"
-                                    Href="@AdminPaths.Records(Selected)">Open @Selected in Data</AlvoButton>
+                        @if (!SelectedIsPending)
+                        {
+                            <AlvoButton Small="true" class="a-actions"
+                                        Href="@AdminPaths.Records(Selected)">Open @Selected in Data</AlvoButton>
+                        }
                     </p>
                 </div>
             </div>
@@ -119,6 +137,13 @@
 
     private readonly List<Caller> _callers = [];
     private SchemaModel? _schema;
+
+    /// <summary>
+    /// The entities the picker offers: the applied ones in the schema's order, then the ones only the working copy
+    /// declares, as the schema list draws them — a pending entity with no tab here read as one with no rules at all.
+    /// </summary>
+    private IReadOnlyList<string> _names = [];
+    private IReadOnlySet<string> _pending = new HashSet<string>();
     private IReadOnlyList<KeyValuePair<string, string>> _rules = [];
     private ManagementPolicyVerdict? _verdict;
     private AdminProblem? _problem;
@@ -139,9 +164,9 @@
     {
         get
         {
-            for (var index = 0; _schema is not null && index < _schema.Entities.Count; index++)
+            for (var index = 0; index < _names.Count; index++)
             {
-                if (_schema.Entities[index].Name == Selected)
+                if (_names[index] == Selected)
                 {
                     return index;
                 }
@@ -151,7 +176,10 @@
         }
     }
 
-    private string Selected => EntityName ?? _schema?.Entities.FirstOrDefault()?.Name ?? string.Empty;
+    private string Selected => EntityName ?? _names.FirstOrDefault() ?? string.Empty;
+
+    /// <summary>Whether the selected entity is only in the working copy, so the engine cannot be asked about it.</summary>
+    private bool SelectedIsPending => _pending.Contains(Selected);
 
     protected override async Task OnParametersSetAsync()
     {
@@ -159,7 +187,9 @@
         {
             _schema = await Gateway.SchemaAsync(CancellationToken.None);
             var descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
-            _rules = DescriptorLens.Rules(descriptor.DescriptorJson, Selected);
+            var copy = await Session.WorkingCopyAsync(CancellationToken.None);
+            ReadEntities(copy);
+            _rules = DescriptorLens.Rules(SelectedIsPending ? copy.Json : descriptor.DescriptorJson, Selected);
 
             if (_callers.Count == 0)
             {
@@ -204,6 +234,16 @@
         }
     }
 
+    /// <summary>The applied entities and, after them, the ones only the working copy declares (§8d item 28's rule).</summary>
+    /// <param name="copy">This operator's working copy, loaded.</param>
+    private void ReadEntities(WorkingCopy copy)
+    {
+        var applied = _schema!.Entities.Select(entity => entity.Name).ToList();
+        _pending = copy.Entities.Where(name => !applied.Contains(name, StringComparer.Ordinal))
+            .ToHashSet(StringComparer.Ordinal);
+        _names = [.. applied, .. copy.Entities.Where(_pending.Contains)];
+    }
+
     private void Choose(string entity) => Navigation.NavigateTo(AdminPaths.Rules(entity));
 
     /// <summary>
@@ -217,10 +257,9 @@
     /// </remarks>
     private Task ChooseAsync(TabInteractionEventArgs interaction)
     {
-        if (_schema is not null && interaction.PanelIndex >= 0 && interaction.PanelIndex < _schema.Entities.Count
-            && _schema.Entities[interaction.PanelIndex].Name != Selected)
+        if (interaction.PanelIndex >= 0 && interaction.PanelIndex < _names.Count && _names[interaction.PanelIndex] != Selected)
         {
-            Choose(_schema.Entities[interaction.PanelIndex].Name);
+            Choose(_names[interaction.PanelIndex]);
         }
 
         return Task.CompletedTask;
@@ -249,8 +288,11 @@
     /// <param name="pressed">Whether an operator's choice asked it, so a refusal takes focus; the page's own first ask does not.</param>
     private async Task SimulateAsync(bool pressed = true)
     {
-        if (Selected.Length == 0)
+        /* A pending entity is not in the schema the engine serves; asking would only be refused. */
+        if (Selected.Length == 0 || SelectedIsPending)
         {
+            _verdict = null;
+            _simulationProblem.Clear();
             return;
         }
 
