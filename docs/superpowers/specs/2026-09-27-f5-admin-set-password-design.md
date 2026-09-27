@@ -337,7 +337,13 @@ Extend `A_second_person_can_be_created_and_gets_a_credential_token` to assert th
    client is its IPv4 address, or its IPv6 /64, with an IPv4-mapped address read as IPv4. Both are **charged
    by the endpoint after the antiforgery check**, not by `UseRateLimiter` middleware in front of it, so a
    cross-site page cannot spend a victim's budget; the pipeline has no rate-limiter middleware. Both counts are
-   validated only when the dashboard is enabled. Both anonymous posts refuse a body over 16 KB before reading it.
+   validated only when the dashboard is enabled. Both anonymous posts refuse a body over 16 KB before reading it. *Residual, accepted (ruling 10.8):* this
+   makes a shared-address lockout ten times costlier, not impossible — a client cycling 200 distinct subjects a
+   minute, each with a valid anonymous antiforgery pair, still spends the ceiling for everyone behind its address;
+   requests with no remote address share one partition; and Identity's per-account lockout still lets anyone keep a
+   known account locked (todo item 46). The ceiling is checked without spending it before a subject's partition is
+   created, and every subject is a fixed-length hash (the sign-in address through the registered
+   `ILookupNormalizer`, capped at 256 characters), so the limiter's memory is bounded by the ceiling.
 8. **A temporary lockout is cleared on success.** Identity leaves it. The lockout protected the old
    password, and the holder just proved possession of an admin-issued token.
 9. **Disabled accounts and the bootstrap admin are refused at redemption.** Identity's
@@ -405,3 +411,13 @@ Rulings on the T2 review (controller, 27 Sep 2026):
    anonymous posts; the counts are validated only when the dashboard is on.
 7. A throttled set-password page says "Too many attempts from this network. Wait a minute, then open your link
    again." (§2 table). The dashboard under a PathBase is todo item 45.
+
+Rulings on the T2 re-review (controller, 27 Sep 2026):
+
+8. The limiter's memory is bounded (ceiling checked before a subject partition exists, hashed subjects, a 256-character
+   address cap, `ILookupNormalizer` for the sign-in key); a chunked body cut off past 16 KB answers the page; sign-out
+   gets the same 16 KB bound. The per-client ceiling's residual (200 subjects a minute still throttle one address) and
+   the shared partition for requests with no remote address are accepted and documented. Identity's per-account
+   lockout stays — it is the only defence against a distributed guesser — and its denial-of-service trade-off (about
+   one wrong post a minute keeps a known account, the bootstrap admin included, locked) is accepted before 1.0, to be
+   stated in `host.md` (T3), with todo item 46 for a better scheme.

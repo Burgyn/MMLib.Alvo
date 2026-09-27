@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -18,13 +19,26 @@ namespace MMLib.Alvo.Host.Internal;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Two layers, so no anonymous client can lock everyone behind its address out of sign-in.</b> A single budget per
+/// <b>Two layers, so locking out everyone behind one address takes ten times the effort.</b> A single budget per
 /// client address let one stranger spend it for a whole office behind a NAT, or for every user behind a proxy that
 /// forwards no client address. So the design's budget (20 a minute) is charged per <em>subject</em>: per client and
 /// normalised address on sign-in, per client and token on set-password. A flood for one address throttles that
 /// address from that client and nobody else. Over it sits a coarse <em>ceiling</em> per client (200 a minute), shared
 /// by both forms, which bounds what the subjects cannot: the password-hashing cost of a client that cycles addresses
 /// or tokens.
+/// </para>
+/// <para>
+/// <b>What remains, accepted (ruling 10.8):</b> a client that cycles 200 distinct subjects a minute, each with a valid
+/// anonymous antiforgery pair, spends the ceiling, and so still throttles everyone behind its address. Requests with no
+/// remote address (an in-process or Unix-socket host) all share one partition. And Identity's per-account lockout,
+/// which this does not replace, lets anyone keep a known account locked with a wrong password every few minutes
+/// (todo item 46).
+/// </para>
+/// <para>
+/// <b>Memory is bounded by the ceiling, not by the request rate.</b> The ceiling is checked, without spending it,
+/// before a subject's partition is created, so a client the ceiling refuses creates none; and every subject is a
+/// fixed-length hash, so no key holds what a client typed. At most one ceiling's worth of subject partitions per client
+/// is alive per window.
 /// </para>
 /// <para>
 /// <b>Charged by the endpoint, after the antiforgery check</b>, never by middleware in front of it. A cross-site page
@@ -56,6 +70,7 @@ internal sealed class AlvoAdminCredentialLimit : IDisposable
 
     private readonly PartitionedRateLimiter<string> _subjects;
     private readonly PartitionedRateLimiter<string> _clients;
+    private int _subjectPartitionsCreated;
 
     /// <summary>Builds the two limiters from the validated counts.</summary>
     /// <param name="options">The counts.</param>
@@ -63,8 +78,8 @@ internal sealed class AlvoAdminCredentialLimit : IDisposable
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        _subjects = FixedWindows(options.Value.AttemptsPerMinute);
-        _clients = FixedWindows(options.Value.CeilingPerMinute);
+        _subjects = FixedWindows(options.Value.AttemptsPerMinute, () => Interlocked.Increment(ref _subjectPartitionsCreated));
+        _clients = FixedWindows(options.Value.CeilingPerMinute, () => { });
     }
 
     /// <summary>Registers the limit and its validated counts.</summary>
@@ -84,9 +99,12 @@ internal sealed class AlvoAdminCredentialLimit : IDisposable
         services.AddSingleton<AlvoAdminCredentialLimit>();
     }
 
-    /// <summary>A sign-in's subject: the address as Identity normalises it.</summary>
-    /// <param name="email">The typed address.</param>
-    internal static string SignInSubject(string email) => $"sign-in|{email.Trim().ToUpperInvariant()}";
+    /// <summary>
+    /// A sign-in's subject: a hash of the address as the registered <see cref="ILookupNormalizer"/> normalises it, so
+    /// every spelling Identity finds as one account is one budget, and the key is a fixed length.
+    /// </summary>
+    /// <param name="normalized">The address, through <see cref="ILookupNormalizer.NormalizeEmail"/>.</param>
+    internal static string SignInSubject(string normalized) => $"sign-in|{Hash(normalized)}";
 
     /// <summary>
     /// A set-password post's subject: a hash of the token's first characters, never the token itself, so the
@@ -96,8 +114,11 @@ internal sealed class AlvoAdminCredentialLimit : IDisposable
     internal static string SetPasswordSubject(string token)
     {
         var prefix = token.Length > TokenPrefixLength ? token[..TokenPrefixLength] : token;
-        return $"set-password|{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(prefix)))[..32]}";
+        return $"set-password|{Hash(prefix)}";
     }
+
+    /// <summary>How many subject partitions have been created, for the fact that the ceiling bounds them.</summary>
+    internal int SubjectPartitionsCreated => Volatile.Read(ref _subjectPartitionsCreated);
 
     /// <summary>The partition a client address falls in: IPv4 as is, IPv6 by its /64, IPv4-mapped as IPv4.</summary>
     /// <param name="address">The connection's remote address, when known.</param>
@@ -128,8 +149,10 @@ internal sealed class AlvoAdminCredentialLimit : IDisposable
     /// either budget is spent.
     /// </summary>
     /// <remarks>
-    /// The subject first, and the ceiling only when the subject allowed it: a flood for one address, once throttled,
-    /// stops drawing on the ceiling, so it cannot use the client's shared budget up for its other addresses.
+    /// The ceiling is looked at first without spending it (a zero-permit acquire), so a client it refuses creates no
+    /// subject partition. Then the subject, and the ceiling is spent only when the subject allowed the attempt: a flood
+    /// for one address, once throttled, stops drawing on the ceiling, so it cannot use the client's shared budget up
+    /// for its other addresses.
     /// </remarks>
     /// <param name="http">The request, whose antiforgery token has already been validated.</param>
     /// <param name="subject">The subject, from <see cref="SignInSubject"/> or <see cref="SetPasswordSubject"/>.</param>
@@ -137,6 +160,14 @@ internal sealed class AlvoAdminCredentialLimit : IDisposable
     internal TimeSpan? Charge(HttpContext http, string subject)
     {
         var client = ClientOf(http.Connection.RemoteIpAddress);
+
+        using (var ceiling = _clients.AttemptAcquire(client, 0))
+        {
+            if (!ceiling.IsAcquired)
+            {
+                return RetryAfter(ceiling);
+            }
+        }
 
         using var perSubject = _subjects.AttemptAcquire($"{client}|{subject}");
         if (!perSubject.IsAcquired)
@@ -169,15 +200,21 @@ internal sealed class AlvoAdminCredentialLimit : IDisposable
         _clients.Dispose();
     }
 
-    private static PartitionedRateLimiter<string> FixedWindows(int perMinute)
+    private static PartitionedRateLimiter<string> FixedWindows(int perMinute, Action created)
         => PartitionedRateLimiter.Create<string, string>(key => RateLimitPartition.GetFixedWindowLimiter(
             key,
-            _ => new FixedWindowRateLimiterOptions
+            _ =>
             {
-                PermitLimit = Math.Max(perMinute, 1),
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
+                created();
+                return new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = Math.Max(perMinute, 1),
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0,
+                };
             }));
+
+    private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..32];
 
     private static TimeSpan RetryAfter(RateLimitLease lease)
         => lease.TryGetMetadata(MetadataName.RetryAfter, out var after) ? after : TimeSpan.FromMinutes(1);

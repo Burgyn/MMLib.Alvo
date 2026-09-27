@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -70,7 +71,11 @@ internal static class AlvoAdminSignIn
     /// the browser's resubmission prompt.
     /// </remarks>
     private static async Task<IResult> SignInAsync(
-        HttpContext http, AlvoSignIn signIn, IAntiforgery antiforgery, AlvoAdminCredentialLimit limit)
+        HttpContext http,
+        AlvoSignIn signIn,
+        IAntiforgery antiforgery,
+        AlvoAdminCredentialLimit limit,
+        ILookupNormalizer normalizer)
     {
         if (!WithinSize(http) || !await ValidAsync(http, antiforgery).ConfigureAwait(false))
         {
@@ -82,7 +87,12 @@ internal static class AlvoAdminSignIn
         var password = form["password"].ToString();
         var returnUrl = Local(form["returnUrl"].ToString());
 
-        if (limit.Charge(http, AlvoAdminCredentialLimit.SignInSubject(email)) is { } wait)
+        if (email.Length > AlvoAdminSetPassword.MaximumEmailLength)
+        {
+            return Results.Redirect(Failed(returnUrl));
+        }
+
+        if (limit.Charge(http, AlvoAdminCredentialLimit.SignInSubject(normalizer.NormalizeEmail(email))) is { } wait)
         {
             return AlvoAdminCredentialLimit.Throttled(
                 http, wait, $"{AlvoAdmin.SignInPath}?throttled=true&returnUrl={Uri.EscapeDataString(returnUrl)}");
@@ -91,18 +101,21 @@ internal static class AlvoAdminSignIn
         if (email.Length == 0 || password.Length == 0
             || !await signIn.PasswordSignInAsync(email, password).ConfigureAwait(false))
         {
-            return Results.Redirect(
-                $"{AlvoAdmin.SignInPath}?failed=true&returnUrl={Uri.EscapeDataString(returnUrl)}");
+            return Results.Redirect(Failed(returnUrl));
         }
 
         return Results.Redirect(returnUrl);
     }
 
+    /// <summary>Back to sign-in, saying the credentials did not match, and keeping where the person was going.</summary>
+    private static string Failed(string returnUrl)
+        => $"{AlvoAdmin.SignInPath}?failed=true&returnUrl={Uri.EscapeDataString(returnUrl)}";
+
     /// <summary>Clears the cookie and returns to the sign-in screen.</summary>
     private static async Task<IResult> SignOutAsync(
         HttpContext http, AlvoSignIn signIn, IAntiforgery antiforgery)
     {
-        if (await ValidAsync(http, antiforgery).ConfigureAwait(false))
+        if (WithinSize(http) && await ValidAsync(http, antiforgery).ConfigureAwait(false))
         {
             await signIn.SignOutAsync().ConfigureAwait(false);
         }
@@ -120,7 +133,7 @@ internal static class AlvoAdminSignIn
     /// The antiforgery check and the form read buffer the whole body under the server's defaults (tens of megabytes)
     /// before the fields' own bounds apply, and the rate limit bounds how often, not how big. A declared length over
     /// the bound is answered at once; a chunked body that grows past it is cut off by the server, which the lowered
-    /// maximum below asks for.
+    /// maximum below asks for, and <see cref="ValidAsync"/> answers that cut-off with the page like any refusal.
     /// </remarks>
     /// <param name="http">The request.</param>
     internal static bool WithinSize(HttpContext http)
@@ -148,6 +161,14 @@ internal static class AlvoAdminSignIn
         }
         catch (AntiforgeryValidationException)
         {
+            return false;
+        }
+        catch (BadHttpRequestException tooLarge) when (tooLarge.StatusCode == StatusCodes.Status413PayloadTooLarge)
+        {
+            /* A chunked body that grew past WithinSize's bound, cut off by the server while the token was being
+               read: the same refusal as a declared length over it, not an exception page. Today the antiforgery
+               token store already turns this IOException into an AntiforgeryValidationException (measured: the
+               chunked fact stays green without this clause); this catch keeps the answer if that detail changes. */
             return false;
         }
     }

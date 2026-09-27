@@ -1,4 +1,6 @@
-﻿using Microsoft.AspNetCore.Identity;
+﻿using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Admin;
@@ -201,7 +203,7 @@ public sealed partial class SetPasswordEndpointTests
 
         for (var attempt = 0; attempt < 5; attempt++)
         {
-            (await browser.SignInAsync(" Mallory@alvo.test", "a wrong password here", "/admin/access")).Dispose();
+            (await browser.SignInAsync("Mallory@alvo.test", "a wrong password here", "/admin/access")).Dispose();
         }
 
         using var flooded = await browser.SignInAsync("mallory@ALVO.test", "a wrong password here", "/admin/access");
@@ -319,6 +321,81 @@ public sealed partial class SetPasswordEndpointTests
     public void A_client_is_its_ipv4_address_or_its_ipv6_slash_64(string first, string second, bool same)
         => (AlvoAdminCredentialLimit.ClientOf(IPAddress.Parse(first)) == AlvoAdminCredentialLimit.ClientOf(IPAddress.Parse(second)))
             .ShouldBe(same);
+
+    /// <summary>
+    /// <b>The ceiling bounds the limiter's memory</b>: once it refuses a client, that client's new subjects create no
+    /// partition, however many it cycles.
+    /// </summary>
+    [Fact]
+    public void Once_the_ceiling_refuses_a_client_its_new_subjects_create_no_partition()
+    {
+        using var limit = new AlvoAdminCredentialLimit(Options.Create(
+            new AlvoAdminCredentialLimitOptions { AttemptsPerMinute = 20, CeilingPerMinute = 3 }));
+        var http = new DefaultHttpContext();
+        http.Connection.RemoteIpAddress = IPAddress.Parse("10.42.0.7");
+
+        var throttled = Enumerable.Range(0, 50)
+            .Count(attempt => limit.Charge(http, AlvoAdminCredentialLimit.SignInSubject($"GUESS-{attempt}@ALVO.TEST")) is not null);
+
+        throttled.ShouldBe(47);
+        limit.SubjectPartitionsCreated.ShouldBe(3);
+    }
+
+    /// <summary>
+    /// A sign-in's subject is the address as Identity finds it: every spelling of one account, Unicode normalisation
+    /// forms included, is one budget, and the key is a fixed-length hash holding nothing typed.
+    /// </summary>
+    [Fact]
+    public void A_sign_in_subject_is_one_per_account_and_holds_nothing_typed()
+    {
+        var normalizer = new UpperInvariantLookupNormalizer();
+        string Subject(string email) => AlvoAdminCredentialLimit.SignInSubject(normalizer.NormalizeEmail(email));
+
+        Subject("jos\u00e9@alvo.test").ShouldBe(Subject("jose\u0301@ALVO.test"));
+        Subject(new string('e', 250) + "@alvo.test").Length.ShouldBe(Subject("a@alvo.test").Length);
+        Subject("mallory@alvo.test").ShouldNotContain("MALLORY");
+    }
+
+    /// <summary>An address over 256 characters is a failed sign-in, answered before it is keyed or looked up.</summary>
+    [Fact]
+    public async Task An_address_over_its_bound_is_a_failed_sign_in()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+
+        using var response = await new Browser(world).SignInAsync(new string('e', 300) + "@alvo.test", "a wrong password here");
+
+        LocationOf(response).ShouldStartWith($"{AlvoAdmin.SignInPath}?failed=true");
+    }
+
+    /// <summary>
+    /// <b>A chunked body cut off past 16 KB is refused like a declared one</b>, on all three anonymous posts, never
+    /// an exception page. TestServer enforces no body limit, so the fact installs Kestrel's behaviour: the lowered
+    /// maximum wraps the body in a stream that throws Kestrel's own 413 exception past it.
+    /// </summary>
+    /// <param name="endpoint">The post.</param>
+    /// <param name="page">Where a refusal is sent.</param>
+    [Theory]
+    [InlineData(AlvoAdmin.SetPasswordEndpoint, AlvoAdmin.SetPasswordPath)]
+    [InlineData(AlvoAdmin.SignInEndpoint, AlvoAdmin.SignInPath)]
+    [InlineData(AlvoAdmin.SignOutEndpoint, AlvoAdmin.SignInPath)]
+    public async Task A_chunked_body_cut_off_past_sixteen_kilobytes_is_refused_with_the_page(string endpoint, string page)
+    {
+        var limit = new KestrelBodyLimit();
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor, configure: builder =>
+            builder.Services.AddSingleton<Microsoft.AspNetCore.Hosting.IStartupFilter>(limit));
+        var browser = new Browser(world);
+        var form = Form(Eva, "not-a-token", NewPassword, antiforgery: await browser.AntiforgeryTokenAsync(page));
+        form["padding"] = new string('p', 17 * 1024);
+        var body = new FormUrlEncodedContent(form);
+        var chunked = new StreamContent(new UnseekableStream(await body.ReadAsStreamAsync(Ct)));
+        chunked.Headers.ContentType = body.Headers.ContentType;
+
+        using var response = await browser.PostAsync(endpoint, chunked);
+
+        ((int)response.StatusCode).ShouldBeInRange(300, 399, "a refusal is the page, never an exception page");
+        LocationOf(response).ShouldBe(page);
+        limit.CutOffs.ShouldBe(1, "the body went chunked and was cut off, not refused by its declared length");
+    }
 
     /// <summary>The limiter's keys never hold a credential: a token is keyed by a hash of its first characters.</summary>
     [Fact]
@@ -605,7 +682,11 @@ public sealed partial class SetPasswordEndpointTests
 
         /// <summary>Posts <paramref name="form"/> with this browser's cookies.</summary>
         public Task<HttpResponseMessage> PostAsync(string path, Dictionary<string, string> form)
-            => SendAsync(new HttpRequestMessage(HttpMethod.Post, path) { Content = new FormUrlEncodedContent(form) });
+            => PostAsync(path, new FormUrlEncodedContent(form));
+
+        /// <summary>Posts <paramref name="content"/> with this browser's cookies.</summary>
+        public Task<HttpResponseMessage> PostAsync(string path, HttpContent content)
+            => SendAsync(new HttpRequestMessage(HttpMethod.Post, path) { Content = content });
 
         private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request)
         {
@@ -633,5 +714,93 @@ public sealed partial class SetPasswordEndpointTests
 
         [GeneratedRegex("name=\"__RequestVerificationToken\"[^>]*value=\"(?<value>[^\"]+)\"")]
         private static partial Regex AntiforgeryInput();
+    }
+
+    /// <summary>Kestrel's body limit, which TestServer does not have: lowering the maximum cuts the body off past it.</summary>
+    private sealed class KestrelBodyLimit : Microsoft.AspNetCore.Hosting.IStartupFilter
+    {
+        private int _cutOffs;
+
+        /// <summary>How many bodies were cut off past their maximum.</summary>
+        public int CutOffs => Volatile.Read(ref _cutOffs);
+
+        public Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> Configure(
+            Action<Microsoft.AspNetCore.Builder.IApplicationBuilder> next) => app =>
+            {
+                app.Use(async (context, proceed) =>
+                {
+                    context.Features.Set<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>(new Limit(context, this));
+                    await proceed(context);
+                });
+                next(app);
+            };
+
+        private sealed class Limit(HttpContext context, KestrelBodyLimit owner) : Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature
+        {
+            private long? _maximum;
+
+            public bool IsReadOnly => false;
+
+            public long? MaxRequestBodySize
+            {
+                get => _maximum;
+                set
+                {
+                    _maximum = value;
+                    context.Request.Body = new CutOff(context.Request.Body, value ?? long.MaxValue, owner);
+                }
+            }
+        }
+
+        private sealed class CutOff(Stream inner, long maximum, KestrelBodyLimit owner) : Stream
+        {
+            private long _read;
+
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => _read; set => throw new NotSupportedException(); }
+
+            public override int Read(byte[] buffer, int offset, int count) => Counted(inner.Read(buffer, offset, count));
+
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+                => Counted(await inner.ReadAsync(buffer, cancellationToken));
+
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+                => ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+            public override void Flush() { }
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+            private int Counted(int read)
+            {
+                _read += read;
+                if (_read <= maximum)
+                {
+                    return read;
+                }
+
+                Interlocked.Increment(ref owner._cutOffs);
+                throw new BadHttpRequestException("Request body too large.", StatusCodes.Status413PayloadTooLarge);
+            }
+        }
+    }
+
+    /// <summary>A stream with no length, so the client sends it chunked.</summary>
+    private sealed class UnseekableStream(Stream inner) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 }
