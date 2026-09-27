@@ -59,7 +59,6 @@ namespace MMLib.Alvo.Admin.Components.Access
     {
         public Access() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
     public class PersonEditor : Microsoft.AspNetCore.Components.ComponentBase

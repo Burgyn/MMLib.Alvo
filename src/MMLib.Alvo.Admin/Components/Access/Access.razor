@@ -8,6 +8,9 @@
 
 <PageTitle>Access · Alvo</PageTitle>
 
+@* Learns the operator's offset from UTC once, so a lockout's end reads in their own time (LockoutWords). *@
+@OperatorClock.On(StateHasChanged)
+
 <div class="a-stack">
     @* The screen's create action is its header's primary one (spec §3.7). *@
     <PageHeader Title="Access"
@@ -275,19 +278,6 @@
 
     /// <inheritdoc />
     protected override async Task OnInitializedAsync() => await LoadAsync();
-
-    /// <summary>Asks the browser its offset from UTC once, so a lockout's end reads in the operator's own time.</summary>
-    /// <remarks>
-    /// After the first render because the browser is only reachable then; until it answers, the time says UTC
-    /// (<see cref="LockoutWords"/>), and it is drawn again once it has.
-    /// </remarks>
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender && await Interop.LearnUtcOffsetAsync())
-        {
-            StateHasChanged();
-        }
-    }
 
     /// <summary>Reads the descriptor's roles and levels, the operator's own id, and the people.</summary>
     private async Task LoadAsync()

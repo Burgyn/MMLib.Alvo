@@ -36,10 +36,11 @@ internal static class AlvoIdentityLockout
     /// <remarks>
     /// Read against the system clock because it is the clock Identity's own check reads
     /// (<c>UserManager.IsLockedOutAsync</c> compares with <see cref="DateTimeOffset.UtcNow"/>), so the screen and the
-    /// sign-in agree on whether a lockout stands; a lockout already over is not projected at all.
+    /// sign-in agree on whether a lockout stands — to the tick, hence <c>&gt;=</c> as Identity has it; a lockout
+    /// already over is not projected at all.
     /// </remarks>
     /// <param name="lockoutEnd">The stored <c>LockoutEnd</c>.</param>
     /// <returns>The end, or <see langword="null"/> for no lockout, one that has ended, and a disable.</returns>
     internal static DateTimeOffset? LockedOutUntil(DateTimeOffset? lockoutEnd)
-        => lockoutEnd is { } end && end > DateTimeOffset.UtcNow && !IsDisabled(end) ? end : null;
+        => lockoutEnd is { } end && end >= DateTimeOffset.UtcNow && !IsDisabled(end) ? end : null;
 }

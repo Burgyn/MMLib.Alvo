@@ -69,6 +69,12 @@ and the e2e suite asserts that things render, not that they behave.
    reads the confirms from the source, batch-B re-review N1). A confirm **names its subject** ("Remove the index on
    status, priority?", "Remove this beforeCreate hook?", "Disable dispatcher@…?") and acts on what it named, found
    again when it runs, never on a position captured at the press (M7).
+   *Amended 27 Sep (B8, §8d items 39 and 46(i)):* **Unlock person is confirmed though it is not destructive** — the
+   one confirm that is not. Ending a lockout from failed sign-ins early removes the account's guard against somebody
+   guessing its password, which is a defence taken away, not an administrator's own decision undone (Let them back in,
+   which asks nothing). It follows every rule above: "Unlock <address>?", the body leading with the consequence
+   ("They can try to sign in again now." and what does not change), the verb "Unlock", the editor closed first, and
+   focus on the person's Edit after Cancel and after the verb (pinned by `LockoutScenarios`).
 3. **Feedback.**
    - **Snackbar** (`ISnackbar`, read out by one polite live region — amended 26 Sep, final review M15 and batch-B
      re-review N2: the dashboard's provider is `role=status aria-live=polite`, on the page before any message, and

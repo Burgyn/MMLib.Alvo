@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
+using MMLib.Alvo.Admin.Components.Access;
 
 namespace MMLib.Alvo.Admin.Internal;
 
@@ -122,8 +123,11 @@ internal sealed partial class AdminInterop(IJSRuntime js, ILogger<AdminInterop> 
             return false;
         }
 
+        /* Range-checked where it arrives: the value is the browser's word, and an offset no zone can have (beyond
+           ±14 h) would make every time drawn from it throw during a render. Such a value is not kept, and the words
+           stay in UTC, saying so. */
         var minutes = await QuietlyAsync<int?>(module => module.InvokeAsync<int?>("utcOffsetMinutes"));
-        UtcOffset = minutes is { } east ? TimeSpan.FromMinutes(east) : null;
+        UtcOffset = LockoutWords.Usable(minutes is { } east ? TimeSpan.FromMinutes(east) : null);
         return UtcOffset is not null;
     }
 

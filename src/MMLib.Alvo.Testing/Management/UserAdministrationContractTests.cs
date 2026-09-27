@@ -193,13 +193,21 @@ public abstract class UserAdministrationContractTests
         page.Users.ShouldHaveSingleItem().IsDisabled.ShouldBeTrue("a refused unlock left the person disabled");
     }
 
-    /// <summary>The bootstrap administrator's lockout can be cleared.</summary>
+    /// <summary>Ending the bootstrap administrator's lockout is not refused.</summary>
     /// <remarks>
+    /// <para>
     /// The one write aimed at the bootstrap administrator that the guards admit, deliberately: ending their lockout
     /// gives back the account that can always recover a project, where the two refused writes would take it away.
+    /// </para>
+    /// <para>
+    /// <b>What this measures, and what it cannot.</b> The port has no member that causes a lockout — only failed
+    /// sign-ins do, and they are the store's — so the account is not locked first, and the fact is that the call is
+    /// admitted and leaves the person enabled with no lockout. That a real lockout ends is each implementation's own
+    /// suite (for ASP.NET Core Identity, <c>AlvoIdentityUserAdministrationLockoutTests</c>).
+    /// </para>
     /// </remarks>
     [Fact]
-    public async Task The_bootstrap_administrators_lockout_can_be_cleared()
+    public async Task Ending_the_bootstrap_administrators_lockout_is_not_refused()
     {
         EnsureAvailable();
 
