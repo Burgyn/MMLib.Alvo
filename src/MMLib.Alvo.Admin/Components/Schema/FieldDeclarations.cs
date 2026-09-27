@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Management;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
@@ -45,11 +46,37 @@ internal sealed class FieldDeclarations
     /// <param name="appliedJson">The applied revision the copy was taken from.</param>
     /// <param name="entity">The entity, by the name the copy gives it.</param>
     /// <param name="refused">Every refusal the build publishes, which a staged row may carry.</param>
+    /// <remarks>
+    /// The applied side is read under the name the entity is <em>applied</em> under, which is not its working name
+    /// once the copy renamed it: the rename's <c>renamedFrom</c>, resolved the way <c>WorkingCopy.AppliedEntityOf</c>
+    /// resolves it (<see cref="StagedChanges.OriginOf"/>). Read under the working name, a renamed entity's removed
+    /// fields lost their badges.
+    /// </remarks>
     public static FieldDeclarations From(
         string workingJson, string appliedJson, string entity, IReadOnlyList<ManagementRefusedFeature> refused)
         => new(
-            DescriptorLens.FieldDeclarations(workingJson, entity), DescriptorLens.FieldDeclarations(appliedJson, entity),
+            DescriptorLens.FieldDeclarations(workingJson, entity),
+            DescriptorLens.FieldDeclarations(appliedJson, AppliedNameOf(workingJson, appliedJson, entity)),
             refused);
+
+    /// <summary>The name the applied document holds the entity under; its working name when it holds neither.</summary>
+    private static string AppliedNameOf(string workingJson, string appliedJson, string entity)
+        => StagedChanges.OriginOf(
+            (Parse(workingJson)?["entities"] as JsonObject)?[entity], entity, Parse(appliedJson)?["entities"] as JsonObject)
+            ?? entity;
+
+    /// <summary>Parses, or answers nothing, for <c>DescriptorLens</c>'s reason: a pasted copy may not parse.</summary>
+    private static JsonNode? Parse(string json)
+    {
+        try
+        {
+            return JsonNode.Parse(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     /// <summary>The build's refusals one field's declaration carries (<see cref="FieldBadges.Refused"/>).</summary>
     /// <param name="field">The field's name.</param>

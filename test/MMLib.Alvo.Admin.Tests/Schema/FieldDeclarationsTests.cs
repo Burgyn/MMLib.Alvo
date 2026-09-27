@@ -28,6 +28,21 @@ public class FieldDeclarationsTests
     public void A_field_the_copy_removed_is_read_from_the_applied_revision()
         => Kind(FieldDeclarations.From(Working, Applied, "orders", []), "gone", "readOnly").ShouldBe(JsonValueKind.True);
 
+    /// <summary>
+    /// An entity renamed in the copy is applied under its old name, so a field the copy removed from it is read there —
+    /// and keeps its badges on its struck-through row.
+    /// </summary>
+    [Fact]
+    public void A_removed_field_of_a_renamed_entity_is_read_under_the_applied_name()
+    {
+        const string renamed = """
+            {"entities":{"jobs":{"renamedFrom":"orders","fields":{
+              "notes":{"type":"text","hidden":true}}}}}
+            """;
+
+        Kind(FieldDeclarations.From(renamed, Applied, "jobs", []), "gone", "readOnly").ShouldBe(JsonValueKind.True);
+    }
+
     [Fact]
     public void A_field_neither_declares_has_no_declaration()
         => FieldDeclarations.From(Working, Applied, "orders", []).Of("absent").ShouldBeNull();
