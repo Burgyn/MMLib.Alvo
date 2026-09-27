@@ -267,6 +267,12 @@ None carries `ready`: they are gaps this audit found, not confirmed specificatio
     declared blocks with no screen and no sentence. The cheap fix is one honest surface (a
     "declared, not editable here" panel, as Integrations already does for `webhooks`/`templates`)
     rather than five editors.
+    **Partly done** in `aa402bf` + `45edf80` (B2, narrowed by the maintainer's ruling of 27 Sep): the Overview's
+    "Declared, not honoured by this build" panel says `auth.providers` (a provider other than `local`), `realtime`
+    and `dynamicEntities` in the build's own sentences, and `DeclaredLimits` honours `enabled: false` and every other
+    block declined by value. **Still open on #271:** the editors — the `tenancy.enabled` switch (with its plan step
+    in Preview), the `formats` editor and the `field.format` picker — and showing `tenancy.enabled` and the declared
+    `formats` themselves.
 
 ### 5f. Found after the audit, by using it
 
@@ -593,9 +599,15 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
 20. ✅ **The Automations page denies the block exists.** `"automations"` vs `"automation"`
     (NotYet.razor:57, US:127). One-word fix plus a fact asserting each NotYet page finds its warning.
     **Done:** the page reads "automation", and an e2e fact asserts both not-yet pages find their warned block.
-21. **`storage: dynamic` is mis-rendered, and the build drops it silently.** Listed as not-applied forever,
+21. ✅ **`storage: dynamic` is mis-rendered, and the build drops it silently.** Listed as not-applied forever,
     badged `physical table` (SchemaList.razor:204, PS). Core question first: an entity the mapper
     discards without a warning (Map:44-46) is the silent case `UnhonouredSubsystems` exists to prevent.
+    **Done** in `aa402bf` + `45edf80`: the core warns at apply on every `storage: dynamic` entity, whether or not
+    `dynamicEntities` is enabled (`UnhonouredSubsystems.WithinBlocks`, slot `entity.storage`, served in
+    `capabilities.warned`) — warned, not refused, because nothing is wrongly permitted; `PendingSchema` reads
+    `storage`, so the list row and the entity header say "dynamic — not honoured by this build (F7, #41)" instead
+    of "not applied yet", the header's storage badge reads `dynamic`, and the screen prints the build's sentence.
+    The driver itself stays F7 (#41).
 22. ✅ **The staged view of a field loses facets.** `PendingSchema` reads 11 facets; `rollup`, `computed`,
     `index`, `default`, `nullable` vanish from a row the moment it is changed (EC:279-286, PS:78-89), and
     a pending entity without `tenancy` is drawn global. Probably: map the staged field through the same
@@ -614,9 +626,16 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     `{{…}}` webhook `payload` withheld as if refused; endpoint, template and mutate field are free text
     while endpoints and templates cannot be declared here at all — so a webhook/email hook cannot be
     completed from the dashboard alone. Probably pickers over declared names, and 13/#271's panel.
-27. **Keys the build ignores without a word** — `auth.providers`, `realtime`, `branding`, project
+27. ✅ **Keys the build ignores without a word** — `auth.providers`, `realtime`, `branding`, project
     `description`, `formats.*.description`. Extends #271/#268: the core should warn (they belong in
     `UnhonouredSubsystems` or a sibling), and the dashboard then renders that warning like the others.
+    **Done** in `aa402bf` + `45edf80`, one answer per key: `auth.providers` other than `local` is warned at apply
+    (slot `auth.providers`, #36); `realtime` is **reported, not warned** — `capabilities.warned` lists
+    `entity.realtime` while the apply stays quiet, since its default is `true` (the recorded deviation in
+    `CapabilityReport`, #38); `branding`, the project `description` and a format's `description` are metadata, so no
+    core row — the Overview says, in the dashboard's own sentence, that this dashboard does not show them yet
+    (#268, #271). All of it on Overview's "Declared, not honoured by this build" panel;
+    `DeclaredSlotsAgreementTests` holds the dashboard's slot reader to the real report.
 28. ✅ **Ref targets and index candidates are applied-only.** A pending entity cannot be a ref target
     (EC:95); a staged field cannot join an index (Indexes.razor:125). Read both from the working copy.
     **Done:** ref targets and index candidates come from the working copy, and so do the standalone Rules page's entity tabs (a pending entity shows the copy's rules, with no simulation). `users`, the reserved ref target the validator accepts beside the declared entities (`DescriptorValidator.ReservedUsersEntity`), is verified never offered — a separate, pre-existing gap this item did not touch.
@@ -626,6 +645,8 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     idempotency key.
     **Deferred → [#277](https://github.com/Burgyn/MMLib.Alvo/issues/277)**, by the maintainer's scope ruling of
     27 Sep: none of it is needed for day-to-day use of the dashboard.
+    Except one part, which landed with #271's in `45edf80`: the Overview no longer lists `dynamicEntities` for
+    `enabled: false`.
 30. ✅ **A person the dashboard creates can never sign in.** Access → *Add a person* creates the account
     **without a password** (deliberately — `IAlvoUserAdministration.CreateAsync` remarks), and *Issue a
     credential token* mints a single-use token (`IssueCredentialTokenAsync`, ASP.NET Identity's reset
