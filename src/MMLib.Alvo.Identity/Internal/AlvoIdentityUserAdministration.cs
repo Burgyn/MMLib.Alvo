@@ -36,37 +36,26 @@ internal sealed class AlvoIdentityUserAdministration(
     IAlvoBootstrapAdmin bootstrap) : IAlvoUserAdministration
 {
     /// <inheritdoc/>
+    /// <remarks>
+    /// <b>Ordered and paged by the normalised user name</b>, not the raw address: it is the column
+    /// Identity keeps unique and indexed (<c>UserNameIndex</c>), and every writer here sets the user
+    /// name to the address, so it orders the same people case-insensitively, a page is an index range
+    /// rather than a sort, and two equal keys — which would make the keyset skip the second one
+    /// forever — cannot exist. The cursor stays opaque to the caller; it happens to be that name.
+    /// </remarks>
     public async Task<AlvoUserPage> ListAsync(
         AlvoUserQuery query, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        var rows = store.Users.AsNoTracking().OrderBy(row => row.Email).AsQueryable();
+        var matching = Matching(query.Search);
 
-        if (query.Search is { Length: > 0 } search)
-        {
-            rows = rows.Where(row => row.Email != null && row.Email.Contains(search));
-        }
-
-        /* The cursor is the last address seen. Keyset over a unique ordered column, which is what
-           the Data API's own paging does and for the same reason: an offset drifts under a
-           concurrent insert, and a page that silently skips a row is worse than a slow one. */
-        if (query.After is { Length: > 0 } after)
-        {
-            /* The two-argument Compare, which EF translates to SQL's own ">" — so the cursor is
-               compared by the database's collation, the one that ordered the page. A comparison
-               chosen here would be a different order from the one the page was built with, which is
-               how a keyset cursor starts skipping rows; and the Ordinal overload this line once used
-               has no translation at all, so every second page threw. */
-            /* CA1309 is about a comparison .NET runs; this one is an expression tree SQL runs. */
-#pragma warning disable CA1309
-            rows = rows.Where(row => string.Compare(row.Email, after) > 0);
-#pragma warning restore CA1309
-        }
-
-        var total = await rows.LongCountAsync(cancellationToken).ConfigureAwait(false);
+        /* Counted before the cursor narrows it: the port's total is how many there are, not how
+           many are left after the page on screen. */
+        var total = await matching.LongCountAsync(cancellationToken).ConfigureAwait(false);
         var limit = Math.Clamp(query.Limit, 1, 200);
-        var page = await rows.Take(limit + 1).ToListAsync(cancellationToken).ConfigureAwait(false);
+        var page = await After(matching, query.After).Take(limit + 1)
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
 
         var more = page.Count > limit;
         var taken = more ? page[..limit] : page;
@@ -77,7 +66,49 @@ internal sealed class AlvoIdentityUserAdministration(
             projected.Add(await ProjectAsync(row).ConfigureAwait(false));
         }
 
-        return new AlvoUserPage(projected, more ? taken[^1].Email : null, total);
+        return new AlvoUserPage(projected, more ? taken[^1].NormalizedUserName : null, total);
+    }
+
+    /// <summary>The people a search matches, in the order the pages walk.</summary>
+    /// <remarks>
+    /// Matched as signing in matches an address (<c>FindByEmailAsync</c>): on the normalised column,
+    /// through Identity's own normaliser, so a search ignores case on every engine rather than
+    /// following each one's collation.
+    /// </remarks>
+    /// <param name="search">An address fragment, or nothing.</param>
+    private IQueryable<AlvoIdentityUser> Matching(string? search)
+    {
+        var rows = store.Users.AsNoTracking().OrderBy(row => row.NormalizedUserName).AsQueryable();
+        if (search is not { Length: > 0 })
+        {
+            return rows;
+        }
+
+        var normalized = users.NormalizeEmail(search);
+        return rows.Where(row => row.NormalizedEmail != null && row.NormalizedEmail.Contains(normalized));
+    }
+
+    /// <summary>The rows after the cursor: keyset over a unique ordered column.</summary>
+    /// <remarks>
+    /// What the Data API's own paging does and for the same reason: an offset drifts under a
+    /// concurrent insert, and a page that silently skips a row is worse than a slow one. The
+    /// two-argument Compare is what EF translates to SQL's own <c>&gt;</c>, so the cursor is compared
+    /// by the database's collation — the one that ordered the page; the Ordinal overload this once
+    /// used has no translation at all, so every second page threw.
+    /// </remarks>
+    /// <param name="rows">The ordered rows.</param>
+    /// <param name="after">The previous page's cursor, or nothing.</param>
+    private static IQueryable<AlvoIdentityUser> After(IQueryable<AlvoIdentityUser> rows, string? after)
+    {
+        if (after is not { Length: > 0 })
+        {
+            return rows;
+        }
+
+        /* CA1309 is about a comparison .NET runs; this one is an expression tree SQL runs. */
+#pragma warning disable CA1309
+        return rows.Where(row => string.Compare(row.NormalizedUserName, after) > 0);
+#pragma warning restore CA1309
     }
 
     /// <inheritdoc/>
