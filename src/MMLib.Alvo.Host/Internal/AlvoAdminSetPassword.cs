@@ -45,17 +45,28 @@ internal static partial class AlvoAdminSetPassword
     /// <param name="signIn">The identity package's redemption.</param>
     /// <param name="antiforgery">The antiforgery service the form's token is checked with.</param>
     /// <param name="people">The store the person's id is read back from after a success.</param>
+    /// <param name="limit">The credential limit, charged once the antiforgery check has passed.</param>
     /// <param name="loggers">Where the outcome is recorded.</param>
     /// <returns>A <c>303</c>.</returns>
     internal static async Task<IResult> SetPasswordAsync(
-        HttpContext http, AlvoSignIn signIn, IAntiforgery antiforgery, IAlvoUserStore people, ILoggerFactory loggers)
+        HttpContext http,
+        AlvoSignIn signIn,
+        IAntiforgery antiforgery,
+        IAlvoUserStore people,
+        AlvoAdminCredentialLimit limit,
+        ILoggerFactory loggers)
     {
-        if (!await AlvoAdminSignIn.ValidAsync(http, antiforgery).ConfigureAwait(false))
+        if (!AlvoAdminSignIn.WithinSize(http) || !await AlvoAdminSignIn.ValidAsync(http, antiforgery).ConfigureAwait(false))
         {
             return AlvoAdminRedirect.SeeOther(http, AlvoAdmin.SetPasswordPath);
         }
 
         var posted = Posted.From(await http.Request.ReadFormAsync().ConfigureAwait(false));
+        if (limit.Charge(http, AlvoAdminCredentialLimit.SetPasswordSubject(posted.Token)) is { } wait)
+        {
+            return AlvoAdminCredentialLimit.Throttled(http, wait, $"{AlvoAdmin.SetPasswordPath}?throttled=true");
+        }
+
         var logger = loggers.CreateLogger(typeof(AlvoAdminSetPassword).FullName!);
         var location = posted.Refusal()
             ?? await RedeemAsync(posted, signIn, people, logger, http.RequestAborted).ConfigureAwait(false);

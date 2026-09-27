@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using MMLib.Alvo.Admin;
 using MMLib.Alvo.Admin.Internal;
+using MMLib.Alvo.Host.Internal;
 using System.Net;
 using System.Text.RegularExpressions;
 
@@ -162,11 +163,14 @@ public sealed partial class SetPasswordEndpointTests
         (await RefusalAsync(world, Eva, token + new string('A', 2048))).ShouldBe(Failed);
     }
 
-    /// <summary><b>With the limit set to 3, the fourth post is throttled</b>: a 303 back to the page, with Retry-After.</summary>
+    /// <summary>
+    /// <b>With the per-subject limit at 3, the fourth post for one token is throttled</b>: a 303 back to the page, with
+    /// Retry-After. Another token from the same client is still answered.
+    /// </summary>
     [Fact]
-    public async Task The_fourth_post_in_a_minute_is_throttled_back_to_the_page()
+    public async Task The_fourth_post_for_one_token_is_throttled_and_another_token_is_not()
     {
-        await using var world = await AlvoHostWorld.StartAsync(Descriptor, Limit(3));
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor, Limits(attempts: 3));
         var browser = new Browser(world);
 
         for (var attempt = 0; attempt < 3; attempt++)
@@ -176,44 +180,154 @@ public sealed partial class SetPasswordEndpointTests
         }
 
         using var throttled = await browser.SetPasswordAsync("nobody@alvo.test", "not-a-token", NewPassword);
+        using var other = await browser.SetPasswordAsync("nobody@alvo.test", "another-token", NewPassword);
 
         throttled.StatusCode.ShouldBe(HttpStatusCode.SeeOther);
         LocationOf(throttled).ShouldBe($"{AlvoAdmin.SetPasswordPath}?throttled=true");
         throttled.Headers.RetryAfter.ShouldNotBeNull();
         throttled.Headers.CacheControl?.NoStore.ShouldBeTrue();
+        LocationOf(other).ShouldBe(Failed, "one token's flood throttles that token, not the client");
     }
 
-    /// <summary><b>The budget is shared</b>: three failed sign-ins throttle the set-password post, and the reverse.</summary>
+    /// <summary>
+    /// <b>A flood for one address does not throttle another address from the same client</b>, so nobody behind a
+    /// shared address can lock a colleague out of sign-in. The throttled answer keeps where they were going.
+    /// </summary>
     [Fact]
-    public async Task Sign_in_and_set_password_share_one_budget_per_client()
+    public async Task A_sign_in_flood_for_one_address_does_not_throttle_another_from_the_same_client()
     {
-        await using var world = await AlvoHostWorld.StartAsync(Descriptor, Limit(3));
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor, Limits(attempts: 3));
+        var browser = new Browser(world);
+
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            (await browser.SignInAsync(" Mallory@alvo.test", "a wrong password here", "/admin/access")).Dispose();
+        }
+
+        using var flooded = await browser.SignInAsync("mallory@ALVO.test", "a wrong password here", "/admin/access");
+        using var colleague = await browser.SignInAsync(Eva, "a wrong password here");
+
+        LocationOf(flooded).ShouldBe($"{AlvoAdmin.SignInPath}?throttled=true&returnUrl=%2Fadmin%2Faccess");
+        LocationOf(colleague).ShouldStartWith($"{AlvoAdmin.SignInPath}?failed=true");
+    }
+
+    /// <summary>
+    /// <b>A post that fails antiforgery consumes nothing</b>: a cross-site page in a victim's browser cannot spend
+    /// the victim's budget, per subject or per client.
+    /// </summary>
+    [Fact]
+    public async Task A_post_failing_antiforgery_consumes_no_budget()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor, Limits(attempts: 1, ceiling: 1));
+        var token = await IssueAsync(world, await CreateAsync(world, Eva));
+
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            using var forged = await new Browser(world).PostAsync(AlvoAdmin.SetPasswordEndpoint, Form(Eva, token, NewPassword));
+            LocationOf(forged).ShouldBe(AlvoAdmin.SetPasswordPath);
+        }
+
+        using var genuine = await new Browser(world).SetPasswordAsync(Eva, token, NewPassword);
+        LocationOf(genuine).ShouldBe($"{AlvoAdmin.SignInPath}?passwordSet=true");
+    }
+
+    /// <summary>
+    /// <b>The per-client ceiling still throttles</b> a client that cycles addresses and tokens, across both forms.
+    /// </summary>
+    [Fact]
+    public async Task The_ceiling_throttles_a_client_across_subjects_and_both_forms()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor, Limits(ceiling: 3));
         var browser = new Browser(world);
 
         for (var attempt = 0; attempt < 3; attempt++)
         {
-            using var failed = await browser.SignInAsync("nobody@alvo.test", "a wrong password here");
+            using var failed = await browser.SignInAsync($"guess-{attempt}@alvo.test", "a wrong password here");
             LocationOf(failed).ShouldStartWith($"{AlvoAdmin.SignInPath}?failed=true");
         }
 
         using var setPassword = await browser.SetPasswordAsync("nobody@alvo.test", "not-a-token", NewPassword);
-        using var signIn = await browser.SignInAsync("nobody@alvo.test", "a wrong password here");
+        using var signIn = await browser.SignInAsync("yet-another@alvo.test", "a wrong password here");
 
         LocationOf(setPassword).ShouldBe($"{AlvoAdmin.SetPasswordPath}?throttled=true");
-        LocationOf(signIn).ShouldBe($"{AlvoAdmin.SignInPath}?throttled=true");
+        LocationOf(signIn).ShouldStartWith($"{AlvoAdmin.SignInPath}?throttled=true");
     }
 
-    /// <summary>A limit that is not a positive number is refused at start.</summary>
+    /// <summary>A count that is not a positive number is refused at start, naming the variable to fix.</summary>
+    /// <param name="key">The configuration key.</param>
     /// <param name="limit">The configured value.</param>
     [Theory]
-    [InlineData("0")]
-    [InlineData("-5")]
-    public async Task A_limit_that_is_not_positive_is_refused_at_start(string limit)
+    [InlineData("Alvo:Admin:CredentialAttemptsPerMinute", "0")]
+    [InlineData("Alvo:Admin:CredentialAttemptsPerMinute", "-5")]
+    [InlineData("Alvo:Admin:CredentialCeilingPerMinute", "0")]
+    [InlineData("Alvo:Admin:CredentialCeilingPerMinute", "many")]
+    public async Task A_limit_that_is_not_positive_is_refused_at_start(string key, string limit)
     {
         var refusal = await Should.ThrowAsync<OptionsValidationException>(
-            () => AlvoHostWorld.StartAsync(Descriptor, Limit(limit)));
+            () => AlvoHostWorld.StartAsync(Descriptor, new Dictionary<string, string?>(StringComparer.Ordinal) { [key] = limit }));
 
-        refusal.Message.ShouldContain("Alvo__Admin__CredentialAttemptsPerMinute");
+        refusal.Message.ShouldContain(key.Replace(":", "__", StringComparison.Ordinal));
+    }
+
+    /// <summary>With the dashboard off there is no credential post to limit, so its counts are not validated.</summary>
+    [Fact]
+    public async Task With_the_dashboard_off_a_bad_limit_does_not_fail_the_start()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor, new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            [$"{AlvoAdmin.ConfigurationSection}:Enabled"] = "false",
+            ["Alvo:Admin:CredentialAttemptsPerMinute"] = "0",
+        });
+
+        using var page = await world.SendAnonymouslyAsync(HttpMethod.Get, AlvoAdmin.SetPasswordPath);
+        page.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+    }
+
+    /// <summary>
+    /// <b>A body over 16 KB is refused before anything reads it</b>, on both credential posts, and consumes nothing.
+    /// </summary>
+    [Fact]
+    public async Task A_body_over_sixteen_kilobytes_is_refused_before_it_is_read()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+        var token = await IssueAsync(world, await CreateAsync(world, Eva));
+        var browser = new Browser(world);
+        var padded = Form(Eva, token, NewPassword, antiforgery: await browser.AntiforgeryTokenAsync(AlvoAdmin.SetPasswordPath));
+        padded["padding"] = new string('p', 17 * 1024);
+
+        using var setPassword = await browser.PostAsync(AlvoAdmin.SetPasswordEndpoint, padded);
+        using var signIn = await browser.PostAsync(AlvoAdmin.SignInEndpoint, padded);
+
+        LocationOf(setPassword).ShouldBe(AlvoAdmin.SetPasswordPath);
+        LocationOf(signIn).ShouldBe(AlvoAdmin.SignInPath);
+        using var genuine = await browser.SetPasswordAsync(Eva, token, NewPassword);
+        LocationOf(genuine).ShouldBe($"{AlvoAdmin.SignInPath}?passwordSet=true");
+    }
+
+    /// <summary>
+    /// A client is its address: an IPv6 one by its /64, which a single host is routinely handed whole, and an
+    /// IPv4-mapped one as the IPv4 address, so a dual-stack client has one budget.
+    /// </summary>
+    /// <param name="first">One address.</param>
+    /// <param name="second">Another.</param>
+    /// <param name="same">Whether they are one client.</param>
+    [Theory]
+    [InlineData("2001:db8:1:2:aaaa::1", "2001:db8:1:2:ffff:ffff:ffff:ffff", true)]
+    [InlineData("2001:db8:1:2::1", "2001:db8:1:3::1", false)]
+    [InlineData("::ffff:10.42.0.7", "10.42.0.7", true)]
+    [InlineData("10.42.0.7", "10.42.0.8", false)]
+    public void A_client_is_its_ipv4_address_or_its_ipv6_slash_64(string first, string second, bool same)
+        => (AlvoAdminCredentialLimit.ClientOf(IPAddress.Parse(first)) == AlvoAdminCredentialLimit.ClientOf(IPAddress.Parse(second)))
+            .ShouldBe(same);
+
+    /// <summary>The limiter's keys never hold a credential: a token is keyed by a hash of its first characters.</summary>
+    [Fact]
+    public void A_set_password_subject_holds_no_part_of_the_token()
+    {
+        var token = "CfDJ8" + new string('x', 200);
+
+        AlvoAdminCredentialLimit.SetPasswordSubject(token).ShouldNotContain("xxxx");
+        AlvoAdminCredentialLimit.SetPasswordSubject(token).ShouldBe(AlvoAdminCredentialLimit.SetPasswordSubject(token[..^20]));
     }
 
     /// <summary>With the dashboard turned off, the page and the endpoint are both gone.</summary>
@@ -263,7 +377,7 @@ public sealed partial class SetPasswordEndpointTests
     [InlineData("failed=true", "This link does not work. It may have been used already, have expired, or been copied incompletely. Ask your administrator for a new one.")]
     [InlineData("problem=mismatch", "The two passwords are not the same.")]
     [InlineData("problem=weak", "Choose a password of at least 15 characters that is not your email address.")]
-    [InlineData("throttled=true", "Too many attempts from this network. Wait a minute and try again.")]
+    [InlineData("throttled=true", "Too many attempts from this network. Wait a minute, then open your link again.")]
     public async Task Each_state_renders_its_sentence(string query, string sentence)
     {
         await using var world = await AlvoHostWorld.StartAsync(Descriptor);
@@ -369,9 +483,10 @@ public sealed partial class SetPasswordEndpointTests
 
     private static int CountOf(string text, string needle) => Regex.Count(text, Regex.Escape(needle));
 
-    private static Dictionary<string, string?> Limit(object perMinute) => new(StringComparer.Ordinal)
+    private static Dictionary<string, string?> Limits(int? attempts = null, int? ceiling = null) => new(StringComparer.Ordinal)
     {
-        ["Alvo:Admin:CredentialAttemptsPerMinute"] = perMinute.ToString(),
+        ["Alvo:Admin:CredentialAttemptsPerMinute"] = attempts?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        ["Alvo:Admin:CredentialCeilingPerMinute"] = ceiling?.ToString(System.Globalization.CultureInfo.InvariantCulture),
     };
 
     private static Dictionary<string, string?> Bootstrap(string secret) => new(StringComparer.Ordinal)
@@ -466,14 +581,14 @@ public sealed partial class SetPasswordEndpointTests
         }
 
         /// <summary>Opens the sign-in page and signs in.</summary>
-        public async Task<HttpResponseMessage> SignInAsync(string email, string password)
+        public async Task<HttpResponseMessage> SignInAsync(string email, string password, string returnUrl = "")
         {
             var antiforgery = await AntiforgeryTokenAsync(AlvoAdmin.SignInPath);
             return await PostAsync(AlvoAdmin.SignInEndpoint, new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["email"] = email,
                 ["password"] = password,
-                ["returnUrl"] = string.Empty,
+                ["returnUrl"] = returnUrl,
                 ["__RequestVerificationToken"] = antiforgery,
             });
         }

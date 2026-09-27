@@ -76,7 +76,7 @@ the policy stated statically under the field. The query-string states it renders
 | `failed=true` | "This link does not work. It may have been used already, have expired, or been copied incompletely. Ask your administrator for a new one." |
 | `problem=mismatch` | "The two passwords are not the same." |
 | `problem=weak` | "Choose a password of at least 15 characters that is not your email address." |
-| `throttled=true` | "Too many attempts from this network. Wait a minute and try again." |
+| `throttled=true` | "Too many attempts from this network. Wait a minute, then open your link again." (amended, ruling 10.7: a throttled post comes back without the fragment, so the boxes are empty; sign-in keeps "Wait a minute and try again.") |
 
 For `mismatch` and `weak`, the endpoint's redirect `Location` carries `#email=…&token=…` back, so the
 person does not have to reopen the link. The browser keeps the fragment, and it never appears in a
@@ -94,7 +94,7 @@ The steps, in order:
 4. `await signIn.SetPasswordAsync(email, token, password)`, then map the outcome:
    `Set` → sign-in with `passwordSet=true`; `PasswordRejected` → `problem=weak`; `Refused` → `failed=true`.
 
-**Rate limit, shared with sign-in (new).** The host adds `AddRateLimiter` with **one** named policy,
+**Rate limit, shared with sign-in (new; superseded in shape by the §8.7 amendment, ruling 10.6: two layers, charged by the endpoints after antiforgery, no middleware).** The host adds `AddRateLimiter` with **one** named policy,
 `alvo-admin-credentials`: a fixed-window partitioner keyed on `Connection.RemoteIpAddress` (correct
 behind a proxy only when `ForwardedHeaders.Enabled` is on, which `docs/architecture/host.md` must say),
 `QueueLimit = 0`. Both `SignInEndpoint` and `SetPasswordEndpoint` call
@@ -328,6 +328,16 @@ Extend `A_second_person_can_be_created_and_gets_a_credential_token` to assert th
    is offline, and no list ships. Only the context-specific (address) blocklist is applied. Follow-up.
 7. **The rate limit is per client IP, a fixed window, with no CAPTCHA.** Identity's lockout does not
    cover redemption, by design (the token cannot be guessed).
+   *Amended (ruling 10.6):* a single per-IP budget let one anonymous client lock everyone behind a shared
+   address (a NAT, a proxy that forwards no client address) out of sign-in, the bootstrap admin included. So
+   the limit has two layers, both fixed windows with no queue: the design's **20 a minute per (client,
+   normalised address)** on sign-in and **per (client, hash of the token's first 64 characters)** on
+   set-password, under a coarse **200 a minute per client** across both forms that bounds the hashing cost of a
+   client cycling subjects (`Alvo:Admin:CredentialCeilingPerMinute`, internal, validated like the other). A
+   client is its IPv4 address, or its IPv6 /64, with an IPv4-mapped address read as IPv4. Both are **charged
+   by the endpoint after the antiforgery check**, not by `UseRateLimiter` middleware in front of it, so a
+   cross-site page cannot spend a victim's budget; the pipeline has no rate-limiter middleware. Both counts are
+   validated only when the dashboard is enabled. Both anonymous posts refuse a body over 16 KB before reading it.
 8. **A temporary lockout is cleared on success.** Identity leaves it. The lockout protected the old
    password, and the holder just proved possession of an admin-issued token.
 9. **Disabled accounts and the bootstrap admin are refused at redemption.** Identity's
@@ -386,3 +396,12 @@ Rulings on the T1 review (controller, 27 Sep 2026):
    fallback), never hard-coded (§8.14). The three T1 deviations (§8.11–13) are accepted.
 5. Disabling a person rotates their security stamp in the same unit of work, so every existing cookie and
    circuit ends and "let back in" never revives an old session (§4, §8.15).
+
+Rulings on the T2 review (controller, 27 Sep 2026):
+
+6. The credential limit is two-layered and charged after antiforgery (§8.7 amendment): per (client, address) on
+   sign-in and per (client, token-prefix hash) on set-password at 20 a minute, under a 200-a-minute per-client
+   ceiling; IPv6 by /64, IPv4-mapped as IPv4; a throttled sign-in keeps its `returnUrl`; a 16 KB body limit on both
+   anonymous posts; the counts are validated only when the dashboard is on.
+7. A throttled set-password page says "Too many attempts from this network. Wait a minute, then open your link
+   again." (§2 table). The dashboard under a PathBase is todo item 45.

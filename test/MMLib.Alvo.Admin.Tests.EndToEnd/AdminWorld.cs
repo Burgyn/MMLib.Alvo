@@ -119,6 +119,7 @@ public class AdminWorld : IAsyncLifetime
                the shipped limit of 20 credential posts per client per minute would throttle the suite rather than
                a stranger. The throttling scenario sets its own low limit. */
             ["Alvo:Admin:CredentialAttemptsPerMinute"] = "100000",
+            ["Alvo:Admin:CredentialCeilingPerMinute"] = "100000",
 
             /* Quiet, and this is not cosmetic. The host runs INSIDE the test process, so every
                log line it writes goes through the test platform's own output sink — and at the

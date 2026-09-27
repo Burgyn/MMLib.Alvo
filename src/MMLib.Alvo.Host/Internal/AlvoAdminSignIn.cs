@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -53,12 +54,11 @@ internal static class AlvoAdminSignIn
 
         /* AllowAnonymous says what these are, and it is what the identity package's cookie re-check skips on:
            signing in and out, and setting a password, must work with no session. The two posts that take a
-           credential share one rate limit, so a client has one budget across both forms (design §2). */
-        app.MapPost(AlvoAdmin.SignInEndpoint, SignInAsync).AllowAnonymous().ExcludeFromDescription()
-            .RequireRateLimiting(AlvoAdminCredentialLimit.PolicyName);
+           credential are rate-limited by their handlers, after the antiforgery check (AlvoAdminCredentialLimit). */
+        app.MapPost(AlvoAdmin.SignInEndpoint, SignInAsync).AllowAnonymous().ExcludeFromDescription();
         app.MapPost(AlvoAdmin.SignOutEndpoint, SignOutAsync).AllowAnonymous().ExcludeFromDescription();
         app.MapPost(AlvoAdmin.SetPasswordEndpoint, AlvoAdminSetPassword.SetPasswordAsync).AllowAnonymous()
-            .ExcludeFromDescription().RequireRateLimiting(AlvoAdminCredentialLimit.PolicyName);
+            .ExcludeFromDescription();
     }
 
     /// <summary>
@@ -70,9 +70,9 @@ internal static class AlvoAdminSignIn
     /// the browser's resubmission prompt.
     /// </remarks>
     private static async Task<IResult> SignInAsync(
-        HttpContext http, AlvoSignIn signIn, IAntiforgery antiforgery)
+        HttpContext http, AlvoSignIn signIn, IAntiforgery antiforgery, AlvoAdminCredentialLimit limit)
     {
-        if (!await ValidAsync(http, antiforgery).ConfigureAwait(false))
+        if (!WithinSize(http) || !await ValidAsync(http, antiforgery).ConfigureAwait(false))
         {
             return Results.Redirect(AlvoAdmin.SignInPath);
         }
@@ -81,6 +81,12 @@ internal static class AlvoAdminSignIn
         var email = form["email"].ToString();
         var password = form["password"].ToString();
         var returnUrl = Local(form["returnUrl"].ToString());
+
+        if (limit.Charge(http, AlvoAdminCredentialLimit.SignInSubject(email)) is { } wait)
+        {
+            return AlvoAdminCredentialLimit.Throttled(
+                http, wait, $"{AlvoAdmin.SignInPath}?throttled=true&returnUrl={Uri.EscapeDataString(returnUrl)}");
+        }
 
         if (email.Length == 0 || password.Length == 0
             || !await signIn.PasswordSignInAsync(email, password).ConfigureAwait(false))
@@ -102,6 +108,29 @@ internal static class AlvoAdminSignIn
         }
 
         return Results.Redirect(AlvoAdmin.SignInPath);
+    }
+
+    /// <summary>The most a credential form's body may carry; a real one is well under a kilobyte.</summary>
+    internal const long MaximumFormBytes = 16 * 1024;
+
+    /// <summary>
+    /// Bounds an anonymous post's body before anything reads it, and says whether its declared length is within it.
+    /// </summary>
+    /// <remarks>
+    /// The antiforgery check and the form read buffer the whole body under the server's defaults (tens of megabytes)
+    /// before the fields' own bounds apply, and the rate limit bounds how often, not how big. A declared length over
+    /// the bound is answered at once; a chunked body that grows past it is cut off by the server, which the lowered
+    /// maximum below asks for.
+    /// </remarks>
+    /// <param name="http">The request.</param>
+    internal static bool WithinSize(HttpContext http)
+    {
+        if (http.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } body)
+        {
+            body.MaxRequestBodySize = MaximumFormBytes;
+        }
+
+        return http.Request.ContentLength is not > MaximumFormBytes;
     }
 
     /// <summary>Validates the antiforgery token on a posted form.</summary>

@@ -101,7 +101,7 @@ public static class AlvoHost
            decisions: MMLib.Alvo.Admin adds no authentication of its own (an embedded host already
            has one), and the standalone image is the deployment that needs one. */
         builder.Services.AddAlvoIdentityCookieSignIn(AlvoAdmin.SignInPath);
-        builder.Services.AddAlvoAdminCredentialLimit(builder.Configuration);
+        AlvoAdminCredentialLimit.AddAlvoAdminCredentialLimit(builder.Services, builder.Configuration);
         builder.Services.AddAlvoAdmin(admin =>
         {
             builder.Configuration.GetSection(AlvoAdmin.ConfigurationSection).Bind(admin);
@@ -314,13 +314,11 @@ public static class AlvoHost
            because Blazor's form handling requires the token to have been validated by the time a
            component renders.
 
-           The rate limiter after authentication and before antiforgery: it guards the two credential
-           posts, and a throttled post is answered before its form is read, its antiforgery token checked
-           or its password hashed — the limiter exists to bound exactly that work (design §2). It acts only
-           on endpoints that name its policy, so no other request pays for it. */
+           No rate-limiter middleware: the two credential posts charge their limit themselves, after the
+           antiforgery check, so a cross-site page cannot spend a victim's budget (AlvoAdminCredentialLimit,
+           design §8.7 as amended). */
         MapAssets(app);
         app.UseAuthentication();
-        app.UseRateLimiter();
         app.UseAuthorization();
         app.UseAntiforgery();
 
