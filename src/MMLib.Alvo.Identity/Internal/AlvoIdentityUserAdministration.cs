@@ -53,11 +53,15 @@ internal sealed class AlvoIdentityUserAdministration(
            concurrent insert, and a page that silently skips a row is worse than a slow one. */
         if (query.After is { Length: > 0 } after)
         {
-            /* Ordinal, because the cursor is compared in the database and the database's
-               collation is what actually orders the rows — a culture-aware comparison here would
-               be a different order from the one the page was built with, which is how a keyset
-               cursor starts skipping rows. */
-            rows = rows.Where(row => string.Compare(row.Email, after, StringComparison.Ordinal) > 0);
+            /* The two-argument Compare, which EF translates to SQL's own ">" — so the cursor is
+               compared by the database's collation, the one that ordered the page. A comparison
+               chosen here would be a different order from the one the page was built with, which is
+               how a keyset cursor starts skipping rows; and the Ordinal overload this line once used
+               has no translation at all, so every second page threw. */
+            /* CA1309 is about a comparison .NET runs; this one is an expression tree SQL runs. */
+#pragma warning disable CA1309
+            rows = rows.Where(row => string.Compare(row.Email, after) > 0);
+#pragma warning restore CA1309
         }
 
         var total = await rows.LongCountAsync(cancellationToken).ConfigureAwait(false);
