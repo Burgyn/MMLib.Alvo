@@ -8,7 +8,8 @@
 /// <c>MMLib.Alvo.Identity</c>'s (NIST SP 800-63B-4, 15 to 128 characters, no composition rules, not the address),
 /// and this package holds no reference to it (design §1.2). So the numbers are spelled here, for the box's
 /// <c>minlength</c>/<c>maxlength</c> and the sentence under it, and a host test asserts they equal what the host
-/// registered — the <c>TenantClaimType</c> precedent. The endpoint's own check is the package's, so a drift here
+/// registered (the ceiling by what the policy does at it and one past it, beside the endpoint's own cut-off) — the
+/// <c>TenantClaimType</c> precedent. The endpoint's own check is the package's, so a drift here
 /// would mislead the sentence, never admit a password.
 /// </remarks>
 internal static class SetPasswordPolicy

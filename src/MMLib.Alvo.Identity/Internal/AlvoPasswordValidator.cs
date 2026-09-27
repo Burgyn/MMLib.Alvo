@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Identity;
+using System.Globalization;
 
 namespace MMLib.Alvo.Identity.Internal;
 
@@ -29,7 +30,12 @@ internal sealed class AlvoPasswordValidator : IPasswordValidator<AlvoIdentityUse
     /// <summary>The policy's floor: NIST's fifteen for a single-factor password.</summary>
     internal const int MinimumLength = 15;
 
-    /// <summary>The policy's ceiling.</summary>
+    /// <summary>The policy's ceiling, and the one source of it.</summary>
+    /// <remarks>
+    /// The dashboard's page (<c>SetPasswordPolicy.MaximumLength</c>) and the host's endpoint
+    /// (<c>AlvoAdminSetPassword.MaximumPasswordLength</c>) cannot reference this package's internals, so they spell
+    /// the number and a host test pins both to what this policy does at it and one past it.
+    /// </remarks>
     internal const int MaximumLength = 128;
 
     /// <summary>How long a local part must be before a password containing it is refused.</summary>
@@ -38,7 +44,8 @@ internal sealed class AlvoPasswordValidator : IPasswordValidator<AlvoIdentityUse
     private static readonly IdentityError _tooLong = new()
     {
         Code = "PasswordTooLong",
-        Description = "Passwords must be at most 128 characters.",
+        Description = string.Create(
+            CultureInfo.InvariantCulture, $"Passwords must be at most {MaximumLength} characters."),
     };
 
     private static readonly IdentityError _containsAddress = new()

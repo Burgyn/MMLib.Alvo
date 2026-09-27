@@ -553,6 +553,30 @@ public sealed partial class SetPasswordEndpointTests
             .ShouldBe(SetPasswordPolicy.MinimumLength);
     }
 
+    /// <summary>
+    /// <b>The ceiling of 128 is one number</b> (final branch review, item 6): the page's <c>maxlength</c>, the
+    /// endpoint's cut-off before any store read, and the identity policy the host registered. The policy's is read
+    /// by what it does — it runs before the account is looked at, so for an address with no account a password at
+    /// the ceiling gets past it (<c>Refused</c>) and one character more does not (<c>PasswordRejected</c>) — because
+    /// the identity package's constant is its own internal, and its behaviour is what a drift would change.
+    /// </summary>
+    [Fact]
+    public async Task The_dashboards_and_the_endpoints_ceiling_is_the_identity_policys()
+    {
+        AlvoAdminSetPassword.MaximumPasswordLength.ShouldBe(SetPasswordPolicy.MaximumLength);
+
+        await using var world = await AlvoHostWorld.StartAsync(Descriptor);
+        using var scope = world.Services.CreateScope();
+        var signIn = scope.ServiceProvider.GetRequiredService<Identity.AlvoSignIn>();
+        Task<Identity.AlvoPasswordSetOutcome> Redeem(int length) => signIn.SetPasswordAsync(
+            "nobody@example.test", "t", new string('q', length), TestContext.Current.CancellationToken);
+
+        (await Redeem(SetPasswordPolicy.MaximumLength))
+            .ShouldBe(Identity.AlvoPasswordSetOutcome.Refused, "a password at the ceiling passes the policy");
+        (await Redeem(SetPasswordPolicy.MaximumLength + 1))
+            .ShouldBe(Identity.AlvoPasswordSetOutcome.PasswordRejected, "one character over it does not");
+    }
+
     private static async Task<string> RefusalAsync(AlvoHostWorld world, string email, string token)
     {
         using var response = await new Browser(world).SetPasswordAsync(email, token, NewPassword);

@@ -36,6 +36,10 @@ internal static partial class AlvoAdminSetPassword
     internal const int MaximumTokenLength = 2048;
 
     /// <summary>The longest password the policy accepts, so a longer one is weak without being hashed.</summary>
+    /// <remarks>
+    /// The identity policy's ceiling, spelled here because it is that package's internal; a host test pins the two,
+    /// and the dashboard's <c>maxlength</c>, to one number.
+    /// </remarks>
     internal const int MaximumPasswordLength = 128;
 
     private const string Failed = $"{AlvoAdmin.SetPasswordPath}?failed=true";
