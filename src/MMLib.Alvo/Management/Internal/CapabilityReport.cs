@@ -34,9 +34,9 @@ namespace MMLib.Alvo.Management.Internal;
 /// <see cref="UnhonouredSubsystems.WithinBlocks"/>' <c>auth.providers</c> and <c>entity.storage</c>, and
 /// <see cref="UnhonouredSubsystems.ReportedOnly"/>' <c>entity.realtime</c>, after the blocks, spelled as
 /// <c>refused</c>'s slots already are (<c>field.default</c>). A client keyed on a top-level block name matches
-/// none of them, so no existing badge moves. <c>ManagementWarnedBlock.Block</c>'s own summary still says "top-level
-/// block name"; correcting that sentence is an Abstractions change, left to the batch that grows Abstractions
-/// (B7), and this paragraph is where the wider meaning is stated until then.
+/// none of them, so no existing badge moves. <c>ManagementWarnedBlock.Block</c>'s and
+/// <c>ManagementCapabilities.Warned</c>'s own documentation says so (corrected with B7, the batch that grew
+/// Abstractions).
 /// </para>
 /// <para>
 /// <b>Deliberate deviation: the report and the apply warning are no longer the same list.</b> Until §8d item 27

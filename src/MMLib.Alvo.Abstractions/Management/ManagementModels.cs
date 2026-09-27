@@ -84,15 +84,25 @@ public sealed record ManagementRevisionDetail(ManagementRevision Version, string
 
 /// <summary>What this build honours, warns about, and refuses — one source of truth for "not yet".</summary>
 /// <param name="Honoured">The top-level blocks this build honours.</param>
-/// <param name="Warned">Blocks that apply and then do nothing. The section exists; nothing runs.</param>
+/// <param name="Warned">
+/// What a descriptor may declare and this build then does nothing with: the section parses, nothing runs. Both
+/// top-level blocks (<c>automation</c>) and qualified slots inside an honoured block (<c>auth.providers</c>,
+/// <c>entity.storage</c>, <c>entity.realtime</c>) — so a client keyed on a block name matches only the first
+/// kind. <b>Not the same list as the apply's warning:</b> <c>entity.realtime</c> is reported here and never warned
+/// at apply, because its schema default is <see langword="true"/> and a warning would fire on every descriptor.
+/// </param>
 /// <param name="Refused">Features an apply rejects. A control for one of these must not exist.</param>
 public sealed record ManagementCapabilities(
     IReadOnlyList<string> Honoured,
     IReadOnlyList<ManagementWarnedBlock> Warned,
     IReadOnlyList<ManagementRefusedFeature> Refused);
 
-/// <summary>A declared block this build parses and then honours nowhere.</summary>
-/// <param name="Block">The descriptor's top-level block name.</param>
+/// <summary>A declared block, or a slot inside one, this build parses and then honours nowhere.</summary>
+/// <param name="Block">
+/// A top-level block name (<c>automation</c>), or a qualified slot inside an honoured block
+/// (<c>auth.providers</c>, <c>entity.storage</c>, <c>entity.realtime</c>), spelled as
+/// <see cref="ManagementRefusedFeature.Slot"/> already is (<c>field.default</c>).
+/// </param>
 /// <param name="Consequence">
 /// What does not happen, concretely — <b>served verbatim.</b> Never rewrite it in a client: it is the
 /// framework's own sentence, and a second wording is a third spelling of one truth.
