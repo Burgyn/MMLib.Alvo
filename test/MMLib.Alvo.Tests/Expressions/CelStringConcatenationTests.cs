@@ -124,6 +124,39 @@ public class CelStringConcatenationTests
         => Compile(source, CelProfile.Computed).IsSuccess.ShouldBeFalse();
 
     /// <summary>
+    /// The idiomatic "separator only when present" shapes: a field is known present anywhere inside the branch its
+    /// own presence test guards, however deep the join that reads it sits there.
+    /// </summary>
+    [Theory]
+    [InlineData("first_name + (has(middle_name) ? ' ' + middle_name : '') + ' ' + last_name")]
+    [InlineData("has(middle_name) ? first_name + ' ' + middle_name : first_name")]
+    [InlineData("!has(middle_name) ? first_name : first_name + ' ' + middle_name")]
+    [InlineData("has(middle_name) ? (has(notes) ? middle_name + notes : middle_name) : ''")]
+    public void A_field_is_known_present_inside_the_branch_its_presence_test_guards(string source)
+    {
+        var result = Compile(source, CelProfile.Computed);
+
+        result.IsSuccess.ShouldBeTrue(string.Join("; ", result.Errors.Select(error => error.Message)));
+    }
+
+    /// <summary>
+    /// The guard's reach ends where its branch does: the other branch, a different field's test, and a read after
+    /// the ternary are all still unguarded.
+    /// </summary>
+    [Theory]
+    [InlineData("has(middle_name) ? first_name : first_name + ' ' + middle_name")]
+    [InlineData("has(notes) ? first_name + ' ' + middle_name : first_name")]
+    [InlineData("!has(middle_name) ? first_name + ' ' + middle_name : first_name")]
+    [InlineData("(has(middle_name) ? middle_name : '') + middle_name")]
+    [InlineData("(visits > 1 ? ' ' + middle_name : '') + last_name")]
+    public void A_read_the_presence_test_does_not_guard_is_still_refused(string source)
+    {
+        var error = Compile(source, CelProfile.Computed).Errors.ShouldHaveSingleItem();
+
+        error.Message.ShouldContain("'middle_name'");
+    }
+
+    /// <summary>
     /// Two independent optional operands are two refusals — one round trip, every finding — and a refused inner
     /// join is not reported again by the join around it.
     /// </summary>

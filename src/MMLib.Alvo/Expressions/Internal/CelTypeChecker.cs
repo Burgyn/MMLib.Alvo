@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Internal;
 using MMLib.Alvo.Schema;
+using System.Collections.Immutable;
 
 namespace MMLib.Alvo.Expressions.Internal;
 
@@ -168,6 +169,14 @@ internal static class CelTypeChecker
             "'@tenant.id' is not legal in an access level: an access level is project-scoped, not tenant-scoped.";
 
         private int _cursor;
+
+        /// <summary>
+        /// The fields a presence test has established inside the branch being checked — <c>f</c> within the
+        /// <c>WhenTrue</c> of <c>has(f) ? … : …</c>, or the <c>WhenFalse</c> of <c>!has(f) ? … : …</c>. Scoped to that
+        /// branch: <see cref="CheckGuardedBranch"/> restores it on the way out, so a read after the ternary is
+        /// unguarded again.
+        /// </summary>
+        private ImmutableHashSet<string> _knownPresent = ImmutableHashSet.Create<string>(StringComparer.Ordinal);
 
         public List<CelCompilationError> Errors { get; } = [];
 
@@ -527,7 +536,8 @@ internal static class CelTypeChecker
         private static CelCompilationError NullableFieldOperand(string fieldName, int position) => new(
             $"'+' would join '{fieldName}', which may be null: CEL's '+' has no null overload, and SQL's '||' makes "
             + "the whole value NULL when any part is.",
-            $"Make '{fieldName}' required, or write the fallback explicitly: (has({fieldName}) ? {fieldName} : '').",
+            $"Make '{fieldName}' required, or write the fallback explicitly: (has({fieldName}) ? {fieldName} : ''), or "
+            + $"(has({fieldName}) ? ' ' + {fieldName} : '') to join a separator only when it is there.",
             position);
 
         private static CelCompilationError NullableOperand(int position) => new(
@@ -541,12 +551,14 @@ internal static class CelTypeChecker
         /// <c>NOT NULL</c>; a healthy join (its own operands passed this same test); or a ternary both of whose
         /// branches are — where a field on the branch its own presence test guards
         /// (<c>has(f) ? f : …</c>, <c>!has(f) ? … : f</c>) counts, because that is exactly the coalescing construct
-        /// this profile already has.
+        /// this profile already has — and a field read anywhere inside the branch its presence test guards
+        /// (<see cref="_knownPresent"/>), so <c>has(m) ? a + ' ' + m : a</c> is accepted too.
         /// </summary>
         private bool IsNeverNull(CelNode node) => node switch
         {
             CelLiteral literal => literal.Value is not null,
-            CelFieldRef fieldRef => ResolveField(fieldRef.FieldName) is { Nullable: false },
+            CelFieldRef fieldRef =>
+                _knownPresent.Contains(fieldRef.FieldName) || ResolveField(fieldRef.FieldName) is { Nullable: false },
             CelBinary { Operator: CelBinaryOperator.Add } => true,
             CelConditional conditional =>
                 IsNeverNullWhen(conditional.WhenTrue, conditional.Condition, conditionHolds: true)
@@ -556,12 +568,7 @@ internal static class CelTypeChecker
 
         private bool IsNeverNullWhen(CelNode branch, CelNode condition, bool conditionHolds) =>
             IsNeverNull(branch)
-            || (branch is CelFieldRef fieldRef && GuardsPresence(condition, fieldRef.FieldName, conditionHolds));
-
-        private static bool GuardsPresence(CelNode condition, string fieldName, bool conditionHolds) => conditionHolds
-            ? condition is CelHas { Field.FieldName: var tested } && tested == fieldName
-            : condition is CelUnary { Operator: CelUnaryOperator.Not, Operand: CelHas { Field.FieldName: var negated } }
-                && negated == fieldName;
+            || (branch is CelFieldRef fieldRef && PresenceTested(condition, conditionHolds) == fieldRef.FieldName);
 
         private (CelNode, CelValueType, bool, int) CheckComparison(
             CelBinary binary, CelBinaryOperator op, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError, int position)
@@ -700,8 +707,10 @@ internal static class CelTypeChecker
         private (CelNode, CelValueType, bool, int) CheckConditional(CelConditional conditional)
         {
             var (condition, conditionType, conditionError, conditionPosition) = CheckNode(conditional.Condition);
-            var (whenTrue, trueType, trueError, _) = CheckNode(conditional.WhenTrue);
-            var (whenFalse, falseType, falseError, falsePosition) = CheckNode(conditional.WhenFalse);
+            var (whenTrue, trueType, trueError, _) =
+                CheckGuardedBranch(conditional.WhenTrue, PresenceTested(conditional.Condition, conditionHolds: true));
+            var (whenFalse, falseType, falseError, falsePosition) =
+                CheckGuardedBranch(conditional.WhenFalse, PresenceTested(conditional.Condition, conditionHolds: false));
             var rewritten = conditional with { Condition = condition, WhenTrue = whenTrue, WhenFalse = whenFalse };
 
             var profileBad = CheckConstruct(
@@ -714,6 +723,37 @@ internal static class CelTypeChecker
 
             return (rewritten, trueError ? falseType : trueType, profileBad || conditionBad || branchesBad, conditionPosition);
         }
+
+        /// <summary>Checks one ternary branch with <paramref name="presentField"/>, when there is one, known present in it.</summary>
+        private (CelNode Node, CelValueType Type, bool HasError, int Position) CheckGuardedBranch(CelNode branch, string? presentField)
+        {
+            if (presentField is null)
+            {
+                return CheckNode(branch);
+            }
+
+            var outside = _knownPresent;
+            _knownPresent = outside.Add(presentField);
+            try
+            {
+                return CheckNode(branch);
+            }
+            finally
+            {
+                _knownPresent = outside;
+            }
+        }
+
+        /// <summary>
+        /// The field a ternary's condition establishes as present on one of its branches: <c>has(f)</c> on the branch
+        /// taken when it holds, <c>!has(f)</c> on the other one. Nothing else is read as a guard.
+        /// </summary>
+        private static string? PresenceTested(CelNode condition, bool conditionHolds) => (condition, conditionHolds) switch
+        {
+            (CelHas has, true) => has.Field.FieldName,
+            (CelUnary { Operator: CelUnaryOperator.Not, Operand: CelHas has }, false) => has.Field.FieldName,
+            _ => null,
+        };
 
         private bool RequireMatchingBranches(CelValueType trueType, CelValueType falseType, bool trueError, bool falseError, int position)
         {
