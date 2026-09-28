@@ -33,7 +33,7 @@ back. §6 owes the core issue that makes the request honourable; the eval case f
 | # | Cause | Where | Why a patch removes it |
 |---|---|---|---|
 | R1 | **Triple encoding.** `get_descriptor` returns `ManagementDescriptor.DescriptorJson` as a *string* property, so the model reads JSON-in-a-JSON-string; `validate_descriptor(string descriptorJson)` makes it write JSON-in-a-string-in-tool-call-arguments; a CEL string literal adds a third level (`\\\"`). Line 257 was that third level. | `ManagementTools.GetDescriptorAsync`, `ValidateDescriptorAsync` | Patch values are JSON *values* in the arguments — one encoding level, the one providers train on. CEL literals use single quotes (`CelLexer` accepts `'`), so no escaping remains at all |
-| R2 | **Default encoder escapes everything non-ASCII.** `ToolJson.Options` is `JsonSerializerDefaults.Web` with the default `JavaScriptEncoder`: `č` → `č`, `"` → `"`, `'` → `'`, `+` → `+`. The model saw a descriptor of `\uXXXX` sequences and had to reproduce them by hand — small models hallucinate hex digits, which is exactly `0x01` | `ToolJson.cs` | The model never re-emits text it did not change: untouched bytes stay server-side. Tool results additionally switch to `UnsafeRelaxedJsonEscaping` (§2.4) so what it reads is legible |
+| R2 | **Default encoder escapes everything non-ASCII.** `ToolJson.Options` is `JsonSerializerDefaults.Web` with the default `JavaScriptEncoder`: `č` → `č`, `"` → `"`, `'` → `'`, `+` → `+`. The model saw a descriptor of `\uXXXX` sequences and had to reproduce them by hand — small models hallucinate hex digits, which is exactly `0x01` | `ToolJson.cs` | The model never re-emits text it did not change: untouched bytes stay server-side. Tool results additionally switch to `UnsafeRelaxedJsonEscaping` (§2.2, `ToolJson`) so what it reads is legible |
 | R3 | **Long verbatim output.** `bike-workshop` is 31.6 KB (~9–10k output tokens) to change ~120 bytes. Every token is an independent chance of corruption, and local/OpenAI-compatible models commonly truncate or drift on long outputs; latency and cost scale with the whole document | prompt step 2: *"Draft the whole descriptor, not a fragment"* | A patch is O(change), not O(document) — the full_name edit is one `add` op of ~150 bytes |
 | R4 | **Wrong document model for errors.** Refusals are flattened to `"{path}: {message} — {fix}"` strings; a JSON parse failure points at `/` with a line number in text the model never saw | `ManagementTools.Refusals`, `DescriptorValidator` L148 | A patch fails *per op, at a pointer the model wrote* — `/entities/customers/fields/full_name/computed` is both the validator's `DescriptorValidationError.Path` and the patch `path`, so a violation names the exact op to fix |
 | R5 | **The last attempt wins, even a broken one.** `ProposalFrom` takes `LastValidated` regardless of refusals, so a refused retry overwrites an earlier valid draft | `AlvoAssistant.ProposalFrom` | Rule change (§2.3) — independent of patching, but the same PR |
@@ -137,6 +137,20 @@ cannot do it the plan raises a `DescriptorValidationError` at `/entities/<e>/fie
 fix ("…declare it on a new entity, or …"). Then it reaches the assistant as `source: validation` with a
 pointer, and the model explains it like any other refusal. A test in `MMLib.Alvo.Host.Tests` pins it:
 dry run of "add a computed field to a populated SQLite table" yields a violation, not a clean plan.
+
+> **Superseded (28 Sep 2026).** The engine limitation shipped as a **fix**, not a refusal: SQLite rebuilds the
+> table (EF's create-new / copy / drop / rename) instead of the bare `ADD COLUMN … STORED`, so there is no
+> violation to surface. The decision is still made at plan time behind a dialect port member, as this section
+> required — `GeneratedColumnAdds`, gated by the default-implemented
+> `IAlvoSqlDialect.GeneratedColumnAddRequiresTableRebuild` (SQLite `true`, PostgreSQL keeps its one-hop `ADD`).
+> The dry run therefore answers a **clean plan** whose step carries the non-destructive reason *"Rebuilds the
+> table: copies every row under a write lock."*, and the rebuild runs on both apply paths under
+> `MigrationFramingScope` (foreign keys suspended, then `PRAGMA foreign_key_check` over the touched tables before
+> commit). Landed in `94d250e` and its follow-ups (`dea3c50`, `6bea651`, `1d94b9f`); the record is the
+> computed-rollup design's "Dev-1/Dev-2 reinstated" entry
+> (`docs/superpowers/specs/2026-08-04-f3-pr6-computed-rollup-design.md`), and it is pinned by the shared suite's
+> `A_new_computed_field_can_be_added_to_a_parent_that_already_holds_rows` and the admin e2e
+> `ComputedOnPopulatedEntityScenarios`. The Host.Tests fact above was not written: the case it names now applies.
 
 ## 3. The instructions ("skill")
 
@@ -327,8 +341,8 @@ ring); `package-boundary.md` only if the eval project needs listing.
     (compiler and dialect).
   - `ComputedFieldCheck`/`ComputedValueShape`: text result ↔ declared type, join length ≤ declared `maxLength`,
     and "reads no field" refused.
-- **§2.4 plan-time refusal/rebuild for SQLite STORED columns** — being fixed now; this design only fixes
-  its required *shape*.
+- **§2.4 plan-time refusal/rebuild for SQLite STORED columns** — shipped as a table rebuild with a clean
+  plan, not a refusal (`94d250e` and follow-ups); see the "Superseded" note under §2.4.
 
 ## Rulings (controller, 28 Sep 2026)
 
