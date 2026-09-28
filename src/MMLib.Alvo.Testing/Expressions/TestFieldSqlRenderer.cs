@@ -63,12 +63,21 @@ public sealed class TestFieldSqlRenderer : IFieldSqlRenderer
     /// <inheritdoc />
     /// <remarks>
     /// The SQL standard's literal — doubled single quotes — which is what the core's own scalar snapshots are read
-    /// against. A fake's answer: it refuses nothing, because the compiler has already refused what no dialect
-    /// carries, and the real drivers' quoting is proved against their engines, not here.
+    /// against. It declines what the port's remarks say every dialect declines (<see cref="TextLiteralRule"/>); the
+    /// real drivers' quoting is proved against their engines, not here.
     /// </remarks>
     string? IFieldSqlRenderer.RenderStringLiteral(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        return $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+        return TextLiteralRule.IsCarried(value) ? $"'{value.Replace("'", "''", StringComparison.Ordinal)}'" : null;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>The SQL standard's operator, as both shipped engines spell it.</remarks>
+    string IFieldSqlRenderer.RenderStringConcatenation(string left, string right)
+    {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+        return $"({left} || {right})";
     }
 }

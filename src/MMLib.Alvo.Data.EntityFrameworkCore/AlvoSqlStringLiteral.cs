@@ -22,8 +22,16 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// would not be the value authored. The CEL compiler refuses both in a computed constant already, so declining here
 /// is a belt, not a second rule.
 /// </para>
+/// <para>
+/// <b>Never for a value that can be bound.</b> Its one job is a computed field's text constant, in DDL, which has no
+/// bind-parameter form; every value a statement can bind is bound. That is why it is <see langword="internal"/>,
+/// shared with the two driver assemblies by <c>InternalsVisibleTo</c>, rather than public like
+/// <see cref="AlvoSqlIdentifier"/>: an identifier has no bind form anywhere, a value almost always does, and a public
+/// quoter would be the easy wrong path for a host's own SQL. The standard literal alone is not safe on an engine that
+/// honours backslash escapes — see PostgreSQL's renderer.
+/// </para>
 /// </remarks>
-public static class AlvoSqlStringLiteral
+internal static class AlvoSqlStringLiteral
 {
     /// <summary>Quotes <paramref name="value"/> as one standard SQL string literal, unless it holds text a literal must not carry.</summary>
     /// <param name="value">The text to quote.</param>

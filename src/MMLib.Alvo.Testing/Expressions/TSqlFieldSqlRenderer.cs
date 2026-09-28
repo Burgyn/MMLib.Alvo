@@ -80,6 +80,6 @@ public sealed class TSqlFieldSqlRenderer : IFieldSqlRenderer
     string? IFieldSqlRenderer.RenderStringLiteral(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
-        return $"N'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+        return TextLiteralRule.IsCarried(value) ? $"N'{value.Replace("'", "''", StringComparison.Ordinal)}'" : null;
     }
 }

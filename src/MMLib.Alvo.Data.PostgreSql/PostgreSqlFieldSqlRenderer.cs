@@ -32,6 +32,10 @@ public sealed class PostgreSqlFieldSqlRenderer : IFieldSqlRenderer
     public string RenderCaseInsensitiveLike(string left, string right) => $"{left} ILIKE {right}";
 
     /// <inheritdoc/>
+    /// <remarks>The SQL standard's concatenation operator, which this engine implements as such.</remarks>
+    string IFieldSqlRenderer.RenderStringConcatenation(string left, string right) => $"({left} || {right})";
+
+    /// <inheritdoc/>
     /// <remarks>
     /// <para>
     /// <b>An escape string, <c>E'…'</c>, rather than the standard literal — a deliberate deviation, for the one

@@ -94,11 +94,17 @@ public interface IFieldSqlRenderer
 
     /// <summary>
     /// Joins two already-rendered <b>string</b> operands — CEL's <c>+</c> over two strings, which only a computed
-    /// field's generated column renders. The default is the SQL standard's concatenation operator,
-    /// <c>(left || right)</c>, which PostgreSQL and SQLite both implement; a dialect whose operator differs
-    /// overrides it (T-SQL: <c>CONCAT(left, right)</c>).
+    /// field's generated column renders. PostgreSQL and SQLite implement it as the SQL standard's concatenation
+    /// operator, <c>(left || right)</c>; T-SQL as <c>CONCAT(left, right)</c>.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// <b>The default throws <see cref="NotSupportedException"/> — deny by default, like
+    /// <see cref="RenderStringLiteral"/>'s <see langword="null"/>.</b> The standard's <c>||</c> is not a safe guess:
+    /// on MySQL without <c>PIPES_AS_CONCAT</c> it is a logical OR, so a dialect that never considered text would store
+    /// a wrong value rather than fail. The renderer lets the exception out, and the computed field is refused as one
+    /// with no generated-column rendering on this engine.
+    /// </para>
     /// <para>
     /// <b>Neither operand is ever <c>NULL</c> by the time this is called,</b> and a dialect may rely on it. CEL's
     /// <c>+</c> has no null overload while <c>||</c> answers <c>NULL</c> for the whole value, so the compiler refuses
@@ -113,7 +119,10 @@ public interface IFieldSqlRenderer
     /// </remarks>
     /// <param name="left">The already-rendered left operand.</param>
     /// <param name="right">The already-rendered right operand.</param>
-    string RenderStringConcatenation(string left, string right) => $"({left} || {right})";
+    string RenderStringConcatenation(string left, string right) =>
+        throw new NotSupportedException(
+            $"This storage driver's {nameof(IFieldSqlRenderer)} declares no string concatenation, so a computed field "
+            + "that joins text has no generated-column rendering on this engine.");
 
     /// <summary>
     /// Renders a text constant as <b>one inline SQL string-literal token</b> of this dialect, or

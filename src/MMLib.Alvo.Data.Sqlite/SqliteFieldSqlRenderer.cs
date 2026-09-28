@@ -53,6 +53,10 @@ public sealed class SqliteFieldSqlRenderer : IFieldSqlRenderer
     private static string AsReal(string sql) => $"CAST({sql} AS REAL)";
 
     /// <inheritdoc/>
+    /// <remarks>The SQL standard's concatenation operator, which this engine implements as such.</remarks>
+    string IFieldSqlRenderer.RenderStringConcatenation(string left, string right) => $"({left} || {right})";
+
+    /// <inheritdoc/>
     /// <remarks>
     /// The standard literal, <see cref="AlvoSqlStringLiteral"/>'s, because that is exactly what SQLite reads: <i>"A
     /// single quote within the string can be encoded by putting two single quotes in a row … C-style escapes using the

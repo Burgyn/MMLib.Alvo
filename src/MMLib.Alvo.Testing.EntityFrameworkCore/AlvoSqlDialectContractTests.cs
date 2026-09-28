@@ -523,6 +523,11 @@ public abstract class AlvoSqlDialectContractTests
         "$tag$ $tag$",
         "🚲 ž ť ô ä",
         "\u2028\u2029",
+        "a\u0000b",
+        "a\nb",
+        "\u0085",
+        "\uD800",
+        "a\uDC00b",
     ];
 
     /// <summary>
@@ -540,7 +545,14 @@ public abstract class AlvoSqlDialectContractTests
     [MemberData(nameof(HostileText))]
     public void A_text_literal_is_one_token_nothing_inside_it_can_close(string value)
     {
-        if (CreateFieldRenderer().RenderStringLiteral(value) is not { } literal)
+        var literal = CreateFieldRenderer().RenderStringLiteral(value);
+        if (MustBeDeclined(value))
+        {
+            literal.ShouldBeNull("a control character or an unpaired surrogate is text no literal carries");
+            return;
+        }
+
+        if (literal is null)
         {
             return;
         }
@@ -572,6 +584,25 @@ public abstract class AlvoSqlDialectContractTests
         joined.IndexOf(Column, StringComparison.Ordinal)
             .ShouldBeLessThan(joined.IndexOf("\"last_name\"", StringComparison.Ordinal));
         joined.ShouldNotContain(";");
+    }
+
+    /// <summary>
+    /// The port's own rule, restated here as this suite's oracle: a control character (C0, DEL, C1) or an unpaired
+    /// UTF-16 surrogate.
+    /// </summary>
+    private static bool MustBeDeclined(string value)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (char.IsControl(value[index]) || (char.IsSurrogate(value[index]) && !char.IsSurrogatePair(value, index)))
+            {
+                return true;
+            }
+
+            index += char.IsHighSurrogate(value[index]) ? 1 : 0;
+        }
+
+        return false;
     }
 
     private static bool IsOneQuotedToken(string literal)

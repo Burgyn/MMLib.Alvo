@@ -149,5 +149,7 @@ internal static class ComputedFieldCheck
         /// dialect would quote it.
         /// </summary>
         public string? RenderStringLiteral(string value) => "'…'";
+
+        public string RenderStringConcatenation(string left, string right) => $"({left} || {right})";
     }
 }

@@ -44,10 +44,24 @@ public class SqlPredicateRendererConcatenationTests
     [Fact]
     public void A_dialect_that_declines_the_literal_gets_a_bound_parameter_instead()
     {
-        var scalar = Render("first_name + ' ' + last_name", new PortDefaultsRenderer());
+        var scalar = Render("first_name + ' ' + last_name", new ConcatenationOnlyRenderer());
 
         scalar.Sql.ShouldBe("((\"first_name\" || @p0) || \"last_name\")");
         scalar.Parameters.Values.ShouldBe([" "]);
+    }
+
+    /// <summary>
+    /// Deny by default for the operator too: a dialect that never declared how it joins text is refused, not given
+    /// <c>||</c> — which on some engines is a logical OR and would store a wrong value rather than fail.
+    /// </summary>
+    [Fact]
+    public void A_dialect_that_declares_no_concatenation_is_refused_rather_than_guessed()
+    {
+        var result = CelFixtures.Compiler.Compile(
+            "first_name + last_name", CelProfile.Computed, CelStringConcatenationTests.Customers);
+
+        Should.Throw<NotSupportedException>(() => _renderer.Render(result.Expression!, new PortDefaultsRenderer()))
+            .Message.ShouldContain("concatenation");
     }
 
     /// <summary>The explicit fallback the null rule asks for renders as a <c>CASE</c> whose branches are the join's operands.</summary>
@@ -99,6 +113,22 @@ public class SqlPredicateRendererConcatenationTests
         public string RenderParameter(string parameterName) => "@" + parameterName;
 
         public string RenderCaseInsensitiveLike(string left, string right) => $"{left} ILIKE {right}";
+    }
+
+    /// <summary>The port's defaults, except that it declares the standard's concatenation operator.</summary>
+    private sealed class ConcatenationOnlyRenderer : IFieldSqlRenderer
+    {
+        public string TrueLiteral => "TRUE";
+
+        public string FalseLiteral => "FALSE";
+
+        public string RenderField(EntitySchema entity, string fieldName) => $"\"{fieldName}\"";
+
+        public string RenderParameter(string parameterName) => "@" + parameterName;
+
+        public string RenderCaseInsensitiveLike(string left, string right) => $"{left} ILIKE {right}";
+
+        public string RenderStringConcatenation(string left, string right) => $"({left} || {right})";
     }
 
     /// <summary><see cref="TestFieldSqlRenderer"/>, except that being asked for an inline literal is a test failure.</summary>
