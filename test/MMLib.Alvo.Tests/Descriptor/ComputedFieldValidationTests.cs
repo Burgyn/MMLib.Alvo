@@ -154,6 +154,29 @@ public class ComputedFieldValidationTests
         error.FixSuggestion.ShouldNotBeNull().ShouldContain("first_name + ' ' + last_name");
     }
 
+    /// <summary>
+    /// A computed field that reads itself gets its own message rather than the reads-another-computed-field one: no
+    /// engine accepts a generated column that is its own input, so there is no "the other engine accepts it" to name,
+    /// and the fix cannot be "write its own expression in its place" (that expression is itself).
+    /// </summary>
+    [Fact]
+    public void A_computed_field_reading_itself_is_refused_naming_the_self_reference()
+    {
+        var json = """
+            { "apiVersion": "alvo.dev/v1", "name": "demo",
+              "entities": { "customers": { "fields": {
+                "greeting": { "type": "string", "required": true, "computed": "greeting + 'x'" } } } } }
+            """;
+
+        var error = _validator.Validate(json).Errors.ShouldHaveSingleItem();
+
+        error.Path.ShouldBe("/entities/customers/fields/greeting/computed");
+        error.Message.ShouldContain("cannot read itself");
+        error.Message.ShouldNotContain("SQLite accepts it", Case.Sensitive, "SQLite refuses a generated-column loop too");
+        error.FixSuggestion.ShouldNotBeNull()
+            .ShouldNotContain("greeting + 'x'", Case.Sensitive, "the fix must not be circular");
+    }
+
     /// <summary>A rollup is a stored column the framework maintains, so a computed field may read it (the ladder).</summary>
     [Fact]
     public void A_computed_field_may_still_read_a_rollup()

@@ -49,8 +49,9 @@ internal static class ComputedValueShape
     /// <summary>
     /// A generated column reads only stored fields: PostgreSQL refuses a generation expression that reads another
     /// generated column when the DDL runs, while SQLite accepts it — so it is refused here, the same on every engine,
-    /// with the other field's own expression as the fix. A rollup is a stored column the framework maintains, and
-    /// stays readable (<c>gross_total = net_total + vat_total</c>).
+    /// with the other field's own expression as the fix. A field that reads itself is its own refusal: no engine
+    /// accepts a generated column that is its own input, so there is no "the other engine accepts it" to name. A
+    /// rollup is a stored column the framework maintains, and stays readable (<c>gross_total = net_total + vat_total</c>).
     /// </summary>
     private static (string, string)? ReadsComputed(EntitySchema entity, FieldSchema field, CompiledExpression expression)
     {
@@ -59,12 +60,23 @@ internal static class ComputedValueShape
             return null;
         }
 
-        return ($"{Declares(entity, field, expression)}, which reads '{other.Name}', itself a computed field. A computed "
+        return other.Name == field.Name
+            ? SelfReference(entity, field, expression)
+            : ReadsAnotherComputed(entity, field, expression, other);
+    }
+
+    private static (string, string) SelfReference(EntitySchema entity, FieldSchema field, CompiledExpression expression) =>
+        ($"{Declares(entity, field, expression)}, which reads '{field.Name}' — its own field. A computed field becomes "
+            + "a generated column, and a generated column cannot read itself.",
+            $"Compute '{field.Name}' from the row's other fields, not from '{field.Name}' itself.");
+
+    private static (string, string) ReadsAnotherComputed(
+        EntitySchema entity, FieldSchema field, CompiledExpression expression, FieldSchema other) =>
+        ($"{Declares(entity, field, expression)}, which reads '{other.Name}', itself a computed field. A computed "
             + "field becomes a generated column, and a generated column reads only stored fields — PostgreSQL refuses "
             + "one that reads another, SQLite accepts it.",
-            $"Write '{other.Name}''s own expression in its place (\"{other.ComputedExpression}\"), so '{field.Name}' "
+            $"Write the expression of '{other.Name}' (\"{other.ComputedExpression}\") in its place, so '{field.Name}' "
             + "reads only stored fields.");
-    }
 
     private static FieldSchema? ComputedRead(CelNode node, EntitySchema entity) => node switch
     {
