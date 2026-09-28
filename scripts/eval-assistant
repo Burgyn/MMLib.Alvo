@@ -13,7 +13,8 @@
 # Environment:
 #   ALVO_EVAL_API_KEY     the endpoint's key, when it needs one (always for azure-openai) — read from the
 #                         environment, never an argument, so it stays out of shell history and the process list
-#   ALVO_EVAL_ARTIFACTS   the build's --artifacts-path (default: <repo>/artifacts/eval-assistant, gitignored)
+#   ALVO_EVAL_ARTIFACTS   the build's --artifacts-path, and traces/ under it: one JSON line per graded turn,
+#                         passes included (default: <repo>/artifacts/eval-assistant, gitignored)
 #
 # Exit status: 0 when the suite passes (every case in every language >= 2/3 of its runs, overall >= 90 %),
 # 1 when it does not, 2 on a usage error. Publish the printed table into docs/assistant-evals.md per model.
@@ -42,4 +43,4 @@ fi
 command -v dotnet >/dev/null 2>&1 || { echo "[eval-assistant] 'dotnet' is required but not on PATH" >&2; exit 1; }
 
 exec dotnet run --project "$root/eval/MMLib.Alvo.Ai.Eval/MMLib.Alvo.Ai.Eval.csproj" \
-  --configuration Release --artifacts-path "$artifacts" -- --repository "$root" "$@"
+  --configuration Release --artifacts-path "$artifacts" -- --repository "$root" --trace "$artifacts/traces" "$@"

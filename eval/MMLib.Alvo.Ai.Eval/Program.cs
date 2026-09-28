@@ -18,8 +18,4 @@ Console.CancelKeyPress += (_, press) =>
     cancel.Cancel();
 };
 
-await using var world = await EvalWorld.StartAsync(options.RepositoryRoot, cancel.Token);
-var runs = await new EvalRunner(world, options).RunAsync(cancel.Token);
-EvalReport.Print(options, runs, Console.Out);
-
-return EvalReport.SuitePasses(runs) ? 0 : 1;
+return await EvalSession.RunAsync(options, cancel.Token);

@@ -8,8 +8,6 @@ using MMLib.Alvo.Auth;
 using MMLib.Alvo.Host;
 using MMLib.Alvo.Management;
 
-using System.Security.Cryptography;
-
 namespace MMLib.Alvo.Ai.Eval;
 
 /// <summary>
@@ -20,18 +18,17 @@ namespace MMLib.Alvo.Ai.Eval;
 /// One world serves the whole suite: the assistant only ever dry-runs, so no case can change what the next one reads.
 /// </para>
 /// <para>
-/// The settings are the Host suite's known-good minimum (<c>AlvoHostWorld</c>), except that the dev key's secret is
-/// drawn per run: the host listens on a loopback port for as long as the eval runs, and a fixed secret in the
-/// repository would be a credential for it.
+/// <b>No API key is configured.</b> The eval never calls the host over HTTP — it acts through the in-process principal
+/// <see cref="ActAsAdministrator"/> publishes — so the loopback listener the host opens for the run accepts no
+/// credential at all, which is the default-deny the host already has without one.
 /// </para>
 /// </remarks>
 internal sealed class EvalWorld : IAsyncDisposable
 {
     internal const string Project = "bike-workshop";
     private const string LoopbackAnyPort = "http://127.0.0.1:0";
-    private const string DevKeyId = "alvo-eval";
-    private const string DevKeyUser = "6f9619ff-8b86-d011-b42d-00c04fc964ff";
-    private const int DevKeySecretBytes = 32;
+    private const string CallerKeyId = "alvo-eval";
+    private static readonly string[] _sqliteCompanions = [string.Empty, "-wal", "-shm", "-journal"];
 
     private readonly WebApplication _app;
     private readonly string _database;
@@ -45,19 +42,36 @@ internal sealed class EvalWorld : IAsyncDisposable
     /// <summary>The running host's management surface — what the assistant's tools read through.</summary>
     internal IAlvoManagement Management => _app.Services.GetRequiredService<IAlvoManagement>();
 
-    /// <summary>Boots the host and applies <c>bike-workshop</c>.</summary>
+    /// <summary>Cancelled when the host begins to stop.</summary>
+    /// <remarks>
+    /// The host's console lifetime takes Ctrl-C (SIGINT) for itself and stops the application, so the eval's own
+    /// <c>CancelKeyPress</c> handler may never run; a run linked to this token stops either way.
+    /// </remarks>
+    internal CancellationToken Stopping => _app.Lifetime.ApplicationStopping;
+
+    /// <summary>Boots the host and applies <c>bike-workshop</c>; on failure, removes what the attempt created.</summary>
     /// <param name="repositoryRoot">The repository the example is read from.</param>
     /// <param name="ct">A token to cancel the start.</param>
     internal static async Task<EvalWorld> StartAsync(string repositoryRoot, CancellationToken ct)
     {
         var database = Path.Combine(Path.GetTempPath(), $"alvo-eval-{Guid.NewGuid():N}.db");
-        var builder = AlvoHost.CreateBuilder([], configuration => configuration.AddInMemoryCollection(Settings(repositoryRoot, database)));
-        builder.Logging.ClearProviders();
-        builder.WebHost.UseUrls(LoopbackAnyPort);
+        WebApplication? app = null;
+        try
+        {
+            app = await BuildAsync(repositoryRoot, database).ConfigureAwait(false);
+            await app.StartAsync(ct).ConfigureAwait(false);
+            return new EvalWorld(app, database);
+        }
+        catch
+        {
+            if (app is not null)
+            {
+                await app.DisposeAsync().ConfigureAwait(false);
+            }
 
-        var app = await AlvoHost.BuildAsync(builder).ConfigureAwait(false);
-        await app.StartAsync(ct).ConfigureAwait(false);
-        return new EvalWorld(app, database);
+            DeleteDatabase(database);
+            throw;
+        }
     }
 
     /// <summary>Publishes an administrator as the ambient caller for the awaited calls that follow.</summary>
@@ -66,15 +80,32 @@ internal sealed class EvalWorld : IAsyncDisposable
         {
             Context = new AlvoContext { User = UserId.New(), Roles = new HashSet<Role> { Role.Admin } },
             Scopes = new HashSet<ApiKeyScope>(),
-            KeyId = DevKeyId,
+            KeyId = CallerKeyId,
         };
 
     public async ValueTask DisposeAsync()
     {
         await _app.StopAsync().ConfigureAwait(false);
         await _app.DisposeAsync().ConfigureAwait(false);
+        DeleteDatabase(_database);
+    }
+
+    private static Task<WebApplication> BuildAsync(string repositoryRoot, string database)
+    {
+        var builder = AlvoHost.CreateBuilder([], configuration => configuration.AddInMemoryCollection(Settings(repositoryRoot, database)));
+        builder.Logging.ClearProviders();
+        builder.WebHost.UseUrls(LoopbackAnyPort);
+        return AlvoHost.BuildAsync(builder);
+    }
+
+    /// <summary>The database file and every companion SQLite may have left beside it (WAL, shared memory, journal).</summary>
+    private static void DeleteDatabase(string database)
+    {
         SqliteConnection.ClearAllPools();
-        File.Delete(_database);
+        foreach (var suffix in _sqliteCompanions)
+        {
+            File.Delete(database + suffix);
+        }
     }
 
     private static Dictionary<string, string?> Settings(string repositoryRoot, string database) => new(StringComparer.Ordinal)
@@ -82,12 +113,5 @@ internal sealed class EvalWorld : IAsyncDisposable
         ["Alvo:DescriptorPath"] = Path.Combine(repositoryRoot, "examples", Project, $"{Project}.alvo.json"),
         ["Alvo:Database:Provider"] = "sqlite",
         ["Alvo:Database:SqliteConnectionString"] = $"Data Source={database}",
-        ["Alvo:Auth:DevKeys:0:KeyId"] = DevKeyId,
-        ["Alvo:Auth:DevKeys:0:Secret"] = Convert.ToHexString(RandomNumberGenerator.GetBytes(DevKeySecretBytes)),
-        ["Alvo:Auth:DevKeys:0:User"] = DevKeyUser,
-        ["Alvo:Auth:DevKeys:0:Roles:0"] = "admin",
-        ["Alvo:Auth:DevKeys:0:Roles:1"] = "authenticated",
-        ["Alvo:Auth:DevKeys:0:Scopes:0"] = "*:read",
-        ["Alvo:Auth:DevKeys:0:Scopes:1"] = "*:write",
     };
 }

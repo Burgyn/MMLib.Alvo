@@ -88,7 +88,8 @@ compresses out. Violating one of these is a bug, not a style nit.
   below — and `demo-admin`, which boots the dashboard over the seeded `examples/bike-workshop`
   backend for demos and UX reviews.
 - `eval/` — `MMLib.Alvo.Ai.Eval`, the schema assistant's real-model eval, driven by
-  `scripts/eval-assistant`; in no ring, never on the PR.
+  `scripts/eval-assistant`; in no ring — built on the PR, never run there. Its graders' own suite,
+  `test/MMLib.Alvo.Ai.Eval.Tests`, is an ordinary ring0 module.
 - `.husky/` — Husky.Net git hooks (`pre-commit`, `commit-msg`) + `task-runner.json`; auto-installed on build.
 - `.github/` — CI workflows; the PR run (everything but mutation) plus
   `mutation.yml`, which runs post-merge on `main`.
@@ -150,7 +151,8 @@ content still matches the repository it was derived from.
 **The assistant eval is in no ring, like load.** `scripts/eval-assistant` asks a real model
 the seven cases of `docs/superpowers/specs/2026-09-28-f5-assistant-reliability-design.md` §4.2 over the real host
 and grades outcomes; it costs tokens and measures a model, so it is run on demand and its table is published per
-model in `docs/assistant-evals.md`.
+model in `docs/assistant-evals.md`. Every graded turn, passes included, is traced to `artifacts/eval-assistant/traces/`.
+The graders themselves are pure and tested in ring0 (`test/MMLib.Alvo.Ai.Eval.Tests`).
 
 ## Hard rules
 

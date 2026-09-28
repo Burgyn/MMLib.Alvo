@@ -11,9 +11,14 @@ namespace MMLib.Alvo.Ai.Eval;
 /// <param name="ToolRounds">How many of the model's answers asked for a tool — what the iteration cap bounds.</param>
 /// <param name="Tokens">The tokens the provider reported.</param>
 /// <param name="Calls">Every tool call, with the tool's answer.</param>
+/// <param name="ProviderStatus">
+/// The provider's HTTP status when a turn failed on an answer it received, <c>none</c> when it failed on no answer at
+/// all, <see langword="null"/> when nothing failed — the status only, never the provider's message, which can echo the
+/// request.
+/// </param>
 internal sealed record TurnRecord(
     string OriginalDescriptor, IReadOnlyList<AssistantUpdate> Updates, TimeSpan Elapsed, int Requests, int ToolRounds,
-    long Tokens, IReadOnlyList<RecordedCall> Calls)
+    long Tokens, IReadOnlyList<RecordedCall> Calls, string? ProviderStatus = null)
 {
     private static readonly HashSet<string> _dryRuns = new(StringComparer.Ordinal) { "check_change", "propose_change" };
 
@@ -45,6 +50,15 @@ internal sealed record TurnRecord(
 
     internal bool HasViolation(string field, string value) =>
         Outcomes.SelectMany(outcome => outcome["violations"] as JsonArray ?? []).Any(violation => TextOf(violation?[field]) == value);
+
+    /// <summary>Every <c>message</c> and <c>fix</c> the dry runs returned — the framework's words, not the model's.</summary>
+    internal IReadOnlyList<string> FrameworkTexts =>
+    [
+        .. Outcomes.SelectMany(outcome => outcome["violations"] as JsonArray ?? [])
+            .SelectMany(violation => new[] { TextOf(violation?["message"]), TextOf(violation?["fix"]) })
+            .OfType<string>()
+            .Where(text => text.Length > 0),
+    ];
 
     /// <summary>Whether any dry run's plan said it would destroy data.</summary>
     internal bool AnyDestructivePlan =>

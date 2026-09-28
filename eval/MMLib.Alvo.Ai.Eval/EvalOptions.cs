@@ -8,15 +8,17 @@ namespace MMLib.Alvo.Ai.Eval;
 /// <param name="Runs">How many times each case is asked in each language.</param>
 /// <param name="Case">The one case to run, or <see langword="null"/> for the whole suite.</param>
 /// <param name="Languages">The languages each case is asked in.</param>
+/// <param name="TraceDirectory">Where every graded turn is written in full, or <see langword="null"/> for nowhere.</param>
 internal sealed record EvalOptions(
-    string RepositoryRoot, AlvoAiConnection Connection, int Runs, string? Case, IReadOnlyList<string> Languages)
+    string RepositoryRoot, AlvoAiConnection Connection, int Runs, string? Case, IReadOnlyList<string> Languages,
+    string? TraceDirectory = null)
 {
     internal const string ApiKeyVariable = "ALVO_EVAL_API_KEY";
     private const int DefaultRuns = 3;
     private static readonly string[] _allLanguages = ["en", "sk"];
     private static readonly HashSet<string> _known = new(StringComparer.Ordinal)
     {
-        "--repository", "--endpoint", "--model", "--kind", "--runs", "--case", "--language",
+        "--repository", "--endpoint", "--model", "--kind", "--runs", "--case", "--language", "--trace",
     };
 
     /// <summary>Parses the arguments <c>scripts/eval-assistant</c> passes through.</summary>
@@ -30,7 +32,8 @@ internal sealed record EvalOptions(
             ConnectionFrom(values),
             RunsFrom(values.GetValueOrDefault("--runs")),
             CaseFrom(values.GetValueOrDefault("--case")),
-            LanguagesFrom(values.GetValueOrDefault("--language")));
+            LanguagesFrom(values.GetValueOrDefault("--language")),
+            values.GetValueOrDefault("--trace"));
     }
 
     private static AlvoAiConnection ConnectionFrom(Dictionary<string, string> values)

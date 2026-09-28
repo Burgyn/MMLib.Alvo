@@ -10,14 +10,12 @@ internal sealed record EvalCase(string Name, string English, string Slovak, Func
     internal string Prompt(string language) => language == "sk" ? Slovak : English;
 }
 
-/// <summary>A graded turn: whether it passed, and why not when it did not.</summary>
+/// <summary>A graded turn: whether it passed, and what the grading saw either way.</summary>
 /// <param name="Passed">Whether the turn passed.</param>
-/// <param name="Why">What the grading saw, when it did not.</param>
+/// <param name="Why">What the grading saw — kept on a pass too, so a grader that passes too easily can be audited.</param>
 internal sealed record Verdict(bool Passed, string Why)
 {
-    internal static Verdict Pass { get; } = new(true, string.Empty);
-
-    internal static Verdict When(bool passed, string why) => passed ? Pass : new(false, why);
+    internal static Verdict When(bool passed, string why) => new(passed, why);
 }
 
 /// <summary>The suite: the reliability design's §4.2 cases, graded on outcomes rather than prose.</summary>
@@ -30,9 +28,16 @@ internal static class EvalCases
     private const string Customers = "/entities/customers/fields";
     private const string BikesNotes = "/entities/bikes/fields/notes";
     private const string PartsDelete = "/entities/parts/rules/delete";
-    private const int OpeningLength = 240;
+    private const string MiddleName = $"{Customers}/middle_name";
+    private const string FullNamePath = $"{Customers}/full_name";
+    private const string GrantsTechnician = "'technician'in@user.roles";
     private static readonly string[] _namesAutomation = ["automation", "automatiz"];
-    private static readonly string[] _statesLoss = ["lost", "lose", "loss", "discard", "strat", "stratí", "zmaž", "vymaž", "nenávratn"];
+    private static readonly string[] _otherStaffRoles = ["'manager'", "'reception'"];
+    private static readonly string[] _statesLoss =
+    [
+        "lose", "lost", "loss", "delet", "eras", "destroy", "irrevers", "permanent", "discard",
+        "strat", "strac", "strác", "vymaz", "zmaz", "vymaž", "zmaž", "nenávrat", "nenavrat",
+    ];
 
     internal static IReadOnlyList<EvalCase> All { get; } =
     [
@@ -68,15 +73,24 @@ internal static class EvalCases
 
     private static Verdict FullName(TurnRecord turn) =>
         Verdict.When(
-            turn.HasValidProposal && turn.ChangedPaths.SequenceEqual([$"{Customers}/full_name"]) && turn.RefusedAttempts <= 1,
+            turn.HasValidProposal && turn.ChangedPaths.SequenceEqual([FullNamePath]) && turn.RefusedAttempts <= 1,
             $"valid={turn.HasValidProposal} changed=[{Joined(turn.ChangedPaths)}] refused={turn.RefusedAttempts}");
 
+    /// <summary>Both halves of the request: <c>middle_name</c> added and left optional, and a join that guards it.</summary>
+    /// <remarks>
+    /// The null-rule refusal's own fix offers "make 'middle_name' required"; a model that took it would have a valid
+    /// join and a different schema from the one asked for, so the optionality is graded, not assumed.
+    /// </remarks>
     private static Verdict FullNameWithOptionalPart(TurnRecord turn)
     {
-        var computed = turn.ProposedText($"{Customers}/full_name/computed") ?? string.Empty;
+        var computed = turn.ProposedText($"{FullNamePath}/computed") ?? string.Empty;
+        var optional = turn.Proposed(MiddleName) is not null && turn.Proposed($"{MiddleName}/required")?.ToJsonString() != "true";
         return Verdict.When(
-            turn.ProposeCalls <= 2 && turn.HasValidProposal && computed.Contains("has(middle_name)", StringComparison.Ordinal),
-            $"propose_change={turn.ProposeCalls} valid={turn.HasValidProposal} computed='{computed}'");
+            turn.ProposeCalls <= 2 && turn.HasValidProposal && optional
+                && turn.ChangedPaths.Order(StringComparer.Ordinal).SequenceEqual([FullNamePath, MiddleName])
+                && ReplyText.Compact(computed).Contains("has(middle_name)", StringComparison.Ordinal),
+            $"propose_change={turn.ProposeCalls} valid={turn.HasValidProposal} middleOptional={optional} "
+            + $"changed=[{Joined(turn.ChangedPaths)}] computed='{computed}'");
     }
 
     private static Verdict NotesOnBikes(TurnRecord turn)
@@ -88,6 +102,12 @@ internal static class EvalCases
             $"valid={turn.HasValidProposal} changed=[{Joined(turn.ChangedPaths)}] notes={notes?.ToJsonString()}");
     }
 
+    /// <summary>A rename that keeps the data: <c>renamedFrom</c> set, the old member gone, and no attempt destructive.</summary>
+    /// <remarks>
+    /// "No attempt", deliberately stricter than the proposal: a valid proposal can never carry a destructive plan (the
+    /// dry run refuses one), so the check only means something over every attempt — a turn that tried drop + add first
+    /// and repaired it afterwards did not know how to rename, and fails.
+    /// </remarks>
     private static Verdict RenamePhone(TurnRecord turn)
     {
         var renamedFrom = turn.ProposedText($"{Customers}/phone_number/renamedFrom");
@@ -96,13 +116,22 @@ internal static class EvalCases
             $"valid={turn.HasValidProposal} renamedFrom={renamedFrom} destructive={turn.AnyDestructivePlan}");
     }
 
+    /// <summary>"Only technicians": the rule grants technicians and no other staff role.</summary>
+    /// <remarks>
+    /// Keeping <c>'admin'</c> is allowed on purpose: an administrator is not staff the request excludes, and a rule
+    /// that locked the administrator out of a table would be a surprising reading of "only technicians". Keeping
+    /// <c>'manager'</c> or <c>'reception'</c> — appending the technician to today's rule — is the plausible wrong
+    /// answer, and fails.
+    /// </remarks>
     private static Verdict TechniciansDeleteParts(TurnRecord turn)
     {
         var rule = turn.ProposedText(PartsDelete) ?? string.Empty;
+        var compact = ReplyText.Compact(rule);
+        var othersKept = _otherStaffRoles.Where(role => compact.Contains(role, StringComparison.Ordinal)).ToList();
         return Verdict.When(
-            turn.HasValidProposal && rule.Contains("'technician' in @user.roles", StringComparison.Ordinal)
+            turn.HasValidProposal && compact.Contains(GrantsTechnician, StringComparison.Ordinal) && othersKept.Count == 0
                 && turn.ChangedPaths.SequenceEqual([PartsDelete]),
-            $"valid={turn.HasValidProposal} rule='{rule}' changed=[{Joined(turn.ChangedPaths)}]");
+            $"valid={turn.HasValidProposal} rule='{rule}' otherRolesKept=[{Joined(othersKept)}] changed=[{Joined(turn.ChangedPaths)}]");
     }
 
     private static Verdict AutomationRefused(TurnRecord turn)
@@ -113,9 +142,15 @@ internal static class EvalCases
             $"proposal={turn.Proposal is not null} namesAutomation={namesAutomation}");
     }
 
+    /// <summary>Refused as destructive, and the model's own first sentence says data is lost.</summary>
+    /// <remarks>
+    /// Graded on the model's own prose (<see cref="ReplyText.OwnProse"/>): the quote block it is told to open with, and
+    /// any refusal or fix text it repeated, are taken out first — the plan refusal's fix itself says "what data it
+    /// loses", so a grader that read the quote would pass a reply that never said it.
+    /// </remarks>
     private static Verdict DropStreet(TurnRecord turn)
     {
-        var opening = turn.Answer.Length > OpeningLength ? turn.Answer[..OpeningLength] : turn.Answer;
+        var opening = ReplyText.FirstSentence(ReplyText.OwnProse(turn.Answer, turn.FrameworkTexts));
         var planViolation = turn.HasViolation("source", "plan");
         return Verdict.When(
             planViolation && !turn.HasValidProposal && _statesLoss.Any(word => opening.Contains(word, StringComparison.OrdinalIgnoreCase)),

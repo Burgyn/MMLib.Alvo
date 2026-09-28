@@ -18,10 +18,15 @@ namespace MMLib.Alvo.Ai.Eval;
 /// <see cref="AlvoAssistant.MaximumIterations"/> times and then still asks the model for its answer, so a turn that
 /// honoured the cap can make one request more than it; the round-trips are recorded, the tool rounds are graded.
 /// </para>
+/// <para>
+/// <b>A call is identified by its round and its id, never its id alone.</b> Some OpenAI-compatible servers number call
+/// ids per response (<c>call_0</c> every round), and keying by id would let a later round overwrite an earlier call. A
+/// tool's answer is matched to the latest unanswered call with its id — the one the request answering it follows.
+/// </para>
 /// </remarks>
 internal sealed class RecordingChatClient(IChatClient inner) : DelegatingChatClient(inner)
 {
-    private readonly Dictionary<string, RecordedCall> _calls = new(StringComparer.Ordinal);
+    private readonly List<RecordedCall> _calls = [];
 
     /// <summary>How many times the loop asked the model.</summary>
     internal int Requests { get; private set; }
@@ -33,7 +38,7 @@ internal sealed class RecordingChatClient(IChatClient inner) : DelegatingChatCli
     internal long Tokens { get; private set; }
 
     /// <summary>Every tool call, in the order the model made them.</summary>
-    internal IReadOnlyList<RecordedCall> Calls => [.. _calls.Values];
+    internal IReadOnlyList<RecordedCall> Calls => [.. _calls];
 
     public override async Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
@@ -64,9 +69,10 @@ internal sealed class RecordingChatClient(IChatClient inner) : DelegatingChatCli
         Requests++;
         foreach (var result in sent.SelectMany(message => message.Contents).OfType<FunctionResultContent>())
         {
-            if (_calls.TryGetValue(result.CallId, out var call) && call.Result is null)
+            var index = _calls.FindLastIndex(call => call.CallId == result.CallId && call.Result is null);
+            if (index >= 0)
             {
-                _calls[result.CallId] = call with { Result = TextOf(result.Result) };
+                _calls[index] = _calls[index] with { Result = TextOf(result.Result) };
             }
         }
 
@@ -75,13 +81,14 @@ internal sealed class RecordingChatClient(IChatClient inner) : DelegatingChatCli
 
     private void Recorded(IEnumerable<AIContent> contents)
     {
+        var round = Requests;
         var askedForTool = false;
         foreach (var content in contents)
         {
             if (content is FunctionCallContent call)
             {
                 askedForTool = true;
-                _calls[call.CallId] = new RecordedCall(call.CallId, call.Name, call.Arguments, Result: null);
+                _calls.Add(new RecordedCall(round, call.CallId, call.Name, call.Arguments, Result: null));
             }
             else if (content is UsageContent usage)
             {
@@ -101,8 +108,9 @@ internal sealed class RecordingChatClient(IChatClient inner) : DelegatingChatCli
 }
 
 /// <summary>One tool call the model made, and what the tool answered.</summary>
-/// <param name="CallId">The provider's id for the call.</param>
+/// <param name="Round">The request (1-based) whose answer asked for it.</param>
+/// <param name="CallId">The provider's id for the call — unique within its round only.</param>
 /// <param name="Tool">The tool's name.</param>
 /// <param name="Arguments">The arguments as the model sent them.</param>
 /// <param name="Result">The tool's answer, once the next request carried it back.</param>
-internal sealed record RecordedCall(string CallId, string Tool, IDictionary<string, object?>? Arguments, string? Result);
+internal sealed record RecordedCall(int Round, string CallId, string Tool, IDictionary<string, object?>? Arguments, string? Result);
