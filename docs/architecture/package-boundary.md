@@ -75,8 +75,9 @@
   component class `public` and a `.razor` file cannot declare otherwise; the baseline
   is what keeps the question asked. Details in
   [`2026-09-18-f5-admin-dashboard-design.md`](../superpowers/specs/2026-09-18-f5-admin-dashboard-design.md).
-- `src/MMLib.Alvo.Ai` — the schema assistant: the Microsoft Agent Framework loop, the five tools it
-  may call, and the chat client each connection kind is dialled through (#29). Earned by **(a)** — an
+- `src/MMLib.Alvo.Ai` — the schema assistant: the Microsoft Agent Framework loop, the six tools it
+  may call (`get_descriptor`, `get_schema`, `get_capabilities`, `get_revisions`, `check_change`,
+  `propose_change` — four reads and two dry runs, none of which writes), and the chat client each connection kind is dialled through (#29). Earned by **(a)** — an
   embedded host serving a Data API must not acquire an agent runtime and an OpenAI client — and by
   **(b)**: the assistant is a real swap point, reached through `IAlvoAssistant` in
   `MMLib.Alvo.Abstractions`, which is what lets the dashboard call it without referencing this package.
