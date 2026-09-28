@@ -42,6 +42,15 @@ public sealed class PatchAdmissionTests
     }
 
     [Fact]
+    public void Values_are_measured_in_utf8_bytes_not_characters()
+    {
+        var value = new string('ž', (PatchAdmission.MaximumValueBytes / 2) + 8);
+
+        PatchAdmission.Check(Ops($$"""[{"op":"add","path":"/a","value":"{{value}}"}]"""))!.Code
+            .ShouldBe(JsonPatchError.PatchTooLarge);
+    }
+
+    [Fact]
     public void An_ordinary_field_addition_is_admitted() =>
         PatchAdmission.Check(Ops("""[{"op":"add","path":"/entities/bikes/fields/notes","value":{"type":"text"}}]"""))
             .ShouldBeNull();

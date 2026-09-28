@@ -4,7 +4,11 @@ namespace MMLib.Alvo.Ai.Internal;
 
 /// <summary>What applying a patch produced: the new document and what it touched, or the one operation that failed.</summary>
 /// <param name="Document">The patched copy; <see langword="null"/> when the patch failed.</param>
-/// <param name="ChangedPaths">The pointers the mutating operations addressed, distinct, in operation order.</param>
+/// <param name="ChangedPaths">
+/// The pointers the mutating operations addressed, distinct, in operation order: an append (<c>-</c>) as the index it
+/// landed at, so it matches the pointer a validator reports; a <c>move</c> as its <c>from</c> and its <c>path</c>. A
+/// <c>move</c> onto itself changes nothing and adds nothing, and neither does a <c>test</c>.
+/// </param>
 /// <param name="Error">Why the patch failed, or <see langword="null"/>.</param>
 internal sealed record JsonPatchResult(JsonNode? Document, IReadOnlyList<string> ChangedPaths, JsonPatchError? Error)
 {

@@ -1,5 +1,4 @@
-﻿using System.Text;
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace MMLib.Alvo.Ai.Internal;
 
@@ -7,16 +6,24 @@ namespace MMLib.Alvo.Ai.Internal;
 /// What the assistant's tools refuse in a patch before it runs: the whole document as a target, and size.
 /// </summary>
 /// <remarks>
+/// <para>
 /// <b>The root pointer is the removed <c>validate_descriptor</c> in disguise.</b> A <c>replace</c> at <c>""</c> is a
 /// hand-retyped descriptor again — the failure this design exists to remove — so it is refused rather than admitted
 /// as the RFC would. The bounds make a runaway model a refusal instead of a 30 KB dry run.
+/// </para>
+/// <para>
+/// <b>The byte bound covers what a patch adds, not only what it spells.</b> A <c>copy</c> carries no value yet can
+/// double a subtree each time, so the engine counts every copied subtree against the same
+/// <see cref="MaximumValueBytes"/> budget the values count against, and refuses as <c>patch-too-large</c> before
+/// cloning. This check sees values only, because only the engine sees the document a copy reads.
+/// </para>
 /// </remarks>
 internal static class PatchAdmission
 {
     /// <summary>The most operations one patch may carry.</summary>
     internal const int MaximumOperations = 50;
 
-    /// <summary>The most UTF-8 bytes the operations' values may total.</summary>
+    /// <summary>The most UTF-8 bytes the operations' values and copied subtrees may total.</summary>
     internal const int MaximumValueBytes = 16 * 1024;
 
     private static readonly HashSet<string> _mutating = new(StringComparer.Ordinal)
@@ -40,7 +47,7 @@ internal static class PatchAdmission
     private static JsonPatchError? CheckEach(JsonElement operations)
     {
         var index = 0;
-        var valueBytes = 0;
+        var valueBytes = 0L;
         foreach (var operation in operations.EnumerateArray())
         {
             if (TargetsWholeDocument(operation))
@@ -48,7 +55,7 @@ internal static class PatchAdmission
                 return WholeDocument(index);
             }
 
-            valueBytes += ValueBytes(operation);
+            valueBytes += PatchBytes.OfValue(operation);
             index++;
         }
 
@@ -62,11 +69,6 @@ internal static class PatchAdmission
         && operation.TryGetProperty("path", out var path) && path.ValueKind == JsonValueKind.String
         && path.GetString()!.Length == 0;
 
-    private static int ValueBytes(JsonElement operation) =>
-        operation.ValueKind == JsonValueKind.Object && operation.TryGetProperty("value", out var value)
-            ? Encoding.UTF8.GetByteCount(value.GetRawText())
-            : 0;
-
     private static JsonPatchError WholeDocument(int index) => new(
         JsonPatchError.WholeDocumentReplace, index, string.Empty,
         "An operation on the whole document (path \"\") is refused: it replaces the descriptor wholesale.",
@@ -77,7 +79,7 @@ internal static class PatchAdmission
         $"The patch has {count} operations; at most {MaximumOperations} are accepted.",
         "Replace one subtree, such as /entities/<entity>, instead of many small parts of it.");
 
-    private static JsonPatchError TooLarge(int bytes) => new(
+    private static JsonPatchError TooLarge(long bytes) => new(
         JsonPatchError.PatchTooLarge, Op: null, string.Empty,
         $"The patch's values total {bytes} bytes; at most {MaximumValueBytes} are accepted.",
         "Send only what the request changes; untouched parts of the descriptor never need to be sent.");

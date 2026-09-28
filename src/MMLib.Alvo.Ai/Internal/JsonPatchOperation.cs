@@ -4,6 +4,10 @@ using System.Text.Json.Nodes;
 namespace MMLib.Alvo.Ai.Internal;
 
 /// <summary>One RFC 6902 operation, read and checked for the members its <c>op</c> requires.</summary>
+/// <remarks>
+/// A <c>value</c> is re-read strictly: a repeated member name or nesting past the reader's default depth is an
+/// <c>invalid-operation</c>, never an exception out of the engine, and never a document with duplicate keys.
+/// </remarks>
 internal sealed record JsonPatchOperation(int Index, string Op, JsonPointer Path, JsonPointer? From, JsonNode? Value)
 {
     internal const string Add = "add";
@@ -14,6 +18,8 @@ internal sealed record JsonPatchOperation(int Index, string Op, JsonPointer Path
     internal const string Test = "test";
 
     private static readonly HashSet<string> _known = new(StringComparer.Ordinal) { Add, Remove, Replace, Move, Copy, Test };
+
+    private static readonly JsonDocumentOptions _strictValue = new() { AllowDuplicateProperties = false };
 
     /// <summary>Reads the operation at <paramref name="index"/>, or says why it is not one.</summary>
     internal static JsonPatchError? TryRead(JsonElement element, int index, out JsonPatchOperation? operation)
@@ -47,26 +53,38 @@ internal sealed record JsonPatchOperation(int Index, string Op, JsonPointer Path
         }
 
         JsonNode? value = null;
-        if (op is Add or Replace or Test && !TryValue(element, out value))
+        if (op is Add or Replace or Test && ReadValue(element, index, op, path, out value) is { } unreadable)
         {
-            return Malformed(index, path.Text, $"'{op}' needs 'value'.");
+            return unreadable;
         }
 
         operation = new JsonPatchOperation(index, op, path, from, value);
         return null;
     }
 
-    private static bool TryValue(JsonElement element, out JsonNode? value)
+    private static JsonPatchError? ReadValue(
+        JsonElement element, int index, string op, JsonPointer path, out JsonNode? value)
     {
         value = null;
         if (!element.TryGetProperty("value", out var raw))
         {
-            return false;
+            return Malformed(index, path.Text, $"'{op}' needs 'value'.");
         }
 
-        value = raw.ValueKind == JsonValueKind.Null ? null : JsonNode.Parse(raw.GetRawText());
-        return true;
+        try
+        {
+            value = raw.ValueKind == JsonValueKind.Null ? null : JsonNode.Parse(raw.GetRawText(), documentOptions: _strictValue);
+            return null;
+        }
+        catch (JsonException exception)
+        {
+            return Unreadable(index, path, exception);
+        }
     }
+
+    private static JsonPatchError Unreadable(int index, JsonPointer path, JsonException exception) => new(
+        JsonPatchError.InvalidOperation, index, path.Text, $"'value' cannot be read: {exception.Message}",
+        "Give each member of an object a distinct name, and nest no deeper than 64 levels.");
 
     private static string? StringMember(JsonElement element, string name) =>
         element.TryGetProperty(name, out var member) && member.ValueKind == JsonValueKind.String ? member.GetString() : null;

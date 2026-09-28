@@ -14,14 +14,21 @@ namespace MMLib.Alvo.Ai.Internal;
 /// <c>json-patch-tests</c> suite, vendored under <c>MMLib.Alvo.Ai.Tests/TestData</c>.
 /// </para>
 /// <para>
-/// <b>RFC-pure.</b> What the assistant's tools refuse on top — the root pointer, the size bounds — is
-/// <see cref="PatchAdmission"/>'s, because the RFC admits both and the suite tests them.
+/// <b>RFC-pure, with one bound of its own.</b> What the assistant's tools refuse on top — the root pointer, the
+/// operation count — is <see cref="PatchAdmission"/>'s, because the RFC admits both and the suite tests them.
+/// </para>
+/// <para>
+/// <b>The added-bytes budget is the engine's</b>, because only the engine sees the document a <c>copy</c> reads:
+/// every operation's <c>value</c> and every copied subtree, measured by <see cref="PatchBytes"/> before it is cloned,
+/// draw on one budget of <see cref="PatchAdmission.MaximumValueBytes"/>. Past it the patch fails as
+/// <c>patch-too-large</c>; twenty self-doubling copies are a refusal, not a 25 MB document.
 /// </para>
 /// </remarks>
 internal static class JsonPatch
 {
     private const string AppendToken = "-";
     private const int MaximumListedKeys = 20;
+    private const string InsertIndexFix = "Use an index from 0 to the item count, or '-' to append.";
 
     /// <summary>Applies <paramref name="operations"/> to a copy of <paramref name="document"/>; any failure aborts all.</summary>
     internal static JsonPatchResult Apply(JsonNode? document, JsonElement operations)
@@ -34,10 +41,11 @@ internal static class JsonPatch
 
         var working = document?.DeepClone();
         var changed = new List<string>();
+        var budget = new AddedBytes();
         var index = 0;
         foreach (var element in operations.EnumerateArray())
         {
-            var step = Step(working, element, index++);
+            var step = Step(working, element, index++, budget);
             if (step.Error is { } error)
             {
                 return JsonPatchResult.Refused(error);
@@ -50,20 +58,28 @@ internal static class JsonPatch
         return JsonPatchResult.Applied(working, [.. changed.Distinct(StringComparer.Ordinal)]);
     }
 
-    private static StepResult Step(JsonNode? document, JsonElement element, int index) =>
-        JsonPatchOperation.TryRead(element, index, out var operation) is { } malformed
-            ? StepResult.Failed(malformed)
-            : Dispatch(document, operation!);
-
-    private static StepResult Dispatch(JsonNode? document, JsonPatchOperation operation) => operation.Op switch
+    private static StepResult Step(JsonNode? document, JsonElement element, int index, AddedBytes budget)
     {
-        JsonPatchOperation.Add => Add(document, operation, operation.Path, operation.Value),
-        JsonPatchOperation.Remove => Remove(document, operation),
-        JsonPatchOperation.Replace => Replace(document, operation),
-        JsonPatchOperation.Move => Move(document, operation),
-        JsonPatchOperation.Copy => Copy(document, operation),
-        _ => Test(document, operation),
-    };
+        if (JsonPatchOperation.TryRead(element, index, out var operation) is { } malformed)
+        {
+            return StepResult.Failed(malformed);
+        }
+
+        return budget.TrySpend(PatchBytes.OfValue(element))
+            ? Dispatch(document, operation!, budget)
+            : StepResult.Failed(ValuesTooLarge(operation!));
+    }
+
+    private static StepResult Dispatch(JsonNode? document, JsonPatchOperation operation, AddedBytes budget) =>
+        operation.Op switch
+        {
+            JsonPatchOperation.Add => Add(document, operation, operation.Path, operation.Value),
+            JsonPatchOperation.Remove => Remove(document, operation),
+            JsonPatchOperation.Replace => Replace(document, operation),
+            JsonPatchOperation.Move => Move(document, operation),
+            JsonPatchOperation.Copy => Copy(document, operation, budget),
+            _ => Test(document, operation),
+        };
 
     private static StepResult Add(JsonNode? document, JsonPatchOperation operation, JsonPointer path, JsonNode? value)
     {
@@ -96,13 +112,14 @@ internal static class JsonPatch
     {
         if (path.Last == AppendToken)
         {
+            var appendedAt = items.Count;
             items.Add(value);
-            return StepResult.Done(document, path.Text);
+            return StepResult.Done(document, path.Parent.Append(appendedAt.ToString(CultureInfo.InvariantCulture)).Text);
         }
 
         if (!TryIndex(path.Last, items.Count + 1, out var index))
         {
-            return StepResult.Failed(IndexOutOfRange(operation, path, items.Count));
+            return StepResult.Failed(IndexOutOfRange(operation, path, items.Count, InsertIndexFix));
         }
 
         items.Insert(index, value);
@@ -111,14 +128,39 @@ internal static class JsonPatch
 
     private static StepResult Remove(JsonNode? document, JsonPatchOperation operation)
     {
-        if (operation.Path.IsRoot)
+        var path = operation.Path;
+        if (path.IsRoot)
         {
-            return StepResult.Done(null, operation.Path.Text);
+            return StepResult.Done(null, path.Text);
         }
 
-        return TryDetach(document, operation.Path, out _)
+        if (!TryResolve(document, path.Parent, out var parent))
+        {
+            return StepResult.Failed(Missing(operation, path, document));
+        }
+
+        return parent switch
+        {
+            JsonObject members => RemoveMember(document, members, operation),
+            JsonArray items => RemoveItem(document, items, operation),
+            _ => StepResult.Failed(NotAContainer(operation, path)),
+        };
+    }
+
+    private static StepResult RemoveMember(JsonNode? document, JsonObject members, JsonPatchOperation operation) =>
+        members.Remove(operation.Path.Last)
             ? StepResult.Done(document, operation.Path.Text)
             : StepResult.Failed(Missing(operation, operation.Path, document));
+
+    private static StepResult RemoveItem(JsonNode? document, JsonArray items, JsonPatchOperation operation)
+    {
+        if (!TryIndex(operation.Path.Last, items.Count, out var index))
+        {
+            return StepResult.Failed(ExistingItemOutOfRange(operation, items.Count));
+        }
+
+        items.RemoveAt(index);
+        return StepResult.Done(document, operation.Path.Text);
     }
 
     private static StepResult Replace(JsonNode? document, JsonPatchOperation operation)
@@ -136,10 +178,27 @@ internal static class JsonPatch
 
         return parent switch
         {
-            JsonObject members when members.ContainsKey(path.Last) => SetMember(document, members, path, operation.Value),
-            JsonArray items when TryDetach(document, path, out _) => InsertItem(document, items, operation, path, operation.Value),
-            _ => StepResult.Failed(Missing(operation, path, document)),
+            JsonObject members => ReplaceMember(document, members, operation),
+            JsonArray items => ReplaceItem(document, items, operation),
+            _ => StepResult.Failed(NotAContainer(operation, path)),
         };
+    }
+
+    private static StepResult ReplaceMember(JsonNode? document, JsonObject members, JsonPatchOperation operation) =>
+        members.ContainsKey(operation.Path.Last)
+            ? SetMember(document, members, operation.Path, operation.Value)
+            : StepResult.Failed(Missing(operation, operation.Path, document));
+
+    private static StepResult ReplaceItem(JsonNode? document, JsonArray items, JsonPatchOperation operation)
+    {
+        if (!TryIndex(operation.Path.Last, items.Count, out var index))
+        {
+            return StepResult.Failed(ExistingItemOutOfRange(operation, items.Count));
+        }
+
+        items.RemoveAt(index);
+        items.Insert(index, operation.Value);
+        return StepResult.Done(document, operation.Path.Text);
     }
 
     private static StepResult Move(JsonNode? document, JsonPatchOperation operation)
@@ -164,10 +223,18 @@ internal static class JsonPatch
         return added.Error is null ? added with { Changed = [from.Text, .. added.Changed] } : added;
     }
 
-    private static StepResult Copy(JsonNode? document, JsonPatchOperation operation) =>
-        TryResolve(document, operation.From!, out var source)
+    private static StepResult Copy(JsonNode? document, JsonPatchOperation operation, AddedBytes budget)
+    {
+        if (!TryResolve(document, operation.From!, out var source))
+        {
+            return StepResult.Failed(Missing(operation, operation.From!, document));
+        }
+
+        var copiedBytes = PatchBytes.Of(source);
+        return budget.TrySpend(copiedBytes)
             ? Add(document, operation, operation.Path, source?.DeepClone())
-            : StepResult.Failed(Missing(operation, operation.From!, document));
+            : StepResult.Failed(CopyTooLarge(operation, copiedBytes));
+    }
 
     private static StepResult Test(JsonNode? document, JsonPatchOperation operation)
     {
@@ -289,10 +356,26 @@ internal static class JsonPatch
         JsonPatchError.NotAContainer, operation.Index, path.Text,
         $"'{path.Parent.Text}' is neither an object nor an array, so it cannot hold '{path.Last}'.", Fix: null);
 
-    private static JsonPatchError IndexOutOfRange(JsonPatchOperation operation, JsonPointer path, int count) => new(
+    private static JsonPatchError IndexOutOfRange(
+        JsonPatchOperation operation, JsonPointer path, int count, string fix) => new(
         JsonPatchError.IndexOutOfRange, operation.Index, path.Text,
-        $"'{path.Last}' is not an index into the array at '{path.Parent.Text}', which has {count} items.",
-        "Use an index from 0 to the item count, or '-' to append.");
+        $"'{path.Last}' is not an index into the array at '{path.Parent.Text}', which has {count} items.", fix);
+
+    private static JsonPatchError ExistingItemOutOfRange(JsonPatchOperation operation, int count) =>
+        IndexOutOfRange(operation, operation.Path, count, count == 0
+            ? $"The array is empty, so there is no item to {operation.Op}."
+            : $"Use an index from 0 to {count - 1}; '-' names no existing item.");
+
+    private static JsonPatchError ValuesTooLarge(JsonPatchOperation operation) => new(
+        JsonPatchError.PatchTooLarge, operation.Index, operation.Path.Text,
+        $"This operation's value takes what the patch adds past {PatchAdmission.MaximumValueBytes} bytes.",
+        "Send only what the request changes; untouched parts of the descriptor never need to be sent.");
+
+    private static JsonPatchError CopyTooLarge(JsonPatchOperation operation, long copiedBytes) => new(
+        JsonPatchError.PatchTooLarge, operation.Index, operation.Path.Text,
+        $"Copying '{operation.From!.Text}' adds {copiedBytes} bytes, which takes what the patch adds past " +
+        $"{PatchAdmission.MaximumValueBytes} bytes.",
+        "Copy a smaller subtree, or add only the part the request needs.");
 
     private static JsonPatchError MoveIntoItself(JsonPatchOperation operation) => new(
         JsonPatchError.MoveIntoItself, operation.Index, operation.Path.Text,
@@ -302,6 +385,22 @@ internal static class JsonPatch
         JsonPatchError.TestFailed, operation.Index, operation.Path.Text,
         $"The value at '{operation.Path.Text}' is not the one the 'test' operation expected.",
         "Call get_descriptor again; the document is not what this patch assumed.");
+
+    private sealed class AddedBytes
+    {
+        private long _remaining = PatchAdmission.MaximumValueBytes;
+
+        internal bool TrySpend(long bytes)
+        {
+            if (bytes > _remaining)
+            {
+                return false;
+            }
+
+            _remaining -= bytes;
+            return true;
+        }
+    }
 
     private sealed record StepResult(JsonNode? Document, IReadOnlyList<string> Changed, JsonPatchError? Error)
     {
