@@ -18,11 +18,20 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// </para>
 /// <para>
 /// <b>It renders as well as compiles, through the core's own <see cref="SqlPredicateRenderer"/>,</b> because two
-/// refusals live past the compiler: a constant becomes a bind parameter, which DDL has no form for, and a
-/// comparison over anything but a field or a literal has no scalar rendering. Asking the renderer that the driver
+/// refusals live past the compiler: a constant other than text in a value position becomes a bind parameter, which
+/// DDL has no form for, and a comparison over anything but a field or a literal has no scalar rendering. Asking the renderer that the driver
 /// itself uses — over a neutral field renderer, since the question is the shape and not the dialect's spelling —
 /// keeps this pass from growing a second copy of what the renderer accepts. The driver keeps its own guard as a
 /// backstop, for a host that replaced <see cref="IPredicateRenderer"/> or a model built without this validator.
+/// </para>
+/// <para>
+/// <b>Text (assistant-reliability design, ruling 2).</b> CEL's <c>+</c> over two strings is admitted in the Computed
+/// profile and a text constant it joins is written inline through the dialect's own literal quoting. The rules that
+/// make that honest are split by who can decide them: the compiler refuses a mixed pair (no implicit conversion), an
+/// operand that can be null (CEL's <c>+</c> has no null overload and SQL's <c>||</c> yields <c>NULL</c> — the explicit
+/// fallback is <c>has(f) ? f : ''</c>) and a constant holding a control character; this pass, which knows the declared
+/// field, refuses an expression that reads no field, a result the declared type does not hold, and a join longer than
+/// the declared <c>maxLength</c> (<see cref="ComputedValueShape"/>).
 /// </para>
 /// <para>
 /// <b>A deliberate deviation: the core's own renderer, not the one in the container.</b> The driver renders with the
@@ -54,9 +63,15 @@ internal static class ComputedFieldCheck
         var result = compiler.Compile(field.ComputedExpression!, CelProfile.Computed, entity);
 
         return result.IsSuccess
-            ? RenderErrors(entity, field, result.Expression!)
+            ? CompiledErrors(entity, field, result.Expression!)
             : result.Errors.Select(error => CompileError(entity, field, error));
     }
+
+    private static IEnumerable<DescriptorValidationError> CompiledErrors(
+        EntitySchema entity, FieldSchema field, CompiledExpression expression) =>
+        ComputedValueShape.Refusal(entity, field, expression) is { } shape
+            ? [Refusal(entity, field, shape.Message, shape.Fix)]
+            : RenderErrors(entity, field, expression);
 
     private static DescriptorValidationError CompileError(EntitySchema entity, FieldSchema field, CelCompilationError error) =>
         Refusal(
@@ -90,10 +105,11 @@ internal static class ComputedFieldCheck
             $"Field '{entity.Name}.{field.Name}' declares \"computed\": \"{field.ComputedExpression}\", which carries "
             + $"the constant value(s) {string.Join(", ", rendered.Parameters.Values.Select(value => $"'{value}'"))}. "
             + "A computed field becomes a stored generated column, and a column definition is DDL, which has no "
-            + "bind-parameter form — so a constant cannot be carried into it.",
+            + "bind-parameter form — so a constant other than a text constant joined into the value cannot be "
+            + "carried into it.",
             "Keep 'computed' to arithmetic over this entity's own fields (\"unit_price * amount\", "
-            + "\"net_total + vat_total\"), and hold a contextual constant such as a tax rate in a field of its own "
-            + "that a before-hook maintains.");
+            + "\"net_total + vat_total\") or to text joined from them (\"first_name + ' ' + last_name\"), and hold a "
+            + "contextual constant such as a tax rate in a field of its own that a before-hook maintains.");
 
     private static DescriptorValidationError UnrenderableShape(EntitySchema entity, FieldSchema field) =>
         Refusal(
@@ -126,5 +142,12 @@ internal static class ComputedFieldCheck
         public string RenderParameter(string parameterName) => parameterName;
 
         public string RenderCaseInsensitiveLike(string left, string right) => $"{left} LIKE {right}";
+
+        /// <summary>
+        /// Answers every text constant, as every shipped dialect does for the text the compiler admits — so the pass
+        /// refuses what a constant <em>means</em> in a column (see <see cref="ComputedValueShape"/>), never how a
+        /// dialect would quote it.
+        /// </summary>
+        public string? RenderStringLiteral(string value) => "'…'";
     }
 }

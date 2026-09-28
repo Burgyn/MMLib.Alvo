@@ -68,6 +68,63 @@ public class ComputedFieldValidationTests
             [Pointer, "/entities/invoices/fields/stamp/computed"], ignoreOrder: true);
     }
 
+    /// <summary>
+    /// The maintainer's own request, and the shapes around it that the generated column carries: text joined from
+    /// required fields and constants, into a <c>string</c> or <c>text</c> field whose declared length holds it.
+    /// </summary>
+    /// <param name="fullName">The declaration of <c>customers.full_name</c>.</param>
+    [Theory]
+    [InlineData("""{ "type": "string", "computed": "first_name + ' ' + last_name" }""")]
+    [InlineData("""{ "type": "text", "computed": "last_name + ', ' + first_name" }""")]
+    [InlineData("""{ "type": "string", "maxLength": 121, "computed": "first_name + ' ' + last_name" }""")]
+    [InlineData("""{ "type": "string", "maxLength": 100, "computed": "(has(middle_name) ? middle_name : '') + last_name" }""")]
+    [InlineData("""{ "type": "string", "maxLength": 66, "computed": "tier + ': ' + last_name" }""")]
+    [InlineData("""{ "type": "string", "computed": "'Mr. ' + last_name" }""")]
+    public void Text_joined_from_required_fields_is_accepted(string fullName)
+    {
+        _validator.Validate(CustomerDescriptor(fullName)).Errors.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// Each shape the join cannot honestly become a column for is refused at the field, with a fix: a result the
+    /// declared type does not hold (either way round), a constant with no field in it, a declared length the join can
+    /// exceed — PostgreSQL's <c>varchar(n)</c> would refuse the write where SQLite stores it — and an operand that can
+    /// be null.
+    /// </summary>
+    /// <param name="fullName">The declaration of <c>customers.full_name</c>.</param>
+    /// <param name="named">What the refusal must name.</param>
+    [Theory]
+    [InlineData("""{ "type": "integer", "computed": "first_name + ' ' + last_name" }""", "string")]
+    [InlineData("""{ "type": "enum", "values": ["a"], "computed": "first_name + last_name" }""", "string")]
+    [InlineData("""{ "type": "string", "computed": "visits + visits" }""", "Int")]
+    [InlineData("""{ "type": "string", "computed": "'always the same'" }""", "no field")]
+    [InlineData("""{ "type": "string", "computed": "'a' + 'b'" }""", "no field")]
+    [InlineData("""{ "type": "string", "maxLength": 100, "computed": "first_name + ' ' + last_name" }""", "121")]
+    [InlineData("""{ "type": "string", "maxLength": 100, "computed": "first_name + bio" }""", "bio")]
+    [InlineData("""{ "type": "string", "maxLength": 100, "computed": "first_name + nickname" }""", "nickname")]
+    [InlineData("""{ "type": "string", "computed": "first_name + middle_name" }""", "middle_name")]
+    public void Text_the_column_cannot_honestly_hold_is_refused_at_the_field(string fullName, string named)
+    {
+        var error = _validator.Validate(CustomerDescriptor(fullName)).Errors.ShouldHaveSingleItem();
+
+        error.Path.ShouldBe("/entities/customers/fields/full_name/computed");
+        error.Message.ShouldContain(named);
+        error.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    private static string CustomerDescriptor(string fullName) => $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "customers": { "fields": {
+            "first_name": { "type": "string", "required": true, "maxLength": 60 },
+            "last_name": { "type": "string", "required": true, "maxLength": 60 },
+            "middle_name": { "type": "string", "maxLength": 40 },
+            "nickname": { "type": "string", "required": true },
+            "bio": { "type": "text", "required": true },
+            "tier": { "type": "enum", "values": ["none", "club"], "required": true },
+            "visits": { "type": "integer", "required": true },
+            "full_name": {{fullName}} } } } }
+        """;
+
     private static string Descriptor(string computed) => $$"""
         { "apiVersion": "alvo.dev/v1", "name": "demo",
           "entities": { "invoices": { "fields": {
