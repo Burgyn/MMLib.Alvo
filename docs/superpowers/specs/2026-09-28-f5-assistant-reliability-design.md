@@ -180,7 +180,8 @@ diffable in review and the drift tests (§4.1) can parse it. Sections, with thei
      expression that reads **no field** (`'always the same'`) is refused — that is a `default`, not computed.
      A text constant cannot hold a line break, a tab or another control character.
    - **Not another computed field**: a computed field reads stored fields only (a rollup is stored); reading
-     another computed field is refused with that field's expression as the fix.
+     another computed field is refused with that field's expression as the fix, and a computed field never reads
+     itself.
    - **A text constant is joined, never compared**: `first_name == 'Jana' ? …` is refused (*"a text constant
      can be joined, not compared, in a computed field"*); compare two fields instead.
    - **Never**: `@user`/`@tenant`, `now()` or any function, `old.`/`new.`, `changed()`, role membership.
@@ -260,7 +261,8 @@ If pointer errors (`source: patch`) dominate refused attempts on the eval, add *
 
 **Public API: no new public symbol.** Every new type (`JsonPatch`, `DescriptorDraft`, `ChangeOutcome`,
 `ToolViolation`, `AssistantInstructions`) is `internal` to `MMLib.Alvo.Ai`, reached by the existing
-`InternalsVisibleTo` grants; `PublicApi.MMLib.Alvo.Ai.verified.txt` does not move. `AssistantUpdate`
+`InternalsVisibleTo` grants; `PublicApi.MMLib.Alvo.Ai.verified.txt` moves by one line only — the eval's
+`InternalsVisibleTo` grant (Ruling 5, D7). `AssistantUpdate`
 keeps its shape (`Proposal.Refusals` stays strings); only the `ToolInvoked` remark ("a fixed five") is
 reworded — a doc comment, not the contract. The core change in §2.4 lives behind the existing dialect port.
 
@@ -334,3 +336,34 @@ ring); `package-boundary.md` only if the eval project needs listing.
 2. **String concatenation in a computed field is built in this PR** (a task before the assistant tasks), because the maintainer's own first request needs it: CEL `+` over two strings in the Computed profile, rendered by the dialect (`||` on SQLite and PostgreSQL), string literals rendered inline into DDL only through the dialect's literal escaping (security core: property test that no literal breaks out of its quotes). NULL semantics stated explicitly (CEL has no implicit null → a nullable operand is refused at validation unless wrapped, or rendered with `COALESCE` — decide in that task against the CEL spec, record the deviation).
 3. The SQLite "add a STORED generated column to an existing table" limitation is fixed first (in progress), so the full_name case can actually apply end to end.
 4. Order: SQLite stored column → computed string concatenation → patch engine → tools → instructions → eval harness.
+5. **The eval gets one `InternalsVisibleTo("MMLib.Alvo.Ai.Eval")` grant** (pre-flight ruling I4): an assembly-level grant, not a public symbol, and the same pattern the Host suite's grant already follows. `PublicApi.MMLib.Alvo.Ai.verified.txt` gains exactly that one line and nothing else; §5's "does not move" is amended by it (D7).
+
+## Deviations recorded by the implementation plan (28 Sep 2026)
+
+From `docs/superpowers/plans/2026-09-28-f5-assistant-reliability.md`, amended where the tasks' rulings changed them,
+so a later reader of this design can tell a decision from an oversight.
+
+| # | Deviation | Reason |
+|---|---|---|
+| D1 | Root refusal and the op-count bound live in `PatchAdmission`, not in `JsonPatch.Apply`; **amended:** the 16 KB added-bytes budget is carried by the engine itself, counting every operation's `value` *and every subtree a `copy` duplicates* | The vendored RFC conformance suite requires root `add`/`replace` to *work* (e.g. "replacing the root of the document is possible with add"), so the root refusal is the tool's policy, checked before the engine runs. The byte budget is a bound RFC 6902 lacks, and only the engine sees the document a `copy` reads: a budget over the operations' values alone would let one small `copy` repeated fifty times duplicate the whole descriptor. Both are tested as §4.1 asks |
+| D2 | `ToolViolation` carries a `code` slug (`whole-document-replace`, `stale-revision`, `attempts-exhausted`, `path-not-found`, …) beyond the Outcome sketch in §2.2 | The model and the eval branch on a slug, not on prose — the same reason `ToolError` has one. The patch codes are `JsonPatchError`'s constants, passed through `ViolationMapping` unchanged. Additive |
+| D3 | `AlvoIdempotencyConflictException` is **not** caught (R7 names it) | The dry run never sends an `IdempotencyKey`, so the exception is unreachable from these tools; catching it would turn a future bug into a quiet refusal — the rule `AnsweredAsync`'s remarks state. `ManagementEscalationException` is mapped to `access` |
+| D4 | A refused attempt that never produced a draft (stale base, inadmissible or failing patch) files the **current** descriptor as the refused proposal's `DescriptorJson` | No draft exists; the card still shows the refusals, and Preview shows no diff rather than a half-applied patch |
+| D5 | Worked example (c) uses `test` + `replace` at `/entities/parts/rules/delete`, not §3's `add` | The member already exists in `bike-workshop`; the instructions teach "`replace` to change". RFC `add` would also succeed |
+| D6 | Eval case 6 is a nightly **automation** request, not "send a webhook when an order completes" | This build *delivers* after-hook webhooks (`UnhonouredSubsystems`' `webhooks` consequence: "an endpoint an after-hook posts to is delivered to"; `bike-workshop`'s `rentals.hooks.afterCreate` uses one), so the webhook request is honourable and "no proposal" would grade a correct answer as a failure. Also, `get_capabilities` lists a warned block only when the descriptor declares it and `bike-workshop` declares no `automation`, so "sentence quoted verbatim" is not gradable there — the case grades "no proposal, the reply names `automation`" (in Slovak, `automatiz…`) |
+| D7 | `PublicApi.MMLib.Alvo.Ai.verified.txt` grows by one `InternalsVisibleTo("MMLib.Alvo.Ai.Eval")` line (§5 says it does not move) — Ruling 5 | The grant is the chosen route, not a strictly necessary one: the eval uses the internal constructor's chat-client seam to count tool rounds and tokens and to read tool outcomes. The alternative — a local recording proxy between the public assistant and the provider — was rejected as more moving parts (an HTTP listener, a second parse of the provider's wire format) for the same measurement. Publishing the seam instead would hand every host a way to swap the client this package owns — the reason the Host.Tests grant already exists |
+| D8 | The "first run against the maintainer's model" (§5 task 4) is the maintainer's step | It needs their endpoint and key; the harness prints the table they publish into `docs/assistant-evals.md` |
+| D9 | `operations` sent as a JSON **string** is unwrapped before patching | Several OpenAI-compatible servers stringify nested tool arguments; refusing them would be a refusal about transport, not about the change. Additive |
+| D10 | `Proposal.Summary` is the turn's answer text, falling back to `propose_change`'s `summary` when the answer is empty | The public record is unchanged; the fallback only fills what was empty |
+| D11 | The executable-examples test is split: the patch half in `MMLib.Alvo.Ai.Tests`, the validity half in `MMLib.Alvo.Host.Tests` | The validator lives in the core, and `MMLib.Alvo.Ai.Tests` does not reference the core: the package it tests references `MMLib.Alvo.Abstractions` only, which `BoundaryArchitectureTests` constrains, and the Host suite is where the real validator already runs |
+| D12 | An example's `baseRevision` is illustrative; the tests substitute the live revision | The booted revision is the host's business, and pinning it would make the example rot on the next boot change |
+| D13 | Warnings reach the model only beside errors: a *valid* dry run's outcome carries none | `ApplyDescriptorAsync`'s success result has no warnings member — they surface only inside `DescriptorValidationException.Result`, which is thrown when there are errors. Carrying them on success needs an Abstractions change (a new member on the result), out of scope for this design |
+| D14 | A violation's `op` is the operation whose *landed* target (`JsonPatchResult.Targets`) is the reported pointer, contains it, **or lies under it** — deepest wins, last on a tie — where §2.2 says "the op whose path is the pointer's prefix" | The validator also reports at a container (`/entities/bikes`) about a member an operation added beneath it; prefix-only matching would leave that violation with no `op`. Matching landed targets rather than written paths is what gives an `/-` append its real index |
+
+**Two known limits of `op` attribution (D14).** Each target is recorded where the operation landed *in the document
+the earlier operations left*: (1) a later operation that shifts an array (an insert or remove before an earlier
+target's index) is not reflected back into that earlier target, so the earlier operation's recorded index can be
+stale in the final document the validator reads; (2) a `remove` by index records the index it emptied, which a later
+item — or a replacement added at the same index — now occupies, so a violation about that item can name the `remove`.
+`op` is therefore **best-effort**; `pointer` is authoritative, and the instructions teach the model to fix what the
+pointer names.

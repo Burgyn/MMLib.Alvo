@@ -11,3 +11,8 @@
 // real management surface, with only the model scripted. The constructor that takes a chat-client delegate is
 // what it needs, and publishing that would hand every host a way to swap the client this package owns.
 [assembly: InternalsVisibleTo("MMLib.Alvo.Host.Tests")]
+
+// The real-model eval (scripts/eval-assistant), for the same one seam the Host suite uses: the constructor that
+// takes a chat-client delegate, which is how it counts a turn's tool rounds and tokens and reads what each tool
+// answered. It ships in no package and runs in no ring.
+[assembly: InternalsVisibleTo("MMLib.Alvo.Ai.Eval")]

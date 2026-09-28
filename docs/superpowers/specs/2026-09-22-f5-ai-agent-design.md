@@ -362,6 +362,8 @@ a redaction assertion that no member's `ToString` can print a value. **Interface
 calls, no network, no key. The end-to-end suite registers a scripted `IAlvoAssistant` in the test host
 and drives the drawer — ask, diff, confirm, and Configuration history showing the operator as author
 with the `assistant: ` reason. What end-to-end must prove is the **flow**, not the model.
+The real-model eval (`scripts/eval-assistant`, reliability design §4.2) is a measurement in no ring, not a test —
+see AC5.
 
 ### 6.4 Acceptance criteria, made measurable
 
@@ -373,7 +375,8 @@ with the `assistant: ` reason. What end-to-end must prove is the **flow**, not t
    the appended revision names the operator and carries the `assistant: ` reason.
 4. A proposal that would drop a column is reported as a refusal, not applied, until destructive
    changes are explicitly allowed in the existing control.
-5. No test in the repository performs a network call to a model provider.
+5. No test in the rings or on the PR performs a network call to a model provider. (Narrowed by the reliability
+   design §4.2: `scripts/eval-assistant` is a measurement, in no ring.)
 6. A secret's value appears in no log, no `ManagementInfo`, and no descriptor.
 
 ---

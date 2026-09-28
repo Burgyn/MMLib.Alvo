@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/eval/">
+    <Project Path="eval/MMLib.Alvo.Ai.Eval/MMLib.Alvo.Ai.Eval.csproj" />
+  </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/MMLib.Alvo.Samples.EmbeddedHost/MMLib.Alvo.Samples.EmbeddedHost.csproj" />
   </Folder>
