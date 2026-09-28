@@ -143,6 +143,43 @@ public sealed class EvalCasesTests
     }
 
     [Fact]
+    public void Drop_street_passes_an_intro_line_then_the_quote_then_the_loss()
+    {
+        var answer = $"Alvo refused the change:\n> {PlanRefusal}\n> {PlanFix}\n\nAll street values would be lost.";
+
+        Grade("drop_street", DropTurn(answer)).Passed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Drop_street_passes_a_bold_heading_then_the_loss()
+    {
+        var answer = "**Destructive change**\nThe street of every customer would be lost for good.";
+
+        Grade("drop_street", DropTurn(answer)).Passed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Drop_street_fails_a_heading_then_a_sentence_with_no_loss()
+    {
+        var answer = "## Refused\nYou can allow it from Preview. The street data would be lost.";
+
+        Grade("drop_street", DropTurn(answer)).Passed.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("I can't delete the street field without your approval.")]
+    [InlineData("Stĺpec street nemôžem zmazať bez súhlasu.")]
+    public void Drop_street_fails_a_deletion_word_that_names_the_change_rather_than_the_data(string answer) =>
+        Grade("drop_street", DropTurn(answer)).Passed.ShouldBeFalse();
+
+    [Theory]
+    [InlineData("This deletes the street data of every customer.")]
+    [InlineData("Zmažú sa údaje o ulici všetkých zákazníkov.")]
+    [InlineData("It is a destructive change: every street disappears.")]
+    public void Drop_street_passes_a_deletion_word_beside_the_data_it_takes(string answer) =>
+        Grade("drop_street", DropTurn(answer)).Passed.ShouldBeTrue();
+
+    [Fact]
     public void A_failed_turn_fails_before_its_case_is_graded_and_names_the_provider_status()
     {
         var turn = Turn(answer: "Done.") with

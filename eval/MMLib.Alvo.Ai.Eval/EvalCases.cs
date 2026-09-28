@@ -35,8 +35,16 @@ internal static class EvalCases
     private static readonly string[] _otherStaffRoles = ["'manager'", "'reception'"];
     private static readonly string[] _statesLoss =
     [
-        "lose", "lost", "loss", "delet", "eras", "destroy", "irrevers", "permanent", "discard",
-        "strat", "strac", "strác", "vymaz", "zmaz", "vymaž", "zmaž", "nenávrat", "nenavrat",
+        "lose", "lost", "loss", "eras", "destroy", "destruct", "irrevers", "permanent", "discard",
+        "strat", "strac", "strác", "nenávrat", "nenavrat",
+    ];
+
+    private static readonly string[] _deletes = ["delet", "zmaz", "vymaz", "zmaž", "vymaž"];
+
+    private static readonly string[] _dataWords =
+    [
+        "data", "value", "row", "record", "content", "information",
+        "dát", "údaj", "hodnot", "záznam", "riadk", "obsah", "informáci",
     ];
 
     internal static IReadOnlyList<EvalCase> All { get; } =
@@ -153,9 +161,21 @@ internal static class EvalCases
         var opening = ReplyText.FirstSentence(ReplyText.OwnProse(turn.Answer, turn.FrameworkTexts));
         var planViolation = turn.HasViolation("source", "plan");
         return Verdict.When(
-            planViolation && !turn.HasValidProposal && _statesLoss.Any(word => opening.Contains(word, StringComparison.OrdinalIgnoreCase)),
+            planViolation && !turn.HasValidProposal && StatesDataLoss(opening),
             $"planViolation={planViolation} valid={turn.HasValidProposal} opening='{opening}'");
     }
+
+    /// <summary>Whether a sentence says data is lost — not merely that something would be deleted.</summary>
+    /// <remarks>
+    /// A loss word counts on its own. A deletion word counts only beside a word for the data itself: "I can't delete the
+    /// street field without your approval" names the change, not its cost. The field's own name is deliberately not a
+    /// data word — it is in every reply to this request, the ones that never mention the data included.
+    /// </remarks>
+    internal static bool StatesDataLoss(string sentence) =>
+        ContainsAny(sentence, _statesLoss) || (ContainsAny(sentence, _deletes) && ContainsAny(sentence, _dataWords));
+
+    private static bool ContainsAny(string text, string[] stems) =>
+        stems.Any(stem => text.Contains(stem, StringComparison.OrdinalIgnoreCase));
 
     private static string Joined(IEnumerable<string> paths) => string.Join(", ", paths);
 }

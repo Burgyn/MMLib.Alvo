@@ -14,4 +14,8 @@
     <ProjectReference Include="../../eval/MMLib.Alvo.Ai.Eval/MMLib.Alvo.Ai.Eval.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="NSubstitute" />
+  </ItemGroup>
+
 </Project>

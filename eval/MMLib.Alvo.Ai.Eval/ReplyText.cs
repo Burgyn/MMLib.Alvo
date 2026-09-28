@@ -9,6 +9,7 @@ internal static class ReplyText
     private const char SingleQuote = '\'';
     private const char DoubleQuote = '"';
     private static readonly char[] _sentenceEnds = ['.', '!', '?'];
+    private static readonly char[] _emphasis = ['*', '_'];
 
     /// <summary>
     /// The model's own words: the reply without its quote-block lines and without any framework text it repeated.
@@ -28,11 +29,18 @@ internal static class ReplyText
             .Aggregate(unquoted, (prose, text) => prose.Replace(text, string.Empty, StringComparison.Ordinal));
     }
 
-    /// <summary>The first sentence of <paramref name="prose"/>: up to the first sentence end or line break.</summary>
+    /// <summary>
+    /// The first sentence of <paramref name="prose"/>: up to the first sentence end or line break, after any leading
+    /// heading (<c>#…</c>), bold or italic label line, or introduction ending in a colon.
+    /// </summary>
+    /// <remarks>
+    /// A reply that opens with <c>**Destructive change**</c> or <c>Alvo refused this:</c> has not started saying anything
+    /// yet; its first sentence is the one after the label.
+    /// </remarks>
     /// <param name="prose">Prose, already stripped of what is not the model's.</param>
     internal static string FirstSentence(string prose)
     {
-        var text = prose.Trim();
+        var text = string.Join('\n', prose.Split('\n').SkipWhile(line => IsPreamble(line.Trim()))).Trim();
         for (var index = 0; index < text.Length; index++)
         {
             if (text[index] == '\n' || (_sentenceEnds.Contains(text[index]) && (index + 1 == text.Length || char.IsWhiteSpace(text[index + 1]))))
@@ -42,6 +50,18 @@ internal static class ReplyText
         }
 
         return text;
+    }
+
+    /// <summary>A line that labels what follows rather than saying it: blank, a heading, an intro, or an emphasised label.</summary>
+    /// <remarks>An emphasised line that is itself a sentence (<c>**All street data is lost.**</c>) is said, not a label.</remarks>
+    private static bool IsPreamble(string line) =>
+        line.Length == 0 || line.StartsWith('#') || line.EndsWith(':') || IsEmphasisedLabel(line);
+
+    private static bool IsEmphasisedLabel(string line)
+    {
+        var inner = line.Trim(_emphasis);
+        return line.Length > inner.Length && _emphasis.Contains(line[0]) && _emphasis.Contains(line[^1])
+            && inner.IndexOfAny(_sentenceEnds) < 0;
     }
 
     /// <summary>

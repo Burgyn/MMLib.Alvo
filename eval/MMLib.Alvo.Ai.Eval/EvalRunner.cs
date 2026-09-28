@@ -1,4 +1,6 @@
-﻿using MMLib.Alvo.Ai.Internal;
+﻿using Microsoft.Extensions.AI;
+using MMLib.Alvo.Ai.Internal;
+using MMLib.Alvo.Management;
 
 using System.Diagnostics;
 using System.Globalization;
@@ -80,26 +82,63 @@ internal sealed class EvalRunner(EvalWorld world, EvalOptions options, EvalTrace
 
     private async Task<TurnRecord> AskAsync(string prompt, CancellationToken ct)
     {
+        world.ActAsAdministrator();
+        var original = await world.Management.GetDescriptorAsync(EvalWorld.Project, ct).ConfigureAwait(false);
+        return await AskAsync(world.Management, options.Connection, ChatClientFactory.For, original.DescriptorJson, prompt, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>One turn of the real assistant over <paramref name="management"/>, dialling through <paramref name="dial"/>.</summary>
+    /// <remarks>
+    /// <para>
+    /// The dial is a parameter so the graders' suite can hand in a client that fails the way a provider does, without a
+    /// network; the eval passes <see cref="ChatClientFactory.For"/>.
+    /// </para>
+    /// <para>
+    /// <b>A provider that times out is a failed turn, not a failed run.</b> The HTTP client reports its own timeout as an
+    /// <see cref="OperationCanceledException"/>, which the assistant deliberately lets through; when this run's token was
+    /// not the one cancelled, the turn is recorded as <see cref="TimedOut"/> and the suite goes on.
+    /// </para>
+    /// </remarks>
+    internal static async Task<TurnRecord> AskAsync(
+        IAlvoManagement management, AlvoAiConnection connection, Func<AlvoAiConnection, IChatClient> dial,
+        string original, string prompt, CancellationToken ct)
+    {
         RecordingChatClient? recorder = null;
         var logger = new ProviderStatusLogger();
         var assistant = new AlvoAssistant(
-            world.Management,
-            new FixedConnection(options.Connection),
-            connection => recorder = new RecordingChatClient(ChatClientFactory.For(connection)),
-            logger);
+            management, new FixedConnection(connection), dialled => recorder = new RecordingChatClient(dial(dialled)), logger);
 
-        world.ActAsAdministrator();
-        var original = await world.Management.GetDescriptorAsync(EvalWorld.Project, ct).ConfigureAwait(false);
         var clock = Stopwatch.StartNew();
         var updates = new List<AssistantUpdate>();
-        await foreach (var update in assistant.AskAsync(new AssistantRequest(EvalWorld.Project, prompt, []), ct).ConfigureAwait(false))
-        {
-            updates.Add(update);
-        }
+        var timedOut = await CollectAsync(assistant.AskAsync(new AssistantRequest(EvalWorld.Project, prompt, []), ct), updates, ct)
+            .ConfigureAwait(false);
 
         return new TurnRecord(
-            original.DescriptorJson, updates, clock.Elapsed,
-            recorder?.Requests ?? 0, recorder?.ToolRounds ?? 0, recorder?.Tokens ?? 0, recorder?.Calls ?? [], logger.Status);
+            original, updates, clock.Elapsed, recorder?.Requests ?? 0, recorder?.ToolRounds ?? 0, recorder?.Tokens ?? 0,
+            recorder?.Calls ?? [], timedOut ? TimedOut : logger.Status);
+    }
+
+    /// <summary>The status a turn whose provider timed out is recorded with.</summary>
+    internal const string TimedOut = "timeout";
+
+    private static async Task<bool> CollectAsync(
+        IAsyncEnumerable<AssistantUpdate> turn, List<AssistantUpdate> updates, CancellationToken ct)
+    {
+        try
+        {
+            await foreach (var update in turn.ConfigureAwait(false))
+            {
+                updates.Add(update);
+            }
+
+            return false;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            updates.Add(new AssistantUpdate.Failed("The AI endpoint did not answer in time."));
+            return true;
+        }
     }
 
     /// <summary>The one connection the eval measures, resolved the way a configured deployment resolves it.</summary>

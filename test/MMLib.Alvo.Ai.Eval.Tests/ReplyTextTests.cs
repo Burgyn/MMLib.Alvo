@@ -13,6 +13,8 @@ public sealed class ReplyTextTests
     [InlineData("Line one\nline two.", "Line one")]
     [InlineData("Version 1.2 is out! Next.", "Version 1.2 is out!")]
     [InlineData("No end", "No end")]
+    [InlineData("# Heading\n**Label**\n_Note_\nIntro:\nSaid here. Then more.", "Said here.")]
+    [InlineData("**All street data is lost.**\nMore.", "**All street data is lost.**")]
     public void The_first_sentence_ends_at_a_sentence_end_or_a_line_break(string prose, string first) =>
         ReplyText.FirstSentence(prose).ShouldBe(first);
 
