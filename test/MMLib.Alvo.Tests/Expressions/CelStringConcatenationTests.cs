@@ -171,7 +171,8 @@ public class CelStringConcatenationTests
     }
 
     /// <summary>
-    /// A text constant in a computed field is written into the column's DDL, which carries no control character —
+    /// A text constant in a computed field is written into the column's DDL, which carries no control character and
+    /// no line or paragraph separator —
     /// refused at compile time in engine-neutral words, before any dialect is asked to quote it.
     /// </summary>
     [Theory]
@@ -183,6 +184,8 @@ public class CelStringConcatenationTests
     [InlineData(null, 0x1B)]
     [InlineData(null, 0x7F)]
     [InlineData(null, 0x85)]
+    [InlineData(null, 0x2028)]
+    [InlineData(null, 0x2029)]
     [InlineData(null, 0xD800)]
     [InlineData(null, 0xDFFF)]
     public void A_text_constant_carrying_a_control_character_is_refused(string? celEscape, int codeUnit = 0)

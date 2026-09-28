@@ -51,7 +51,7 @@ public class AlvoSqlStringLiteralTests
     }
 
     /// <summary>
-    /// A control character or an unpaired surrogate is declined: not text a DDL statement carries, and a surrogate on
+    /// A control character, a line or paragraph separator or an unpaired surrogate is declined: not text a DDL statement carries, and a surrogate on
     /// its own has no UTF-8 encoding, so the engine would store something that is not the input.
     /// </summary>
     [Theory]
@@ -62,6 +62,8 @@ public class AlvoSqlStringLiteralTests
     [InlineData(0x1F)]
     [InlineData(0x7F)]
     [InlineData(0x9F)]
+    [InlineData(0x2028)]
+    [InlineData(0x2029)]
     [InlineData(0xD800)]
     [InlineData(0xDC00)]
     public void Text_a_literal_cannot_carry_is_declined(int codeUnit)

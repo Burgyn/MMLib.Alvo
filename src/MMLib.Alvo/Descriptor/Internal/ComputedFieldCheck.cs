@@ -29,7 +29,8 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// profile and a text constant it joins is written inline through the dialect's own literal quoting. The rules that
 /// make that honest are split by who can decide them: the compiler refuses a mixed pair (no implicit conversion), an
 /// operand that can be null (CEL's <c>+</c> has no null overload and SQL's <c>||</c> yields <c>NULL</c> — the explicit
-/// fallback is <c>has(f) ? f : ''</c>) and a constant holding a control character; this pass, which knows the declared
+/// fallback is <c>has(f) ? f : ''</c>) and a constant holding a control character or a line or paragraph separator;
+/// this pass, which knows the declared
 /// field, refuses an expression that reads no field, a result the declared type does not hold, and a join longer than
 /// the declared <c>maxLength</c> (<see cref="ComputedValueShape"/>).
 /// </para>

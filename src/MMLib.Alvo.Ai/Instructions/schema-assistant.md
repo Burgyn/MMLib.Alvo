@@ -88,7 +88,8 @@ names the refusal the framework gives, so you can explain it.
   (`unit_price * 1.2`) is refused (*"a constant other than a text constant joined into the value cannot be carried
   into it"*) — hold a rate in a field of its own that a before-hook maintains. An expression that reads **no field**
   (`'always the same'`) is refused (*"which reads no field of its row"*) — that is a `default`, not computed. A text
-  constant cannot hold a line break, a tab or another control character.
+  constant cannot hold a line break (the Unicode line and paragraph separators U+2028 and U+2029 included), a tab or
+  another control character.
 - **Not another computed field**: a computed field reads stored fields only (a rollup is stored); reading another
   computed field is refused (*"itself a computed field"*) with that field's expression as the fix, and a computed
   field never reads itself.

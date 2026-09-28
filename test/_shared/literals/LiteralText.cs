@@ -1,4 +1,5 @@
 ﻿using CsCheck;
+using System.Globalization;
 using System.Text;
 
 namespace MMLib.Alvo.Tests.Data;
@@ -10,7 +11,8 @@ namespace MMLib.Alvo.Tests.Data;
 /// <remarks>
 /// <para>
 /// The space: the quote and the backslash (the two characters a literal escapes), the prefixes, dollar quotes,
-/// comment openers and terminators SQL gives meaning to, every UTF-16 code unit — C0, DEL and C1 controls, lone
+/// comment openers and terminators SQL gives meaning to, the Unicode line and paragraph separators (drawn on purpose:
+/// two code units out of 65 536 would almost never be sampled), every UTF-16 code unit — C0, DEL and C1 controls, lone
 /// surrogates and U+E000–U+FFFF included — and astral code points as proper surrogate pairs.
 /// </para>
 /// <para>
@@ -21,7 +23,7 @@ namespace MMLib.Alvo.Tests.Data;
 internal static class LiteralText
 {
     private static readonly Gen<string> _piece = Gen.OneOf(
-        Gen.OneOfConst("'", "''", "\\", "\\'", "E'", "N'", "$$", "--", "/*", ";", " ", "ž", "中"),
+        Gen.OneOfConst("'", "''", "\\", "\\'", "E'", "N'", "$$", "--", "/*", ";", " ", "ž", "中", "\u2028", "\u2029"),
         Gen.Char.Select(character => character.ToString()),
         Gen.Char['\u0000', ' '].Select(character => character.ToString()),
         Gen.Char['\uD800', '\uDFFF'].Select(character => character.ToString()),
@@ -32,12 +34,16 @@ internal static class LiteralText
     public static Gen<string> Any(int maxPieces = 24) =>
         _piece.Array[0, maxPieces].Select(pieces => string.Concat(pieces));
 
-    /// <summary>Whether a literal must decline <paramref name="value"/>: a control character or an unpaired surrogate.</summary>
+    /// <summary>
+    /// Whether a literal must decline <paramref name="value"/>: a control character, a line or paragraph separator
+    /// (Unicode categories Zl and Zp — asked by category here, where the product names the two code points), or an
+    /// unpaired surrogate.
+    /// </summary>
     public static bool MustBeDeclined(string value)
     {
         foreach (var rune in EnumerateOrFail(value))
         {
-            if (rune is null || Rune.IsControl(rune.Value))
+            if (rune is null || Rune.IsControl(rune.Value) || IsLineOrParagraphSeparator(rune.Value))
             {
                 return true;
             }
@@ -45,6 +51,9 @@ internal static class LiteralText
 
         return false;
     }
+
+    private static bool IsLineOrParagraphSeparator(Rune rune) =>
+        Rune.GetUnicodeCategory(rune) is UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator;
 
     private static IEnumerable<Rune?> EnumerateOrFail(string value)
     {

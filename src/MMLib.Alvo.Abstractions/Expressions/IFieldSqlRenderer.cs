@@ -148,7 +148,8 @@ public interface IFieldSqlRenderer
     /// an optional prefix the engine defines for literals (T-SQL's <c>N</c>), nothing after its closing quote — whose
     /// decoded value is <paramref name="value"/>, code unit for code unit. A value holding a character the dialect
     /// cannot carry literally answers <see langword="null"/> rather than an approximation. The compiler already
-    /// refuses a control character and an unpaired surrogate in a computed constant, so a dialect refusing those too
+    /// refuses a control character, a line or paragraph separator (U+2028, U+2029) and an unpaired surrogate in a
+    /// computed constant, so a dialect refusing those too
     /// is a belt, not a second rule. <c>MMLib.Alvo.Testing.Data.AlvoSqlDialectContractTests</c> asserts the
     /// round-trip generically for every driver.
     /// </para>

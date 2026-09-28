@@ -522,7 +522,8 @@ public abstract class AlvoSqlDialectContractTests
         "$$",
         "$tag$ $tag$",
         "🚲 ž ť ô ä",
-        "\u2028\u2029",
+        "\u2028",
+        "a\u2029b",
         "a\u0000b",
         "a\nb",
         "\u0085",
@@ -548,7 +549,7 @@ public abstract class AlvoSqlDialectContractTests
         var literal = CreateFieldRenderer().RenderStringLiteral(value);
         if (MustBeDeclined(value))
         {
-            literal.ShouldBeNull("a control character or an unpaired surrogate is text no literal carries");
+            literal.ShouldBeNull("a control character, a line or paragraph separator or an unpaired surrogate is text no literal carries");
             return;
         }
 
@@ -600,14 +601,16 @@ public abstract class AlvoSqlDialectContractTests
     }
 
     /// <summary>
-    /// The port's own rule, restated here as this suite's oracle: a control character (C0, DEL, C1) or an unpaired
+    /// The port's own rule, restated here as this suite's oracle: a control character (C0, DEL, C1), a line or
+    /// paragraph separator (U+2028, U+2029), or an unpaired
     /// UTF-16 surrogate.
     /// </summary>
     private static bool MustBeDeclined(string value)
     {
         for (var index = 0; index < value.Length; index++)
         {
-            if (char.IsControl(value[index]) || (char.IsSurrogate(value[index]) && !char.IsSurrogatePair(value, index)))
+            if (char.IsControl(value[index]) || value[index] is '\u2028' or '\u2029'
+                || (char.IsSurrogate(value[index]) && !char.IsSurrogatePair(value, index)))
             {
                 return true;
             }

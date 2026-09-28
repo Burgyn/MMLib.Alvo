@@ -17,9 +17,10 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// </para>
 /// <para>
 /// <b>It declines what a literal must not carry</b> instead of approximating it: a control character (C0, DEL and
-/// C1 — a line break or a tab included), which DDL a schema persists has no business holding, and an unpaired UTF-16
+/// C1 — a line break or a tab included) or a Unicode line or paragraph separator (U+2028, U+2029 — line breaks that
+/// are not controls), which DDL a schema persists has no business holding, and an unpaired UTF-16
 /// surrogate, which has no UTF-8 encoding — the engine would store a replacement character and the value read back
-/// would not be the value authored. The CEL compiler refuses both in a computed constant already, so declining here
+/// would not be the value authored. The CEL compiler refuses all of them in a computed constant already, so declining here
 /// is a belt, not a second rule.
 /// </para>
 /// <para>
@@ -50,7 +51,7 @@ internal static class AlvoSqlStringLiteral
     {
         for (var index = 0; index < value.Length; index++)
         {
-            if (char.IsControl(value[index]) || IsUnpairedSurrogate(value, index))
+            if (char.IsControl(value[index]) || IsLineOrParagraphSeparator(value[index]) || IsUnpairedSurrogate(value, index))
             {
                 return false;
             }
@@ -63,4 +64,6 @@ internal static class AlvoSqlStringLiteral
 
     private static bool IsUnpairedSurrogate(string value, int index) =>
         char.IsSurrogate(value[index]) && !char.IsSurrogatePair(value, index);
+
+    private static bool IsLineOrParagraphSeparator(char character) => character is '\u2028' or '\u2029';
 }

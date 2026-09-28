@@ -212,7 +212,8 @@ internal static class CelTypeChecker
 
         /// <summary>
         /// Refuses a text constant a generated column's DDL cannot carry: a control character (C0, DEL, C1 — a
-        /// line break or a tab included) or an unpaired UTF-16 surrogate, which is not text at all.
+        /// line break or a tab included), the Unicode line and paragraph separators (U+2028, U+2029 — line breaks
+        /// that are not controls), or an unpaired UTF-16 surrogate, which is not text at all.
         /// </summary>
         /// <remarks>
         /// <b>Engine-neutral, and before any dialect sees it.</b> A computed field's constants are written inline
@@ -229,9 +230,9 @@ internal static class CelTypeChecker
 
             Errors.Add(new CelCompilationError(
                 "A text constant in a computed field is written into the column's DDL, which carries no control "
-                + $"character or unpaired surrogate; this one holds U+{(int)offender:X4}.",
-                "Remove that character from the constant: a line break, a tab or a control code cannot be part of a "
-                + "computed text value.",
+                + $"character, line or paragraph separator, or unpaired surrogate; this one holds U+{(int)offender:X4}.",
+                "Remove that character from the constant: a line break (U+2028 and U+2029 included), a tab or a "
+                + "control code cannot be part of a computed text value.",
                 _cursor));
             return true;
         }
@@ -240,7 +241,7 @@ internal static class CelTypeChecker
         {
             for (var index = 0; index < text.Length; index++)
             {
-                if (char.IsControl(text[index]) || IsUnpairedSurrogate(text, index))
+                if (char.IsControl(text[index]) || IsLineOrParagraphSeparator(text[index]) || IsUnpairedSurrogate(text, index))
                 {
                     return text[index];
                 }
@@ -253,6 +254,9 @@ internal static class CelTypeChecker
 
         private static bool IsUnpairedSurrogate(string text, int index) =>
             char.IsSurrogate(text[index]) && !char.IsSurrogatePair(text, index);
+
+        // Zl and Zp: each is a line break to a reader, but neither is a control, so IsControl alone admits them.
+        private static bool IsLineOrParagraphSeparator(char character) => character is '\u2028' or '\u2029';
 
         /// <summary>
         /// Whether this profile admits a field reference in <em>any</em> state. Only
