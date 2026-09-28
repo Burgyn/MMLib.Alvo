@@ -927,7 +927,9 @@ number that looks like data:
   answers `null`, so a dialect that has not decided its quoting binds the constant and is refused. A property test
   per engine reads generated literals back through the engine itself. The validator also refuses a text result into
   a non-text field, a join longer than a declared `maxLength` (PostgreSQL's `varchar(n)` refuses the write where
-  SQLite stores it), an expression that reads no field, and — the null rule — an operand that can be null.
+  SQLite stores it), an expression that reads no field, a computed field reading another computed field
+  (PostgreSQL refuses that generation expression, SQLite accepts it), and — the null rule — an operand that can be
+  null. `RenderStringConcatenation` defaults to throwing, so a dialect must declare its operator.
 - **An engine whose dialect cannot express a stored generated column is refused by name**, rather than the
   field silently becoming plain.
 - **A payload naming a computed field is refused**, rather than dropped. The runtime model marks the property

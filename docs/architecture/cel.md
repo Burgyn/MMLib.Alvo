@@ -59,8 +59,8 @@ is legal.
   no caller. The only profile that allows arithmetic, string concatenation and the ternary.
   **String `+`** is CEL's `(string, string) → string` overload, left-associative, with no implicit
   conversion (a mixed pair is a type error; there is no `string()` here), and an operand that can be
-  null is **refused** — CEL's `+` has no null overload and SQL's `||` yields `NULL` — unless its
-  fallback is written with the profile's own coalescing construct, `has(f) ? f : ''`. A text constant
+  null is **refused** — CEL's `+` has no null overload and SQL's `||` yields `NULL` — unless it is read
+  inside the branch its own presence test guards (`has(f) ? f : ''`, `has(f) ? a + ' ' + f : a`). A text constant
   in a value position is written inline into the generated column's DDL through the dialect's
   `IFieldSqlRenderer.RenderStringLiteral` (so it may not hold a control character or an unpaired
   surrogate); every other constant is still a bind parameter, which a computed field refuses.

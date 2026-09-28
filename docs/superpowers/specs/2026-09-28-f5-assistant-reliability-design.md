@@ -165,7 +165,9 @@ diffable in review and the drift tests (§4.1) can parse it. Sections, with thei
      may be joined. There is **no implicit conversion**: `first_name + visits` is refused, and a computed field
      has no `string()` to convert with.
    - **Null rule**: every joined operand must be **never null** — a `required` field, a constant, or a
-     fallback written explicitly with `has()`: `(has(middle_name) ? middle_name : '') + ' ' + last_name`. An
+     field read inside the branch its own `has()` guards: `(has(middle_name) ? middle_name : '') + last_name`,
+     or with the separator only when present, `first_name + (has(middle_name) ? ' ' + middle_name : '') + ' ' +
+     last_name` and `has(middle_name) ? first_name + ' ' + middle_name : first_name`. An
      optional field joined directly is refused (*"'+' would join 'street', which may be null…"*, fix: *"Make
      'street' required, or write the fallback explicitly: (has(street) ? street : '')"*). Reason: CEL's `+`
      has no null overload, and SQL's `||` makes the whole value NULL when any part is.
@@ -177,6 +179,10 @@ diffable in review and the drift tests (§4.1) can parse it. Sections, with thei
      (`unit_price * 1.2`) is refused — hold a rate in a field of its own that a before-hook maintains. An
      expression that reads **no field** (`'always the same'`) is refused — that is a `default`, not computed.
      A text constant cannot hold a line break, a tab or another control character.
+   - **Not another computed field**: a computed field reads stored fields only (a rollup is stored); reading
+     another computed field is refused with that field's expression as the fix.
+   - **A text constant is joined, never compared**: `first_name == 'Jana' ? …` is refused (*"a text constant
+     can be joined, not compared, in a computed field"*); compare two fields instead.
    - **Never**: `@user`/`@tenant`, `now()` or any function, `old.`/`new.`, `changed()`, role membership.
 5. **Editing mechanics** — read `get_descriptor` once; express the change as RFC 6902 ops against its
    `revision`; pointers are `/entities/<entity>/fields/<field>`; `add` to create, `replace` to change,
@@ -308,7 +314,10 @@ ring); `package-boundary.md` only if the eval project needs listing.
     the core renderer reaches a dialect): `RenderStringConcatenation` (default `(l || r)`; the T-SQL fake spells
     `CONCAT`) and `RenderStringLiteral` (default `null` = the dialect declines, the constant is bound and refused).
     Only the scalar entry point inlines, only a text constant in a value position; every predicate still binds.
-  - Quoting: SQLite the standard literal (`AlvoSqlStringLiteral`, quotes doubled). **Deviation recorded:**
+    Fix round 1: the concatenation default also denies (throws `NotSupportedException`, since `||` is a logical OR
+    on some engines); SQLite and PostgreSQL declare `||`.
+  - Quoting: SQLite the standard literal (`AlvoSqlStringLiteral`, quotes doubled; `internal`, shared with the two
+    driver assemblies only, because a public quoter invites interpolating a value that should be bound). **Deviation recorded:**
     PostgreSQL writes an escape string `E'…'` (backslashes doubled, then quotes) instead of the standard literal
     under a documented `standard_conforming_strings = on` assumption, because with the setting off a standard
     literal is broken out of by a backslash before a quote, and an escape string reads the same under both —

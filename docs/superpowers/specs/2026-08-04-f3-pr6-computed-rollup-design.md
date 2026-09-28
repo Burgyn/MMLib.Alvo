@@ -403,6 +403,11 @@ the type checker both refused. What changed, and what each decision is measured 
   the reverse; a join longer than a declared `maxLength` is refused, because PostgreSQL's `varchar(n)` refuses the
   write where SQLite stores it — the same §0-principle-3 divergence class as Dev-13; and an expression reading no
   field is refused (it is a `default`).
+- **Fix round 1:** a field is known present anywhere inside the branch its `has()` guards (the
+  separator-only-when-present shapes validate); a computed field reading another computed field is refused
+  (PostgreSQL refuses it at apply, SQLite accepts — a principle-3 divergence, closed at validation);
+  `RenderStringConcatenation` defaults to throwing; `AlvoSqlStringLiteral` is `internal` with
+  `InternalsVisibleTo` to the two drivers.
 - **Backstop not widened:** `ComputedColumnSql` still refuses a bound value; it does not repeat the type/length
   checks, which need the descriptor's declared field and live in the validator.
 
