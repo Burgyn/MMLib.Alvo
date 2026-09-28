@@ -51,6 +51,7 @@ internal static class CelTypeChecker
         In,
         Has,
         Arithmetic,
+        Concatenation,
         Conditional,
         Changed,
         Call,
@@ -140,6 +141,7 @@ internal static class CelTypeChecker
             [CelConstructKind.In] = _ruleConditionAndAccess,
             [CelConstructKind.Has] = _ruleComputedCondition,
             [CelConstructKind.Arithmetic] = _computedOnly,
+            [CelConstructKind.Concatenation] = _computedOnly,
             [CelConstructKind.Conditional] = _computedOnly,
             [CelConstructKind.Changed] = _conditionOnly,
             [CelConstructKind.Call] = _mutateOnly,
@@ -195,8 +197,53 @@ internal static class CelTypeChecker
         private (CelNode, CelValueType, bool, int) CheckLiteral(CelLiteral literal)
         {
             var profileBad = CheckConstruct(CelConstructKind.Literal, "Literals are not legal in this profile.", null, _cursor);
-            return (literal, literal.Type, profileBad, _cursor);
+            var textBad = profile == CelProfile.Computed && RequireDdlText(literal);
+            return (literal, literal.Type, profileBad || textBad, _cursor);
         }
+
+        /// <summary>
+        /// Refuses a text constant a generated column's DDL cannot carry: a control character (C0, DEL, C1 — a
+        /// line break or a tab included) or an unpaired UTF-16 surrogate, which is not text at all.
+        /// </summary>
+        /// <remarks>
+        /// <b>Engine-neutral, and before any dialect sees it.</b> A computed field's constants are written inline
+        /// into DDL (a column definition has no bind-parameter form), so each dialect's literal quoting refuses the
+        /// same characters as a belt; stating the rule here is what makes the refusal a structured one at the
+        /// field's pointer, identical on every engine, instead of a driver's silence.
+        /// </remarks>
+        private bool RequireDdlText(CelLiteral literal)
+        {
+            if (literal is not { Type: CelValueType.String, Value: string text } || FirstNonText(text) is not { } offender)
+            {
+                return false;
+            }
+
+            Errors.Add(new CelCompilationError(
+                "A text constant in a computed field is written into the column's DDL, which carries no control "
+                + $"character or unpaired surrogate; this one holds U+{(int)offender:X4}.",
+                "Remove that character from the constant: a line break, a tab or a control code cannot be part of a "
+                + "computed text value.",
+                _cursor));
+            return true;
+        }
+
+        private static char? FirstNonText(string text)
+        {
+            for (var index = 0; index < text.Length; index++)
+            {
+                if (char.IsControl(text[index]) || IsUnpairedSurrogate(text, index))
+                {
+                    return text[index];
+                }
+
+                index += char.IsHighSurrogate(text[index]) ? 1 : 0;
+            }
+
+            return null;
+        }
+
+        private static bool IsUnpairedSurrogate(string text, int index) =>
+            char.IsSurrogate(text[index]) && !char.IsSurrogatePair(text, index);
 
         /// <summary>
         /// Whether this profile admits a field reference in <em>any</em> state. Only
@@ -388,6 +435,11 @@ internal static class CelTypeChecker
         private (CelNode, CelValueType, bool, int) CheckArithmetic(
             CelBinary binary, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError, int leftPosition, int rightPosition)
         {
+            if (IsConcatenation(binary.Operator, leftType, rightType, leftError, rightError))
+            {
+                return CheckConcatenation(binary, leftType, rightType, leftError, rightError, leftPosition, rightPosition);
+            }
+
             var profileBad = CheckConstruct(
                 CelConstructKind.Arithmetic,
                 $"Arithmetic is legal only in the Computed profile; '{OperatorText(binary.Operator)}' is not allowed here.",
@@ -402,6 +454,114 @@ internal static class CelTypeChecker
 
             return (binary, resultType, profileBad || leftBad || rightBad, rightPosition);
         }
+
+        /// <summary>
+        /// Whether this <c>+</c> is CEL's <c>(string, string) → string</c> overload rather than arithmetic: a healthy
+        /// string operand on either side makes it one, so a mixed pair is reported as the concatenation it was
+        /// meant to be, with a conversion fix, rather than as "the left operand must be numeric".
+        /// </summary>
+        private static bool IsConcatenation(
+            CelBinaryOperator op, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError) =>
+            op == CelBinaryOperator.Add
+            && ((leftType == CelValueType.String && !leftError) || (rightType == CelValueType.String && !rightError));
+
+        /// <summary>
+        /// CEL's <c>+</c> over two strings. Left-associative like every <c>+</c>, so <c>a + ' ' + b</c> is
+        /// <c>(a + ' ') + b</c> and each join is checked on its own.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>No implicit conversion (CEL spec: there is no <c>(int, string)</c> overload).</b> A mixed pair is a type
+        /// error, and its fix says this profile has no <c>string()</c> to reach for.
+        /// </para>
+        /// <para>
+        /// <b>The null rule is a refusal.</b> CEL's <c>+</c> has no null overload — a null operand is an evaluation
+        /// error — while SQL's <c>||</c> answers <c>NULL</c> for the whole value when any operand is. Rather than
+        /// picking one of the two and diverging from the other, an operand that can be null is refused here, with
+        /// the explicit fallback in the profile's own syntax as the fix; see <see cref="IsNeverNull"/> for what counts
+        /// as never null.
+        /// </para>
+        /// </remarks>
+        private (CelNode, CelValueType, bool, int) CheckConcatenation(
+            CelBinary binary, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError, int leftPosition, int rightPosition)
+        {
+            var profileBad = CheckConstruct(
+                CelConstructKind.Concatenation,
+                "String concatenation ('+' over two strings) is legal only in the Computed profile.",
+                "Join the text in a computed field, and compare that field here instead.",
+                rightPosition);
+            var mismatch = RequireTwoStrings(leftType, rightType, leftError, rightError, rightPosition);
+            var nullBad = !profileBad && !mismatch
+                && (RequireNeverNull(binary.Left, leftError, leftPosition) | RequireNeverNull(binary.Right, rightError, rightPosition));
+
+            return (binary, CelValueType.String, profileBad || mismatch || nullBad || leftError || rightError, rightPosition);
+        }
+
+        private bool RequireTwoStrings(CelValueType leftType, CelValueType rightType, bool leftError, bool rightError, int position)
+        {
+            if (leftError || rightError || (leftType == CelValueType.String && rightType == CelValueType.String))
+            {
+                return false;
+            }
+
+            Errors.Add(new CelCompilationError(
+                $"'+' joins two strings or adds two numbers; found {leftType} and {rightType}, and CEL converts "
+                + "neither implicitly.",
+                "Join two string fields or string constants (first_name + ' ' + last_name). A computed field has no "
+                + "string() conversion, so keep the number in a field of its own.",
+                position));
+            return true;
+        }
+
+        private bool RequireNeverNull(CelNode operand, bool operandError, int position)
+        {
+            if (operandError || IsNeverNull(operand))
+            {
+                return false;
+            }
+
+            Errors.Add(operand is CelFieldRef fieldRef ? NullableFieldOperand(fieldRef.FieldName, position) : NullableOperand(position));
+            return true;
+        }
+
+        private static CelCompilationError NullableFieldOperand(string fieldName, int position) => new(
+            $"'+' would join '{fieldName}', which may be null: CEL's '+' has no null overload, and SQL's '||' makes "
+            + "the whole value NULL when any part is.",
+            $"Make '{fieldName}' required, or write the fallback explicitly: (has({fieldName}) ? {fieldName} : '').",
+            position);
+
+        private static CelCompilationError NullableOperand(int position) => new(
+            "An operand of '+' may be null: CEL's '+' has no null overload, and SQL's '||' makes the whole value NULL "
+            + "when any part is.",
+            "Give every branch a value that is never null, e.g. (has(middle_name) ? middle_name : '').",
+            position);
+
+        /// <summary>
+        /// Whether an already-checked string operand can never be null: a constant; a field whose column is
+        /// <c>NOT NULL</c>; a healthy join (its own operands passed this same test); or a ternary both of whose
+        /// branches are — where a field on the branch its own presence test guards
+        /// (<c>has(f) ? f : …</c>, <c>!has(f) ? … : f</c>) counts, because that is exactly the coalescing construct
+        /// this profile already has.
+        /// </summary>
+        private bool IsNeverNull(CelNode node) => node switch
+        {
+            CelLiteral literal => literal.Value is not null,
+            CelFieldRef fieldRef => ResolveField(fieldRef.FieldName) is { Nullable: false },
+            CelBinary { Operator: CelBinaryOperator.Add } => true,
+            CelConditional conditional =>
+                IsNeverNullWhen(conditional.WhenTrue, conditional.Condition, conditionHolds: true)
+                && IsNeverNullWhen(conditional.WhenFalse, conditional.Condition, conditionHolds: false),
+            _ => false,
+        };
+
+        private bool IsNeverNullWhen(CelNode branch, CelNode condition, bool conditionHolds) =>
+            IsNeverNull(branch)
+            || (branch is CelFieldRef fieldRef && GuardsPresence(condition, fieldRef.FieldName, conditionHolds));
+
+        private static bool GuardsPresence(CelNode condition, string fieldName, bool conditionHolds) => conditionHolds
+            ? condition is CelHas { Field.FieldName: var tested } && tested == fieldName
+            : condition is CelUnary { Operator: CelUnaryOperator.Not, Operand: CelHas { Field.FieldName: var negated } }
+                && negated == fieldName;
 
         private (CelNode, CelValueType, bool, int) CheckComparison(
             CelBinary binary, CelBinaryOperator op, CelValueType leftType, CelValueType rightType, bool leftError, bool rightError, int position)
