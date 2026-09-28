@@ -101,7 +101,13 @@ internal sealed class EvalWorld : IAsyncDisposable
     /// <summary>The database file and every companion SQLite may have left beside it (WAL, shared memory, journal).</summary>
     private static void DeleteDatabase(string database)
     {
-        SqliteConnection.ClearAllPools();
+        // This file's pool only, the same rule the test worlds follow: one world per process today, but a
+        // process-wide clear disposes a connection any other world is in the middle of opening.
+        using (var connection = new SqliteConnection($"Data Source={database}"))
+        {
+            SqliteConnection.ClearPool(connection);
+        }
+
         foreach (var suffix in _sqliteCompanions)
         {
             File.Delete(database + suffix);

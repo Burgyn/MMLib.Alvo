@@ -137,6 +137,14 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
     internal static string TempDatabasePath() =>
         Path.Combine(Path.GetTempPath(), $"alvo-host-tests-{Guid.NewGuid():N}.db");
 
+    /// <summary>The one connection string every world in this suite hands a host for <paramref name="databasePath"/>.</summary>
+    /// <remarks>
+    /// One spelling on purpose: SQLite pools are keyed by the exact string, so <see cref="TryDeleteDatabase"/>
+    /// reaches a world's pool only by building the very string that world's host opened its connections with.
+    /// </remarks>
+    /// <param name="databasePath">The SQLite file.</param>
+    internal static string ConnectionStringFor(string databasePath) => $"Data Source={databasePath}";
+
     /// <summary>Releases and removes a caller-owned database, as far as the platform allows.</summary>
     /// <remarks>
     /// <para>
@@ -148,13 +156,22 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
     /// strict delete here asserts nothing on Unix and fails every fact on Windows. It did exactly that.
     /// </para>
     /// <para>
-    /// <see cref="SqliteConnection.ClearAllPools"/> comes first, because the pool is the real holder.
-    /// Microsoft.Data.Sqlite pools by default, so a connection returned to the pool keeps its SQLite handle —
-    /// and the file — open past the disposal of the application that opened it, and the pool is process-wide.
+    /// Clearing <em>this file's</em> pool comes first, because the pool is the real holder. Microsoft.Data.Sqlite
+    /// pools by default — the host's identity store and its data context open their connections pooled, over
+    /// the very string <see cref="ConnectionStringFor"/> gave the host — so a connection returned to the pool
+    /// keeps its SQLite handle, and the file, open past the disposal of the application that opened it.
     /// Clearing it turns "the file is probably free by now" into "no pooled handle to this file exists", which
-    /// is what makes the delete below deterministic rather than lucky. Safe while another world runs: a
-    /// connection in use is not closed, only barred from returning to the pool, and every database this suite
-    /// opens is a file that reopens on demand — never a <c>Mode=Memory</c> one, which clearing would destroy.
+    /// is what makes the delete below deterministic rather than lucky. (The driver's migrator and runtime writer
+    /// open theirs with <c>Pooling=False</c>, so they never enter a pool at all.)
+    /// </para>
+    /// <para>
+    /// <b>Only this file's pool, never <see cref="SqliteConnection.ClearAllPools"/>.</b> Pools are keyed by the
+    /// exact connection string, so a connection built from the string the host was given reaches this world's
+    /// pool and no other world's. Clearing every pool in the process is not safe while another world runs: a
+    /// connection that world is <em>opening</em> — popped from its pool, not yet bound to its owner — reads as
+    /// leaked in that window, and the clear disposes its SQLite handle under the thread about to use it. That
+    /// was the intermittent <see cref="ObjectDisposedException"/> on <c>sqlite3</c> during an identity write on
+    /// boot.
     /// </para>
     /// <para>
     /// The bounded retry covers what clearing the pool cannot: on Windows a handle can outlive the call that
@@ -165,7 +182,10 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
     /// <param name="databasePath">The path <see cref="TempDatabasePath"/> returned.</param>
     internal static void TryDeleteDatabase(string databasePath)
     {
-        SqliteConnection.ClearAllPools();
+        using (var connection = new SqliteConnection(ConnectionStringFor(databasePath)))
+        {
+            SqliteConnection.ClearPool(connection);
+        }
 
         for (var attempt = 1; attempt <= DeleteAttempts; attempt++)
         {
@@ -239,7 +259,7 @@ internal sealed class AlvoHostWorld : IAsyncDisposable
         {
             ["Alvo:DescriptorPath"] = descriptorPath,
             ["Alvo:Database:Provider"] = "sqlite",
-            ["Alvo:Database:SqliteConnectionString"] = $"Data Source={databasePath}",
+            ["Alvo:Database:SqliteConnectionString"] = ConnectionStringFor(databasePath),
             ["Alvo:Auth:DevKeys:0:KeyId"] = AdminKeyId,
             ["Alvo:Auth:DevKeys:0:Secret"] = AdminSecret,
             ["Alvo:Auth:DevKeys:0:User"] = "6f9619ff-8b86-d011-b42d-00c04fc964ff",
