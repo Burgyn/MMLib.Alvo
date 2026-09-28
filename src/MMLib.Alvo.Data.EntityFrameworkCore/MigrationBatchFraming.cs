@@ -56,7 +56,8 @@ public sealed record MigrationBatchFraming
     /// of the table names the plan's steps change. It must check those tables and every table whose reference points
     /// at one of them, and nothing else — so an orphan that already sat in an untouched table never refuses an
     /// unrelated migration, and the check costs the tables the migration rewrote rather than the whole database.
-    /// A plan with no steps touches nothing and is not verified.
+    /// <b>It fails closed:</b> a plan that carries SQL but whose steps name no table passes <c>@touched</c> as
+    /// <c>NULL</c>, and the query must then check every table. Only a plan with no SQL at all is not verified.
     /// </para>
     /// </remarks>
     public string? Verify { get; init; }

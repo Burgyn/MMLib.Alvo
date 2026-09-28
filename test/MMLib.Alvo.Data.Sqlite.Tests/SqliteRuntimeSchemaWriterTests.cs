@@ -154,17 +154,36 @@ public sealed class SqliteRuntimeSchemaWriterTests : RuntimeSchemaWriterContract
         var ct = TestContext.Current.CancellationToken;
         await writer.ApplyAndAppendAsync("scoped", Plan(
             "CREATE TABLE parents (id INTEGER PRIMARY KEY)",
-            "CREATE TABLE others (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parents (id))",
             "CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER)",
             "INSERT INTO parents (id) VALUES (1)",
-            "INSERT INTO others (id, parent_id) VALUES (20, 99)",
             "INSERT INTO children (id, parent_id) VALUES (10, 1)"), Candidate(0), 0, new MigrationOptions(), ct);
+        await PlantOrphanOutOfBandAsync(ct);
 
         await writer.ApplyAndAppendAsync("scoped", Rebuild(_orphaningRebuild), Candidate(1), 1, new MigrationOptions(), ct);
 
         (await ScalarAsync("SELECT count(*) FROM pragma_foreign_key_list('children')", ct))
             .ShouldBe(1L, "the rebuild of children committed despite the orphan in others");
         (await ScalarAsync("SELECT count(*) FROM others WHERE parent_id = 99", ct)).ShouldBe(1L);
+    }
+
+    /// <summary>
+    /// Fail closed: a plan that runs SQL but whose steps name no table is checked over every table, so a hand-built
+    /// plan cannot commit an orphaned reference by leaving its steps out.
+    /// </summary>
+    [Fact]
+    public async Task A_plan_whose_steps_name_no_table_is_checked_over_every_table()
+    {
+        var writer = CreateWriter();
+        var ct = TestContext.Current.CancellationToken;
+        await writer.ApplyAndAppendAsync("unscoped", Plan(
+            "CREATE TABLE parents (id INTEGER PRIMARY KEY)",
+            "CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER)",
+            "INSERT INTO children (id, parent_id) VALUES (11, 99)"), Candidate(0), 0, new MigrationOptions(), ct);
+
+        var refusal = await Should.ThrowAsync<MMLib.Alvo.Descriptor.DescriptorValidationException>(
+            () => writer.ApplyAndAppendAsync("unscoped", Plan(_orphaningRebuild), Candidate(1), 1, new MigrationOptions(), ct));
+
+        refusal.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe("/entities/children/fields/parent_id");
     }
 
     /// <summary>
@@ -191,6 +210,21 @@ public sealed class SqliteRuntimeSchemaWriterTests : RuntimeSchemaWriterContract
     ];
 
     private static MigrationPlan Plan(params string[] sql) => new() { Steps = [], Sql = sql };
+
+    /// <summary>
+    /// A table holding an orphaned reference, written outside any migration with enforcement off — the state an
+    /// earlier build could have left behind, and one no migration of this test's plans touches.
+    /// </summary>
+    private async Task PlantOrphanOutOfBandAsync(CancellationToken ct)
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_databasePath};Foreign Keys=False");
+        await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "CREATE TABLE others (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parents (id));"
+            + "INSERT INTO others (id, parent_id) VALUES (20, 99);";
+        await command.ExecuteNonQueryAsync(ct);
+    }
 
     /// <summary>The rebuild as the planner would describe it: one step on <c>children.parent_id</c>.</summary>
     private static MigrationPlan Rebuild(string[] sql) => new()

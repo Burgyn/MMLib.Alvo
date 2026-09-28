@@ -102,7 +102,7 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// retargets a reference over values naming no parent would commit the orphans silently; the check runs inside
     /// the transaction, and the correlated <c>pragma_foreign_key_list</c> join names the referencing column. It runs
     /// <c>foreign_key_check(table)</c> per table in scope — the touched tables that still exist, and every table
-    /// referencing one of them — never the argument-less whole-database form.
+    /// referencing one of them — or, when the plan names no table (<c>@touched</c> is <c>NULL</c>), every table.
     /// </para>
     /// </remarks>
     public MigrationBatchFraming MigrationFraming { get; } = new()
@@ -113,7 +113,7 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
             WITH touched(name) AS (SELECT value FROM json_each(@touched)),
             scope(name) AS (
                 SELECT m.name FROM sqlite_schema AS m
-                WHERE m.type = 'table' AND m.name IN (SELECT name FROM touched)
+                WHERE m.type = 'table' AND (@touched IS NULL OR m.name IN (SELECT name FROM touched))
                 UNION
                 SELECT m.name FROM sqlite_schema AS m JOIN pragma_foreign_key_list(m.name) AS f
                 WHERE m.type = 'table' AND f."table" IN (SELECT name FROM touched))

@@ -98,11 +98,12 @@ internal static class MigrationFramingScope
         DbConnection connection, DbTransaction transaction, MigrationBatchFraming framing, MigrationPlan plan,
         CancellationToken ct)
     {
-        var touched = Touched(plan);
-        if (framing.Verify is not { Length: > 0 } query || touched.Count == 0)
+        if (framing.Verify is not { Length: > 0 } query || !plan.Sql.Any(sql => !string.IsNullOrWhiteSpace(sql)))
         {
             return;
         }
+
+        var touched = Touched(plan);
 
         var violations = await ViolationsAsync(connection, transaction, query, touched, ct).ConfigureAwait(false);
         if (violations.Count > 0)
@@ -112,19 +113,26 @@ internal static class MigrationFramingScope
         }
     }
 
-    /// <summary>The tables the plan's steps change — an entity maps onto its own table name verbatim.</summary>
-    private static List<string> Touched(MigrationPlan plan) =>
-        [.. plan.Steps.Select(step => step.Change.Entity).Distinct(StringComparer.Ordinal)];
+    /// <summary>
+    /// The tables the plan's steps change — an entity maps onto its own table name verbatim — or <see langword="null"/>
+    /// when SQL runs but no step names a table, which the query answers by checking every table (fail closed).
+    /// </summary>
+    private static List<string>? Touched(MigrationPlan plan)
+    {
+        List<string> tables = [.. plan.Steps.Select(step => step.Change.Entity).Distinct(StringComparer.Ordinal)];
+        return tables.Count > 0 ? tables : null;
+    }
 
     private static async Task<List<Violation>> ViolationsAsync(
-        DbConnection connection, DbTransaction transaction, string query, List<string> touched, CancellationToken ct)
+        DbConnection connection, DbTransaction transaction, string query, List<string>? touched, CancellationToken ct)
     {
         var command = connection.CreateCommand();
         await using (command.ConfigureAwait(false))
         {
             command.CommandText = query;
             command.Transaction = transaction;
-            RelationalSqlBatch.AddParameter(command, "@touched", JsonSerializer.Serialize(touched));
+            RelationalSqlBatch.AddParameter(
+                command, "@touched", touched is null ? DBNull.Value : JsonSerializer.Serialize(touched));
             var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
             await using (reader.ConfigureAwait(false))
             {
