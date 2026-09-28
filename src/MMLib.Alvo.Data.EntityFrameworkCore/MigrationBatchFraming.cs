@@ -51,6 +51,13 @@ public sealed record MigrationBatchFraming
     /// <b>Return grammar.</b> Four columns, in this order: the referencing table, the offending row's identifier
     /// (<c>rowid</c> on SQLite), the referenced table, and the referencing column. No rows means the batch may commit.
     /// </para>
+    /// <para>
+    /// <b>Scoped to what the migration touched.</b> The query is handed one parameter, <c>@touched</c>: a JSON array
+    /// of the table names the plan's steps change. It must check those tables and every table whose reference points
+    /// at one of them, and nothing else — so an orphan that already sat in an untouched table never refuses an
+    /// unrelated migration, and the check costs the tables the migration rewrote rather than the whole database.
+    /// A plan with no steps touches nothing and is not verified.
+    /// </para>
     /// </remarks>
     public string? Verify { get; init; }
 }

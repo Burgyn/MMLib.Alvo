@@ -215,7 +215,7 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
         await using (transaction.ConfigureAwait(false))
         {
             await RelationalSqlBatch.ExecuteAsync(connection, plan.Sql, transaction, ct).ConfigureAwait(false);
-            await MigrationFramingScope.VerifyAsync(connection, transaction, _dialect.MigrationFraming, ct)
+            await MigrationFramingScope.VerifyAsync(connection, transaction, _dialect.MigrationFraming, plan, ct)
                 .ConfigureAwait(false);
             await transaction.CommitAsync(ct).ConfigureAwait(false);
             return true;

@@ -113,7 +113,7 @@ public sealed class SqliteRuntimeSchemaWriterTests : RuntimeSchemaWriterContract
             "INSERT INTO children (id, parent_id) VALUES (10, 1), (11, 99)"), Candidate(0), 0, new MigrationOptions(), ct);
 
         var refusal = await Should.ThrowAsync<MMLib.Alvo.Descriptor.DescriptorValidationException>(
-            () => writer.ApplyAndAppendAsync("orphans", Plan(_orphaningRebuild), Candidate(1), 1, new MigrationOptions(), ct));
+            () => writer.ApplyAndAppendAsync("orphans", Rebuild(_orphaningRebuild), Candidate(1), 1, new MigrationOptions(), ct));
 
         var error = refusal.Result.Errors.ShouldHaveSingleItem();
         error.Path.ShouldBe("/entities/children/fields/parent_id");
@@ -137,10 +137,34 @@ public sealed class SqliteRuntimeSchemaWriterTests : RuntimeSchemaWriterContract
             "INSERT INTO children (id, parent_id) VALUES (11, 99)"), new MigrationOptions(), ct);
 
         var refusal = await Should.ThrowAsync<MMLib.Alvo.Descriptor.DescriptorValidationException>(
-            () => migrator.ApplyAsync(Plan(_orphaningRebuild), new MigrationOptions(), ct));
+            () => migrator.ApplyAsync(Rebuild(_orphaningRebuild), new MigrationOptions(), ct));
 
         refusal.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe("/entities/children/fields/parent_id");
         (await ScalarAsync("SELECT count(*) FROM pragma_foreign_key_list('children')", ct)).ShouldBe(0L);
+    }
+
+    /// <summary>
+    /// The check is scoped to what the migration touched: an orphan that already sits in a table the plan does not
+    /// change — nor reference anything it changes — never refuses it.
+    /// </summary>
+    [Fact]
+    public async Task A_pre_existing_orphan_in_an_untouched_table_does_not_refuse_the_migration()
+    {
+        var writer = CreateWriter();
+        var ct = TestContext.Current.CancellationToken;
+        await writer.ApplyAndAppendAsync("scoped", Plan(
+            "CREATE TABLE parents (id INTEGER PRIMARY KEY)",
+            "CREATE TABLE others (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parents (id))",
+            "CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER)",
+            "INSERT INTO parents (id) VALUES (1)",
+            "INSERT INTO others (id, parent_id) VALUES (20, 99)",
+            "INSERT INTO children (id, parent_id) VALUES (10, 1)"), Candidate(0), 0, new MigrationOptions(), ct);
+
+        await writer.ApplyAndAppendAsync("scoped", Rebuild(_orphaningRebuild), Candidate(1), 1, new MigrationOptions(), ct);
+
+        (await ScalarAsync("SELECT count(*) FROM pragma_foreign_key_list('children')", ct))
+            .ShouldBe(1L, "the rebuild of children committed despite the orphan in others");
+        (await ScalarAsync("SELECT count(*) FROM others WHERE parent_id = 99", ct)).ShouldBe(1L);
     }
 
     /// <summary>
@@ -167,6 +191,14 @@ public sealed class SqliteRuntimeSchemaWriterTests : RuntimeSchemaWriterContract
     ];
 
     private static MigrationPlan Plan(params string[] sql) => new() { Steps = [], Sql = sql };
+
+    /// <summary>The rebuild as the planner would describe it: one step on <c>children.parent_id</c>.</summary>
+    private static MigrationPlan Rebuild(string[] sql) => new()
+    {
+        Steps = [new MigrationStep(
+            new SchemaChange { Kind = SchemaChangeKind.AlterField, Entity = "children", Field = "parent_id" }, false, null)],
+        Sql = sql,
+    };
 
     private static DescriptorVersion Candidate(int revision) =>
         new(new SchemaModel([]), "{}", Revision: revision, CreatedAt: DateTimeOffset.UnixEpoch);

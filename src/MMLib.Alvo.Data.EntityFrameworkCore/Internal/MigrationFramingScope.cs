@@ -1,6 +1,8 @@
 ﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Migrations;
 using System.Data.Common;
 using System.Globalization;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
@@ -89,17 +91,20 @@ internal static class MigrationFramingScope
     /// <param name="connection">The migration's connection.</param>
     /// <param name="transaction">The migration's open transaction.</param>
     /// <param name="framing">The dialect's framing.</param>
+    /// <param name="plan">The plan being applied; its steps name the tables the check is scoped to.</param>
     /// <param name="ct">Cancels the query.</param>
     /// <exception cref="DescriptorValidationException">The query answered at least one violating row.</exception>
     public static async Task VerifyAsync(
-        DbConnection connection, DbTransaction transaction, MigrationBatchFraming framing, CancellationToken ct)
+        DbConnection connection, DbTransaction transaction, MigrationBatchFraming framing, MigrationPlan plan,
+        CancellationToken ct)
     {
-        if (framing.Verify is not { Length: > 0 } query)
+        var touched = Touched(plan);
+        if (framing.Verify is not { Length: > 0 } query || touched.Count == 0)
         {
             return;
         }
 
-        var violations = await ViolationsAsync(connection, transaction, query, ct).ConfigureAwait(false);
+        var violations = await ViolationsAsync(connection, transaction, query, touched, ct).ConfigureAwait(false);
         if (violations.Count > 0)
         {
             throw new DescriptorValidationException(new DescriptorValidationResult(
@@ -107,14 +112,19 @@ internal static class MigrationFramingScope
         }
     }
 
+    /// <summary>The tables the plan's steps change — an entity maps onto its own table name verbatim.</summary>
+    private static List<string> Touched(MigrationPlan plan) =>
+        [.. plan.Steps.Select(step => step.Change.Entity).Distinct(StringComparer.Ordinal)];
+
     private static async Task<List<Violation>> ViolationsAsync(
-        DbConnection connection, DbTransaction transaction, string query, CancellationToken ct)
+        DbConnection connection, DbTransaction transaction, string query, List<string> touched, CancellationToken ct)
     {
         var command = connection.CreateCommand();
         await using (command.ConfigureAwait(false))
         {
             command.CommandText = query;
             command.Transaction = transaction;
+            RelationalSqlBatch.AddParameter(command, "@touched", JsonSerializer.Serialize(touched));
             var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
             await using (reader.ConfigureAwait(false))
             {

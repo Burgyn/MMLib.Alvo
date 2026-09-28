@@ -100,7 +100,9 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// <para>
     /// <b><c>Verify</c> is what makes the suspension safe to commit.</b> With enforcement off, a rebuild that adds or
     /// retargets a reference over values naming no parent would commit the orphans silently; the check runs inside
-    /// the transaction, and the correlated <c>pragma_foreign_key_list</c> join names the referencing column.
+    /// the transaction, and the correlated <c>pragma_foreign_key_list</c> join names the referencing column. It runs
+    /// <c>foreign_key_check(table)</c> per table in scope — the touched tables that still exist, and every table
+    /// referencing one of them — never the argument-less whole-database form.
     /// </para>
     /// </remarks>
     public MigrationBatchFraming MigrationFraming { get; } = new()
@@ -108,9 +110,17 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
         Before = ["PRAGMA foreign_keys = 0"],
         After = ["PRAGMA foreign_keys = 1"],
         Verify = """
-            SELECT c."table", c.rowid, c.parent, l."from"
-            FROM pragma_foreign_key_check() AS c
-            JOIN pragma_foreign_key_list(c."table") AS l ON l.id = c.fkid
+            WITH touched(name) AS (SELECT value FROM json_each(@touched)),
+            scope(name) AS (
+                SELECT m.name FROM sqlite_schema AS m
+                WHERE m.type = 'table' AND m.name IN (SELECT name FROM touched)
+                UNION
+                SELECT m.name FROM sqlite_schema AS m JOIN pragma_foreign_key_list(m.name) AS f
+                WHERE m.type = 'table' AND f."table" IN (SELECT name FROM touched))
+            SELECT k."table", k.rowid, k.parent, l."from"
+            FROM scope AS s
+            JOIN pragma_foreign_key_check(s.name) AS k
+            JOIN pragma_foreign_key_list(k."table") AS l ON l.id = k.fkid
             """,
     };
 

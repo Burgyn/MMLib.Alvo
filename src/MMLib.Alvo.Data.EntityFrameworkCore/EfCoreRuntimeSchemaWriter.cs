@@ -105,7 +105,7 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
             // failure rolls the version row back too. See the type remarks for why order matters.
             await _rows.InsertAsync(connection, transaction, project, appended, ct).ConfigureAwait(false);
             await RelationalSqlBatch.ExecuteAsync(connection, plan.Sql, transaction, ct).ConfigureAwait(false);
-            await MigrationFramingScope.VerifyAsync(connection, transaction, _framing, ct).ConfigureAwait(false);
+            await MigrationFramingScope.VerifyAsync(connection, transaction, _framing, plan, ct).ConfigureAwait(false);
             await transaction.CommitAsync(ct).ConfigureAwait(false);
         }
         catch (DbException)
