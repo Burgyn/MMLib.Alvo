@@ -14,7 +14,9 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// arbitrary-DDL-injection vector, and this is what revives the feature without reviving the vector: the text
 /// that reaches DDL is produced by <see cref="IPredicateRenderer"/>'s scalar entry point from a CEL AST the
 /// compiler accepted for <see cref="CelProfile.Computed"/>, so it can contain nothing but this entity's own
-/// field references (delimited by <see cref="IFieldSqlRenderer.RenderField"/>), arithmetic, and
+/// field references (delimited by <see cref="IFieldSqlRenderer.RenderField"/>), arithmetic, text joined by
+/// <see cref="IFieldSqlRenderer.RenderStringConcatenation"/> from fields and constants quoted by
+/// <see cref="IFieldSqlRenderer.RenderStringLiteral"/>, and
 /// <c>CASE WHEN</c>. A descriptor string never appears in it.
 /// </para>
 /// <para>
@@ -28,6 +30,13 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// <c>baas-analyza:1358</c> deliberately puts a contextual constant — a VAT rate, which is time-valid
 /// business logic rather than arithmetic — in a before-hook instead. Widening this later is additive;
 /// getting the escaping wrong once is persisted.
+/// </para>
+/// <para>
+/// <b>Widened once, for text, and only through the dialect (assistant-reliability design, ruling 2).</b> A text
+/// constant in a value position — the <c>' '</c> of <c>first_name + ' ' + last_name</c> — is quoted by this
+/// driver's own <see cref="IFieldSqlRenderer.RenderStringLiteral"/> and never by this package, so the quoting
+/// stays per engine and the refusal above still answers every other constant, and every text constant of a
+/// dialect that declines to quote it.
 /// </para>
 /// <para>
 /// <b>It renders, and it does not decide whether the engine can hold one.</b> That question needs the

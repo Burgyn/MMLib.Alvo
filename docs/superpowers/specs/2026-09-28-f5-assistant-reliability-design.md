@@ -23,6 +23,11 @@ request is therefore *one* dry-run attempt, the framework's refusal quoted, and 
 with the honest alternative (a plain `string` field the client writes) — in one turn, with no question
 back. §6 owes the core issue that makes the request honourable; the eval case flips when it lands.
 
+> **Superseded (28 Sep 2026, ruling 2).** The core change landed before the assistant tasks: the `Computed`
+> profile now joins two strings with `+`, and `first_name + ' ' + last_name` validates, dry-runs and applies —
+> including to a populated SQLite table. §3.4 states exactly what `Computed` allows now; the paragraph above is
+> kept as the record of why the design was written.
+
 ## 1. Root causes
 
 | # | Cause | Where | Why a patch removes it |
@@ -150,11 +155,29 @@ diffable in review and the drift tests (§4.1) can parse it. Sections, with thei
    decimal — total digits, `values` enum, `entity`+`onDelete` ref); `required`/`unique`/`default`
    (`{"$cel": …}`); `rules.{list,get,create,update,delete}` — a missing op is deny; before-hooks
    `reject`/`mutate`, in-transaction; rollups over related rows are read-only.
-4. **Computed, precisely** — same-row CEL rendered into a STORED generated column. Legal: `+ - * /` over
-   **numeric** fields, unary `-`, ternary over a field-to-field comparison, `has()`. Not legal: string
-   concatenation, any literal constant (a constant cannot live in DDL), `@user`/`@tenant`, `now()`,
-   functions. *"If the request needs text joined or a constant, say this build cannot compute it and
-   offer a plain field."* (Updated in the same PR as the core issue in §6.)
+4. **What Computed allows** — same-row CEL rendered into a STORED generated column, maintained by the
+   database. The next task copies this list into the instructions verbatim; each rule names the refusal the
+   framework gives, so the model can explain it.
+   - **Arithmetic**: `+ - * /` and unary `-` over **numeric** fields (`unit_price * amount`,
+     `net_total + vat_total`); a computed field may read a rollup field of its own row.
+   - **Text**: `+` over **two strings** joins them (CEL's `string + string`), left to right:
+     `first_name + ' ' + last_name`. A `string`, `text` or `enum` field, or a text constant in single quotes,
+     may be joined. There is **no implicit conversion**: `first_name + visits` is refused, and a computed field
+     has no `string()` to convert with.
+   - **Null rule**: every joined operand must be **never null** — a `required` field, a constant, or a
+     fallback written explicitly with `has()`: `(has(middle_name) ? middle_name : '') + ' ' + last_name`. An
+     optional field joined directly is refused (*"'+' would join 'street', which may be null…"*, fix: *"Make
+     'street' required, or write the fallback explicitly: (has(street) ? street : '')"*). Reason: CEL's `+`
+     has no null overload, and SQL's `||` makes the whole value NULL when any part is.
+   - **Type and length**: a text result needs a field declared `"type": "string"` (or `"text"`), and a number a
+     numeric type; with `maxLength`, it must hold the longest join (the sum of the parts' `maxLength`s —
+     `first_name` 60 + `' '` 1 + `last_name` 60 = 121). Omitting `maxLength` is always fine.
+   - **Ternary** `c ? a : b` whose condition compares two fields of the row or tests `has(field)`; `has()`.
+   - **Constants**: a **text** constant may appear in a join or a ternary branch. A **numeric** constant
+     (`unit_price * 1.2`) is refused — hold a rate in a field of its own that a before-hook maintains. An
+     expression that reads **no field** (`'always the same'`) is refused — that is a `default`, not computed.
+     A text constant cannot hold a line break, a tab or another control character.
+   - **Never**: `@user`/`@tenant`, `now()` or any function, `old.`/`new.`, `changed()`, role membership.
 5. **Editing mechanics** — read `get_descriptor` once; express the change as RFC 6902 ops against its
    `revision`; pointers are `/entities/<entity>/fields/<field>`; `add` to create, `replace` to change,
    `remove` to delete; rename = `move` + `add …/renamedFrom` (without `renamedFrom` a rename is drop+add
@@ -164,8 +187,9 @@ diffable in review and the drift tests (§4.1) can parse it. Sections, with thei
    (b) rename `phone` → `phone_number` — `move` + `renamedFrom`; (c) a rule "only technicians delete
    parts" — `add /entities/parts/rules/delete` `"'technician' in @user.roles"`; (d) **full_name**:
    `add /entities/customers/fields/full_name {type:string, computed:"first_name + ' ' + last_name"}` →
-   the tool returns *"Arithmetic left operand must be numeric…"* → reply in Slovak: what was refused
-   (quoted), why (text cannot be joined in a computed column in this build), the alternative, and stop.
+   a valid proposal (both parts are `required`); the reply says the database now maintains it for every
+   existing customer and that a caller cannot write it. (e) the same with `middle_name` (optional) → the tool
+   returns the null-rule refusal → the model retries once with `(has(middle_name) ? middle_name : '')`.
    Each example shows the call, the outcome JSON and the final reply.
 7. **Behaviour rules** — act, don't ask: a request that names what it wants is a request to propose it;
    ask only when two readings lead to different schemas. Answer in the operator's language; quote
@@ -207,8 +231,8 @@ on the PR"*; the eval is a measurement, like load calibration.
 
 | Case (asked in Slovak and English) | Pass when |
 |---|---|
-| full_name (today) | ≤ 2 `propose_change` calls; no `patch`-source violation; no question back; final text quotes the numeric-operand refusal and names a plain field as the alternative; answer language = request language |
-| full_name (after §6 core issue) | valid proposal; `changedPaths == ["/entities/customers/fields/full_name"]`; ≤ 1 refused attempt |
+| full_name | valid proposal; `changedPaths == ["/entities/customers/fields/full_name"]`; ≤ 1 refused attempt (the §6 core issue has landed; the pre-core "cannot" case is retired) |
+| full_name with an optional part | ≤ 2 `propose_change` calls; the second uses the `has()` fallback and is valid |
 | add optional `notes` text to bikes | valid; one `add`; `type: text`, not required |
 | rename customers.phone → phone_number | valid; plan non-destructive; `renamedFrom: "phone"` present |
 | only technicians may delete parts | valid; `rules.delete` compiles; no other rule changed |
@@ -269,12 +293,29 @@ ring); `package-boundary.md` only if the eval project needs listing.
 
 ## 6. Owed, outside this design
 
-- **Core issue: string concatenation in `Computed`** — CEL defines `string + string`; admit it in
-  `CelTypeChecker` for Computed, render via a dialect member (`||` on SQLite/PostgreSQL, `CONCAT` on
-  T-SQL — per-engine DDL is a port member), and inline string literals as dialect-quoted SQL literals in
-  generated-column DDL instead of bind parameters. Security core (`alvo-security-core-review`): literal
-  quoting in DDL, and CEL-vs-SQL null semantics (`NULL || x` is `NULL` in both engines; the interpreter
-  must agree). Until it lands, full_name is an honest "cannot" — which this design makes fast and clear.
+- **Core issue: string concatenation in `Computed` — landed (ruling 2).** As built:
+  - `CelTypeChecker`: `+` over two strings is its own construct (`Concatenation`), admitted in `Computed` only;
+    a mixed pair is a type error (no implicit conversion, no `string()` in the profile).
+  - **The null rule is a refusal**, decided against the CEL spec: CEL's `+` has no null overload (a null operand
+    is an evaluation error), SQL's `||` yields `NULL`. Neither is adopted over the other; an operand that can be
+    null is refused at compile time unless its fallback is written with the profile's own coalescing construct,
+    `has(f) ? f : ''`. **Deviation recorded:** `Computed` arithmetic already lets a null propagate (the
+    interpreter answers null, SQL answers NULL), and concatenation does *not* follow that precedent — a name
+    that silently turns empty for every row missing one part is the wrong default, and the refusal is additive
+    to relax. The interpreter joins two strings and answers null for a null operand, as `||` does, so the two
+    backends agree on every tree the compiler admits.
+  - Rendering through two `IFieldSqlRenderer` members (the expression half of the engine port, which is where
+    the core renderer reaches a dialect): `RenderStringConcatenation` (default `(l || r)`; the T-SQL fake spells
+    `CONCAT`) and `RenderStringLiteral` (default `null` = the dialect declines, the constant is bound and refused).
+    Only the scalar entry point inlines, only a text constant in a value position; every predicate still binds.
+  - Quoting: SQLite the standard literal (`AlvoSqlStringLiteral`, quotes doubled). **Deviation recorded:**
+    PostgreSQL writes an escape string `E'…'` (backslashes doubled, then quotes) instead of the standard literal
+    under a documented `standard_conforming_strings = on` assumption, because with the setting off a standard
+    literal is broken out of by a backslash before a quote, and an escape string reads the same under both —
+    proved against a real server under both settings. Control characters and unpaired surrogates are refused
+    (compiler and dialect).
+  - `ComputedFieldCheck`/`ComputedValueShape`: text result ↔ declared type, join length ≤ declared `maxLength`,
+    and "reads no field" refused.
 - **§2.4 plan-time refusal/rebuild for SQLite STORED columns** — being fixed now; this design only fixes
   its required *shape*.
 

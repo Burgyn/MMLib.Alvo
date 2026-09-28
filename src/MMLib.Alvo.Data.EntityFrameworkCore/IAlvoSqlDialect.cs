@@ -296,7 +296,9 @@ public interface IAlvoSqlDialect
     /// <paramref name="renderedExpression"/> reaches the SQL text unparameterized because DDL has no
     /// bind-parameter form at all. That is safe only because it comes from
     /// <see cref="MMLib.Alvo.Expressions.IPredicateRenderer"/>'s scalar entry point over a <b>compiled</b> CEL
-    /// AST, so it can contain nothing but this entity's own field references, arithmetic and
+    /// AST, so it can contain nothing but this entity's own field references, arithmetic, text constants the
+    /// field renderer quoted (<see cref="MMLib.Alvo.Expressions.IFieldSqlRenderer.RenderStringLiteral"/>) and
+    /// joined, and
     /// <c>CASE WHEN</c> — never a descriptor string spliced in, which is what #20 removed as an
     /// arbitrary-DDL-injection vector. A dialect must never be handed one assembled from caller input.
     /// </para>

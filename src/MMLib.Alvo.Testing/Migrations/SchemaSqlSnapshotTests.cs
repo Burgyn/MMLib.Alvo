@@ -209,8 +209,10 @@ public abstract class SchemaSqlSnapshotTests
     /// </para>
     /// <para>
     /// The expression is field-only arithmetic, which is not a simplification: a <c>computed</c> carrying a
-    /// literal is refused at apply, because the scalar renderer routes every literal through a bind parameter and
-    /// DDL has no bind-parameter form.
+    /// numeric literal is refused at apply, because the scalar renderer routes it through a bind parameter and DDL
+    /// has no bind-parameter form. A text constant is the one literal a dialect writes inline; its quoting is
+    /// proved per engine against the engine itself (<c>SqliteStringLiteralTests</c>, <c>PostgreSqlStringLiteralTests</c>)
+    /// rather than frozen here.
     /// </para>
     /// </remarks>
     [Fact]
