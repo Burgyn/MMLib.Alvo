@@ -51,4 +51,14 @@ public sealed class SqliteFieldSqlRenderer : IFieldSqlRenderer
         type == CelValueType.Decimal ? (AsReal(left), AsReal(right)) : (left, right);
 
     private static string AsReal(string sql) => $"CAST({sql} AS REAL)";
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The standard literal, <see cref="AlvoSqlStringLiteral"/>'s, because that is exactly what SQLite reads: <i>"A
+    /// single quote within the string can be encoded by putting two single quotes in a row … C-style escapes using the
+    /// backslash character are not supported because they are not standard SQL"</i> (lang_expr.html). A backslash is
+    /// therefore an ordinary character, and needs nothing of its own.
+    /// </remarks>
+    string? IFieldSqlRenderer.RenderStringLiteral(string value) =>
+        AlvoSqlStringLiteral.TryQuote(value, out var literal) ? literal : null;
 }

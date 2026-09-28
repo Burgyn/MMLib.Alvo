@@ -26,4 +26,8 @@
     <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="CsCheck" />
+  </ItemGroup>
+
 </Project>

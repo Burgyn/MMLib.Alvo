@@ -14,6 +14,10 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
     {
         public static string Quote(string identifier) { }
     }
+    public static class AlvoSqlStringLiteral
+    {
+        public static bool TryQuote(string value, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out string? literal) { }
+    }
     public sealed class EfCoreOutboxStore : MMLib.Alvo.Events.IOutboxStore
     {
         public System.Threading.Tasks.Task AppendAsync(MMLib.Alvo.Events.AlvoCustomEvent customEvent, System.Threading.CancellationToken cancellationToken = default) { }

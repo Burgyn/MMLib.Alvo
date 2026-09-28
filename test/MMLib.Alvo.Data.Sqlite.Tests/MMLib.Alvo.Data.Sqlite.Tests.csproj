@@ -13,6 +13,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Configuration" />
     <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="CsCheck" />
   </ItemGroup>
 
   <!-- The SQLite fixture and the dialect it records locks through, shared with

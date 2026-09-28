@@ -21,6 +21,7 @@
   <ItemGroup>
     <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="Verify.XunitV3" />
+    <PackageReference Include="CsCheck" />
   </ItemGroup>
 
   <!-- Only the path-derivation module initializer from test/_shared — this project opts out of
