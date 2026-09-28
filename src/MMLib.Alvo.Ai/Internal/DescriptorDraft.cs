@@ -28,6 +28,8 @@ namespace MMLib.Alvo.Ai.Internal;
 /// </remarks>
 internal static class DescriptorDraft
 {
+    private const string WholeDocumentRemoved = "An admitted patch cannot remove the whole document.";
+
     private static readonly JsonSerializerOptions _descriptorWriter = new()
     {
         WriteIndented = true,
@@ -56,7 +58,8 @@ internal static class DescriptorDraft
             return DraftAttempt.Refused(current, ViolationMapping.FromPatch(failed));
         }
 
-        var draft = new Draft(patched.Document!.ToJsonString(_descriptorWriter), current.Revision, patched.ChangedPaths, patch);
+        var document = patched.Document ?? throw new InvalidOperationException(WholeDocumentRemoved);
+        var draft = new Draft(document.ToJsonString(_descriptorWriter), current.Revision, patched.ChangedPaths, patched.Targets);
         return await DryRunAsync(management, project, draft, ct).ConfigureAwait(false);
     }
 
@@ -71,15 +74,15 @@ internal static class DescriptorDraft
         }
         catch (DescriptorValidationException refused)
         {
-            return draft.Refused(ViolationMapping.FromValidation(refused, draft.Operations));
+            return draft.Refused(ViolationMapping.FromValidation(refused, draft.Targets));
         }
         catch (DestructiveChangeNotAllowedException refused)
         {
-            return draft.Refused([ViolationMapping.FromDestructive(refused, draft.Operations)], Destructive(refused.Plan));
+            return draft.Refused([ViolationMapping.FromDestructive(refused, draft.Targets)], Destructive(refused.Plan));
         }
         catch (DescriptorConcurrencyException stale)
         {
-            return draft.Refused([ViolationMapping.FromConcurrency(stale)]) with { Revision = stale.ActualRevision };
+            return draft.Refused([ViolationMapping.FromConcurrency(stale)]) with { ActualRevision = stale.ActualRevision };
         }
         catch (ManagementEscalationException escalation)
         {
@@ -87,7 +90,15 @@ internal static class DescriptorDraft
         }
     }
 
-    /// <summary>A refused destructive plan, as the summary the outcome reports — its steps are the plan's own reasons.</summary>
+    /// <summary>A refused destructive plan, as the summary the outcome reports.</summary>
+    /// <remarks>
+    /// <b>The one path on which <c>hasDestructiveChanges</c> can be true.</b> The dry run asks with
+    /// <c>AllowDestructive: false</c>, so a destructive plan is a refusal rather than a result — and without
+    /// this arm the field could only ever be <see langword="false"/>, which would leave the instructions'
+    /// "a dropped column is lost data" with no mechanism behind it. The step lines are the plan's own
+    /// reasons, not a retelling.
+    /// </remarks>
+    /// <param name="plan">The plan the guardrail refused.</param>
     private static ManagementPlanSummary Destructive(MigrationPlan plan) => new(
         plan.IsEmpty,
         plan.HasDestructiveChanges,
@@ -111,7 +122,7 @@ internal static class DescriptorDraft
         }
     }
 
-    private sealed record Draft(string DescriptorJson, int Revision, IReadOnlyList<string> ChangedPaths, JsonElement Operations)
+    private sealed record Draft(string DescriptorJson, int Revision, IReadOnlyList<string> ChangedPaths, IReadOnlyList<string?> Targets)
     {
         internal DraftAttempt Accepted(ManagementPlanSummary plan) =>
             new(DescriptorJson, Revision, Valid: true, plan, ChangedPaths, []);
@@ -130,6 +141,18 @@ internal sealed record DraftAttempt(
     IReadOnlyList<string> ChangedPaths,
     IReadOnlyList<ToolViolation> Violations)
 {
+    /// <summary>
+    /// The revision the descriptor turned out to be at, when a concurrent apply moved it during the dry run.
+    /// </summary>
+    /// <remarks>
+    /// Kept apart from <see cref="Revision"/>, which stays the revision the draft was written against — the one a
+    /// proposal filed from it must carry, because its descriptor is the patch applied to that revision.
+    /// </remarks>
+    internal int? ActualRevision { get; init; }
+
+    /// <summary>The revision the descriptor is at, as far as this attempt learned — what the model re-bases on.</summary>
+    internal int CurrentRevision => ActualRevision ?? Revision;
+
     /// <summary>The blocking violations, in the string form the proposal card has always drawn.</summary>
     internal IReadOnlyList<string> Refusals => [.. Violations.Where(violation => violation.Blocks).Select(violation => violation.AsRefusal())];
 

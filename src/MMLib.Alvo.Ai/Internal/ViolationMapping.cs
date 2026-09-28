@@ -2,14 +2,20 @@
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
 
-using System.Text.Json;
-
 namespace MMLib.Alvo.Ai.Internal;
 
 /// <summary>Every refusal the dry-run pipeline can meet, as the one <see cref="ToolViolation"/> shape.</summary>
 /// <remarks>
-/// A violation names the operation that caused it by pointer: the validator reports at RFC 6901 pointers of the same
-/// grammar a patch writes, so <see cref="JsonPointer"/> is the one parser for both.
+/// <para>
+/// A violation names the operation that caused it by pointer: the validator reports at RFC 6901 pointers against the
+/// patched document, so an operation is matched by where it <em>landed</em> (<see cref="JsonPatchResult.Targets"/>) —
+/// an append as its real index, after every shift an earlier operation made — never by the path it was written with.
+/// </para>
+/// <para>
+/// <b>Related both ways (D14).</b> An operation matches when its target is the reported pointer, contains it, or lies
+/// under it; the deepest wins, the last on a tie. A validator that reports at a container (<c>/entities/bikes</c>)
+/// about a field an operation added beneath it still names that operation.
+/// </para>
 /// </remarks>
 internal static class ViolationMapping
 {
@@ -41,41 +47,40 @@ internal static class ViolationMapping
         "Stop proposing. Explain to the operator what the framework refused, quoting it.", Fix: null,
         Code: AttemptsExhaustedCode);
 
-    internal static IReadOnlyList<ToolViolation> FromValidation(DescriptorValidationException refused, JsonElement operations) =>
+    internal static IReadOnlyList<ToolViolation> FromValidation(DescriptorValidationException refused, IReadOnlyList<string?> targets) =>
     [
         .. refused.Result.Errors.Select(error => new ToolViolation(
-            ToolViolation.Validation, error.Path, error.Message, error.FixSuggestion, OpFor(operations, error.Path),
+            ToolViolation.Validation, error.Path, error.Message, error.FixSuggestion, OpFor(targets, error.Path),
             Severity: SeverityOf(error.Severity))),
     ];
 
-    internal static ToolViolation FromDestructive(DestructiveChangeNotAllowedException refused, JsonElement operations)
+    internal static ToolViolation FromDestructive(DestructiveChangeNotAllowedException refused, IReadOnlyList<string?> targets)
     {
         var pointer = DestructivePointer(refused.Plan);
         return new ToolViolation(
             ToolViolation.Plan, pointer, refused.Message,
             "Only the operator can allow a destructive change, from Preview. Say first what data it loses.",
-            OpFor(operations, pointer));
+            OpFor(targets, pointer));
     }
 
-    /// <summary>The operation whose path is the pointer's prefix, or lies under it — the deepest such, the last on a tie.</summary>
-    internal static int? OpFor(JsonElement operations, string pointer)
+    /// <summary>The operation whose target is the pointer's prefix, or lies under it — the deepest such, the last on a tie.</summary>
+    /// <param name="targets">Where each operation landed, index-aligned with the patch.</param>
+    /// <param name="pointer">The pointer the violation was reported at.</param>
+    internal static int? OpFor(IReadOnlyList<string?> targets, string pointer)
     {
-        if (!JsonPointer.TryParse(pointer, out var reported) || reported.IsRoot || operations.ValueKind != JsonValueKind.Array)
+        if (!JsonPointer.TryParse(pointer, out var reported) || reported.IsRoot)
         {
             return null;
         }
 
         int? best = null;
         var bestDepth = -1;
-        var index = 0;
-        foreach (var operation in operations.EnumerateArray())
+        for (var index = 0; index < targets.Count; index++)
         {
-            if (PathOf(operation) is { } path && Related(path, reported) && path.Tokens.Count >= bestDepth)
+            if (JsonPointer.TryParse(targets[index], out var target) && Related(target, reported) && target.Tokens.Count >= bestDepth)
             {
-                (best, bestDepth) = (index, path.Tokens.Count);
+                (best, bestDepth) = (index, target.Tokens.Count);
             }
-
-            index++;
         }
 
         return best;
@@ -94,12 +99,6 @@ internal static class ViolationMapping
         var toEntity = JsonPointer.Root.Append(EntitiesToken).Append(entity);
         return field is null ? toEntity : toEntity.Append(FieldsToken).Append(field);
     }
-
-    private static JsonPointer? PathOf(JsonElement operation) =>
-        operation.ValueKind == JsonValueKind.Object && operation.TryGetProperty("path", out var path)
-        && path.ValueKind == JsonValueKind.String && JsonPointer.TryParse(path.GetString(), out var parsed)
-            ? parsed
-            : null;
 
     private static bool Related(JsonPointer path, JsonPointer reported) =>
         !path.IsRoot

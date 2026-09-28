@@ -15,8 +15,20 @@ internal sealed record JsonPatchResult(JsonNode? Document, IReadOnlyList<string>
     /// <summary>Whether every operation applied.</summary>
     internal bool Succeeded => Error is null;
 
-    internal static JsonPatchResult Applied(JsonNode? document, IReadOnlyList<string> changedPaths) =>
-        new(document, changedPaths, Error: null);
+    /// <summary>
+    /// One pointer per operation, index-aligned with the patch: where it landed in the document the earlier operations
+    /// left — an append as its real index, a <c>move</c> as its <c>path</c> — or <see langword="null"/> for one that
+    /// wrote nothing (<c>test</c>, a <c>move</c> onto itself). Empty when the patch failed.
+    /// </summary>
+    /// <remarks>
+    /// Not <see cref="ChangedPaths"/>, which is distinct and flat: a violation names an operation by index, and only an
+    /// index-aligned list can answer which one.
+    /// </remarks>
+    internal IReadOnlyList<string?> Targets { get; init; } = [];
+
+    internal static JsonPatchResult Applied(
+        JsonNode? document, IReadOnlyList<string> changedPaths, IReadOnlyList<string?> targets) =>
+        new(document, changedPaths, Error: null) { Targets = targets };
 
     internal static JsonPatchResult Refused(JsonPatchError error) => new(Document: null, [], error);
 }

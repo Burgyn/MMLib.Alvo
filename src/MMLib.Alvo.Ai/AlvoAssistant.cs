@@ -182,9 +182,13 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     /// <summary>One step of the agent's stream: whether it moved, or what stopped it.</summary>
     private readonly record struct StreamStep(bool Moved, AssistantUpdate.Failed? Failure);
 
-    /// <summary>Runs the agent loop for one turn, capped at <see cref="MaximumIterations"/>.</summary>
+    /// <summary>Runs the agent loop for one turn.</summary>
     private static IAsyncEnumerable<AgentResponseUpdate> RunAsync(
-        IChatClient client, ManagementTools tools, AssistantRequest request, CancellationToken ct)
+        IChatClient client, ManagementTools tools, AssistantRequest request, CancellationToken ct) =>
+        AgentFor(client, tools).RunStreamingAsync(Conversation(request), session: null, options: null, ct);
+
+    /// <summary>The agent for one turn: the fixed instructions, the tools, and a capped, sequential invoker.</summary>
+    internal static ChatClientAgent AgentFor(IChatClient client, ManagementTools tools)
     {
         var agent = new ChatClientAgent(
             client,
@@ -192,21 +196,33 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
             name: AgentName,
             description: null,
             tools: [.. tools.Functions]);
-        Bounded(agent);
+        Constrain(agent);
 
-        return agent.RunStreamingAsync(Conversation(request), session: null, options: null, ct);
+        return agent;
     }
 
-    /// <summary>Caps the function-invoking loop the agent built for itself.</summary>
+    /// <summary>
+    /// Caps the function-invoking loop the agent built for itself at <see cref="MaximumIterations"/>, and keeps it
+    /// invoking one call at a time.
+    /// </summary>
     /// <remarks>
+    /// <para>
     /// The agent's own invoker, found rather than replaced, so the pipeline the agent builds — and whatever else it
-    /// configures on that invoker — stays the one that runs. Missing is a bug, never an uncapped turn.
+    /// configures on that invoker — stays the one that runs. Sequential invocation is set rather than inherited
+    /// because <see cref="ManagementTools"/>' budget and proposal are plain state that assumes it.
+    /// </para>
+    /// <para>
+    /// <b>A missing invoker throws, deliberately</b>, and outside <see cref="NextAsync"/>'s catch, so it surfaces
+    /// from <see cref="AskAsync"/> as the bug it is rather than as a sentence to the operator. Whether the agent
+    /// inserts one is fixed per package version, not per endpoint, and the iteration-cap fact fails first.
+    /// </para>
     /// </remarks>
-    private static void Bounded(ChatClientAgent agent)
+    private static void Constrain(ChatClientAgent agent)
     {
         var invoker = agent.ChatClient.GetService<FunctionInvokingChatClient>()
             ?? throw new InvalidOperationException("The agent built no function-invoking client to cap.");
         invoker.MaximumIterationsPerRequest = MaximumIterations;
+        invoker.AllowConcurrentInvocation = false;
     }
 
     /// <summary>The conversation as the model sees it: the caller's history, then this turn's message.</summary>

@@ -78,6 +78,7 @@ branch**; this plan covers items 3–6, one task each, in ruling order.
 | D10 | `Proposal.Summary` is the turn's answer text, falling back to `propose_change`'s `summary` when the answer is empty | The public record is unchanged; the fallback only fills what was empty |
 | D11 | The executable-examples test is split: the patch half in `MMLib.Alvo.Ai.Tests`, the validity half in `MMLib.Alvo.Host.Tests` | The validator lives in the core, which `MMLib.Alvo.Ai.Tests` cannot reach (boundary test) |
 | D12 | An example's `baseRevision` is illustrative; the tests substitute the live revision | The booted revision is the host's business, and pinning it would make the example rot on the next boot change |
+| D14 | A violation's `op` is the operation whose *landed* target (`JsonPatchResult.Targets`) is the reported pointer, contains it, **or lies under it** — deepest wins, last on a tie — where spec §2.2 says "the op whose path is the pointer's prefix" | The validator also reports at a container (`/entities/bikes`) about a member an operation added beneath it; prefix-only matching would leave that violation with no `op`. Matching landed targets rather than written paths is what gives an `/-` append its real index. Goes to the spec in Task 4 |
 
 ---
 

@@ -41,6 +41,7 @@ internal static class JsonPatch
 
         var working = document?.DeepClone();
         var changed = new List<string>();
+        var targets = new List<string?>();
         var budget = new AddedBytes();
         var index = 0;
         foreach (var element in operations.EnumerateArray())
@@ -53,9 +54,10 @@ internal static class JsonPatch
 
             working = step.Document;
             changed.AddRange(step.Changed);
+            targets.Add(step.Target);
         }
 
-        return JsonPatchResult.Applied(working, [.. changed.Distinct(StringComparer.Ordinal)]);
+        return JsonPatchResult.Applied(working, [.. changed.Distinct(StringComparer.Ordinal)], targets);
     }
 
     private static StepResult Step(JsonNode? document, JsonElement element, int index, AddedBytes budget)
@@ -404,6 +406,9 @@ internal static class JsonPatch
 
     private sealed record StepResult(JsonNode? Document, IReadOnlyList<string> Changed, JsonPatchError? Error)
     {
+        /// <summary>Where the operation landed: its last changed pointer, a <c>move</c>'s <c>path</c> after its <c>from</c>.</summary>
+        internal string? Target => Changed.Count > 0 ? Changed[^1] : null;
+
         internal static StepResult Done(JsonNode? document, params string[] changed) => new(document, changed, Error: null);
 
         internal static StepResult Failed(JsonPatchError error) => new(Document: null, [], error);

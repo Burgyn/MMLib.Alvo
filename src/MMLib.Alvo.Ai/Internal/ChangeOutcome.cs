@@ -18,7 +18,7 @@ internal sealed record ChangeOutcome(
     int AttemptsLeft)
 {
     internal static ChangeOutcome From(DraftAttempt attempt, int attemptsLeft) =>
-        new(attempt.Valid, attempt.Revision, attempt.Plan, attempt.ChangedPaths, attempt.Violations, attemptsLeft);
+        new(attempt.Valid, attempt.CurrentRevision, attempt.Plan, attempt.ChangedPaths, attempt.Violations, attemptsLeft);
 
     /// <summary>The answer once the refusal budget is spent: only the instruction to stop.</summary>
     /// <param name="revision">The revision the descriptor was last read at — never the model's claimed base.</param>

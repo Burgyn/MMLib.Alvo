@@ -53,6 +53,19 @@ public sealed class JsonPatchTests
     }
 
     [Fact]
+    public void Targets_are_one_resolved_pointer_per_operation_in_operation_order()
+    {
+        var document = JsonNode.Parse("""{"a":{"b":1},"c":2,"x":[1,2,3]}""");
+
+        var result = JsonPatch.Apply(document, Ops("""
+            [{"op":"test","path":"/c","value":2},{"op":"move","from":"/a/b","path":"/d"},
+             {"op":"remove","path":"/x/0"},{"op":"add","path":"/x/-","value":4},{"op":"replace","path":"/d","value":5}]
+            """));
+
+        result.Targets.ShouldBe([null, "/d", "/x/0", "/x/2", "/d"]);
+    }
+
+    [Fact]
     public void An_escaped_pointer_token_addresses_the_member_it_spells()
     {
         var result = JsonPatch.Apply(JsonNode.Parse("""{"a/b":{"m~n":1}}"""), Ops("""

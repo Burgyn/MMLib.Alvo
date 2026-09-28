@@ -25,6 +25,18 @@ namespace MMLib.Alvo.Ai.Internal;
 /// stop. Built per turn, none of that can outlive the conversation it belongs to.
 /// </para>
 /// <para>
+/// <b>Only a refusal spends budget.</b> An attempt that ends in an exception — one <c>AnsweredAsync</c> maps, a
+/// call the invoker could not bind, or a bug — spends nothing, and neither does a <em>valid</em> dry run; what
+/// bounds those is <see cref="AlvoAssistant.MaximumIterations"/>, which caps model round-trips (not calls per
+/// round-trip — the eval's tool-call ceiling is the guard there).
+/// </para>
+/// <para>
+/// <b>The state assumes sequential invocation.</b> The budget check, the count and the filed proposal are plain
+/// fields, correct because the agent's function invoker runs one call at a time
+/// (<c>AllowConcurrentInvocation</c> off, set so explicitly and pinned by <c>AlvoAssistantTests</c>). Turning that
+/// on would let parallel calls all pass an exhausted budget.
+/// </para>
+/// <para>
 /// <b>Every tool answers, none of them throws.</b> A refusal the framework raised is something to tell the
 /// operator, not a stack trace that ends the turn — so the documented management exceptions become results
 /// the model can read, and everything else still reaches the host's logs as the bug it is.
@@ -43,6 +55,12 @@ internal sealed class ManagementTools
         + "test, path an RFC 6901 JSON Pointer such as /entities/customers/fields/full_name. Never the whole document (\"\").";
 
     private const string SummaryHelp = "One sentence, in the operator's language, saying what the change does.";
+
+    private const string InvalidRequestCode = "invalid-request";
+
+    private const string SummaryRequired =
+        "propose_change needs a summary: one sentence, in the operator's language, saying what the change does. "
+        + "Nothing was dry-run or filed.";
 
     private readonly IAlvoManagement _management;
     private readonly string _project;
@@ -129,7 +147,7 @@ internal sealed class ManagementTools
         [Description(BaseRevisionHelp)] int baseRevision,
         [Description(OperationsHelp)] JsonElement operations,
         CancellationToken ct) =>
-        AnsweredAsync(() => AttemptAsync(baseRevision, operations, summary: null, ct));
+        AnsweredAsync(async () => Json((await AttemptAsync(baseRevision, operations, ct).ConfigureAwait(false)).Outcome));
 
     /// <summary>Dry-runs a patch and files the result as this turn's proposal.</summary>
     /// <param name="baseRevision">The revision the operations were written against.</param>
@@ -141,37 +159,55 @@ internal sealed class ManagementTools
         [Description(OperationsHelp)] JsonElement operations,
         [Description(SummaryHelp)] string summary,
         CancellationToken ct) =>
-        AnsweredAsync(() => AttemptAsync(baseRevision, operations, summary, ct));
+        AnsweredAsync(() => ProposeAsync(baseRevision, operations, summary, ct));
 
-    /// <summary>One attempt at a change, within the budget; a <paramref name="summary"/> files it as a proposal.</summary>
-    private async Task<string> AttemptAsync(int baseRevision, JsonElement operations, string? summary, CancellationToken ct)
+    /// <summary>Refuses a proposal with no summary as a request; otherwise attempts it and files what it produced.</summary>
+    /// <remarks>
+    /// A missing summary spends no budget and runs no dry run: it is a malformed call, not a change the framework
+    /// refused — and it is never quietly run as a <c>check_change</c>, which would answer "valid" and file nothing.
+    /// </remarks>
+    private async Task<string> ProposeAsync(int baseRevision, JsonElement operations, string? summary, CancellationToken ct)
     {
-        if (AttemptsLeft == 0)
+        if (string.IsNullOrWhiteSpace(summary))
         {
-            return Json(ChangeOutcome.BudgetSpent(_currentRevision));
+            return Error(InvalidRequestCode, SummaryRequired);
         }
 
-        var attempt = await DescriptorDraft.BuildAsync(_management, _project, baseRevision, operations, ct).ConfigureAwait(false);
-        Record(attempt);
-        if (summary is not null)
+        var (attempt, outcome) = await AttemptAsync(baseRevision, operations, ct).ConfigureAwait(false);
+        if (attempt is not null)
         {
             FileProposal(attempt, summary);
         }
 
-        return Json(ChangeOutcome.From(attempt, AttemptsLeft));
+        return Json(outcome);
     }
 
-    /// <summary>Remembers the revision the attempt saw, and spends one from the budget when it was refused.</summary>
+    /// <summary>One attempt at a change, within the budget: the draft it produced, if any, and the model's answer.</summary>
+    private async Task<(DraftAttempt? Attempt, ChangeOutcome Outcome)> AttemptAsync(
+        int baseRevision, JsonElement operations, CancellationToken ct)
+    {
+        if (AttemptsLeft == 0)
+        {
+            return (null, ChangeOutcome.BudgetSpent(_currentRevision));
+        }
+
+        var attempt = await DescriptorDraft.BuildAsync(_management, _project, baseRevision, operations, ct).ConfigureAwait(false);
+        Record(attempt);
+
+        return (attempt, ChangeOutcome.From(attempt, AttemptsLeft));
+    }
+
+    /// <summary>Remembers the revision the attempt learned the descriptor is at, and spends budget on a refusal.</summary>
     private void Record(DraftAttempt attempt)
     {
-        _currentRevision = attempt.Revision;
+        _currentRevision = attempt.CurrentRevision;
         if (!attempt.Valid)
         {
             _refusedAttempts++;
         }
     }
 
-    /// <summary>Files the attempt as the proposal — a valid one always, a refused one only while no valid one exists.</summary>
+    /// <summary>Files the attempt: a valid one as the proposal, a refused one as the fallback while none is valid.</summary>
     private void FileProposal(DraftAttempt attempt, string summary)
     {
         var draft = new ProposedDraft(attempt.DescriptorJson, attempt.Revision, summary, attempt.Refusals);
@@ -209,7 +245,7 @@ internal sealed class ManagementTools
         }
         catch (ManagementRequestException refusal)
         {
-            return Error("invalid-request", refusal.Message);
+            return Error(InvalidRequestCode, refusal.Message);
         }
         catch (DescriptorConcurrencyException stale)
         {

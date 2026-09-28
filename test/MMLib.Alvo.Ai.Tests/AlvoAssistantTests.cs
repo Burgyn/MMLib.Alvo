@@ -135,7 +135,8 @@ public sealed class AlvoAssistantTests
     /// <summary>A model that keeps calling tools ends as a turn, not a bill.</summary>
     /// <remarks>
     /// Thirty scripted calls against a cap of <see cref="AlvoAssistant.MaximumIterations"/>: at the framework's
-    /// default of forty, every one of them would run.
+    /// default of forty, every one of them would run. The count is pinned exactly — one tool call per iteration — so
+    /// a loop that ended early for an unrelated reason cannot pass for the cap.
     /// </remarks>
     [Fact]
     public async Task A_model_that_never_stops_calling_tools_is_cut_off_at_the_iteration_cap()
@@ -147,7 +148,24 @@ public sealed class AlvoAssistantTests
 
         management.ReceivedCalls()
             .Count(call => call.GetMethodInfo().Name == nameof(IAlvoManagement.GetDescriptorAsync))
-            .ShouldBeInRange(1, AlvoAssistant.MaximumIterations);
+            .ShouldBe(AlvoAssistant.MaximumIterations);
+    }
+
+    /// <summary>The agent's own invoker is capped, and invokes one tool call at a time.</summary>
+    /// <remarks>
+    /// <see cref="Internal.ManagementTools"/> keeps its budget and proposal in plain fields; concurrent invocation
+    /// would let parallel calls in one response all pass an exhausted budget, so the setting is pinned here.
+    /// </remarks>
+    [Fact]
+    public void The_agents_invoker_is_capped_and_sequential()
+    {
+        var agent = AlvoAssistant.AgentFor(
+            new ScriptedChatClient(), Internal.ManagementTools.For(Substitute.For<IAlvoManagement>(), "p"));
+
+        var invoker = agent.ChatClient.GetService<FunctionInvokingChatClient>().ShouldNotBeNull();
+
+        invoker.MaximumIterationsPerRequest.ShouldBe(AlvoAssistant.MaximumIterations);
+        invoker.AllowConcurrentInvocation.ShouldBeFalse();
     }
 
     /// <summary>
