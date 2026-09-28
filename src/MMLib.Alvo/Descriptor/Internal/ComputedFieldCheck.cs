@@ -98,18 +98,26 @@ internal static class ComputedFieldCheck
     }
 
     /// <summary>A constant would be a bind parameter in DDL, which has none — <c>ComputedColumnSql</c>'s spike Q9.</summary>
+    /// <remarks>
+    /// When every bound value is text, the cause is its position rather than its kind — a text constant is written
+    /// inline where it is joined into the value, and only a comparison operand is bound — so the message says that.
+    /// </remarks>
     private static DescriptorValidationError BoundConstant(EntitySchema entity, FieldSchema field, SqlExpression rendered) =>
         Refusal(
             entity,
             field,
             $"Field '{entity.Name}.{field.Name}' declares \"computed\": \"{field.ComputedExpression}\", which carries "
             + $"the constant value(s) {string.Join(", ", rendered.Parameters.Values.Select(value => $"'{value}'"))}. "
-            + "A computed field becomes a stored generated column, and a column definition is DDL, which has no "
-            + "bind-parameter form — so a constant other than a text constant joined into the value cannot be "
-            + "carried into it.",
+            + (rendered.Parameters.Values.All(value => value is string)
+                ? "A text constant can be joined, not compared, in a computed field: a joined constant is written into "
+                    + "the generated column's DDL, and a compared one would be a bind parameter, which DDL has no form for."
+                : "A computed field becomes a stored generated column, and a column definition is DDL, which has no "
+                    + "bind-parameter form — so a constant other than a text constant joined into the value cannot be "
+                    + "carried into it."),
             "Keep 'computed' to arithmetic over this entity's own fields (\"unit_price * amount\", "
-            + "\"net_total + vat_total\") or to text joined from them (\"first_name + ' ' + last_name\"), and hold a "
-            + "contextual constant such as a tax rate in a field of its own that a before-hook maintains.");
+            + "\"net_total + vat_total\") or to text joined from them (\"first_name + ' ' + last_name\"), compare two of "
+            + "the row's fields rather than a field and a constant, and hold a contextual constant such as a tax rate in "
+            + "a field of its own that a before-hook maintains.");
 
     private static DescriptorValidationError UnrenderableShape(EntitySchema entity, FieldSchema field) =>
         Refusal(

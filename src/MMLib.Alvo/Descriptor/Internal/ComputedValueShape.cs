@@ -34,6 +34,7 @@ internal static class ComputedValueShape
     /// <param name="expression">Its expression, compiled for <see cref="CelProfile.Computed"/>.</param>
     internal static (string Message, string Fix)? Refusal(EntitySchema entity, FieldSchema field, CompiledExpression expression) =>
         ConstantOnly(entity, field, expression)
+        ?? ReadsComputed(entity, field, expression)
         ?? DeclaredTypeMismatch(entity, field, expression)
         ?? LengthBound(entity, field, expression);
 
@@ -44,6 +45,36 @@ internal static class ComputedValueShape
                 + "value, which is a default rather than a computed column.",
                 "Declare a plain field with a \"default\" instead, or join the constant to a field of the row "
                 + "(\"'Mr. ' + last_name\").");
+
+    /// <summary>
+    /// A generated column reads only stored fields: PostgreSQL refuses a generation expression that reads another
+    /// generated column when the DDL runs, while SQLite accepts it — so it is refused here, the same on every engine,
+    /// with the other field's own expression as the fix. A rollup is a stored column the framework maintains, and
+    /// stays readable (<c>gross_total = net_total + vat_total</c>).
+    /// </summary>
+    private static (string, string)? ReadsComputed(EntitySchema entity, FieldSchema field, CompiledExpression expression)
+    {
+        if (ComputedRead(expression.Root, entity) is not { } other)
+        {
+            return null;
+        }
+
+        return ($"{Declares(entity, field, expression)}, which reads '{other.Name}', itself a computed field. A computed "
+            + "field becomes a generated column, and a generated column reads only stored fields — PostgreSQL refuses "
+            + "one that reads another, SQLite accepts it.",
+            $"Write '{other.Name}''s own expression in its place (\"{other.ComputedExpression}\"), so '{field.Name}' "
+            + "reads only stored fields.");
+    }
+
+    private static FieldSchema? ComputedRead(CelNode node, EntitySchema entity) => node switch
+    {
+        CelFieldRef fieldRef => ComputedField(entity, fieldRef.FieldName),
+        CelHas has => ComputedField(entity, has.Field.FieldName),
+        _ => CelTree.Children(node).Select(child => ComputedRead(child, entity)).FirstOrDefault(found => found is not null),
+    };
+
+    private static FieldSchema? ComputedField(EntitySchema entity, string name) =>
+        entity.Fields.FirstOrDefault(candidate => candidate.Name == name && candidate.ComputedExpression is not null);
 
     private static bool ReadsAField(CelNode node) =>
         node is CelFieldRef or CelHas || CelTree.Children(node).Any(ReadsAField);
@@ -75,7 +106,8 @@ internal static class ComputedValueShape
             return null;
         }
 
-        var (longest, unbounded) = Longest(expression.Root, entity);
+        var (longest, unboundedPart) = Longest(expression.Root, entity);
+        var unbounded = unboundedPart ?? "a part of the join";
         if (longest is null)
         {
             return ($"{Declares(entity, field, expression)} into a field declared maxLength {declared}, but it joins "

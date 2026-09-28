@@ -112,6 +112,67 @@ public class ComputedFieldValidationTests
         error.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
     }
 
+    /// <summary>
+    /// A text constant compared inside a condition is still a bound value — and the refusal says that is the cause,
+    /// rather than claiming text constants are not carried at all.
+    /// </summary>
+    [Fact]
+    public void A_compared_text_constant_is_refused_naming_the_comparison()
+    {
+        var error = _validator.Validate(CustomerDescriptor(
+                """{ "type": "string", "computed": "first_name == 'Jana' ? 'J' : last_name" }"""))
+            .Errors.ShouldHaveSingleItem();
+
+        error.Message.ShouldContain("a text constant can be joined, not compared, in a computed field");
+        error.Message.ShouldContain("'Jana'");
+    }
+
+    /// <summary>
+    /// A computed field that reads another computed field is refused at validation, in engine-neutral words:
+    /// PostgreSQL refuses such a generation expression at apply while SQLite accepts it. The fix is the other field's
+    /// own expression, written in its place.
+    /// </summary>
+    /// <param name="computed">The declaration of <c>greeting</c>, over the computed <c>full_name</c>.</param>
+    [Theory]
+    [InlineData("'Dear ' + full_name")]
+    [InlineData("has(full_name) ? full_name : last_name")]
+    public void A_computed_field_reading_another_computed_field_is_refused(string computed)
+    {
+        var json = $$"""
+            { "apiVersion": "alvo.dev/v1", "name": "demo",
+              "entities": { "customers": { "fields": {
+                "first_name": { "type": "string", "required": true },
+                "last_name": { "type": "string", "required": true },
+                "full_name": { "type": "string", "required": true, "computed": "first_name + ' ' + last_name" },
+                "greeting": { "type": "string", "computed": "{{computed}}" } } } } }
+            """;
+
+        var error = _validator.Validate(json).Errors.ShouldHaveSingleItem();
+
+        error.Path.ShouldBe("/entities/customers/fields/greeting/computed");
+        error.Message.ShouldContain("'full_name'");
+        error.FixSuggestion.ShouldNotBeNull().ShouldContain("first_name + ' ' + last_name");
+    }
+
+    /// <summary>A rollup is a stored column the framework maintains, so a computed field may read it (the ladder).</summary>
+    [Fact]
+    public void A_computed_field_may_still_read_a_rollup()
+    {
+        var json = """
+            { "apiVersion": "alvo.dev/v1", "name": "demo",
+              "entities": {
+                "invoices": { "fields": {
+                  "vat": { "type": "decimal", "precision": 18, "scale": 2 },
+                  "net": { "type": "decimal", "precision": 18, "scale": 2, "rollup": { "from": "lines", "op": "sum", "field": "amount" } },
+                  "gross": { "type": "decimal", "precision": 18, "scale": 2, "computed": "net + vat" } } },
+                "lines": { "fields": {
+                  "invoice_id": { "type": "ref", "entity": "invoices", "required": true },
+                  "amount": { "type": "decimal", "precision": 18, "scale": 2 } } } } }
+            """;
+
+        _validator.Validate(json).Errors.ShouldBeEmpty();
+    }
+
     private static string CustomerDescriptor(string fullName) => $$"""
         { "apiVersion": "alvo.dev/v1", "name": "demo",
           "entities": { "customers": { "fields": {
