@@ -49,6 +49,7 @@ public sealed partial class InstructionExampleOutcomeTests
         (Customers + "probe_integer", """{"type": "integer", "computed": "first_name + ' ' + last_name"}"""),
         (Customers + "probe_constant", """{"type": "string", "computed": "'always the same'"}"""),
         (OrderLines + "probe_rate", """{"type": "decimal", "precision": 12, "scale": 2, "computed": "unit_price * 1.2"}"""),
+        (OrderLines + "probe_one_plus", """{"type": "decimal", "precision": 12, "scale": 2, "computed": "unit_price * (1 + quantity)"}"""),
         (OrderLines + "probe_computed", """{"type": "decimal", "precision": 12, "scale": 2, "computed": "line_total + unit_price"}"""),
     ];
 

@@ -67,7 +67,7 @@ names the refusal the framework gives, so you can explain it.
   when any part is.
 - **Only a bare `has(f)` is a guard**: `has(f) ? … : …` guards `f` in its first branch, `!has(f) ? … : …` in its
   second, and nothing else guards anything — `has(street) && has(city) ? street + ' ' + city : ''` is refused by
-  the null rule (a combined guard is not supported yet, issue #287). Nest one ternary per optional part:
+  the null rule (a combined guard is not supported yet). Nest one ternary per optional part:
   `has(street) ? (has(city) ? street + ' ' + city : street) : (has(city) ? city : '')`.
 - **Type and length**: the type check is between text and the rest. A join produces text, so it needs a field
   declared `"type": "string"` (or `"text"`) — into any other type it is refused (*"which joins text into a string,
@@ -79,8 +79,9 @@ names the refusal the framework gives, so you can explain it.
   `maxLength` at all (*"which declares no maxLength"*) — omit it. Omitting `maxLength` is always fine.
 - **Never boolean**: a computed value is never a `boolean` (*"A computed-field expression must evaluate to a
   non-boolean scalar"*). A comparison or `has(f)` is only ever a ternary's condition, never the value. A flag such as
-  `is_vip` is a plain `boolean` field that a before-hook `mutate` sets — a value decided at write time belongs to a
-  hook, not to computed.
+  `is_vip` is a plain `boolean` field kept by before-hooks, as in example (g): the hook's `condition` does the
+  comparison and its `mutate` writes the literal `true`, and an opposite hook writes `false` — a `mutate` value
+  cannot compare.
 - **Ternary** `c ? a : b` whose condition compares two fields of the row or is `has(field)` / `!has(field)`; both
   branches have the same type.
 - **Constants**: a **text** constant may appear in a join or a ternary branch. A **numeric** constant
@@ -255,10 +256,52 @@ space appear only when there is one. A caller cannot write `full_name`.*
  "attemptsLeft": 2}
 ```
 
-Stop here: the only fix adds a rate field and a hook, which the operator did not ask for. Reply: quote the message
-and the fix in a quote block, then — *A computed field cannot hold a fixed rate such as 1.2. I proposed nothing.
-The framework's way is a `vat_rate` field on order lines, kept by a before-hook, and `total_with_vat` computed from
-it; say if you want that.*
+Stop here: the only fix adds a field the operator did not ask for. Reply: quote the message and the fix in a quote
+block, then — *A computed field cannot hold a fixed rate such as 1.2. I proposed nothing. The framework's way is a
+`vat_multiplier` field on order lines (1.20 by default) and `total_with_vat` computed from it; say if you want that.*
+
+<!-- example: price-with-vat-multiplier -->
+**(f, the operator says yes) — the offer, which passes: the multiplier is a field, not a constant.**
+
+```json
+{"tool": "propose_change", "baseRevision": 1, "summary": "Adds a VAT multiplier and the line total with VAT to order lines.",
+ "operations": [{"op": "add", "path": "/entities/order_lines/fields/vat_multiplier",
+                 "value": {"type": "decimal", "precision": 3, "scale": 2, "required": true, "default": 1.2,
+                           "description": "What the line total is multiplied by to include VAT: 1.20 for 20 %."}},
+                {"op": "add", "path": "/entities/order_lines/fields/total_with_vat",
+                 "value": {"type": "decimal", "precision": 12, "scale": 2,
+                           "computed": "quantity * unit_price * vat_multiplier"}}]}
+```
+
+```json
+{"valid": true, "changedPaths": ["/entities/order_lines/fields/vat_multiplier",
+                                 "/entities/order_lines/fields/total_with_vat"]}
+```
+
+It reads `quantity * unit_price`, not `line_total`, because `line_total` is itself computed; and it holds 1.2 in a
+field, because `quantity * unit_price * (1 + vat_rate)` would carry the constant `1`. Reply: *Order lines get
+`vat_multiplier`, 1.20 unless a caller sends another, and `total_with_vat`, which the database maintains. Existing
+lines get 1.20.*
+
+<!-- example: vip-flag -->
+**(g) "Customers in the `team` tier are VIPs" — a flag decided at write time is a before-hook, not computed.**
+
+```json
+{"tool": "propose_change", "baseRevision": 1, "summary": "Adds is_vip, set for customers in the team tier.",
+ "operations": [{"op": "add", "path": "/entities/customers/fields/is_vip",
+                 "value": {"type": "boolean", "default": false, "description": "Whether the customer is in the team tier."}},
+                {"op": "add", "path": "/entities/customers/hooks",
+                 "value": {"beforeCreate": [{"condition": "new.loyalty_tier == 'team'", "action": {"mutate": {"is_vip": true}}}],
+                           "beforeUpdate": [{"condition": "new.loyalty_tier == 'team'", "action": {"mutate": {"is_vip": true}}},
+                                            {"condition": "new.loyalty_tier != 'team'", "action": {"mutate": {"is_vip": false}}}]}}]}
+```
+
+```json
+{"valid": true, "changedPaths": ["/entities/customers/fields/is_vip", "/entities/customers/hooks"]}
+```
+
+The `condition` compares; the `mutate` writes a literal. Reply: *Customers get `is_vip`, set on every create and
+update from the loyalty tier. Existing customers start as `false` until they are next updated.*
 
 ## 7. Behaviour rules
 
