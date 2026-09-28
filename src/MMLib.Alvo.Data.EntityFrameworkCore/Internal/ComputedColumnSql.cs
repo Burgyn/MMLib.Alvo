@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Expressions;
+﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore;
@@ -35,6 +36,14 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// see its own remarks. Splitting the two keeps this type free of the dialect and therefore usable from the
 /// model builder, which runs before any store type is resolved.
 /// </para>
+/// <para>
+/// <b>A backstop, not the gate.</b> The core's descriptor validator compiles and renders every <c>computed</c>
+/// the same way (<c>ComputedFieldCheck</c>) and refuses it when the descriptor is saved, so a validated
+/// descriptor never reaches a refusal here. It still refuses, for a host that replaced
+/// <see cref="IPredicateRenderer"/> or built a model from a schema no validator saw — and it refuses with
+/// <see cref="DescriptorValidationException"/>, the documented type the Management API and the dashboard
+/// already answer as a structured refusal at the field's pointer, never an exception nothing maps.
+/// </para>
 /// </remarks>
 internal sealed class ComputedColumnSql
 {
@@ -62,9 +71,9 @@ internal sealed class ComputedColumnSql
     /// </summary>
     /// <param name="entity">The entity the field belongs to — what the CEL is type-checked against.</param>
     /// <param name="field">The field being configured.</param>
-    /// <exception cref="InvalidOperationException">
-    /// The CEL does not compile for the <see cref="CelProfile.Computed"/> profile, or it renders a bound value
-    /// DDL cannot carry.
+    /// <exception cref="DescriptorValidationException">
+    /// The CEL does not compile for the <see cref="CelProfile.Computed"/> profile, has no scalar rendering, or
+    /// renders a bound value DDL cannot carry.
     /// </exception>
     internal string? For(EntitySchema entity, FieldSchema field)
     {
@@ -76,7 +85,7 @@ internal sealed class ComputedColumnSql
             return null;
         }
 
-        var rendered = _predicates.Render(Compiled(entity, field, source), _fields);
+        var rendered = Rendered(entity, field, Compiled(entity, field, source));
         EnsureNoBoundValue(entity, field, source, rendered);
 
         return rendered.Sql;
@@ -86,10 +95,9 @@ internal sealed class ComputedColumnSql
     /// The compiled expression, or a refusal carrying every problem the compiler found at once.
     /// </summary>
     /// <remarks>
-    /// The descriptor mapper does not compile <c>computed</c> — the policy catalog compiles rules, not this
-    /// slot — so this is the first and only place an unresolvable <c>computed</c> is caught, and it therefore
-    /// has to report every error rather than the first: an agent fixing one field wants the whole list in one
-    /// round trip (§0 principle 4), which is exactly the shape <see cref="CelCompilationResult"/> already has.
+    /// It reports every error rather than the first, as the validator's own pass does: an agent fixing one field
+    /// wants the whole list in one round trip (§0 principle 4), which is exactly the shape
+    /// <see cref="CelCompilationResult"/> already has.
     /// </remarks>
     private CompiledExpression Compiled(EntitySchema entity, FieldSchema field, string source)
     {
@@ -97,13 +105,37 @@ internal sealed class ComputedColumnSql
 
         return result.IsSuccess
             ? result.Expression!
-            : throw new InvalidOperationException(
+            : throw Refused(result.Errors.Select(error => Error(
+                entity,
+                field,
                 $"Field '{entity.Name}.{field.Name}' declares a 'computed' expression that does not compile: "
-                + string.Join(" ", result.Errors.Select(Describe)));
+                + error.Message,
+                error.FixSuggestion ?? "Keep 'computed' to arithmetic over this entity's own fields.")));
     }
 
-    private static string Describe(CelCompilationError error) =>
-        error.FixSuggestion is { } fix ? $"{error.Message} ({fix})" : error.Message;
+    /// <summary>The scalar render, with the renderer's own "no rendering for this shape" refused at the field.</summary>
+    private SqlExpression Rendered(EntitySchema entity, FieldSchema field, CompiledExpression expression)
+    {
+        try
+        {
+            return _predicates.Render(expression, _fields);
+        }
+        catch (NotSupportedException unsupported)
+        {
+            throw Refused([Error(
+                entity,
+                field,
+                $"Field '{entity.Name}.{field.Name}' declares \"computed\": \"{expression.Source}\", which has no "
+                + $"generated-column rendering: {unsupported.Message}",
+                "Compare two of this row's fields directly, or hold the value in a plain field a before-hook writes.")]);
+        }
+    }
+
+    private static DescriptorValidationError Error(EntitySchema entity, FieldSchema field, string message, string fix) =>
+        new($"/entities/{entity.Name}/fields/{field.Name}/computed", message, fix, DescriptorValidationSeverity.Error);
+
+    private static DescriptorValidationException Refused(IEnumerable<DescriptorValidationError> errors) =>
+        new(new DescriptorValidationResult([.. errors]));
 
     /// <summary>
     /// Refuses a <c>computed</c> whose render produced bind parameters, naming the constants that made it one.
@@ -122,13 +154,16 @@ internal sealed class ComputedColumnSql
         }
 
         var constants = string.Join(", ", rendered.Parameters.Values.Select(value => $"'{value}'"));
-        throw new InvalidOperationException(
+        throw Refused([Error(
+            entity,
+            field,
             $"Field '{entity.Name}.{field.Name}' declares \"computed\": \"{source}\", which carries the "
             + $"constant value(s) {constants}. A computed field becomes a stored generated column, and a "
             + "column definition is DDL, which has no bind-parameter form — so a constant cannot be carried "
-            + "into it. Keep 'computed' to arithmetic over this entity's own fields "
+            + "into it.",
+            "Keep 'computed' to arithmetic over this entity's own fields "
             + "(\"unit_price * amount\", \"net_total + vat_total\"), and hold a contextual constant such as a "
             + "tax rate in a field of its own that a before-hook maintains, which is where it belongs anyway: "
-            + "a rate is time-valid business logic rather than arithmetic over this row.");
+            + "a rate is time-valid business logic rather than arithmetic over this row.")]);
     }
 }

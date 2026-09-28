@@ -210,6 +210,29 @@ public class ManagementApplyTests
     }
 
     /// <summary>
+    /// A <c>computed</c> expression the generated column cannot carry is the validator's 422 at the field's own
+    /// pointer — on a preview too — never the driver's exception out of the migration model.
+    /// </summary>
+    [Fact]
+    public async Task A_computed_field_calling_now_is_refused_at_the_field_rather_than_thrown()
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+        var sent = DescriptorEdits.AddComputedField(
+            await CurrentAsync(world), entity: "vehicles", field: "seen_at", type: "datetime", computed: "now()");
+
+        var response = await ApplyAsync(world, sent, ifMatch: "\"1\"", query: "?dryRun=true");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Validation);
+        var violations = (await response.ReadJsonObjectAsync())["violations"]!.AsArray();
+        violations.ShouldNotBeEmpty();
+        violations.ShouldAllBe(violation =>
+            violation!["pointer"]!.GetValue<string>() == "/entities/vehicles/fields/seen_at/computed");
+        violations[0]!["message"]!.GetValue<string>().ShouldContain("vehicles.seen_at");
+        (await RevisionAsync(world)).ShouldBe(1);
+    }
+
+    /// <summary>
     /// A blank <c>descriptorJson</c> is the named 422, not a 500.
     /// </summary>
     /// <remarks>

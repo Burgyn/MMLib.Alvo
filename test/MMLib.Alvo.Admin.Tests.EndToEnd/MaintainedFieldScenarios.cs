@@ -93,3 +93,43 @@ public sealed class ComputedFieldScenarios(AdminWorld world) : IClassFixture<Adm
         session.AssertConsoleClean();
     }
 }
+
+/// <summary>
+/// A computed expression the generated column cannot carry is refused by Preview's dry run as the descriptor
+/// validator's own finding at the field — never the generic "Something went wrong" of an exception nothing maps.
+/// </summary>
+/// <remarks>
+/// The field editor has no CEL compiler (<c>FieldFacets.ComputedTypes</c> gives the reason), so it stages
+/// <c>now()</c> as typed; the refusal is the build's, and this pins that it arrives as one. Its own world: it stages.
+/// </remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class ComputedRefusalScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+{
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_computed_field_calling_now_is_refused_at_preview_naming_the_field()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/customers");
+
+        await session.Page.GetByTestId("add-field").ClickAsync();
+        var sheet = session.Page.GetByTestId("field-sheet");
+        await sheet.GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync("date_test");
+        await sheet.GetByRole(AriaRole.Radio, new() { Name = "computed", Exact = true }).ClickAsync();
+        await sheet.GetByRole(AriaRole.Radio, new() { Name = "datetime", Exact = true }).ClickAsync();
+        await sheet.GetByRole(AriaRole.Textbox, new() { Name = "Expression" }).FillAsync("now()");
+        await session.Page.GetByTestId("field-save").ClickAsync();
+        await session.Page.GetByTestId("field-row-date_test").WaitForAsync();
+
+        await session.Page.ClickAsync("[data-testid='pending-preview']");
+        var refusal = session.Page.GetByTestId("error-panel");
+        await refusal.WaitForAsync();
+
+        var said = await refusal.InnerTextAsync();
+        said.ShouldContain("The descriptor is not valid");
+        said.ShouldContain("/entities/customers/fields/date_test/computed");
+        said.ShouldNotContain("Something went wrong");
+        (await session.Page.GetByTestId("plan").CountAsync()).ShouldBe(0, "a refused descriptor has no plan");
+
+        session.AssertConsoleClean();
+    }
+}
