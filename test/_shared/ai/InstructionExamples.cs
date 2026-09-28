@@ -9,8 +9,8 @@ namespace MMLib.Alvo.Ai.Tests;
 /// <remarks>
 /// An example is a <c>&lt;!-- example: name --&gt;</c> marker followed by two <c>json</c> fences: the call, then the
 /// outcome it claims. The outcome is abbreviated to what the example teaches — <c>valid</c>, <c>changedPaths</c>, and
-/// for a refusal the violation's <c>source</c> and a <em>fragment</em> of its message, which the validator's own
-/// message must contain.
+/// for a refusal the violations in the shape the tool returns them, with <c>message</c> and <c>fix</c> as
+/// <em>fragments</em> the real ones must contain.
 /// </remarks>
 internal static partial class InstructionExamples
 {
@@ -39,16 +39,21 @@ internal sealed record InstructionExample(string Name, JsonElement Call, JsonEle
 
     internal JsonElement Operations => Call.GetProperty("operations");
 
+    /// <summary>The call's arguments: every member but <c>tool</c>, as the tool's parameters receive them.</summary>
+    internal IReadOnlyDictionary<string, JsonElement> Arguments =>
+        Call.EnumerateObject().Where(member => member.Name != "tool").ToDictionary(member => member.Name, member => member.Value);
+
     internal bool ClaimsValid => Outcome.GetProperty("valid").GetBoolean();
 
     internal IReadOnlyList<string> ChangedPaths =>
         Outcome.TryGetProperty("changedPaths", out var paths) ? [.. paths.EnumerateArray().Select(path => path.GetString()!)] : [];
 
-    /// <summary>Each claimed violation: the stage that says it, and a fragment its message contains.</summary>
-    internal IReadOnlyList<(string Source, string Message)> ClaimedViolations =>
-        Outcome.TryGetProperty("violations", out var violations)
-            ? [.. violations.EnumerateArray().Select(v => (v.GetProperty("source").GetString()!, v.GetProperty("message").GetString()!))]
-            : [];
+    /// <summary>
+    /// Each claimed violation, as written: <c>source</c>, <c>pointer</c>, <c>op</c> and <c>severity</c> are claimed
+    /// exactly, <c>message</c> and <c>fix</c> as fragments the real ones contain.
+    /// </summary>
+    internal IReadOnlyList<JsonElement> ClaimedViolations =>
+        Outcome.TryGetProperty("violations", out var violations) ? [.. violations.EnumerateArray()] : [];
 
     public override string ToString() => Name;
 }

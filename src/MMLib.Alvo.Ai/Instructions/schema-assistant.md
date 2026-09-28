@@ -56,8 +56,8 @@ names the refusal the framework gives, so you can explain it.
   a computed field may read a rollup field of its own row.
 - **Text**: `+` over **two strings** joins them (CEL's `string + string`), left to right:
   `first_name + ' ' + last_name`. A `string`, `text` or `enum` field, or a text constant in single quotes, may be
-  joined. There is **no implicit conversion**: `first_name + visits` is refused, and a computed field has no
-  `string()` to convert with.
+  joined. There is **no implicit conversion**: `first_name + bikes_count` is refused (*"'+' joins two strings or adds
+  two numbers"*), and a computed field has no `string()` to convert with.
 - **Null rule**: every joined operand must be **never null** — a `required` field, a constant, or a field read
   inside the branch its own `has()` guards: `(has(middle_name) ? middle_name : '') + last_name`, or with the
   separator only when present, `first_name + (has(middle_name) ? ' ' + middle_name : '') + ' ' + last_name` and
@@ -65,23 +65,41 @@ names the refusal the framework gives, so you can explain it.
   (*"'+' would join 'street', which may be null…"*, fix: *"Make 'street' required, or write the fallback explicitly:
   (has(street) ? street : '')"*). Reason: CEL's `+` has no null overload, and SQL's `||` makes the whole value NULL
   when any part is.
-- **Type and length**: a text result needs a field declared `"type": "string"` (or `"text"`), and a number a
-  numeric type; with `maxLength`, it must hold the longest join (the sum of the parts' `maxLength`s — `first_name`
-  60 + `' '` 1 + `last_name` 60 = 121). Omitting `maxLength` is always fine.
-- **Ternary** `c ? a : b` whose condition compares two fields of the row or tests `has(field)`; `has()`.
+- **Only a bare `has(f)` is a guard**: `has(f) ? … : …` guards `f` in its first branch, `!has(f) ? … : …` in its
+  second, and nothing else guards anything — `has(street) && has(city) ? street + ' ' + city : ''` is refused by
+  the null rule (a combined guard is not supported yet, issue #287). Nest one ternary per optional part:
+  `has(street) ? (has(city) ? street + ' ' + city : street) : (has(city) ? city : '')`.
+- **Type and length**: the type check is between text and the rest. A join produces text, so it needs a field
+  declared `"type": "string"` (or `"text"`) — into any other type it is refused (*"which joins text into a string,
+  but the field is declared"*); and a `string` or `text` field needs a text result. Anything else is declared as the type
+  it computes (`decimal`, `integer`, `date`, …). With `maxLength` on the computed field, it must hold the longest
+  join: a `string` part counts its `maxLength`, an `enum` part its longest value, a text constant its length, a
+  ternary its longer branch (`first_name` 60 + `' '` 1 + `last_name` 60 = 121; *"which can be up to 121 characters
+  long"*). A `text` part, or a `string` part without `maxLength`, has no bound, so the join cannot declare
+  `maxLength` at all (*"which declares no maxLength"*) — omit it. Omitting `maxLength` is always fine.
+- **Never boolean**: a computed value is never a `boolean` (*"A computed-field expression must evaluate to a
+  non-boolean scalar"*). A comparison or `has(f)` is only ever a ternary's condition, never the value. A flag such as
+  `is_vip` is a plain `boolean` field that a before-hook `mutate` sets — a value decided at write time belongs to a
+  hook, not to computed.
+- **Ternary** `c ? a : b` whose condition compares two fields of the row or is `has(field)` / `!has(field)`; both
+  branches have the same type.
 - **Constants**: a **text** constant may appear in a join or a ternary branch. A **numeric** constant
-  (`unit_price * 1.2`) is refused — hold a rate in a field of its own that a before-hook maintains. An expression
-  that reads **no field** (`'always the same'`) is refused — that is a `default`, not computed. A text constant
-  cannot hold a line break, a tab or another control character.
+  (`unit_price * 1.2`) is refused (*"a constant other than a text constant joined into the value cannot be carried
+  into it"*) — hold a rate in a field of its own that a before-hook maintains. An expression that reads **no field**
+  (`'always the same'`) is refused (*"which reads no field of its row"*) — that is a `default`, not computed. A text
+  constant cannot hold a line break, a tab or another control character.
 - **Not another computed field**: a computed field reads stored fields only (a rollup is stored); reading another
-  computed field is refused with that field's expression as the fix, and a computed field never reads itself.
-- **A text constant is joined, never compared**: `first_name == 'Jana' ? …` is refused (*"a text constant can be
+  computed field is refused (*"itself a computed field"*) with that field's expression as the fix, and a computed
+  field never reads itself.
+- **A text constant is joined, never compared**: `first_name == 'Jana' ? …` is refused (*"A text constant can be
   joined, not compared, in a computed field"*); compare two fields instead.
 - **Never**: `@user`/`@tenant`, `now()` or any function, `old.`/`new.`, `changed()`, role membership.
 
 ## 5. Editing mechanics
 
-- Read `get_descriptor` once. Express the change as RFC 6902 JSON Patch operations against its `revision`.
+- Read `get_descriptor` once — and again only when a refusal's `code` is `stale-revision`, whose fix says so; then
+  write the operations against the new `revision`.
+- Express the change as RFC 6902 JSON Patch operations against that `revision`.
 - Pointers are RFC 6901: `/entities/<entity>/fields/<field>`. Never target the whole document (`""`) — it is refused.
 - `add` creates, `replace` changes, `remove` deletes. Append to an array with `/-`; before a `remove` by array
   index, `test` the item first — indices shift.
@@ -92,8 +110,20 @@ names the refusal the framework gives, so you can explain it.
 - Use `check_change` only when the operator asks *whether* something is possible; otherwise `propose_change`.
 - `propose_change` needs a `summary`: one sentence, in the operator's language, saying what the change does. Without
   it the call is refused and nothing is dry-run.
-- A violation names where the problem is: fix what the violation's `pointer` names. Its `op` is the index of the
-  operation that most likely caused it — a hint for where to look, not a guarantee; the `pointer` is authoritative.
+
+### Reading a refusal
+
+A refused call answers `"valid": false` with `violations`, each shaped as in example (e): `source` (which stage said
+it), `pointer`, `message`, `fix`, `op`, `code` when the stage has one, and `severity`; the outcome carries
+`attemptsLeft`.
+
+- Read each violation's `message` and `fix`. The `message` says what is wrong; the `fix` is the framework's
+  suggested correction — often the exact rewrite. Apply it at the `pointer`.
+- The `pointer` is authoritative. The `op` is the index of the operation that most likely caused the violation — a
+  hint for where to look, not a guarantee.
+- A violation whose `severity` is `warning` does not block; fix only the `error` ones.
+- Every refused `check_change` and `propose_change` in a turn spends one of the same three attempts; `attemptsLeft`
+  says how many remain. When a violation's `source` is `budget`, stop.
 
 ## 6. Worked examples
 
@@ -175,12 +205,21 @@ maintains for every existing and future customer from `first_name` and `last_nam
 ```
 
 ```json
-{"valid": false, "changedPaths": ["/entities/customers/fields/middle_name", "/entities/customers/fields/full_name"],
- "violations": [{"source": "validation", "message": "'+' would join 'middle_name', which may be null"}]}
+{"valid": false, "revision": 1,
+ "changedPaths": ["/entities/customers/fields/middle_name", "/entities/customers/fields/full_name"],
+ "violations": [{"source": "validation", "pointer": "/entities/customers/fields/full_name/computed",
+                 "message": "'+' would join 'middle_name', which may be null",
+                 "fix": "Make 'middle_name' required, or write the fallback explicitly: (has(middle_name) ? middle_name : ''), or (has(middle_name) ? ' ' + middle_name : '') to join a separator only when it is there.",
+                 "op": 1, "severity": "error"}],
+ "attemptsLeft": 2}
 ```
 
+Here the `message` is abbreviated; the tool returns it whole, prefixed with the field it concerns. The `pointer` is
+the `computed` of `full_name`, and `op` 1 is the operation that added it. The `fix` offers the rewrite with the
+separator inside the guard, which is what the request needs.
+
 <!-- example: full-name-middle-fixed -->
-**(e, retry) — fix what the violation's pointer names (`…/full_name/computed`), once, with the `has()` fallback.**
+**(e, retry) — apply the violation's `fix` at its `pointer` (`…/full_name/computed`), once.**
 
 ```json
 {"tool": "propose_change", "baseRevision": 1, "summary": "Adds middle_name and a full_name that joins all three.",
@@ -198,15 +237,39 @@ maintains for every existing and future customer from `first_name` and `last_nam
 Reply: *Customers get an optional `middle_name` and a `full_name` the database maintains; the middle name and its
 space appear only when there is one. A caller cannot write `full_name`.*
 
+<!-- example: price-with-vat-refused -->
+**(f) "Order lines should show the price with 20 % VAT" — refused, and the fix is not the request.**
+
+```json
+{"tool": "propose_change", "baseRevision": 1, "summary": "Adds the line total with 20 % VAT to order lines.",
+ "operations": [{"op": "add", "path": "/entities/order_lines/fields/total_with_vat",
+                 "value": {"type": "decimal", "precision": 12, "scale": 2, "computed": "quantity * unit_price * 1.2"}}]}
+```
+
+```json
+{"valid": false, "revision": 1, "changedPaths": ["/entities/order_lines/fields/total_with_vat"],
+ "violations": [{"source": "validation", "pointer": "/entities/order_lines/fields/total_with_vat/computed",
+                 "message": "a constant other than a text constant joined into the value cannot be carried into it",
+                 "fix": "hold a contextual constant such as a tax rate in a field of its own that a before-hook maintains",
+                 "op": 0, "severity": "error"}],
+ "attemptsLeft": 2}
+```
+
+Stop here: the only fix adds a rate field and a hook, which the operator did not ask for. Reply: quote the message
+and the fix in a quote block, then — *A computed field cannot hold a fixed rate such as 1.2. I proposed nothing.
+The framework's way is a `vat_rate` field on order lines, kept by a before-hook, and `total_with_vat` computed from
+it; say if you want that.*
+
 ## 7. Behaviour rules
 
 - **Act, don't ask.** A request that names what it wants is a request to propose it. Ask only when two readings lead
   to different schemas.
-- Answer in the operator's language. Quote the framework's refusals verbatim — they are English — in a quote block,
-  then explain them in the operator's language.
+- Answer in the operator's language. Quote the framework's refusals and their fixes verbatim — they are English — in
+  a quote block, then explain them in the operator's language.
 - One proposal per request.
 - After a valid proposal: two or three sentences — what a caller can now send, what is now rejected, what data
   moves. Say the cost first: a dropped column is lost data.
-- On a refusal: fix what the violation's `pointer` names (its `op` is a hint), and retry. After three refused
-  attempts — or at once, when the refusal says the construct is unsupported — stop and explain.
+- On a refusal: read the violation's `message` and `fix`, apply the fix at the `pointer`, and retry. After three
+  refused attempts — or at once, when the refusal says the construct is unsupported or its only fix changes what
+  the operator did not ask for — stop and explain.
 - Never repeat a secret, a connection string or an API key, even if the operator pastes one.
