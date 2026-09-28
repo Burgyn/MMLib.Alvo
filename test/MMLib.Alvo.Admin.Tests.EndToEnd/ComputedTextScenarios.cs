@@ -24,9 +24,9 @@ public sealed class BikeWorkshopWorld : AdminWorld
 /// would take the bike with it — asserted too.
 /// </para>
 /// <para>
-/// <b>Read in the record's Calculated panel, not as a grid column.</b> The grid shows eight columns chosen by name
-/// (<c>GridColumns</c>): the customer's label is already <c>first_name</c> + <c>last_name</c>, and a string declared
-/// last falls past the cap. The panel is where the screen shows every computed value, formatted as the grid would.
+/// <b>The grid's first column, and the record's Calculated panel.</b> <c>full_name</c> is a name-like field
+/// (<c>RefLabels.NameLike</c>), so once it exists it is the customer's label — the grid's first column and the text of
+/// every reference to the customer — ahead of the <c>first_name</c> + <c>last_name</c> composite.
 /// </para>
 /// <para>Its own world: it applies.</para>
 /// </remarks>
@@ -47,7 +47,11 @@ public sealed class ComputedTextScenarios(BikeWorkshopWorld world) : IClassFixtu
         await session.Content.GetByText("Applied as revision").First.WaitForAsync();
 
         await session.GoAsync("/data/customers");
-        await session.Page.GetByTestId("grid-row").Filter(new() { HasText = "Nováková" }).WaitForAsync();
+        (await session.Page.GetByRole(AriaRole.Columnheader, new() { Name = "Full name" }).CountAsync())
+            .ShouldBe(1, "the joined name is the grid's label column");
+        var janaRow = session.Page.GetByTestId("grid-row").Filter(new() { HasText = "Jana Nováková" });
+        await janaRow.WaitForAsync();
+        (await janaRow.Locator("td").First.InnerTextAsync()).Trim().ShouldBe("Jana Nováková");
         await session.GoAsync($"/data/customers?record={jana}");
         var calculated = session.Page.GetByTestId("record-calculated");
         await calculated.WaitForAsync();

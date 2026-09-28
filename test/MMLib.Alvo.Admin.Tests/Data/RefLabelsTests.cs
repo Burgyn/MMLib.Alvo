@@ -65,6 +65,7 @@ public class RefLabelsTests
     [InlineData("title")]
     [InlineData("label")]
     [InlineData("display_name")]
+    [InlineData("full_name")]
     [InlineData("reference")]
     [InlineData("code")]
     [InlineData("sku")]
@@ -96,6 +97,21 @@ public class RefLabelsTests
         label.Of(Row(("last_name", "Lovelace"))).ShouldBe("Lovelace", "a masked or unset half is skipped");
         label.Of(Row()).ShouldBeNull();
     }
+
+    /// <summary>
+    /// A <c>full_name</c> — typically computed from the two halves — names the row ahead of the first+last composite,
+    /// so the grid's first column and every reference to the row read the joined name.
+    /// </summary>
+    [Fact]
+    public void A_full_name_is_the_label_ahead_of_first_and_last_name()
+        => RefLabels.For(
+                Entity(Strings("first_name"), Strings("last_name"), Strings("full_name")), FieldMasks.None)!
+            .Fields.ShouldBe(["full_name"]);
+
+    [Fact]
+    public void A_display_name_still_wins_over_a_full_name()
+        => RefLabels.For(Entity(Strings("full_name"), Strings("display_name")), FieldMasks.None)!
+            .Fields.ShouldBe(["display_name"]);
 
     [Fact]
     public void A_first_name_alone_is_not_a_composite()

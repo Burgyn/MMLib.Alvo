@@ -15,7 +15,8 @@ namespace MMLib.Alvo.Admin.Components.Data;
 /// </para>
 /// <list type="number">
 /// <item>a string field with a name-like name, in the order of <see cref="NameLike"/>, then any field
-/// ending in <c>_number</c> (<c>order_number</c>);</item>
+/// ending in <c>_number</c> (<c>order_number</c>) — <c>full_name</c> among them, so a computed joined name wins
+/// over step 2's composite of its own halves;</item>
 /// <item><c>first_name</c> and <c>last_name</c> together, as "first last";</item>
 /// <item>the first required string, then the first string;</item>
 /// <item>nothing — the cell shows the short id.</item>
@@ -43,7 +44,7 @@ internal static class RefLabels
 {
     /// <summary>The field names that name a row, most name-like first.</summary>
     public static IReadOnlyList<string> NameLike { get; } =
-        ["name", "title", "label", "display_name", "reference", "code", "sku"];
+        ["name", "title", "label", "display_name", "full_name", "reference", "code", "sku"];
 
     private const string NumberSuffix = "_number";
 
