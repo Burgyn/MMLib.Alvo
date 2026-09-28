@@ -102,7 +102,7 @@ internal sealed class ScriptedAssistant : IAlvoAssistant
             yield break;
         }
 
-        yield return new AssistantUpdate.ToolInvoked("validate_descriptor");
+        yield return new AssistantUpdate.ToolInvoked("propose_change");
 
         if (request.Message.Contains("drop", StringComparison.OrdinalIgnoreCase))
         {

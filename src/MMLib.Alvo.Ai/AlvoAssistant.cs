@@ -20,10 +20,16 @@ namespace MMLib.Alvo.Ai;
 /// would keep using the old one until the process was recycled.
 /// </para>
 /// <para>
-/// <b>A proposal is what a validated draft becomes.</b> The agent has no way to apply, so the only path from
-/// its draft to the database is <see cref="AssistantUpdate.Proposal"/> and the operator pressing the same
+/// <b>A proposal is what a dry-run patch becomes.</b> The agent sends RFC 6902 operations, Alvo applies them to
+/// the applied descriptor and dry-runs the result, and the agent has no way to apply — so the only path from its
+/// draft to the database is <see cref="AssistantUpdate.Proposal"/> and the operator pressing the same
 /// button they press for their own edits — carrying the revision the agent read, so two people composing at
 /// once cannot overwrite each other silently.
+/// </para>
+/// <para>
+/// <b>A turn is bounded twice.</b> The tools refuse after three refused attempts; the loop itself ends after
+/// <see cref="MaximumIterations"/> model round-trips, so a model that never stops calling tools ends as a turn
+/// rather than a bill.
 /// </para>
 /// <para>
 /// <b>Nothing the operator typed is logged.</b> A message to a schema assistant routinely carries a
@@ -176,7 +182,7 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     /// <summary>One step of the agent's stream: whether it moved, or what stopped it.</summary>
     private readonly record struct StreamStep(bool Moved, AssistantUpdate.Failed? Failure);
 
-    /// <summary>Runs the agent loop for one turn.</summary>
+    /// <summary>Runs the agent loop for one turn, capped at <see cref="MaximumIterations"/>.</summary>
     private static IAsyncEnumerable<AgentResponseUpdate> RunAsync(
         IChatClient client, ManagementTools tools, AssistantRequest request, CancellationToken ct)
     {
@@ -186,8 +192,21 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
             name: AgentName,
             description: null,
             tools: [.. tools.Functions]);
+        Bounded(agent);
 
         return agent.RunStreamingAsync(Conversation(request), session: null, options: null, ct);
+    }
+
+    /// <summary>Caps the function-invoking loop the agent built for itself.</summary>
+    /// <remarks>
+    /// The agent's own invoker, found rather than replaced, so the pipeline the agent builds — and whatever else it
+    /// configures on that invoker — stays the one that runs. Missing is a bug, never an uncapped turn.
+    /// </remarks>
+    private static void Bounded(ChatClientAgent agent)
+    {
+        var invoker = agent.ChatClient.GetService<FunctionInvokingChatClient>()
+            ?? throw new InvalidOperationException("The agent built no function-invoking client to cap.");
+        invoker.MaximumIterationsPerRequest = MaximumIterations;
     }
 
     /// <summary>The conversation as the model sees it: the caller's history, then this turn's message.</summary>
@@ -230,17 +249,24 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     /// The proposal this turn produced, or <see langword="null"/> when it produced none.
     /// </summary>
     /// <remarks>
-    /// A turn proposes by validating: the agent cannot present a draft it has not run through the dry run,
-    /// so the last validated draft is the proposal and a turn that only answered a question has none.
+    /// A turn proposes through <c>propose_change</c>, whose every draft has been through the dry run: the last
+    /// valid proposal, else the last refused one. A turn that only answered a question — or only asked
+    /// <c>check_change</c> — has none.
     /// </remarks>
     private static AssistantUpdate.Proposal? ProposalFrom(ManagementTools tools, StringBuilder answer) =>
-        tools.LastValidated is { } draft
-            ? new AssistantUpdate.Proposal(
-                draft.DescriptorJson, draft.ExpectedRevision, answer.ToString(), draft.Refusals)
+        tools.Proposal is { } draft
+            ? new AssistantUpdate.Proposal(draft.DescriptorJson, draft.ExpectedRevision, SummaryOf(answer, draft), draft.Refusals)
             : null;
+
+    /// <summary>The turn's answer, or the proposal's own summary when the turn said nothing (D10).</summary>
+    private static string SummaryOf(StringBuilder answer, ProposedDraft draft) =>
+        answer.Length > 0 ? answer.ToString() : draft.Summary;
 
     /// <summary>What the agent calls itself, which some providers echo back in a response.</summary>
     private const string AgentName = "alvo-schema-assistant";
+
+    /// <summary>How many model round-trips one turn may take before it ends as a turn rather than a bill.</summary>
+    internal const int MaximumIterations = 12;
 
     /// <summary>What an operator is told when the endpoint itself failed.</summary>
     /// <remarks>

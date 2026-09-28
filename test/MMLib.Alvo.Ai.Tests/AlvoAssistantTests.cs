@@ -1,8 +1,12 @@
 ﻿using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Management;
 
 using NSubstitute;
+
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Ai.Tests;
 
@@ -53,32 +57,97 @@ public sealed class AlvoAssistantTests
     }
 
     /// <summary>
-    /// A validated draft becomes a proposal, carrying the revision the apply must echo.
+    /// A valid proposal becomes the turn's proposal, carrying the revision the apply must echo.
     /// </summary>
     /// <remarks>
-    /// And it arrives <b>after</b> the validation, never before: the agent cannot present a draft it has not
-    /// run through the dry run, because the proposal is built from what the dry run recorded.
+    /// And it arrives <b>after</b> the dry run, never before: the proposal is built from what the dry run
+    /// recorded, and the descriptor it carries is the applied one with the patch applied.
     /// </remarks>
     [Fact]
-    public async Task A_validated_draft_becomes_a_proposal_after_the_dry_run()
+    public async Task A_valid_proposal_becomes_the_turns_proposal_after_the_dry_run()
     {
-        var management = Substitute.For<IAlvoManagement>();
+        var management = Describing(revision: 4);
         management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
             .Returns(new ManagementApplyResult(Applied: false, Revision: 4, EmptyPlan));
 
         var updates = await RunAsync(management, Configured(), new ScriptedChatClient(
-            Scripted.Calls("validate_descriptor", new Dictionary<string, object?>
-            {
-                ["descriptorJson"] = """{"name":"p"}""",
-                ["expectedRevision"] = 4,
-            }),
+            Scripted.Calls("propose_change", Proposing(revision: 4)),
             Scripted.Says("Adds a nullable note column.")));
 
         var proposal = updates.OfType<AssistantUpdate.Proposal>().ShouldHaveSingleItem();
         proposal.ExpectedRevision.ShouldBe(4);
-        proposal.DescriptorJson.ShouldBe("""{"name":"p"}""");
+        JsonNode.Parse(proposal.DescriptorJson)!["entities"]!["bikes"]!["fields"]!["notes"].ShouldNotBeNull();
         proposal.Summary.ShouldContain("nullable note column");
         updates.IndexOf(proposal).ShouldBe(updates.Count - 1);
+    }
+
+    /// <summary>A turn that ends without an answer of its own is summarised by what it proposed (D10).</summary>
+    [Fact]
+    public async Task A_proposal_with_no_answer_text_is_summarised_by_the_proposals_own_summary()
+    {
+        var management = Describing(revision: 4);
+        management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ManagementApplyResult(Applied: false, Revision: 4, EmptyPlan));
+
+        var updates = await RunAsync(management, Configured(), new ScriptedChatClient(
+            Scripted.Calls("propose_change", Proposing(revision: 4)),
+            Scripted.Says(string.Empty)));
+
+        updates.OfType<AssistantUpdate.Proposal>().ShouldHaveSingleItem().Summary.ShouldBe("Adds notes.");
+    }
+
+    /// <summary>A question answered with a dry run is an answer, not a proposal.</summary>
+    [Fact]
+    public async Task A_turn_that_only_checked_a_change_proposes_nothing()
+    {
+        var management = Describing(revision: 4);
+        management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ManagementApplyResult(Applied: false, Revision: 4, EmptyPlan));
+        var checking = Proposing(revision: 4);
+        checking.Remove("summary");
+
+        var updates = await RunAsync(management, Configured(), new ScriptedChatClient(
+            Scripted.Calls("check_change", checking),
+            Scripted.Says("Yes, that would work.")));
+
+        updates.OfType<AssistantUpdate.Proposal>().ShouldBeEmpty();
+    }
+
+    /// <summary>A refused retry after a valid proposal leaves the valid one standing.</summary>
+    [Fact]
+    public async Task A_later_refused_attempt_does_not_replace_the_valid_proposal()
+    {
+        var management = Describing(revision: 4);
+        management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Returns(
+                _ => new ManagementApplyResult(Applied: false, Revision: 4, EmptyPlan),
+                _ => throw new DescriptorValidationException(new DescriptorValidationResult(
+                    [new DescriptorValidationError("/entities", "No.", null, DescriptorValidationSeverity.Error)])));
+
+        var updates = await RunAsync(management, Configured(), new ScriptedChatClient(
+            Scripted.Calls("propose_change", Proposing(revision: 4)),
+            Scripted.Calls("propose_change", Proposing(revision: 4)),
+            Scripted.Says("Done.")));
+
+        updates.OfType<AssistantUpdate.Proposal>().ShouldHaveSingleItem().Refusals.ShouldBeEmpty();
+    }
+
+    /// <summary>A model that keeps calling tools ends as a turn, not a bill.</summary>
+    /// <remarks>
+    /// Thirty scripted calls against a cap of <see cref="AlvoAssistant.MaximumIterations"/>: at the framework's
+    /// default of forty, every one of them would run.
+    /// </remarks>
+    [Fact]
+    public async Task A_model_that_never_stops_calling_tools_is_cut_off_at_the_iteration_cap()
+    {
+        var management = Describing(revision: 1);
+        var looping = Enumerable.Range(0, 30).Select(_ => Scripted.Calls("get_descriptor", [])).ToArray();
+
+        await RunAsync(management, Configured(), new ScriptedChatClient(looping));
+
+        management.ReceivedCalls()
+            .Count(call => call.GetMethodInfo().Name == nameof(IAlvoManagement.GetDescriptorAsync))
+            .ShouldBeInRange(1, AlvoAssistant.MaximumIterations);
     }
 
     /// <summary>
@@ -141,6 +210,23 @@ public sealed class AlvoAssistantTests
 
         return updates;
     }
+
+    private static IAlvoManagement Describing(int revision)
+    {
+        var management = Substitute.For<IAlvoManagement>();
+        management.GetDescriptorAsync("p", Arg.Any<CancellationToken>()).Returns(new ManagementDescriptor(
+            "p", revision, """{"name":"p","entities":{"bikes":{"fields":{"brand":{"type":"string"}}}}}"""));
+
+        return management;
+    }
+
+    private static Dictionary<string, object?> Proposing(int revision) => new()
+    {
+        ["baseRevision"] = revision,
+        ["operations"] = JsonDocument.Parse(
+            """[{"op":"add","path":"/entities/bikes/fields/notes","value":{"type":"text"}}]""").RootElement.Clone(),
+        ["summary"] = "Adds notes.",
+    };
 
     private static IAiConnectionResolver Configured() => Resolving(new AlvoAiConnection(
         AiConnectionKind.OpenAiCompatible, new Uri("http://localhost:11434/v1"), "qwen3:8b", null));

@@ -252,7 +252,9 @@ is a closed hierarchy: a text delta, a tool-invoked notice, a **proposal** (cand
 the dry-run's plan and refusals), or a failure. Streaming, because §2.8 names latency and cost as the
 thing to design for, and a server-interactive circuit can render tokens as they arrive.
 
-### 4.2 Five tools, none of which can write
+### 4.2 Six tools, none of which can write
+
+*Superseded in shape by `2026-09-28-f5-assistant-reliability-design.md` §2: the draft is a patch, not a retyped descriptor.*
 
 Every tool is an `IAlvoManagement` member:
 
@@ -262,14 +264,15 @@ Every tool is an `IAlvoManagement` member:
 | `get_descriptor` | `GetDescriptorAsync` | the text to modify, and the revision an apply must echo |
 | `get_capabilities` | `GetCapabilitiesAsync` | what this build honours — so it can refuse to author `automation` and say why |
 | `get_revisions` | `ListRevisionsAsync` | what changed, and why, before proposing the next change |
-| `validate_descriptor` | `ApplyDescriptorAsync(DryRun: true, AllowDestructive: false)` | the only way it learns whether its own proposal is even applicable |
+| `check_change` | `ApplyDescriptorAsync(DryRun: true, AllowDestructive: false)` over an RFC 6902 patch of the applied descriptor | "would this work?" without filing anything |
+| `propose_change` | the same dry run | the only way a change becomes a proposal — and only a valid one |
 
 **There is no apply tool.** Not *"the agent is instructed not to apply"* — the member is not in the
 tool set, so the safety property is enforced by composition rather than by a prompt, and a prompt
 injection that says *apply this now* has nothing to call. This is the difference between a guard and
 a wish, and it is the same argument `GuardedUserAdministration` makes one layer down.
 
-`validate_descriptor` runs with `AllowDestructive: false`, so a proposal that would drop a column
+Both dry runs run with `AllowDestructive: false`, so a proposal that would drop a column
 comes back as a **refusal the agent must show**, and enabling it is a decision an operator makes in
 the existing confirm control. That is #29's *"destructive operations require approval"*, answered by
 the guard that already exists rather than by a second one.
@@ -347,7 +350,7 @@ a redaction assertion that no member's `ToString` can print a value. **Interface
 |---|---|
 | `MMLib.Alvo.Ai` cannot reach the core | the `EfDependencyBoundaryTests` shape, in both readings (project file, loaded assembly) |
 | The tool set contains no write member | an assertion over the **registered** tools, not over the prompt |
-| A proposal always passed through `validate_descriptor` | the scripted-client suite asserts the call order |
+| A proposal always passed through the dry run | the scripted-client suite: `propose_change` files only what the dry run answered |
 | Configuration shadows the store, and the write refuses | unit tests over `LayeredSecretStore` |
 | No `ALVO_SECRET_KEY` ⇒ no writable store, no fallback | a registration test |
 | A secret never appears in telemetry | a log-capturing test over a turn that resolves a key |

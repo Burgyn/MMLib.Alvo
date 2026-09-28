@@ -33,7 +33,7 @@ public sealed class AssistantScenarios(AssistantWorld world) : IClassFixture<Ass
 
         /* The tools it called are shown by name, so a reader can see which questions it asked. */
         (await session.Page.Locator("[data-testid='assistant-tools']").InnerTextAsync())
-            .ShouldContain("validate_descriptor");
+            .ShouldContain("propose_change");
 
         await session.Page.ClickAsync("[data-testid='assistant-review']");
         await session.Page.WaitForURLAsync("**/changes");

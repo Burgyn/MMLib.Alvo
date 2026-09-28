@@ -53,8 +53,8 @@ public abstract record AssistantUpdate
     /// <summary>The agent called one of its tools.</summary>
     /// <remarks>
     /// The name only. An argument list would carry the descriptor the operator is drafting into whatever the
-    /// caller does with this — a log line, a transcript — and the tool set is a fixed five, so the name is
-    /// the whole of what a reader can act on.
+    /// caller does with this — a log line, a transcript — and the tool set is fixed and small, so the name
+    /// is the whole of what a reader can act on.
     /// </remarks>
     /// <param name="Tool">The tool's name, as the agent sees it.</param>
     public sealed record ToolInvoked(string Tool) : AssistantUpdate;
