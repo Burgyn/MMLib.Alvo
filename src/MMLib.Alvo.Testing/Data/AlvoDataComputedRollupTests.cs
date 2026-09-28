@@ -231,6 +231,42 @@ public abstract class AlvoDataComputedRollupTests
     }
 
     /// <summary>
+    /// A computed field that did not exist at all is added to a <b>parent</b> that already holds a row with a
+    /// cascading child, and both rows survive with the value computed — the shape an operator adding a field from
+    /// the dashboard produces.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Different from the fact above in the one way that decides the DDL.</b> There the column already exists as
+    /// an ordinary one and becomes generated, which EF plans as an <c>AlterColumnOperation</c> — and EF's SQLite
+    /// generator rebuilds the table for that. Here the column is new: EF plans an <c>AddColumnOperation</c>, for
+    /// which its SQLite generator emits the bare <c>ALTER TABLE … ADD COLUMN … STORED</c> the engine refuses on a
+    /// table holding a row (<c>cannot add a STORED column</c>).
+    /// </para>
+    /// <para>
+    /// The child is asserted as well as the parent, because a rebuild of <c>invoices</c> that let its foreign key
+    /// act would <c>DROP</c> the parent and cascade the item away — the Dev-7 failure, reachable again through a
+    /// different operation.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_new_computed_field_can_be_added_to_a_parent_that_already_holds_rows()
+    {
+        var data = await CreateAsync(WithoutGrossSchema, DescriptorFor(computed: true, withGross: false));
+        var invoice = await CreateInvoiceAsync(data, vatTotal: 5m);
+        var item = await CreateItemAsync(data, invoice, unitPrice: 3m, amount: 2);      // FIRST. Not a detail.
+
+        var migration = await MigrateAsync(WithoutGrossSchema, Schema);
+
+        migration.Applied.ShouldBeTrue("adding a computed field is not a destructive change on either engine");
+        migration.Plan.HasDestructiveChanges.ShouldBeFalse();
+        (await InvoiceAsync(data, invoice))[GrossTotal].ShouldBe(11m, "net_total 6 + vat_total 5, for the row already there");
+        (await data.GetAsync(Items, (Guid)item["id"]!, Caller, Ct)).ShouldNotBeNull("the child survived its parent's rebuild");
+        (await ExecuteOutOfBandAsync($"UPDATE \"{Invoices}\" SET \"{GrossTotal}\" = 999")).ShouldNotBeNull(
+            "and it is a GENERATED column afterwards, not an ordinary one");
+    }
+
+    /// <summary>
     /// The counterweight to the fact above, and the answer to "does the two-hop trip the destructive gate":
     /// adding a computed field plans <b>no destructive step</b>, so it applies without
     /// <see cref="MigrationOptions.AllowDestructive"/>.
@@ -606,7 +642,8 @@ public abstract class AlvoDataComputedRollupTests
     /// is declared on an entity that has been serving for a while.
     /// </summary>
     /// <param name="computed">Whether the two computed fields declare their expression.</param>
-    private static AlvoDescriptor DescriptorFor(bool computed) => new()
+    /// <param name="withGross">Whether <c>gross_total</c> is declared at all.</param>
+    private static AlvoDescriptor DescriptorFor(bool computed, bool withGross = true) => new()
     {
         ApiVersion = "alvo.dev/v1",
         Name = "computed-rollup-suite",
@@ -615,18 +652,7 @@ public abstract class AlvoDataComputedRollupTests
             [Invoices] = new()
             {
                 Tenancy = EntityTenancy.Global,
-                Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
-                {
-                    [VatTotal] = new() { Type = DescField.Decimal },
-                    [NetTotal] = new() { Type = DescField.Decimal, Rollup = Sum(LineTotal) },
-                    [GrossTotal] = new() { Type = DescField.Decimal, Computed = computed ? "net_total + vat_total" : null },
-                    [ItemCount] = new() { Type = DescField.Integer, Rollup = new() { From = Items, Op = RollupOp.Count } },
-                    [LargestLine] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Max, LineTotal) },
-                    [SmallestLine] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Min, LineTotal) },
-                    [AverageLine] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Avg, LineTotal) },
-                    [LargestPrice] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Max, "unit_price") },
-                    [SmallestPrice] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Min, "unit_price") },
-                },
+                Fields = InvoiceFields(computed, withGross),
                 Rules = AllowAll,
             },
             [Items] = new()
@@ -643,6 +669,28 @@ public abstract class AlvoDataComputedRollupTests
             },
         },
     };
+
+    /// <summary>The invoice's declared fields, with <c>gross_total</c> only when <paramref name="withGross"/>.</summary>
+    private static Dictionary<string, FieldDescriptor> InvoiceFields(bool computed, bool withGross)
+    {
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            [VatTotal] = new() { Type = DescField.Decimal },
+            [NetTotal] = new() { Type = DescField.Decimal, Rollup = Sum(LineTotal) },
+            [ItemCount] = new() { Type = DescField.Integer, Rollup = new() { From = Items, Op = RollupOp.Count } },
+            [LargestLine] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Max, LineTotal) },
+            [SmallestLine] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Min, LineTotal) },
+            [AverageLine] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Avg, LineTotal) },
+            [LargestPrice] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Max, "unit_price") },
+            [SmallestPrice] = new() { Type = DescField.Decimal, Rollup = Aggregate(RollupOp.Min, "unit_price") },
+        };
+        if (withGross)
+        {
+            fields[GrossTotal] = new() { Type = DescField.Decimal, Computed = computed ? "net_total + vat_total" : null };
+        }
+
+        return fields;
+    }
 
     private static Rollup Sum(string field) => Aggregate(RollupOp.Sum, field);
 
@@ -662,10 +710,14 @@ public abstract class AlvoDataComputedRollupTests
     /// <summary>The same schema with both computed fields as ordinary columns — where the migration fact starts.</summary>
     private static SchemaModel PlainSchema => new([Invoice_(computed: false), Items_(computed: false)]);
 
+    /// <summary>The schema before <c>gross_total</c> was declared at all — where the new-field migration fact starts.</summary>
+    private static SchemaModel WithoutGrossSchema =>
+        new([Invoice_(computed: true, withGross: false), Items_(computed: true)]);
+
     /// <summary>The descriptor that matches <see cref="PlainSchema"/>.</summary>
     private static AlvoDescriptor PlainDescriptor => DescriptorFor(computed: false);
 
-    private static EntitySchema Invoice_(bool computed) => new()
+    private static EntitySchema Invoice_(bool computed, bool withGross = true) => new()
     {
         Name = Invoices,
         Tenancy = TenancyMode.Global,
@@ -674,7 +726,7 @@ public abstract class AlvoDataComputedRollupTests
             new FieldSchema { Name = "id", Type = SchemaField.Uuid, Required = true },
             Money(VatTotal),
             Money(NetTotal) with { Rollup = RollupOf(RollupOperation.Sum, LineTotal) },
-            Money(GrossTotal) with { ComputedExpression = computed ? "net_total + vat_total" : null },
+            .. withGross ? [Money(GrossTotal) with { ComputedExpression = computed ? "net_total + vat_total" : null }] : Array.Empty<FieldSchema>(),
             new FieldSchema { Name = ItemCount, Type = SchemaField.Integer, Nullable = true, Rollup = RollupOf(RollupOperation.Count, field: null) },
             Money(LargestLine) with { Rollup = RollupOf(RollupOperation.Max, LineTotal) },
             Money(SmallestLine) with { Rollup = RollupOf(RollupOperation.Min, LineTotal) },

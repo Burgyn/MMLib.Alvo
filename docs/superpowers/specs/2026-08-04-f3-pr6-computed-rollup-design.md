@@ -204,6 +204,20 @@ already emits the whole create-new / copy / drop / rename rebuild. It never emit
 extra plain `ADD` first), and the member answered a question nobody asks — a default interface member with no
 consumer. Both are gone. The engine fact Q1 measured is still true; the inference drawn from it was not.
 
+**Dev-1/Dev-2 reinstated (2026-09-28) — the withdrawal above measured the wrong diff.** The "single-hop" run
+started from the column present as an *ordinary* one (the shared suite's `PlainSchema`), which EF plans as an
+`AlterColumnOperation` — and that is the operation EF's SQLite generator rebuilds for. A field that did not exist
+at all, which is what an operator adding one from the dashboard produces, is an `AddColumnOperation`, and EF emits
+the bare `ALTER TABLE … ADD COLUMN … STORED` SQLite refuses on a populated table (`cannot add a STORED column`) —
+Q7 was right. So the two-hop is back, in `GeneratedColumnAdds`, behind the default-implemented dialect member
+`IAlvoSqlDialect.GeneratedColumnAddRequiresTableRebuild` (SQLite `true`, PostgreSQL keeps its one-hop `ADD`). The
+same run found that Dev-7's framing covered only the migrator's own apply: the runtime path the dashboard and the
+Management API use (`EfCoreRuntimeSchemaWriter`) ran the rebuild with foreign keys enforced, so rebuilding a
+referenced parent failed on a restricted reference (and would have cascaded away children of a cascading one). Both
+now run through `MigrationFramingScope`. Pinned by the shared suite's
+`A_new_computed_field_can_be_added_to_a_parent_that_already_holds_rows`, `SqliteRuntimeSchemaWriterTests`, and the
+admin e2e `ComputedOnPopulatedEntityScenarios`.
+
 **Dev-7 — the rebuild's real missing piece was a foreign-key pragma outside the transaction, and no pass of the
 spike found it.** EF emits `PRAGMA foreign_keys = 0` around its rebuild and marks those commands
 transaction-suppressed, but `MigrationPlan.Sql` carries plain strings and cannot carry the flag — so the pragma

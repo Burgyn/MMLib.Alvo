@@ -1,4 +1,6 @@
-﻿using Microsoft.Playwright;
+﻿using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Playwright;
+using MMLib.Alvo.Data;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
@@ -63,8 +65,8 @@ public sealed class MaintainedFieldScenarios(AdminWorld world) : IClassFixture<A
 }
 
 /// <summary>
-/// A computed field is authored and keeps its kind once staged. It stops before Preview: whether the SQLite
-/// migrator can add a stored generated column to an existing table is the migrator's question, not the editor's.
+/// A computed field is authored and keeps its kind once staged. It stops before Preview; applying one to populated
+/// entities is <see cref="ComputedOnPopulatedEntityScenarios"/>' case.
 /// </summary>
 /// <param name="world">The running host and browser.</param>
 public sealed class ComputedFieldScenarios(AdminWorld world) : IClassFixture<AdminWorld>
@@ -132,4 +134,81 @@ public sealed class ComputedRefusalScenarios(AdminWorld world) : IClassFixture<A
 
         session.AssertConsoleClean();
     }
+}
+
+/// <summary>
+/// A computed field is added to entities that already hold rows — a parent other rows reference, and the child that
+/// references it — and the apply keeps every row and computes the value for each.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>The rows are written before the field is staged, and that is the case under test.</b> SQLite's <c>ALTER TABLE
+/// … ADD COLUMN</c> cannot add a <c>STORED</c> generated column to a table that holds a row, so the migrator has to
+/// rebuild the table; on an empty one the question never arises. <c>customers</c> is the parent every work order
+/// references, so a rebuild that let the foreign key act would take the work order with it.
+/// </para>
+/// <para>Its own world: it applies.</para>
+/// </remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class ComputedOnPopulatedEntityScenarios(AdminWorld world) : IClassFixture<AdminWorld>
+{
+    private static readonly TenantId _tenant = TenantId.New();
+
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_computed_field_added_to_populated_entities_is_applied_and_computed_for_every_row()
+    {
+        var (customer, workOrder) = await SeedAsync();
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+
+        await AddComputedAsync(session, "customers", "display_name", "string", "name");
+        await AddComputedAsync(session, "work_orders", "priority_twice", "integer", "priority + priority");
+        await session.PreviewPendingAsync();
+        (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
+        await session.Page.FillAsync("#apply-reason", "Computed fields over populated entities");
+        await session.Page.GetByRole(AriaRole.Button, new() { Name = "Apply these changes" }).ClickAsync();
+        await session.Content.GetByText("Applied as revision").First.WaitForAsync();
+
+        using var scope = world.Services.CreateScope();
+        var data = scope.ServiceProvider.GetRequiredService<IAlvoData>();
+        var system = AlvoContext.System(_tenant);
+        var customerNow = (await data.GetAsync("customers", customer, system, TestContext.Current.CancellationToken)).ShouldNotBeNull("the parent row survived the rebuild");
+        customerNow["display_name"].ShouldBe("Customer of WO-0901");
+        var workOrderNow = (await data.GetAsync("work_orders", workOrder, system, TestContext.Current.CancellationToken))
+            .ShouldNotBeNull("the child row survived its parent's rebuild");
+        Convert.ToInt64(workOrderNow["priority_twice"], System.Globalization.CultureInfo.InvariantCulture).ShouldBe(6);
+        workOrderNow["customer_id"].ShouldBe(customer, "and still references its customer");
+
+        session.AssertConsoleClean();
+    }
+
+    private static async Task AddComputedAsync(AdminSession session, string entity, string name, string type, string expression)
+    {
+        await session.GoAsync($"/schema/{entity}");
+        await session.Page.GetByTestId("add-field").ClickAsync();
+        var sheet = session.Page.GetByTestId("field-sheet");
+        await sheet.GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync(name);
+        await sheet.GetByRole(AriaRole.Radio, new() { Name = "computed", Exact = true }).ClickAsync();
+        await sheet.GetByRole(AriaRole.Radio, new() { Name = type, Exact = true }).ClickAsync();
+        await sheet.GetByRole(AriaRole.Textbox, new() { Name = "Expression" }).FillAsync(expression);
+        await session.Page.GetByTestId("field-save").ClickAsync();
+        await session.Page.GetByTestId($"field-row-{name}").WaitForAsync();
+    }
+
+    private async Task<(Guid Customer, Guid WorkOrder)> SeedAsync()
+    {
+        using var scope = world.Services.CreateScope();
+        await FieldServiceSeed.GrantTheOperatorAsync(scope.ServiceProvider, _tenant);
+        var data = scope.ServiceProvider.GetRequiredService<IAlvoData>();
+        var system = AlvoContext.System(_tenant);
+        var region = await FieldServiceSeed.RegionAsync(data, system, "R-WO-0901");
+        var customer = await FieldServiceSeed.CustomerAsync(data, system, _tenant, "Customer of WO-0901");
+        var workOrder = await FieldServiceSeed.WorkOrderAsync(data, system, _tenant, "WO-0901", customer, region);
+        return (Id(customer), Id(workOrder));
+    }
+
+    private static Guid Id(AlvoRecord record) => record["id"] switch
+    {
+        Guid id => id,
+        var other => Guid.Parse(Convert.ToString(other, System.Globalization.CultureInfo.InvariantCulture)!),
+    };
 }

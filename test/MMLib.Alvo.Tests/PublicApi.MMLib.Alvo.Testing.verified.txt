@@ -236,6 +236,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_child_write_in_one_tenant_never_moves_another_tenants_rollup() { }
         public System.Threading.Tasks.Task A_computed_field_can_be_added_to_an_entity_that_already_holds_a_row() { }
         public System.Threading.Tasks.Task A_computed_field_is_the_expression_over_the_row_the_write_stored() { }
+        public System.Threading.Tasks.Task A_new_computed_field_can_be_added_to_a_parent_that_already_holds_rows() { }
         public System.Threading.Tasks.Task A_payload_naming_a_computed_field_is_refused_rather_than_ignored() { }
         public System.Threading.Tasks.Task A_rollup_over_no_children_is_the_operations_own_empty_answer() { }
         public System.Threading.Tasks.Task A_tenants_rollup_never_aggregates_another_tenants_children() { }

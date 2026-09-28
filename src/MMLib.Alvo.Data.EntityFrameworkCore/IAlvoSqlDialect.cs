@@ -329,6 +329,26 @@ public interface IAlvoSqlDialect
     MigrationBatchFraming MigrationFraming => MigrationBatchFraming.None;
 
     /// <summary>
+    /// Whether this engine refuses to <c>ADD</c> a stored generated column to a table that holds rows, so the migrator
+    /// must have the table rebuilt instead — <see langword="false"/> for an engine that adds one in place.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The hop count is per engine, measured.</b> PostgreSQL adds a <c>STORED</c> column to a populated table and
+    /// backfills it; SQLite refuses with <c>cannot add a STORED column</c>, and refuses only once the table holds a
+    /// row, so a fact over an empty fixture passes on both. Answering <see langword="true"/> makes the migrator plan
+    /// the column as added plain and then altered into the generated one, which EF Core's SQLite generator answers
+    /// with its create-new / copy / drop / rename rebuild — so the DDL stays EF's, and this member only decides
+    /// which operations it is handed.
+    /// </para>
+    /// <para>
+    /// A <b>default interface member</b>, like <see cref="MigrationFraming"/>, answering "nothing special" so no
+    /// existing implementation breaks and no engine is assumed to have a peculiarity it does not have.
+    /// </para>
+    /// </remarks>
+    bool GeneratedColumnAddRequiresTableRebuild => false;
+
+    /// <summary>
     /// Decides whether <paramref name="failure"/> is this engine refusing a write on a constraint a
     /// <em>caller</em> can do something about — a <c>unique</c> collision or a <c>restrict</c>-ed reference —
     /// and recovers whatever it names, or answers <see langword="null"/> when it is anything else.

@@ -248,7 +248,7 @@ public static class AlvoEfCoreProvider
         var connections = services.GetRequiredService<RelationalConnectionFactory>();
         var options = services.GetRequiredService<IOptions<AlvoOptions>>().Value;
 
-        return new EfCoreRuntimeSchemaWriter(connections, options);
+        return new EfCoreRuntimeSchemaWriter(connections, options, services.GetRequiredService<IAlvoSqlDialect>());
     }
 
     // A short-lived context configured with the provider's UseXxx, spun up only to reach its

@@ -104,6 +104,16 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
         After = ["PRAGMA foreign_keys = 1"],
     };
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>ALTER TABLE … ADD COLUMN … STORED</c> is refused on a table holding a row (<c>cannot add a STORED
+    /// column</c>) — SQLite's documented limit on <c>ADD COLUMN</c>, which accepts only <c>VIRTUAL</c> there — and
+    /// the rebuild this asks for runs under <see cref="MigrationFraming"/>, which is what keeps the rebuilt table's
+    /// cascading children. Implemented explicitly: it is the migrator's question, not part of this type's own
+    /// surface.
+    /// </remarks>
+    bool IAlvoSqlDialect.GeneratedColumnAddRequiresTableRebuild => true;
+
     /// <summary><c>SQLITE_CONSTRAINT_UNIQUE</c> (2067): a <c>UNIQUE</c> index refused the row.</summary>
     private const int ConstraintUnique = 2067;
 

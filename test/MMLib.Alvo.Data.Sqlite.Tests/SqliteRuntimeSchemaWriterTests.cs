@@ -61,6 +61,51 @@ public sealed class SqliteRuntimeSchemaWriterTests : RuntimeSchemaWriterContract
         (await store.ListAsync("ddl-failure", ct)).ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// A plan that rebuilds a table other rows reference — SQLite's create-new / copy / drop / rename, which is what
+    /// EF emits for a generated column added to a populated table — applies on the runtime path and keeps the child.
+    /// </summary>
+    /// <remarks>
+    /// The writer must frame its transaction with the dialect's <c>PRAGMA foreign_keys = 0</c> the way the migrator
+    /// does: the pragma is a no-op inside a transaction, so without the framing <c>DROP TABLE parents</c> is refused
+    /// by the restricted reference (<c>FOREIGN KEY constraint failed</c>) — the failure the dashboard's apply of a
+    /// computed field on <c>customers</c> hit — and a cascading one would have deleted the children instead.
+    /// </remarks>
+    [Fact]
+    public async Task A_rebuild_of_a_referenced_table_applies_and_keeps_its_children()
+    {
+        var writer = CreateWriter();
+        var ct = TestContext.Current.CancellationToken;
+        await writer.ApplyAndAppendAsync("rebuild", Plan(
+            "CREATE TABLE parents (id INTEGER PRIMARY KEY, name TEXT)",
+            "CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parents (id) ON DELETE RESTRICT)",
+            "INSERT INTO parents (id, name) VALUES (1, 'p')",
+            "INSERT INTO children (id, parent_id) VALUES (10, 1)"), Candidate(0), 0, new MigrationOptions(), ct);
+
+        await writer.ApplyAndAppendAsync("rebuild", Plan(
+            "CREATE TABLE ef_temp_parents (id INTEGER PRIMARY KEY, name TEXT, label TEXT AS (name) STORED)",
+            "INSERT INTO ef_temp_parents (id, name) SELECT id, name FROM parents",
+            "DROP TABLE parents",
+            "ALTER TABLE ef_temp_parents RENAME TO parents"), Candidate(1), 1, new MigrationOptions(), ct);
+
+        (await ScalarAsync("SELECT count(*) FROM children WHERE parent_id = 1", ct)).ShouldBe(1L);
+        (await ScalarAsync("SELECT label FROM parents WHERE id = 1", ct)).ShouldBe("p");
+    }
+
+    private static MigrationPlan Plan(params string[] sql) => new() { Steps = [], Sql = sql };
+
+    private static DescriptorVersion Candidate(int revision) =>
+        new(new SchemaModel([]), "{}", Revision: revision, CreatedAt: DateTimeOffset.UnixEpoch);
+
+    private async Task<object?> ScalarAsync(string sql, CancellationToken ct)
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_databasePath};Foreign Keys=True");
+        await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return await command.ExecuteScalarAsync(ct);
+    }
+
     public void Dispose()
     {
         _services.Dispose();
