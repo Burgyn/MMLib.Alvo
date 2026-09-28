@@ -26,4 +26,11 @@ internal static class Descriptors
     /// </summary>
     public static string ComplexCrm { get; } = File.ReadAllText(
         Path.Combine(RepositoryRoot.Find(), "examples", "complex-crm", "crm.alvo.json"));
+
+    /// <summary>
+    /// The bike-workshop example, exactly as it sits in the repository — the demo world <c>scripts/demo-admin</c>
+    /// boots, and the one whose customers the maintainer asked a computed <c>full_name</c> of.
+    /// </summary>
+    public static string BikeWorkshop { get; } = File.ReadAllText(
+        Path.Combine(RepositoryRoot.Find(), "examples", "bike-workshop", "bike-workshop.alvo.json"));
 }

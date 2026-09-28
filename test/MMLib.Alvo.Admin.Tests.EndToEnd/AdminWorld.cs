@@ -94,7 +94,7 @@ public class AdminWorld : IAsyncLifetime
 
         var descriptor = Path.Combine(_root, "descriptor.json");
         var password = Path.Combine(_root, "bootstrap.pwd");
-        await File.WriteAllTextAsync(descriptor, Descriptors.FieldService).ConfigureAwait(false);
+        await File.WriteAllTextAsync(descriptor, Descriptor).ConfigureAwait(false);
         await File.WriteAllTextAsync(password, AdminPassword).ConfigureAwait(false);
 
         var port = FreePort();
@@ -156,6 +156,13 @@ public class AdminWorld : IAsyncLifetime
         _playwright = await Playwright.CreateAsync().ConfigureAwait(false);
         _browser = await _playwright.Chromium.LaunchAsync(new() { Headless = true }).ConfigureAwait(false);
     }
+
+    /// <summary>The descriptor this world boots — the field-service example unless a derived world names another.</summary>
+    /// <remarks>
+    /// A seam for a world whose scenario is about another example's data — the bike-workshop customers the computed
+    /// <c>full_name</c> request was made over — rather than a way to write a descriptor for a test.
+    /// </remarks>
+    protected virtual string Descriptor => Descriptors.FieldService;
 
     /// <summary>
     /// Adds this world's own services to the shipped host.
