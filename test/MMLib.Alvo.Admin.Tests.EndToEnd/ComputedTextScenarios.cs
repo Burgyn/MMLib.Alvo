@@ -47,10 +47,10 @@ public sealed class ComputedTextScenarios(BikeWorkshopWorld world) : IClassFixtu
         await session.Content.GetByText("Applied as revision").First.WaitForAsync();
 
         await session.GoAsync("/data/customers");
-        (await session.Page.GetByRole(AriaRole.Columnheader, new() { Name = "Full name" }).CountAsync())
-            .ShouldBe(1, "the joined name is the grid's label column");
         var janaRow = session.Page.GetByTestId("grid-row").Filter(new() { HasText = "Jana Nováková" });
         await janaRow.WaitForAsync();
+        (await session.Page.GetByRole(AriaRole.Columnheader, new() { Name = "Full name" }).CountAsync())
+            .ShouldBe(1, "the joined name is the grid's label column");
         (await janaRow.Locator("td").First.InnerTextAsync()).Trim().ShouldBe("Jana Nováková");
         await session.GoAsync($"/data/customers?record={jana}");
         var calculated = session.Page.GetByTestId("record-calculated");
