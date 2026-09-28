@@ -1,5 +1,6 @@
 ﻿using CsCheck;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Tests.Data;
 using Npgsql;
 using Xunit;
 
@@ -16,40 +17,34 @@ namespace MMLib.Alvo.Data.PostgreSql.Tests.Integration;
 /// </remarks>
 public sealed class PostgreSqlStringLiteralTests(PostgresFixture fixture) : IClassFixture<PostgresFixture>
 {
-    private static readonly Gen<string> _hostileText =
-        Gen.OneOf(
-            Gen.Char["abcXYZ01_ '\"%;-()\\/*$ENé中ž"],
-            Gen.Char[' ', '퟿'],
-            Gen.Const('\''),
-            Gen.Const('\\')).Array[0, 24].Select(characters => new string(characters));
-
     private readonly IFieldSqlRenderer _fields = new PostgreSqlFieldSqlRenderer();
 
     [Theory]
     [InlineData("on")]
     [InlineData("off")]
-    public async Task The_engine_reads_every_literal_back_as_the_text_it_was_rendered_from(string standardConformingStrings)
+    public async Task The_engine_reads_every_literal_back_and_only_what_must_be_is_declined(string standardConformingStrings)
     {
         EnsureEngineAvailable();
         await using var connection = await OpenAsync(standardConformingStrings);
-        long asked = 0;
+        long quoted = 0, declined = 0;
 
-        _hostileText.Sample(
+        LiteralText.Any().Sample(
             value =>
             {
-                var literal = _fields.RenderStringLiteral(value);
-                if (literal is null)
+                if (_fields.RenderStringLiteral(value) is not { } literal)
                 {
-                    return false;
+                    declined++;
+                    return LiteralText.MustBeDeclined(value);
                 }
 
-                asked++;
-                return ReadBack(connection, literal) == value;
+                quoted++;
+                return !LiteralText.MustBeDeclined(value) && ReadBack(connection, literal) == value;
             },
-            iter: 300,
+            iter: 400,
             threads: 1);
 
-        asked.ShouldBe(300, "every generated value is text PostgreSQL carries, so none may be declined");
+        quoted.ShouldBeGreaterThan(40, "the space must reach text a literal carries");
+        declined.ShouldBeGreaterThan(40, "and text it must decline, or the partition is asserted vacuously");
     }
 
     /// <summary>The payload that breaks a standard literal under <c>off</c> lands as data here, and runs nothing.</summary>

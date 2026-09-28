@@ -72,4 +72,8 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/boot/ConcurrentColdStart.cs" Link="_shared/ConcurrentColdStart.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/literals/LiteralText.cs" Link="_shared/LiteralText.cs" />
+  </ItemGroup>
+
 </Project>

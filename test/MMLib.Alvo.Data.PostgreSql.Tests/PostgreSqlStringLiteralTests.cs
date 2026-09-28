@@ -1,5 +1,6 @@
 ﻿using CsCheck;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Tests.Data;
 using System.Text;
 
 namespace MMLib.Alvo.Data.PostgreSql.Tests;
@@ -25,34 +26,29 @@ namespace MMLib.Alvo.Data.PostgreSql.Tests;
 /// </remarks>
 public class PostgreSqlStringLiteralTests
 {
-    private static readonly Gen<string> _hostileText =
-        Gen.OneOf(
-            Gen.Char["abcXYZ01_ '\"%;-()\\/*$ENé中ž"],
-            Gen.Char[' ', '퟿'],
-            Gen.Const('\''),
-            Gen.Const('\\')).Array[0, 32].Select(characters => new string(characters));
-
     private readonly IFieldSqlRenderer _fields = new PostgreSqlFieldSqlRenderer();
 
     [Fact]
-    public void Every_text_decodes_back_to_itself_from_exactly_one_escape_string()
+    public void A_literal_is_declined_exactly_when_it_must_be_and_otherwise_decodes_back_from_one_escape_string()
     {
-        long quoted = 0;
+        long quoted = 0, declined = 0;
 
-        _hostileText.Sample(
+        LiteralText.Any().Sample(
             value =>
             {
                 if (_fields.RenderStringLiteral(value) is not { } literal)
                 {
-                    return false;
+                    Interlocked.Increment(ref declined);
+                    return LiteralText.MustBeDeclined(value);
                 }
 
                 Interlocked.Increment(ref quoted);
-                return DecodeEscapeString(literal) == value;
+                return !LiteralText.MustBeDeclined(value) && DecodeEscapeString(literal) == value;
             },
             iter: 10_000);
 
-        quoted.ShouldBe(10_000, "every generated value is text a literal carries, so none may be declined");
+        quoted.ShouldBeGreaterThan(500, "the space must reach text a literal carries");
+        declined.ShouldBeGreaterThan(500, "and text it must decline, or the partition is asserted vacuously");
     }
 
     [Theory]

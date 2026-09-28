@@ -1,6 +1,7 @@
 ﻿using CsCheck;
 using Microsoft.Data.Sqlite;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Tests.Data;
 
 namespace MMLib.Alvo.Data.Sqlite.Tests;
 
@@ -16,38 +17,33 @@ namespace MMLib.Alvo.Data.Sqlite.Tests;
 /// </remarks>
 public sealed class SqliteStringLiteralTests : IDisposable
 {
-    private static readonly Gen<string> _hostileText =
-        Gen.OneOf(
-            Gen.Char["abcXYZ01_ '\"%;-()\\/*$ENé中ž"],
-            Gen.Char[' ', '퟿'],
-            Gen.Const('\'')).Array[0, 24].Select(characters => new string(characters));
-
     private readonly IFieldSqlRenderer _fields = new SqliteFieldSqlRenderer();
     private readonly SqliteConnection _connection = new("Data Source=:memory:");
 
     public SqliteStringLiteralTests() => _connection.Open();
 
     [Fact]
-    public void The_engine_reads_every_literal_back_as_the_text_it_was_rendered_from()
+    public void The_engine_reads_every_literal_back_and_only_what_must_be_is_declined()
     {
-        long asked = 0;
+        long quoted = 0, declined = 0;
 
-        _hostileText.Sample(
+        LiteralText.Any().Sample(
             value =>
             {
-                var literal = _fields.RenderStringLiteral(value);
-                if (literal is null)
+                if (_fields.RenderStringLiteral(value) is not { } literal)
                 {
-                    return false;
+                    declined++;
+                    return LiteralText.MustBeDeclined(value);
                 }
 
-                asked++;
-                return ReadBack(literal) == value;
+                quoted++;
+                return !LiteralText.MustBeDeclined(value) && ReadBack(literal) == value;
             },
             iter: 2_000,
             threads: 1);
 
-        asked.ShouldBe(2_000, "every generated value is text SQLite carries, so none may be declined");
+        quoted.ShouldBeGreaterThan(100, "the space must reach text a literal carries");
+        declined.ShouldBeGreaterThan(100, "and text it must decline, or the partition is asserted vacuously");
     }
 
     /// <summary>
