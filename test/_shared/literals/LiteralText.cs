@@ -25,7 +25,7 @@ internal static class LiteralText
         Gen.Char.Select(character => character.ToString()),
         Gen.Char['\u0000', ' '].Select(character => character.ToString()),
         Gen.Char['\uD800', '\uDFFF'].Select(character => character.ToString()),
-        Gen.Char['', '￿'].Select(character => character.ToString()),
+        Gen.Char['\uE000', '\uFFFF'].Select(character => character.ToString()),
         Gen.Int[0x10000, 0x10FFFF].Select(char.ConvertFromUtf32));
 
     /// <summary>Strings of up to <paramref name="maxPieces"/> pieces from the whole space.</summary>
