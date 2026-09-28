@@ -24,6 +24,15 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// keeps this pass from growing a second copy of what the renderer accepts. The driver keeps its own guard as a
 /// backstop, for a host that replaced <see cref="IPredicateRenderer"/> or a model built without this validator.
 /// </para>
+/// <para>
+/// <b>A deliberate deviation: the core's own renderer, not the one in the container.</b> The driver renders with the
+/// DI-resolved <see cref="IPredicateRenderer"/>; this pass uses <see cref="SqlPredicateRenderer"/> directly, because
+/// <see cref="DescriptorValidator"/> is constructed without a container too (a CLI <c>validate</c>, a test) and must
+/// answer the same there. The cost is one-sided and stated: a host whose replacement renderer could carry more —
+/// inline a constant, say — is refused here for an expression its own driver would have accepted. The opposite
+/// error, accepting what the driver then refuses, cannot happen for the core renderer's shapes, and for a
+/// narrower replacement the driver's structured backstop still answers.
+/// </para>
 /// </remarks>
 internal static class ComputedFieldCheck
 {

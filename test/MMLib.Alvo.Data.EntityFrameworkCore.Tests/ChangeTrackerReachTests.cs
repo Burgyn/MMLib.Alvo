@@ -127,6 +127,8 @@ public class ChangeTrackerReachTests
     /// precisely so the row-statement file does not also become the place framework bookkeeping SQL is written;
     /// <c>PredicateParameterBinder</c> creates a command only to reach the provider's parameter factory;
     /// <c>EfCoreSchemaMigrator</c> executes the migrator's generated statements;
+    /// <c>MigrationFramingScope</c> runs the dialect's constant integrity query (<c>PRAGMA foreign_key_check</c>) inside
+    /// a migration's transaction, binding and composing nothing;
     /// <c>SqliteCaseSensitiveLike</c> runs one connection pragma and can carry no row predicate at all;
     /// <c>RollupRecompute</c> writes the parent's own aggregate columns from a subquery over the child table
     /// and narrows by the row id it read off the child row this caller was already authorised to write, so it
@@ -227,6 +229,7 @@ public class ChangeTrackerReachTests
         "EfCoreSchemaMigrator.cs",
         "EfCoreSecretStore.cs",
         "IdempotencyTable.cs",
+        "MigrationFramingScope.cs",
         "OutboxTable.cs",
         "PredicateParameterBinder.cs",
         "RelationalReachability.cs",

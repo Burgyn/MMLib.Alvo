@@ -1,4 +1,6 @@
-﻿using System.Data.Common;
+﻿using MMLib.Alvo.Descriptor;
+using System.Data.Common;
+using System.Globalization;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Internal;
 
@@ -70,9 +72,107 @@ internal static class MigrationFramingScope
             throw;
         }
 
-        await RelationalSqlBatch.ExecuteUntransactedAsync(connection, framing.After, CancellationToken.None)
-            .ConfigureAwait(false);
+        await RestoreAsync(connection, framing).ConfigureAwait(false);
         return result;
+    }
+
+    /// <summary>
+    /// Runs the framing's <see cref="MigrationBatchFraming.Verify"/> query inside <paramref name="transaction"/>, and
+    /// refuses the migration when it answers a row — before the caller commits, so the refusal rolls it all back.
+    /// </summary>
+    /// <remarks>
+    /// The refusal is a <see cref="DescriptorValidationException"/> at each offending reference's field pointer —
+    /// the type the Management API and the dashboard already answer as a structured refusal — because what failed is
+    /// the descriptor's reference over the data it was applied to, and the fix is the author's: point the rows at a
+    /// parent that exists, clear them, or leave the reference as it was.
+    /// </remarks>
+    /// <param name="connection">The migration's connection.</param>
+    /// <param name="transaction">The migration's open transaction.</param>
+    /// <param name="framing">The dialect's framing.</param>
+    /// <param name="ct">Cancels the query.</param>
+    /// <exception cref="DescriptorValidationException">The query answered at least one violating row.</exception>
+    public static async Task VerifyAsync(
+        DbConnection connection, DbTransaction transaction, MigrationBatchFraming framing, CancellationToken ct)
+    {
+        if (framing.Verify is not { Length: > 0 } query)
+        {
+            return;
+        }
+
+        var violations = await ViolationsAsync(connection, transaction, query, ct).ConfigureAwait(false);
+        if (violations.Count > 0)
+        {
+            throw new DescriptorValidationException(new DescriptorValidationResult(
+                [.. violations.GroupBy(violation => (violation.Table, violation.Column, violation.Parent)).Select(Refusal)]));
+        }
+    }
+
+    private static async Task<List<Violation>> ViolationsAsync(
+        DbConnection connection, DbTransaction transaction, string query, CancellationToken ct)
+    {
+        var command = connection.CreateCommand();
+        await using (command.ConfigureAwait(false))
+        {
+            command.CommandText = query;
+            command.Transaction = transaction;
+            var reader = await command.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            await using (reader.ConfigureAwait(false))
+            {
+                var violations = new List<Violation>();
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    violations.Add(new Violation(
+                        reader.GetString(0), Text(reader.GetValue(1)), reader.GetString(2), reader.GetString(3)));
+                }
+
+                return violations;
+            }
+        }
+    }
+
+    private static string Text(object value) => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+
+    private static DescriptorValidationError Refusal(IGrouping<(string Table, string Column, string Parent), Violation> rows)
+    {
+        var (table, column, parent) = rows.Key;
+        var count = rows.Count();
+        var named = string.Join(", ", rows.Take(NamedRows).Select(row => row.Row));
+        return new DescriptorValidationError(
+            $"/entities/{table}/fields/{column}",
+            $"Applying this change would leave {count} row(s) of '{table}' whose '{column}' names a '{parent}' "
+            + $"record that does not exist (row {named}{(count > NamedRows ? ", …" : string.Empty)}). Nothing was applied.",
+            $"Point those rows' '{column}' at existing '{parent}' records, or clear it, before applying — or keep the "
+            + "reference as it was.",
+            DescriptorValidationSeverity.Error);
+    }
+
+    /// <summary>At most this many row identifiers are named in one refusal; the count says the rest.</summary>
+    private const int NamedRows = 10;
+
+    private sealed record Violation(string Table, string Row, string Parent, string Column);
+
+    /// <summary>
+    /// Restores the framing after the work, and closes a connection whose restore failed rather than letting it go
+    /// on with enforcement still suspended.
+    /// </summary>
+    /// <remarks>
+    /// The pragma is a property of the connection, so a restore that failed leaves exactly this one connection unsafe.
+    /// The migration connections are opened unpooled (the SQLite driver's
+    /// <c>RelationalProviderRegistration.CreateConnection</c>, pinned by a test), so closing it ends the native
+    /// connection there and then — nothing later in this call, and no pool, can hand it out again.
+    /// </remarks>
+    private static async Task RestoreAsync(DbConnection connection, MigrationBatchFraming framing)
+    {
+        try
+        {
+            await RelationalSqlBatch.ExecuteUntransactedAsync(connection, framing.After, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            await connection.CloseAsync().ConfigureAwait(false);
+            throw;
+        }
     }
 
     /// <summary>
@@ -91,8 +191,7 @@ internal static class MigrationFramingScope
     {
         try
         {
-            await RelationalSqlBatch.ExecuteUntransactedAsync(connection, framing.After, CancellationToken.None)
-                .ConfigureAwait(false);
+            await RestoreAsync(connection, framing).ConfigureAwait(false);
         }
         catch (Exception secondary) when (secondary is DbException or InvalidOperationException)
         {

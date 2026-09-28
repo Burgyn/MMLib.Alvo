@@ -32,10 +32,15 @@ internal static class GeneratedColumnAdds
     internal static List<MigrationOperation> AsRebuilds(IEnumerable<MigrationOperation> operations) =>
         [.. operations.SelectMany(Expand)];
 
+    /// <summary>What the plan says on the step whose SQL this rewrites.</summary>
+    internal const string RebuildNote = "Rebuilds the table: copies every row under a write lock.";
+
+    /// <summary>Whether <paramref name="operation"/> adds a stored generated column — the one this rewrites.</summary>
+    internal static bool IsGeneratedAdd(MigrationOperation operation) =>
+        operation is AddColumnOperation { ComputedColumnSql: not null, IsStored: true };
+
     private static IEnumerable<MigrationOperation> Expand(MigrationOperation operation) =>
-        operation is AddColumnOperation { ComputedColumnSql: not null, IsStored: true } add
-            ? [Plain(add), IntoGenerated(add)]
-            : [operation];
+        IsGeneratedAdd(operation) ? [Plain((AddColumnOperation)operation), IntoGenerated((AddColumnOperation)operation)] : [operation];
 
     /// <summary>The column as an ordinary, nullable one — legal to add to a table that holds rows.</summary>
     private static AddColumnOperation Plain(AddColumnOperation add) => new()

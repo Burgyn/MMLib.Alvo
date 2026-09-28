@@ -92,6 +92,80 @@ public sealed class SqliteRuntimeSchemaWriterTests : RuntimeSchemaWriterContract
         (await ScalarAsync("SELECT label FROM parents WHERE id = 1", ct)).ShouldBe("p");
     }
 
+    /// <summary>
+    /// A rebuild that introduces a reference over a value naming no parent is refused before it commits — on the
+    /// runtime path — naming the table, the column and the row, and nothing of it is applied.
+    /// </summary>
+    /// <remarks>
+    /// With enforcement suspended for the rebuild, the orphan used to be copied into a table whose foreign key it
+    /// violates and committed silently. <c>PRAGMA foreign_key_check</c> inside the transaction (SQLite's own step 10)
+    /// is what turns that into a refusal.
+    /// </remarks>
+    [Fact]
+    public async Task A_rebuild_that_would_commit_an_orphaned_reference_is_refused_and_rolled_back()
+    {
+        var writer = CreateWriter();
+        var ct = TestContext.Current.CancellationToken;
+        await writer.ApplyAndAppendAsync("orphans", Plan(
+            "CREATE TABLE parents (id INTEGER PRIMARY KEY)",
+            "CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER)",
+            "INSERT INTO parents (id) VALUES (1)",
+            "INSERT INTO children (id, parent_id) VALUES (10, 1), (11, 99)"), Candidate(0), 0, new MigrationOptions(), ct);
+
+        var refusal = await Should.ThrowAsync<MMLib.Alvo.Descriptor.DescriptorValidationException>(
+            () => writer.ApplyAndAppendAsync("orphans", Plan(_orphaningRebuild), Candidate(1), 1, new MigrationOptions(), ct));
+
+        var error = refusal.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/children/fields/parent_id");
+        error.Message.ShouldContain("'parents'");
+        error.Message.ShouldContain("row 11");
+        (await _services.GetRequiredService<IDescriptorVersionStore>().ListAsync("orphans", ct)).Count
+            .ShouldBe(1, "the version row rolled back with the DDL");
+        (await ScalarAsync("SELECT count(*) FROM pragma_foreign_key_list('children')", ct))
+            .ShouldBe(0L, "the rebuild rolled back: the table has no foreign key");
+    }
+
+    /// <summary>The migrator's own apply verifies the same way.</summary>
+    [Fact]
+    public async Task The_migrators_apply_refuses_the_same_orphaned_reference()
+    {
+        var migrator = _services.GetRequiredService<ISchemaMigrator>();
+        var ct = TestContext.Current.CancellationToken;
+        await migrator.ApplyAsync(Plan(
+            "CREATE TABLE parents (id INTEGER PRIMARY KEY)",
+            "CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER)",
+            "INSERT INTO children (id, parent_id) VALUES (11, 99)"), new MigrationOptions(), ct);
+
+        var refusal = await Should.ThrowAsync<MMLib.Alvo.Descriptor.DescriptorValidationException>(
+            () => migrator.ApplyAsync(Plan(_orphaningRebuild), new MigrationOptions(), ct));
+
+        refusal.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe("/entities/children/fields/parent_id");
+        (await ScalarAsync("SELECT count(*) FROM pragma_foreign_key_list('children')", ct)).ShouldBe(0L);
+    }
+
+    /// <summary>
+    /// The migration connections are unpooled, which is what makes closing one whose restore failed final: no pool
+    /// can hand it out again with foreign keys still off.
+    /// </summary>
+    [Fact]
+    public void Migration_connections_are_never_pooled()
+    {
+#pragma warning disable EF1001 // Alvo's own internal type; the analyzer keys on the ".Internal" namespace alone.
+        using var connection = _services.GetRequiredService<MMLib.Alvo.Data.EntityFrameworkCore.Internal.RelationalConnectionFactory>().Create();
+#pragma warning restore EF1001
+
+        new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connection.ConnectionString).Pooling.ShouldBeFalse();
+    }
+
+    /// <summary>The create-new / copy / drop / rename rebuild of <c>children</c>, adding a reference to <c>parents</c>.</summary>
+    private static readonly string[] _orphaningRebuild =
+    [
+        "CREATE TABLE ef_temp_children (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parents (id))",
+        "INSERT INTO ef_temp_children (id, parent_id) SELECT id, parent_id FROM children",
+        "DROP TABLE children",
+        "ALTER TABLE ef_temp_children RENAME TO children",
+    ];
+
     private static MigrationPlan Plan(params string[] sql) => new() { Steps = [], Sql = sql };
 
     private static DescriptorVersion Candidate(int revision) =>

@@ -218,6 +218,21 @@ now run through `MigrationFramingScope`. Pinned by the shared suite's
 `A_new_computed_field_can_be_added_to_a_parent_that_already_holds_rows`, `SqliteRuntimeSchemaWriterTests`, and the
 admin e2e `ComputedOnPopulatedEntityScenarios`.
 
+**Deviation (2026-09-28) — `computed` is compiled and rendered at descriptor validation, with the core's own
+renderer.** `ComputedFieldCheck` (called from `DescriptorValidator`) refuses at `/entities/{e}/fields/{f}/computed`
+what `ComputedColumnSql` used to refuse only at plan time with an undocumented exception; the driver keeps it as a
+structured backstop (`DescriptorValidationException`). The pass uses `SqlPredicateRenderer` directly rather than the
+DI-resolved `IPredicateRenderer`, because the validator is also constructed without a container; a host whose
+replacement renderer could carry more is therefore over-refused at validation. Deliberate, and one-sided.
+
+**Rebuild integrity (2026-09-28).** With enforcement suspended, a rebuild that adds or retargets a reference over
+values naming no parent would commit the orphans. `MigrationBatchFraming.Verify` (SQLite: `PRAGMA
+foreign_key_check`, step 10 of SQLite's twelve-step `ALTER TABLE`) runs inside the transaction before commit on both
+the migrator and the runtime writer, and any row refuses the migration as a `DescriptorValidationException` at the
+referencing field, rolling it all back. A connection whose restore of `PRAGMA foreign_keys = 1` fails is closed (the
+migration connections are unpooled, so it cannot be handed out again). A generated-column add that SQLite rebuilds
+is planned as one safe `AddField` whose step says "Rebuilds the table: copies every row under a write lock."
+
 **Dev-7 — the rebuild's real missing piece was a foreign-key pragma outside the transaction, and no pass of the
 spike found it.** EF emits `PRAGMA foreign_keys = 0` around its rebuild and marks those commands
 transaction-suppressed, but `MigrationPlan.Sql` carries plain strings and cannot carry the flag — so the pragma

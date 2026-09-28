@@ -97,11 +97,21 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// outcome rather than left to connection disposal, because a pooled connection handed back with foreign
     /// keys off would silently stop enforcing them for whatever ran next.
     /// </para>
+    /// <para>
+    /// <b><c>Verify</c> is what makes the suspension safe to commit.</b> With enforcement off, a rebuild that adds or
+    /// retargets a reference over values naming no parent would commit the orphans silently; the check runs inside
+    /// the transaction, and the correlated <c>pragma_foreign_key_list</c> join names the referencing column.
+    /// </para>
     /// </remarks>
     public MigrationBatchFraming MigrationFraming { get; } = new()
     {
         Before = ["PRAGMA foreign_keys = 0"],
         After = ["PRAGMA foreign_keys = 1"],
+        Verify = """
+            SELECT c."table", c.rowid, c.parent, l."from"
+            FROM pragma_foreign_key_check() AS c
+            JOIN pragma_foreign_key_list(c."table") AS l ON l.id = c.fkid
+            """,
     };
 
     /// <inheritdoc/>

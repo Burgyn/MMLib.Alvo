@@ -22,9 +22,9 @@
 /// </para>
 /// <para>
 /// <b>The line's grammar is <c>DestructiveChangeGuard.DescribeStep</c>'s:</b>
-/// <c>{Kind} {entity}[.{field}][: {reason}][  &lt;- destructive]</c>. A reason is present only on a
-/// destructive step, and for a drop it repeats what the verb already says, so only an alteration's reason
-/// — the one that names <em>how</em> it can lose data — is carried into the sentence.
+/// <c>{Kind} {entity}[.{field}][: {reason}][  &lt;- destructive]</c>. On a destructive step the reason says how it
+/// loses data, and for a drop it repeats what the verb already says, so only an alteration's reason is carried into
+/// the sentence; on a non-destructive <c>AddField</c> it is a cost note (a SQLite table rebuild), carried too.
 /// </para>
 /// </remarks>
 /// <param name="Verb">What the step does, e.g. <c>Add column</c>.</param>
@@ -93,7 +93,7 @@ internal sealed record PlanStep(string Verb, string Target, string? Consequence,
         "CreateEntity" => new("Create table", target, null, destructive),
         "DropEntity" => new("Drop table", target, "destroys its rows", destructive),
         "RenameEntity" => new("Rename a table to", target, null, destructive),
-        "AddField" => new("Add column", target, null, destructive),
+        "AddField" => new("Add column", target, Sentence(reason), destructive),
         "DropField" => new("Drop column", target, "destroys its data", destructive),
         "RenameField" => new("Rename a column to", target, null, destructive),
         "AlterField" => new(target.Contains('.', StringComparison.Ordinal) ? "Change column" : "Change table",

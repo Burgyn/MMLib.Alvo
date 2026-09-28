@@ -28,6 +28,15 @@ public class PlanStepTests
     }
 
     [Fact]
+    public void An_added_column_carries_the_planners_cost_note_and_stays_safe()
+    {
+        var step = PlanStep.Parse("AddField customers.display_name: Rebuilds the table: copies every row under a write lock.");
+
+        step.ShouldBe(new PlanStep(
+            "Add column", "customers.display_name", "rebuilds the table: copies every row under a write lock", Destructive: false));
+    }
+
+    [Fact]
     public void A_dropped_column_says_it_destroys_its_data_and_loses_the_marker()
     {
         var step = PlanStep.Parse("DropField customers.notes: Drops the column and all its data.  <- destructive");

@@ -138,13 +138,21 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
 
     // Semantic steps (drive HasDestructiveChanges and the dry-run summary), in the same order as
     // AssembleOperations.
-    private static List<MigrationStep> BuildSemanticSteps(RenamePrePass.Result prePass, IReadOnlyList<MigrationOperation> residual)
+    private List<MigrationStep> BuildSemanticSteps(RenamePrePass.Result prePass, IReadOnlyList<MigrationOperation> residual)
     {
         var steps = new List<MigrationStep>(prePass.Renames.Count + residual.Count);
         steps.AddRange(prePass.Renames.Select(rename => ToStep(rename.Change)));
-        steps.AddRange(residual.Select(operation => ToStep(DestructiveScan.Classify(operation))));
+        steps.AddRange(residual.Select(operation => ToStep(DestructiveScan.Classify(operation), CostNote(operation))));
         return steps;
     }
+
+    // What a non-destructive step costs when that is worth saying before it runs: on an engine that rebuilds the table
+    // to add a generated column, the step copies every row under a write lock — a pause on a large table, not data
+    // loss, so it is a note on the step and never the destructive flag.
+    private string? CostNote(MigrationOperation operation) =>
+        _dialect.GeneratedColumnAddRequiresTableRebuild && GeneratedColumnAdds.IsGeneratedAdd(operation)
+            ? GeneratedColumnAdds.RebuildNote
+            : null;
 
     // Generates the executable SQL from the WHOLE operation list in ONE call: only then does EF
     // resolve interdependent operations correctly (e.g. a SQLite table rebuild triggered by a drop
@@ -196,17 +204,28 @@ public sealed class EfCoreSchemaMigrator : ISchemaMigrator
         MigrationFramingScope.RunAsync(
             connection,
             _dialect.MigrationFraming,
-            async () =>
-            {
-                await RelationalSqlBatch.ExecuteAsync(connection, plan.Sql, ct).ConfigureAwait(false);
-                return true;
-            },
+            () => ExecuteVerifiedAsync(connection, plan, ct),
             ct);
+
+    /// <summary>The plan's SQL in one transaction, verified by the dialect's framing before it commits.</summary>
+    private async Task<bool> ExecuteVerifiedAsync(DbConnection connection, MigrationPlan plan, CancellationToken ct)
+    {
+        await RelationalSqlBatch.OpenAsync(connection, ct).ConfigureAwait(false);
+        var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await using (transaction.ConfigureAwait(false))
+        {
+            await RelationalSqlBatch.ExecuteAsync(connection, plan.Sql, transaction, ct).ConfigureAwait(false);
+            await MigrationFramingScope.VerifyAsync(connection, transaction, _dialect.MigrationFraming, ct)
+                .ConfigureAwait(false);
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+            return true;
+        }
+    }
 
     // A step is purely semantic now: it names the change and whether it destroys data. The
     // executable SQL is generated once for the whole plan (see GenerateSql), not per step.
-    private static MigrationStep ToStep(SchemaChange change) =>
-        new(change, change.IsDestructive, change.IsDestructive ? change.Detail : null);
+    private static MigrationStep ToStep(SchemaChange change, string? costNote = null) =>
+        new(change, change.IsDestructive, change.IsDestructive ? change.Detail : costNote);
 
     private IModel BuildInitializedModel(SchemaModel schema)
     {
