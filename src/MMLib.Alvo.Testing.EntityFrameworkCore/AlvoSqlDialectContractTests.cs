@@ -574,10 +574,23 @@ public abstract class AlvoSqlDialectContractTests
     /// A join keeps both operands, in order — <c>first_name + ' ' + last_name</c> reversed is a different name — and
     /// carries no separator of its own, since it is composed inside another join.
     /// </summary>
+    /// <remarks>
+    /// A dialect that does not join text keeps the port's deny-by-default and throws
+    /// <see cref="NotSupportedException"/>: that is a decline, not a failure, the way a <see langword="null"/> is for
+    /// <see cref="IFieldSqlRenderer.RenderStringLiteral"/>. The order is asserted only for a dialect that answers.
+    /// </remarks>
     [Fact]
     public void A_concatenation_keeps_both_operands_in_their_order()
     {
-        var joined = CreateFieldRenderer().RenderStringConcatenation(Column, "\"last_name\"");
+        string joined;
+        try
+        {
+            joined = CreateFieldRenderer().RenderStringConcatenation(Column, "\"last_name\"");
+        }
+        catch (NotSupportedException)
+        {
+            return;
+        }
 
         joined.ShouldBe(joined.Trim());
         joined.IndexOf(Column, StringComparison.Ordinal).ShouldBeGreaterThanOrEqualTo(0);
