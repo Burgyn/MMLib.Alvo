@@ -59,4 +59,16 @@ public sealed class TestFieldSqlRenderer : IFieldSqlRenderer
     }
 
     private static string AsNumeric(string sql) => $"CAST({sql} AS numeric)";
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The SQL standard's literal — doubled single quotes — which is what the core's own scalar snapshots are read
+    /// against. A fake's answer: it refuses nothing, because the compiler has already refused what no dialect
+    /// carries, and the real drivers' quoting is proved against their engines, not here.
+    /// </remarks>
+    string? IFieldSqlRenderer.RenderStringLiteral(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return $"'{value.Replace("'", "''", StringComparison.Ordinal)}'";
+    }
 }

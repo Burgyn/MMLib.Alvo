@@ -1227,6 +1227,8 @@ namespace MMLib.Alvo.Expressions
         System.ValueTuple<string, string> RenderComparableOperands(string left, string right, MMLib.Alvo.Expressions.CelValueType type);
         string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName);
         string RenderParameter(string parameterName);
+        string RenderStringConcatenation(string left, string right);
+        string? RenderStringLiteral(string value);
         string RenderTwoValued(string predicate);
     }
     public interface IPredicateEvaluator

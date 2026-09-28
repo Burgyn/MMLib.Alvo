@@ -93,6 +93,61 @@ public interface IFieldSqlRenderer
     string RenderCaseInsensitiveLike(string left, string right);
 
     /// <summary>
+    /// Joins two already-rendered <b>string</b> operands — CEL's <c>+</c> over two strings, which only a computed
+    /// field's generated column renders. The default is the SQL standard's concatenation operator,
+    /// <c>(left || right)</c>, which PostgreSQL and SQLite both implement; a dialect whose operator differs
+    /// overrides it (T-SQL: <c>CONCAT(left, right)</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Neither operand is ever <c>NULL</c> by the time this is called,</b> and a dialect may rely on it. CEL's
+    /// <c>+</c> has no null overload while <c>||</c> answers <c>NULL</c> for the whole value, so the compiler refuses
+    /// an operand that can be null (the explicit fallback is <c>has(f) ? f : ''</c>). That is also why a
+    /// NULL-as-empty <c>CONCAT</c> and a NULL-propagating <c>||</c> answer identically here.
+    /// </para>
+    /// <para>
+    /// <b>Return grammar.</b> One expression, parenthesised or a function call so it composes inside another join,
+    /// with the operands in the order given. Called once per <c>+</c>, left-associatively, so <c>a + ' ' + b</c> asks
+    /// for <c>(a, ' ')</c> first and then for that result and <c>b</c>.
+    /// </para>
+    /// </remarks>
+    /// <param name="left">The already-rendered left operand.</param>
+    /// <param name="right">The already-rendered right operand.</param>
+    string RenderStringConcatenation(string left, string right) => $"({left} || {right})";
+
+    /// <summary>
+    /// Renders a text constant as <b>one inline SQL string-literal token</b> of this dialect, or
+    /// <see langword="null"/> when this dialect cannot carry <paramref name="value"/> inline.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The one path by which a value from CEL source reaches SQL text, and it is bounded three ways.</b> Only the
+    /// scalar (Computed) entry point calls it, because a generated column is DDL and DDL has no bind-parameter form;
+    /// only for a constant in a <em>value</em> position (a join's operand, a ternary's branch), never a comparison
+    /// operand; and every predicate keeps binding every value it carries. It is never handed caller input — the
+    /// constant was authored in the descriptor and compiled.
+    /// </para>
+    /// <para>
+    /// <b>The default is <see langword="null"/>, deliberately, and that is default-deny rather than a gap.</b> A
+    /// dialect that has not decided its own quoting rules is not given the SQL standard's by assumption: an engine
+    /// whose string literals honour backslash escapes would be broken out of by a doubled-quote literal. On
+    /// <see langword="null"/> the renderer binds the constant instead, and the validator refuses a computed field
+    /// that binds one — a refusal, never wrong DDL.
+    /// </para>
+    /// <para>
+    /// <b>Contract.</b> A non-null answer is exactly one string-literal token — nothing before its opening quote but
+    /// an optional prefix the engine defines for literals (T-SQL's <c>N</c>), nothing after its closing quote — whose
+    /// decoded value is <paramref name="value"/>, code unit for code unit. A value holding a character the dialect
+    /// cannot carry literally answers <see langword="null"/> rather than an approximation. The compiler already
+    /// refuses a control character and an unpaired surrogate in a computed constant, so a dialect refusing those too
+    /// is a belt, not a second rule. <c>MMLib.Alvo.Testing.Data.AlvoSqlDialectContractTests</c> asserts the
+    /// round-trip generically for every driver.
+    /// </para>
+    /// </remarks>
+    /// <param name="value">The constant, exactly as the compiled expression holds it.</param>
+    string? RenderStringLiteral(string value) => null;
+
+    /// <summary>
     /// Wraps <b>both</b> already-rendered operands of one comparison so this dialect compares them by
     /// <b>value</b>. A dialect whose storage for <paramref name="type"/> does not order the way the type
     /// does repairs the comparison here, in one place. The default returns the pair unchanged, which is
