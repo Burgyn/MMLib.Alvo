@@ -24,4 +24,10 @@
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
   </ItemGroup>
 
+  <!-- The agent's instructions, embedded so they ship with the package and cannot be edited by a deployment
+       (#29 §5). The logical name is spelled out so the loader does not depend on MSBuild's folder mangling. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Instructions/schema-assistant.md" LogicalName="MMLib.Alvo.Ai.Instructions.schema-assistant.md" />
+  </ItemGroup>
+
 </Project>

@@ -31,7 +31,7 @@ internal sealed record ChangeOutcome(
 /// <param name="Pointer">The RFC 6901 pointer it concerns; empty for the whole change.</param>
 /// <param name="Message">The framework's words, verbatim.</param>
 /// <param name="Fix">The framework's fix suggestion, verbatim, when it gave one.</param>
-/// <param name="Op">The index of the operation whose path the pointer falls under, when one does.</param>
+/// <param name="Op">The op whose landed target best matches the pointer; best-effort — the pointer is authoritative.</param>
 /// <param name="Code">A stable slug to branch on, where the stage has one.</param>
 /// <param name="Severity"><c>error</c> blocks the change; <c>warning</c> does not.</param>
 internal sealed record ToolViolation(

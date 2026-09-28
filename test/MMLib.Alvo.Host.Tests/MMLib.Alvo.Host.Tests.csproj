@@ -41,6 +41,12 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/SqliteOutboxProbe.cs" Link="_shared/SqliteOutboxProbe.cs" />
   </ItemGroup>
 
+  <!-- The instructions' worked-example parser, shared with MMLib.Alvo.Ai.Tests — see the same link there. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InstructionExamples.cs" Link="_shared/InstructionExamples.cs" />
+    <Using Include="MMLib.Alvo.Ai.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <Content Include="descriptors/*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

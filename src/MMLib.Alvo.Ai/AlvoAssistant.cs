@@ -192,7 +192,7 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     {
         var agent = new ChatClientAgent(
             client,
-            instructions: SystemPrompt.Text,
+            instructions: AssistantInstructions.Text,
             name: AgentName,
             description: null,
             tools: [.. tools.Functions]);

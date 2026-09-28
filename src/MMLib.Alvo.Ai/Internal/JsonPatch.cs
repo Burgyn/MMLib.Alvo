@@ -407,6 +407,7 @@ internal static class JsonPatch
     private sealed record StepResult(JsonNode? Document, IReadOnlyList<string> Changed, JsonPatchError? Error)
     {
         /// <summary>Where the operation landed: its last changed pointer, a <c>move</c>'s <c>path</c> after its <c>from</c>.</summary>
+        /// <remarks>Relies on each step listing its changed paths landing-last — the order the <c>Targets</c> fact pins.</remarks>
         internal string? Target => Changed.Count > 0 ? Changed[^1] : null;
 
         internal static StepResult Done(JsonNode? document, params string[] changed) => new(document, changed, Error: null);
