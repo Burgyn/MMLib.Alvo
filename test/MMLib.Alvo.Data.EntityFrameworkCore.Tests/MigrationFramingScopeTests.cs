@@ -1,12 +1,14 @@
 ﻿using Microsoft.Data.Sqlite;
 using MMLib.Alvo.Data.EntityFrameworkCore.Internal;
+using MMLib.Alvo.Migrations;
 using System.Data;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
 /// <summary>
 /// <see cref="MigrationFramingScope"/>'s restore: a connection whose restore failed is closed, never left open with
-/// enforcement suspended, and on the failing path the work's own exception is the one a caller sees.
+/// enforcement suspended, and on the failing path the work's own exception is the one a caller sees; and the tables
+/// its pre-commit check is scoped to, which fail closed (every table) when no step names one.
 /// </summary>
 public sealed class MigrationFramingScopeTests
 {
@@ -39,4 +41,30 @@ public sealed class MigrationFramingScopeTests
 
         connection.State.ShouldBe(ConnectionState.Closed);
     }
+
+    [Fact]
+    public void A_plan_whose_every_step_names_an_empty_entity_is_checked_over_every_table()
+    {
+        var plan = PlanOver(string.Empty, string.Empty);
+
+        MigrationFramingScope.Touched(plan).ShouldBeNull();
+    }
+
+    [Fact]
+    public void An_empty_entity_beside_a_named_one_is_dropped_from_the_touched_tables()
+    {
+        var plan = PlanOver(string.Empty, "orders", "orders");
+
+        MigrationFramingScope.Touched(plan).ShouldBe(["orders"]);
+    }
+
+    private static MigrationPlan PlanOver(params string[] entities) => new()
+    {
+        Steps =
+        [
+            .. entities.Select(entity => new MigrationStep(
+                new SchemaChange { Kind = SchemaChangeKind.AlterField, Entity = entity }, IsDestructive: false, Reason: null)),
+        ],
+        Sql = ["SELECT 1"],
+    };
 }

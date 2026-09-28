@@ -117,9 +117,21 @@ internal static class MigrationFramingScope
     /// The tables the plan's steps change — an entity maps onto its own table name verbatim — or <see langword="null"/>
     /// when SQL runs but no step names a table, which the query answers by checking every table (fail closed).
     /// </summary>
-    private static List<string>? Touched(MigrationPlan plan)
+    /// <remarks>
+    /// A step with an empty entity names no table — <see cref="DestructiveScan"/> answers one for an operation it
+    /// cannot place on a table — so it is dropped before the count: a plan made only of such steps checks every
+    /// table rather than a list holding one empty name, which would check none.
+    /// </remarks>
+    /// <param name="plan">The plan being applied.</param>
+    internal static List<string>? Touched(MigrationPlan plan)
     {
-        List<string> tables = [.. plan.Steps.Select(step => step.Change.Entity).Distinct(StringComparer.Ordinal)];
+        List<string> tables =
+        [
+            .. plan.Steps
+                .Select(step => step.Change.Entity)
+                .Where(entity => !string.IsNullOrEmpty(entity))
+                .Distinct(StringComparer.Ordinal),
+        ];
         return tables.Count > 0 ? tables : null;
     }
 
