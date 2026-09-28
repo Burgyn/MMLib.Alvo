@@ -1,0 +1,89 @@
+﻿using MMLib.Alvo.Ai.Internal;
+
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
+namespace MMLib.Alvo.Ai.Tests;
+
+/// <summary>What the engine owes beyond the suite: atomicity, the pointer it names, and what it touched.</summary>
+public sealed class JsonPatchTests
+{
+    [Fact]
+    public void A_failing_third_operation_leaves_the_document_untouched()
+    {
+        var document = JsonNode.Parse("""{"a":1}""");
+
+        var result = JsonPatch.Apply(document, Ops("""
+            [{"op":"add","path":"/b","value":2},{"op":"replace","path":"/a","value":3},{"op":"remove","path":"/missing"}]
+            """));
+
+        result.Succeeded.ShouldBeFalse();
+        result.Error!.Op.ShouldBe(2);
+        result.Document.ShouldBeNull();
+        JsonNode.DeepEquals(document, JsonNode.Parse("""{"a":1}""")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_missing_parent_is_named_with_the_keys_that_do_exist()
+    {
+        var document = JsonNode.Parse("""{"entities":{"customers":{},"bikes":{}}}""");
+
+        var error = JsonPatch.Apply(document, Ops("""
+            [{"op":"add","path":"/entities/customer/fields/x","value":{"type":"string"}}]
+            """)).Error!;
+
+        error.Code.ShouldBe(JsonPatchError.PathNotFound);
+        error.Pointer.ShouldBe("/entities/customer/fields/x");
+        error.Op.ShouldBe(0);
+        error.Fix.ShouldBe("'/entities' has: customers, bikes.");
+    }
+
+    [Fact]
+    public void Changed_paths_are_what_the_mutating_operations_addressed_in_order()
+    {
+        var document = JsonNode.Parse("""{"a":{"b":1},"c":2}""");
+
+        var result = JsonPatch.Apply(document, Ops("""
+            [{"op":"test","path":"/c","value":2},{"op":"move","from":"/a/b","path":"/d"},{"op":"add","path":"/d","value":5}]
+            """));
+
+        result.ChangedPaths.ShouldBe(["/a/b", "/d"]);
+    }
+
+    [Fact]
+    public void An_escaped_pointer_token_addresses_the_member_it_spells()
+    {
+        var result = JsonPatch.Apply(JsonNode.Parse("""{"a/b":{"m~n":1}}"""), Ops("""
+            [{"op":"replace","path":"/a~1b/m~0n","value":2}]
+            """));
+
+        JsonNode.DeepEquals(result.Document, JsonNode.Parse("""{"a/b":{"m~n":2}}""")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void A_replaced_member_keeps_its_place_among_its_siblings()
+    {
+        var result = JsonPatch.Apply(JsonNode.Parse("""{"a":1,"b":2,"c":3}"""), Ops("""
+            [{"op":"replace","path":"/b","value":{"x":true}}]
+            """));
+
+        result.Document!.ToJsonString().ShouldBe("""{"a":1,"b":{"x":true},"c":3}""");
+    }
+
+    [Fact]
+    public void A_value_with_diacritics_and_quotes_arrives_literally()
+    {
+        var result = JsonPatch.Apply(JsonNode.Parse("{}"), Ops("""
+            [{"op":"add","path":"/d","value":"Dielňa \"U Ťava\" + ž"}]
+            """));
+
+        result.Document!["d"]!.GetValue<string>().ShouldBe("Dielňa \"U Ťava\" + ž");
+    }
+
+    [Fact]
+    public void A_patch_that_is_not_an_array_is_refused() =>
+        JsonPatch.Apply(JsonNode.Parse("{}"), Ops("""{"op":"add"}""")).Error!.Code
+            .ShouldBe(JsonPatchError.InvalidOperation);
+
+    private static JsonElement Ops(string json) => JsonDocument.Parse(json).RootElement.Clone();
+}
