@@ -5,6 +5,7 @@ using MMLib.Alvo.Auth;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;
 
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Host.Tests;
@@ -27,9 +28,9 @@ public sealed partial class InstructionExampleOutcomeTests
     /// <c>bike-workshop</c> happens to declare.
     /// </summary>
     /// <remarks>
-    /// The scoped-tenancy bullet is not probed: a scoped entity needs project tenancy, which <c>bike-workshop</c>
-    /// does not enable. Its <c>tenant_id</c> is held to <see cref="AlvoManagedColumns"/> by
-    /// <c>AssistantInstructionsTests</c>.
+    /// The scoped-tenancy bullet is not here: a scoped entity needs project tenancy, which <c>bike-workshop</c>
+    /// does not enable, so its probe enables it in the same patch
+    /// (<see cref="A_tenant_id_on_an_entity_the_project_scopes_by_default_is_refused"/>).
     /// </remarks>
     private static readonly (string Label, string? Trait)[] _probedBullets =
     [
@@ -61,6 +62,22 @@ public sealed partial class InstructionExampleOutcomeTests
                     $"{path} {entity}: {string.Join(" | ", attempt.Refusals)}");
             }
         }
+    }
+
+    [Fact]
+    public async Task A_tenant_id_on_an_entity_the_project_scopes_by_default_is_refused()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(BikeWorkshop);
+        var management = world.Services.GetRequiredService<IAlvoManagement>();
+        world.Services.GetRequiredService<IAlvoContextAccessor>().Principal = Administrator();
+
+        var control = await WithTenancyEnabledAsync(management, Entity([]));
+        var declared = await WithTenancyEnabledAsync(management, Entity([AlvoManagedColumns.TenantId]));
+
+        control.Valid.ShouldBeTrue(string.Join(" | ", control.Refusals));
+        declared.Violations.ShouldContain(
+            violation => violation.Message.Contains(ManagedRefusal, StringComparison.Ordinal),
+            string.Join(" | ", declared.Refusals));
     }
 
     [Fact]
@@ -101,14 +118,29 @@ public sealed partial class InstructionExampleOutcomeTests
     }
 
     /// <summary>
-    /// The rule's own example name, and the trait scoping the other way: <c>created_at</c> is an ordinary field on
-    /// the non-audited <c>order_lines</c>.
+    /// The rule's own example name; a <c>ref</c> to the reserved <c>users</c>, which the reserved-names bullet
+    /// allows; and the trait scoping the other way: <c>created_at</c> is an ordinary field on the non-audited
+    /// <c>order_lines</c>.
     /// </summary>
     private static IEnumerable<(string Path, string Value)> AcceptedNameProbes() =>
     [
         ("/entities/customer_audits", Entity([])),
+        (OrderLines + "probe_user", """{"type": "ref", "entity": "users"}"""),
         (OrderLines + AlvoManagedColumns.CreatedAt, """{"type": "datetime"}"""),
     ];
+
+    /// <summary>
+    /// One patch that turns project tenancy on and adds <paramref name="entity"/> as <c>probe_tenant</c>, which
+    /// declares no <c>tenancy</c> of its own and so is scoped by the project's default.
+    /// </summary>
+    private static async Task<DraftAttempt> WithTenancyEnabledAsync(IAlvoManagement management, string entity)
+    {
+        var current = await management.GetDescriptorAsync(Project, Ct);
+        var operations = new JsonArray(
+            new JsonObject { ["op"] = "add", ["path"] = "/tenancy", ["value"] = new JsonObject { ["enabled"] = true } },
+            new JsonObject { ["op"] = "add", ["path"] = "/entities/probe_tenant", ["value"] = JsonNode.Parse(entity) });
+        return await DescriptorDraft.BuildAsync(management, Project, current.Revision, JsonSerializer.SerializeToElement(operations), Ct);
+    }
 
     /// <summary>A new entity: a plain <c>label</c> field beside the probed ones, and the trait, if any, set.</summary>
     private static string Entity(IEnumerable<string> probedFields, string? trait = null)

@@ -42,8 +42,10 @@ fields; indexes; formats.
   letter: `customer_audits`, never `CustomerAudits` or `customer-audits`. Turn the operator's words into such a name
   yourself; do not ask.
 - Reserved names: the entity `users` (the built-in auth entity; a `ref` may still point at it), and the fields `order`, `limit`, `offset`, `after`, `select`, `or`, `and`, `not`, which the Data API's query string uses.
-- **Framework-managed columns** — never declare them: the framework adds them from the entity's traits, and a
-  declaration is refused. To give an entity these columns, set its trait.
+- **Framework-managed columns** — never declare them: the framework adds them, and a declaration is refused. An
+  entity is `scoped` when it says `"tenancy": "scoped"`, or when the project enables tenancy
+  (`"tenancy": {"enabled": true}`) and the entity does not opt out with `"tenancy": "global"`. To give an entity the
+  audit or soft-delete columns, set its `audit` or `softDelete` trait instead.
   - on every entity — `id`
   - on an entity whose `tenancy` is `scoped` — `tenant_id`
   - on an entity with `"audit": true` — `created_at`, `created_by`, `updated_at`, `updated_by`
