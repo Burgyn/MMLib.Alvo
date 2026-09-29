@@ -35,6 +35,9 @@ public sealed class ProposalWordingTests
     [InlineData("Pole bolo pridané.")]
     [InlineData("Hotovo.")]
     [InlineData("I proposed it and it is now applied.")]
+    [InlineData("No entita je vytvorená.")]
+    [InlineData("I did not apply it but the field is created.")]
+    [InlineData("The change is saved.")]
     public void A_reply_that_says_the_change_happened_claims_done(string prose) =>
         ProposalWording.ClaimsDone(prose).ShouldBeTrue();
 
@@ -55,7 +58,19 @@ public sealed class ProposalWordingTests
     [InlineData("The column is renamed, not dropped.")]
     [InlineData("If I applied it, existing bikes would start with no notes.")]
     [InlineData("When you are done, apply it from Preview.")]
+    [InlineData("The join is done by the database.")]
+    [InlineData("The value is saved in a stored generated column.")]
     public void A_reply_that_leaves_the_apply_to_the_operator_does_not(string prose) =>
+        ProposalWording.ClaimsDone(prose).ShouldBeFalse();
+
+    /// <summary>
+    /// A known hider, pinned so that tightening the guards is a deliberate change: a guard word used as a plain
+    /// preposition ("after", "po") hides a claim in its clause.
+    /// </summary>
+    [Theory]
+    [InlineData("The field is added to bikes after customers.")]
+    [InlineData("Entita je vytvorená po kliknutí.")]
+    public void A_guard_word_used_as_a_preposition_still_hides_a_claim(string prose) =>
         ProposalWording.ClaimsDone(prose).ShouldBeFalse();
 
     [Theory]
