@@ -18,4 +18,10 @@
     <PackageReference Include="NSubstitute" />
   </ItemGroup>
 
+  <!-- The skill cases' right answers, shared with MMLib.Alvo.Host.Tests: that suite dry-runs them through the real
+       validator, this one grades the turns built from them, and one source keeps the two on the same answers. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/SkillCaseAnswers.cs" Link="_shared/SkillCaseAnswers.cs" />
+  </ItemGroup>
+
 </Project>

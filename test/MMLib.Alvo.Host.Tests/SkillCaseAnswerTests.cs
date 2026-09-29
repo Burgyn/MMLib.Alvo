@@ -12,50 +12,19 @@ namespace MMLib.Alvo.Host.Tests;
 /// <c>bike-workshop</c>, and the <c>function</c> case's wrong answer is refused as unhonoured.
 /// </summary>
 /// <remarks>
-/// A case whose right answer the validator refused would grade every model a failure. The patches are the right answers
-/// <c>SkillCasesTests</c> grades (in <c>MMLib.Alvo.Ai.Eval.Tests</c>), written against the real descriptor.
+/// A case whose right answer the validator refused would grade every model a failure. The patches are
+/// <see cref="SkillCaseAnswers"/>, the same ones <c>SkillCasesTests</c> (in <c>MMLib.Alvo.Ai.Eval.Tests</c>) builds its
+/// right turns from.
 /// </remarks>
 public sealed class SkillCaseAnswerTests
 {
-    private const string ReadRule = "'admin' in @user.roles || 'manager' in @user.roles || assigned_user_id == @user.id";
-    private const string RejectPrice =
-        """{"condition": "new.unit_price < 0.0", "action": {"reject": "The selling price of a part cannot be negative."}}""";
-
-    private const string FunctionHook = """
-        [{"op": "add", "path": "/entities/service_orders/hooks/afterUpdate/-",
-          "value": {"condition": "new.status == 'ready'", "action": {"type": "function", "name": "invoice"}}}]
-        """;
-
-    private static readonly Dictionary<string, string> _rightAnswers = new(StringComparer.Ordinal)
-    {
-        ["hook_returned_at"] = """
-            [{"op": "add", "path": "/entities/rentals/hooks/beforeUpdate",
-              "value": [{"condition": "new.status == 'returned' && old.status != 'returned'",
-                         "action": {"mutate": {"returned_at": {"$cel": "now()"}}}}]}]
-            """,
-        ["reject_negative_price"] = $$$"""
-            [{"op": "add", "path": "/entities/parts/hooks", "value": {"beforeCreate": [{{{RejectPrice}}}], "beforeUpdate": [{{{RejectPrice}}}]}}]
-            """,
-        ["rollup_rentals_count"] = """
-            [{"op": "add", "path": "/entities/customers/fields/rentals_count",
-              "value": {"type": "integer", "rollup": {"from": "rentals", "op": "count"}}}]
-            """,
-        ["unique_part_per_order"] = """
-            [{"op": "add", "path": "/entities/order_lines/indexes/-", "value": {"fields": ["part_id", "order_id"], "unique": true}}]
-            """,
-        ["own_orders_only"] = $$"""
-            [{"op": "replace", "path": "/entities/service_orders/rules/list", "value": "{{ReadRule}}"},
-             {"op": "replace", "path": "/entities/service_orders/rules/get", "value": "{{ReadRule}}"}]
-            """,
-    };
-
-    public static TheoryData<string> Cases() => [.. _rightAnswers.Keys];
+    public static TheoryData<string> Cases() => [.. SkillCaseAnswers.RightAnswers.Keys];
 
     [Theory]
     [MemberData(nameof(Cases))]
     public async Task A_skill_cases_right_answer_passes_the_real_dry_run(string name)
     {
-        var attempt = await AttemptAsync(_rightAnswers[name]);
+        var attempt = await AttemptAsync(SkillCaseAnswers.RightAnswers[name]);
 
         attempt.Valid.ShouldBeTrue($"{name}: {string.Join(" | ", attempt.Refusals)}");
     }
@@ -63,7 +32,7 @@ public sealed class SkillCaseAnswerTests
     [Fact]
     public async Task The_function_cases_wrong_answer_is_refused_as_unhonoured()
     {
-        var attempt = await AttemptAsync(FunctionHook);
+        var attempt = await AttemptAsync(SkillCaseAnswers.FunctionHook);
 
         attempt.Valid.ShouldBeFalse();
         attempt.Refusals.ShouldContain(

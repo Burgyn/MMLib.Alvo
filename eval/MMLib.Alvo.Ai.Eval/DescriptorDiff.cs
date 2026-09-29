@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.Ai.Internal;
 
 using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Ai.Eval;
@@ -20,6 +21,18 @@ internal static class DescriptorDiff
         var paths = new List<string>();
         Walk(JsonNode.Parse(before), JsonNode.Parse(after), JsonPointer.Root, paths);
         return paths;
+    }
+
+    /// <summary>
+    /// <paramref name="before"/> patched with <paramref name="operations"/> by the assistant's own JSON Patch, the way a
+    /// proposal is made from a patch; throws when the patch does not apply.
+    /// </summary>
+    /// <param name="before">The descriptor to patch.</param>
+    /// <param name="operations">An RFC 6902 operations array.</param>
+    internal static string Patched(string before, JsonElement operations)
+    {
+        var result = JsonPatch.Apply(JsonNode.Parse(before), operations);
+        return result.Document?.ToJsonString() ?? throw new InvalidOperationException($"The patch does not apply: {result.Error}");
     }
 
     /// <summary>The node <paramref name="pointer"/> addresses, or <see langword="null"/> when there is none.</summary>
