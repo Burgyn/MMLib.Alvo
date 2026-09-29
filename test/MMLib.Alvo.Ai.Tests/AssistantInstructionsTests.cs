@@ -85,7 +85,7 @@ public sealed partial class AssistantInstructionsTests
 
     [Fact]
     public void Every_json_fence_belongs_to_a_worked_example() =>
-        JsonFence().Matches(_text).Count.ShouldBe(2 * InstructionExamples.Parse(_text).Count);
+        JsonFence().Count(_text).ShouldBe(2 * InstructionExamples.Parse(_text).Count);
 
     [Fact]
     public void Every_snake_case_name_in_code_is_a_tool_or_a_descriptor_name() =>
