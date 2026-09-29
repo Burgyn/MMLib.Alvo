@@ -19,6 +19,13 @@ public sealed class SkillsReadTests
     [InlineData("/access", "project-access")]
     [InlineData("/entities/bikes/fields/notes", "entities-and-fields")]
     [InlineData("/entities/order_lines/fields/line_total/computed", "computed-and-rollups")]
+    [InlineData("/entities/rentals/hooks/afterCreate", "hooks")]
+    [InlineData("/entities/rentals/storage", "traits-and-tenancy")]
+    [InlineData("/access/admin", "project-access")]
+    [InlineData("/entities/audit/fields/notes", "entities-and-fields")]
+    [InlineData("/entities/rules", "entities-and-fields")]
+    [InlineData("/entities/bikes/fields/computed", "entities-and-fields")]
+    [InlineData("/entities/bikes/fields/hooks/type", "entities-and-fields")]
     public void A_changed_path_belongs_to_its_area(string path, string area) =>
         SkillsRead.AreaOf(path, proposed: null).ShouldBe(area);
 
@@ -33,9 +40,50 @@ public sealed class SkillsReadTests
     public void A_changed_scalar_facet_belongs_to_its_entitys_fields_without_throwing() =>
         SkillsRead.AreaOf("/entities/customers/fields/street/maxLength", JsonValue.Create(200)).ShouldBe("entities-and-fields");
 
+    [Theory]
+    [InlineData("/formats/iban")]
+    [InlineData("/accessible")]
+    [InlineData("")]
+    public void A_path_outside_every_area_needs_no_skill(string path) =>
+        SkillsRead.AreaOf(path, JsonValue.Create("x")).ShouldBeNull();
+
     [Fact]
-    public void A_path_outside_every_area_needs_no_skill() =>
-        SkillsRead.AreaOf("/formats/iban", JsonValue.Create("x")).ShouldBeNull();
+    public void A_new_entity_needs_every_area_it_declares()
+    {
+        var entity = JsonNode.Parse("""
+            {"audit": true, "fields": {"total": {"type": "decimal", "computed": "a * b"}},
+             "rules": {"list": "true"}, "hooks": {"beforeCreate": []}}
+            """);
+
+        SkillsRead.AreasOf("/entities/invoices", entity).ShouldBe(
+            ["entities-and-fields", "traits-and-tenancy", "computed-and-rollups", "rules-and-cel", "hooks"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public void A_new_fields_map_carrying_a_computed_field_needs_computed_and_rollups() =>
+        SkillsRead.AreasOf("/entities/bikes/fields", JsonNode.Parse("""{"brand": {"type": "string"}, "label": {"type": "string", "computed": "brand"}}"""))
+            .ShouldBe(["entities-and-fields", "computed-and-rollups"], ignoreOrder: true);
+
+    [Fact]
+    public void A_new_entity_map_needs_what_its_entities_declare() =>
+        SkillsRead.AreasOf("/entities", JsonNode.Parse("""{"a": {"fields": {}}, "b": {"indexes": [], "fields": {}}}"""))
+            .ShouldBe(["entities-and-fields", "indexes"], ignoreOrder: true);
+
+    [Fact]
+    public void A_whole_subtree_of_an_unexpected_shape_is_read_without_throwing() =>
+        SkillsRead.AreasOf("/entities/bikes", JsonValue.Create(3)).ShouldBe(["entities-and-fields"]);
+
+    [Fact]
+    public void A_turn_that_adds_an_entity_needs_the_skill_of_every_area_the_entity_declares()
+    {
+        var proposed = Edited(document => document["entities"]!["invoices"] = JsonNode.Parse("""
+            {"fields": {"total": {"type": "decimal", "computed": "a * b"}}, "rules": {"list": "true"}}
+            """));
+        var verdict = SkillsRead.Judge(Turn(proposed, "I proposed invoices.", calls: [Loads(EntitiesAndFields, 1), Propose(Valid(), 2)]));
+
+        verdict.Passed.ShouldBeFalse();
+        verdict.Why.ShouldContain("skillsNeeded=[alvo-descriptor-computed-and-rollups,alvo-descriptor-entities-and-fields,alvo-descriptor-rules-and-cel]");
+    }
 
     [Fact]
     public void Every_area_the_grader_can_name_is_a_skill_in_the_catalogue() =>
@@ -87,6 +135,14 @@ public sealed class SkillsReadTests
         turn.ManagementCalls.ShouldBe(6);
         turn.SkillReads.ShouldBe(2);
         EvalRunner.Invariants(turn).Passed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Exactly_four_skill_reads_pass_the_invariants()
+    {
+        var calls = Enumerable.Range(1, 4).Select(round => Loads("alvo-descriptor-hooks", round)).ToArray();
+
+        EvalRunner.Invariants(Turn(answer: "ok", calls: calls)).Passed.ShouldBeTrue();
     }
 
     [Fact]

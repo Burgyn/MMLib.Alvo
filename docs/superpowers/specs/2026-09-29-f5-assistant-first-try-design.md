@@ -243,6 +243,11 @@ Worked examples in a skill use the base prompt's `<!-- example: name -->` + two-
     (`computed` or `rollup` means `computed-and-rollups`).
   - `field-types-and-formats` and `capabilities-and-limits` are never required: the base prompt states the types,
     and the limits skill serves answers rather than proposals.
+  - The area is read by segment **position** (`/entities/{entity}/{facet}` and
+    `/entities/{entity}/fields/{field}/{facet}`), so an entity or a field named `audit` or `rules` is not misrouted.
+  - A path that adds the entity map, a whole entity or a whole fields map needs the union of the areas its subtree
+    declares, beside `entities-and-fields`: computed or rollup fields, rules, hooks, indexes, and the traits
+    `audit`, `softDelete`, `tenancy`, `storage` and `realtime`.
 - **Where it shows:** the verdict prints `skillsNeeded=[…] skillsLoaded=[…]` on every turn, pass or fail.
 
 ### 7.4 Acceptance criteria

@@ -37,7 +37,7 @@ internal static class SkillsRead
     private const string EntitiesAndFields = "entities-and-fields";
 
     private static readonly HashSet<string> _dryRuns = new(StringComparer.Ordinal) { "check_change", "propose_change" };
-    private static readonly HashSet<string> _traits = new(StringComparer.Ordinal) { "tenancy", "audit", "softDelete" };
+    private static readonly HashSet<string> _traits = new(StringComparer.Ordinal) { "tenancy", "audit", "softDelete", "storage", "realtime" };
 
     /// <summary>The two skill tools, which are bounded apart from the management tools (D34).</summary>
     internal static IReadOnlySet<string> SkillTools { get; } =
@@ -50,27 +50,58 @@ internal static class SkillsRead
     /// <summary>The names of the skills the assistant is given.</summary>
     internal static IReadOnlyCollection<string> Catalogue { get; } = [.. EmbeddedSkills.All.Select(skill => skill.Frontmatter.Name)];
 
-    /// <summary>The area a changed path belongs to, reading a new field's own declaration; <see langword="null"/> for none.</summary>
+    /// <summary>
+    /// The area a changed path itself belongs to, read by the position of its segments, and for a new field by its own
+    /// declaration; <see langword="null"/> for none.
+    /// </summary>
+    /// <remarks>
+    /// <b>By position, not by name anywhere in the path</b>: <c>/entities/{entity}/{facet}</c> and
+    /// <c>/entities/{entity}/fields/{field}/{facet}</c>. An entity or a field that happens to be called <c>audit</c>,
+    /// <c>rules</c> or <c>computed</c> is still an entity or a field.
+    /// </remarks>
     internal static string? AreaOf(string path, JsonNode? proposed)
     {
-        var segments = path.Split('/');
-        return path switch
+        if (!JsonPointer.TryParse(path, out var pointer) || pointer.IsRoot)
         {
-            _ when path.StartsWith("/access", StringComparison.Ordinal) => ProjectAccess,
-            _ when segments.Contains("rules") => RulesAndCel,
-            _ when segments.Contains("hooks") => Hooks,
-            _ when segments.Contains("indexes") => Indexes,
-            _ when segments.Any(_traits.Contains) || path == "/tenancy" => TraitsAndTenancy,
-            _ when segments.Contains("computed") || segments.Contains("rollup") || IsDerived(proposed) => ComputedAndRollups,
-            _ when path.StartsWith("/entities/", StringComparison.Ordinal) => EntitiesAndFields,
+            return null;
+        }
+
+        var tokens = pointer.Tokens;
+        return tokens[0] switch
+        {
+            "access" => ProjectAccess,
+            "tenancy" => TraitsAndTenancy,
+            "entities" => tokens.Count < 3 ? EntitiesAndFields : EntityFacetArea(tokens, proposed),
             _ => null,
         };
     }
 
+    /// <summary>
+    /// Every area a changed path needs: its own, and — when it adds a whole entity, the entity map, or a fields map —
+    /// every area the proposed subtree declares, beside <c>entities-and-fields</c>.
+    /// </summary>
+    /// <remarks>Pure and total: a proposed value of any shape is read by pattern, never by an indexer that throws.</remarks>
+    internal static IReadOnlyList<string> AreasOf(string path, JsonNode? proposed)
+    {
+        var areas = new List<string>();
+        if (AreaOf(path, proposed) is { } own)
+        {
+            areas.Add(own);
+        }
+
+        if (JsonPointer.TryParse(path, out var pointer) && pointer.Tokens.Count is > 0 and < 4 && pointer.Tokens[0] == "entities")
+        {
+            areas.AddRange(SubtreeAreas(pointer.Tokens, proposed));
+        }
+
+        return [.. areas.Distinct(StringComparer.Ordinal)];
+    }
+
+
     /// <summary>The skills a turn's proposal needs, ordinal; none when it filed none.</summary>
     internal static IReadOnlyList<string> Needed(TurnRecord turn) =>
     [
-        .. turn.ChangedPaths.Select(path => AreaOf(path, turn.Proposed(path))).OfType<string>().Distinct()
+        .. turn.ChangedPaths.SelectMany(path => AreasOf(path, turn.Proposed(path))).Distinct(StringComparer.Ordinal)
             .Select(area => Prefix + area).Order(StringComparer.Ordinal),
     ];
 
@@ -85,6 +116,47 @@ internal static class SkillsRead
             needed.All(loaded.Contains),
             $"skillsNeeded=[{string.Join(",", needed)}] skillsLoaded=[{string.Join(",", loaded.Order(StringComparer.Ordinal))}]");
     }
+
+    private static IEnumerable<string> SubtreeAreas(IReadOnlyList<string> tokens, JsonNode? proposed) => tokens.Count switch
+    {
+        1 => EntitiesMapAreas(proposed),
+        2 => EntityAreas(proposed),
+        _ when tokens[2] == "fields" => FieldsMapAreas(proposed),
+        _ => [],
+    };
+
+    private static string EntityFacetArea(IReadOnlyList<string> tokens, JsonNode? proposed) => tokens[2] switch
+    {
+        "rules" => RulesAndCel,
+        "hooks" => Hooks,
+        "indexes" => Indexes,
+        "fields" when tokens.Count == 4 && IsDerived(proposed) => ComputedAndRollups,
+        "fields" when tokens.Count > 4 && tokens[4] is "computed" or "rollup" => ComputedAndRollups,
+        var facet when _traits.Contains(facet) => TraitsAndTenancy,
+        _ => EntitiesAndFields,
+    };
+
+    private static IEnumerable<string> EntitiesMapAreas(JsonNode? proposed) =>
+        proposed is JsonObject entities ? entities.SelectMany(entity => EntityAreas(entity.Value)) : [];
+
+    private static IEnumerable<string> EntityAreas(JsonNode? proposed) =>
+        proposed is JsonObject entity
+            ? entity.SelectMany(member => member.Key == "fields" ? FieldsMapAreas(member.Value) : EntityMemberAreas(member.Key)).Append(EntitiesAndFields)
+            : [];
+
+    private static IEnumerable<string> EntityMemberAreas(string key) => key switch
+    {
+        "rules" => [RulesAndCel],
+        "hooks" => [Hooks],
+        "indexes" => [Indexes],
+        _ when _traits.Contains(key) => [TraitsAndTenancy],
+        _ => [],
+    };
+
+    private static IEnumerable<string> FieldsMapAreas(JsonNode? proposed) =>
+        proposed is JsonObject fields
+            ? fields.Where(field => IsDerived(field.Value)).Select(_ => ComputedAndRollups).Append(EntitiesAndFields)
+            : [];
 
     private static bool IsDerived(JsonNode? proposed) =>
         proposed is JsonObject field && (field["computed"] is not null || field["rollup"] is not null);
