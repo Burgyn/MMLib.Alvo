@@ -61,8 +61,15 @@ internal sealed class EvalRunner(EvalWorld world, EvalOptions options, EvalTrace
             $"requests={turn.Requests} toolRounds={turn.ToolRounds} toolCalls={turn.ToolCalls.Count} wholeDocument={wholeDocument}");
     }
 
-    /// <summary>The invariants first; a turn that holds them is graded by its case, with both diagnostics kept.</summary>
-    internal static Verdict Graded(EvalCase evalCase, TurnRecord turn)
+    /// <summary>The invariants first; a turn that holds them is graded by its case and by the two behaviour rules.</summary>
+    /// <remarks>
+    /// The wording and language graders apply to every case (D21): "Done." or a Czech reply to a Slovak question is a
+    /// failure the operator sees whatever was asked. Every diagnostic is kept, pass or fail.
+    /// </remarks>
+    /// <param name="evalCase">The case the turn answered.</param>
+    /// <param name="language">The language the case was asked in.</param>
+    /// <param name="turn">What the turn produced.</param>
+    internal static Verdict Graded(EvalCase evalCase, string language, TurnRecord turn)
     {
         var invariants = Invariants(turn);
         if (!invariants.Passed)
@@ -70,14 +77,14 @@ internal sealed class EvalRunner(EvalWorld world, EvalOptions options, EvalTrace
             return invariants;
         }
 
-        var verdict = evalCase.Grade(turn);
-        return verdict with { Why = $"{verdict.Why} | {invariants.Why}" };
+        Verdict[] verdicts = [evalCase.Grade(turn), ProposalWording.Judge(turn), ReplyLanguage.Judge(turn, language), invariants];
+        return new Verdict(verdicts.All(verdict => verdict.Passed), string.Join(" | ", verdicts.Select(verdict => verdict.Why)));
     }
 
     private async Task<CaseRun> RunOnceAsync(EvalCase evalCase, string language, CancellationToken ct)
     {
         var turn = await AskAsync(evalCase.Prompt(language), ct).ConfigureAwait(false);
-        return new CaseRun(evalCase.Name, language, turn, Graded(evalCase, turn));
+        return new CaseRun(evalCase.Name, language, turn, Graded(evalCase, language, turn));
     }
 
     private async Task<TurnRecord> AskAsync(string prompt, CancellationToken ct)

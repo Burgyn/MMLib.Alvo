@@ -7,7 +7,7 @@
 /// <param name="Grade">What makes a turn a pass, read off outcomes rather than prose.</param>
 internal sealed record EvalCase(string Name, string English, string Slovak, Func<TurnRecord, Verdict> Grade)
 {
-    internal string Prompt(string language) => language == "sk" ? Slovak : English;
+    internal string Prompt(string language) => language == ReplyLanguage.Slovak ? Slovak : English;
 }
 
 /// <summary>A graded turn: whether it passed, and what the grading saw either way.</summary>

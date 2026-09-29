@@ -25,8 +25,9 @@ public sealed partial class InstructionRepliesTests
         Replies().Where(reply => reply.Valid).ShouldAllBe(reply => ProposalWording.SaysProposed(reply.Text));
 
     [Fact]
-    public void A_worked_example_replies_in_slovak() =>
-        Replies().ShouldContain(reply => reply.Text.StartsWith("Navrhol som", StringComparison.Ordinal));
+    public void One_worked_example_replies_in_slovak_and_every_other_in_english() =>
+        Replies().Select(reply => ReplyLanguage.Of(reply.Text)).Order(StringComparer.Ordinal)
+            .ShouldBe([.. Enumerable.Repeat(ReplyLanguage.English, WorkedReplies - 1), ReplyLanguage.Slovak]);
 
     /// <summary>Each example's reply, and whether the example's outcome is valid.</summary>
     private static List<(string Text, bool Valid)> Replies() =>

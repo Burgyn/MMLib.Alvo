@@ -188,7 +188,7 @@ public sealed class EvalCasesTests
             ProviderStatus = "404",
         };
 
-        var verdict = EvalRunner.Graded(Case("automation_refused"), turn);
+        var verdict = EvalRunner.Graded(Case("automation_refused"), ReplyLanguage.English, turn);
 
         verdict.Passed.ShouldBeFalse();
         verdict.Why.ShouldContain("provider status: 404");
@@ -213,11 +213,36 @@ public sealed class EvalCasesTests
     [Fact]
     public void A_pass_keeps_both_diagnostics_so_it_can_be_audited()
     {
-        var verdict = EvalRunner.Graded(Case("automation_refused"), Turn(answer: "No automation here.", calls: Read("get_capabilities")));
+        var verdict = EvalRunner.Graded(
+            Case("automation_refused"), ReplyLanguage.English,
+            Turn(answer: "This build does not run automation, so there is nothing to propose.", calls: Read("get_capabilities")));
 
         verdict.Passed.ShouldBeTrue();
         verdict.Why.ShouldContain("namesAutomation=True");
         verdict.Why.ShouldContain("requests=");
+        verdict.Why.ShouldContain("language=en");
+    }
+
+    [Fact]
+    public void A_turn_its_case_passes_fails_when_it_answers_in_another_language()
+    {
+        var verdict = EvalRunner.Graded(
+            Case("automation_refused"), ReplyLanguage.Slovak,
+            Turn(answer: "This build does not run automation, so there is nothing to propose.", calls: Read("get_capabilities")));
+
+        verdict.Passed.ShouldBeFalse();
+        verdict.Why.ShouldContain("language=en asked=sk");
+    }
+
+    [Fact]
+    public void A_turn_its_case_passes_fails_when_it_claims_done()
+    {
+        var verdict = EvalRunner.Graded(
+            Case("automation_refused"), ReplyLanguage.English,
+            Turn(answer: "This build does not run automation. Done.", calls: Read("get_capabilities")));
+
+        verdict.Passed.ShouldBeFalse();
+        verdict.Why.ShouldContain("claimsDone=True");
     }
 
     private static Verdict Grade(string name, TurnRecord turn) => Case(name).Grade(turn);
