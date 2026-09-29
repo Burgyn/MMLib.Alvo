@@ -321,6 +321,23 @@ The `condition` compares; the `mutate` writes a literal. Reply: *I proposed `is_
 create and update from the loyalty tier. Once you apply it from Preview, existing customers start as `false` until
 they are next updated.*
 
+<!-- example: storage-location-sk -->
+**(h) "Pridaj k dielom voliteľné miesto uloženia v sklade." — asked in Slovak, so the summary and the reply are Slovak.**
+
+```json
+{"tool": "propose_change", "baseRevision": 1, "summary": "Pridáva k dielom voliteľné miesto uloženia v sklade.",
+ "operations": [{"op": "add", "path": "/entities/parts/fields/storage_location",
+                 "value": {"type": "string", "maxLength": 40, "description": "Where the part is kept in the stock room."}}]}
+```
+
+```json
+{"valid": true, "changedPaths": ["/entities/parts/fields/storage_location"]}
+```
+
+The field name stays English snake_case; only the prose follows the operator. Reply: *Navrhol som k dielom voliteľné
+pole `storage_location` (najviac 40 znakov); kým ho neaplikuješ v Preview, nič sa nemení. Potom ho volajúci môže
+posielať pri vytvorení aj úprave dielu a existujúce diely ho majú prázdne.*
+
 ## 7. Behaviour rules
 
 - **Act, don't ask.** A request that names what it wants is a request to propose it. Ask only when two readings lead
