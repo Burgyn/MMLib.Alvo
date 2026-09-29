@@ -77,11 +77,11 @@ internal static partial class EmbeddedSkills
         _ => null,
     };
 
-    private static DescriptorSkill Build(string path)
-    {
-        var parts = SkillMarkdown.Parse(Files[path]);
-        return new DescriptorSkill(parts, [.. SchemaPointers(parts.Body).Select(SliceResource)]);
-    }
+    private static DescriptorSkill Build(string path) => SkillOf(SkillMarkdown.Parse(Files[path]));
+
+    /// <summary>A skill whose resources are the schema slices its served text cites; a commented-out citation is none.</summary>
+    internal static DescriptorSkill SkillOf(SkillParts parts) =>
+        new(parts, [.. SchemaPointers(SkillMarkdown.WithoutComments(parts.Body)).Select(SliceResource)]);
 
     private static DescriptorSkillResource SliceResource(string pointer) =>
         new(SchemaReference + pointer, Slice(pointer), SliceDescription);
@@ -100,6 +100,6 @@ internal static partial class EmbeddedSkills
         return reader.ReadToEnd().ReplaceLineEndings("\n");
     }
 
-    [GeneratedRegex(@"schema/project\.schema\.json#(?<pointer>/[^\s`)]*[^\s`).,;:])", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"schema/project\.schema\.json#(?<pointer>/[^\s`)*""'\[\]<>]*[^\s`)*""'\[\]<>.,;:])", RegexOptions.CultureInvariant)]
     private static partial Regex Citation();
 }

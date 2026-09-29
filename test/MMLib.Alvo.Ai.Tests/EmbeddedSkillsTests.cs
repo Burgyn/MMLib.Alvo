@@ -56,6 +56,20 @@ public sealed class EmbeddedSkillsTests
             .ShouldBe(["/$defs/a", "/$defs/b"]);
 
     [Fact]
+    public void A_citation_wrapped_in_emphasis_quotes_or_a_link_is_read_without_its_wrapper() =>
+        EmbeddedSkills.SchemaPointers("**schema/project.schema.json#/$defs/a** \"schema/project.schema.json#/$defs/b\" [c](schema/project.schema.json#/$defs/c) <schema/project.schema.json#/$defs/d>")
+            .ShouldBe(["/$defs/a", "/$defs/b", "/$defs/c", "/$defs/d"]);
+
+    [Fact]
+    public async Task A_citation_only_inside_a_comment_is_not_a_resource()
+    {
+        var skill = EmbeddedSkills.SkillOf(new SkillParts("alvo-descriptor-x", "Use when x.", "Body.\n<!-- schema/project.schema.json#/$defs/no-such-definition -->\n"));
+
+        (await skill.GetResourceAsync(EmbeddedSkills.SchemaReference + "/$defs/no-such-definition", Ct)).ShouldBeNull();
+        (await skill.GetContentAsync(Ct)).ShouldContain("<available_resources />");
+    }
+
+    [Fact]
     public void A_frontmatter_that_is_not_name_then_description_is_refused() =>
         Should.Throw<InvalidOperationException>(() => SkillMarkdown.Parse("---\ndescription: d\nname: n\n---\nbody"));
 
@@ -79,6 +93,15 @@ public sealed class EmbeddedSkillsTests
     }
 
     [Fact]
+    public async Task A_resource_attribute_is_escaped_so_it_cannot_break_the_list()
+    {
+        var skill = new DescriptorSkill(
+            new SkillParts("alvo-descriptor-x", "Use when x.", "Body.\n"), [new DescriptorSkillResource("r", "{}", "A \"quoted\" <slice>.")]);
+
+        (await skill.GetContentAsync(Ct)).ShouldContain("description=\"A &quot;quoted&quot; &lt;slice&gt;.\"/>", Case.Sensitive);
+    }
+
+    [Fact]
     public async Task A_skill_without_resources_says_so_and_offers_no_scripts()
     {
         var content = await new DescriptorSkill(new SkillParts("alvo-descriptor-x", "Use when x.", "Body.\n"), []).GetContentAsync(Ct);
@@ -87,20 +110,21 @@ public sealed class EmbeddedSkillsTests
     }
 
     [Fact]
-    public async Task The_model_sees_both_read_tools_without_approval_and_never_the_script_tool()
+    public async Task The_model_sees_exactly_the_management_tools_and_the_two_read_tools_none_needing_approval()
     {
         var model = new ScriptedChatClient(Scripted.Says("ok"));
+        var management = ManagementTools.For(Substitute.For<IAlvoManagement>(), "p").Functions.Select(tool => tool.Name).ToList();
 
         await DrainAsync(model);
 
         var tools = model.Options[0].ShouldNotBeNull().Tools.ShouldNotBeNull();
-        _readTools.ShouldBeSubsetOf(tools.Select(tool => tool.Name));
-        tools.Select(tool => tool.Name).ShouldNotContain(AgentSkillsProvider.RunSkillScriptToolName);
+        management.Count.ShouldBe(6);
+        tools.Select(tool => tool.Name).ShouldBe([.. management, .. _readTools], ignoreOrder: true);
         tools.ShouldAllBe(tool => !(tool is ApprovalRequiredAIFunction));
     }
 
     [Fact]
-    public async Task The_instructions_the_model_receives_end_with_the_skill_list()
+    public async Task The_instructions_the_model_receives_are_the_base_prompt_then_the_skill_list()
     {
         var model = new ScriptedChatClient(Scripted.Says("ok"));
 
@@ -108,7 +132,8 @@ public sealed class EmbeddedSkillsTests
 
         var instructions = model.Options[0].ShouldNotBeNull().Instructions.ShouldNotBeNull();
         instructions.ShouldStartWith(AssistantInstructions.Text);
-        EmbeddedSkills.All.ShouldAllBe(skill => instructions.Contains($"<name>{skill.Frontmatter.Name}</name>", StringComparison.Ordinal));
+        var list = instructions[AssistantInstructions.Text.Length..];
+        EmbeddedSkills.All.ShouldAllBe(skill => list.Contains($"<name>{skill.Frontmatter.Name}</name>", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -127,7 +152,7 @@ public sealed class EmbeddedSkillsTests
     }
 
     [Fact]
-    public async Task A_loaded_skill_reaches_the_model_unescaped()
+    public async Task A_loaded_skill_reaches_the_tool_result_without_xml_escapes()
     {
         var model = new ScriptedChatClient(
             Scripted.Calls(AgentSkillsProvider.LoadSkillToolName, new() { ["skillName"] = Indexes }),

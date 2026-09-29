@@ -20,8 +20,17 @@ internal static partial class SkillMarkdown
         return new SkillParts(match.Groups["name"].Value, match.Groups["description"].Value, markdown[match.Length..].TrimStart('\n'));
     }
 
+    /// <summary>
+    /// <paramref name="body"/> without its HTML comments: the <c>gen:</c> and worked-example markers are for the drift
+    /// tests, which read the file, and are neither shown to the model nor a source of citations.
+    /// </summary>
+    internal static string WithoutComments(string body) => Comment().Replace(body, string.Empty);
+
     [GeneratedRegex(@"\A---\nname: (?<name>[^\n]+)\ndescription: (?<description>[^\n]+)\n---\n", RegexOptions.CultureInvariant)]
     private static partial Regex Frontmatter();
+
+    [GeneratedRegex(@"<!--.*?-->\n?", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    private static partial Regex Comment();
 }
 
 /// <summary>A skill's frontmatter values and its body.</summary>

@@ -1,7 +1,7 @@
 ﻿using Microsoft.Agents.AI;
 
+using System.Security;
 using System.Text;
-using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Ai.Internal;
 
@@ -16,14 +16,16 @@ namespace MMLib.Alvo.Ai.Internal;
 /// <c>&lt;available_resources&gt;</c>, with the text left as written.
 /// </para>
 /// <para>
-/// <b>HTML comments are removed from what the model reads.</b> The <c>gen:</c> region markers and the worked-example
-/// markers are for the drift tests, which read the file, not the served text.
+/// <b>HTML comments are removed from what the model reads</b> (<see cref="SkillMarkdown.WithoutComments"/>). The
+/// resource list is the one place text is escaped: a name and a description sit inside XML attributes, and the
+/// citation grammar already keeps quotes and angle brackets out of a name, so escaping it changes nothing the model
+/// has to type back.
 /// </para>
 /// <para>
 /// No scripts: <see cref="AgentSkill.GetScriptAsync"/> keeps its default, and the script tool is not offered (D28).
 /// </para>
 /// </remarks>
-internal sealed partial class DescriptorSkill : AgentSkill
+internal sealed class DescriptorSkill : AgentSkill
 {
     private readonly string _content;
     private readonly IReadOnlyList<DescriptorSkillResource> _resources;
@@ -48,7 +50,7 @@ internal sealed partial class DescriptorSkill : AgentSkill
         new StringBuilder()
             .Append("<name>").Append(parts.Name).Append("</name>\n")
             .Append("<description>").Append(parts.Description).Append("</description>\n\n")
-            .Append("<instructions>\n").Append(Comment().Replace(parts.Body, string.Empty).TrimEnd('\n')).Append("\n</instructions>\n\n")
+            .Append("<instructions>\n").Append(SkillMarkdown.WithoutComments(parts.Body).TrimEnd('\n')).Append("\n</instructions>\n\n")
             .Append(ResourceList(resources))
             .ToString();
 
@@ -58,8 +60,5 @@ internal sealed partial class DescriptorSkill : AgentSkill
             : $"<available_resources>\n{string.Concat(resources.Select(ResourceLine))}</available_resources>";
 
     private static string ResourceLine(DescriptorSkillResource resource) =>
-        $"  <resource name=\"{resource.Name}\" description=\"{resource.Description}\"/>\n";
-
-    [GeneratedRegex(@"<!--.*?-->\n?", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
-    private static partial Regex Comment();
+        $"  <resource name=\"{SecurityElement.Escape(resource.Name)}\" description=\"{SecurityElement.Escape(resource.Description)}\"/>\n";
 }
