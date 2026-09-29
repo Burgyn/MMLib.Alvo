@@ -315,6 +315,48 @@ public sealed class EvalCasesTests
         Grade("stale_revision_recovered", turn).Passed.ShouldBeFalse();
     }
 
+    [Fact]
+    public void Audit_fails_a_new_entity_whose_name_is_not_snake_case_even_when_the_dry_run_passed_it() =>
+        Grade("audit_entity", Turn(WithEntity("CustomerAudits", AuditFields()), "I proposed it.", calls: Propose(Valid())))
+            .Passed.ShouldBeFalse();
+
+    [Fact]
+    public void Audit_grades_a_tenancy_that_is_not_text_instead_of_throwing()
+    {
+        var proposed = Edited(document => document["entities"]!.AsObject()["customer_audits"] =
+            new JsonObject { ["tenancy"] = true, ["fields"] = AuditFields() });
+
+        Should.NotThrow(() => Grade("audit_entity", Turn(proposed, "I proposed it.", calls: Propose(Valid()))));
+    }
+
+    [Fact]
+    public void The_forced_case_fails_a_turn_that_needed_a_third_proposal()
+    {
+        var turn = Turn(WithNicknameAfterTheOtherOperator(rebased: true), "I proposed nickname.", calls:
+        [
+            Read("get_descriptor", round: 1),
+            Propose(Refused("concurrency", "The descriptor is at revision 2.", code: "stale-revision"), round: 2),
+            Propose(Refused("validation", "The string value does not match the pattern."), round: 3),
+            Propose(Valid(), round: 4),
+        ]);
+
+        Grade("stale_revision_recovered", turn).Passed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void The_forced_case_fails_a_nickname_made_required()
+    {
+        var turn = Turn(WithNicknameAfterTheOtherOperator(rebased: true, required: true), "I proposed nickname.", calls:
+        [
+            Read("get_descriptor", round: 1),
+            Propose(Refused("concurrency", "The descriptor is at revision 2.", code: "stale-revision"), round: 2),
+            Read("get_descriptor", round: 3),
+            Propose(Valid(), round: 4),
+        ]);
+
+        Grade("stale_revision_recovered", turn).Passed.ShouldBeFalse();
+    }
+
     private static JsonObject AuditFields() => new()
     {
         ["customer_id"] = new JsonObject { ["type"] = "ref", ["entity"] = "customers", ["onDelete"] = "cascade" },
@@ -324,9 +366,11 @@ public sealed class EvalCasesTests
     private static string WithEntity(string name, JsonObject fields) =>
         Edited(document => document["entities"]!.AsObject()[name] = new JsonObject { ["fields"] = fields });
 
-    private static string WithNicknameAfterTheOtherOperator(bool rebased) => Edited(document =>
+    private static string WithNicknameAfterTheOtherOperator(bool rebased, bool required = false) => Edited(document =>
     {
-        document.Fields("technicians")["nickname"] = new JsonObject { ["type"] = "string" };
+        document.Fields("technicians")["nickname"] = required
+            ? new JsonObject { ["type"] = "string", ["required"] = true }
+            : new JsonObject { ["type"] = "string" };
         if (rebased)
         {
             document["entities"]!["bikes"]!["description"] = "edited by another operator";

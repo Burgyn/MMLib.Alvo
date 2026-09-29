@@ -9,6 +9,14 @@ public sealed class InterferingChatClientTests
 {
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
+    /// <summary>A history in which the model has read the descriptor.</summary>
+    private static ChatMessage[] AfterRead =>
+    [
+        new(ChatRole.User, "hi"),
+        new(ChatRole.Assistant, [new FunctionCallContent("c1", "get_descriptor")]),
+        new(ChatRole.Tool, [new FunctionResultContent("c1", "{}")]),
+    ];
+
     [Fact]
     public async Task It_interferes_once_before_the_first_request_that_follows_a_descriptor_read()
     {
@@ -19,18 +27,30 @@ public sealed class InterferingChatClientTests
             requestsSeenAtInterference.Add(model.Requests);
             return Task.CompletedTask;
         });
-        ChatMessage[] afterRead =
-        [
-            new(ChatRole.User, "hi"),
-            new(ChatRole.Assistant, [new FunctionCallContent("c1", "get_descriptor")]),
-            new(ChatRole.Tool, [new FunctionResultContent("c1", "{}")]),
-        ];
-
         await DrainAsync(client, [new ChatMessage(ChatRole.User, "hi")]);
-        await DrainAsync(client, afterRead);
-        await DrainAsync(client, afterRead);
+        await DrainAsync(client, AfterRead);
+        await DrainAsync(client, AfterRead);
 
         requestsSeenAtInterference.ShouldBe([1]);
+    }
+
+    [Fact]
+    public async Task It_interferes_on_a_non_streaming_request_too()
+    {
+        var model = new CountingModel();
+        var interferences = 0;
+        using var client = new InterferingChatClient(model, _ =>
+        {
+            interferences++;
+            return Task.CompletedTask;
+        });
+
+        await client.GetResponseAsync([new ChatMessage(ChatRole.User, "hi")], cancellationToken: Ct);
+        await client.GetResponseAsync(AfterRead, cancellationToken: Ct);
+        await client.GetResponseAsync(AfterRead, cancellationToken: Ct);
+
+        interferences.ShouldBe(1);
+        model.Requests.ShouldBe(3);
     }
 
     private static async Task DrainAsync(InterferingChatClient client, ChatMessage[] messages)

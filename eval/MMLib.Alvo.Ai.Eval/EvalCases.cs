@@ -248,11 +248,14 @@ internal static partial class EvalCases
     private static List<string> DeclaredManagedColumns(JsonNode? entity)
     {
         var owned = AlvoManagedColumns.For(
-            entity?["tenancy"]?.GetValue<string>() == "scoped" ? TenancyMode.Scoped : null, Flag(entity, "audit"), Flag(entity, "softDelete"));
+            Text(entity, "tenancy") == "scoped" ? TenancyMode.Scoped : null, Flag(entity, "audit"), Flag(entity, "softDelete"));
         return [.. (entity?["fields"] as JsonObject ?? new JsonObject()).Select(field => field.Key).Where(owned.Contains)];
     }
 
     private static bool Flag(JsonNode? entity, string trait) => entity?[trait] is JsonValue value && value.TryGetValue<bool>(out var on) && on;
+
+    private static string? Text(JsonNode? entity, string member) =>
+        entity?[member] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
 
     private static bool RefersTo(JsonNode? entity, string target) =>
         (entity?["fields"] as JsonObject ?? new JsonObject()).Any(field => field.Value?["entity"]?.GetValue<string>() == target);
