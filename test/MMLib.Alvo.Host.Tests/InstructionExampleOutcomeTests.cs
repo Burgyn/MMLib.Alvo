@@ -81,6 +81,15 @@ public sealed partial class InstructionExampleOutcomeTests
 
         var outcome = await InvokeAsync(management, example);
 
+        AssertClaims(example, outcome);
+    }
+
+    /// <summary>
+    /// Holds <paramref name="outcome"/> to what <paramref name="example"/> claims: every claimed member equal, except
+    /// <c>revision</c>, and every claimed violation among the real ones.
+    /// </summary>
+    internal static void AssertClaims(InstructionExample example, JsonElement outcome)
+    {
         foreach (var claimed in example.Outcome.EnumerateObject().Where(member => member.Name is not ("violations" or "revision")))
         {
             outcome.TryGetProperty(claimed.Name, out var actual).ShouldBeTrue($"the outcome has no '{claimed.Name}': {outcome}");
@@ -142,7 +151,7 @@ public sealed partial class InstructionExampleOutcomeTests
         return said;
     }
 
-    private static async Task<JsonElement> InvokeAsync(IAlvoManagement management, InstructionExample example)
+    internal static async Task<JsonElement> InvokeAsync(IAlvoManagement management, InstructionExample example)
     {
         var current = await management.GetDescriptorAsync(Project, Ct);
         var tool = ManagementTools.For(management, Project).Functions.Single(function => function.Name == example.Tool);
@@ -177,10 +186,10 @@ public sealed partial class InstructionExampleOutcomeTests
 
     private static string Collapsed(string text) => Whitespace().Replace(text, " ").TrimEnd('…');
 
-    private static string BikeWorkshop { get; } =
+    internal static string BikeWorkshop { get; } =
         Path.Combine(RepositoryRoot.Find(), "examples", "bike-workshop", "bike-workshop.alvo.json");
 
-    private static AlvoPrincipal Administrator() => new()
+    internal static AlvoPrincipal Administrator() => new()
     {
         Context = new AlvoContext { User = UserId.New(), Roles = new HashSet<Role> { Role.Admin } },
         Scopes = new HashSet<ApiKeyScope>(),

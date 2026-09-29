@@ -73,7 +73,7 @@ compresses out. Violating one of these is a bug, not a style nit.
   measurement, produced by `scripts/test-load --tier calibration`.
 - `docs/superpowers/specs/` — per-issue specs (the what/why for one issue).
 - `docs/superpowers/plans/` — per-issue Superpowers implementation plans (the how, for one PR).
-- `.claude/skills/` — the `alvo-*` skills (see below).
+- `.claude/skills/` — the `alvo-*` skills, and the `alvo-descriptor-*` skills the admin assistant embeds (see below).
 - `.claude/agents/` — subagents, e.g. `alvo-plan-guard`.
 - `docs/design/f5-admin/` — the F5 admin **design prototype** (HTML/CSS/vanilla ES, no build) plus
   its scenario suite and the two adversarial reviews it was built against. A design artifact:
@@ -207,7 +207,11 @@ and only descend when the layer above does not answer your question.
 ## Skills & guard
 
 Domain discipline lives in `.claude/skills/alvo-*` (skills) and the read-only
-`alvo-plan-guard` subagent (`.claude/agents/`). You don't invoke skills by
+`alvo-plan-guard` subagent (`.claude/agents/`). The `alvo-descriptor-*` skills are different in kind: they
+teach the descriptor itself (entities, rules, hooks, rollups, indexes, access, capabilities), and they are
+**shared with the admin assistant**, which embeds these same directories (`MMLib.Alvo.Ai`, D33 of
+`docs/superpowers/specs/2026-09-29-f5-assistant-first-try-design.md`). Edit them as product text: their regions
+are drift-tested, and their size is capped. You don't invoke skills by
 name and this file deliberately doesn't re-list them — the harness surfaces
 each skill's `description` and it activates when a task touches its area. Two
 things those descriptions won't tell you: packaging / licensing / test-stack /

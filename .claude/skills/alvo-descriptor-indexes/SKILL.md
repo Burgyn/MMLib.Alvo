@@ -27,5 +27,18 @@ Adding one depends on whether the entity already has the list:
 - It has none: `add` at `/entities/<entity>/indexes` with a list holding the new index,
   `[{"fields": ["active", "specialization"]}]`. An append to a list that does not exist is refused.
 
+<!-- example: index-technicians-by-specialization -->
+**Speed up listing the active technicians of one specialization.**
+
+```json
+{"tool": "propose_change", "baseRevision": 1, "summary": "Indexes technicians by active and specialization.",
+ "operations": [{"op": "add", "path": "/entities/technicians/indexes",
+                 "value": [{"fields": ["active", "specialization"]}]}]}
+```
+
+```json
+{"valid": true, "changedPaths": ["/entities/technicians/indexes"]}
+```
+
 In the dashboard: read with `get_descriptor`, then `check_change` or `propose_change` the operation.
 In this repo: edit the descriptor file and run the validator (`dotnet test`), or the Management API.

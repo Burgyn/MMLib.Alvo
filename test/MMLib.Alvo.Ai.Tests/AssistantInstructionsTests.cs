@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.AI;
+﻿using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;
@@ -37,9 +38,11 @@ public sealed partial class AssistantInstructionsTests
 
     private static readonly string[] _pointerMembers = ["path", "from"];
 
+    private static readonly string[] _skillTools = [AgentSkillsProvider.LoadSkillToolName, AgentSkillsProvider.ReadSkillResourceToolName];
+
     private static IReadOnlyList<AIFunction> Tools { get; } = ManagementTools.For(Substitute.For<IAlvoManagement>(), "p").Functions;
 
-    private static IReadOnlyList<string> Registered { get; } = [.. Tools.Select(tool => tool.Name).Order(StringComparer.Ordinal)];
+    internal static IReadOnlyList<string> Registered { get; } = [.. Tools.Select(tool => tool.Name).Order(StringComparer.Ordinal)];
 
     public static TheoryData<string> ExampleNames() => [.. InstructionExamples.Parse(_text).Select(example => example.Name)];
 
@@ -113,17 +116,22 @@ public sealed partial class AssistantInstructionsTests
         JsonFence().Count(_text).ShouldBe(2 * InstructionExamples.Parse(_text).Count);
 
     [Fact]
-    public void Every_snake_case_name_in_code_is_a_tool_or_a_descriptor_name() =>
-        CodeSpan().Matches(Fence().Replace(_text, string.Empty))
-            .SelectMany(span => SnakeCase().Matches(span.Value).Select(match => match.Value))
-            .Distinct()
-            .ShouldAllBe(name => KnownNames.Contains(name));
+    public void Every_snake_case_name_in_code_is_a_tool_or_a_descriptor_name()
+    {
+        var known = KnownNames(_text);
+
+        SnakeCaseInCode(_text).ShouldAllBe(name => known.Contains(name));
+    }
 
     [Theory]
     [MemberData(nameof(ExampleNames))]
-    public void A_worked_example_sends_exactly_its_tools_parameters(string name)
+    public void A_worked_example_sends_exactly_its_tools_parameters(string name) =>
+        SendsExactlyItsToolsParameters(InstructionExamples.Parse(_text).Single(candidate => candidate.Name == name));
+
+    /// <summary>Holds a worked example's call to a registered tool's parameters: every one it has, and each required one.</summary>
+    internal static void SendsExactlyItsToolsParameters(InstructionExample example)
     {
-        var example = InstructionExamples.Parse(_text).Single(candidate => candidate.Name == name);
+        Registered.ShouldContain(example.Tool);
         var schema = Tools.Single(tool => tool.Name == example.Tool).JsonSchema;
 
         example.Arguments.Keys.Order(StringComparer.Ordinal)
@@ -151,22 +159,26 @@ public sealed partial class AssistantInstructionsTests
     private static partial Regex ToolBullet();
 
     /// <summary>
-    /// Every name a tool, the bike-workshop descriptor, the schema, an example's patch or the framework's managed
-    /// columns define — what a snake-case token in the text may legitimately be.
+    /// Every name a tool, the skill tools, the bike-workshop descriptor, the schema, one of <paramref name="text"/>'s
+    /// own example patches or the framework's managed columns define — what a snake-case token in the text may
+    /// legitimately be.
     /// </summary>
-    private static HashSet<string> KnownNames
+    internal static HashSet<string> KnownNames(string text)
     {
-        get
-        {
-            var root = RepositoryRoot.Find();
-            var names = new HashSet<string>(Registered.Concat(_illustrativeNames), StringComparer.Ordinal);
-            names.UnionWith(PropertyNames(JsonNode.Parse(File.ReadAllText(Path.Combine(root, "examples", "bike-workshop", "bike-workshop.alvo.json")))));
-            names.UnionWith(PropertyNames(JsonNode.Parse(File.ReadAllText(Path.Combine(root, "schema", "project.schema.json")))));
-            names.UnionWith(InstructionExamples.Parse(_text).SelectMany(ExampleTokens));
-            names.UnionWith(AlvoManagedColumns.For(TenancyMode.Scoped, audit: true, softDelete: true));
-            return names;
-        }
+        var root = RepositoryRoot.Find();
+        var names = new HashSet<string>(Registered.Concat(_illustrativeNames).Concat(_skillTools), StringComparer.Ordinal);
+        names.UnionWith(PropertyNames(JsonNode.Parse(File.ReadAllText(Path.Combine(root, "examples", "bike-workshop", "bike-workshop.alvo.json")))));
+        names.UnionWith(PropertyNames(JsonNode.Parse(File.ReadAllText(Path.Combine(root, "schema", "project.schema.json")))));
+        names.UnionWith(InstructionExamples.Parse(text).SelectMany(ExampleTokens));
+        names.UnionWith(AlvoManagedColumns.For(TenancyMode.Scoped, audit: true, softDelete: true));
+        return names;
     }
+
+    /// <summary>Every distinct snake-case token inside a code span of <paramref name="text"/>, fences left out.</summary>
+    internal static IEnumerable<string> SnakeCaseInCode(string text) =>
+        CodeSpan().Matches(Fence().Replace(text, string.Empty))
+            .SelectMany(span => SnakeCase().Matches(span.Value).Select(match => match.Value))
+            .Distinct();
 
     private static IEnumerable<string> Beyond(IReadOnlySet<string> columns, IReadOnlySet<string> always) =>
         columns.Where(column => !always.Contains(column));
@@ -190,7 +202,7 @@ public sealed partial class AssistantInstructionsTests
     private static partial Regex ToolName();
 
     [GeneratedRegex("^```json\r?$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
-    private static partial Regex JsonFence();
+    internal static partial Regex JsonFence();
 
     [GeneratedRegex("```.*?```", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex Fence();
