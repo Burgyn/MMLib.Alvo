@@ -517,7 +517,9 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.FillAsync("#hook-reject", "A completed work order cannot be reopened.");
         await session.Page.ClickAsync("[data-testid='hook-add']");
 
-        var row = session.Page.Locator("[data-testid='hook-row']").First;
+        /* Filtered, not First: another fact in this world adds a hook with the same first clause, and xUnit runs
+           them in any order. "new.status" survives the escaping this fact is about. */
+        var row = session.Page.Locator("[data-testid='hook-row']").Filter(new() { HasText = "new.status" }).First;
         await row.WaitForAsync();
 
         var rendered = await row.InnerTextAsync();

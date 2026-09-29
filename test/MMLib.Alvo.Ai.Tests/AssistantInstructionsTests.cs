@@ -157,7 +157,7 @@ public sealed partial class AssistantInstructionsTests
     [GeneratedRegex(@"\b(?:get|check|propose|validate|apply|set|update|delete|list|add|remove|create)_[a-z_]+\b", RegexOptions.CultureInvariant)]
     private static partial Regex ToolName();
 
-    [GeneratedRegex("^```json$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex("^```json\r?$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex JsonFence();
 
     [GeneratedRegex("```.*?```", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
