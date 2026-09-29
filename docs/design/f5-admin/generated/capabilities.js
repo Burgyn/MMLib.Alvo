@@ -143,6 +143,12 @@ export const CAPABILITIES = {
       "level": "admin"
     },
     {
+      "verb": "DELETE",
+      "path": "/projects/{project}/users/{user:guid}/lockout",
+      "operation": "ManageUsers",
+      "level": "admin"
+    },
+    {
       "verb": "GET",
       "path": "/info",
       "operation": "GetInfo",
