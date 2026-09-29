@@ -26,10 +26,14 @@ internal sealed class ScriptedChatClient(params IReadOnlyList<ChatResponse> resp
     /// <summary>The messages the pipeline sent, in order — what a test asserts was never logged.</summary>
     internal List<ChatMessage> Sent { get; } = [];
 
+    /// <summary>The options each request carried, in order: the tools and instructions the model saw on each call.</summary>
+    internal List<ChatOptions?> Options { get; } = [];
+
     public Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
         Sent.AddRange(messages);
+        Options.Add(options?.Clone());
 
         return Task.FromResult(Next());
     }
@@ -40,6 +44,7 @@ internal sealed class ScriptedChatClient(params IReadOnlyList<ChatResponse> resp
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         Sent.AddRange(messages);
+        Options.Add(options?.Clone());
 
         foreach (var update in Next().ToChatResponseUpdates())
         {

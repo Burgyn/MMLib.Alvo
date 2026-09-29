@@ -32,6 +32,10 @@ namespace MMLib.Alvo.Ai;
 /// rather than a bill.
 /// </para>
 /// <para>
+/// <b>The skills are read-only too</b> (D28): <c>load_skill</c> and <c>read_skill_resource</c> read fixed embedded
+/// text.
+/// </para>
+/// <para>
 /// <b>Nothing the operator typed is logged.</b> A message to a schema assistant routinely carries a
 /// connection string somebody pasted, and a log line is the place §7.1 asks a secret never to reach.
 /// </para>
@@ -187,15 +191,21 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
         IChatClient client, ManagementTools tools, AssistantRequest request, CancellationToken ct) =>
         AgentFor(client, tools).RunStreamingAsync(Conversation(request), session: null, options: null, ct);
 
-    /// <summary>The agent for one turn: the fixed instructions, the tools, and a capped, sequential invoker.</summary>
+    /// <summary>
+    /// The agent for one turn: the fixed instructions, the tools, the descriptor skills, and a capped, sequential invoker.
+    /// </summary>
     internal static ChatClientAgent AgentFor(IChatClient client, ManagementTools tools)
     {
         var agent = new ChatClientAgent(
             client,
-            instructions: AssistantInstructions.Text,
-            name: AgentName,
-            description: null,
-            tools: [.. tools.Functions]);
+            new ChatClientAgentOptions
+            {
+                Name = AgentName,
+                ChatOptions = new ChatOptions { Instructions = AssistantInstructions.Text, Tools = [.. tools.Functions] },
+                AIContextProviders = [EmbeddedSkills.Provider],
+            },
+            loggerFactory: null,
+            services: null);
         Constrain(agent);
 
         return agent;
