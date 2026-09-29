@@ -170,9 +170,9 @@ These are nine skills, each `.claude/skills/alvo-descriptor-<area>/SKILL.md`. **
 
 | Area | What it teaches | G region → source (test home) |
 |---|---|---|
-| `entities-and-fields` | pointer paths; rename by `renamedFrom`; removal is destructive, so the operator applies it; `default` literal or `$cel` | entity keys, field keys ← schema (Ai.Tests); reserved fields ← `ReservedQueryKeys.All` (Host.Tests) |
-| `field-types-and-formats` | facets per type; `precision` counts all digits; `text` vs `string`; `ref` to `users` | type enum, `onDelete` enum, named formats ← schema (Ai.Tests) |
-| `traits-and-tenancy` | project × entity tenancy; a scoped create echoes `tenant_id`; `softDelete` + `default` is refused at apply | managed columns per trait ← `AlvoManagedColumns` (Ai.Tests, via `InstructionClaims.ManagedColumns`) |
+| `entities-and-fields` | pointer paths; rename by `renamedFrom`; removal is destructive, so the operator applies it; `default` is a literal of the field's type (a `$cel` default is refused, D38); `validation` is refused; `required` + `readOnly` needs a literal `default` | entity keys, field keys ← schema (Ai.Tests); reserved fields ← `ReservedQueryKeys.All` (Host.Tests) |
+| `field-types-and-formats` | facets per type; `precision` counts all digits; `text` vs `string`; `onDelete` and the automatic index hold on a `ref` to a declared entity, and a `ref` to `users` has neither (D38) | type enum, `onDelete` enum, built-in formats ← schema (Ai.Tests) |
+| `traits-and-tenancy` | project × entity tenancy; a scoped `POST` create echoes `tenant_id`; `softDelete` is refused at apply as a whole (D38) | managed columns per trait ← `AlvoManagedColumns` (Ai.Tests, via `InstructionClaims.ManagedColumns`) |
 | `rules-and-cel` | a missing operation denies; `USING` / `WITH CHECK` per operation; role literals are checked at apply | Rule profile: allowed and refused examples ← `CelCompiler` probes (Host.Tests, D35) |
 | `hooks` | `reject` / `mutate`; `old.` / `new.`; `changed()`; runs in the transaction with no network | Condition and Mutate profiles ← probes; Mutate functions ← `CelCall.LowerAscii` / `CelCall.Now` (Host.Tests) |
 | `computed-and-rollups` | the ladder computed → rollup → hook → action → csx; today's §4; rollup `from` / `op` | Computed profile ← probes (Host.Tests); rollup `op` enum ← schema (Ai.Tests) |
@@ -182,6 +182,19 @@ These are nine skills, each `.claude/skills/alvo-descriptor-<area>/SKILL.md`. **
 
 Worked examples in a skill use the base prompt's `<!-- example: name -->` + two-`json`-fence format, so
 `InstructionExamples.Parse` and the Host.Tests outcome check run them unchanged.
+
+**D38 (2026-09-29, Task 6): the table above is corrected against this build, not the draft.**
+
+- A `$cel` field `default` is refused (`UnhonouredFeatures.OnAField`, #113). Only a literal of the field's own type,
+  within its facets, is honoured.
+- `softDelete: true` is refused at apply by itself (`UnhonouredFeatures.OnAnEntity`), not only beside a `default`.
+- `onDelete` and the automatic foreign-key index exist only on a `ref` to a declared entity (`ConfigureReferences`).
+  A `ref` to `users` is a bare id.
+- The worked examples are retargeted to what `bike-workshop` lacks. `audit-rental-fleet` replaces `audit-rentals`,
+  since `rentals` is already audited. `index-technicians-by-specialization` replaces `index-technician-status`,
+  since `service_orders` already has `[technician_id, status]` (Task 5 B5).
+- A prose claim that a skill makes about a refusal or acceptance is probed in `SkillClaimTests` (Host.Tests), beside
+  the region drift tests.
 
 ### 7.4 Acceptance criteria
 

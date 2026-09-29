@@ -10,6 +10,17 @@ namespace MMLib.Alvo.Ai.Tests;
 /// </summary>
 public sealed class SkillRegionTests
 {
+    /// <summary>The regions this suite holds to the schema and the ports.</summary>
+    private static readonly string[] _heldHere =
+        ["entity-keys", "field-keys", "field-types", "on-delete", "built-in-formats", "managed-columns"];
+
+    /// <summary>The regions whose source is the core, held by <c>SkillClaimTests</c> in <c>MMLib.Alvo.Host.Tests</c>.</summary>
+    private static readonly string[] _heldInHostTests = ["reserved-fields"];
+
+    [Fact]
+    public void Every_region_a_skill_declares_is_held_to_a_source() =>
+        SkillCatalogue.RegionIds().ShouldBe(_heldHere.Concat(_heldInHostTests), ignoreOrder: true);
+
     [Fact]
     public void The_entity_keys_are_the_schemas() =>
         Holds("entities-and-fields", "entity-keys", Keys(Schema()["$defs"]!["entity"]!["properties"]!));

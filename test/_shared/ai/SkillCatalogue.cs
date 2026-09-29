@@ -7,9 +7,10 @@ namespace MMLib.Alvo.Ai.Tests;
 /// (D33). The tests run over these, not over a copy.
 /// </summary>
 /// <remarks>
-/// <b>Reading is tolerant on purpose.</b> A skill whose frontmatter is malformed still loads, with the keys it does
-/// have, so the conformance fact that checks the frontmatter fails and names the skill, rather than every test of the
-/// suite failing inside this type's initialiser.
+/// <b>Reading is tolerant on purpose.</b> A skill whose frontmatter is malformed, or a directory with no
+/// <c>SKILL.md</c> at all, still loads, with the keys it does have (none, for a missing file), so the conformance fact
+/// that checks the frontmatter fails and names the skill, rather than every test of the suite failing inside this
+/// type's initialiser.
 /// </remarks>
 internal static partial class SkillCatalogue
 {
@@ -28,6 +29,10 @@ internal static partial class SkillCatalogue
 
     /// <summary>Every skill's directory name: what a theory is keyed by.</summary>
     internal static TheoryData<string> Keys() => [.. All.Select(skill => skill.Key)];
+
+    /// <summary>Every <c>gen:</c> region id any skill declares, each once.</summary>
+    internal static IReadOnlySet<string> RegionIds() =>
+        All.SelectMany(skill => Regions(skill.Body).Keys).ToHashSet(StringComparer.Ordinal);
 
     internal static IReadOnlyDictionary<string, string> Regions(string body) =>
         Region().Matches(body).ToDictionary(match => match.Groups["id"].Value, match => match.Groups["text"].Value, StringComparer.Ordinal);
@@ -58,7 +63,8 @@ internal static partial class SkillCatalogue
 
     private static SkillOnDisk Read(string directory)
     {
-        var text = File.ReadAllText(Path.Combine(directory, "SKILL.md")).ReplaceLineEndings("\n");
+        var file = Path.Combine(directory, "SKILL.md");
+        var text = File.Exists(file) ? File.ReadAllText(file).ReplaceLineEndings("\n") : string.Empty;
         var block = FrontmatterBlock().Match(text);
         var lines = FrontmatterLine().Matches(block.Groups["block"].Value);
         var values = lines.GroupBy(line => line.Groups["key"].Value).ToDictionary(group => group.Key, group => group.First().Groups["value"].Value, StringComparer.Ordinal);

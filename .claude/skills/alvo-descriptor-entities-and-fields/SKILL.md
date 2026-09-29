@@ -1,6 +1,6 @@
 ---
 name: alvo-descriptor-entities-and-fields
-description: Use when an Alvo descriptor change adds, renames or removes an entity or a field, or sets a field's required, unique, default, hidden or readOnly — the paths, the keys each level takes, and how a rename keeps its data.
+description: Use when an Alvo descriptor change adds, renames or removes an entity or a field, or sets required, unique, default, hidden or readOnly on a field — the paths, the keys each level takes, the reserved names, and how a rename keeps its data.
 ---
 
 # Entities and fields in an Alvo descriptor
@@ -20,6 +20,13 @@ A field takes these keys:
 `type` `description` `renamedFrom` `required` `unique` `nullable` `default` `maxLength` `precision` `scale` `values` `entity` `onDelete` `format` `validation` `index` `hidden` `readOnly` `computed` `rollup`
 <!-- /gen:field-keys -->
 
+No field may be named one of these, which the Data API's query string uses, and no entity may be named `users`, the
+built-in auth entity (a `ref` may still point at it):
+
+<!-- gen:reserved-fields -->
+`order` `limit` `offset` `after` `select` `or` `and` `not`
+<!-- /gen:reserved-fields -->
+
 The schema declares every key above, and this build refuses one of them outright: a field's `validation` is not
 evaluated yet, so it is refused at apply rather than accepted as a constraint that holds nothing. Express the rule
 with a facet the API does check (`maxLength`, `precision` and `scale`, enum `values`, a `format`) or a before-hook.
@@ -27,13 +34,15 @@ Types and facets are in `alvo-descriptor-field-types-and-formats`; `computed` an
 
 - `required` makes the field NOT NULL; `nullable` is derived from it and is rarely written.
 - `unique` is uniqueness across the entity, per tenant on a tenant-scoped one (see `alvo-descriptor-indexes`).
-- `default` is honoured as a JSON literal, which becomes the column default. The schema also allows
-  `{"$cel": "…"}`, and this build refuses it: send the value on create instead.
+- `default` is honoured as a JSON literal of the field's own type and within its facets (`"0"` on an `integer` is
+  refused), which becomes the column default. A `computed` or `rollup` field takes no `default`. The schema also
+  allows `{"$cel": "…"}`, and this build refuses it: send the value on create instead.
 - `hidden` keeps the field out of every API response and `readOnly` keeps a caller from writing it. Each is `true`,
   or a CEL condition that decides per caller: it may read `@user` and `@tenant`, never the row's own fields, which
   is refused.
-- A `required` field that is `"readOnly": true` can never be created, and is refused, unless a literal `default`,
-  `computed` or `rollup` supplies its value.
+- A `required` field that is `"readOnly": true` can never be created, and is refused, unless a literal `default`
+  supplies its value. A `computed` or `rollup` field is already read-only: do not add `readOnly` to it, since
+  `required` with `readOnly` is refused there too.
 
 ## Renames keep data; removals lose it
 

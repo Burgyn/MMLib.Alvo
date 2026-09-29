@@ -130,7 +130,7 @@ public sealed partial class InstructionExampleOutcomeTests
         }
     }
 
-    private static async Task<DraftAttempt> AttemptAsync(IAlvoManagement management, string path, string field)
+    internal static async Task<DraftAttempt> AttemptAsync(IAlvoManagement management, string path, string field)
     {
         var current = await management.GetDescriptorAsync(Project, Ct);
         var operations = JsonSerializer.SerializeToElement(new[] { new { op = "add", path, value = JsonNode.Parse(field) } });

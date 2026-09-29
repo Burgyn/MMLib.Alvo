@@ -6,7 +6,7 @@ description: Use when an Alvo descriptor change should speed up a query or make 
 # Indexes in an Alvo descriptor
 
 Alvo already indexes, without being asked, the primary key `id`, every field with `"unique": true`, and every `ref`
-field. Declare an index only beyond those:
+to a declared entity. A `ref` to the built-in `users` is not indexed by itself. Declare an index only beyond those:
 
 - A field's `"index": true` is the one-field form. Prefer it for a single field.
 - The entity's `indexes` list is for composite indexes, fields in query order: filter on the first, then the next.
