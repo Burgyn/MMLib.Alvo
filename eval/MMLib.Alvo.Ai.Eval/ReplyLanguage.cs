@@ -10,9 +10,22 @@ namespace MMLib.Alvo.Ai.Eval;
 /// neither list. <b>Czech is decided by markers alone</b>, because it is the confusion the #289 transcript shows and
 /// the one a count cannot see: the letters <c>ě ř ů</c>, which Slovak does not have, and the function words Slovak
 /// spells differently (<c>se</c>/<c>sa</c>, <c>pro</c>/<c>pre</c>, <c>jsem</c>/<c>som</c>, <c>pojďme</c>/<c>poďme</c>).
-/// One marker makes the reply Czech, since a Slovak reply with one Czech word is the defect.
+/// One marker makes the reply Czech, since a Slovak reply with one Czech word is the defect. The marker words include the
+/// diacritic-free Czech forms Slovak spells otherwise (<c>bylo</c>/<c>bolo</c>, <c>tedy</c>/<c>teda</c>,
+/// <c>jak</c>/<c>ako</c>), so a Czech reply without <c>ě ř ů</c> is still found — and never a word Slovak also has
+/// (<c>také</c> is Slovak for "such").
 /// </para>
-/// <para>Code spans and fences are identifiers, not language, so they are taken out first.</para>
+/// <para>
+/// A word with a letter only Slovak has (<c>ä ô ľ ĺ ŕ</c>) counts as Slovak, so a short Slovak reply of content words
+/// ("Nemôžem …") is not <c>unknown</c>. Code spans and fences are identifiers, not language, so they are taken out
+/// first; a word is a run of letters and digits, hyphens inside it included, so <c>v1</c> or <c>pre-existing</c> is
+/// one word and never the Slovak <c>v</c> or <c>pre</c>.
+/// </para>
+/// <para>
+/// <b>Known limits.</b> A proper name spelled with a Czech-only letter (<c>Škůdce</c>) makes a Slovak reply Czech. An
+/// English refusal the model paraphrases inline — not a quote-block line, not the framework's text verbatim, which
+/// <see cref="ReplyText.OwnProse"/> removes — counts toward English and can tip a short Slovak reply.
+/// </para>
 /// </remarks>
 internal static partial class ReplyLanguage
 {
@@ -30,21 +43,27 @@ internal static partial class ReplyLanguage
 
     private static readonly SearchValues<char> _czechLetters = SearchValues.Create("ěřůĚŘŮ");
 
+    private static readonly SearchValues<char> _slovakLetters = SearchValues.Create("äôľĺŕÄÔĽĹŔ");
+
     private static readonly HashSet<string> _english = new(StringComparer.OrdinalIgnoreCase)
     {
         "the", "is", "and", "of", "it", "for", "can", "will", "this", "that", "are", "not", "with", "you", "your", "now",
-        "be", "until", "once", "from", "nothing", "there",
+        "be", "until", "once", "from", "nothing", "there", "in", "i", "as", "but", "was", "has", "have", "its", "or",
+        "an", "then", "proposed", "propose", "add", "field", "fields", "apply", "applied",
     };
 
     private static readonly HashSet<string> _slovak = new(StringComparer.OrdinalIgnoreCase)
     {
         "je", "sa", "na", "v", "pre", "sú", "nie", "ako", "že", "bude", "môže", "alebo", "ktorý", "ktorá", "ktoré",
-        "pri", "po", "aby", "ak", "už", "iba", "som", "ho", "ju", "kým", "nič", "teraz", "preto",
+        "pri", "po", "aby", "ak", "už", "iba", "som", "ho", "ju", "kým", "nič", "teraz", "preto", "lebo", "pretože",
+        "ale", "aj", "si", "len", "bol", "bola", "bolo", "boli", "nemôžem", "tak", "teda", "keď", "ešte", "však", "sme",
+        "ste", "tiež", "ktorú", "ani", "rozumiem", "pridám", "navrhol", "navrhla", "navrhujem",
     };
 
     private static readonly HashSet<string> _czechWords = new(StringComparer.OrdinalIgnoreCase)
     {
-        "se", "pro", "jsem", "jsi", "jsou", "jste", "pojďme", "který", "která", "které", "nebo", "protože",
+        "se", "pro", "jsem", "jsi", "jsou", "jste", "pojďme", "který", "která", "které", "nebo", "protože", "byl",
+        "byla", "bylo", "byly", "taky", "když", "jestli", "tedy", "jsme", "jak", "co",
     };
 
     /// <summary>The language of <paramref name="prose"/>, with its code spans and fences left out.</summary>
@@ -57,7 +76,7 @@ internal static partial class ReplyLanguage
         }
 
         var english = words.Count(_english.Contains);
-        var slovak = words.Count(_slovak.Contains);
+        var slovak = words.Count(IsSlovak);
         return english == slovak ? Unknown : english > slovak ? English : Slovak;
     }
 
@@ -70,7 +89,9 @@ internal static partial class ReplyLanguage
 
     private static bool IsCzech(string word) => word.AsSpan().ContainsAny(_czechLetters) || _czechWords.Contains(word);
 
-    [GeneratedRegex(@"\p{L}+", RegexOptions.CultureInvariant)]
+    private static bool IsSlovak(string word) => _slovak.Contains(word) || word.AsSpan().ContainsAny(_slovakLetters);
+
+    [GeneratedRegex(@"[\p{L}\p{N}]+(?:-[\p{L}\p{N}]+)*", RegexOptions.CultureInvariant)]
     private static partial Regex Word();
 
     [GeneratedRegex("```.*?```", RegexOptions.Singleline | RegexOptions.CultureInvariant)]

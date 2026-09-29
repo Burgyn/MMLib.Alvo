@@ -12,6 +12,14 @@ public sealed class ReplyLanguageTests
     [InlineData("Entita je pripravená, pojďme ďalej.", "cs")]
     [InlineData("Navrhol som to pro vás.", "cs")]
     [InlineData("`customers_audit`", "unknown")]
+    [InlineData("Nemôžem to urobiť, pretože build nepodporuje automatizáciu.", "sk")]
+    [InlineData("Rozumiem. Pridám pole.", "sk")]
+    [InlineData("Proposed: add notes to customers.", "en")]
+    [InlineData("I proposed the v1 pre-existing field", "en")]
+    [InlineData("Pole bylo navrženo a je v návrhu.", "cs")]
+    [InlineData("Také pole je v návrhu.", "sk")]
+    [InlineData("Jak jste chtěli, pole je v návrhu.", "cs")]
+    [InlineData("Ale pole je len v návrhu, lebo ho ešte treba aplikovať.", "sk")]
     public void The_language_of_a_reply_is_read_from_its_words(string prose, string language) =>
         ReplyLanguage.Of(prose).ShouldBe(language);
 
