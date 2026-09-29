@@ -45,7 +45,12 @@ name rule, the managed columns), wording (proposed vs done), and language — no
    - every stated refusal is one the real validator gives on `bike-workshop` (probes, as the Computed quotes are),
      and the trait scoping is proven the other way: `created_at` on the non-audited `order_lines` is **accepted**.
 2. **"Proposed, never done"** — a §7 rule, the worked examples' replies rewritten to it, and a grader
-   (`ProposalWording`) that every example reply must itself pass.
+   (`ProposalWording`) that every example reply must itself pass. §7 also states two rules the table above marks
+   covered or partly covered, so the model reads them as rules rather than infers them from the tools:
+   - **retry yourself** — folded into the existing refusal bullet: every refusal is in the tool's answer, so fix and
+     retry in the same turn, never ask the operator to paste a refusal back or to say "try again";
+   - **capabilities from `get_capabilities` only** — what this build cannot do is quoted from `get_capabilities` and
+     §2, and a hook or hook action is never described from memory.
 3. **Language** — §7 says Slovak is not Czech; a grader (`ReplyLanguage`) judges the model's own prose.
 4. **Two new eval cases** — `audit_entity` (the transcript, graded on the first attempt) and
    `stale_revision_recovered` (a refusal forced by the world and recovered inside the turn).
