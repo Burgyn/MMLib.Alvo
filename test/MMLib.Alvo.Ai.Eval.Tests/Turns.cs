@@ -52,6 +52,10 @@ internal static class Turns
     internal static RecordedCall Propose(JsonObject outcome, int round = 1) =>
         new(round, $"call_{round}", "propose_change", Arguments: null, outcome.ToJsonString());
 
+    /// <summary>A <c>load_skill</c> call, answered with the skill's body as the provider wraps it.</summary>
+    internal static RecordedCall Loads(string skill, int round = 1) =>
+        new(round, $"load_{skill}_{round}", "load_skill", new Dictionary<string, object?> { ["skillName"] = skill }, "<instructions>…</instructions>");
+
     /// <summary>A tool call that is not a dry run.</summary>
     internal static RecordedCall Read(string tool, int round = 1) => new(round, $"call_{round}", tool, Arguments: null, "{}");
 

@@ -15,6 +15,9 @@ internal sealed class EvalRunner(EvalWorld world, EvalOptions options, EvalTrace
 {
     private const int MaximumToolCalls = 6;
 
+    /// <summary>How many skill loads and resource reads one turn may make (D34).</summary>
+    internal const int MaximumSkillReads = 4;
+
     /// <summary>Runs the suite, adding each graded turn to <paramref name="runs"/> as it finishes.</summary>
     /// <remarks>The caller owns the list, so a cancelled run still has every turn that finished to report.</remarks>
     /// <param name="runs">Where the graded turns go.</param>
@@ -43,9 +46,15 @@ internal sealed class EvalRunner(EvalWorld world, EvalOptions options, EvalTrace
     /// how often tools are invoked, and the loop may ask once more for the answer after the last round.
     /// </para>
     /// <para>
-    /// <b>The ≤ 12 term cannot fail today</b>, and is kept anyway: every round carries at least one call, so the ≤ 6
-    /// tool-call bar is met first. It is the spec's invariant (§4.2) stated where a later change to either bound would
-    /// be read, and <c>requests=</c> is printed beside it so a loop that ended at the cap is visible.
+    /// <b>The ≤ 12 term cannot fail today</b>, and is kept anyway: every round carries at least one call, so the
+    /// ≤ 6 management calls and ≤ 4 skill reads are met first, at 10 calls. It is the spec's invariant (§4.2)
+    /// stated where a later change to any bound would be read, and <c>requests=</c> is printed beside it so a loop that
+    /// ended at the cap is visible.
+    /// </para>
+    /// <para>
+    /// <b>Skill reads are bounded apart (D34)</b>: the ≤ 6 bar predates skills, and a turn that loads what the
+    /// instructions ask would otherwise fail for obeying them. A separate ≤ 4 still catches a model browsing the
+    /// catalogue.
     /// </para>
     /// </remarks>
     internal static Verdict Invariants(TurnRecord turn)
@@ -57,14 +66,20 @@ internal sealed class EvalRunner(EvalWorld world, EvalOptions options, EvalTrace
 
         var wholeDocument = turn.HasViolation("code", JsonPatchError.WholeDocumentReplace);
         return Verdict.When(
-            turn.ToolRounds <= AlvoAssistant.MaximumIterations && turn.ToolCalls.Count <= MaximumToolCalls && !wholeDocument,
-            $"requests={turn.Requests} toolRounds={turn.ToolRounds} toolCalls={turn.ToolCalls.Count} wholeDocument={wholeDocument}");
+            turn.ToolRounds <= AlvoAssistant.MaximumIterations && turn.ManagementCalls <= MaximumToolCalls
+                && turn.SkillReads <= MaximumSkillReads && !wholeDocument,
+            $"requests={turn.Requests} toolRounds={turn.ToolRounds} toolCalls={turn.ManagementCalls} skillReads={turn.SkillReads} "
+            + $"wholeDocument={wholeDocument}");
     }
 
-    /// <summary>The invariants first; a turn that holds them is graded by its case and by the two behaviour rules.</summary>
+    /// <summary>
+    /// The invariants first; a turn that holds them is graded by its case, by the two behaviour rules, and by whether
+    /// it loaded the skills its proposal needed (D31).
+    /// </summary>
     /// <remarks>
-    /// The wording and language graders apply to every case (D21): "Done." or a Czech reply to a Slovak question is a
-    /// failure the operator sees whatever was asked. Every diagnostic is kept, pass or fail.
+    /// The wording, language and skill graders apply to every case (D21, D31): "Done." or a Czech reply to a Slovak
+    /// question is a failure the operator sees whatever was asked, and a proposal made without its area's skill is one
+    /// the skill existed to get right. Every diagnostic is kept, pass or fail.
     /// </remarks>
     /// <param name="evalCase">The case the turn answered.</param>
     /// <param name="language">The language the case was asked in.</param>
@@ -77,7 +92,10 @@ internal sealed class EvalRunner(EvalWorld world, EvalOptions options, EvalTrace
             return invariants;
         }
 
-        Verdict[] verdicts = [evalCase.Grade(turn), ProposalWording.Judge(turn), ReplyLanguage.Judge(turn, language), invariants];
+        Verdict[] verdicts =
+        [
+            evalCase.Grade(turn), ProposalWording.Judge(turn), ReplyLanguage.Judge(turn, language), SkillsRead.Judge(turn), invariants,
+        ];
         return new Verdict(verdicts.All(verdict => verdict.Passed), string.Join(" | ", verdicts.Select(verdict => verdict.Why)));
     }
 

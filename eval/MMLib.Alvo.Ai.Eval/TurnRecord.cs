@@ -30,6 +30,12 @@ internal sealed record TurnRecord(
 
     internal IReadOnlyList<string> ToolCalls => [.. Updates.OfType<AssistantUpdate.ToolInvoked>().Select(update => update.Tool)];
 
+    /// <summary>The management tools the turn called — what the ≤ 6 bar counts (D34).</summary>
+    internal int ManagementCalls => ToolCalls.Count(tool => !SkillsRead.SkillTools.Contains(tool));
+
+    /// <summary>The skill loads and resource reads the turn made, bounded apart (D34).</summary>
+    internal int SkillReads => ToolCalls.Count(SkillsRead.SkillTools.Contains);
+
     internal int ProposeCalls => ToolCalls.Count(tool => tool == "propose_change");
 
     /// <summary>What every dry-run tool answered, parsed; an answer that is not a JSON object is left out.</summary>

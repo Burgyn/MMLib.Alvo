@@ -233,6 +233,18 @@ Worked examples in a skill use the base prompt's `<!-- example: name -->` + two-
 - The always-in-context text (the base prompt plus the list) measures about 21.4 KB of AC 3's 22,758 bytes, and a
   test holds it there.
 
+**D40 (2026-09-29, Task 8): `SkillsRead` is stricter than D31's wording.**
+
+- **What it measures:** a proposal's needed skill must be loaded in a round before the **first dry run of any kind**,
+  not before the first dry run touching that area (ruling H4). A turn's dry runs are attempts at one proposal. A
+  model that is refused and only then loads the skill has spent an attempt on what the skill says.
+- **Which skills are needed:**
+  - The needed skills are read from the proposal's changed paths, and for a new field from its declaration too
+    (`computed` or `rollup` means `computed-and-rollups`).
+  - `field-types-and-formats` and `capabilities-and-limits` are never required: the base prompt states the types,
+    and the limits skill serves answers rather than proposals.
+- **Where it shows:** the verdict prints `skillsNeeded=[…] skillsLoaded=[…]` on every turn, pass or fail.
+
 ### 7.4 Acceptance criteria
 
 1. `.claude/skills/` holds exactly **9** `alvo-descriptor-*` directories. Each `SKILL.md` has frontmatter with only
