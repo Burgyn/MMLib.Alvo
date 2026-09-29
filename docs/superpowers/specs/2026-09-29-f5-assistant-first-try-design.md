@@ -202,7 +202,14 @@ Worked examples in a skill use the base prompt's `<!-- example: name -->` + two-
   - a declared `id`, and a declared `created_at` on an audited entity;
   - an entity named `users`;
   - a `ref` to `users` with `index`;
-  - the three refused after-hook action types.
+  - the hook phases: `new.` in a `beforeDelete` (refused), `old.` in a `beforeDelete` (accepted), and `old.` and
+    `changed()` in a `beforeCreate` (refused);
+  - a `mutate` that reads `@user` (refused), and one that reads `old.` (accepted);
+  - the three refused after-hook action types, each in a shape the schema accepts. Each is asserted refused **by its
+    own unhonoured-action consequence** (`UnhonouredFeatures.UnhonouredAction(type)`), not merely refused.
+
+  `SkillCoreClaimsTests` also runs every allowed `cel-computed` example through the real dry run as a computed
+  field, because the compiler alone is not the whole Computed authority.
 
   The worked examples that claim `softDelete` and `validation` are refused are run by `SkillExampleOutcomeTests`.
 

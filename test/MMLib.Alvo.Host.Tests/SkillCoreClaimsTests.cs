@@ -1,7 +1,9 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Auth;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Management;
 using MMLib.Alvo.Management.Internal;
 using MMLib.Alvo.Schema;
 
@@ -37,6 +39,18 @@ public sealed class SkillCoreClaimsTests
 
     private static readonly string[] _mutateFunctions = [CelCall.LowerAscii, CelCall.Now];
 
+    /// <summary>
+    /// The field each allowed <c>cel-computed</c> example is declared on for the real dry run. The compiler is not the
+    /// whole Computed authority (the validator's own computed check refuses some expressions it compiles), so every
+    /// allowed example is also run as a computed field of <c>order_lines</c>; a new example needs a row here.
+    /// </summary>
+    private static readonly Dictionary<string, string> _computedFields = new(StringComparer.Ordinal)
+    {
+        ["quantity * unit_price"] = """{"type": "decimal", "precision": 16, "scale": 4, "computed": "quantity * unit_price"}""",
+        ["-unit_price"] = """{"type": "decimal", "precision": 8, "scale": 2, "computed": "-unit_price"}""",
+        ["description + ' ' + kind"] = """{"type": "string", "computed": "description + ' ' + kind"}""",
+    };
+
     public static TheoryData<int> Profiles() => [.. Enumerable.Range(0, _profiles.Length)];
 
     [Theory]
@@ -62,6 +76,22 @@ public sealed class SkillCoreClaimsTests
         Claims(Region(area, region).Split('\n'), "- refused:").ShouldAllBe(
             source => others.Any(other => Compiles(source, other, entities[EntityFor(other, entity)])),
             $"{region}: a refused example is refused everywhere, so it proves nothing about {profile}");
+    }
+
+    [Fact]
+    public async Task Every_allowed_computed_example_passes_the_real_dry_run_as_a_computed_field()
+    {
+        var allowed = Claims(Region("computed-and-rollups", "cel-computed").Split('\n'), "- allowed:");
+        await using var world = await AlvoHostWorld.StartAsync(InstructionExampleOutcomeTests.BikeWorkshop);
+        var management = world.Services.GetRequiredService<IAlvoManagement>();
+        world.Services.GetRequiredService<IAlvoContextAccessor>().Principal = InstructionExampleOutcomeTests.Administrator();
+
+        _computedFields.Keys.ShouldBe(allowed, ignoreOrder: true);
+        foreach (var source in allowed)
+        {
+            var attempt = await InstructionExampleOutcomeTests.AttemptAsync(management, "/entities/order_lines/fields/probe_computed", _computedFields[source]);
+            attempt.Valid.ShouldBeTrue($"{source}: {string.Join(" | ", attempt.Refusals)}");
+        }
     }
 
     [Fact]

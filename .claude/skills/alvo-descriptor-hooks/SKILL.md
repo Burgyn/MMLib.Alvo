@@ -16,15 +16,17 @@ nothing else. A hook without a `condition` runs on every write of its kind.
 
 The shape: `schema/project.schema.json#/$defs/beforeHookList`.
 
-A `condition` reads the row as it will be (`new.<field>`) and, on update or delete, as it was (`old.<field>`);
-`changed(<field>)` is true when an update changes the field.
+A `condition` reads the row as it will be with `new.<field>` on create and update, and as it was with `old.<field>`
+on update and delete; `changed(<field>)`, true when an update changes the field, is for update only. The other
+combinations are refused at apply: a delete has no `new.`, a create no `old.`.
 
 <!-- gen:cel-condition -->
 - allowed: `new.quantity <= 0.0` `old.unit_price != new.unit_price` `changed(unit_price)` `'technician' in @user.roles`
 - refused: `quantity * unit_price` `now()` `lowerAscii(description)`
 <!-- /gen:cel-condition -->
 
-A `mutate` value computes one value, and may call only these functions:
+A `mutate` value is a field, a literal, or a call to one of these functions, and nothing more: no `@user` or `@tenant`,
+no arithmetic, no joins.
 
 <!-- gen:mutate-functions -->
 `lowerAscii` `now`

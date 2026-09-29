@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Auth;
+using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Management;
 
 namespace MMLib.Alvo.Host.Tests;
@@ -16,8 +17,10 @@ public sealed class SkillClaimTests
     private const string Technicians = "/entities/technicians/fields/";
     private const string Rentals = "/entities/rentals/fields/";
     private const string AfterCreate = "/entities/rentals/hooks/afterCreate/-";
+    private const string BeforeCreate = "/entities/order_lines/hooks/beforeCreate/-";
+    private const string BeforeUpdate = "/entities/order_lines/hooks/beforeUpdate";
 
-    /// <summary>Each probe, the field it adds, and whether the skill says the dry run accepts it.</summary>
+    /// <summary>Each probe, the value it adds at its path, and whether the skill says the dry run accepts it.</summary>
     private static readonly (string Path, string Field, bool Accepted)[] _probes =
     [
         (OrderLines + "probe_computed_read_only", """{"type": "decimal", "precision": 10, "scale": 2, "required": true, "readOnly": true, "computed": "quantity * unit_price"}""", false),
@@ -32,12 +35,28 @@ public sealed class SkillClaimTests
         (Technicians + "id", """{"type": "uuid"}""", false),
         (Technicians + "created_at", """{"type": "datetime"}""", false),
         ("/entities/users", """{"fields": {"nickname": {"type": "string"}}}""", false),
-        (AfterCreate, """{"action": {"type": "function", "name": "invoice"}}""", false),
-        (AfterCreate, """{"action": {"type": "http.call", "url": "https://erp.example.com/rentals"}}""", false),
-        (AfterCreate, """{"action": {"type": "entity.update", "entity": "customers", "payload": "{}"}}""", false),
+        ("/entities/order_lines/hooks/beforeDelete", """[{"condition": "new.quantity > 1.0", "action": {"reject": "No."}}]""", false),
+        ("/entities/order_lines/hooks/beforeDelete", """[{"condition": "old.quantity > 1.0", "action": {"reject": "No."}}]""", true),
+        (BeforeCreate, """{"condition": "old.quantity > 1.0", "action": {"reject": "No."}}""", false),
+        (BeforeCreate, """{"condition": "changed(quantity)", "action": {"reject": "No."}}""", false),
+        (BeforeUpdate, """[{"action": {"mutate": {"description": {"$cel": "@user.id"}}}}]""", false),
+        (BeforeUpdate, """[{"action": {"mutate": {"unit_price": {"$cel": "old.unit_price"}}}}]""", true),
+    ];
+
+    /// <summary>
+    /// The after-hook action types the capabilities skill calls refused, each in a shape the schema accepts, so the
+    /// refusal can only be the unhonoured-action one — which the fact asserts by its consequence text.
+    /// </summary>
+    private static readonly (string Type, string Hook)[] _refusedActions =
+    [
+        ("function", """{"action": {"type": "function", "name": "invoice"}}"""),
+        ("http.call", """{"action": {"type": "http.call", "url": "https://erp.example.com/rentals"}}"""),
+        ("entity.update", """{"action": {"type": "entity.update", "entity": "customers", "payload": {"notes": "x"}}}"""),
     ];
 
     public static TheoryData<int> Probes() => [.. Enumerable.Range(0, _probes.Length)];
+
+    public static TheoryData<int> RefusedActions() => [.. Enumerable.Range(0, _refusedActions.Length)];
 
     [Fact]
     public void The_reserved_fields_are_the_data_apis_reserved_query_keys()
@@ -61,5 +80,22 @@ public sealed class SkillClaimTests
         var attempt = await InstructionExampleOutcomeTests.AttemptAsync(management, path, field);
 
         attempt.Valid.ShouldBe(accepted, $"{path}: {string.Join(" | ", attempt.Refusals)}");
+    }
+
+    [Theory]
+    [MemberData(nameof(RefusedActions))]
+    public async Task A_refused_action_type_is_refused_as_unhonoured(int action)
+    {
+        var (type, hook) = _refusedActions[action];
+        await using var world = await AlvoHostWorld.StartAsync(InstructionExampleOutcomeTests.BikeWorkshop);
+        var management = world.Services.GetRequiredService<IAlvoManagement>();
+        world.Services.GetRequiredService<IAlvoContextAccessor>().Principal = InstructionExampleOutcomeTests.Administrator();
+
+        var attempt = await InstructionExampleOutcomeTests.AttemptAsync(management, AfterCreate, hook);
+
+        attempt.Valid.ShouldBeFalse();
+        attempt.Refusals.ShouldContain(
+            refusal => refusal.Contains(UnhonouredFeatures.UnhonouredAction(type).Consequence, StringComparison.Ordinal),
+            string.Join(" | ", attempt.Refusals));
     }
 }
