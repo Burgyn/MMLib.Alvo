@@ -8,6 +8,9 @@ using MMLib.Alvo.Auth;
 using MMLib.Alvo.Host;
 using MMLib.Alvo.Management;
 
+using System.Globalization;
+using System.Text.Json.Nodes;
+
 namespace MMLib.Alvo.Ai.Eval;
 
 /// <summary>
@@ -15,7 +18,8 @@ namespace MMLib.Alvo.Ai.Eval;
 /// </summary>
 /// <remarks>
 /// <para>
-/// One world serves the whole suite: the assistant only ever dry-runs, so no case can change what the next one reads.
+/// One world serves the whole suite. The assistant only ever dry-runs; the one write is the forced case's second
+/// operator (D15), a description no case grades, and every turn reads its own starting descriptor.
 /// </para>
 /// <para>
 /// <b>No API key is configured.</b> The eval never calls the host over HTTP — it acts through the in-process principal
@@ -26,6 +30,10 @@ namespace MMLib.Alvo.Ai.Eval;
 internal sealed class EvalWorld : IAsyncDisposable
 {
     internal const string Project = "bike-workshop";
+
+    /// <summary>Where <see cref="EditAsAnotherOperatorAsync"/> edits — a member no case grades.</summary>
+    internal const string OtherOperatorsEdit = "/entities/bikes/description";
+
     private const string LoopbackAnyPort = "http://127.0.0.1:0";
     private const string CallerKeyId = "alvo-eval";
     private static readonly string[] _sqliteCompanions = [string.Empty, "-wal", "-shm", "-journal"];
@@ -82,6 +90,28 @@ internal sealed class EvalWorld : IAsyncDisposable
             Scopes = new HashSet<ApiKeyScope>(),
             KeyId = CallerKeyId,
         };
+
+    /// <summary>Applies a real, harmless edit as another operator would, moving the project to a new revision.</summary>
+    /// <remarks>
+    /// A unique text each time, so every run moves the revision. The edit stays in the world: every turn reads its own
+    /// starting descriptor, so the cases after it grade against a descriptor that already has it.
+    /// </remarks>
+    /// <param name="ct">A token to cancel the apply.</param>
+    internal async Task EditAsAnotherOperatorAsync(CancellationToken ct)
+    {
+        var current = await Management.GetDescriptorAsync(Project, ct).ConfigureAwait(false);
+        var document = JsonNode.Parse(current.DescriptorJson)!;
+        document["entities"]!["bikes"]!["description"] = string.Create(
+            CultureInfo.InvariantCulture, $"A customer's bicycle, edited by another operator ({Guid.NewGuid():N}).");
+        var applied = await Management.ApplyDescriptorAsync(
+            Project,
+            new ManagementApplyRequest(document.ToJsonString(), current.Revision, Author: CallerKeyId, Reason: "Another operator applies mid-turn (D15)."),
+            ct).ConfigureAwait(false);
+        if (applied.Revision == current.Revision)
+        {
+            throw new InvalidOperationException("The second operator's edit did not move the revision, so the forced case forces nothing.");
+        }
+    }
 
     public async ValueTask DisposeAsync()
     {

@@ -83,17 +83,24 @@ internal sealed class EvalRunner(EvalWorld world, EvalOptions options, EvalTrace
 
     private async Task<CaseRun> RunOnceAsync(EvalCase evalCase, string language, CancellationToken ct)
     {
-        var turn = await AskAsync(evalCase.Prompt(language), ct).ConfigureAwait(false);
+        var turn = await AskAsync(evalCase, language, ct).ConfigureAwait(false);
         return new CaseRun(evalCase.Name, language, turn, Graded(evalCase, language, turn));
     }
 
-    private async Task<TurnRecord> AskAsync(string prompt, CancellationToken ct)
+    private async Task<TurnRecord> AskAsync(EvalCase evalCase, string language, CancellationToken ct)
     {
         world.ActAsAdministrator();
         var original = await world.Management.GetDescriptorAsync(EvalWorld.Project, ct).ConfigureAwait(false);
-        return await AskAsync(world.Management, options.Connection, ChatClientFactory.For, original.DescriptorJson, prompt, ct)
+        return await AskAsync(
+            world.Management, options.Connection, DialFor(evalCase), original.DescriptorJson, evalCase.Prompt(language), ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>The provider, with the second operator between it and the recorder when the case forces a stale revision.</summary>
+    private Func<AlvoAiConnection, IChatClient> DialFor(EvalCase evalCase) =>
+        evalCase.ForcesStaleRevision
+            ? connection => new InterferingChatClient(ChatClientFactory.For(connection), world.EditAsAnotherOperatorAsync)
+            : ChatClientFactory.For;
 
     /// <summary>One turn of the real assistant over <paramref name="management"/>, dialling through <paramref name="dial"/>.</summary>
     /// <remarks>

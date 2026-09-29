@@ -90,7 +90,9 @@ Out of scope: the audit mechanism itself (#288); the generic `pattern` fix text 
 5. `EvalCases.All` has nine cases. `audit_entity` passes only with 0 refused attempts, exactly one `propose_change`,
    exactly one changed path that is a new `/entities/<snake_case>` declaring no managed column.
    `stale_revision_recovered` passes only when a `stale-revision` violation was answered, the turn ended valid in ≤ 2
-   `propose_change` calls, and the proposal carries both the other operator's edit and the nickname field.
+   `propose_change` calls, and the proposal carries both the other operator's edit and the nickname field. The
+   grader is stricter than that sentence, deliberately: the changed paths are *exactly* those two, and `nickname` is
+   left optional, as asked — a proposal that also touches something else, or makes the field required, fails.
 6. The bar is §4.2's, unchanged: each case ≥ 2/3 runs per language, suite ≥ 90 %. The real-model numbers are the
    maintainer's run (D8 still holds).
 7. No public symbol; `MMLib.Alvo.Admin` untouched; ring2 and `dotnet build MMLib.Alvo.slnx -c Release -warnaserror`
@@ -100,7 +102,7 @@ Out of scope: the audit mechanism itself (#288); the generic `pattern` fix text 
 
 | # | Deviation | Reason |
 |---|---|---|
-| D15 | The forced-refusal case is forced by **the world** (a concurrent apply → `stale-revision`), not by the prompt | Every refusal a prompt can reliably elicit is one scope item 1 exists to prevent; a prompt-forced case would grade the instructions' failure as its precondition and turn flaky exactly as they improve. A concurrent edit is refused whatever the model knows, is a real production path, and exercises the same in-turn loop (read the violation, re-read, retry) |
+| D15 | The forced-refusal case is forced by **the world** (a concurrent apply → `stale-revision`), not by the prompt | Every refusal a prompt can reliably elicit is one scope item 1 exists to prevent; a prompt-forced case would grade the instructions' failure as its precondition and turn flaky exactly as they improve. A concurrent edit is refused whatever the model knows, is a real production path, and exercises the same in-turn loop (read the violation, re-read, retry). The edit lands after the turn's first `get_descriptor`; a model that proposes without reading the descriptor is never interfered with, so its turn grades `forced=False` and fails — the case reports the force did not land rather than passing a turn that recovered from nothing |
 | D16 | `audit_entity` grades the **schema only** (one new entity, nothing else changed), not an audit that fills itself | The mechanism is #288, undecided. Grading "exactly one changed path" also fails a proposal that adds an unhonoured `entity.update` after-hook — the capability confusion #289 names — without grading prose. "Declares no managed column" is graded although validity implies it, so a validator regression still fails the case |
 | D17 | Language is judged by a deterministic stop-word count plus Czech-only markers (`ě ř ů`, `se pro jsem jsou …`), not a language-identification library | No dependency for an eval grader; the one hard distinction (Slovak vs Czech) is exactly the letters Slovak lacks; `unknown` (a reply with no own prose) fails, since the rule requires an explanation in the operator's language |
 | D18 | The admin drawer is **not** changed, though #289 asks to consider it | It never offered "paste the refusal back": the refused card (`AssistantDrawer.razor:71-79`) lists the refusals under *"Nothing has been applied"* with no control; the relay was the old model stopping after one refusal. The card now appears only after the turn's own attempts, and the next turn carries the refusal through the reply the model is told to quote verbatim (`_turns` holds text only). Saying "after N attempts" would need an attempt count on the public `AssistantUpdate.Proposal` — an Abstractions change not earned by a card label |

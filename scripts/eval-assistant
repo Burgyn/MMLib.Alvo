@@ -3,8 +3,9 @@
 #
 # IN NO RING, like scripts/test-load: it calls a model provider over the network and costs tokens, and its
 # verdict measures a model rather than gating the code. Nothing in CI runs it. It boots the real host over a
-# temporary SQLite database from examples/bike-workshop, asks the reliability design's seven cases in English
-# and Slovak, and grades outcomes (the proposal, the dry-run violations, the calls), not prose.
+# temporary SQLite database from examples/bike-workshop, asks the reliability and first-try designs' nine cases in
+# English and Slovak, and grades outcomes (the proposal, the dry-run violations, the calls) and the reply's wording
+# and language.
 #
 # Usage:
 #   scripts/eval-assistant --endpoint http://localhost:11434/v1 --model qwen3:8b [--runs 3]

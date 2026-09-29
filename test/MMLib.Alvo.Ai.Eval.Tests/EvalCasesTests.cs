@@ -245,6 +245,94 @@ public sealed class EvalCasesTests
         verdict.Why.ShouldContain("claimsDone=True");
     }
 
+    [Fact]
+    public void Audit_passes_one_new_entity_proposed_on_the_first_attempt() =>
+        Grade("audit_entity", Turn(WithEntity("customer_audits", AuditFields()), "I proposed customer_audits.", calls: Propose(Valid())))
+            .Passed.ShouldBeTrue();
+
+    [Fact]
+    public void Audit_fails_the_transcripts_turn_that_got_there_on_the_third_attempt()
+    {
+        var turn = Turn(WithEntity("customer_audits", AuditFields()), "I proposed customer_audits.", calls:
+        [
+            Propose(Refused("validation", "The string value does not match the pattern."), round: 1),
+            Propose(Refused("validation", "Field 'id' is a framework-managed column and cannot be declared."), round: 2),
+            Propose(Valid(), round: 3),
+        ]);
+
+        Grade("audit_entity", turn).Passed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Audit_fails_a_proposal_that_also_hooks_customers()
+    {
+        var proposed = Edited(document =>
+        {
+            document["entities"]!.AsObject()["customer_audits"] = new JsonObject { ["fields"] = AuditFields() };
+            document["entities"]!["customers"]!["hooks"] = new JsonObject { ["afterUpdate"] = new JsonArray() };
+        });
+
+        Grade("audit_entity", Turn(proposed, "I proposed it.", calls: Propose(Valid()))).Passed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Audit_fails_a_declared_managed_column_even_when_the_dry_run_passed_it()
+    {
+        var fields = AuditFields();
+        fields["id"] = new JsonObject { ["type"] = "uuid" };
+
+        Grade("audit_entity", Turn(WithEntity("customer_audits", fields), "I proposed it.", calls: Propose(Valid()))).Passed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void The_forced_case_passes_a_turn_that_rebased_after_the_stale_refusal()
+    {
+        var turn = Turn(WithNicknameAfterTheOtherOperator(rebased: true), "I proposed nickname.", calls:
+        [
+            Read("get_descriptor", round: 1),
+            Propose(Refused("concurrency", "The descriptor is at revision 2.", code: "stale-revision"), round: 2),
+            Read("get_descriptor", round: 3),
+            Propose(Valid(), round: 4),
+        ]);
+
+        Grade("stale_revision_recovered", turn).Passed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void The_forced_case_fails_when_the_force_did_not_land() =>
+        Grade("stale_revision_recovered", Turn(WithNicknameAfterTheOtherOperator(rebased: true), "I proposed it.", calls: Propose(Valid())))
+            .Passed.ShouldBeFalse();
+
+    [Fact]
+    public void The_forced_case_fails_a_proposal_without_the_other_operators_edit()
+    {
+        var turn = Turn(WithNicknameAfterTheOtherOperator(rebased: false), "I proposed it.", calls:
+        [
+            Propose(Refused("concurrency", "The descriptor is at revision 2.", code: "stale-revision"), round: 1),
+            Propose(Valid(), round: 2),
+        ]);
+
+        Grade("stale_revision_recovered", turn).Passed.ShouldBeFalse();
+    }
+
+    private static JsonObject AuditFields() => new()
+    {
+        ["customer_id"] = new JsonObject { ["type"] = "ref", ["entity"] = "customers", ["onDelete"] = "cascade" },
+        ["previous_version"] = new JsonObject { ["type"] = "json", ["required"] = true },
+    };
+
+    private static string WithEntity(string name, JsonObject fields) =>
+        Edited(document => document["entities"]!.AsObject()[name] = new JsonObject { ["fields"] = fields });
+
+    private static string WithNicknameAfterTheOtherOperator(bool rebased) => Edited(document =>
+    {
+        document.Fields("technicians")["nickname"] = new JsonObject { ["type"] = "string" };
+        if (rebased)
+        {
+            document["entities"]!["bikes"]!["description"] = "edited by another operator";
+        }
+    });
+
     private static Verdict Grade(string name, TurnRecord turn) => Case(name).Grade(turn);
 
     private static EvalCase Case(string name) => EvalCases.All.Single(candidate => candidate.Name == name);

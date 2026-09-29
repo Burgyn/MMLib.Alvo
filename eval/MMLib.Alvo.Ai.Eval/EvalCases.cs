@@ -1,11 +1,23 @@
-﻿namespace MMLib.Alvo.Ai.Eval;
+﻿using MMLib.Alvo.Schema;
+
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+
+namespace MMLib.Alvo.Ai.Eval;
 
 /// <summary>One thing the operator asks, in both languages, and what makes the turn a pass.</summary>
 /// <param name="Name">The case's name, as <c>--case</c> takes it.</param>
 /// <param name="English">The request in English.</param>
 /// <param name="Slovak">The same request in Slovak.</param>
-/// <param name="Grade">What makes a turn a pass, read off outcomes rather than prose.</param>
-internal sealed record EvalCase(string Name, string English, string Slovak, Func<TurnRecord, Verdict> Grade)
+/// <param name="Grade">
+/// What makes a turn a pass for this case, read off outcomes — the proposal, the dry-run violations, the calls. The
+/// reply's wording and language are graded on every case besides (<see cref="EvalRunner.Graded"/>).
+/// </param>
+/// <param name="ForcesStaleRevision">
+/// Whether the turn runs under <see cref="InterferingChatClient"/>, which applies another operator's edit mid-turn (D15).
+/// </param>
+internal sealed record EvalCase(
+    string Name, string English, string Slovak, Func<TurnRecord, Verdict> Grade, bool ForcesStaleRevision = false)
 {
     internal string Prompt(string language) => language == ReplyLanguage.Slovak ? Slovak : English;
 }
@@ -18,13 +30,18 @@ internal sealed record Verdict(bool Passed, string Why)
     internal static Verdict When(bool passed, string why) => new(passed, why);
 }
 
-/// <summary>The suite: the reliability design's §4.2 cases, graded on outcomes rather than prose.</summary>
+/// <summary>
+/// The suite: the reliability design's seven §4.2 cases plus the first-try design's two (D15, D16), each graded on
+/// its outcomes — and every turn also on its wording and language.
+/// </summary>
 /// <remarks>
 /// Case 6 is a nightly <c>automation</c> request rather than the design's webhook one (plan deviation D6): this build
 /// delivers after-hook webhooks, so "no proposal" would grade a correct answer as a failure.
 /// </remarks>
-internal static class EvalCases
+internal static partial class EvalCases
 {
+    private const string StaleRevision = "stale-revision";
+    private const string TechniciansNickname = "/entities/technicians/fields/nickname";
     private const string Customers = "/entities/customers/fields";
     private const string BikesNotes = "/entities/bikes/fields/notes";
     private const string PartsDelete = "/entities/parts/rules/delete";
@@ -77,6 +94,15 @@ internal static class EvalCases
             "Remove the street field from customers.",
             "Odstráň z customers stĺpec street.",
             DropStreet),
+        new("audit_entity",
+            "I want an audit of customers: when a customer changes, keep its previous version in an audit entity. For now, at least create the schema.",
+            "Chcem audit zákazníkov: keď sa zákazník zmení, ulož jeho predchádzajúcu verziu do audit entity. Zatiaľ sprav aspoň schému.",
+            AuditEntity),
+        new("stale_revision_recovered",
+            "Add an optional nickname field to technicians.",
+            "Pridaj technikom (technicians) nepovinné pole nickname.",
+            StaleRevisionRecovered,
+            ForcesStaleRevision: true),
     ];
 
     private static Verdict FullName(TurnRecord turn) =>
@@ -177,5 +203,62 @@ internal static class EvalCases
     private static bool ContainsAny(string text, string[] stems) =>
         stems.Any(stem => text.Contains(stem, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>The #289 transcript: one new entity under a schema-valid name, right on the first attempt (D16).</summary>
+    /// <remarks>
+    /// Schema only, as asked: exactly one changed path, so a proposal that also adds an after-hook — the unhonoured
+    /// <c>entity.update</c> the transcript confused — fails. "Declares no managed column" is implied by a valid dry run
+    /// and graded anyway, so a validator that stopped refusing <c>id</c> still fails the case. Whether the entity refers
+    /// to customers is printed, not graded: the mechanism that fills it is #288's.
+    /// </remarks>
+    private static Verdict AuditEntity(TurnRecord turn)
+    {
+        var entity = NewEntity(turn);
+        var declared = entity is null ? null : turn.Proposed(entity);
+        var managed = DeclaredManagedColumns(declared);
+        return Verdict.When(
+            turn.HasValidProposal && turn.RefusedAttempts == 0 && turn.ProposeCalls == 1 && entity is not null && managed.Count == 0,
+            AuditWhy(turn, entity, declared, managed));
+    }
+
+    private static string AuditWhy(TurnRecord turn, string? entity, JsonNode? declared, List<string> managed) =>
+        $"valid={turn.HasValidProposal} refused={turn.RefusedAttempts} propose_change={turn.ProposeCalls} "
+        + $"newEntity={entity ?? "none"} managedDeclared=[{Joined(managed)}] refersToCustomers={RefersTo(declared, "customers")} "
+        + $"changed=[{Joined(turn.ChangedPaths)}]";
+
+    /// <summary>A stale-revision refusal the world forced, recovered in the same turn by re-reading and re-basing (D15).</summary>
+    /// <remarks>
+    /// Stricter than "carries both edits": the proposal changes exactly the other operator's description and the new
+    /// field, and leaves the field optional, as asked.
+    /// </remarks>
+    private static Verdict StaleRevisionRecovered(TurnRecord turn)
+    {
+        var forced = turn.HasViolation("code", StaleRevision);
+        var changed = turn.ChangedPaths.Order(StringComparer.Ordinal).ToList();
+        return Verdict.When(
+            forced && turn.HasValidProposal && turn.ProposeCalls <= 2
+                && changed.SequenceEqual([EvalWorld.OtherOperatorsEdit, TechniciansNickname])
+                && turn.Proposed($"{TechniciansNickname}/required")?.ToJsonString() != "true",
+            $"forced={forced} valid={turn.HasValidProposal} propose_change={turn.ProposeCalls} changed=[{Joined(changed)}]");
+    }
+
+    private static string? NewEntity(TurnRecord turn) =>
+        turn.ChangedPaths is [var only] && EntityPointer().IsMatch(only)
+            && DescriptorDiff.At(JsonNode.Parse(turn.OriginalDescriptor), only) is null ? only : null;
+
+    private static List<string> DeclaredManagedColumns(JsonNode? entity)
+    {
+        var owned = AlvoManagedColumns.For(
+            entity?["tenancy"]?.GetValue<string>() == "scoped" ? TenancyMode.Scoped : null, Flag(entity, "audit"), Flag(entity, "softDelete"));
+        return [.. (entity?["fields"] as JsonObject ?? new JsonObject()).Select(field => field.Key).Where(owned.Contains)];
+    }
+
+    private static bool Flag(JsonNode? entity, string trait) => entity?[trait] is JsonValue value && value.TryGetValue<bool>(out var on) && on;
+
+    private static bool RefersTo(JsonNode? entity, string target) =>
+        (entity?["fields"] as JsonObject ?? new JsonObject()).Any(field => field.Value?["entity"]?.GetValue<string>() == target);
+
     private static string Joined(IEnumerable<string> paths) => string.Join(", ", paths);
+
+    [GeneratedRegex("^/entities/[a-z][a-z0-9_]{0,62}$", RegexOptions.CultureInvariant)]
+    private static partial Regex EntityPointer();
 }

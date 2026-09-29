@@ -16,7 +16,8 @@ internal static class Turns
               "street": { "type": "string", "maxLength": 120 } } },
             "bikes": { "fields": { "brand": { "type": "string" } } },
             "parts": { "fields": { "name": { "type": "string" } },
-              "rules": { "delete": "'admin' in @user.roles || 'manager' in @user.roles" } }
+              "rules": { "delete": "'admin' in @user.roles || 'manager' in @user.roles" } },
+            "technicians": { "fields": { "full_name": { "type": "string" } } }
           }
         }
         """;
