@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.AI;
 using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Management;
+using MMLib.Alvo.Schema;
 
 using NSubstitute;
 
@@ -30,9 +31,9 @@ public sealed partial class AssistantInstructionsTests
 
     /// <summary>
     /// Snake-case names the instructions may use in code without their being tools: illustrative fields of the
-    /// Arithmetic and Never-boolean rules, and the rate field example (f) suggests.
+    /// Arithmetic and Never-boolean rules, the rate field example (f) suggests, and the name rule's own example.
     /// </summary>
-    private static readonly string[] _illustrativeNames = ["net_total", "vat_total", "is_vip", "vat_rate"];
+    private static readonly string[] _illustrativeNames = ["net_total", "vat_total", "is_vip", "vat_rate", "customer_audits"];
 
     private static readonly string[] _pointerMembers = ["path", "from"];
 
@@ -60,10 +61,34 @@ public sealed partial class AssistantInstructionsTests
     public void The_field_types_are_the_schemas_field_types()
     {
         var line = _text.Split('\n').Single(candidate => candidate.StartsWith("- Field types:", StringComparison.Ordinal));
-        var schema = JsonNode.Parse(File.ReadAllText(Path.Combine(RepositoryRoot.Find(), "schema", "project.schema.json")))!;
 
         Backticked().Matches(line).Select(match => match.Groups["token"].Value)
-            .ShouldBe(schema["$defs"]!["fieldType"]!["enum"]!.AsArray().Select(type => type!.GetValue<string>()));
+            .ShouldBe(Schema()["$defs"]!["fieldType"]!["enum"]!.AsArray().Select(type => type!.GetValue<string>()));
+    }
+
+    [Fact]
+    public void The_name_rule_is_the_schemas_entity_and_field_name_pattern()
+    {
+        var schema = Schema();
+
+        InstructionClaims.NamePattern(_text).ShouldSatisfyAllConditions(
+            stated => stated.ShouldBe(schema["properties"]!["entities"]!["propertyNames"]!["pattern"]!.GetValue<string>()),
+            stated => stated.ShouldBe(schema["$defs"]!["entity"]!["properties"]!["fields"]!["propertyNames"]!["pattern"]!.GetValue<string>()));
+    }
+
+    [Fact]
+    public void The_managed_columns_are_the_ones_the_framework_injects_for_each_trait()
+    {
+        var stated = InstructionClaims.ManagedColumns(_text);
+        var always = AlvoManagedColumns.For(null, audit: false, softDelete: false);
+
+        stated.Keys.ShouldBe(InstructionClaims.TraitLabels);
+        stated[InstructionClaims.EveryEntity].ShouldBe(always, ignoreOrder: true);
+        stated[InstructionClaims.ScopedEntity].ShouldBe(Beyond(AlvoManagedColumns.For(TenancyMode.Scoped, audit: false, softDelete: false), always), ignoreOrder: true);
+        stated[InstructionClaims.AuditedEntity].ShouldBe(AlvoManagedColumns.Audit);
+        stated[InstructionClaims.SoftDeletedEntity].ShouldBe(Beyond(AlvoManagedColumns.For(null, audit: false, softDelete: true), always), ignoreOrder: true);
+        stated.Values.SelectMany(columns => columns)
+            .ShouldBe(AlvoManagedColumns.For(TenancyMode.Scoped, audit: true, softDelete: true), ignoreOrder: true);
     }
 
     [Fact]
@@ -126,8 +151,8 @@ public sealed partial class AssistantInstructionsTests
     private static partial Regex ToolBullet();
 
     /// <summary>
-    /// Every name a tool, the bike-workshop descriptor, the schema or an example's patch defines — what a snake-case
-    /// token in the text may legitimately be.
+    /// Every name a tool, the bike-workshop descriptor, the schema, an example's patch or the framework's managed
+    /// columns define — what a snake-case token in the text may legitimately be.
     /// </summary>
     private static HashSet<string> KnownNames
     {
@@ -138,9 +163,16 @@ public sealed partial class AssistantInstructionsTests
             names.UnionWith(PropertyNames(JsonNode.Parse(File.ReadAllText(Path.Combine(root, "examples", "bike-workshop", "bike-workshop.alvo.json")))));
             names.UnionWith(PropertyNames(JsonNode.Parse(File.ReadAllText(Path.Combine(root, "schema", "project.schema.json")))));
             names.UnionWith(InstructionExamples.Parse(_text).SelectMany(ExampleTokens));
+            names.UnionWith(AlvoManagedColumns.For(TenancyMode.Scoped, audit: true, softDelete: true));
             return names;
         }
     }
+
+    private static IEnumerable<string> Beyond(IReadOnlySet<string> columns, IReadOnlySet<string> always) =>
+        columns.Where(column => !always.Contains(column));
+
+    private static JsonNode Schema() =>
+        JsonNode.Parse(File.ReadAllText(Path.Combine(RepositoryRoot.Find(), "schema", "project.schema.json")))!;
 
     private static IEnumerable<string> PropertyNames(JsonNode? node) => node switch
     {

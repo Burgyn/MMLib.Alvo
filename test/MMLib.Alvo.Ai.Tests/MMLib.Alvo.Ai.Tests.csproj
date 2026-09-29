@@ -9,9 +9,12 @@
   </ItemGroup>
 
   <!-- The instructions' worked-example parser, shared with MMLib.Alvo.Host.Tests: this suite runs each example's
-       patch, that one its dry run through the real validator (D11), and one parser keeps them reading the same examples. -->
+       patch, that one its dry run through the real validator (D11), and one parser keeps them reading the same examples.
+       The name-claims parser is shared the same way: this suite holds the claims to the schema and the ports, that one
+       to the validator. -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InstructionExamples.cs" Link="_shared/InstructionExamples.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InstructionClaims.cs" Link="_shared/InstructionClaims.cs" />
   </ItemGroup>
 
 </Project>
