@@ -15,9 +15,23 @@ internal static class Turns
               "phone": { "type": "string", "required": true },
               "street": { "type": "string", "maxLength": 120 } } },
             "bikes": { "fields": { "brand": { "type": "string" } } },
-            "parts": { "fields": { "name": { "type": "string" } },
+            "parts": { "fields": { "name": { "type": "string" }, "unit_price": { "type": "decimal", "required": true, "precision": 8, "scale": 2 } },
               "rules": { "delete": "'admin' in @user.roles || 'manager' in @user.roles" } },
-            "technicians": { "fields": { "full_name": { "type": "string" } } }
+            "technicians": { "fields": { "full_name": { "type": "string" } } },
+            "rentals": { "fields": {
+              "customer_id": { "type": "ref", "entity": "customers", "required": true },
+              "status": { "type": "enum", "required": true, "values": ["reserved", "active", "returned", "overdue", "cancelled"] },
+              "returned_at": { "type": "datetime" } },
+              "hooks": { "afterCreate": [ { "action": { "type": "webhook", "endpoint": "rental-desk" } } ] } },
+            "service_orders": { "fields": {
+              "status": { "type": "enum", "required": true, "values": ["received", "ready", "collected"] },
+              "assigned_user_id": { "type": "uuid" } },
+              "rules": { "list": "'authenticated' in @user.roles", "get": "'authenticated' in @user.roles" },
+              "hooks": { "afterUpdate": [] } },
+            "order_lines": { "fields": {
+              "order_id": { "type": "ref", "entity": "service_orders", "required": true },
+              "part_id": { "type": "ref", "entity": "parts" } },
+              "indexes": [ { "fields": ["order_id"] } ] }
           }
         }
         """;

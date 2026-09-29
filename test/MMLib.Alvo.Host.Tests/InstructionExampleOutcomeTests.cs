@@ -130,10 +130,13 @@ public sealed partial class InstructionExampleOutcomeTests
         }
     }
 
-    internal static async Task<DraftAttempt> AttemptAsync(IAlvoManagement management, string path, string field)
+    internal static Task<DraftAttempt> AttemptAsync(IAlvoManagement management, string path, string field) =>
+        AttemptAsync(management, JsonSerializer.SerializeToElement(new[] { new { op = "add", path, value = JsonNode.Parse(field) } }));
+
+    /// <summary>Dry-runs a whole JSON Patch <paramref name="operations"/> array against the current revision, as the tools do.</summary>
+    internal static async Task<DraftAttempt> AttemptAsync(IAlvoManagement management, JsonElement operations)
     {
         var current = await management.GetDescriptorAsync(Project, Ct);
-        var operations = JsonSerializer.SerializeToElement(new[] { new { op = "add", path, value = JsonNode.Parse(field) } });
         return await DescriptorDraft.BuildAsync(management, Project, current.Revision, operations, Ct);
     }
 

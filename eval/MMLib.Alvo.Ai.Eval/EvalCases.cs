@@ -31,8 +31,9 @@ internal sealed record Verdict(bool Passed, string Why)
 }
 
 /// <summary>
-/// The suite: the reliability design's seven §4.2 cases plus the first-try design's two (D15, D16), each graded on
-/// its outcomes — and every turn also on its wording and language.
+/// The suite: the reliability design's seven §4.2 cases plus the first-try design's two (D15, D16) and its seven skill
+/// cases (§7.5, D36), each graded on its outcomes — and every turn also on its wording, its language and the skills its
+/// proposal needed (D21, D31).
 /// </summary>
 /// <remarks>
 /// Case 6 is a nightly <c>automation</c> request rather than the design's webhook one (plan deviation D6): this build
@@ -103,6 +104,34 @@ internal static partial class EvalCases
             "Pridaj technikom (technicians) nepovinné pole nickname.",
             StaleRevisionRecovered,
             ForcesStaleRevision: true),
+        new("hook_returned_at",
+            "When a rental becomes returned, set returned_at to the current time.",
+            "Keď sa výpožička (rentals) vráti, nastav returned_at na aktuálny čas.",
+            HookReturnedAt),
+        new("reject_negative_price",
+            "A part's selling price may never be negative.",
+            "Predajná cena dielu (parts) nesmie byť nikdy záporná.",
+            RejectNegativePrice),
+        new("rollup_rentals_count",
+            "Customers: how many rentals they have.",
+            "Pri zákazníkoch (customers) chcem vidieť, koľko majú výpožičiek.",
+            RollupRentalsCount),
+        new("unique_part_per_order",
+            "A part may appear only once on each service order.",
+            "Jeden diel sa smie na jednej zákazke objaviť iba raz.",
+            UniquePartPerOrder),
+        new("own_orders_only",
+            "Technicians may list and read only the service orders assigned to them; admins and managers still see all.",
+            "Technici môžu vidieť a čítať iba zákazky (service_orders), ktoré sú pridelené im; admini a manažéri naďalej všetky.",
+            OwnOrdersOnly),
+        new("function_action_refused",
+            "When a service order is ready, run our invoicing function.",
+            "Keď je zákazka hotová (ready), spusti našu fakturačnú funkciu.",
+            FunctionActionRefused),
+        new("can_alvo_call_http",
+            "Can Alvo call our ERP's HTTP API when a part's stock changes?",
+            "Vie Alvo zavolať HTTP API nášho ERP, keď sa zmení sklad dielu?",
+            CanAlvoCallHttp),
     ];
 
     private static Verdict FullName(TurnRecord turn) =>
