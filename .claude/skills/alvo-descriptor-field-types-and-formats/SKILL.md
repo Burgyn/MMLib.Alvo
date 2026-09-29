@@ -1,6 +1,6 @@
 ---
 name: alvo-descriptor-field-types-and-formats
-description: Use when an Alvo descriptor field needs a type or its facets — string versus text, decimal precision and scale, enum values, a ref and its onDelete, a ref to users, or a validation format such as email or a named pattern.
+description: Use when an Alvo descriptor field needs a type or its facets — string or text, decimal precision and scale, enum values, a ref and its onDelete, or a format such as email.
 ---
 
 # Field types and formats in an Alvo descriptor

@@ -194,7 +194,37 @@ Worked examples in a skill use the base prompt's `<!-- example: name -->` + two-
   since `rentals` is already audited. `index-technicians-by-specialization` replaces `index-technician-status`,
   since `service_orders` already has `[technician_id, status]` (Task 5 B5).
 - A prose claim that a skill makes about a refusal or acceptance is probed in `SkillClaimTests` (Host.Tests), beside
-  the region drift tests.
+  the region drift tests. The probes cover:
+  - `required` + `readOnly` with `computed`, without it, and with a literal default;
+  - a default of another type, and a `$cel` default;
+  - `hidden` over a row field, and over `@user`;
+  - a facet on another type;
+  - a declared `id`, and a declared `created_at` on an audited entity;
+  - an entity named `users`;
+  - a `ref` to `users` with `index`;
+  - the three refused after-hook action types.
+
+  The worked examples that claim `softDelete` and `validation` are refused are run by `SkillExampleOutcomeTests`.
+
+**D39 (2026-09-29, Task 7): the core-sourced skills and v4.**
+
+- The rules example is `technician-updates-own-profile`: `technicians.rules.update` gains `user_id == @user.id`
+  (ruling B6). It is not the eval's `own_orders_only`.
+- **When to load a skill is stated once, in the base prompt's `### Skills`** (ruling H3). The catalogue frame
+  (`EmbeddedSkills.Catalogue`) is only `## Skill list` and the list.
+- Descriptions are capped at 200 characters, not AC 2's 300, and carry no quote or apostrophe (H3).
+- `computed-and-rollups`, `project-access` and `capabilities-and-limits` carry no worked example:
+  - the computed examples stay in the base prompt (§5), so the fence count stays exact in both;
+  - an access change needs an administrator;
+  - the limits are answered, not proposed.
+- A refused CEL example must compile under another profile (ruling M3), so each refusal is the profile's rather than
+  a typo's (`SkillCoreClaimsTests`).
+- §3 of the base prompt no longer offers the `softDelete` trait or a `$cel` default, both of which are refused
+  (D38).
+- The computed section moves verbatim, except that "as in example (g)" becomes "as `alvo-descriptor-hooks` shows",
+  because the skill is read without the base prompt.
+- The always-in-context text (the base prompt plus the list) measures about 21.4 KB of AC 3's 22,758 bytes, and a
+  test holds it there.
 
 ### 7.4 Acceptance criteria
 

@@ -32,9 +32,10 @@ public sealed partial class AssistantInstructionsTests
 
     /// <summary>
     /// Snake-case names the instructions may use in code without their being tools: illustrative fields of the
-    /// Arithmetic and Never-boolean rules, the rate field example (f) suggests, and the name rule's own example.
+    /// Arithmetic and Never-boolean rules, the rate field example (f) suggests, the name rule's own example, and the
+    /// optional middle name the computed skill's null rule reads (its examples, which add it, stay in the base prompt).
     /// </summary>
-    private static readonly string[] _illustrativeNames = ["net_total", "vat_total", "is_vip", "vat_rate", "customer_audits"];
+    private static readonly string[] _illustrativeNames = ["net_total", "vat_total", "is_vip", "vat_rate", "customer_audits", "middle_name"];
 
     private static readonly string[] _pointerMembers = ["path", "from"];
 
@@ -42,7 +43,8 @@ public sealed partial class AssistantInstructionsTests
 
     private static IReadOnlyList<AIFunction> Tools { get; } = ManagementTools.For(Substitute.For<IAlvoManagement>(), "p").Functions;
 
-    internal static IReadOnlyList<string> Registered { get; } = [.. Tools.Select(tool => tool.Name).Order(StringComparer.Ordinal)];
+    /// <summary>Every tool the model is given: the management tools and the two skill tools (D30), sorted.</summary>
+    internal static IReadOnlyList<string> Registered { get; } = [.. Tools.Select(tool => tool.Name).Concat(_skillTools).Order(StringComparer.Ordinal)];
 
     public static TheoryData<string> ExampleNames() => [.. InstructionExamples.Parse(_text).Select(example => example.Name)];
 
@@ -95,8 +97,12 @@ public sealed partial class AssistantInstructionsTests
     }
 
     [Fact]
-    public void The_computed_section_states_every_rule_it_owes() =>
-        _computedRules.ShouldAllBe(rule => _text.Contains(rule, StringComparison.Ordinal));
+    public void The_computed_skill_states_every_rule_it_owes() =>
+        _computedRules.ShouldAllBe(rule => SkillCatalogue.Named("computed-and-rollups").Body.Contains(rule, StringComparison.Ordinal));
+
+    [Fact]
+    public void The_base_prompt_no_longer_carries_the_computed_section() =>
+        _text.ShouldNotContain("What Computed allows");
 
     [Fact]
     public void The_instructions_state_what_the_tools_enforce() =>
@@ -198,7 +204,7 @@ public sealed partial class AssistantInstructionsTests
             .SelectMany(operation => _pointerMembers.Where(key => operation.TryGetProperty(key, out _)).Select(key => operation.GetProperty(key).GetString()!))
             .SelectMany(pointer => pointer.Split('/'));
 
-    [GeneratedRegex(@"\b(?:get|check|propose|validate|apply|set|update|delete|list|add|remove|create)_[a-z_]+\b", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\b(?:get|check|propose|validate|apply|set|update|delete|list|add|remove|create|load|read|run)_[a-z_]+\b", RegexOptions.CultureInvariant)]
     private static partial Regex ToolName();
 
     [GeneratedRegex("^```json\r?$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]

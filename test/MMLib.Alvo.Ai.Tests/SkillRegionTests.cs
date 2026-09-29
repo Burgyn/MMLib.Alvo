@@ -12,10 +12,17 @@ public sealed class SkillRegionTests
 {
     /// <summary>The regions this suite holds to the schema and the ports.</summary>
     private static readonly string[] _heldHere =
-        ["entity-keys", "field-keys", "field-types", "on-delete", "built-in-formats", "managed-columns"];
+        ["entity-keys", "field-keys", "field-types", "on-delete", "built-in-formats", "managed-columns", "rollup-ops"];
 
-    /// <summary>The regions whose source is the core, held by <c>SkillClaimTests</c> in <c>MMLib.Alvo.Host.Tests</c>.</summary>
-    private static readonly string[] _heldInHostTests = ["reserved-fields"];
+    /// <summary>
+    /// The regions whose source is the core, held in <c>MMLib.Alvo.Host.Tests</c>: the reserved fields by
+    /// <c>SkillClaimTests</c>, the rest by <c>SkillCoreClaimsTests</c>.
+    /// </summary>
+    private static readonly string[] _heldInHostTests =
+    [
+        "reserved-fields", "cel-rule", "cel-condition", "cel-mutate", "mutate-functions", "cel-computed", "cel-access",
+        "honoured", "warned", "refused-actions",
+    ];
 
     [Fact]
     public void Every_region_a_skill_declares_is_held_to_a_source() =>
@@ -40,6 +47,10 @@ public sealed class SkillRegionTests
     [Fact]
     public void The_built_in_formats_are_the_schemas() =>
         Holds("field-types-and-formats", "built-in-formats", Enum(Schema()["$defs"]!["field"]!["properties"]!["format"]!["anyOf"]![0]!["enum"]!));
+
+    [Fact]
+    public void The_rollup_operations_are_the_schemas() =>
+        Holds("computed-and-rollups", "rollup-ops", Enum(Schema()["$defs"]!["field"]!["properties"]!["rollup"]!["properties"]!["op"]!["enum"]!));
 
     [Fact]
     public void The_managed_columns_per_trait_are_the_ones_the_framework_injects()

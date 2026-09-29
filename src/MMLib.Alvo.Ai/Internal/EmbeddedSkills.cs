@@ -34,10 +34,11 @@ internal static partial class EmbeddedSkills
     private const string SliceDescription = "A slice of the descriptor's JSON Schema, schema/project.schema.json.";
 
     /// <summary>The skill list's frame in the instructions; the framework's default also advertises scripts (D28).</summary>
-    private const string Catalogue =
-        "## Skills\n\nEach skill below holds the rules of one area of the descriptor. Before `check_change` or "
-        + "`propose_change` in an area, load its skill with `load_skill`; read a resource it lists with "
-        + "`read_skill_resource`, using the name exactly as listed.\n\n<available_skills>\n{skills}\n</available_skills>";
+    /// <remarks>
+    /// Only the list: when to load a skill is stated once, in the instructions' <c>### Skills</c> (ruling H3), so the
+    /// two cannot drift into saying it twice, differently.
+    /// </remarks>
+    private const string Catalogue = "## Skill list\n\n<available_skills>\n{skills}\n</available_skills>";
 
     private static readonly Lazy<JsonNode> _schema = new(() => JsonNode.Parse(Read(SchemaResourceName))!);
 

@@ -5,6 +5,7 @@ using MMLib.Alvo.Management;
 
 using NSubstitute;
 
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -19,6 +20,9 @@ namespace MMLib.Alvo.Ai.Tests;
 /// </remarks>
 public sealed class AlvoAssistantTests
 {
+    /// <summary>The v3 base prompt's size in UTF-8 bytes, before skills (spec §7.4 AC 3).</summary>
+    private const int AlwaysInContextBudget = 22_758;
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>
@@ -156,6 +160,21 @@ public sealed class AlvoAssistantTests
     /// <see cref="Internal.ManagementTools"/> keeps its budget and proposal in plain fields; concurrent invocation
     /// would let parallel calls in one response all pass an exhausted budget, so the setting is pinned here.
     /// </remarks>
+    /// <summary>
+    /// What the model always reads — the base prompt and the skill list — is no larger than the v3 base prompt alone
+    /// (spec §7.4 AC 3). Measured LF-normalised, so a CRLF checkout measures the same text.
+    /// </summary>
+    [Fact]
+    public async Task The_always_in_context_instructions_do_not_outgrow_the_v3_base_prompt()
+    {
+        var model = new ScriptedChatClient(Scripted.Says("ok"));
+
+        await RunAsync(Describing(revision: 1), Configured(), model);
+
+        Encoding.UTF8.GetByteCount(model.Options[0].ShouldNotBeNull().Instructions.ShouldNotBeNull().ReplaceLineEndings("\n"))
+            .ShouldBeLessThanOrEqualTo(AlwaysInContextBudget);
+    }
+
     [Fact]
     public void The_agents_invoker_is_capped_and_sequential()
     {

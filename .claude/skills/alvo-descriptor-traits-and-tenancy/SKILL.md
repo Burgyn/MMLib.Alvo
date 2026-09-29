@@ -1,6 +1,6 @@
 ---
 name: alvo-descriptor-traits-and-tenancy
-description: Use when an Alvo descriptor change touches the audit, softDelete, tenancy, storage or realtime trait of an entity, or the tenancy of a project — which columns the framework adds for each, and what this build honours.
+description: Use when an Alvo descriptor change touches audit, softDelete, tenancy, storage or realtime on an entity, or project tenancy — the columns each trait adds and what this build honours.
 ---
 
 # Entity traits and tenancy in an Alvo descriptor

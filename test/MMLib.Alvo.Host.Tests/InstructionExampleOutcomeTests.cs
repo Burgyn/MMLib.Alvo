@@ -174,14 +174,15 @@ public sealed partial class InstructionExampleOutcomeTests
             _ => JsonElement.DeepEquals(value, member.Value),
         });
 
+    /// <summary>The computed skill's <c>## What Computed allows</c> section, up to the next heading or the end.</summary>
     private static string ComputedSection()
     {
-        var text = AssistantInstructions.Text;
-        var start = text.IndexOf("## 4. What Computed allows", StringComparison.Ordinal);
-        var end = text.IndexOf("## 5.", start, StringComparison.Ordinal);
+        var text = SkillCatalogue.Named("computed-and-rollups").Body;
+        var start = text.IndexOf("## What Computed allows", StringComparison.Ordinal);
         start.ShouldBeGreaterThanOrEqualTo(0);
+        var end = text.IndexOf("\n## ", start + 1, StringComparison.Ordinal);
 
-        return text[start..end];
+        return end < 0 ? text[start..] : text[start..end];
     }
 
     private static string Collapsed(string text) => Whitespace().Replace(text, " ").TrimEnd('…');

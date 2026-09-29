@@ -1,6 +1,6 @@
 ---
 name: alvo-descriptor-entities-and-fields
-description: Use when an Alvo descriptor change adds, renames or removes an entity or a field, or sets required, unique, default, hidden or readOnly on a field — the paths, the keys each level takes, the reserved names, and how a rename keeps its data.
+description: Use when an Alvo descriptor change adds, renames or removes an entity or a field, or sets required, unique, default, hidden or readOnly — paths, keys, reserved names, renames that keep data.
 ---
 
 # Entities and fields in an Alvo descriptor

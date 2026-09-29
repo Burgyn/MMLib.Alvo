@@ -15,6 +15,7 @@ public sealed class SkillClaimTests
     private const string OrderLines = "/entities/order_lines/fields/";
     private const string Technicians = "/entities/technicians/fields/";
     private const string Rentals = "/entities/rentals/fields/";
+    private const string AfterCreate = "/entities/rentals/hooks/afterCreate/-";
 
     /// <summary>Each probe, the field it adds, and whether the skill says the dry run accepts it.</summary>
     private static readonly (string Path, string Field, bool Accepted)[] _probes =
@@ -24,6 +25,16 @@ public sealed class SkillClaimTests
         (Technicians + "probe_read_only_default", """{"type": "integer", "required": true, "readOnly": true, "default": 0}""", true),
         (Technicians + "probe_default_of_another_type", """{"type": "integer", "default": "0"}""", false),
         (Rentals + "probe_user_ref", """{"type": "ref", "entity": "users", "index": true}""", true),
+        (Technicians + "probe_cel_default", """{"type": "datetime", "default": {"$cel": "now()"}}""", false),
+        (Technicians + "probe_hidden_by_row", """{"type": "string", "hidden": "active == true"}""", false),
+        (Technicians + "probe_hidden_by_caller", """{"type": "string", "hidden": "!('admin' in @user.roles)"}""", true),
+        (Technicians + "probe_facet_on_another_type", """{"type": "text", "maxLength": 10}""", false),
+        (Technicians + "id", """{"type": "uuid"}""", false),
+        (Technicians + "created_at", """{"type": "datetime"}""", false),
+        ("/entities/users", """{"fields": {"nickname": {"type": "string"}}}""", false),
+        (AfterCreate, """{"action": {"type": "function", "name": "invoice"}}""", false),
+        (AfterCreate, """{"action": {"type": "http.call", "url": "https://erp.example.com/rentals"}}""", false),
+        (AfterCreate, """{"action": {"type": "entity.update", "entity": "customers", "payload": "{}"}}""", false),
     ];
 
     public static TheoryData<int> Probes() => [.. Enumerable.Range(0, _probes.Length)];

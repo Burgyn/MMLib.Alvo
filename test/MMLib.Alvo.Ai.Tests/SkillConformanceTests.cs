@@ -1,6 +1,7 @@
 ﻿using Microsoft.Agents.AI;
 using MMLib.Alvo.Ai.Internal;
 
+using System.Buffers;
 using System.Text;
 using System.Text.Json.Nodes;
 
@@ -11,12 +12,28 @@ public sealed class SkillConformanceTests
 {
     private const int MaximumSkillBytes = 6_144;
     private const int MaximumSkillLines = 200;
-    private const int MaximumDescription = 300;
+    /// <summary>
+    /// Tighter than spec §7.4 AC 2's 300: every description is in the always-in-context list (AC 3), and the
+    /// pre-flight ruling H3 caps it at about 200.
+    /// </summary>
+    private const int MaximumDescription = 200;
     private const int MaximumResourceBytes = 16_384;
     private const int MaximumSkills = 10;
 
-    /// <summary>The areas, in order. Task 7 adds the five core-sourced ones.</summary>
-    private static readonly string[] _areas = ["entities-and-fields", "field-types-and-formats", "indexes", "traits-and-tenancy"];
+    /// <summary>The nine areas, in ordinal order (spec §7.3).</summary>
+    private static readonly string[] _areas =
+    [
+        "capabilities-and-limits", "computed-and-rollups", "entities-and-fields", "field-types-and-formats", "hooks", "indexes",
+        "project-access", "rules-and-cel", "traits-and-tenancy",
+    ];
+
+    /// <summary>
+    /// The areas that teach without a worked example of their own: the computed examples stay in the base prompt,
+    /// an access change needs an administrator the example cannot assume, and the limits are answered, not proposed.
+    /// </summary>
+    private static readonly string[] _withoutExamples = ["capabilities-and-limits", "computed-and-rollups", "project-access"];
+
+    private static readonly SearchValues<char> _quotes = SearchValues.Create("'\"");
 
     private static readonly string[] _frontmatterKeys = ["name", "description"];
 
@@ -42,6 +59,7 @@ public sealed class SkillConformanceTests
         AgentSkillFrontmatter.ValidateName(skill.Name, out var nameReason).ShouldBeTrue(nameReason);
         AgentSkillFrontmatter.ValidateDescription(skill.Description, out var descriptionReason).ShouldBeTrue(descriptionReason);
         skill.Description.ShouldStartWith("Use when ");
+        skill.Description.AsSpan().IndexOfAny(_quotes).ShouldBe(-1, "a description carries no quote or apostrophe (H3)");
         SkillMarkdown.Parse(skill.Text).ShouldBe(new SkillParts(skill.Name, skill.Description, skill.Body));
     }
 
@@ -91,8 +109,14 @@ public sealed class SkillConformanceTests
 
     [Theory]
     [MemberData(nameof(SkillKeys))]
-    public void Every_skill_teaches_by_at_least_one_worked_example(string key) =>
-        InstructionExamples.Parse(SkillCatalogue.Keyed(key).Body).ShouldNotBeEmpty();
+    public void A_skill_has_worked_examples_exactly_when_it_is_not_exempt(string key) =>
+        (InstructionExamples.Parse(SkillCatalogue.Keyed(key).Body).Count > 0)
+            .ShouldBe(!_withoutExamples.Contains(key[SkillCatalogue.Prefix.Length..]));
+
+    [Theory]
+    [MemberData(nameof(SkillKeys))]
+    public void A_skill_scripts_no_reply(string key) =>
+        SkillCatalogue.Keyed(key).Body.ShouldNotContain("Reply:", Case.Sensitive);
 
     [Theory]
     [MemberData(nameof(SkillExamples))]

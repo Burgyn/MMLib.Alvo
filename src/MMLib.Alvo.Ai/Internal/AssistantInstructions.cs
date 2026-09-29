@@ -22,7 +22,7 @@ internal static class AssistantInstructions
     internal const string ResourceName = "MMLib.Alvo.Ai.Instructions.schema-assistant.md";
 
     /// <summary>The first line, which names the version a transcript was produced under.</summary>
-    internal const string VersionLine = "<!-- alvo-schema-assistant v3 -->";
+    internal const string VersionLine = "<!-- alvo-schema-assistant v4 -->";
 
     /// <summary>The instructions the agent runs under.</summary>
     internal static string Text { get; } = Load();
