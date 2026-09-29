@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Management;
+﻿using MMLib.Alvo.Ai;
+
+namespace MMLib.Alvo.Management;
 
 /// <summary>What this Alvo instance is.</summary>
 /// <param name="Version">The informational version of the running <c>MMLib.Alvo</c> assembly.</param>
@@ -11,7 +13,44 @@
 /// <b>Not the database engine:</b> the core may not reference the adapter that knows one.
 /// </param>
 /// <param name="StartupMode">The <c>Alvo:Schema:Startup</c> mode this process booted under, lower-cased.</param>
-public sealed record ManagementInfo(string Version, string Mode, string DataProvider, string StartupMode);
+/// <param name="Ai">What this instance can say about its AI connection, without saying where it dials.</param>
+public sealed record ManagementInfo(
+    string Version, string Mode, string DataProvider, string StartupMode, ManagementAi Ai);
+
+/// <summary>
+/// Whether this instance has an AI connection, and enough about it to be recognised — never enough to be
+/// used.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>No endpoint, ever, and that is the field this record deliberately does not have.</b> The same
+/// reasoning <c>WebhookDelivery</c> records about a target URL: an address is a place a credential ends up
+/// in practice — in a query string, in a userinfo segment — and an internal host name is reconnaissance on
+/// its own. What a reader needs is "is it on, is it the model I meant, and did my deployment or the
+/// dashboard decide that", which is exactly what is here.
+/// </para>
+/// <para>
+/// <b>Always present rather than <see langword="null"/> when unconfigured.</b> A screen that has to
+/// distinguish "no AI" from "an older instance that does not report AI" is a screen with two empty states;
+/// <see cref="Configured"/> answers the first and the field's presence answers the second.
+/// </para>
+/// </remarks>
+/// <param name="Configured">Whether a connection resolves at all.</param>
+/// <param name="Kind">The wire spelling of the protocol, or <see langword="null"/> when unconfigured.</param>
+/// <param name="Model">The model or deployment name, or <see langword="null"/> when unconfigured.</param>
+/// <param name="Source">
+/// <c>configuration</c>, <c>store</c>, or <see langword="null"/> when unconfigured — which is what tells an
+/// operator whether their deployment pinned this or somebody saved it from the dashboard.
+/// </param>
+/// <param name="KeyState">
+/// Whether the connection has the key its endpoint needs — on the wire <c>present</c>, <c>missing</c>,
+/// <c>not-needed</c>, or <c>none</c> when unconfigured. <b>Read it beside <paramref name="Configured"/>, never
+/// after it:</b> a connection whose key is <c>missing</c> is configured and refused on every call, which is the
+/// state "configured" alone used to report as working (docs/todo-admin.md §8d item 31). A state only: neither
+/// the key nor the name of the secret it was looked for under.
+/// </param>
+public sealed record ManagementAi(
+    bool Configured, string? Kind, string? Model, string? Source, AiKeyState KeyState);
 
 /// <summary>One project this instance serves.</summary>
 /// <param name="Name">The project name — the descriptor's own <c>name</c>.</param>
@@ -45,15 +84,25 @@ public sealed record ManagementRevisionDetail(ManagementRevision Version, string
 
 /// <summary>What this build honours, warns about, and refuses — one source of truth for "not yet".</summary>
 /// <param name="Honoured">The top-level blocks this build honours.</param>
-/// <param name="Warned">Blocks that apply and then do nothing. The section exists; nothing runs.</param>
+/// <param name="Warned">
+/// What a descriptor may declare and this build then does nothing with: the section parses, nothing runs. Both
+/// top-level blocks (<c>automation</c>) and qualified slots inside an honoured block (<c>auth.providers</c>,
+/// <c>entity.storage</c>, <c>entity.realtime</c>) — so a client keyed on a block name matches only the first
+/// kind. <b>Not the same list as the apply's warning:</b> <c>entity.realtime</c> is reported here and never warned
+/// at apply, because its schema default is <see langword="true"/> and a warning would fire on every descriptor.
+/// </param>
 /// <param name="Refused">Features an apply rejects. A control for one of these must not exist.</param>
 public sealed record ManagementCapabilities(
     IReadOnlyList<string> Honoured,
     IReadOnlyList<ManagementWarnedBlock> Warned,
     IReadOnlyList<ManagementRefusedFeature> Refused);
 
-/// <summary>A declared block this build parses and then honours nowhere.</summary>
-/// <param name="Block">The descriptor's top-level block name.</param>
+/// <summary>A declared block, or a slot inside one, this build parses and then honours nowhere.</summary>
+/// <param name="Block">
+/// A top-level block name (<c>automation</c>), or a qualified slot inside an honoured block
+/// (<c>auth.providers</c>, <c>entity.storage</c>, <c>entity.realtime</c>), spelled as
+/// <see cref="ManagementRefusedFeature.Slot"/> already is (<c>field.default</c>).
+/// </param>
 /// <param name="Consequence">
 /// What does not happen, concretely — <b>served verbatim.</b> Never rewrite it in a client: it is the
 /// framework's own sentence, and a second wording is a third spelling of one truth.

@@ -1,0 +1,479 @@
+﻿@*
+    The shell (spec §3.7): one app bar, one nav drawer, the pending bar under the app bar, and the bottom bar under
+    720 px.
+
+    The two layouts are one markup tree, not two components. A second component would be a second navigation — and
+    §4.3 argues at length that a second navigation is how a navigation starts lying about what works. That is also
+    why the drawer's entries are SectionLink rather than the library's nav link (V8): a section here owns routes
+    beyond its own prefix (Schema owns /changes, Data the record routes), and the library's link cannot say so.
+*@
+@inherits LayoutComponentBase
+@implements IAsyncDisposable
+@inject AssistantGateway Assistant
+@inject ILogger<AdminLayout> Logger
+@inject AdminInterop Interop
+@inject IBrowserViewportService Viewport
+
+@*
+    The library's four providers, in the interactive layout because the library does not render them statically
+    (study §1.3). Exactly one popover provider: a second throws. Dialog defaults are the pattern language's:
+    focus lands on the first field, and a click on the scrim never dismisses (spec §3.1-3.2). Each wrapper still
+    states its own options. The snackbars are placed by a class of the dashboard's own rather than the library's
+    position option, which is one object per container and would move an embedding host's snackbars too.
+*@
+<AlvoTheme />
+<MudPopoverProvider />
+<MudDialogProvider DefaultFocus="DefaultFocus.FirstChild" BackdropClick="false" CloseButton="false" />
+@* The one polite live region every confirmation is read from, on the page before any message is, which is when a
+   screen reader starts to listen to a region (spec §3.3; batch-B re-review N2). *@
+<MudSnackbarProvider Class="a-snackbars" role="status" aria-live="polite" data-testid="snackbars" />
+
+@*
+    The first stop of Tab on every screen: past the app bar and the sections, straight to the screen's content
+    (WCAG 2.4.1). Drawn off screen until it has focus. Moves focus itself, because the router answers an in-page link
+    with a scroll and leaves focus where it was.
+*@
+<a class="a-skip" href="#a-content" data-testid="skip-to-content" @onclick="SkipToContentAsync"
+   @onclick:preventDefault="true">Skip to content</a>
+
+<MudLayout Class="@(PageCovered ? "a-shell a-shell--covered" : "a-shell")">
+    <MudAppBar Dense="true" Elevation="0" Class="a-appbar" data-testid="appbar">
+        <AlvoButton @ref="_sectionsButton" Tone="AlvoButton.ButtonTone.Ghost" Small="true" class="a-only-mobile" aria-label="Sections"
+                    aria-expanded="@(_navOpen ? "true" : "false")" data-testid="more-sections" OnClick="_ => ToggleNav()">
+            <Icon Path="@Icons.More" />
+        </AlvoButton>
+        <a class="a-brand" href="@AdminPaths.Overview" aria-label="Alvo">
+            <img src="@AlvoAdminAssets.Mark" width="26" height="26" alt="" />
+            <span>Alvo</span>
+        </a>
+        <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" aria-label="Search" OnClick="_ => OpenPalette()">
+            <Icon Path="@Icons.Search" />
+            <span>Search</span>
+            <kbd class="a-kbd">&#8984;K</kbd>
+        </AlvoButton>
+        <span class="a-spacer"></span>
+        @*
+            Mounted only when a connection resolves. A deployment with no AI gets no launcher, no badge and no
+            explanation to read: spec §3.3, a control whose only possible outcome is "not configured" is worse than
+            its absence, which is the argument Settings already makes about issuing an API key. An icon alone on a
+            phone, named by its label.
+        *@
+        @if (_assistant)
+        {
+            <AlvoButton @ref="_assistantLauncher" Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="assistant-launch"
+                        aria-label="Ask Alvo" aria-expanded="@(_assistantOpen ? "true" : "false")" OnClick="_ => ToggleAssistant()">
+                <Icon Path="@Icons.Sparkle" />
+                <span class="a-only-desktop-block">Ask Alvo</span>
+            </AlvoButton>
+        }
+        <ThemeToggle />
+        <SignedInAs />
+    </MudAppBar>
+
+    @*
+        The persistent drawer on a desktop, a temporary one over the page on a phone, where the bottom bar carries
+        the first five sections and the app bar's Sections button opens the rest. The variant follows Alvo's own
+        720 px phone width, not the library's responsive breakpoints (600 and 960 px): those would draw a third
+        layout between them and 720, which the stylesheet does not have.
+
+        No MudNavMenu around the list. Its entries are SectionLink (V8), so it added only a second, unlabelled
+        <nav> inside this one: a navigation landmark with no name, and nothing else. For the same reason the drawer's
+        own <aside> is role="none": it was an unnamed complementary landmark whose one child is the named <nav>.
+    *@
+    <MudDrawer Open="NavShown" OpenChanged="OnDrawerOpenChanged"
+               Variant="@(_phone ? DrawerVariant.Temporary : DrawerVariant.Persistent)"
+               ClipMode="DrawerClipMode.Always" Elevation="0" Class="a-navdrawer" role="none">
+        <nav aria-label="Sections" data-testid="sidebar" class="a-navdrawer__nav" tabindex="-1" @ref="_drawerNav">
+            <ProjectSwitcher />
+            <NavList OnNavigate="CloseNavOnPhone" />
+        </nav>
+    </MudDrawer>
+
+    @* Inert under the phone's full-width pane: covered controls must not stay in the tab order (WCAG 2.4.11). *@
+    <MudMainContent Class="a-main" inert="@PageCovered">
+        <PendingBar />
+
+        <main class="a-content" id="a-content" tabindex="-1" @ref="_main">
+            @*
+                A screen that throws while rendering takes this panel instead of the circuit. Without the
+                boundary a render bug ends the session: the shell, the working copy's pending count and every
+                other screen go with it, and the operator reads the framework's reconnect banner. The
+                boundary's own logger writes the exception to the server log, so the panel can say "in the
+                server log" and mean it.
+            *@
+            <ErrorBoundary @ref="_boundary">
+                <ChildContent>@Body</ChildContent>
+                <ErrorContent Context="fault">
+                    <ErrorPanel Fault="@fault">
+                        <Actions>
+                            <AlvoButton Small="true" data-testid="error-reload" OnClick="_ => Reload()">Reload</AlvoButton>
+                        </Actions>
+                    </ErrorPanel>
+                </ErrorContent>
+            </ErrorBoundary>
+        </main>
+
+        @* The pane's last row rather than the layout's, so it sits under the content on a phone and needs no
+           height of its own subtracted anywhere. Named apart from the drawer's "Sections", which lists them all:
+           on a phone both are there, and two landmarks of one name read as one said twice. *@
+        <nav class="a-bottomnav" aria-label="Main sections" data-testid="bottom-nav">
+            @foreach (var entry in AdminNavigation.Bar)
+            {
+                @SectionLink.For(entry, "a-bottomnav__item", "a-bottomnav__item--active", BarContent(entry))
+            }
+        </nav>
+    </MudMainContent>
+
+    @if (_assistant)
+    {
+        @*
+            Beside the page, not over it (spec §3.1): a persistent end drawer at every width, with no scrim, no scroll
+            lock and no focus trap, and labelled so a screen reader reaches it as a region. Clipped under the app bar,
+            so the header is never covered. Where the page keeps a usable column beside it the page narrows, pending
+            bar and all, and up to 1100 px the nav drawer steps aside while it is open (see NavShown). Up to
+            AssistantCoverWidth there is no such column, so it is the whole width below the app bar and does cover
+            the page, the pending bar and the bottom bar: that is the trade-off of a full-width pane, and the page
+            under it is inert until it closes. Kept mounted while closed, because the thread lives in the component
+            and closing the pane must not end the conversation.
+        *@
+        <MudDrawer Open="_assistantOpen" Anchor="Anchor.End" Variant="DrawerVariant.Persistent"
+                   ClipMode="DrawerClipMode.Always" Elevation="0" Width="@AssistantWidth"
+                   Class="a-assistant-drawer" role="complementary" aria-label="Ask Alvo">
+            <CascadingValue Value="_pane" IsFixed="true">
+                <AssistantDrawer />
+            </CascadingValue>
+        </MudDrawer>
+    }
+</MudLayout>
+
+<CommandPalette @ref="_palette" />
+
+@code {
+    private CommandPalette? _palette;
+    private ErrorBoundary? _boundary;
+    /// <summary>The widest viewport that is a phone: alvo.css's one phone breakpoint, and the drawer's.</summary>
+    private const int PhoneWidth = 720;
+
+    /// <summary>
+    /// The widest viewport where the nav drawer and the assistant's pane do not both fit beside the page: alvo.css's
+    /// other breakpoint. At 1024 px the two drawers (240 and 440 px) left the page column 344 px.
+    /// </summary>
+    private const int NarrowWidth = 1100;
+
+    /// <summary>
+    /// The widest viewport where the assistant's pane covers the page rather than standing beside it: the pane's 440 px
+    /// and the 480 px the narrowest usable page column needs. Its own width and not <see cref="PhoneWidth"/>, which also
+    /// decides the bottom bar and the temporary nav drawer: at 800 px the page beside the pane was 360 px, a column
+    /// too narrow to read a table in, while the rest of the shell is a desktop's.
+    /// </summary>
+    private const int AssistantCoverWidth = 920;
+
+    /// <summary>The pane's width beside the page.</summary>
+    private const string AssistantPaneWidth = "min(440px, 100vw)";
+
+    private static readonly string _phoneQuery = $"(max-width: {PhoneWidth}px)";
+
+    private static readonly string _narrowQuery = $"(max-width: {NarrowWidth}px)";
+
+    private static readonly string _coverQuery = $"(max-width: {AssistantCoverWidth}px)";
+
+    /// <summary>
+    /// Breakpoints either side of the phone, the cover and the narrow width, so the viewport reports crossing those and
+    /// no other.
+    /// </summary>
+    private static readonly MudBlazor.Services.ResizeOptions _widthCrossings = new()
+    {
+        NotifyOnBreakpointOnly = true,
+        BreakpointDefinitions = new()
+        {
+            [Breakpoint.Xs] = 0, [Breakpoint.Sm] = PhoneWidth + 1, [Breakpoint.Md] = AssistantCoverWidth + 1,
+            [Breakpoint.Lg] = NarrowWidth + 1,
+        },
+    };
+
+    private readonly Guid _viewportWatch = Guid.NewGuid();
+    private AlvoButton? _sectionsButton;
+    private AlvoButton? _assistantLauncher;
+    private AssistantPane _pane = AssistantPane.None;
+    private bool _assistantOpen;
+    private ElementReference _drawerNav;
+    private ElementReference _main;
+    private IAsyncDisposable? _dismiss;
+    private FocusNext _focusNext;
+    private bool _assistant;
+    private bool _navOpen = true;
+    private bool _phone;
+    private bool _narrow;
+    private bool _cover;
+
+    /// <summary>
+    /// Whether to mount the assistant, asked at boot and again whenever the connection is saved.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Every refusal is "no launcher", never a failed page.</b> The shell renders for a caller the
+    /// project names nowhere and for one whose account has been deleted since they signed in — and both
+    /// reach this call. A layout that let either throw would replace the screen that says what happened
+    /// with a 500, which is measured rather than imagined: it took out the revoked-session scenario.
+    /// </para>
+    /// <para>
+    /// <b>Asked again, because once per circuit was a bug rather than a simplification.</b> An operator who
+    /// configured the connection on Settings got a panel reporting <c>configured</c> and a shell with no
+    /// launcher in it, for the rest of the session and with nothing on screen suggesting a reload. The
+    /// subscription is to <see cref="AssistantGateway.ConnectionChanged"/>, which the save raises — see the
+    /// argument for the event there.
+    /// </para>
+    /// </remarks>
+    protected override async Task OnInitializedAsync()
+    {
+        _pane = new AssistantPane(EventCallback.Factory.Create(this, CloseAssistant));
+        Assistant.ConnectionChanged += OnConnectionChanged;
+        await RefreshAssistantAsync();
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        Assistant.ConnectionChanged -= OnConnectionChanged;
+
+        if (_dismiss is not null)
+        {
+            await _dismiss.DisposeAsync();
+        }
+
+        await StopWatchingViewportAsync();
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await StartAsync();
+        }
+
+        await MoveFocusAsync();
+    }
+
+    /// <summary>
+    /// Learns the width, follows it and Escape, then says the shell has rendered interactively, providers and all.
+    /// It is the readiness signal a scenario waits on before it opens a popover or a dialog (study §5.1 gotcha 2):
+    /// a click before the circuit is live is lost, and so is a phone's first choice in the drawer made before the
+    /// shell knows it is on a phone.
+    /// </summary>
+    private async Task StartAsync()
+    {
+        await Viewport.SubscribeAsync(_viewportWatch, OnViewportChanged, _widthCrossings, fireImmediately: false);
+        _narrow = await Viewport.IsMediaQueryMatchAsync(_narrowQuery);
+        _cover = await Viewport.IsMediaQueryMatchAsync(_coverQuery);
+        ApplyWidth(await Viewport.IsMediaQueryMatchAsync(_phoneQuery));
+        _dismiss = await Interop.SubscribeAsync("dismiss", _ => InvokeAsync(DismissDrawer));
+        StateHasChanged();
+        await Interop.MarkShellReadyAsync();
+    }
+
+    /// <summary>The viewport crossed the phone or the narrow width, one way or the other.</summary>
+    private Task OnViewportChanged(BrowserViewportEventArgs change) => InvokeAsync(() =>
+    {
+        _narrow = change.BrowserWindowSize.Width <= NarrowWidth;
+        _cover = change.BrowserWindowSize.Width <= AssistantCoverWidth;
+        ApplyWidth(change.BrowserWindowSize.Width <= PhoneWidth);
+        StateHasChanged();
+    });
+
+    /// <summary>
+    /// A phone's drawer is the temporary one and starts closed; a desktop's is the persistent sidebar and starts
+    /// open. Only a change of side resets it, so a resize within one side keeps what the operator chose.
+    /// </summary>
+    private void ApplyWidth(bool phone)
+    {
+        if (phone == _phone)
+        {
+            return;
+        }
+
+        _phone = phone;
+        _navOpen = !phone;
+    }
+
+    /// <summary>
+    /// Lets the viewport go, unless the circuit already has: a layout disposed with its circuit has no browser left
+    /// to stop listening in.
+    /// </summary>
+    private async Task StopWatchingViewportAsync()
+    {
+        try
+        {
+            await Viewport.UnsubscribeAsync(_viewportWatch);
+        }
+        catch (Exception exception) when (exception is JSDisconnectedException or ObjectDisposedException
+                                              or OperationCanceledException)
+        {
+            /* Nothing is left to unsubscribe from. */
+        }
+    }
+
+    /// <summary>
+    /// Clears a caught fault on every navigation — the layout's parameters are set again with each new page —
+    /// so the panel belongs to the screen that threw rather than to the session.
+    /// </summary>
+    protected override void OnParametersSet() => _boundary?.Recover();
+
+    /// <summary>Draws the screen again from scratch, which re-reads everything it shows.</summary>
+    private void Reload() => _boundary?.Recover();
+
+    /// <summary>
+    /// Re-asks, then redraws — on the renderer's thread, because the save that raised this ran on the
+    /// settings page's own.
+    /// </summary>
+    private void OnConnectionChanged() =>
+        _ = InvokeAsync(async () =>
+        {
+            await RefreshAssistantAsync();
+            StateHasChanged();
+        });
+
+    /// <summary>The one place the question is asked, so the boot and the re-ask cannot answer it differently.</summary>
+    private async Task RefreshAssistantAsync()
+    {
+        try
+        {
+            _assistant = await Assistant.IsConfiguredAsync(CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            AdminProblem.Absorb(exception, Logger);
+            _assistant = false;
+        }
+
+        SetAssistantOpen(_assistantOpen && _assistant);
+    }
+
+    /// <summary>
+    /// Whether the nav drawer is drawn. Between the phone width and 1100 px it steps aside while the assistant's pane
+    /// is open, rather than the pane going over the page: the pane is read beside what it proposes against, and the
+    /// sections are one close away. _navOpen keeps what the operator chose, so closing the pane brings it back.
+    /// </summary>
+    private bool NavShown => _navOpen && !(_assistantOpen && _narrow && !_phone);
+
+    /// <summary>Whether the full-width pane covers the page, which is then inert.</summary>
+    private bool PageCovered => _assistantOpen && _cover;
+
+    /// <summary>The whole width where the pane covers the page; its own width where it stands beside it.</summary>
+    private string AssistantWidth => _cover ? "100vw" : AssistantPaneWidth;
+
+    /// <summary>Opens or closes the pane, and tells the pane, which redraws only then (<see cref="AssistantPane"/>).</summary>
+    private void SetAssistantOpen(bool open)
+    {
+        _assistantOpen = open;
+        _pane.Set(open);
+    }
+
+    /// <summary>The launcher opens the pane or closes it; the pane moves focus into itself as it opens.</summary>
+    private void ToggleAssistant()
+    {
+        if (_assistantOpen)
+        {
+            CloseAssistant();
+            return;
+        }
+
+        SetAssistantOpen(true);
+    }
+
+    /// <summary>Closes the pane, from its close button, Escape inside it, or the launcher, and focus goes back to the launcher.</summary>
+    private void CloseAssistant()
+    {
+        SetAssistantOpen(false);
+        _focusNext = FocusNext.Launcher;
+    }
+
+    private Task OpenPalette() => _palette?.OpenAsync() ?? Task.CompletedTask;
+
+    /// <summary>The skip link: focus to the screen's content, where the next Tab goes on from.</summary>
+    private async Task SkipToContentAsync() => await _main.FocusAsync();
+
+    /// <summary>Opens or closes the phone's drawer; opening it takes focus into it (spec §3.4).</summary>
+    private void ToggleNav()
+    {
+        _navOpen = !_navOpen;
+        _focusNext = _phone && _navOpen ? FocusNext.Drawer : FocusNext.None;
+    }
+
+    /// <summary>
+    /// A choice in the drawer closes it on a phone, where it covers the page; on a desktop it is the persistent
+    /// sidebar and stays. Focus is the new screen's, which the router moves to its heading.
+    /// </summary>
+    private void CloseNavOnPhone()
+    {
+        if (_phone)
+        {
+            _navOpen = false;
+        }
+    }
+
+    /// <summary>The library closed the phone's drawer, on a click on its scrim: focus goes back to Sections.</summary>
+    private void OnDrawerOpenChanged(bool open)
+    {
+        _navOpen = open;
+        _focusNext = !open && _phone ? FocusNext.Sections : FocusNext.None;
+    }
+
+    /// <summary>
+    /// Escape, forwarded from alvo.js: it closes the phone's drawer and gives focus back to Sections. The library's
+    /// temporary drawer does neither, and a drawer over the page is the topmost thing Escape closes (spec §3.4).
+    /// </summary>
+    private void DismissDrawer()
+    {
+        if (!_phone || !_navOpen)
+        {
+            return;
+        }
+
+        _navOpen = false;
+        _focusNext = FocusNext.Sections;
+        StateHasChanged();
+    }
+
+    /// <summary>Moves focus where the last open or close of the drawer said it goes, once the render has drawn it.</summary>
+    private async Task MoveFocusAsync()
+    {
+        var next = _focusNext;
+        _focusNext = FocusNext.None;
+
+        if (next == FocusNext.Drawer)
+        {
+            await _drawerNav.FocusAsync();
+        }
+        else if (next == FocusNext.Sections && _sectionsButton is not null)
+        {
+            await _sectionsButton.FocusAsync();
+        }
+        else if (next == FocusNext.Launcher && _assistantLauncher is not null)
+        {
+            await _assistantLauncher.FocusAsync();
+        }
+    }
+
+    /// <summary>Where focus goes after the next render.</summary>
+    private enum FocusNext
+    {
+        /// <summary>It stays where it is.</summary>
+        None,
+
+        /// <summary>Into the drawer that just opened.</summary>
+        Drawer,
+
+        /// <summary>Back to the Sections button that opened the drawer that just closed.</summary>
+        Sections,
+
+        /// <summary>Back to the launcher of the assistant's pane that just closed.</summary>
+        Launcher,
+    }
+
+    /// <summary>A bottom-bar entry: a smaller icon over the section's short title.</summary>
+    private static RenderFragment BarContent(AdminSection entry) => @<text>
+        <Icon Path="@entry.Icon" Size="18" />
+        <span>@entry.ShortTitle</span>
+    </text>;
+}

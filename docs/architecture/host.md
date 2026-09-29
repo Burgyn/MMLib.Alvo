@@ -12,9 +12,10 @@ binding and validation, one driver registration, `MapAlvo` (the two probes plus 
 generated Data API), and a docs UI. **Nothing here applies the descriptor** — that is the
 framework's boot, described below — so the standalone host is now the same shape as an
 embedded one: `AddAlvo(…)`, then `MapAlvo()`. Since F5 it also composes the **admin
-dashboard** (`AddAlvoAdmin` / `MapAlvoAdmin`) and the two sign-in endpoints that dashboard
-posts to, which live here rather than in `MMLib.Alvo.Admin` because signing in needs ASP.NET
-Core Identity and that package references neither the core nor the identity package. What is
+dashboard** (`AddAlvoAdmin` / `MapAlvoAdmin`) and the anonymous endpoints that dashboard
+posts to (sign-in, set-password, sign-out), which live here rather than in `MMLib.Alvo.Admin`
+because they need ASP.NET Core Identity and that package references neither the core nor the
+identity package. What is
 still #24's remainder is the **CLI** and the **published image**.
 
 ## The five boot stages, and why nothing in the host sequences them
@@ -142,8 +143,9 @@ the descriptor does not already own. **There is no configurable mount point.** A
 component's `@page` is a compile-time constant, so the dashboard lives at `/admin`
 (`AlvoAdmin.BasePath`) and a deployment that needs it elsewhere moves the whole application
 with `Alvo:PathBase`, which is ASP.NET Core's own mechanism for exactly this. Turning it off
-takes the sign-in endpoints (`/admin/sign-in/submit`, `/admin/sign-out`) with it: a password
-endpoint answering behind a dashboard nobody can reach is surface with no purpose.
+takes the credential endpoints (`/admin/sign-in/submit`, `/admin/set-password/submit`,
+`/admin/sign-out`) and the set-password page with it: a password endpoint answering behind a
+dashboard nobody can reach is surface with no purpose.
 
 The container form is the standard .NET double-underscore spelling
 (`Alvo__Database__Provider`), not the `ALVO_*` names spec §X.1 sketches — see the design's
@@ -269,19 +271,138 @@ tables deliberately. Nothing in this repository sets a non-default prefix, and t
 neither problem — the tables were already misplaced — but an operator crossing this version
 deserves the sentence rather than the surprise.
 
-**Identity's request path is a seam with no consumer yet, and that is deliberate.** The host
-calls `AddAlvoIdentity` unconditionally, so every standalone deployment creates the seven
-`<prefix>_identity_*` tables and seeds the configured bootstrap administrator. What that
-administrator can do today is reached through an **API key** whose record carries their user
-id — `ManagementAccessEvaluator` consults `IAlvoBootstrapAdmin` and admits them at `admin`
-regardless of the `access` block. What they cannot do is *sign in*: nothing in `src/` resolves
-`AlvoIdentity.ResolverKey`, no cookie authentication scheme is added, and there is no sign-in
-endpoint. The cookie `IAlvoContextResolver` is registered keyed precisely so that installing
-the package cannot turn a user's uuid into a working API key, and it stays unreached until the
-dashboard (#227's second half) mounts the sign-in surface that consumes it. Registering the
-seam now keeps the bootstrap account, its tables and its validation on one schedule instead of
-arriving with the dashboard as a migration; it is stated here because "seeds an account nobody
-can sign in as" reads as a defect if you do not know it is the plan.
+**Identity's request path is the dashboard's.** The host calls `AddAlvoIdentity` unconditionally, so every
+standalone deployment creates the seven `<prefix>_identity_*` tables and seeds the configured bootstrap
+administrator, and it adds the cookie scheme with `AddAlvoIdentityCookieSignIn(AlvoAdmin.SignInPath)`. A person
+signs in on the dashboard's sign-in page; a person the dashboard created first sets a password from a credential
+token's link (see [The dashboard's credentials](#the-dashboards-credentials-sign-in-set-password-and-their-limits)).
+The dashboard resolves the signed-in person through the cookie `IAlvoContextResolver`, which is registered **keyed**
+(`AlvoIdentity.ResolverKey`, reached only through the host's `AlvoAdminCallerResolver`) so that installing the
+package cannot turn a user's uuid into a working API key: the unkeyed resolver is the one the Data API hands a raw
+API-key header to. The bootstrap administrator can also still act through an **API key** whose record carries their
+user id: `ManagementAccessEvaluator` consults `IAlvoBootstrapAdmin` and admits them at `admin` whatever the
+`access` block says. Before F5 the seam was registered with no consumer, so that the bootstrap account, its tables
+and its validation arrived on one schedule rather than as a migration with the dashboard; the dashboard is now that
+consumer.
+
+## The dashboard's credentials: sign-in, set-password, and their limits
+
+Two anonymous forms take a password: **sign-in** (`AlvoAdmin.SignInEndpoint`) and **set-password**
+(`AlvoAdmin.SetPasswordEndpoint`, todo item 30; design
+`docs/superpowers/specs/2026-09-27-f5-admin-set-password-design.md`). Both are antiforgery-checked by the
+endpoint itself, `AllowAnonymous`, excluded from the OpenAPI document, and mapped only while the dashboard is on.
+
+**A person the dashboard creates sets their own password from a link.** Access → *Issue a credential token*
+shows `{origin}/admin/set-password#email=…&token=…` with *Copy link*; the administrator hands it over out of
+band, because this build sends no email. The address and the token travel in the **fragment**, which a browser
+never sends — not to the server, not to a proxy's access log, not in `Referer` — so the token is in no log
+whatever anyone's log levels are (a deliberate deviation from OWASP's query-string example). The page's script
+fills the form and removes the fragment from the address bar and the history; with JavaScript off the boxes stay
+visible and the token is pasted by hand. A success is a 303 to sign-in with "Your password is set", and the
+person then signs in the usual way — never automatically, so an intercepted link is a password link, not a
+session. Every refusal (unknown address, a wrong, used or expired token, a disabled person, the bootstrap
+administrator) is one byte-identical redirect. The Management API is unchanged: it returns the raw token, and a
+CLI or an agent composes the link from `AlvoAdmin.SetPasswordPath`. A token works **once** and for **24 hours**
+(Identity's default, now stated): redeeming it rotates the person's security stamp, which kills every other
+token outstanding for them. That rotation — and a disable, which rotates it too — **ends every session the
+person holds**: a cookie on its next request, an open dashboard tab within the circuit's 30-second revalidation (`Alvo:Admin:SessionRevalidationSeconds` is an
+internal, test-only key that may only shorten it, 1 to 30, refused at start otherwise; the dashboard's end-to-end
+world sets 2, and no deployment has a reason to set it).
+
+**The password policy is NIST SP 800-63B-4's, one policy for everyone**: at least **15** characters, at most
+**128**, no composition rules, and not the address or (from three characters) its local part. It governs a new
+bootstrap seed too: a deployment whose `BootstrapPasswordFile` holds a password the policy refuses is refused at
+start with a structured sentence, on the branch that *creates* the account. An account that already exists is
+never rewritten, so an existing deployment with a shorter bootstrap password keeps starting. There is no
+breached-password corpus check (the image is offline and ships no list), which NIST asks for; that is a recorded
+follow-up.
+
+**The credential limit is two layers, both fixed one-minute windows with no queue:**
+
+| Layer | Key | Default | Partition |
+|---|---|---|---|
+| per subject | `Alvo:Admin:CredentialAttemptsPerMinute` | 20 | (client, normalised address) on sign-in; (client, hash of the token's first 64 characters) on set-password |
+| per client | `Alvo:Admin:CredentialCeilingPerMinute` | 200 | the client alone, shared by both forms |
+
+A **client** is its IPv4 address, or its IPv6 **/64** (an IPv6 host is routinely handed a whole /64, so a /128
+partition would give it unlimited budgets); an IPv4-mapped IPv6 address counts as the IPv4 one. Both keys are
+**internal configuration, not options** (`Alvo__Admin__CredentialAttemptsPerMinute`,
+`Alvo__Admin__CredentialCeilingPerMinute` in the container), validated positive at start only when the dashboard
+is enabled. Both layers are **charged by the endpoint after the antiforgery check**, never by rate-limiter
+middleware in front of it — the pipeline has none — so a cross-site page in a victim's browser cannot spend the
+victim's budget. A throttled post is a 303 back to its page with `throttled=true` and a `Retry-After`, never a
+bare 429 a form post would render as a blank error. The ceiling is peeked, not spent, before a subject's partition
+is created, and every subject is a fixed-length hash, so the limiter's memory is bounded by the ceiling rather
+than by what a client sends. Both anonymous posts (and sign-out) **refuse a body over 16 KB** before reading it; a
+real one is well under a kilobyte.
+
+**What the limit does not do — the residuals, accepted before 1.0 (design ruling 10.8):**
+
+- A client cycling **200 distinct subjects a minute**, each with a valid anonymous antiforgery pair, spends the
+  ceiling and so still throttles **everyone behind its address** (an office NAT). Two layers make that ten times
+  costlier than one budget per address, not impossible.
+- Requests with **no remote address** (an in-process or Unix-socket host) all share **one** partition.
+- The ceiling is peeked and then charged, so concurrent posts can overshoot it by at most the number **in flight**
+  at once.
+- **Identity's per-account lockout stays**, and it is a denial-of-service lever: sign-in runs with
+  `lockoutOnFailure: true` under Identity's defaults (5 failures, 5 minutes), so **about one wrong post a minute,
+  from anywhere, keeps a known account locked — the bootstrap administrator's included**. The rate limit cannot
+  help, because that attacker needs no more than that. It stays because it is the only defence against a guesser
+  spread over many addresses, which no per-client limit sees; a scheme that does not hand the lever to strangers
+  is todo item 46 (#286). Until then an administrator sees the lockout on Access ("Locked until HH:mm after
+  failed sign-ins") and can end it there with **Unlock** (`IAlvoUserAdministration.ClearLockoutAsync`,
+  `DELETE …/users/{user}/lockout`), the bootstrap administrator's included. Token redemption has no lockout, by
+  design: the token is a MAC'd data-protection payload and cannot be guessed.
+
+**Behind a proxy, the client is only the client with forwarded headers on.** The limiter partitions on
+`Connection.RemoteIpAddress`. With `Alvo:ForwardedHeaders:Enabled` **off** behind a proxy, that is the proxy, so
+**every client shares the proxy's one budget** and a stranger throttles everybody. With it **on**, the host trusts
+`X-Forwarded-For` **from anyone** (both known-address lists are cleared, see
+[Behind a reverse proxy](#behind-a-reverse-proxy)), so a client that reaches the host directly picks its own
+partition with one header — **the host must not be reachable except through the proxy**.
+
+**The data-protection key ring holds every outstanding link.** Tokens (and session cookies) are protected with
+the host's data-protection keys, and the host configures no persistent ring: ASP.NET Core's default keeps it in
+the app user's home directory inside the container (in memory when there is none). A container that is **recreated** — a redeploy, a new pod —
+therefore loses every outstanding set-password link along with every session, and a second replica cannot
+redeem a link the first one issued. This **fails closed**: the link's refusal says to ask for a new one, and the
+person signs in again. A deployment that needs links (and sessions) to survive mounts a volume at that directory
+or, embedded, configures its own key ring (`AddDataProtection().PersistKeysTo…`), which the identity package
+leaves in place.
+
+## Secrets, and the AI connection
+
+Two more families of `Alvo:*` keys, and both follow the bootstrap password's rule rather than inventing
+one.
+
+**The secret store is two layers.** `Alvo__Secrets__Values__<name>` is the deployment's own configuration —
+and it is one adapter for four stores, because Azure Key Vault, a mounted Kubernetes secret, a user-secrets
+file and an environment variable all reach `IConfiguration` through a provider the host adds. Behind it,
+`Alvo__Secrets__EncryptionKeyFile` points at a *mounted* file holding 32 bytes of base64, which is the key
+the database-backed store encrypts rows with. Configuration **wins**, and a write to a name it carries is
+refused by name rather than stored and never read — the one failure this layering can produce, and its
+silent version is an operator saving a key while every request keeps using the old one.
+
+`Alvo__Secrets__EncryptionKey` — the key directly, no file — is **refused at startup**, for the reason
+`Alvo__Admin__BootstrapPassword` is, only sharper: that value decrypts every secret the deployment holds.
+With no key file mounted there is no writable store at all rather than a fallback key, so a deployment that
+lost its mount cannot silently re-encrypt under one nobody can restore from. The dashboard asks before it
+offers a save.
+
+**The AI connection is infrastructure too** (`docs/PLAN.md` invariant 4 again): a model name and an endpoint
+belong to the deployment, and a descriptor that carried them would stop applying the day the operator
+changed providers.
+
+- `Alvo__Ai__Kind` — `openai-compatible` or `azure-openai`.
+- `Alvo__Ai__Endpoint` — the base address, e.g. `http://localhost:11434/v1`.
+- `Alvo__Ai__Model` — the model or deployment name.
+- `Alvo__Ai__ApiKeySecretRef` — the **name** of a secret holding the key, resolved through the store above.
+  A name rather than a value, so the credential still comes from wherever that deployment keeps credentials.
+
+A connection pinned here wins over one saved from the dashboard, which is the same precedence the secret
+store itself uses — one rule to learn rather than two — and `GET {m}/info` reports which of the two answered.
+Configuring nothing is the supported default: the assistant then answers "not configured" and the dashboard
+renders no launcher at all.
 
 ## The startup mode, and what production should set
 

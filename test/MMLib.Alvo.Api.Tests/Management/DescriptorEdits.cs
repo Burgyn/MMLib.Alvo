@@ -25,6 +25,21 @@ internal static class DescriptorEdits
         return Write(root);
     }
 
+    /// <summary>Adds one <c>computed</c> field to an entity.</summary>
+    /// <param name="descriptorJson">The descriptor to edit.</param>
+    /// <param name="entity">The entity to add the field to.</param>
+    /// <param name="field">The field's name.</param>
+    /// <param name="type">The field's declared type.</param>
+    /// <param name="computed">The field's CEL.</param>
+    internal static string AddComputedField(string descriptorJson, string entity, string field, string type, string computed)
+    {
+        var root = JsonNode.Parse(descriptorJson)!.AsObject();
+        root["entities"]![entity]!["fields"]!.AsObject()[field] =
+            new JsonObject { ["type"] = type, ["computed"] = computed };
+
+        return Write(root);
+    }
+
     /// <summary>Removes one entity — a <c>DropEntity</c> step, which is what destructive means.</summary>
     /// <remarks>
     /// <c>managed-fleet</c> declares no <c>ref</c> between its entities, so dropping one leaves nothing

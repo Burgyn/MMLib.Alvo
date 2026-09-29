@@ -21,6 +21,7 @@
   <ItemGroup>
     <PackageReference Include="Testcontainers.PostgreSql" />
     <PackageReference Include="Verify.XunitV3" />
+    <PackageReference Include="CsCheck" />
   </ItemGroup>
 
   <!-- Only the path-derivation module initializer from test/_shared — this project opts out of
@@ -81,6 +82,10 @@
        barrier and the probe counts are linked rather than copied. -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/boot/ConcurrentColdStart.cs" Link="_shared/ConcurrentColdStart.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/literals/LiteralText.cs" Link="_shared/LiteralText.cs" />
   </ItemGroup>
 
 </Project>

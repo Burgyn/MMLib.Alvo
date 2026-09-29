@@ -26,4 +26,12 @@
     <ProjectReference Include="../../src/MMLib.Alvo/MMLib.Alvo.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="CsCheck" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/literals/LiteralText.cs" Link="_shared/LiteralText.cs" />
+  </ItemGroup>
+
 </Project>

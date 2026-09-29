@@ -180,7 +180,7 @@ internal sealed class AlvoBootWorld : IAsyncDisposable
         builder.WebHost.UseTestServer();
         builder.Configuration.AddInMemoryCollection(Settings(startup));
         builder.Services.AddAlvo(alvo => alvo
-            .UseSqlite($"Data Source={databasePath}")
+            .UseSqlite(AlvoHostWorld.ConnectionStringFor(databasePath))
             .FromDescriptor(AlvoHostWorld.DescriptorPath(descriptor)));
 
         if (startServicesConcurrently)

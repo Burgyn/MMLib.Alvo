@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# eval-assistant — the schema assistant, measured against a real model.
+#
+# IN NO RING, like scripts/test-load: it calls a model provider over the network and costs tokens, and its
+# verdict measures a model rather than gating the code. Nothing in CI runs it. It boots the real host over a
+# temporary SQLite database from examples/bike-workshop, asks the reliability design's seven cases in English
+# and Slovak, and grades outcomes (the proposal, the dry-run violations, the calls), not prose.
+#
+# Usage:
+#   scripts/eval-assistant --endpoint http://localhost:11434/v1 --model qwen3:8b [--runs 3]
+#                          [--kind openai-compatible|azure-openai] [--case full_name] [--language en|sk]
+#
+# Environment:
+#   ALVO_EVAL_API_KEY     the endpoint's key, when it needs one (always for azure-openai) — read from the
+#                         environment, never an argument, so it stays out of shell history and the process list
+#   ALVO_EVAL_ARTIFACTS   the build's --artifacts-path, and traces/ under it: one JSON line per graded turn,
+#                         passes included (default: <repo>/artifacts/eval-assistant, gitignored)
+#
+# Exit status: 0 when the suite passes (every case in every language >= 2/3 of its runs, overall >= 90 %),
+# 1 when it does not, 2 on a usage error. Publish the printed table into docs/assistant-evals.md per model.
+#
+# Requires: dotnet (the SDK in global.json).
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+artifacts="${ALVO_EVAL_ARTIFACTS:-$root/artifacts/eval-assistant}"
+
+usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; }
+
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+esac
+
+has_endpoint=0
+for argument in "$@"; do
+  [[ "$argument" == "--endpoint" ]] && has_endpoint=1
+done
+if [[ "$has_endpoint" -eq 0 ]]; then
+  echo "[eval-assistant] --endpoint is required: the model to measure is the maintainer's to name (see --help)." >&2
+  exit 2
+fi
+
+command -v dotnet >/dev/null 2>&1 || { echo "[eval-assistant] 'dotnet' is required but not on PATH" >&2; exit 1; }
+
+exec dotnet run --project "$root/eval/MMLib.Alvo.Ai.Eval/MMLib.Alvo.Ai.Eval.csproj" \
+  --configuration Release --artifacts-path "$artifacts" -- --repository "$root" --trace "$artifacts/traces" "$@"

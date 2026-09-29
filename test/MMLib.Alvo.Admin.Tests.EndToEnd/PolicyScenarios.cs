@@ -37,7 +37,7 @@ public sealed class PolicyScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, width);
         await session.GoAsync("/rules/work_orders");
 
-        var rules = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var rules = await session.Content.InnerTextAsync();
 
         // --- it is the engine's own verdict, over the engine's own route
         rules.ShouldContain("Simulate a policy");

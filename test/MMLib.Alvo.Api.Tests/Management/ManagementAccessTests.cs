@@ -282,6 +282,11 @@ internal sealed class RefusingManagement : IAlvoManagement
         throw new ManagementForbiddenException();
 
     /// <inheritdoc/>
+    public Task SetAiConnectionAsync(
+        MMLib.Alvo.Ai.StoredAiConnection connection, CancellationToken ct = default) =>
+        throw new ManagementForbiddenException();
+
+    /// <inheritdoc/>
     public Task<IReadOnlyList<ManagementProject>> ListProjectsAsync(CancellationToken ct = default) =>
         throw new ManagementForbiddenException();
 

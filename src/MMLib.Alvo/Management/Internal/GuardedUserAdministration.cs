@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Auth;
+﻿using Microsoft.Extensions.DependencyInjection;
+using MMLib.Alvo.Auth;
 
 namespace MMLib.Alvo.Management.Internal;
 
@@ -26,14 +27,25 @@ namespace MMLib.Alvo.Management.Internal;
 /// <item><b>The reserved tenant is not a tenant.</b> The only one of the four that fails
 /// <em>open</em> if it is missing — see <see cref="EnsureTenantIsReal"/>.</item>
 /// </list>
+/// <para>
+/// <b>Every call is its own unit of work: the implementation is resolved from a scope created for that
+/// call and disposed when it returns.</b> This decorator is resolved from whatever scope its caller has,
+/// and in the dashboard that scope is the Blazor circuit — open for as long as the tab. An implementation
+/// resolved alongside it would keep one <c>DbContext</c>, and one change tracker, for all of that time:
+/// a write left its row tracked, so the next write was made against a stale copy, and a write that
+/// failed left rows behind that every later write re-flushed — one lost race and the tab could disable
+/// nobody until it was reloaded. A scope per call rules that out for any implementation, including a
+/// host's own that caches in a scoped service. The guards still read the caller from the decorator's own
+/// scope; the implementation authorizes nothing, so it needs nothing from there.
+/// </para>
 /// </remarks>
-/// <param name="inner">The implementation, resolved through its key so nothing else can.</param>
+/// <param name="scopes">Creates the scope each call resolves the implementation from.</param>
 /// <param name="callers">The ambient caller the management routes publish.</param>
 /// <param name="access">Resolves a caller's management level from the project's own access block.</param>
 /// <param name="roles">The role catalogue the descriptor declares.</param>
 /// <param name="bootstrap">Who the bootstrap administrator is.</param>
 internal sealed class GuardedUserAdministration(
-    IAlvoUserAdministration inner,
+    IServiceScopeFactory scopes,
     IAlvoContextAccessor callers,
     ManagementAccessEvaluator access,
     IRoleCatalogProvider roles,
@@ -43,7 +55,7 @@ internal sealed class GuardedUserAdministration(
     public Task<AlvoUserPage> ListAsync(AlvoUserQuery query, CancellationToken cancellationToken = default)
     {
         EnsureMayManage();
-        return inner.ListAsync(query, cancellationToken);
+        return InScopeAsync(inner => inner.ListAsync(query, cancellationToken));
     }
 
     /// <inheritdoc/>
@@ -54,7 +66,7 @@ internal sealed class GuardedUserAdministration(
 
         EnsureMayManage();
         EnsureTenantIsReal(creation.Tenant);
-        return inner.CreateAsync(creation, cancellationToken);
+        return InScopeAsync(inner => inner.CreateAsync(creation, cancellationToken));
     }
 
     /// <inheritdoc/>
@@ -65,7 +77,7 @@ internal sealed class GuardedUserAdministration(
 
         EnsureMayManage();
         EnsureNoSelfEscalation(user, roleNames);
-        return inner.SetRolesAsync(user, roleNames, cancellationToken);
+        return InScopeAsync(inner => inner.SetRolesAsync(user, roleNames, cancellationToken));
     }
 
     /// <inheritdoc/>
@@ -75,7 +87,7 @@ internal sealed class GuardedUserAdministration(
         EnsureMayManage();
         EnsureTenantIsReal(tenant);
         EnsureNotSelfTenantGrant(user, tenant);
-        return inner.SetTenantAsync(user, tenant, cancellationToken);
+        return InScopeAsync(inner => inner.SetTenantAsync(user, tenant, cancellationToken));
     }
 
     /// <inheritdoc/>
@@ -84,7 +96,27 @@ internal sealed class GuardedUserAdministration(
     {
         EnsureMayManage();
         EnsureNotBootstrap(user, "disabled");
-        return inner.SetDisabledAsync(user, disabled, cancellationToken);
+        return InScopeAsync(inner => inner.SetDisabledAsync(user, disabled, cancellationToken));
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <para>
+    /// <b>The gate, and only the gate.</b> Ending a lockout raises no level and grants no tenant, so the
+    /// self-grant guards have nothing to compare; and it is not refused for the bootstrap administrator,
+    /// whose lockout is the one a stranger most wants to keep standing (<c>docs/todo-admin.md</c> §8d item 46) —
+    /// ending it gives back the account every recovery rests on rather than removing it.
+    /// </para>
+    /// <para>
+    /// <b>A disabled person is refused by the implementation, not here</b>, because only the implementation reads
+    /// the person in the unit of work that writes them: a check made here would read before a disable another
+    /// administrator commits and let the write undo it. The contract suite holds every implementation to it.
+    /// </para>
+    /// </remarks>
+    public Task<AlvoUser> ClearLockoutAsync(UserId user, CancellationToken cancellationToken = default)
+    {
+        EnsureMayManage();
+        return InScopeAsync(inner => inner.ClearLockoutAsync(user, cancellationToken));
     }
 
     /// <inheritdoc/>
@@ -93,10 +125,29 @@ internal sealed class GuardedUserAdministration(
     {
         EnsureMayManage();
         EnsureNotBootstrap(user, "issued a credential token");
-        return inner.IssueCredentialTokenAsync(user, cancellationToken);
+        return InScopeAsync(inner => inner.IssueCredentialTokenAsync(user, cancellationToken));
     }
 
     private AlvoContext Caller => callers.Principal?.Context ?? AlvoContext.Anonymous;
+
+    /// <summary>Runs one call against an implementation resolved from a scope of its own.</summary>
+    /// <remarks>
+    /// Awaited here rather than returned, so the scope outlives the call it serves and ends with it —
+    /// returning the task would dispose the implementation's <c>DbContext</c> under a write in flight.
+    /// </remarks>
+    /// <typeparam name="T">What the call answers with.</typeparam>
+    /// <param name="call">The call, made against the implementation.</param>
+    /// <returns>Whatever the implementation answered.</returns>
+    private async Task<T> InScopeAsync<T>(Func<IAlvoUserAdministration, Task<T>> call)
+    {
+        var scope = scopes.CreateAsyncScope();
+        await using (scope.ConfigureAwait(false))
+        {
+            var inner = scope.ServiceProvider.GetRequiredKeyedService<IAlvoUserAdministration>(
+                AlvoUserAdministration.UnguardedKey);
+            return await call(inner).ConfigureAwait(false);
+        }
+    }
 
     private void EnsureMayManage()
     {

@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Identity.Internal;
+﻿using System.Globalization;
+
+namespace MMLib.Alvo.Identity.Internal;
 
 /// <summary>
 /// The bootstrap administrator's configuration vocabulary: the names an operator sets, and the
@@ -70,6 +72,44 @@ internal static class AlvoIdentityConfiguration
         $"  Set:        {EmailVariable}=admin@example.com",
         "  Note:       a bare address only — a display-name form such as "
             + "'Eva <eva@example.com>' is not a sign-in address.");
+
+    /// <summary>The refusal for a new bootstrap seed the password policy refuses.</summary>
+    /// <remarks>
+    /// It names the file, the policy and Identity's reasons, never the secret or its length: a start failure is
+    /// printed to a container log, and the length of a credential is a fact about it.
+    /// </remarks>
+    /// <param name="passwordFile">The file the secret was read from.</param>
+    /// <param name="email">The administrator the seed is for.</param>
+    /// <param name="requiredLength">The policy's minimum length.</param>
+    /// <param name="reasons">What the password validators said, in their words.</param>
+    /// <returns>The refusal.</returns>
+    internal static string RefusedBootstrapPassword(
+        string passwordFile, string email, int requiredLength, IReadOnlyList<string> reasons)
+    {
+        var policy = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{requiredLength} to {AlvoPasswordValidator.MaximumLength} characters, not containing the address");
+        return Sentence(
+            $"Alvo cannot start: the bootstrap password in {passwordFile} does not meet the password policy, "
+                + $"so the administrator '{email}' cannot be seeded.",
+            $"  Because:    {string.Join(" ", reasons)}",
+            $"  Write:      a passphrase of {policy}, to {passwordFile}",
+            $"  Or set:     {PasswordFileVariable} to a file that holds one.",
+            "  Note:       an administrator an earlier start seeded is never rewritten; "
+                + "this applies only to a new one.");
+    }
+
+    /// <summary>The refusal for a registered password hasher that failed to make the timing-parity hash.</summary>
+    /// <param name="hasher">The registered hasher's type.</param>
+    /// <param name="failure">What it threw.</param>
+    /// <returns>The refusal.</returns>
+    internal static string HasherFailedAtStart(Type hasher, Exception failure) => Sentence(
+        $"Alvo cannot start: the registered password hasher {hasher.Name} failed to hash a password, "
+            + "so a refused sign-in cannot be made to cost what a real one costs.",
+        $"  Because:    {failure.GetType().Name}: {failure.Message}",
+        "  Check:      the IPasswordHasher<AlvoIdentityUser> registration. At start it is handed a user with "
+            + "no id, name or address, and a random password.",
+        "  Or remove:  the replacement, to use Identity's own hasher.");
 
     /// <summary>A headline an operator can act on, a blank line, and the fixes.</summary>
     /// <param name="headline">What is wrong, naming the offending value.</param>

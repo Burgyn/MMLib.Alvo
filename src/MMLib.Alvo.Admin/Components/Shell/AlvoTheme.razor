@@ -1,0 +1,12 @@
+﻿@*
+    The library's palette, both themes, from Alvo's tokens.
+
+    Two providers, deliberately. The first writes the light palette on :root; the second writes the dark one under
+    :root[data-theme=dark], which alvo.js sets before the first paint, so a dark operator never sees light, not even
+    during prerender, and flipping the theme is an attribute change with no server round trip (study §3.3).
+    ObserveSystemDarkModeChange is off: alvo.js is the one authority on the theme, and a second observer would fight
+    the toggle. Static rendering is fine here: the providers only write <style>, which is why the sign-in layout
+    can use this too.
+*@
+<MudThemeProvider Theme="AlvoMudTheme.Light" IsDarkMode="false" ObserveSystemDarkModeChange="false" DefaultScrollbar="true" />
+<MudThemeProvider Theme="AlvoMudTheme.DarkScoped" IsDarkMode="true" ObserveSystemDarkModeChange="false" DefaultScrollbar="true" />

@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Tests.EndToEnd;
+﻿using System.Globalization;
+
+namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
 /// The two acceptance criteria that a screenshot cannot answer.
@@ -27,8 +29,88 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         {
             await session.GoAsync(route);
             await session.AssertNoHorizontalScrollAsync();
+            await session.AssertNoVerticalTextAsync();
             await session.AssertRenderedAsync();
         }
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// A screen's secondary actions fold behind the overflow menu on a phone, and are reachable there.
+    /// </summary>
+    /// <remarks>
+    /// <b>Both halves, because either one alone is the bug.</b> Hidden and unreachable is a control that
+    /// vanished at 375 px; shown inline is the wall of equal-weight buttons this exists to undo. Measured on
+    /// the entity screen because it is the one that gains a control with every editor the dashboard grows.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Secondary_actions_fold_into_the_overflow_menu_on_a_phone()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
+        await session.GoAsync("/schema/work_orders");
+
+        var inline = session.Page.GetByTestId("pagehead-secondary")
+            .GetByRole(Microsoft.Playwright.AriaRole.Link, new() { Name = "Browse records" });
+        await inline.WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Hidden });
+
+        await session.Page.GetByTestId("pagehead-overflow").ClickAsync();
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Group, new() { Name = "More actions" })
+            .GetByRole(Microsoft.Playwright.AriaRole.Link, new() { Name = "Browse records" })
+            .WaitForAsync();
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// On a desktop they stay on the row, and the overflow button is not drawn over them.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Secondary_actions_stay_on_the_row_on_a_desktop()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+
+        await session.Page.GetByTestId("pagehead-secondary")
+            .GetByRole(Microsoft.Playwright.AriaRole.Link, new() { Name = "Browse records" }).WaitForAsync();
+        (await session.Page.Locator("[data-testid='pagehead-overflow']").IsVisibleAsync()).ShouldBeFalse();
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// Rows are visible at both widths, in whichever layout that width draws.
+    /// </summary>
+    /// <remarks>
+    /// <b>The defect this exists for shipped, and this suite was green while it did.</b> The stylesheet
+    /// hides the table below 720 px and the row cards above it, and the Razor dashboard had only the
+    /// table — so a phone showed a row count over an empty box. Asserting "a row is visible" rather than
+    /// "a <c>&lt;td&gt;</c> is attached" is the whole difference: the second passes for a layout nobody
+    /// can see.
+    /// </remarks>
+    [Theory(Timeout = AdminWorld.ScenarioTimeout)]
+    [InlineData(1280)]
+    [InlineData(375)]
+    public async Task A_data_screen_shows_its_rows_at_this_width(int width)
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, width);
+        await session.GoAsync("/data/regions");
+
+        /* The row this fact reads is the one it writes: the example ships no seed rows, and a fact that
+           asserted over an empty table would pass for both the fixed layout and the broken one. */
+        await session.Button("New record", exact: true).ClickAsync();
+        await session.Page.Locator("#rf-name").WaitForAsync();
+        await session.Page.FillAsync("#rf-name", $"Visible at {width.ToString(CultureInfo.InvariantCulture)}");
+        await session.Page.FillAsync("#rf-code", width <= 720 ? "PHN" : "WDE");
+        await session.Dialog("record-sheet").GetByTestId("record-save").ClickAsync();
+
+        var rows = width <= 720
+            ? session.Page.Locator("[data-testid='row-card']")
+            : session.Page.GetByTestId("grid-row");
+
+        await rows.First.WaitForAsync();
+        (await rows.CountAsync()).ShouldBeGreaterThan(0);
+        (await rows.First.InnerTextAsync()).ShouldContain("Visible at");
 
         session.AssertConsoleClean();
     }
@@ -77,8 +159,8 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
         await session.GoAsync("");
 
-        var content = await session.Page.Locator("main.a-content").BoundingBoxAsync();
-        var bar = await session.Page.Locator("nav.a-bottomnav").BoundingBoxAsync();
+        var content = await session.Content.BoundingBoxAsync();
+        var bar = await session.Page.GetByTestId("bottom-nav").BoundingBoxAsync();
 
         content.ShouldNotBeNull();
         bar.ShouldNotBeNull();
@@ -97,14 +179,14 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
     }
 
     /// <summary>
-    /// Every section the sidebar offers is reachable from a phone, and so is signing out.
+    /// Every section the drawer offers is reachable from a phone, and so is signing out.
     /// </summary>
     /// <remarks>
-    /// The bar carries five entries and the sidebar is hidden under 720 px, so without the sheet
-    /// the phone reaches neither Configuration history, Integrations, Settings, the two "not yet"
-    /// sections, nor the way out. <c>AdminNavigation</c>'s own remarks already claimed those live
-    /// <em>"in the sidebar and in the sheet"</em> while the sheet did not exist — which is why the
-    /// claim is now a test rather than a sentence.
+    /// The bar carries five entries and the drawer is closed under 720 px, so without the app bar's
+    /// Sections button the phone reaches neither Configuration history, Integrations, Settings, nor the
+    /// two "not yet" sections, and without the account menu not the way out. <c>AdminNavigation</c>'s own
+    /// remarks once claimed those were reachable while nothing on a phone led to them — which is why the
+    /// claim is a test rather than a sentence.
     /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task Every_section_is_reachable_from_a_phone()
@@ -112,28 +194,30 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
         await session.GoAsync("");
 
-        await session.Page.Locator("[data-testid='more-sections']").ClickAsync();
-        var sheet = session.Page.Locator("[data-testid='sections-sheet']");
-        await sheet.WaitForAsync();
+        await session.Page.GetByTestId("more-sections").ClickAsync();
+        var drawer = session.Page.GetByTestId("sidebar");
+        await drawer.WaitForAsync();
 
         foreach (var route in new[] { "/history", "/integrations", "/automations", "/functions", "/settings" })
         {
-            (await sheet.Locator($"a[href$='{route}']").CountAsync())
-                .ShouldBe(1, $"the sheet is the only way to reach {route} on a phone");
+            (await drawer.Locator($"a[href$='{route}']").CountAsync())
+                .ShouldBe(1, $"the drawer is the only way to reach {route} on a phone");
         }
 
-        (await sheet.GetByText("Sign out").CountAsync()).ShouldBe(1);
-
-        await sheet.Locator("a[href$='/history']").ClickAsync();
+        await drawer.Locator("a[href$='/history']").ClickAsync();
         await session.Page.WaitForURLAsync("**/admin/history");
         await session.SettleAsync();
         await session.AssertRenderedAsync();
 
-        /* Waiting for it to leave rather than counting it: the sheet closes through the circuit, so
-           a count taken the instant the URL changed is a snapshot of a render that has not arrived —
-           the same impatience the goto-shortcut scenario records below. */
-        await session.Page.Locator("[data-testid='sections-sheet']")
-            .WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+        /* Waiting for it to leave rather than checking it: the drawer closes through the circuit, so a
+           check taken the instant the URL changed is a snapshot of a render that has not arrived — the
+           same impatience the goto-shortcut scenario records below. */
+        await drawer.WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Hidden });
+
+        await session.Page.GetByTestId("account-menu").ClickAsync();
+        var signOut = session.Page.GetByRole(Microsoft.Playwright.AriaRole.Menuitem, new() { Name = "Sign out" });
+        await signOut.WaitForAsync();
+        (await signOut.CountAsync()).ShouldBe(1);
 
         session.AssertConsoleClean();
     }
@@ -152,7 +236,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
         await session.GoAsync("");
 
-        var items = session.Page.Locator(".a-bottomnav .a-bottomnav__item");
+        var items = session.Page.GetByTestId("bottom-nav").GetByRole(Microsoft.Playwright.AriaRole.Link);
         (await items.CountAsync()).ShouldBe(5);
 
         for (var index = 0; index < 5; index += 1)
@@ -161,7 +245,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
             await session.SettleAsync();
             await session.AssertRenderedAsync();
 
-            (await session.Page.Locator("main.a-content").InnerTextAsync())
+            (await session.Content.InnerTextAsync())
                 .ShouldNotContain("Not yet");
         }
 
@@ -184,7 +268,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await session.GoAsync(route);
 
         await session.AssertRenderedAsync();
-        (await session.Page.Locator("main.a-content").InnerTextAsync()).ShouldContain("Not yet");
+        (await session.Content.InnerTextAsync()).ShouldContain("Not yet");
         session.AssertConsoleClean();
     }
 
@@ -203,10 +287,17 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         await session.GoAsync("");
 
         await session.Page.Keyboard.PressAsync("Meta+k");
-        await session.Page.Locator(".a-palette").WaitForAsync();
+        await session.Dialog("palette").WaitForAsync();
 
         await session.Page.Keyboard.TypeAsync("access");
-        await session.SettleAsync();
+
+        /* Wait for the filter to have produced the match, not for a timer. Enter opens whatever is
+           selected, so pressing it before the typed query has round-tripped opens whatever the list
+           held a moment ago — which on a slower runner is the unfiltered first entry, and the
+           navigation this fact waits for never comes. */
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Option, new() { Name = "Access", Selected = true })
+            .WaitForAsync();
+
         await session.Page.Keyboard.PressAsync("Enter");
         await session.Page.WaitForURLAsync("**/admin/access");
         await session.SettleAsync();
@@ -237,11 +328,159 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
            over the circuit, so it is not in the DOM the instant the key is released. A count is a
            snapshot; WaitForAsync is the question actually being asked. */
         await session.Page.Keyboard.PressAsync("Meta+k");
-        await session.Page.Locator(".a-palette").WaitForAsync();
+        await session.Dialog("palette").WaitForAsync();
 
         await session.Page.Keyboard.PressAsync("Escape");
-        await session.Page.Locator(".a-palette")
+        await session.Dialog("palette")
             .WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// <c>g d</c> from Overview lands on Data, and <c>g ,</c> — the one key that is not a letter — on Settings.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_goto_shortcut_reaches_data_and_settings()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("");
+
+        await session.Page.Keyboard.PressAsync("g");
+        await session.Page.Keyboard.PressAsync("d");
+        await session.Page.WaitForURLAsync("**/admin/data");
+        await session.SettleAsync();
+
+        await session.Page.Keyboard.PressAsync("g");
+        await session.Page.Keyboard.PressAsync(",");
+        await session.Page.WaitForURLAsync("**/admin/settings");
+        await session.SettleAsync();
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// A sheet open over the page holds the jump back — a stray <c>g d</c> must not navigate out from under it.
+    /// </summary>
+    /// <remarks>
+    /// A negative, so it waits a fixed moment; the positive twin above shows the same keys do navigate
+    /// when nothing is open, which is what keeps this from passing for a shortcut that is simply broken.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_goto_shortcut_is_held_while_a_sheet_is_open()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+
+        await session.Page.ClickAsync("[data-testid='rename-entity']");
+        await session.Page.Locator("[data-testid='rename-sheet']").WaitForAsync();
+        await session.Page.EvaluateAsync("document.activeElement?.blur()");
+
+        await session.Page.Keyboard.PressAsync("g");
+        await session.Page.Keyboard.PressAsync("d");
+        await session.Page.WaitForTimeoutAsync(750);
+
+        session.Page.Url.ShouldEndWith("/admin/schema/work_orders");
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// The palette's Toggle theme flips the theme, and the header's toggle follows a flip it did not make.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Toggle_theme_from_the_palette_and_the_header_both_flip_it()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("");
+
+        var toggle = session.Page.Locator("[data-testid='theme-toggle']");
+        await session.Page.WaitForFunctionAsync(
+            "document.querySelector(\"[data-testid='theme-toggle']\")?.getAttribute('aria-label')?.startsWith('Switch')");
+        var before = await session.ThemeAsync();
+
+        await session.Page.Keyboard.PressAsync("Meta+k");
+        await session.Dialog("palette").WaitForAsync();
+        await session.Page.WaitForFunctionAsync("document.activeElement?.dataset.testid === 'palette-input'");
+        await session.Page.Keyboard.TypeAsync("toggle theme");
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Option, new() { Name = "Toggle theme", Selected = true })
+            .WaitForAsync();
+        await session.Page.Keyboard.PressAsync("Enter");
+
+        var flipped = before == "dark" ? "light" : "dark";
+        await session.Page.WaitForFunctionAsync($"document.documentElement.dataset.theme === '{flipped}'");
+        await session.Page.WaitForFunctionAsync(
+            $"document.querySelector(\"[data-testid='theme-toggle']\").getAttribute('aria-label') === 'Switch to {before} theme'");
+
+        await toggle.ClickAsync();
+        await session.Page.WaitForFunctionAsync($"document.documentElement.dataset.theme === '{before}'");
+        await session.Page.WaitForFunctionAsync(
+            $"document.querySelector(\"[data-testid='theme-toggle']\").getAttribute('aria-label') === 'Switch to {flipped} theme'");
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// An entity's tab is in its address: a reload opens on it, the arrows move it without a history step,
+    /// a click is one, and Back returns.
+    /// </summary>
+    /// <remarks>
+    /// The reload is the half that matters to an operator — a link somebody was sent — and the only
+    /// half a component test cannot reach, because it is the address arriving cold at the server.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task An_entity_tab_survives_a_reload_and_follows_history()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders?tab=rules");
+
+        await session.Page.ReloadAsync();
+        await session.SettleAsync();
+        var selected = session.Page.GetByRole(Microsoft.Playwright.AriaRole.Tab, new() { Selected = true });
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Tab, new() { Name = "Rules", Selected = true }).WaitForAsync();
+        (await selected.CountAsync()).ShouldBe(1);
+
+        /* The strip is MudTabs: an arrow moves focus to the next tab, and Enter opens it. */
+        await selected.FocusAsync();
+        await session.Page.Keyboard.PressAsync("ArrowRight");
+        /* The move is the circuit's, so Enter waits for it: pressed at once, it would open the tab still focused. */
+        await session.Page.WaitForFunctionAsync("() => document.activeElement?.textContent?.trim() === 'On write'");
+        await session.Page.Keyboard.PressAsync("Enter");
+        await session.Page.WaitForURLAsync("**/admin/schema/work_orders?tab=on-write");
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Tab, new() { Name = "On write", Selected = true }).WaitForAsync();
+        (await session.Page.EvaluateAsync<string>("document.activeElement.textContent.trim()")).ShouldBe("On write");
+
+        /* Each opened tab is one step, so Back from Indexes returns to On write, not Rules. */
+        await session.OpenTabAsync("Indexes");
+        await session.Page.WaitForURLAsync("**/admin/schema/work_orders?tab=indexes");
+
+        await session.Page.GoBackAsync();
+        await session.Page.WaitForURLAsync("**/admin/schema/work_orders?tab=on-write");
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Tab, new() { Name = "On write", Selected = true }).WaitForAsync();
+
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// The palette lists the shortcuts beside the sections, and its New entity opens the form on Schema.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_palette_teaches_the_shortcuts_and_opens_a_new_entity()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("");
+
+        await session.Page.Keyboard.PressAsync("Meta+k");
+        await session.Dialog("palette").GetByRole(Microsoft.Playwright.AriaRole.Option, new() { Name = "Data" })
+            .Filter(new() { HasText = "g d" }).WaitForAsync();
+        await session.Page.WaitForFunctionAsync("document.activeElement?.dataset.testid === 'palette-input'");
+
+        await session.Page.Keyboard.TypeAsync("new entity");
+        await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Option, new() { Name = "New entity", Selected = true })
+            .WaitForAsync();
+        await session.Page.Keyboard.PressAsync("Enter");
+
+        await session.Page.Locator("[data-testid='new-entity']").WaitForAsync();
+        await session.Page.WaitForFunctionAsync("document.activeElement?.id === 'new-entity-name'");
 
         session.AssertConsoleClean();
     }

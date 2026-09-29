@@ -4,8 +4,20 @@
 /// The paths and names the dashboard publishes, for a host that has to spell one of them.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The same argument <see cref="AlvoAdminAssets"/> makes: spelled by hand these are strings that
 /// compile either way and fail only in the browser; spelled here they move with the package.
+/// </para>
+/// <para>
+/// <b>This type, <see cref="AlvoAdminAssets"/>, <see cref="AlvoAdminOptions"/>,
+/// <see cref="AlvoAdminClaims"/>, <see cref="IAlvoAdminCallerResolver"/> and the two
+/// <c>Add</c>/<c>Map</c> extension methods are the package's public contract.</b> Everything under
+/// <c>Components.*</c> is implementation — the Razor SDK emits every component class as
+/// <c>public</c> because there is no per-component accessibility to set, not because a host is
+/// meant to construct or extend one — and it may change in any minor version. See
+/// <c>Properties/AssemblyInfo.cs</c> and docs/architecture/admin-dashboard-review.md (F-10) for the
+/// full reasoning.
+/// </para>
 /// </remarks>
 public static class AlvoAdmin
 {
@@ -38,6 +50,32 @@ public static class AlvoAdmin
     /// </para>
     /// </remarks>
     public const string SignInEndpoint = $"{BasePath}/sign-in/submit";
+
+    /// <summary>
+    /// The page a person opens from a credential token's link to set their password.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Public so a CLI or an agent can compose the link</b> from what the Management API returns: the token
+    /// is returned raw, and the link is <c>{origin}{PathBase}/admin/set-password#email=…&amp;token=…</c>, both
+    /// values escaped with <see cref="Uri.EscapeDataString(string)"/>.
+    /// </para>
+    /// <para>
+    /// <b>The token rides in the fragment, never in the query string.</b> A browser sends no fragment to the
+    /// server, to a proxy's access log or in <c>Referer</c>, so the bearer credential stays out of every log
+    /// without depending on anyone's log configuration. The page reads it with a small script and removes it
+    /// from the address bar and the history.
+    /// </para>
+    /// </remarks>
+    public const string SetPasswordPath = $"{BasePath}/set-password";
+
+    /// <summary>Where the set-password form posts.</summary>
+    /// <remarks>
+    /// A form post to an endpoint the host maps, for <see cref="SignInEndpoint"/>'s reason: redeeming a token
+    /// needs the identity package, which this package does not reference. The path is here so the form and the
+    /// endpoint cannot drift.
+    /// </remarks>
+    public const string SetPasswordEndpoint = $"{BasePath}/set-password/submit";
 
     /// <summary>Where signing out posts.</summary>
     /// <remarks>A post, not a link: a sign-out reachable by <c>GET</c> can be triggered by any

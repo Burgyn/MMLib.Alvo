@@ -73,7 +73,14 @@ for the rule and the current list. Today that list is:
 
 | Package | Description |
 | --- | --- |
-| `MMLib.Alvo.Abstractions` | The interface-first root of the dependency graph — no source yet, ports/interfaces land in a later phase. |
+| `MMLib.Alvo.Abstractions` | The interface-first root of the dependency graph: every port, and nothing that implements one. |
+| `MMLib.Alvo` | The core — schema registry, Data API, rule engine, events, management. One large package, deliberately. |
+| `MMLib.Alvo.Data.EntityFrameworkCore` | The relational adapter every engine driver is built on. |
+| `MMLib.Alvo.Data.Sqlite` | The SQLite driver. |
+| `MMLib.Alvo.Data.PostgreSql` | The PostgreSQL driver. |
+| `MMLib.Alvo.Identity` | ASP.NET Core Identity and its EF stores: administrator accounts, roles, the bootstrap administrator. |
+| `MMLib.Alvo.Admin` | The admin dashboard — Blazor components and the design system they ship with. |
+| `MMLib.Alvo.Ai` | The schema assistant: an agent that reads a project and proposes a descriptor, and cannot apply one. |
 
 ## Contributing
 

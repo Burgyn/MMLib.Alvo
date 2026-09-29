@@ -1,0 +1,814 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "bike-workshop",
+  "description": "The back office of Velo Dielňa, a small bicycle repair and rental workshop in Banská Bystrica: its customers and their bikes, the service orders the workshop takes in and the parts it fits, the technicians who do the work, and a small rental fleet. The demo backend for the admin dashboard — see README.md.",
+  "branding": {
+    "title": "Velo Dielňa"
+  },
+  "auth": {
+    "providers": ["local"],
+    "roles": ["manager", "reception", "technician"]
+  },
+  "access": {
+    "admin": "'admin' in @user.roles",
+    "developer": "'manager' in @user.roles",
+    "viewer": "'reception' in @user.roles"
+  },
+  "formats": {
+    "sk-postal-code": {
+      "pattern": "[0-9]{3} ?[0-9]{2}",
+      "description": "A Slovak postal code: five digits, optionally split 3+2 by a space, as in '974 01'."
+    },
+    "part-sku": {
+      "pattern": "[A-Z]{2,4}-[A-Z0-9-]{3,20}",
+      "description": "The workshop's own stock-keeping unit: a two-to-four letter supplier prefix, a dash, then the supplier's part code, as in 'SHI-CN-M6100'."
+    },
+    "order-number": {
+      "pattern": "SO-[0-9]{4}-[0-9]{4}",
+      "description": "A service-order number: SO, the year, and a four-digit sequence within it, as in 'SO-2026-0142'."
+    },
+    "fleet-code": {
+      "pattern": "RENT-[0-9]{3}",
+      "description": "The code painted on a rental bike's top tube, as in 'RENT-007'."
+    }
+  },
+  "webhooks": {
+    "endpoints": {
+      "rental-desk": {
+        "url": "http://127.0.0.1:5081/hooks/rentals",
+        "secretRef": "rental-desk-signing-key"
+      }
+    }
+  },
+  "templates": {
+    "order-ready": {
+      "subject": "Your bike is ready — order {{new.order_number}}",
+      "body": "Hello,\n\nthe work on your bike under order {{new.order_number}} is finished and the bike is ready for collection at Velo Dielňa, Horná 12, Banská Bystrica (Mon–Fri 9:00–18:00, Sat 9:00–12:00).\n\nTotal to pay: {{new.total}} EUR.\n\nThank you,\nVelo Dielňa"
+    },
+    "express-order-received": {
+      "subject": "Express order {{new.order_number}} taken in",
+      "body": "An express service order {{new.order_number}} was taken in and is promised for {{new.promised_on}}. Please schedule it before the regular queue."
+    }
+  },
+  "entities": {
+    "technicians": {
+      "description": "A mechanic who works in the workshop. The row is the workshop's own record of the person; 'user_id' links it to the sign-in account the person uses, which is what the service-order rules compare with the caller.",
+      "audit": true,
+      "fields": {
+        "full_name": {
+          "type": "string",
+          "description": "The technician's name as it is printed on a service order.",
+          "required": true,
+          "maxLength": 80
+        },
+        "email": {
+          "type": "string",
+          "description": "The technician's work address.",
+          "required": true,
+          "unique": true,
+          "maxLength": 160,
+          "format": "email"
+        },
+        "phone": {
+          "type": "string",
+          "description": "The technician's work mobile.",
+          "maxLength": 40,
+          "format": "phone"
+        },
+        "specialization": {
+          "type": "enum",
+          "description": "What the technician is best at. Orders for an e-bike go to someone certified for it.",
+          "required": true,
+          "values": ["general", "road", "mtb_suspension", "ebike", "wheels"]
+        },
+        "hourly_rate": {
+          "type": "decimal",
+          "description": "The labour rate charged for this technician's time, in EUR per hour, excluding VAT.",
+          "required": true,
+          "precision": 6,
+          "scale": 2
+        },
+        "hired_on": {
+          "type": "date",
+          "description": "The day the technician started at the workshop."
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether the technician still takes orders. A technician who left stays on record, because old orders name them.",
+          "default": true
+        },
+        "user_id": {
+          "type": "uuid",
+          "description": "The id of the sign-in account this technician uses. Empty until an account is created for them.",
+          "index": true
+        },
+        "orders_assigned": {
+          "type": "integer",
+          "description": "How many service orders name this technician, maintained by Alvo.",
+          "rollup": { "from": "service_orders", "op": "count" }
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles || 'manager' in @user.roles",
+        "update": "'admin' in @user.roles || 'manager' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      }
+    },
+    "customers": {
+      "description": "A person who brings a bike in, or rents one. Audited, because the workshop answers to the customer for what it did with their bike.",
+      "audit": true,
+      "fields": {
+        "first_name": {
+          "type": "string",
+          "description": "The customer's given name.",
+          "required": true,
+          "maxLength": 60
+        },
+        "last_name": {
+          "type": "string",
+          "description": "The customer's family name.",
+          "required": true,
+          "maxLength": 60,
+          "renamedFrom": "surname"
+        },
+        "email": {
+          "type": "string",
+          "description": "Where order confirmations and 'your bike is ready' notices go. Unique: one customer record per address.",
+          "unique": true,
+          "maxLength": 160,
+          "format": "email"
+        },
+        "phone": {
+          "type": "string",
+          "description": "The number the workshop calls when a repair needs the customer's approval.",
+          "required": true,
+          "maxLength": 40,
+          "format": "phone"
+        },
+        "street": {
+          "type": "string",
+          "description": "Street and number, for invoices.",
+          "maxLength": 120
+        },
+        "city": {
+          "type": "string",
+          "description": "Town or village.",
+          "maxLength": 80
+        },
+        "postal_code": {
+          "type": "string",
+          "description": "Slovak postal code, as in '974 01'.",
+          "maxLength": 6,
+          "format": "sk-postal-code"
+        },
+        "loyalty_tier": {
+          "type": "enum",
+          "description": "The loyalty programme tier: 'club' members get 10 % off labour, 'team' riders (the local cycling club) 15 %.",
+          "required": true,
+          "values": ["none", "club", "team"],
+          "default": "none"
+        },
+        "marketing_consent": {
+          "type": "boolean",
+          "description": "Whether the customer agreed to receive the spring-service newsletter (GDPR consent).",
+          "default": false
+        },
+        "preferences": {
+          "type": "json",
+          "description": "Free-form preferences the reception desk records — preferred contact channel, tyre pressure, saddle height."
+        },
+        "notes": {
+          "type": "text",
+          "description": "Anything reception should know before calling the customer."
+        },
+        "bikes_count": {
+          "type": "integer",
+          "description": "How many bikes the customer has registered with the workshop, maintained by Alvo.",
+          "rollup": { "from": "bikes", "op": "count" }
+        }
+      },
+      "rules": {
+        "list": "'admin' in @user.roles || 'manager' in @user.roles || 'reception' in @user.roles || 'technician' in @user.roles",
+        "get": "'admin' in @user.roles || 'manager' in @user.roles || 'reception' in @user.roles || 'technician' in @user.roles",
+        "create": "'admin' in @user.roles || 'manager' in @user.roles || 'reception' in @user.roles",
+        "update": "'admin' in @user.roles || 'manager' in @user.roles || 'reception' in @user.roles",
+        "delete": "'admin' in @user.roles || 'manager' in @user.roles"
+      },
+      "indexes": [
+        { "fields": ["last_name", "first_name"] },
+        { "fields": ["loyalty_tier", "last_name"] }
+      ]
+    },
+    "bikes": {
+      "description": "A customer's bicycle, registered the first time it comes in for service. The frame number identifies it across owners and orders.",
+      "audit": true,
+      "fields": {
+        "customer_id": {
+          "type": "ref",
+          "description": "Who owns the bike.",
+          "entity": "customers",
+          "required": true,
+          "onDelete": "restrict"
+        },
+        "brand": {
+          "type": "string",
+          "description": "The manufacturer, as in 'Trek', 'Specialized' or 'Author'.",
+          "required": true,
+          "maxLength": 40
+        },
+        "model": {
+          "type": "string",
+          "description": "The model name, as in 'Marlin 7' or 'Rockhopper Comp'.",
+          "required": true,
+          "maxLength": 80
+        },
+        "category": {
+          "type": "enum",
+          "description": "What kind of bike it is, which decides the service checklist used.",
+          "required": true,
+          "values": ["road", "gravel", "mtb_hardtail", "mtb_full", "trekking", "city", "kids", "ebike"]
+        },
+        "model_year": {
+          "type": "integer",
+          "description": "The model year printed on the frame or in the purchase documents."
+        },
+        "frame_number": {
+          "type": "string",
+          "description": "The serial number stamped under the bottom bracket. Unique: two records with one frame number are one bike registered twice.",
+          "required": true,
+          "unique": true,
+          "maxLength": 32
+        },
+        "frame_size": {
+          "type": "string",
+          "description": "The frame size as the manufacturer states it — 'M', '19\"', '54 cm'.",
+          "maxLength": 12
+        },
+        "color": {
+          "type": "string",
+          "description": "The main colour, so the bike can be found in the rack.",
+          "maxLength": 30
+        },
+        "is_electric": {
+          "type": "boolean",
+          "description": "Whether the bike has a motor. E-bikes need a certified technician and a battery check on every visit.",
+          "default": false
+        },
+        "battery_wh": {
+          "type": "integer",
+          "description": "The battery's capacity in watt-hours, for an e-bike."
+        },
+        "purchased_on": {
+          "type": "date",
+          "description": "When the customer bought the bike, which decides whether a repair falls under warranty."
+        },
+        "service_orders_count": {
+          "type": "integer",
+          "description": "How many times the bike has been in, maintained by Alvo.",
+          "rollup": { "from": "service_orders", "op": "count" }
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles || 'manager' in @user.roles || 'reception' in @user.roles",
+        "update": "'admin' in @user.roles || 'manager' in @user.roles || 'reception' in @user.roles || 'technician' in @user.roles",
+        "delete": "'admin' in @user.roles || 'manager' in @user.roles"
+      },
+      "indexes": [
+        { "fields": ["brand", "model"] },
+        { "fields": ["customer_id", "brand"] }
+      ]
+    },
+    "parts": {
+      "description": "A spare part or consumable the workshop stocks. What it costs the workshop is commercial information: technicians and reception see the selling price but not the purchase price or the margin.",
+      "audit": true,
+      "fields": {
+        "sku": {
+          "type": "string",
+          "description": "The workshop's stock-keeping unit, unique across the stock.",
+          "required": true,
+          "unique": true,
+          "maxLength": 32,
+          "format": "part-sku"
+        },
+        "name": {
+          "type": "string",
+          "description": "The part as it is printed on the invoice, as in 'Shimano Deore chain CN-M6100, 12-speed'.",
+          "required": true,
+          "maxLength": 120
+        },
+        "brand": {
+          "type": "string",
+          "description": "The part's manufacturer.",
+          "required": true,
+          "maxLength": 40
+        },
+        "category": {
+          "type": "enum",
+          "description": "Which shelf the part lives on.",
+          "required": true,
+          "values": ["drivetrain", "brakes", "tyres_tubes", "wheels", "cockpit", "suspension", "ebike", "consumables", "accessories"]
+        },
+        "unit_price": {
+          "type": "decimal",
+          "description": "The selling price per unit in EUR, VAT included.",
+          "required": true,
+          "precision": 8,
+          "scale": 2
+        },
+        "purchase_price": {
+          "type": "decimal",
+          "description": "What the workshop pays the supplier per unit, in EUR. Visible and writable only to the manager.",
+          "required": true,
+          "precision": 8,
+          "scale": 2,
+          "hidden": "!('admin' in @user.roles || 'manager' in @user.roles)",
+          "readOnly": "!('admin' in @user.roles || 'manager' in @user.roles)"
+        },
+        "margin": {
+          "type": "decimal",
+          "description": "Selling price minus purchase price, per unit. Computed by the database; hidden exactly where the purchase price is, since one reveals the other.",
+          "precision": 8,
+          "scale": 2,
+          "computed": "unit_price - purchase_price",
+          "hidden": "!('admin' in @user.roles || 'manager' in @user.roles)"
+        },
+        "stock_quantity": {
+          "type": "integer",
+          "description": "How many units are on the shelf right now.",
+          "required": true,
+          "default": 0
+        },
+        "reorder_level": {
+          "type": "integer",
+          "description": "When stock falls to this level the part goes on the next supplier order.",
+          "default": 2
+        },
+        "supplier": {
+          "type": "enum",
+          "description": "Who the workshop orders the part from.",
+          "values": ["paul_lange", "shimano_cz", "kellys_sk", "bike_components", "local"]
+        },
+        "discontinued": {
+          "type": "boolean",
+          "description": "Whether the part is no longer re-ordered. It stays on record, because order lines name it.",
+          "default": false
+        },
+        "compatibility": {
+          "type": "json",
+          "description": "What the part fits — speeds, standards, wheel sizes — as the supplier's catalogue states it."
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles || 'manager' in @user.roles",
+        "update": "'admin' in @user.roles || 'manager' in @user.roles || 'technician' in @user.roles",
+        "delete": "'admin' in @user.roles || 'manager' in @user.roles"
+      },
+      "indexes": [
+        { "fields": ["category", "brand"] },
+        { "fields": ["stock_quantity"] }
+      ]
+    },
+    "service_orders": {
+      "description": "One visit of one bike: what the customer asked for, what the technician found and did, and what it costs. Labour and parts are totalled by Alvo; the order moves through its statuses from 'received' to 'collected'.",
+      "audit": true,
+      "fields": {
+        "order_number": {
+          "type": "string",
+          "description": "The number on the paper tag hung on the bike, unique across all orders.",
+          "required": true,
+          "unique": true,
+          "maxLength": 16,
+          "format": "order-number"
+        },
+        "bike_id": {
+          "type": "ref",
+          "description": "The bike being serviced.",
+          "entity": "bikes",
+          "required": true,
+          "onDelete": "restrict"
+        },
+        "technician_id": {
+          "type": "ref",
+          "description": "The technician the order is assigned to. Cleared, not blocked, if the technician record is deleted.",
+          "entity": "technicians",
+          "onDelete": "setNull"
+        },
+        "assigned_user_id": {
+          "type": "uuid",
+          "description": "The sign-in account of the assigned technician. The rules compare it with the caller, so a technician may work on their own orders and only read everyone else's."
+        },
+        "status": {
+          "type": "enum",
+          "description": "Where the order is: taken in, diagnosed, waiting for parts, on the stand, ready for collection, collected, or cancelled.",
+          "required": true,
+          "values": ["received", "diagnosed", "waiting_for_parts", "in_progress", "ready", "collected", "cancelled"],
+          "default": "received"
+        },
+        "priority": {
+          "type": "enum",
+          "description": "How urgent the job is. 'express' means same or next day, at a surcharge.",
+          "required": true,
+          "values": ["low", "normal", "high", "express"],
+          "default": "normal"
+        },
+        "service_type": {
+          "type": "enum",
+          "description": "The kind of job, which sets the default checklist and price.",
+          "required": true,
+          "values": ["basic_service", "full_service", "repair", "wheel_build", "suspension_service", "ebike_diagnostics", "fitting"]
+        },
+        "received_at": {
+          "type": "datetime",
+          "description": "When the bike was taken in at the counter.",
+          "required": true
+        },
+        "promised_on": {
+          "type": "date",
+          "description": "The day the customer was told the bike would be ready."
+        },
+        "completed_at": {
+          "type": "datetime",
+          "description": "When the technician signed the work off. Stamped by the workshop's before-update hook when an order moves to 'ready'."
+        },
+        "problem_description": {
+          "type": "text",
+          "description": "What the customer reported, in their words.",
+          "required": true
+        },
+        "work_notes": {
+          "type": "text",
+          "description": "What the technician found and did."
+        },
+        "internal_notes": {
+          "type": "text",
+          "description": "Staff-only remarks. Never returned by the API and never published in its schema.",
+          "hidden": true
+        },
+        "contact_email": {
+          "type": "string",
+          "description": "Where to send the 'your bike is ready' notice. Usually the customer's address, copied at intake.",
+          "maxLength": 160,
+          "format": "email"
+        },
+        "notify_customer": {
+          "type": "boolean",
+          "description": "Whether the customer asked to be e-mailed when the bike is ready.",
+          "default": true
+        },
+        "labour_hours": {
+          "type": "decimal",
+          "description": "Hours of labour booked on the order.",
+          "precision": 5,
+          "scale": 2,
+          "default": 0
+        },
+        "labour_rate": {
+          "type": "decimal",
+          "description": "The hourly labour rate charged, in EUR, VAT included — the technician's rate less any loyalty discount.",
+          "precision": 6,
+          "scale": 2,
+          "default": 0
+        },
+        "labour_total": {
+          "type": "decimal",
+          "description": "Hours times rate, computed by the database.",
+          "precision": 10,
+          "scale": 2,
+          "computed": "labour_hours * labour_rate"
+        },
+        "parts_total": {
+          "type": "decimal",
+          "description": "The sum of the order's lines, maintained by Alvo as lines are added, changed or removed.",
+          "precision": 10,
+          "scale": 2,
+          "rollup": { "from": "order_lines", "op": "sum", "field": "line_total" }
+        },
+        "lines_count": {
+          "type": "integer",
+          "description": "How many lines the order has, maintained by Alvo.",
+          "rollup": { "from": "order_lines", "op": "count" }
+        },
+        "total": {
+          "type": "decimal",
+          "description": "What the customer pays: labour plus parts. Computed by the database from the labour fields and the parts rollup.",
+          "precision": 10,
+          "scale": 2,
+          "computed": "labour_hours * labour_rate + parts_total"
+        },
+        "paid": {
+          "type": "boolean",
+          "description": "Whether the customer has paid.",
+          "default": false
+        },
+        "payment_method": {
+          "type": "enum",
+          "description": "How the customer paid.",
+          "values": ["cash", "card", "bank_transfer", "invoice"]
+        },
+        "diagnostics": {
+          "type": "json",
+          "description": "Readings the technician took — chain wear, brake pad thickness, e-bike error codes — as the diagnostic tool exported them."
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles || 'manager' in @user.roles || 'reception' in @user.roles",
+        "update": "'admin' in @user.roles || 'manager' in @user.roles || 'reception' in @user.roles || assigned_user_id == @user.id",
+        "delete": "'admin' in @user.roles || 'manager' in @user.roles"
+      },
+      "hooks": {
+        "beforeUpdate": [
+          {
+            "condition": "old.status == 'collected' && new.status != 'collected'",
+            "action": {
+              "reject": "This order was collected and is closed. Open a new service order for any follow-up work."
+            }
+          },
+          {
+            "condition": "new.status == 'ready' && old.status != 'ready'",
+            "action": {
+              "mutate": { "completed_at": { "$cel": "now()" } }
+            }
+          }
+        ],
+        "beforeDelete": [
+          {
+            "condition": "old.status != 'received' && old.status != 'cancelled'",
+            "action": {
+              "reject": "Only an order still at 'received', or a cancelled one, can be deleted. Cancel the order instead, so its history is kept."
+            }
+          }
+        ],
+        "afterCreate": [
+          {
+            "condition": "new.priority == 'express'",
+            "action": { "type": "email", "template": "express-order-received", "to": "dielna@velo-dielna.example" }
+          }
+        ],
+        "afterUpdate": [
+          {
+            "condition": "new.status == 'ready' && old.status != 'ready' && new.notify_customer",
+            "action": { "type": "email", "template": "order-ready", "to": "{{new.contact_email}}" }
+          }
+        ]
+      },
+      "indexes": [
+        { "fields": ["status", "priority"] },
+        { "fields": ["bike_id", "received_at"] },
+        { "fields": ["technician_id", "status"] }
+      ]
+    },
+    "order_lines": {
+      "description": "One line on a service order: a part fitted, or a flat-rate job. Deleted with its order; the order's parts total follows every change.",
+      "fields": {
+        "order_id": {
+          "type": "ref",
+          "description": "The order the line belongs to.",
+          "entity": "service_orders",
+          "required": true,
+          "onDelete": "cascade"
+        },
+        "part_id": {
+          "type": "ref",
+          "description": "The stocked part fitted, if the line is one. Cleared if the part is later deleted, so the order keeps its history.",
+          "entity": "parts",
+          "onDelete": "setNull"
+        },
+        "kind": {
+          "type": "enum",
+          "description": "Whether the line is a stocked part, a flat-rate job, or anything else.",
+          "required": true,
+          "values": ["part", "flat_rate", "other"],
+          "default": "part"
+        },
+        "description": {
+          "type": "string",
+          "description": "The line as it is printed on the invoice.",
+          "required": true,
+          "maxLength": 160
+        },
+        "quantity": {
+          "type": "decimal",
+          "description": "How many units — or metres of brake cable.",
+          "required": true,
+          "precision": 7,
+          "scale": 2
+        },
+        "unit_price": {
+          "type": "decimal",
+          "description": "The price per unit in EUR, VAT included, as charged on this order.",
+          "required": true,
+          "precision": 8,
+          "scale": 2
+        },
+        "line_total": {
+          "type": "decimal",
+          "description": "Quantity times unit price, computed by the database.",
+          "precision": 10,
+          "scale": 2,
+          "computed": "quantity * unit_price"
+        },
+        "warranty": {
+          "type": "boolean",
+          "description": "Whether the part is replaced under warranty and invoiced to the supplier instead.",
+          "default": false
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles || 'manager' in @user.roles || 'reception' in @user.roles || 'technician' in @user.roles",
+        "update": "'admin' in @user.roles || 'manager' in @user.roles || 'technician' in @user.roles",
+        "delete": "'admin' in @user.roles || 'manager' in @user.roles || 'technician' in @user.roles"
+      },
+      "hooks": {
+        "beforeCreate": [
+          {
+            "condition": "new.quantity <= 0",
+            "action": { "reject": "An order line needs a positive quantity. To credit something back, add a line with a negative unit price." }
+          }
+        ]
+      },
+      "indexes": [
+        { "fields": ["order_id", "kind"] }
+      ]
+    },
+    "rental_fleet": {
+      "description": "A bike the workshop owns and rents out by the day.",
+      "fields": {
+        "code": {
+          "type": "string",
+          "description": "The code painted on the top tube, unique across the fleet.",
+          "required": true,
+          "unique": true,
+          "maxLength": 8,
+          "format": "fleet-code"
+        },
+        "brand": {
+          "type": "string",
+          "description": "The manufacturer.",
+          "required": true,
+          "maxLength": 40
+        },
+        "model": {
+          "type": "string",
+          "description": "The model name.",
+          "required": true,
+          "maxLength": 80
+        },
+        "category": {
+          "type": "enum",
+          "description": "What kind of bike it is.",
+          "required": true,
+          "values": ["city", "trekking", "mtb_hardtail", "ebike", "kids"]
+        },
+        "frame_size": {
+          "type": "string",
+          "description": "The frame size, so reception can match the bike to the rider.",
+          "maxLength": 12
+        },
+        "daily_rate": {
+          "type": "decimal",
+          "description": "The rental price per day in EUR.",
+          "required": true,
+          "precision": 6,
+          "scale": 2
+        },
+        "deposit": {
+          "type": "decimal",
+          "description": "The deposit taken at pick-up, in EUR.",
+          "required": true,
+          "precision": 7,
+          "scale": 2
+        },
+        "in_service": {
+          "type": "boolean",
+          "description": "Whether the bike is available to rent. Cleared while it is being repaired or after damage.",
+          "default": true
+        },
+        "rentals_count": {
+          "type": "integer",
+          "description": "How many times the bike has been rented, maintained by Alvo.",
+          "rollup": { "from": "rentals", "op": "count" }
+        },
+        "revenue": {
+          "type": "decimal",
+          "description": "What the bike has earned over all its rentals, maintained by Alvo.",
+          "precision": 10,
+          "scale": 2,
+          "rollup": { "from": "rentals", "op": "sum", "field": "price" }
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'admin' in @user.roles || 'manager' in @user.roles",
+        "update": "'admin' in @user.roles || 'manager' in @user.roles || 'technician' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      }
+    },
+    "rentals": {
+      "description": "One rental of one fleet bike to one customer, from pick-up to return.",
+      "audit": true,
+      "fields": {
+        "fleet_bike_id": {
+          "type": "ref",
+          "description": "The bike rented.",
+          "entity": "rental_fleet",
+          "required": true,
+          "onDelete": "restrict"
+        },
+        "customer_id": {
+          "type": "ref",
+          "description": "Who rented it.",
+          "entity": "customers",
+          "required": true,
+          "onDelete": "restrict"
+        },
+        "status": {
+          "type": "enum",
+          "description": "Where the rental is.",
+          "required": true,
+          "values": ["reserved", "active", "returned", "overdue", "cancelled"],
+          "default": "reserved"
+        },
+        "starts_at": {
+          "type": "datetime",
+          "description": "When the customer picks the bike up.",
+          "required": true
+        },
+        "due_at": {
+          "type": "datetime",
+          "description": "When the bike is due back.",
+          "required": true
+        },
+        "returned_at": {
+          "type": "datetime",
+          "description": "When the bike actually came back."
+        },
+        "days": {
+          "type": "decimal",
+          "description": "How many rental days are charged. Half days are charged as 0.5.",
+          "required": true,
+          "precision": 4,
+          "scale": 1
+        },
+        "daily_rate": {
+          "type": "decimal",
+          "description": "The daily rate agreed for this rental, in EUR.",
+          "required": true,
+          "precision": 6,
+          "scale": 2
+        },
+        "price": {
+          "type": "decimal",
+          "description": "Days times daily rate, computed by the database.",
+          "precision": 10,
+          "scale": 2,
+          "computed": "days * daily_rate"
+        },
+        "deposit_paid": {
+          "type": "boolean",
+          "description": "Whether the deposit was taken.",
+          "default": false
+        },
+        "id_document": {
+          "type": "string",
+          "description": "The number of the ID card or passport checked at pick-up. Never returned by the API once written.",
+          "maxLength": 20,
+          "hidden": true
+        },
+        "damage_report": {
+          "type": "text",
+          "description": "Anything found wrong with the bike on return."
+        }
+      },
+      "rules": {
+        "list": "'admin' in @user.roles || 'manager' in @user.roles || 'reception' in @user.roles",
+        "get": "'admin' in @user.roles || 'manager' in @user.roles || 'reception' in @user.roles",
+        "create": "'admin' in @user.roles || 'manager' in @user.roles || 'reception' in @user.roles",
+        "update": "'admin' in @user.roles || 'manager' in @user.roles || 'reception' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      },
+      "hooks": {
+        "afterCreate": [
+          {
+            "action": { "type": "webhook", "endpoint": "rental-desk" }
+          }
+        ]
+      },
+      "indexes": [
+        { "fields": ["status", "due_at"] },
+        { "fields": ["fleet_bike_id", "starts_at"], "unique": true }
+      ]
+    }
+  }
+}

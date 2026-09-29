@@ -1,6 +1,8 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/Burgyn/MMLib.Alvo")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.EntityFrameworkCore.Tests")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.PostgreSql")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.PostgreSql.Tests.Integration")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("MMLib.Alvo.Data.Sqlite.Tests.Integration")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v10.0", FrameworkDisplayName=".NET 10.0")]
@@ -31,8 +33,17 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationResult> ApplyAsync(MMLib.Alvo.Migrations.MigrationPlan plan, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
         public System.Threading.Tasks.Task<MMLib.Alvo.Migrations.MigrationPlan> PlanAsync(MMLib.Alvo.Schema.SchemaModel current, MMLib.Alvo.Schema.SchemaModel desired, MMLib.Alvo.Migrations.MigrationOptions options, System.Threading.CancellationToken ct = default) { }
     }
+    public sealed class EfCoreSecretStore : MMLib.Alvo.Secrets.ISecretStore, MMLib.Alvo.Secrets.IWritableSecretStore
+    {
+        public bool CanWrite { get; }
+        public System.Threading.Tasks.ValueTask<bool> DeleteAsync(MMLib.Alvo.Secrets.SecretName name, System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.ValueTask<string?> GetAsync(MMLib.Alvo.Secrets.SecretName name, System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.ValueTask<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Secrets.SecretName>> ListNamesAsync(System.Threading.CancellationToken ct = default) { }
+        public System.Threading.Tasks.ValueTask SetAsync(MMLib.Alvo.Secrets.SecretName name, string value, System.Threading.CancellationToken ct = default) { }
+    }
     public interface IAlvoSqlDialect
     {
+        bool GeneratedColumnAddRequiresTableRebuild { get; }
         MMLib.Alvo.Data.EntityFrameworkCore.MigrationBatchFraming MigrationFraming { get; }
         MMLib.Alvo.Data.EntityFrameworkCore.SqlConstraintViolation? DecodeConstraintViolation(System.Data.Common.DbException failure);
         string? GeneratedColumnDefinition(string columnName, string storeType, string renderedExpression);
@@ -47,6 +58,7 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore
         public MigrationBatchFraming() { }
         public System.Collections.Generic.IReadOnlyList<string> After { get; init; }
         public System.Collections.Generic.IReadOnlyList<string> Before { get; init; }
+        public string? Verify { get; init; }
         public static MMLib.Alvo.Data.EntityFrameworkCore.MigrationBatchFraming None { get; }
     }
     public enum PreImageMutation

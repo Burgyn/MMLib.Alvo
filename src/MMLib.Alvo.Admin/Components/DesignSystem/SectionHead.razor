@@ -1,0 +1,55 @@
+﻿@*
+    The head a panel, a tab or a drawer's part opens with: a title over the sentence that says what
+    is under it (docs/architecture/admin-dashboard-review.md, F-1).
+
+    With Actions it is the bar — the heading on the left, the controls on the right, the title and
+    subtitle still a stacked pair beside them. Panel draws its head through this, so the markup of a
+    section head exists once; a tab, which sits inside the entity's one panel, uses it directly.
+*@
+@if (Actions is not null)
+{
+    <div @attributes="Attributes" class="@CssClass.Of("a-section", Attributes, "a-section--bar")">
+        <div class="a-section__text">
+            @Head
+        </div>
+        @Actions
+    </div>
+}
+else
+{
+    <div @attributes="Attributes" class="@CssClass.Of("a-section", Attributes)">
+        @Head
+    </div>
+}
+
+@code {
+    /// <summary>What the section is about.</summary>
+    [Parameter]
+    public string? Title { get; set; }
+
+    /// <summary>The sentence under the title that says what the section holds, or why.</summary>
+    [Parameter]
+    public RenderFragment? Subtitle { get; set; }
+
+    /// <summary>The controls that belong to the whole section, drawn at the head's end.</summary>
+    [Parameter]
+    public RenderFragment? Actions { get; set; }
+
+    /// <summary>
+    /// Anything else, onto the head's element — a <c>class</c> such as <c>a-section--spaced</c> for a
+    /// second head further down the same panel.
+    /// </summary>
+    [Parameter(CaptureUnmatchedValues = true)]
+    public IReadOnlyDictionary<string, object>? Attributes { get; set; }
+
+    private RenderFragment Head => @<text>
+        @if (Title is not null)
+        {
+            <span class="a-section__title">@Title</span>
+        }
+        @if (Subtitle is not null)
+        {
+            <span class="a-section__sub">@Subtitle</span>
+        }
+    </text>;
+}

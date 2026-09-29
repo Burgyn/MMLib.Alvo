@@ -27,18 +27,27 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 /// apart. The destructive/dry-run guardrail is the caller's responsibility (see
 /// <see cref="IRuntimeSchemaWriter"/>); this writer executes unconditionally.
 /// </para>
+/// <para>
+/// <strong>The transaction runs inside the dialect's <see cref="IAlvoSqlDialect.MigrationFraming"/></strong>, exactly
+/// as the migrator's own apply does (<see cref="MigrationFramingScope"/>): SQLite's <c>PRAGMA foreign_keys</c> is a
+/// no-op inside a transaction, so without it a table rebuild on this path — the dashboard's and the Management API's —
+/// fails on a restricted reference to the rebuilt parent, or deletes the children of a cascading one.
+/// </para>
 /// </remarks>
 internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposable
 {
     private readonly RelationalConnectionFactory _connections;
     private readonly VersionRowWriter _rows;
+    private readonly MigrationBatchFraming _framing;
 
-    public EfCoreRuntimeSchemaWriter(RelationalConnectionFactory connections, AlvoOptions options)
+    public EfCoreRuntimeSchemaWriter(RelationalConnectionFactory connections, AlvoOptions options, IAlvoSqlDialect dialect)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(dialect);
         _connections = connections;
         _rows = new VersionRowWriter(connections, options);
+        _framing = dialect.MigrationFraming;
     }
 
     /// <inheritdoc/>
@@ -54,12 +63,23 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
         await using (connection.ConfigureAwait(false))
         {
             await _rows.EnsureReadyAsync(connection, ct).ConfigureAwait(false);
-            var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-            await using (transaction.ConfigureAwait(false))
-            {
-                return await ApplyAndAppendInTransactionAsync(
-                    connection, transaction, project, plan, candidate, expectedRevision, ct).ConfigureAwait(false);
-            }
+            return await MigrationFramingScope.RunAsync(
+                connection,
+                _framing,
+                () => ApplyInOwnTransactionAsync(connection, project, plan, candidate, expectedRevision, ct),
+                ct).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<DescriptorVersion> ApplyInOwnTransactionAsync(
+        DbConnection connection, string project, MigrationPlan plan, DescriptorVersion candidate,
+        int expectedRevision, CancellationToken ct)
+    {
+        var transaction = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await using (transaction.ConfigureAwait(false))
+        {
+            return await ApplyAndAppendInTransactionAsync(
+                connection, transaction, project, plan, candidate, expectedRevision, ct).ConfigureAwait(false);
         }
     }
 
@@ -85,6 +105,7 @@ internal sealed class EfCoreRuntimeSchemaWriter : IRuntimeSchemaWriter, IDisposa
             // failure rolls the version row back too. See the type remarks for why order matters.
             await _rows.InsertAsync(connection, transaction, project, appended, ct).ConfigureAwait(false);
             await RelationalSqlBatch.ExecuteAsync(connection, plan.Sql, transaction, ct).ConfigureAwait(false);
+            await MigrationFramingScope.VerifyAsync(connection, transaction, _framing, plan, ct).ConfigureAwait(false);
             await transaction.CommitAsync(ct).ConfigureAwait(false);
         }
         catch (DbException)

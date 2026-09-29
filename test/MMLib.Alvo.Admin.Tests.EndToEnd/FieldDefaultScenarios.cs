@@ -37,13 +37,17 @@ public sealed class FieldDefaultScenarios(AdminWorld world) : IClassFixture<Admi
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
         await session.GoAsync("/schema/regions");
 
+        /* The editor is a sheet now: it is on the page only while somebody is editing it. */
+        await session.Page.ClickAsync("[data-testid='add-field']");
+        await session.Page.Locator("[data-testid='field-sheet']").WaitForAsync();
+
         await session.Page.FillAsync("#new-field-name", "dispatch_note");
-        await session.Page.ClickAsync(".a-choice button:has-text('integer')");
+        await session.Page.GetByRole(AriaRole.Radio, new() { Name = "integer", Exact = true }).ClickAsync();
         await session.Page.FillAsync("#new-field-default", "not a number");
         await session.Page.ClickAsync("[data-testid='field-save']");
 
         await session.Page.GetByText("That field cannot be added").WaitForAsync();
-        (await session.Page.Locator("main.a-content").InnerTextAsync())
+        (await session.Dialog("field-sheet").GetByTestId("error-panel").InnerTextAsync())
             .ShouldContain("is not a number");
 
         /* Still on the entity: a refused default must not be a half-added field, and the editor is
@@ -51,46 +55,43 @@ public sealed class FieldDefaultScenarios(AdminWorld world) : IClassFixture<Admi
         (session.Page.Url).ShouldContain("/schema/regions");
         await session.AssertNoHorizontalScrollAsync();
 
-        await session.Page.ClickAsync(".a-choice button:has-text('string')");
+        await session.Page.GetByRole(AriaRole.Radio, new() { Name = "string", Exact = true }).ClickAsync();
         await session.Page.FillAsync("#new-field-default", "unassigned");
         await session.Page.ClickAsync("[data-testid='field-save']");
-        await session.Page.WaitForURLAsync("**/schema/preview");
+        /* Waits for the plan rather than for the URL alone: the navigation resolves before the preview's own
+           render arrives, and the diff below is what that render draws. */
+        await session.PreviewPendingAsync();
 
-        /* Waiting for the plan control rather than for the URL alone: the navigation resolves before
-           the preview's own render arrives, and the diff below is what that render draws. */
-        await session.Page.Locator("button:has-text('Plan this change')").WaitForAsync();
-
-        (await session.Page.Locator("main.a-content").InnerTextAsync())
+        (await session.Content.InnerTextAsync())
             .ShouldContain("\"default\": \"unassigned\"");
 
-        await session.Page.ClickAsync("button:has-text('Plan this change')");
         await session.Page.Locator("#apply-reason").WaitForAsync();
         await session.Page.FillAsync("#apply-reason", "Give regions a dispatch note");
-        await session.Page.ClickAsync("button:has-text('Apply these changes')");
+        await session.Button("Apply these changes").ClickAsync();
         await session.Page.GetByText("Applied as revision").First.WaitForAsync();
 
         await session.GoAsync("/schema/regions");
-        (await session.Page.Locator("main.a-content").InnerTextAsync())
+        (await session.Content.InnerTextAsync())
             .ShouldContain("default \"unassigned\"");
 
         /* The point of the whole feature: a create that omits the field stores the default rather
            than nothing. */
         await session.GoAsync("/data/regions");
-        await session.Page.ClickAsync("button:has-text('New record')");
+        await session.Button("New record", exact: true).ClickAsync();
         await session.Page.Locator("#rf-name").WaitForAsync();
         await session.Page.FillAsync("#rf-name", "Northern");
         await session.Page.FillAsync("#rf-code", "NOR");
-        await session.Page.ClickAsync("button:has-text('Create')");
+        await session.Dialog("record-sheet").GetByTestId("record-save").ClickAsync();
 
-        var row = session.Page.Locator("table.a-grid tbody tr").First;
-        await row.WaitForAsync(new() { State = WaitForSelectorState.Attached });
+        /* Visible, at this width, in whichever layout this width draws. The table is hidden below
+           720 px and the row cards are hidden above it, so asserting on the table alone measured a
+           layout the operator was not looking at — which is exactly how a phone came to show
+           "showing 2 of 2" over an empty box while this suite stayed green. */
+        var card = session.Page.Locator("[data-testid='row-card']").First;
+        await card.WaitForAsync();
 
-        /* The text content rather than the rendered text: at phone width the grid keeps the narrow
-           columns and hides the rest, and what is being measured here is the stored value, not which
-           cells this width chose to draw. */
-        var stored = await row.TextContentAsync();
-        stored.ShouldNotBeNull();
-        stored!.ShouldContain("Northern");
+        var stored = await card.InnerTextAsync();
+        stored.ShouldContain("Northern");
         stored.ShouldContain("unassigned");
 
         session.AssertConsoleClean();

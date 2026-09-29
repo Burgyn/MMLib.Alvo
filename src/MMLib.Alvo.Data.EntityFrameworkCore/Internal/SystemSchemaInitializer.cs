@@ -55,10 +55,12 @@ internal sealed partial class SystemSchemaInitializer
         TableName = DescriptorVersionsTableName(schemaPrefix);
         _idempotencyTableName = IdempotencyTable.NameFor(schemaPrefix);
         _outboxTableName = OutboxTable.NameFor(schemaPrefix);
+        _secretsTableName = SecretsTable.NameFor(schemaPrefix);
     }
 
     private readonly string _idempotencyTableName;
     private readonly string _outboxTableName;
+    private readonly string _secretsTableName;
 
     /// <summary>Gets the fully-prefixed descriptor-versions table name, e.g. <c>alvo_descriptor_versions</c>.</summary>
     public string TableName { get; }
@@ -105,6 +107,8 @@ internal sealed partial class SystemSchemaInitializer
             _idempotencyTableName, IdempotencyTable.Ddl(_idempotencyTableName), ct).ConfigureAwait(false);
         await CreateIfMissingAsync(
             _outboxTableName, OutboxTable.Ddl(_outboxTableName), ct).ConfigureAwait(false);
+        await CreateIfMissingAsync(
+            _secretsTableName, SecretsTable.Ddl(_secretsTableName), ct).ConfigureAwait(false);
     }
 
     /// <summary>

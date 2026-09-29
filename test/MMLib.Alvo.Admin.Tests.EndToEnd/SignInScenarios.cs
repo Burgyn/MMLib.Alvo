@@ -15,6 +15,74 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// <param name="world">The running host and browser.</param>
 public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld>
 {
+    /// <summary>
+    /// A single-line control is the height of a control, not of a paragraph.
+    /// </summary>
+    /// <remarks>
+    /// <b>Measured because the regression was invisible to every check the design system has.</b>
+    /// <c>min-height: 84px</c> and <c>resize: vertical</c> belong to a textarea; a refactor folded the
+    /// rule that carried them into the shared <c>.a-input, .a-select, .a-textarea</c> block, so every
+    /// single-line input in the dashboard got an 84 px floor and the sign-in form became two boxes the
+    /// size of a paragraph. No token moved, no contrast pair changed and no layout assertion cared, so
+    /// <c>DesignTokenTests</c>, the gallery and the phone-fit sweep all stayed green. A height is the one
+    /// thing that says it.
+    ///
+    /// The bound is generous on purpose: this is a floor-and-ceiling on "is it a line or a paragraph",
+    /// not a pin on the design's exact metrics, which are free to move.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_single_line_input_is_not_as_tall_as_a_textarea()
+    {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
+
+        await using var context = await world.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+
+        await page.GotoAsync($"{world.BaseAddress}{AlvoAdmin.SignInPath}");
+
+        var box = await page.Locator("#email").BoundingBoxAsync();
+
+        box.ShouldNotBeNull();
+        box!.Height.ShouldBeGreaterThan(
+            24, "a control shorter than this is not a usable target");
+        box.Height.ShouldBeLessThan(
+            56, $"#email is {box.Height}px tall — a single-line input has been given a textarea's floor");
+    }
+
+    /// <summary>
+    /// The sign-in form is on screen and can be pressed, not merely present in the DOM.
+    /// </summary>
+    /// <remarks>
+    /// <b>The defect this pins</b>: the shell's content pane became a size container so a split's reading
+    /// pane could fit the visible height, and the sign-in screen reuses that pane outside the shell's
+    /// fixed-height frame — size containment measured its height from nothing and the whole form collapsed
+    /// to a sliver. Every other sign-in scenario stayed green, because a locator finds and fills an input
+    /// that an ancestor clips to zero height. Hit-testing the button's centre is what a person does.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_sign_in_button_is_where_a_person_can_press_it()
+    {
+        TestContext.Current.CancellationToken.ThrowIfCancellationRequested();
+
+        await using var context = await world.Browser.NewContextAsync();
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{world.BaseAddress}{AlvoAdmin.SignInPath}");
+
+        await page.GetByRole(AriaRole.Button, new() { Name = "Sign in", Exact = true }).WaitForAsync();
+
+        /* A one-shot EvaluateAsync races Blazor boot and the stylesheet load: on a slow run it could sample
+           the button's box before layout settled and pass regardless of what the page looked like once it
+           had. Polling the same predicate gives layout the time it needs — and still fails, by timing out,
+           on a pane that is genuinely collapsed, because the predicate then never becomes true at all. */
+        await page.WaitForFunctionAsync(
+            "() => { const b = document.querySelector('button[type=submit]'); if (!b) { return false; }"
+            + " const r = b.getBoundingClientRect();"
+            + " const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);"
+            + " return r.height > 0 && !!e && b.contains(e); }",
+            arg: null,
+            new PageWaitForFunctionOptions { PollingInterval = 100, Timeout = 10_000 });
+    }
+
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task An_unauthenticated_visitor_is_sent_to_the_sign_in_screen()
     {
@@ -42,7 +110,7 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await page.ClickAsync("button[type=submit]");
         await page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}?**");
 
-        var message = await page.Locator(".a-error__title").InnerTextAsync();
+        var message = await page.GetByTestId("error-title").InnerTextAsync();
         message.ShouldContain("do not match");
         message.ShouldNotContain("password is", Case.Insensitive);
         message.ShouldNotContain("no such", Case.Insensitive);
@@ -62,7 +130,7 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await page.ClickAsync("button[type=submit]");
         await page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}?**");
 
-        (await page.Locator(".a-error__title").InnerTextAsync()).ShouldContain("do not match");
+        (await page.GetByTestId("error-title").InnerTextAsync()).ShouldContain("do not match");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -139,7 +207,8 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await session.Page.GotoAsync($"{world.BaseAddress}{AlvoAdmin.BasePath}");
         session.Page.Url.ShouldEndWith(AlvoAdmin.BasePath);
 
-        await session.Page.ClickAsync("button:has-text('Sign out')");
+        await session.Page.GetByTestId("account-menu").ClickAsync();
+        await session.Page.GetByRole(AriaRole.Menuitem, new() { Name = "Sign out" }).ClickAsync();
         await session.Page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}");
 
         await session.Page.GotoAsync($"{world.BaseAddress}{AlvoAdmin.BasePath}");

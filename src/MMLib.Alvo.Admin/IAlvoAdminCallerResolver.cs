@@ -26,6 +26,13 @@ namespace MMLib.Alvo.Admin;
 /// nothing, and the dashboard shows the refusal. Minting a caller with no tenant instead would
 /// silently widen "you may not act there" into "you act everywhere unscoped".
 /// </para>
+/// <para>
+/// <b>It is asked on every call, and it is the only re-check the dashboard makes.</b> Whether an open
+/// tab's <em>session</em> is re-checked — whether the shell drops to sign-in once the operator is
+/// disabled — is the host's <c>AuthenticationStateProvider</c>'s business, not this port's: a host that
+/// mints its own sessions owns their revalidation. What this port guarantees is that the calls behind the
+/// screens are refused the moment it stops answering with a caller.
+/// </para>
 /// </remarks>
 public interface IAlvoAdminCallerResolver
 {

@@ -1,0 +1,52 @@
+﻿@*
+    The one confirmation that throws the working copy away, wherever it is asked from.
+
+    Discarding is confirmed, and staging and applying-a-draft are not, which is the opposite way round
+    from the usual reflex — deliberately. Every edit up to here wrote to a draft and touched no table,
+    so staging one needs no ceremony; this is the only control that destroys work the operator did, and
+    the one that cannot be undone. So it looks like what it does — the danger button, with a Cancel
+    beside it — rather than the green of every safe action on the screen. An AlvoConfirm: centred, no
+    light dismiss, Escape = Cancel (spec §3.2).
+
+    One component because there are two ways in, Preview and the shell's pending bar, and two copies of
+    a destructive confirmation are two chances for one of them to drift back to green.
+*@
+@inject AdminSession Session
+@inject ISnackbar Snackbar
+
+<AlvoConfirm Open="Open" TestId="discard-sheet" ConfirmTestId="discard-confirm" CancelTestId="discard-cancel"
+             Title="Discard every unapplied change?"
+             Consequence="@($"The working copy goes back to revision {_revision}, across all screens, not only this one. There is no undo.")"
+             Verb="Discard changes" OnConfirm="DiscardAsync" OnCancel="OnClose" />
+
+@code {
+    private int _revision;
+
+    /// <summary>Whether the confirmation is on the page.</summary>
+    [Parameter]
+    public bool Open { get; set; }
+
+    /// <summary>Raised when the operator backs out — Cancel or Escape.</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    /// <summary>Raised after the copy went back to the applied revision.</summary>
+    [Parameter]
+    public EventCallback OnDiscarded { get; set; }
+
+    /// <summary>Reads the revision the copy would go back to, each time the confirm opens.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Open)
+        {
+            _revision = (await Session.CopyAsync(CancellationToken.None)).Revision;
+        }
+    }
+
+    private async Task DiscardAsync()
+    {
+        (await Session.CopyAsync(CancellationToken.None)).Discard();
+        Snackbar.Confirm("Discarded the working copy");
+        await OnDiscarded.InvokeAsync();
+    }
+}

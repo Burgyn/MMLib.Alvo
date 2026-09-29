@@ -50,10 +50,9 @@ internal static class ManagementSetup
     /// <param name="services">The service collection to register into.</param>
     private static void AddUserAdministration(IServiceCollection services) =>
         services.TryAddScoped<IAlvoUserAdministration>(provider =>
-            provider.GetKeyedService<IAlvoUserAdministration>(AlvoUserAdministration.UnguardedKey)
-                is { } implementation
+            IsRegistered(provider)
                 ? new GuardedUserAdministration(
-                    implementation,
+                    provider.GetRequiredService<IServiceScopeFactory>(),
                     provider.GetRequiredService<Auth.IAlvoContextAccessor>(),
                     provider.GetRequiredService<ManagementAccessEvaluator>(),
                     provider.GetRequiredService<IRoleCatalogProvider>(),
@@ -62,6 +61,18 @@ internal static class ManagementSetup
                     "No IAlvoUserAdministration implementation is registered. A package that "
                     + "administers membership registers itself under "
                     + $"'{AlvoUserAdministration.UnguardedKey}'; MMLib.Alvo.Identity does."));
+
+    /// <summary>Whether an implementation is registered under the unguarded key.</summary>
+    /// <remarks>
+    /// Asked of the registrations rather than answered by resolving one: the decorator resolves the
+    /// implementation per call, from a scope of its own, and one constructed here would be an instance
+    /// in the caller's scope that nothing ever uses — for the dashboard, a <c>DbContext</c> held open for
+    /// the life of the circuit to answer a yes-or-no question.
+    /// </remarks>
+    /// <param name="provider">The provider the decorator is being resolved from.</param>
+    private static bool IsRegistered(IServiceProvider provider) =>
+        provider.GetService<IServiceProviderIsKeyedService>() is { } registrations
+        && registrations.IsKeyedService(typeof(IAlvoUserAdministration), AlvoUserAdministration.UnguardedKey);
 
     /// <summary>
     /// Registers the one <see cref="IAlvoManagement"/> implementation, with its data port and its descriptor
@@ -96,6 +107,8 @@ internal static class ManagementSetup
             provider.GetRequiredService<Auth.IAlvoContextAccessor>(),
             provider.GetRequiredService<ManagementAccessEvaluator>(),
             provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AlvoManagementService>>(),
+            provider.GetRequiredService<Ai.IAiConnectionResolver>(),
+            provider.GetRequiredService<Secrets.ISecretStore>(),
             provider.GetRequiredService<Migrations.RuntimeSchemaService>));
 
     /// <summary>

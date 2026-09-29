@@ -1,5 +1,5 @@
 /* ===========================================================================
-   Alvo Admin — the three browser concerns the design system owns.
+   Alvo Admin — the browser concerns the design system owns.
 
    No framework. Blazor owns rendering and state; this owns only what has to
    exist before hydration (the theme) or below it (the keyboard map).
@@ -12,9 +12,10 @@
   const DENSITY_KEY = 'alvo.density';
 
   /* --- Theme -------------------------------------------------------------
-     Applied from storage synchronously, before paint. The stylesheet's
-     color-scheme carries the system preference on its own, so a viewer who has
-     never chosen gets the right theme with nothing stored and nothing to flash.
+     Applied synchronously, before paint, and ALWAYS resolved to light or dark.
+     The component library's dark palette is scoped to [data-theme=dark] (see
+     AlvoTheme.razor), and a scoped variable cannot follow prefers-color-scheme on
+     its own, so a viewer who never chose gets the system's answer written down.
      ---------------------------------------------------------------------- */
 
   const readStored = (key) => {
@@ -33,11 +34,17 @@
     }
   };
 
-  const applyStored = () => {
+  const DARK = '(prefers-color-scheme: dark)';
+
+  const systemTheme = () => (window.matchMedia(DARK).matches ? 'dark' : 'light');
+
+  const storedTheme = () => {
     const theme = readStored(THEME_KEY);
-    if (theme === 'light' || theme === 'dark') {
-      document.documentElement.dataset.theme = theme;
-    }
+    return theme === 'light' || theme === 'dark' ? theme : null;
+  };
+
+  const applyStored = () => {
+    document.documentElement.dataset.theme = storedTheme() ?? systemTheme();
 
     const density = readStored(DENSITY_KEY);
     if (density === 'comfortable' || density === 'compact') {
@@ -45,14 +52,24 @@
     }
   };
 
-  const resolvedTheme = () =>
-    document.documentElement.dataset.theme ??
-    (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  /* Nothing stored means "follow the system", and the system can change under an open page. */
+  const followSystem = () =>
+    window.matchMedia(DARK).addEventListener('change', () => {
+      if (storedTheme() === null) {
+        document.documentElement.dataset.theme = systemTheme();
+        emit('theme', { value: document.documentElement.dataset.theme });
+      }
+    });
 
+  const resolvedTheme = () => document.documentElement.dataset.theme ?? systemTheme();
+
+  /* Announced as well as returned: the palette can flip the theme too, and the header's toggle has
+     to redraw its icon for a flip it did not make. `emit` is a hoisted function below. */
   const toggleTheme = () => {
     const next = resolvedTheme() === 'dark' ? 'light' : 'dark';
     document.documentElement.dataset.theme = next;
     writeStored(THEME_KEY, next);
+    emit('theme', { value: next });
     return next;
   };
 
@@ -73,31 +90,144 @@
     element instanceof HTMLElement &&
     (element.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(element.tagName));
 
-  const emit = (name, detail) =>
+  /* What Enter already means something to. Enter on a button presses it and on a link follows it; the
+     grid's `open` is for Enter on a selected row, which is none of these, and must not fire as well. */
+  const CONTROL = 'a[href], button, input, select, textarea, summary, [contenteditable], [role="button"], ' +
+    '[role="link"], [role="tab"], [role="radio"], [role="option"], [role="checkbox"], [role="switch"], ' +
+    '[role="menuitem"], [role="separator"]';
+
+  const isControl = (element) => element instanceof Element && element.closest(CONTROL) !== null;
+
+  function emit(name, detail) {
     document.dispatchEvent(new CustomEvent(`alvo:${name}`, { detail, bubbles: true }));
+  }
+
+  /* The keys that may follow `g`: the sections' letters, and the comma Settings takes from the
+     convention of ⌘, for preferences. Which key reaches which section is AdminNavigation's to say. */
+  const GOTO_KEY = /^[a-z,]$/;
 
   let awaitingGoto = false;
 
+  /* A dialog or a sheet is over the page. */
+  const underModal = () => document.querySelector('[aria-modal="true"]') !== null;
+
+  /* --- A menu item that is a form post -----------------------------------
+     The library's menu item is a div it focuses and moves between with the
+     arrows, not a button, so it cannot submit the form around it. The sign-out
+     must stay a real post (a GET sign-out is triggerable by an <img>), so a
+     click, an Enter or a Space on [data-alvo-submits] submits its form here,
+     once: the library may answer the same key with a click of its own.
+     ---------------------------------------------------------------------- */
+  const submitterOf = (target) => (target instanceof Element ? target.closest('[data-alvo-submits]') : null);
+
+  const submitFrom = (item) => {
+    const form = item.closest('form');
+    if (form && form.dataset.alvoSubmitted === undefined) {
+      form.dataset.alvoSubmitted = '';
+      form.requestSubmit();
+    }
+  };
+
+  const onSubmitterClick = (event) => {
+    const item = submitterOf(event.target);
+    if (item) {
+      submitFrom(item);
+    }
+  };
+
+  /* --- Escape in an editor ----------------------------------------------
+     Presses the control that answers it: Cancel, or Keep editing while
+     "Discard your changes?" is asked. The library's dialog keeps Escape for
+     its own close and never hands it on, and an editor holding unsaved
+     changes must ask rather than close. From anywhere in the dialog, its
+     frame included, which is where a click on its whitespace leaves focus.
+     An open list answers Escape itself, so the editor does not.
+     ---------------------------------------------------------------------- */
+  const answerEscapeInDialog = (event) => {
+    const target = event.target;
+    if (event.isComposing || event.defaultPrevented || !(target instanceof Element)
+      || target.matches('[aria-expanded="true"]')) {
+      return;
+    }
+
+    /* The last one: an editor draws one answer at a time (Cancel, or Keep editing over it), and were a
+       question ever drawn beside the actions it is drawn after them, as the topmost thing asked. */
+    const answers = target.closest('[role="dialog"]')?.querySelectorAll('[data-alvo-escape]') ?? [];
+    if (answers.length > 0) {
+      answers[answers.length - 1].click();
+    }
+  };
+
   const onKeyDown = (event) => {
+    /* ⌘K opens the palette, but never over another dialog (spec §3.1: never a dialog over a dialog), and a
+       second ⌘K over the palette itself does nothing, so what was typed there stays. */
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault();
-      emit('palette');
+      if (!underModal()) {
+        emit('palette');
+      }
+      return;
+    }
+
+    if ((event.key === 'Enter' || event.key === ' ') && submitterOf(event.target)) {
+      event.preventDefault();
+      submitFrom(submitterOf(event.target));
+      return;
+    }
+
+    /* Ctrl/Cmd+Enter submits the form it is typed in, exactly once: an editor, the assistant's
+       question, the import, a rule box. The one mechanism for every multi-line box (spec §3.4),
+       so none of them carries a keydown handler of its own. The browser already submits a form on
+       Enter in a single-line field, modifier or not. A server-side keydown handler as well would
+       make that one chord two submits, and the second would land after an owner that saves
+       synchronously had reopened its gate. So the default is cancelled and this is the only path.
+       A textarea, where Enter is a newline, gets the same submit. */
+    if (event.key === 'Enter' && !event.isComposing && (event.metaKey || event.ctrlKey)
+      && event.target instanceof Element) {
+      const form = event.target.closest('form[data-alvo-chord-submit]');
+      if (form) {
+        event.preventDefault();
+        form.requestSubmit();
+        return;
+      }
+    }
+
+    /* Enter in an open combobox chooses the option it points at. Inside an editor form it would
+       also be the browser's Enter-submit, and the record would be saved on the choice. With the
+       list open and nothing highlighted, Enter does nothing at all: the operator is choosing, and a
+       save then would be the surprise this guard exists to prevent. An IME's Enter commits the
+       composition and is the IME's. */
+    if (event.key === 'Enter' && !event.isComposing && event.target instanceof Element
+      && event.target.matches('[role="combobox"][aria-expanded="true"]') && event.target.closest('form')) {
+      event.preventDefault();
       return;
     }
 
     if (event.key === 'Escape') {
       awaitingGoto = false;
+      answerEscapeInDialog(event);
       emit('dismiss');
       return;
     }
 
-    if (isTypingTarget(document.activeElement)) {
+    /* A chord with a modifier belongs to the browser or the operating system — ⌥D, ⌘R — and a
+       half-typed `g` must not turn the next one into a jump. */
+    if (isTypingTarget(document.activeElement) || event.metaKey || event.ctrlKey || event.altKey) {
+      awaitingGoto = false;
       return;
     }
 
+    /* Nor while a dialog or a sheet is over the page: a jump would navigate out from under it, and
+       whatever was half-done in it would be lost to a stray `g`. */
+    const modal = underModal();
+
     if (awaitingGoto) {
       awaitingGoto = false;
-      if (/^[a-z]$/.test(event.key)) {
+      if (modal) {
+        return;
+      }
+
+      if (GOTO_KEY.test(event.key)) {
         event.preventDefault();
         emit('goto', { key: event.key });
       }
@@ -105,32 +235,162 @@
       return;
     }
 
+    /* The page's own keys are the page's, not the dialog's: `j` inside the record sheet must not move
+       the selection behind it, and Enter there must not open a second record over the first. */
+    if (modal) {
+      return;
+    }
+
     switch (event.key) {
       case 'j':
         event.preventDefault();
-        emit('move', { by: 1 });
+        emit('move', { value: 'next' });
         break;
       case 'k':
         event.preventDefault();
-        emit('move', { by: -1 });
+        emit('move', { value: 'previous' });
         break;
       case 'g':
         awaitingGoto = true;
         break;
       case '/':
         event.preventDefault();
-        emit('search');
+        /* Focused here rather than from .NET: a screen's search box is plain markup, and moving
+           focus into it needs no round trip over the circuit — nor a public method on the page. So
+           there is no `search` event: nothing on the circuit has anything to do. */
+        document.querySelector('[data-alvo-search]')?.focus();
         break;
       case 'Enter':
-        emit('open');
+        if (!isControl(document.activeElement)) {
+          emit('open');
+        }
         break;
       default:
         break;
     }
   };
 
-  applyStored();
-  document.addEventListener('keydown', onKeyDown);
+  /* --- The split's reading pane ------------------------------------------
+     A master–detail screen's aside is as wide as the operator drags it. One
+     width for every split, applied before paint like the theme so a revision's
+     descriptor does not open narrow and then jump. The stylesheet clamps it; this
+     only stores what was chosen. Wired by delegation, so a handle Blazor renders
+     later needs nothing registered.
+     ---------------------------------------------------------------------- */
 
-  window.alvo = { toggleTheme, toggleDensity, resolvedTheme };
+  const ASIDE_KEY = 'alvo.aside';
+  const ASIDE_STEP = 24;
+
+  const setAside = (width) => {
+    const px = Math.round(width);
+    document.documentElement.style.setProperty('--a-aside-w', `${px}px`);
+    writeStored(ASIDE_KEY, String(px));
+  };
+
+  const applyStoredAside = () => {
+    const stored = Number(readStored(ASIDE_KEY));
+    if (Number.isFinite(stored) && stored > 0) {
+      document.documentElement.style.setProperty('--a-aside-w', `${stored}px`);
+    }
+  };
+
+  const asideOf = (handle) => handle.parentElement?.querySelector(':scope > .a-split__aside');
+
+  /* What the pane actually is after the clamp, which is what the separator reports as its value. */
+  const syncValue = (handle) => {
+    const aside = asideOf(handle);
+    if (aside) {
+      handle.setAttribute('aria-valuenow', String(Math.round(aside.getBoundingClientRect().width)));
+    }
+  };
+
+  const onHandleDown = (event) => {
+    const handle = event.target instanceof Element ? event.target.closest('.a-split__handle') : null;
+    if (!handle || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    document.documentElement.dataset.resizing = '';
+    const right = handle.parentElement.getBoundingClientRect().right;
+
+    const move = (e) => setAside(right - e.clientX);
+    const up = () => {
+      delete document.documentElement.dataset.resizing;
+      handle.removeEventListener('pointermove', move);
+      syncValue(handle);
+    };
+
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up, { once: true });
+    handle.addEventListener('pointercancel', up, { once: true });
+  };
+
+  /* Left widens the pane — the handle moves the way the arrow points — and a double-click or Enter
+     gives the stored width back to the stylesheet's default. */
+  const onHandleKey = (event) => {
+    const handle = event.target instanceof Element ? event.target.closest('.a-split__handle') : null;
+    const aside = handle && asideOf(handle);
+    if (!aside) {
+      return;
+    }
+
+    const width = aside.getBoundingClientRect().width;
+    const next = { ArrowLeft: width + ASIDE_STEP, ArrowRight: width - ASIDE_STEP }[event.key];
+    if (next !== undefined) {
+      event.preventDefault();
+      setAside(next);
+      syncValue(handle);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      resetAside(handle);
+    }
+  };
+
+  const resetAside = (handle) => {
+    document.documentElement.style.removeProperty('--a-aside-w');
+    try {
+      localStorage.removeItem(ASIDE_KEY);
+    } catch {
+      /* Nothing stored to forget. */
+    }
+    syncValue(handle);
+  };
+
+  const onHandleDoubleClick = (event) => {
+    const handle = event.target instanceof Element ? event.target.closest('.a-split__handle') : null;
+    if (handle) {
+      resetAside(handle);
+    }
+  };
+
+  const onHandleFocus = (event) => {
+    if (event.target instanceof Element && event.target.matches('.a-split__handle')) {
+      syncValue(event.target);
+    }
+  };
+
+  /* --- Tab strip names ---------------------------------------------------
+     MudTabs puts its own attributes on its outer frame and draws role=tablist a
+     level inside, where no parameter reaches, so the strip would lose the name
+     the WAI-ARIA tabs pattern gives it ("work_orders sections"). The frame's
+     TablistName component calls this once after it renders.
+     ---------------------------------------------------------------------- */
+
+  const nameTablist = (frame, label) => {
+    document.querySelector(frame)?.querySelector('[role="tablist"]')?.setAttribute('aria-label', label);
+  };
+
+  applyStored();
+  followSystem();
+  applyStoredAside();
+  document.addEventListener('keydown', onKeyDown);
+  document.addEventListener('click', onSubmitterClick);
+  document.addEventListener('pointerdown', onHandleDown);
+  document.addEventListener('keydown', onHandleKey);
+  document.addEventListener('dblclick', onHandleDoubleClick);
+  document.addEventListener('focusin', onHandleFocus);
+
+  window.alvo = { toggleTheme, toggleDensity, resolvedTheme, nameTablist };
 })();

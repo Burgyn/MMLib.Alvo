@@ -114,7 +114,7 @@ public class CelCompilerTests
     [Fact]
     public void Each_non_numeric_operand_of_an_arithmetic_operator_gets_its_own_error_position()
     {
-        var result = CelFixtures.Compiler.Compile("status + owner_id", CelProfile.Computed, CelFixtures.Orders);
+        var result = CelFixtures.Compiler.Compile("is_public + owner_id", CelProfile.Computed, CelFixtures.Orders);
 
         result.Errors.Count.ShouldBe(2);
         result.Errors[0].Position.ShouldNotBe(result.Errors[1].Position);

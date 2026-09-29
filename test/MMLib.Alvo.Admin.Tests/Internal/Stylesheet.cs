@@ -150,6 +150,16 @@ internal static partial class Stylesheet
     /// redefines what it narrows, and a state selector (<c>:hover</c>, <c>--on</c>) is a different
     /// selector rather than a second definition of the same one.
     /// </para>
+    /// <para>
+    /// <b>A grouped selector counts as each of its parts, and it did not used to.</b> The scan was
+    /// line-by-line and only the line ending in <c>{</c> matched, so
+    /// <c>.a-input,\n.a-select,\n.a-textarea {</c> registered as <c>.a-textarea</c> alone —
+    /// <c>.a-input</c> and <c>.a-select</c> were invisible to this check entirely, and the one name it
+    /// did see was the one that happened to be written last. That is how a textarea's
+    /// <c>min-height: 84px</c> came to be folded into the shared rule: splitting it back out looked like
+    /// a duplicate to this method, and merging it satisfied it. The 84 px floor then applied to every
+    /// single-line input in the dashboard, which nothing else measured.
+    /// </para>
     /// </remarks>
     internal static IReadOnlyList<string> SelectorsDefinedTwice(string css)
     {
@@ -158,24 +168,111 @@ internal static partial class Stylesheet
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         var order = new List<string>();
 
-        foreach (var line in css.ReplaceLineEndings("\n").Split('\n'))
+        var group = new System.Text.StringBuilder();
+
+        foreach (var line in Unlayered(css).Split('\n'))
         {
-            if (TopLevelSelector().Match(line) is not { Success: true } match)
+            /* A group's earlier lines end in a comma and carry no brace, so they are accumulated until
+               the line that opens the block. An indented line resets: the run has left the top level. */
+            if (line.Length > 0 && char.IsWhiteSpace(line[0]))
             {
+                group.Clear();
                 continue;
             }
 
-            var selector = match.Groups["selector"].Value.Trim();
-            counts[selector] = counts.TryGetValue(selector, out var seen) ? seen + 1 : 1;
-            if (counts[selector] == 2)
+            if (TopLevelSelector().Match(line) is not { Success: true } match)
             {
-                order.Add(selector);
+                /* Only a line that ends in a comma continues a group. Anything else — a closing brace,
+                   a comment, a blank — ends whatever was being accumulated, so a stray `}` cannot be
+                   carried into the next selector's name. */
+                if (line.TrimEnd().EndsWith(','))
+                {
+                    group.Append(line);
+                }
+                else
+                {
+                    group.Clear();
+                }
+
+                continue;
             }
+
+            group.Append(match.Groups["selector"].Value);
+
+            foreach (var selector in group.ToString().Split(',',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                counts[selector] = counts.TryGetValue(selector, out var seen) ? seen + 1 : 1;
+                if (counts[selector] == 2)
+                {
+                    order.Add(selector);
+                }
+            }
+
+            group.Clear();
         }
 
         return order;
     }
 
+    /// <summary>
+    /// The stylesheet with its <c>@layer</c> blocks opened out: the wrapper lines dropped and what they held
+    /// moved back to the top level.
+    /// </summary>
+    /// <param name="css">The stylesheet's text.</param>
+    /// <returns>The same rules, each rule that was directly inside a layer now unindented, with LF endings.</returns>
+    /// <remarks>
+    /// <b>A rule directly inside a layer is still a top-level rule</b> — the layer decides which rule wins
+    /// between two, it does not make either of them a narrowing the way a media query does. The checks that
+    /// find "the" rule for a selector, or a selector defined twice, read indentation as nesting; without this
+    /// they would see every rule of a layered file as nested and pass by finding nothing.
+    /// </remarks>
+    internal static string Unlayered(string css)
+    {
+        ArgumentNullException.ThrowIfNull(css);
+
+        var lines = new List<string>();
+        var inLayer = false;
+
+        foreach (var line in css.ReplaceLineEndings("\n").Split('\n'))
+        {
+            if (LayerBlock().IsMatch(line) || (inLayer && line == "}"))
+            {
+                inLayer = !inLayer;
+                continue;
+            }
+
+            lines.Add(inLayer && line.StartsWith("  ", StringComparison.Ordinal) ? line[2..] : line);
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    /// <summary>
+    /// The lines at the file's own top level that open a block, other than a declared layer or a font face.
+    /// </summary>
+    /// <remarks>
+    /// Any top-level line with a brace, not only one that ends in it, so a rule written on one line —
+    /// <c>.x { color: inherit; }</c> — is caught as well as one spread over several.
+    /// </remarks>
+    /// <param name="css">The stylesheet's text.</param>
+    /// <param name="layers">The layer names the statement declares.</param>
+    /// <returns>Each offending line, in source order.</returns>
+    internal static IReadOnlyList<string> BlocksOutsideLayers(string css, IReadOnlyCollection<string> layers)
+    {
+        ArgumentNullException.ThrowIfNull(css);
+        ArgumentNullException.ThrowIfNull(layers);
+
+        return [.. css.ReplaceLineEndings("\n").Split('\n')
+            .Where(line => line.Length > 0 && !char.IsWhiteSpace(line[0]) && line.Contains('{', StringComparison.Ordinal))
+            .Where(line => !line.StartsWith("/*", StringComparison.Ordinal))
+            .Where(line => line != "@font-face {"
+                && !(LayerBlock().Match(line) is { Success: true } layer && layers.Contains(layer.Groups["name"].Value)))];
+    }
+
     [GeneratedRegex(@"^(?<selector>[.#a-zA-Z][^{@]*)\{\s*$", RegexOptions.Compiled)]
     private static partial Regex TopLevelSelector();
+
+    [GeneratedRegex(@"^@layer (?<name>[a-z-]+) \{$", RegexOptions.Compiled)]
+    private static partial Regex LayerBlock();
 }

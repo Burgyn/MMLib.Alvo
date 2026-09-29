@@ -1,0 +1,23 @@
+﻿@*
+    A REFUSED feature: something this build will not do, drawn inert, with the reason in the danger
+    tone (design §4.1; docs/architecture/admin-dashboard-review.md, F-6). Danger, not warning, since the
+    final branch review's item 11: the warning tone is a warned subsystem's, and one refused slot read
+    amber on one screen and red on the next.
+
+    Never drawn like NotYetPanel. A warned subsystem is somewhere the operator can stand; this is a
+    control, or a whole capability, whose only outcome would be a refusal — so it reads as unavailable
+    rather than as merely quiet.
+*@
+<div @attributes="Attributes" class="@CssClass.Of("a-refused", Attributes)">
+    <span class="a-refused__reason">@ChildContent</span>
+</div>
+
+@code {
+    /// <summary>Why it is refused, and where the thing it needs would come from.</summary>
+    [Parameter, EditorRequired]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Anything else, onto the refusal's element — a <c>data-testid</c>.</summary>
+    [Parameter(CaptureUnmatchedValues = true)]
+    public IReadOnlyDictionary<string, object>? Attributes { get; set; }
+}

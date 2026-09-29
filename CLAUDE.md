@@ -82,9 +82,14 @@ compresses out. Violating one of these is a bug, not a style nit.
   `IAlvoManagement` and `IAlvoData`, plus the design system it ships as static web assets. It
   holds **no** reference to `MMLib.Alvo` — an architecture test keeps it that way.
 - `scripts/` — `test-ring0`/`test-ring1`/`test-ring2` plus `check-brief-freshness`,
-  `test-load` (the load harness), `test-prototype` (the design prototype's scenarios) and
-  `test-admin-e2e` (the dashboard's scenarios, a real browser over a real host) — all three in
-  no ring, see below.
+  `test-load` (the load harness), `test-prototype` (the design prototype's scenarios),
+  `test-admin-e2e` (the dashboard's scenarios, a real browser over a real host) and
+  `eval-assistant` (the schema assistant against a real model) — all four in no ring, see
+  below — and `demo-admin`, which boots the dashboard over the seeded `examples/bike-workshop`
+  backend for demos and UX reviews.
+- `eval/` — `MMLib.Alvo.Ai.Eval`, the schema assistant's real-model eval, driven by
+  `scripts/eval-assistant`; in no ring — built on the PR, never run there. Its graders' own suite,
+  `test/MMLib.Alvo.Ai.Eval.Tests`, is an ordinary ring0 module.
 - `.husky/` — Husky.Net git hooks (`pre-commit`, `commit-msg`) + `task-runner.json`; auto-installed on build.
 - `.github/` — CI workflows; the PR run (everything but mutation) plus
   `mutation.yml`, which runs post-merge on `main`.
@@ -106,6 +111,7 @@ compresses out. Violating one of these is a bug, not a style nit.
 | load | `scripts/test-load` | in no ring — see below |
 | prototype | `scripts/test-prototype` | in no ring — see below |
 | admin e2e | `scripts/test-admin-e2e` | in no ring — see below |
+| assistant eval | `scripts/eval-assistant` | in no ring — see below |
 
 Each ring wraps the previous one and adds a layer: ring1 adds architecture
 tests (already inside `dotnet test`) and, once it lands, public-API
@@ -141,6 +147,12 @@ anything under `docs/design/f5-admin/`. When the Razor dashboard lands, its own 
 Microsoft.Playwright + xUnit one the F5 design §6.2 commits to, and this one retires with the
 prototype it drives. `scripts/gen-prototype-fixtures --check` proves the prototype's generated
 content still matches the repository it was derived from.
+
+**The assistant eval is in no ring, like load.** `scripts/eval-assistant` asks a real model
+the seven cases of `docs/superpowers/specs/2026-09-28-f5-assistant-reliability-design.md` §4.2 over the real host
+and grades outcomes; it costs tokens and measures a model, so it is run on demand and its table is to be published per
+model in `docs/assistant-evals.md` (created by the first real run). Every graded turn, passes included, is traced to `artifacts/eval-assistant/traces/`.
+The graders themselves are pure and tested in ring0 (`test/MMLib.Alvo.Ai.Eval.Tests`).
 
 ## Hard rules
 

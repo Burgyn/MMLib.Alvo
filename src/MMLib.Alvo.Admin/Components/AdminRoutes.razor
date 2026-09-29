@@ -9,9 +9,17 @@
     `AuthorizeRouteView`, not `RouteView`, and it is a security property rather than a nicety.
     `[Authorize]` on a page becomes endpoint metadata, which closes the door on the HTTP request
     that first renders it — but navigation inside a live circuit never touches an endpoint, so a
-    plain `RouteView` would render every later screen with no authorization check at all. An
-    operator disabled or stripped of their roles mid-session would keep navigating. This re-asks on
-    every navigation, off the cascaded authentication state.
+    plain `RouteView` would render every later screen with no authorization check at all. This
+    re-asks on every navigation — but only of the cascaded authentication state, which on its own is
+    the principal captured when the circuit opened: it cannot see a disable written since.
+
+    What makes that state move is the host's `AuthenticationStateProvider`. In the standalone image
+    `AddAlvoIdentityCookieSignIn` registers a revalidating one that re-reads the operator every
+    thirty seconds and drops a disabled or deleted account to anonymous, which lands here as
+    `NotAuthorized` and redirects to sign-in; the cookie itself is re-checked on every HTTP page request and on the circuit's hub connection.
+    An embedded host with a plain provider gets neither, and the shell keeps navigating until the
+    next page load. Authority never lingers either way: every management and data call re-resolves
+    its caller and is refused at once — this is about the chrome, not the data.
 *@
 <Router AppAssembly="@typeof(AdminRoutes).Assembly">
     <Found Context="route">
@@ -32,7 +40,7 @@
                     <div class="a-empty__title">There is no screen at this address</div>
                     <div class="a-empty__body">
                         The dashboard is served under <code class="a-mono">@AlvoAdmin.BasePath</code>.
-                        <a class="a-btn a-btn--sm" href="@AlvoAdmin.BasePath">Go to Overview</a>
+                        <a class="a-btn a-btn--sm" href="@AdminPaths.Overview">Go to Overview</a>
                     </div>
                 </div>
             </div>

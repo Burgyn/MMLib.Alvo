@@ -1,0 +1,91 @@
+﻿@*
+    A button with Alvo's defaults set once: no ripple, no shadow, no uppercase (the theme), and a busy state that
+    disables the button and shows progress in it (spec §3.4, so there is no double submit anywhere). MudBlazor 9
+    removed its global defaults and advises exactly this wrapper (study §1.2). A press bubbles the way a native button's
+    does: the library stops it by default, and a container that closes on a click inside it (the page header's phone
+    overflow) then never hears it. StopClickPropagation is the opt-out for a button inside a clickable container. The tone is Alvo's enum, never Mud's
+    (spec D5). Anything else, such as data-testid, aria-label, id or form, passes through to the button.
+*@
+<MudButton @ref="_button" Variant="_look.Variant" Color="_look.Color" Size="@(Small ? Size.Small : Size.Medium)"
+           Ripple="false" DropShadow="false" Disabled="@(Disabled || Busy)" ClickPropagation="@(!StopClickPropagation)"
+           ButtonType="@(Submit ? ButtonType.Submit : ButtonType.Button)" Href="@Href" OnClick="OnClick"
+           aria-busy="@(Busy ? "true" : null)" @attributes="Attributes">
+    @if (Busy)
+    {
+        <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="a-busy" aria-hidden="true" />
+    }
+    @ChildContent
+</MudButton>
+
+@code {
+    private ButtonLook _look = ButtonLook.Of(ButtonTone.Secondary);
+    private MudButton? _button;
+
+    /// <summary>What the button is for, in the order a screen reaches for them.</summary>
+    public enum ButtonTone
+    {
+        /// <summary>The one action a surface exists for: Save, Create, Apply.</summary>
+        Primary,
+
+        /// <summary>Any other action on the surface.</summary>
+        Secondary,
+
+        /// <summary>An action that destroys or revokes: Delete record, Disable person.</summary>
+        Danger,
+
+        /// <summary>A quiet action beside a primary one: Cancel, Close, an icon in the app bar.</summary>
+        Ghost,
+    }
+
+    /// <summary>What the button is for.</summary>
+    [Parameter]
+    public ButtonTone Tone { get; set; } = ButtonTone.Secondary;
+
+    /// <summary>Whether the action it started is still running: disabled, with progress drawn in it.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    /// <summary>Whether the action is unavailable for a reason the surface states.</summary>
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    /// <summary>Whether it submits its form, which makes Enter in a single-line field press it.</summary>
+    [Parameter]
+    public bool Submit { get; set; }
+
+    /// <summary>The dense size a row or an app bar uses.</summary>
+    [Parameter]
+    public bool Small { get; set; }
+
+    /// <summary>
+    /// Whether a press stops at the button instead of bubbling to its container, for a button inside something that
+    /// has a click of its own. Off by default, as for a native button.
+    /// </summary>
+    [Parameter]
+    public bool StopClickPropagation { get; set; }
+
+    /// <summary>A link target, which makes it a link drawn as a button.</summary>
+    [Parameter]
+    public string? Href { get; set; }
+
+    /// <summary>Raised on a press.</summary>
+    [Parameter]
+    public EventCallback<MouseEventArgs> OnClick { get; set; }
+
+    /// <summary>The label, and an icon beside it when there is one.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Every other attribute, passed to the button.</summary>
+    [Parameter(CaptureUnmatchedValues = true)]
+    public IReadOnlyDictionary<string, object>? Attributes { get; set; }
+
+    /// <inheritdoc />
+    protected override void OnParametersSet() => _look = ButtonLook.Of(Tone);
+
+    /// <summary>
+    /// Gives the button focus, for a surface that hands focus back to the control that opened it (spec §3.4).
+    /// Internal, so no member of the public component carries it.
+    /// </summary>
+    internal ValueTask FocusAsync() => _button?.FocusAsync() ?? ValueTask.CompletedTask;
+}

@@ -61,6 +61,191 @@ public sealed class SqliteRuntimeSchemaWriterTests : RuntimeSchemaWriterContract
         (await store.ListAsync("ddl-failure", ct)).ShouldBeEmpty();
     }
 
+    /// <summary>
+    /// A plan that rebuilds a table other rows reference — SQLite's create-new / copy / drop / rename, which is what
+    /// EF emits for a generated column added to a populated table — applies on the runtime path and keeps the child.
+    /// </summary>
+    /// <remarks>
+    /// The writer must frame its transaction with the dialect's <c>PRAGMA foreign_keys = 0</c> the way the migrator
+    /// does: the pragma is a no-op inside a transaction, so without the framing <c>DROP TABLE parents</c> is refused
+    /// by the restricted reference (<c>FOREIGN KEY constraint failed</c>) — the failure the dashboard's apply of a
+    /// computed field on <c>customers</c> hit — and a cascading one would have deleted the children instead.
+    /// </remarks>
+    [Fact]
+    public async Task A_rebuild_of_a_referenced_table_applies_and_keeps_its_children()
+    {
+        var writer = CreateWriter();
+        var ct = TestContext.Current.CancellationToken;
+        await writer.ApplyAndAppendAsync("rebuild", Plan(
+            "CREATE TABLE parents (id INTEGER PRIMARY KEY, name TEXT)",
+            "CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parents (id) ON DELETE RESTRICT)",
+            "INSERT INTO parents (id, name) VALUES (1, 'p')",
+            "INSERT INTO children (id, parent_id) VALUES (10, 1)"), Candidate(0), 0, new MigrationOptions(), ct);
+
+        await writer.ApplyAndAppendAsync("rebuild", Plan(
+            "CREATE TABLE ef_temp_parents (id INTEGER PRIMARY KEY, name TEXT, label TEXT AS (name) STORED)",
+            "INSERT INTO ef_temp_parents (id, name) SELECT id, name FROM parents",
+            "DROP TABLE parents",
+            "ALTER TABLE ef_temp_parents RENAME TO parents"), Candidate(1), 1, new MigrationOptions(), ct);
+
+        (await ScalarAsync("SELECT count(*) FROM children WHERE parent_id = 1", ct)).ShouldBe(1L);
+        (await ScalarAsync("SELECT label FROM parents WHERE id = 1", ct)).ShouldBe("p");
+    }
+
+    /// <summary>
+    /// A rebuild that introduces a reference over a value naming no parent is refused before it commits — on the
+    /// runtime path — naming the table, the column and the row, and nothing of it is applied.
+    /// </summary>
+    /// <remarks>
+    /// With enforcement suspended for the rebuild, the orphan used to be copied into a table whose foreign key it
+    /// violates and committed silently. <c>PRAGMA foreign_key_check</c> inside the transaction (SQLite's own step 10)
+    /// is what turns that into a refusal.
+    /// </remarks>
+    [Fact]
+    public async Task A_rebuild_that_would_commit_an_orphaned_reference_is_refused_and_rolled_back()
+    {
+        var writer = CreateWriter();
+        var ct = TestContext.Current.CancellationToken;
+        await writer.ApplyAndAppendAsync("orphans", Plan(
+            "CREATE TABLE parents (id INTEGER PRIMARY KEY)",
+            "CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER)",
+            "INSERT INTO parents (id) VALUES (1)",
+            "INSERT INTO children (id, parent_id) VALUES (10, 1), (11, 99)"), Candidate(0), 0, new MigrationOptions(), ct);
+
+        var refusal = await Should.ThrowAsync<MMLib.Alvo.Descriptor.DescriptorValidationException>(
+            () => writer.ApplyAndAppendAsync("orphans", Rebuild(_orphaningRebuild), Candidate(1), 1, new MigrationOptions(), ct));
+
+        var error = refusal.Result.Errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/children/fields/parent_id");
+        error.Message.ShouldContain("'parents'");
+        error.Message.ShouldContain("row 11");
+        (await _services.GetRequiredService<IDescriptorVersionStore>().ListAsync("orphans", ct)).Count
+            .ShouldBe(1, "the version row rolled back with the DDL");
+        (await ScalarAsync("SELECT count(*) FROM pragma_foreign_key_list('children')", ct))
+            .ShouldBe(0L, "the rebuild rolled back: the table has no foreign key");
+    }
+
+    /// <summary>The migrator's own apply verifies the same way.</summary>
+    [Fact]
+    public async Task The_migrators_apply_refuses_the_same_orphaned_reference()
+    {
+        var migrator = _services.GetRequiredService<ISchemaMigrator>();
+        var ct = TestContext.Current.CancellationToken;
+        await migrator.ApplyAsync(Plan(
+            "CREATE TABLE parents (id INTEGER PRIMARY KEY)",
+            "CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER)",
+            "INSERT INTO children (id, parent_id) VALUES (11, 99)"), new MigrationOptions(), ct);
+
+        var refusal = await Should.ThrowAsync<MMLib.Alvo.Descriptor.DescriptorValidationException>(
+            () => migrator.ApplyAsync(Rebuild(_orphaningRebuild), new MigrationOptions(), ct));
+
+        refusal.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe("/entities/children/fields/parent_id");
+        (await ScalarAsync("SELECT count(*) FROM pragma_foreign_key_list('children')", ct)).ShouldBe(0L);
+    }
+
+    /// <summary>
+    /// The check is scoped to what the migration touched: an orphan that already sits in a table the plan does not
+    /// change — nor reference anything it changes — never refuses it.
+    /// </summary>
+    [Fact]
+    public async Task A_pre_existing_orphan_in_an_untouched_table_does_not_refuse_the_migration()
+    {
+        var writer = CreateWriter();
+        var ct = TestContext.Current.CancellationToken;
+        await writer.ApplyAndAppendAsync("scoped", Plan(
+            "CREATE TABLE parents (id INTEGER PRIMARY KEY)",
+            "CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER)",
+            "INSERT INTO parents (id) VALUES (1)",
+            "INSERT INTO children (id, parent_id) VALUES (10, 1)"), Candidate(0), 0, new MigrationOptions(), ct);
+        await PlantOrphanOutOfBandAsync(ct);
+
+        await writer.ApplyAndAppendAsync("scoped", Rebuild(_orphaningRebuild), Candidate(1), 1, new MigrationOptions(), ct);
+
+        (await ScalarAsync("SELECT count(*) FROM pragma_foreign_key_list('children')", ct))
+            .ShouldBe(1L, "the rebuild of children committed despite the orphan in others");
+        (await ScalarAsync("SELECT count(*) FROM others WHERE parent_id = 99", ct)).ShouldBe(1L);
+    }
+
+    /// <summary>
+    /// Fail closed: a plan that runs SQL but whose steps name no table is checked over every table, so a hand-built
+    /// plan cannot commit an orphaned reference by leaving its steps out.
+    /// </summary>
+    [Fact]
+    public async Task A_plan_whose_steps_name_no_table_is_checked_over_every_table()
+    {
+        var writer = CreateWriter();
+        var ct = TestContext.Current.CancellationToken;
+        await writer.ApplyAndAppendAsync("unscoped", Plan(
+            "CREATE TABLE parents (id INTEGER PRIMARY KEY)",
+            "CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER)",
+            "INSERT INTO children (id, parent_id) VALUES (11, 99)"), Candidate(0), 0, new MigrationOptions(), ct);
+
+        var refusal = await Should.ThrowAsync<MMLib.Alvo.Descriptor.DescriptorValidationException>(
+            () => writer.ApplyAndAppendAsync("unscoped", Plan(_orphaningRebuild), Candidate(1), 1, new MigrationOptions(), ct));
+
+        refusal.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe("/entities/children/fields/parent_id");
+    }
+
+    /// <summary>
+    /// The migration connections are unpooled, which is what makes closing one whose restore failed final: no pool
+    /// can hand it out again with foreign keys still off.
+    /// </summary>
+    [Fact]
+    public void Migration_connections_are_never_pooled()
+    {
+#pragma warning disable EF1001 // Alvo's own internal type; the analyzer keys on the ".Internal" namespace alone.
+        using var connection = _services.GetRequiredService<MMLib.Alvo.Data.EntityFrameworkCore.Internal.RelationalConnectionFactory>().Create();
+#pragma warning restore EF1001
+
+        new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connection.ConnectionString).Pooling.ShouldBeFalse();
+    }
+
+    /// <summary>The create-new / copy / drop / rename rebuild of <c>children</c>, adding a reference to <c>parents</c>.</summary>
+    private static readonly string[] _orphaningRebuild =
+    [
+        "CREATE TABLE ef_temp_children (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parents (id))",
+        "INSERT INTO ef_temp_children (id, parent_id) SELECT id, parent_id FROM children",
+        "DROP TABLE children",
+        "ALTER TABLE ef_temp_children RENAME TO children",
+    ];
+
+    private static MigrationPlan Plan(params string[] sql) => new() { Steps = [], Sql = sql };
+
+    /// <summary>
+    /// A table holding an orphaned reference, written outside any migration with enforcement off — the state an
+    /// earlier build could have left behind, and one no migration of this test's plans touches.
+    /// </summary>
+    private async Task PlantOrphanOutOfBandAsync(CancellationToken ct)
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_databasePath};Foreign Keys=False");
+        await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText =
+            "CREATE TABLE others (id INTEGER PRIMARY KEY, parent_id INTEGER REFERENCES parents (id));"
+            + "INSERT INTO others (id, parent_id) VALUES (20, 99);";
+        await command.ExecuteNonQueryAsync(ct);
+    }
+
+    /// <summary>The rebuild as the planner would describe it: one step on <c>children.parent_id</c>.</summary>
+    private static MigrationPlan Rebuild(string[] sql) => new()
+    {
+        Steps = [new MigrationStep(
+            new SchemaChange { Kind = SchemaChangeKind.AlterField, Entity = "children", Field = "parent_id" }, false, null)],
+        Sql = sql,
+    };
+
+    private static DescriptorVersion Candidate(int revision) =>
+        new(new SchemaModel([]), "{}", Revision: revision, CreatedAt: DateTimeOffset.UnixEpoch);
+
+    private async Task<object?> ScalarAsync(string sql, CancellationToken ct)
+    {
+        await using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_databasePath};Foreign Keys=True");
+        await connection.OpenAsync(ct);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        return await command.ExecuteScalarAsync(ct);
+    }
+
     public void Dispose()
     {
         _services.Dispose();

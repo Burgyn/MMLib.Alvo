@@ -18,9 +18,16 @@ namespace MMLib.Alvo.Identity
         public string? BootstrapEmail { get; set; }
         public string? BootstrapPasswordFile { get; set; }
     }
+    public enum AlvoPasswordSetOutcome
+    {
+        Set = 0,
+        Refused = 1,
+        PasswordRejected = 2,
+    }
     public sealed class AlvoSignIn
     {
         public System.Threading.Tasks.Task<bool> PasswordSignInAsync(string email, string password) { }
+        public System.Threading.Tasks.Task<MMLib.Alvo.Identity.AlvoPasswordSetOutcome> SetPasswordAsync(string email, string token, string newPassword, System.Threading.CancellationToken cancellationToken = default) { }
         public System.Threading.Tasks.Task SignOutAsync() { }
     }
 }

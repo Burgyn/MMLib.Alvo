@@ -407,14 +407,38 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
 
     private string RenderScalar(CelNode node, EntitySchema entity, IFieldSqlRenderer fields, ParameterBag bag) => node switch
     {
-        CelLiteral literal => RenderLiteralOperand(literal, fields, bag),
+        CelLiteral literal => RenderScalarValueLiteral(literal, fields, bag),
         CelFieldRef fieldRef => RenderField(fieldRef, entity, fields),
         CelUnary { Operator: CelUnaryOperator.Negate } unary => $"(-{RenderScalar(unary.Operand, entity, fields, bag)})",
+        CelBinary { Operator: CelBinaryOperator.Add } join when ValueTypeOf(join) == CelValueType.String =>
+            RenderConcatenation(join, entity, fields, bag),
         CelBinary { Operator: CelBinaryOperator.Add or CelBinaryOperator.Subtract or CelBinaryOperator.Multiply or CelBinaryOperator.Divide } arithmetic =>
             RenderArithmeticScalar(arithmetic, entity, fields, bag),
         CelConditional conditional => RenderConditional(conditional, entity, fields, bag),
         _ => throw Unsupported(node),
     };
+
+    /// <summary>
+    /// A constant in a <em>value</em> position of a generated column. A text constant is written inline through the
+    /// dialect's own literal quoting, because DDL has no bind-parameter form; a dialect that declines it, and every
+    /// other constant, stays a bound parameter — which the validator refuses in a computed field rather than
+    /// letting it reach DDL.
+    /// </summary>
+    /// <remarks>
+    /// This is the one arm where source text reaches SQL, and it is only reachable from
+    /// <see cref="Render(CompiledExpression, IFieldSqlRenderer)"/>: the predicate path renders every literal through
+    /// <see cref="RenderLiteralOperand"/>, and so does a comparison inside a computed expression's condition.
+    /// </remarks>
+    private static string RenderScalarValueLiteral(CelLiteral literal, IFieldSqlRenderer fields, ParameterBag bag) =>
+        literal is { Type: CelValueType.String, Value: string text } && fields.RenderStringLiteral(text) is { } inline
+            ? inline
+            : RenderLiteralOperand(literal, fields, bag);
+
+    /// <summary>CEL's <c>+</c> over two strings, joined by the dialect's own operator.</summary>
+    private string RenderConcatenation(CelBinary binary, EntitySchema entity, IFieldSqlRenderer fields, ParameterBag bag) =>
+        fields.RenderStringConcatenation(
+            RenderScalar(binary.Left, entity, fields, bag),
+            RenderScalar(binary.Right, entity, fields, bag));
 
     private string RenderArithmeticScalar(CelBinary binary, EntitySchema entity, IFieldSqlRenderer fields, ParameterBag bag)
     {

@@ -1,0 +1,48 @@
+﻿@*
+    The navigation's list: the live sections, the ones declared and not yet built, then Settings, each group
+    under its own rule (docs/architecture/admin-dashboard-review.md, F-26).
+
+    The drawer lists every section at every width: on a phone it is the temporary drawer the app bar opens, and
+    it closes itself on a choice.
+*@
+<div class="a-nav">
+    @Group(AdminNavigation.Live)
+
+    <div class="a-nav-sep"></div>
+
+    @Group(AdminNavigation.NotYet)
+
+    <div class="a-nav-sep"></div>
+
+    @Group(AdminNavigation.Footer)
+</div>
+
+@code {
+    /// <summary>Raised when an entry is chosen — how the phone's drawer closes behind the navigation.</summary>
+    [Parameter]
+    public EventCallback OnNavigate { get; set; }
+
+    /// <summary>
+    /// The click handler, only when there is one to call: a link with no one listening costs the circuit a
+    /// round trip per click for nothing.
+    /// </summary>
+    private IReadOnlyDictionary<string, object>? Handlers => OnNavigate.HasDelegate
+        ? new Dictionary<string, object>(StringComparer.Ordinal) { ["onclick"] = OnNavigate }
+        : null;
+
+    private RenderFragment Group(IEnumerable<AdminSection> sections) => @<text>
+        @foreach (var entry in sections)
+        {
+            @SectionLink.For(entry, "a-nav-item", "a-nav-item--active", Content(entry), Handlers)
+        }
+    </text>;
+
+    private static RenderFragment Content(AdminSection entry) => @<text>
+        <Icon Path="@entry.Icon" />
+        <span>@entry.Title</span>
+        @if (entry.NotYet)
+        {
+            <span class="a-badge a-nav-item__trail" data-testid="nav-not-yet">Not yet</span>
+        }
+    </text>;
+}

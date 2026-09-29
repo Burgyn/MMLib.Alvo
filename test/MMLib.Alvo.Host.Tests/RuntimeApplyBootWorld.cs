@@ -164,7 +164,7 @@ internal sealed class RuntimeApplyBootWorld : IAsyncDisposable
     {
         var id = Guid.NewGuid().ToString();
 
-        await using var connection = new SqliteConnection($"Data Source={databasePath}");
+        await using var connection = new SqliteConnection(AlvoHostWorld.ConnectionStringFor(databasePath));
         await connection.OpenAsync(TestContext.Current.CancellationToken);
 
         var command = connection.CreateCommand();
@@ -186,7 +186,7 @@ internal sealed class RuntimeApplyBootWorld : IAsyncDisposable
     /// <param name="id">The entry queued by <see cref="QueueOutboxEntryAsync"/>.</param>
     internal static async Task<long> OutboxAttemptsAsync(string databasePath, string id)
     {
-        await using var connection = new SqliteConnection($"Data Source={databasePath}");
+        await using var connection = new SqliteConnection(AlvoHostWorld.ConnectionStringFor(databasePath));
         await connection.OpenAsync(TestContext.Current.CancellationToken);
 
         var command = connection.CreateCommand();
@@ -198,7 +198,7 @@ internal sealed class RuntimeApplyBootWorld : IAsyncDisposable
 
     private static async Task<string> ReadStoredDescriptorAsync(string databasePath, string project)
     {
-        await using var connection = new SqliteConnection($"Data Source={databasePath}");
+        await using var connection = new SqliteConnection(AlvoHostWorld.ConnectionStringFor(databasePath));
         await connection.OpenAsync(TestContext.Current.CancellationToken);
 
         var command = connection.CreateCommand();
@@ -212,7 +212,7 @@ internal sealed class RuntimeApplyBootWorld : IAsyncDisposable
     private static async Task RewriteStoredDescriptorAsync(
         string databasePath, string project, string descriptorJson)
     {
-        await using var connection = new SqliteConnection($"Data Source={databasePath}");
+        await using var connection = new SqliteConnection(AlvoHostWorld.ConnectionStringFor(databasePath));
         await connection.OpenAsync(TestContext.Current.CancellationToken);
 
         var command = connection.CreateCommand();
@@ -255,7 +255,7 @@ internal sealed class RuntimeApplyBootWorld : IAsyncDisposable
 
         builder.Services.AddAlvo(alvo =>
         {
-            alvo.UseSqlite($"Data Source={databasePath ?? ownedDatabasePath!}");
+            alvo.UseSqlite(AlvoHostWorld.ConnectionStringFor(databasePath ?? ownedDatabasePath!));
 
             if (descriptorSource is not null)
             {

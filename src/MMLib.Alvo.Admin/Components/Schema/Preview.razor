@@ -1,0 +1,572 @@
+﻿@page "/admin/changes"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject AdminSession Session
+@inject NavigationManager Navigation
+@inject ILogger<Preview> Logger
+@inject ISnackbar Snackbar
+@inject AdminInterop Interop
+@implements IDisposable
+
+<PageTitle>Preview changes · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Eyebrow="Schema" EyebrowHref="@AdminPaths.Schema" Title="Preview changes" />
+
+    @RefusalPanel.Of(_problem)
+
+    @if (_kept is { } kept)
+    {
+        @*
+            Persistent and in place, not a second snackbar: the apply worked, and the snackbar says so, but the copy
+            is now a state the operator has to act on before their next apply can run (spec §3.3).
+        *@
+        <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" TestId="apply-kept" TakeFocus="true"
+                   Title="@($"Somebody applied revision {kept.HeadRevision} after yours")">
+            <ChildContent>
+                Your edits staged after you pressed Apply are kept against revision @Copy.Revision, so the diff below
+                still lists the change you just applied as pending, and the next apply is refused as a conflict until
+                you start again from revision @kept.HeadRevision.
+            </ChildContent>
+            <Actions>
+                <AlvoButton Small="true" data-testid="apply-kept-restart" OnClick="_ => _restarting = true">
+                    Start again from revision @kept.HeadRevision
+                </AlvoButton>
+                <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" Href="@AdminPaths.History">
+                    Open Configuration history
+                </AlvoButton>
+            </Actions>
+        </AlvoAlert>
+    }
+
+    @if (!Copy.Loaded)
+    {
+        <Skeleton />
+    }
+    else if (!Copy.IsDirty)
+    {
+        <EmptyState Title="Nothing to apply"
+                    Body="@($"The working copy is identical to revision {Copy.Revision}. Change something in Schema, or import a descriptor.")">
+            <AlvoButton Small="true" Href="@AdminPaths.Schema">Back to Schema</AlvoButton>
+        </EmptyState>
+    }
+    else
+    {
+        <p class="a-note">
+            Nothing below has run. Planning asks the database what this change would do, and changes nothing.
+            <span class="a-ident a-ident--block">API: PUT …/descriptor?dryRun=true</span>
+        </p>
+
+        <Panel Title="What changed">
+            <Subtitle>The descriptor as it would be sent, against revision @Copy.Revision.</Subtitle>
+            <ChildContent>
+                <DescriptorDiff Before="@Copy.AppliedJson" After="@Copy.Json" Revision="@Copy.Revision" />
+            </ChildContent>
+        </Panel>
+
+        @if (_plan is null && (_busy || !RendererInfo.IsInteractive))
+        {
+            <Skeleton />
+        }
+        else if (_plan is null)
+        {
+            @* Reached only when the plan on arrival was refused: the panel above says why, and this asks again. *@
+            <Panel Padded="true" class="a-row">
+                <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Busy="_busy" OnClick="_ => PlanAsync()">
+                    Plan this change
+                </AlvoButton>
+                <AlvoButton Small="true" Disabled="_busy" data-testid="discard" OnClick="_ => _discarding = true">
+                    Discard them
+                </AlvoButton>
+            </Panel>
+        }
+        else
+        {
+            <Panel Title="@PlanTitle(_plan.Plan, _dynamic.Count > 0)" data-testid="plan" data-plan-run="@_planRuns">
+                @* Asked again while this one is on screen: the pane says so over its top, and the steps stay. *@
+                @*
+                    The plan is of the working copy as it stood when it was asked, and the copy can move under
+                    this page — the assistant's drawer composes into it from here, and so does a second tab of
+                    the same operator. Asking again is the way to a plan of what the diff above now shows.
+                *@
+                <Actions>
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" Disabled="_busy"
+                                data-testid="replan" OnClick="_ => PlanAsync()">
+                        Plan again
+                    </AlvoButton>
+                </Actions>
+                <Subtitle>
+                    @(_plan.Plan.IsEmpty ? EmptyPlanWords(_dynamic) : "In this order, in one transaction.")
+                </Subtitle>
+                <ChildContent>
+                    @RefreshBar.While(_busy)
+                    <PlanSteps Steps="_plan.Plan.Steps" />
+                    @* A dynamic entity is recorded and never created (§8d item 21): each one says so, in the build's words. *@
+                    @foreach (var name in _dynamic)
+                    {
+                        <p class="a-note" data-testid="@($"plan-dynamic-{name}")">
+                            <code class="a-mono">@name</code> — @(_storageSentence ?? DynamicStorageWords.ListNote)
+                        </p>
+                    }
+                </ChildContent>
+            </Panel>
+
+            @if (_plan.Plan.HasDestructiveChanges)
+            {
+                <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" Title="This plan destroys data" TestId="plan-destroys">
+                    Permission to lose data is never implied: not by this preview, and not by your management level.
+                    Applying asks you to type the project's name.
+                </AlvoAlert>
+            }
+
+            @*
+                A form, so Enter in Why applies exactly as the primary does (spec §3.4): a destructive plan still asks
+                for the project's name first. Every other button in it says type="button" (AlvoButton does).
+            *@
+            <form class="a-stack" novalidate @onsubmit="RequestApplyAsync">
+                <Panel Padded="true">
+                    <Field Label="Why" For="apply-reason">
+                        <ChildContent>
+                            <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="apply-reason"
+                                          aria-describedby="apply-reason-hint" Placeholder="@ReasonPlaceholder" Value="_reason"
+                                          ValueChanged="text => _reason = text ?? string.Empty" />
+                        </ChildContent>
+                        <Hint>Configuration history shows this on the revision forever.</Hint>
+                    </Field>
+                </Panel>
+
+                <div class="a-toolbar">
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" Href="@AdminPaths.Schema">Back to the editor</AlvoButton>
+                    <AlvoButton Small="true" Disabled="_busy" data-testid="discard" OnClick="_ => _discarding = true">
+                        Discard them
+                    </AlvoButton>
+                    <span class="a-spacer"></span>
+                    @if (!_stale)
+                    {
+                        <span class="a-hint">
+                            Applying as yourself, against revision @(_planned?.Revision ?? Copy.Revision). If somebody applies first, this is
+                            refused rather than written over theirs.
+                        </span>
+                        <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" Busy="_busy" data-testid="apply-run">
+                            Apply these changes
+                        </AlvoButton>
+                    }
+                </div>
+            </form>
+
+            @*
+                The plan is of the copy as it stood when it was asked, and what an apply sends is that same copy — the
+                steps above are what the operator reads and, for a destructive plan, types the project's name over. Once
+                the copy has moved (the assistant composed into it, another tab edited it) the plan describes something
+                that is no longer there, so there is nothing to apply until it is asked again.
+            *@
+            @if (_stale)
+            {
+                <AlvoAlert @key="_staleDrawn" Tone="AlvoAlert.AlertTone.Warning" TestId="plan-stale" TakeFocus="_staleTakesFocus"
+                           Title="The working copy changed after this plan — plan again">
+                    <ChildContent>
+                        The diff above is the copy as it is now; the steps are of the copy as it was. Nothing is applied
+                        until the plan is asked again.
+                    </ChildContent>
+                    <Actions>
+                        <AlvoButton Small="true" data-testid="plan-stale-replan" Disabled="_busy" OnClick="_ => PlanAsync()">
+                            Plan again
+                        </AlvoButton>
+                    </Actions>
+                </AlvoAlert>
+            }
+        }
+    }
+
+    <AlvoConfirm Open="_confirming" TestId="apply-confirm" ConfirmTestId="apply-confirm-run" CancelTestId="apply-confirm-cancel"
+                 Title="Apply a plan that destroys data?"
+                 Consequence="The steps marked as destructive drop data that no rollback brings back."
+                 Verb="Apply and destroy data" TypeToConfirm="@Gateway.Project" Busy="_busy"
+                 OnConfirm="ApplyConfirmedAsync" OnCancel="() => _confirming = false">
+        <PlanSteps Steps="@(_plan?.Plan.Steps ?? [])" />
+    </AlvoConfirm>
+
+    <DiscardConfirm Open="_discarding" OnClose="() => _discarding = false" OnDiscarded="Discarded" />
+
+    <AlvoConfirm Open="_restarting" TestId="restart-confirm" ConfirmTestId="restart-confirm-run"
+                 CancelTestId="restart-confirm-cancel" Title="Discard your later edits?"
+                 Consequence="@($"The edits staged after you pressed Apply are thrown away, and the working copy starts again from revision {_kept?.HeadRevision}, across all screens. There is no undo.")"
+                 Verb="Discard and start again" OnConfirm="RestartFromHeadAsync" OnCancel="() => _restarting = false" />
+
+    @*
+        The one success that stays in place (spec §3.3): the snackbar says it worked, and this keeps the revision and the
+        way onward on screen. AlvoAlert's Success tone is for exactly this.
+    *@
+    @if (_applied is { } result)
+    {
+        <AlvoAlert Tone="AlvoAlert.AlertTone.Success" Title="@($"Applied as revision {result.Revision}")" TestId="apply-applied">
+            <ChildContent>
+                @(result.Replayed
+                    ? "This request repeated one that had already run — the revision it names was applied by the earlier one."
+                    : "The migration ran and the revision was appended.")
+            </ChildContent>
+            <Actions>
+                <AlvoButton Small="true" Href="@AdminPaths.History">Open Configuration history</AlvoButton>
+            </Actions>
+        </AlvoAlert>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// This operator's working copy, resolved from the store rather than injected.
+    /// </summary>
+    /// <remarks>
+    /// Empty until the first render has resolved who is signed in — the markup therefore reads it
+    /// through <c>Copy.Loaded</c> rather than assuming a document is there.
+    /// </remarks>
+    private WorkingCopy Copy { get; set; } = new();
+
+    private readonly ComponentLifetime _lifetime = new();
+
+    private ManagementApplyResult? _plan;
+
+    /// <summary>The copy <see cref="_plan"/> is of, document and base revision: exactly what an apply sends.</summary>
+    private (string Json, int Revision)? _planned;
+
+    /// <summary>Whether the copy has moved since <see cref="_plan"/> was asked, so there is nothing to apply.</summary>
+    private bool _stale;
+
+    /// <summary>How many times the plan has gone stale, which keys its warning so each one is drawn anew.</summary>
+    private int _staleDrawn;
+
+    /// <summary>Whether the stale warning replaced something the operator was acting on, and so takes focus.</summary>
+    private bool _staleTakesFocus;
+
+    /// <summary>How many plans this page has been answered with — which one is showing, for a reader who asked again.</summary>
+    private int _planRuns;
+    private ManagementApplyResult? _applied;
+    private readonly RefusalState<AdminProblem> _problem = new();
+    private string _reason = string.Empty;
+    private bool _allowed;
+    private bool _busy;
+    private bool _discarding;
+    private bool _confirming;
+    private bool _restarting;
+
+    /// <summary>The head an apply found moved past its own revision while later edits were staged, until acted on.</summary>
+    private KeptFollow? _kept;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            Copy = await Session.WorkingCopyAsync(CancellationToken.None);
+            Session.Follow(Copy, InvokeAsync, OnCopyChanged, _lifetime.Token);
+        }
+        catch (Exception exception)
+        {
+            _problem.Show(AdminProblem.From(exception, Logger), fromPress: false);
+        }
+
+        /* A copy the assistant composed carries what it was asked for. Pre-filled rather than imposed: the
+           operator can replace every character, which is what keeps the history a record of what a person
+           meant rather than of what a machine drafted. */
+        if (_reason.Length == 0 && Copy.SuggestedReason is { Length: > 0 } suggested)
+        {
+            _reason = suggested;
+        }
+
+        /* Planned on arrival: a dry run changes nothing, so a button in front of it was a click every apply
+           paid for nothing. Not while prerendering — that render is thrown away, and the plan asks the
+           database; the skeleton stands in until the interactive render asks. */
+        if (Copy.IsDirty && RendererInfo.IsInteractive)
+        {
+            await SendAsync(dryRun: true, pressed: false);
+        }
+    }
+
+    /// <inheritdoc />
+    public void Dispose() => _lifetime.Dispose();
+
+    /// <summary>
+    /// Redraws when the operator's copy moved in another tab, and drops the Kept warning once it no longer holds: the
+    /// copy was discarded, or started again from the head, somewhere other than this page.
+    /// </summary>
+    private void OnCopyChanged()
+    {
+        if (_kept is { } kept && (!Copy.IsDirty || Copy.Revision >= kept.HeadRevision))
+        {
+            _kept = null;
+        }
+
+        var wasStale = _stale;
+        _stale = CopyMovedPastThePlan();
+        if (_stale && !wasStale)
+        {
+            /* The steps the operator may be typing the name over are no longer what an apply would send. */
+            MarkStale(takesFocus: _confirming);
+            _confirming = false;
+        }
+
+        StateHasChanged();
+    }
+
+    /// <summary>Whether the copy has moved since the plan on screen was asked: read now, under the copy's gate.</summary>
+    private bool CopyMovedPastThePlan() => _plan is not null && _planned is { } planned && Copy.Snapshot() != planned;
+
+    /// <summary>Draws the stale warning anew; it takes focus when it stands in for what the operator was pressing.</summary>
+    private void MarkStale(bool takesFocus)
+    {
+        _stale = true;
+        _staleDrawn++;
+        _staleTakesFocus = takesFocus;
+    }
+
+    /// <summary>
+    /// Returns to the editor once every unapplied edit has been thrown away.
+    /// </summary>
+    /// <remarks>
+    /// <b>The control that was missing, and its absence made the draft one-way.</b> Removing a field, or
+    /// any other edit, writes to the working copy immediately and deliberately — nothing has touched the
+    /// database, so staging needs no confirmation. That argument only holds while there is a way back, and
+    /// there was not: <c>WorkingCopy.Discard</c> existed and no screen called it, so an operator who staged
+    /// something they did not want could only apply it or abandon the session.
+    /// </remarks>
+    private void Discarded()
+    {
+        _discarding = false;
+        _plan = null;
+        _planned = null;
+        _applied = null;
+        _kept = null;
+        Navigation.NavigateTo(AdminPaths.Schema);
+    }
+
+    private static string PlanTitle(ManagementPlanSummary plan, bool dynamic) => plan.IsEmpty
+        ? dynamic ? "No migration — no table changes" : "No migration — the schema is unchanged"
+        : $"{plan.Steps.Count} step{(plan.Steps.Count == 1 ? string.Empty : "s")} against the database";
+
+    /// <summary>
+    /// What an empty plan means: a rules-only or access-only edit, or — when the copy adds or changes a
+    /// <c>storage: dynamic</c> entity — entities an apply records and this build never creates (B2 review, finding 3).
+    /// </summary>
+    private static string EmptyPlanWords(IReadOnlyList<string> dynamic) => dynamic.Count == 0
+        ? "A rules-only or access-only edit changes no table. It is still an apply, and it still appends a revision."
+        : $"No table changes: {string.Join(", ", dynamic)} declare storage: dynamic, which this build does not create; "
+            + "applying records them in the descriptor and appends a revision.";
+
+    /// <summary>The dynamic entities the planned copy adds or changes against the applied descriptor.</summary>
+    private IReadOnlyList<string> _dynamic = [];
+
+    /// <summary>The build's <c>entity.storage</c> sentence, when it reports one.</summary>
+    private string? _storageSentence;
+
+    /// <summary>Reads what the plan on screen says about dynamic entities, for the copy it is of.</summary>
+    private async Task ReadDynamicAsync(string sent)
+    {
+        _dynamic = PendingSchema.DynamicChanged(Copy.AppliedJson, sent);
+        if (_dynamic.Count > 0 && _storageSentence is null)
+        {
+            _storageSentence = (await Gateway.CapabilitiesAsync(CancellationToken.None)).Warned.FirstOrDefault(
+                block => string.Equals(block.Block, DeclaredSlots.EntityStorage, StringComparison.Ordinal))?.Consequence;
+        }
+    }
+
+    private Task PlanAsync() => SendAsync(dryRun: true);
+
+    /// <summary>Applies the copy the plan on screen is of, unless the copy has moved since.</summary>
+    private Task ApplyAsync()
+    {
+        if (_planned is null || CopyMovedPastThePlan())
+        {
+            MarkStale(takesFocus: true);
+            return Task.CompletedTask;
+        }
+
+        return SendAsync(dryRun: false);
+    }
+
+    /// <summary>A destructive plan asks for the project's name first; any other applies at once.</summary>
+    /// <remarks>
+    /// Not while a plan or an apply is in flight: a press in the render before "Plan again" disables the button would
+    /// open the confirm over steps that are about to be replaced.
+    /// </remarks>
+    private Task RequestApplyAsync()
+    {
+        if (_busy)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (CopyMovedPastThePlan())
+        {
+            MarkStale(takesFocus: true);
+            return Task.CompletedTask;
+        }
+
+        if (_plan?.Plan.HasDestructiveChanges == true)
+        {
+            _confirming = true;
+            return Task.CompletedTask;
+        }
+
+        return ApplyAsync();
+    }
+
+    /// <summary>The name was typed, which is the permission to lose data this one apply carries.</summary>
+    private async Task ApplyConfirmedAsync()
+    {
+        _allowed = true;
+        _confirming = false;
+        try
+        {
+            await ApplyAsync();
+        }
+        finally
+        {
+            _allowed = false;
+        }
+    }
+
+    /// <summary>Plans or applies the working copy.</summary>
+    /// <param name="dryRun">Whether it only asks what would happen.</param>
+    /// <param name="pressed">
+    /// Whether an operator's press sent it, so a refusal takes focus; the plan on arrival does not pull focus off the
+    /// heading the router gave it.
+    /// </param>
+    private async Task SendAsync(bool dryRun, bool pressed = true)
+    {
+        /* The disabled attribute arrives a render after the first press; a double click lands both before it. */
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        _problem.Clear();
+
+        try
+        {
+            /* A dry run asks what would happen, so it asks with destruction allowed; the apply asks
+               with what the operator has actually confirmed. Asking the plan under `_allowed` was a
+               deadlock: a drop was refused before a plan existed, the refusal said to type the
+               project's name "above", and that control renders only once there is a plan — so a
+               destructive change could be composed and never reviewed or applied from here. Nothing
+               is destroyed by describing it. */
+            /* An apply sends the copy its plan was of, never the live one: the consent was given to those steps. */
+            var (sent, revision) = dryRun ? Copy.Snapshot() : _planned!.Value;
+            var result = await Gateway.ApplyAsync(
+                sent, revision, allowDestructive: dryRun || _allowed, dryRun,
+                author: await Gateway.AuthorAsync(),
+                reason: _reason.Length > 0 ? _reason : null,
+                CancellationToken.None);
+
+            if (dryRun)
+            {
+                _plan = result;
+                _planned = (sent, revision);
+                await ReadDynamicAsync(sent);
+                _stale = CopyMovedPastThePlan();
+                _planRuns++;
+            }
+            else
+            {
+                await TakeAppliedAsync(result, sent);
+            }
+        }
+        catch (Exception exception)
+        {
+            _problem.Show(AdminProblem.From(exception, Logger, ProblemSite.SchemaApply), pressed);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>
+    /// Keeps the result in the panel that stays because it links onward, follows the copy to the revision just
+    /// written, and only then says so in a snackbar (spec §3.3).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The re-read is caught here rather than by the apply's own handler: the apply has run, so its failure is not a
+    /// refused apply, and the snackbar would be the one message on screen claiming everything worked.
+    /// </para>
+    /// <para>
+    /// How the copy follows is <see cref="WorkingCopy.TakeApplied"/>'s decision, made under its gate: it starts again
+    /// from the head when it holds nothing but what was sent (or a discard landed meanwhile); an edit another tab
+    /// staged meanwhile stays staged over the revision just written; and when somebody applied after us as well, the
+    /// copy keeps its old base. That last one is still a success, so the snackbar says so, and the warning in place
+    /// says the rest: the next apply will be refused until the operator starts again from the head.
+    /// </para>
+    /// </remarks>
+    private async Task TakeAppliedAsync(ManagementApplyResult result, string sent)
+    {
+        _applied = result;
+        _plan = null;
+        _planned = null;
+        _kept = null;
+        try
+        {
+            var head = await Gateway.DescriptorAsync(CancellationToken.None);
+            if (Copy.TakeApplied(sent, result.Revision, head.DescriptorJson, head.Revision) is WorkingCopy.AppliedFollow.Kept)
+            {
+                _kept = new KeptFollow(head.Revision);
+            }
+        }
+        catch (Exception exception)
+        {
+            _problem.Show(AdminProblem.From(exception, Logger),
+                title: $"Applied as revision {result.Revision}; the screen could not reload it");
+            return;
+        }
+
+        Snackbar.Confirm($"Applied as revision {result.Revision}");
+
+        /* The Apply that asked is gone with the plan; the result is what the operator reads next (spec §3.2). Once it
+           is drawn, which is after this call reaches the browser; any confirm closed before the apply was sent. The Kept
+           warning, when there is one, takes focus itself: it is the state the operator has to act on. */
+        if (_kept is null)
+        {
+            await Interop.FocusFirstOnceShownAsync(["[data-testid='apply-applied']"]);
+        }
+    }
+
+    /// <summary>
+    /// Throws the edits the kept copy still holds away and starts it again from the head, read again now: the head
+    /// may have moved once more while the warning was on screen.
+    /// </summary>
+    private async Task RestartFromHeadAsync()
+    {
+        _restarting = false;
+        try
+        {
+            var head = await Gateway.DescriptorAsync(CancellationToken.None);
+            Copy.Take(head.DescriptorJson, head.Revision);
+            _kept = null;
+            _applied = null;
+            _reason = string.Empty;
+            Snackbar.Confirm($"Started again from revision {head.Revision}");
+            await Interop.FocusFirstOnceClosedAsync(["#a-content"]);
+        }
+        catch (Exception exception)
+        {
+            _problem.Show(AdminProblem.From(exception, Logger));
+        }
+    }
+
+    /// <summary>The head an apply found already past the revision it wrote.</summary>
+    /// <param name="HeadRevision">The revision the head was at.</param>
+    private sealed record KeptFollow(int HeadRevision);
+
+    /// <summary>
+    /// What the "Why" box offers before anything is typed: a sentence about this change, when one can be said.
+    /// </summary>
+    /// <remarks>
+    /// The fixed example it replaced — about widening a price — sat above every plan, including ones that
+    /// created a table, and read as a value somebody had already filled in. The assistant's own suggestion
+    /// comes first, because it knows what it was asked; a one-step plan can be named from the step; anything
+    /// else gets the question the box is asking.
+    /// </remarks>
+    private string ReasonPlaceholder
+        => Copy.SuggestedReason is { Length: > 0 } suggested
+            ? suggested
+            : PlanStep.SuggestReason(_plan?.Plan.Steps ?? []) ?? "What does this change do, and why?";
+}

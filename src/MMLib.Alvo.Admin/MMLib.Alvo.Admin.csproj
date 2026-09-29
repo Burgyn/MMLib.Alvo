@@ -17,6 +17,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The components the screens are drawn with (spec D1). Its types never reach a public member of this
+         package: LibraryBoundaryTests holds that (spec D5). -->
+    <PackageReference Include="MudBlazor" />
+  </ItemGroup>
+
+  <ItemGroup>
     <SupportedPlatform Include="browser" />
   </ItemGroup>
 

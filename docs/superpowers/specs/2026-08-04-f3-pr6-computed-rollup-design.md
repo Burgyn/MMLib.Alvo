@@ -204,6 +204,35 @@ already emits the whole create-new / copy / drop / rename rebuild. It never emit
 extra plain `ADD` first), and the member answered a question nobody asks — a default interface member with no
 consumer. Both are gone. The engine fact Q1 measured is still true; the inference drawn from it was not.
 
+**Dev-1/Dev-2 reinstated (2026-09-28) — the withdrawal above measured the wrong diff.** The "single-hop" run
+started from the column present as an *ordinary* one (the shared suite's `PlainSchema`), which EF plans as an
+`AlterColumnOperation` — and that is the operation EF's SQLite generator rebuilds for. A field that did not exist
+at all, which is what an operator adding one from the dashboard produces, is an `AddColumnOperation`, and EF emits
+the bare `ALTER TABLE … ADD COLUMN … STORED` SQLite refuses on a populated table (`cannot add a STORED column`) —
+Q7 was right. So the two-hop is back, in `GeneratedColumnAdds`, behind the default-implemented dialect member
+`IAlvoSqlDialect.GeneratedColumnAddRequiresTableRebuild` (SQLite `true`, PostgreSQL keeps its one-hop `ADD`). The
+same run found that Dev-7's framing covered only the migrator's own apply: the runtime path the dashboard and the
+Management API use (`EfCoreRuntimeSchemaWriter`) ran the rebuild with foreign keys enforced, so rebuilding a
+referenced parent failed on a restricted reference (and would have cascaded away children of a cascading one). Both
+now run through `MigrationFramingScope`. Pinned by the shared suite's
+`A_new_computed_field_can_be_added_to_a_parent_that_already_holds_rows`, `SqliteRuntimeSchemaWriterTests`, and the
+admin e2e `ComputedOnPopulatedEntityScenarios`.
+
+**Deviation (2026-09-28) — `computed` is compiled and rendered at descriptor validation, with the core's own
+renderer.** `ComputedFieldCheck` (called from `DescriptorValidator`) refuses at `/entities/{e}/fields/{f}/computed`
+what `ComputedColumnSql` used to refuse only at plan time with an undocumented exception; the driver keeps it as a
+structured backstop (`DescriptorValidationException`). The pass uses `SqlPredicateRenderer` directly rather than the
+DI-resolved `IPredicateRenderer`, because the validator is also constructed without a container; a host whose
+replacement renderer could carry more is therefore over-refused at validation. Deliberate, and one-sided.
+
+**Rebuild integrity (2026-09-28).** With enforcement suspended, a rebuild that adds or retargets a reference over
+values naming no parent would commit the orphans. `MigrationBatchFraming.Verify` (SQLite: `PRAGMA
+foreign_key_check`, step 10 of SQLite's twelve-step `ALTER TABLE`) runs inside the transaction before commit on both
+the migrator and the runtime writer, and any row refuses the migration as a `DescriptorValidationException` at the
+referencing field, rolling it all back. A connection whose restore of `PRAGMA foreign_keys = 1` fails is closed (the
+migration connections are unpooled, so it cannot be handed out again). A generated-column add that SQLite rebuilds
+is planned as one safe `AddField` whose step says "Rebuilds the table: copies every row under a write lock."
+
 **Dev-7 — the rebuild's real missing piece was a foreign-key pragma outside the transaction, and no pass of the
 spike found it.** EF emits `PRAGMA foreign_keys = 0` around its rebuild and marks those commands
 transaction-suppressed, but `MigrationPlan.Sql` carries plain strings and cannot carry the flag — so the pragma
@@ -349,6 +378,38 @@ Only the *child* case exists. A dynamic **parent**'s rollups are never resolved 
 runs only for entities the filter kept — so there is nothing to refuse and no second arm to write.
 
 Caught by CodeRabbit on #163 and by `alvo-plan-guard`, which asked for this entry.
+
+**Dev-16 (2026-09-28) — text joins and inline text constants; Dev-4 narrowed, not reversed.** F5's
+assistant-reliability design (ruling 2) needs `customers.full_name = first_name + ' ' + last_name`, which Dev-4 and
+the type checker both refused. What changed, and what each decision is measured against:
+
+- **CEL `string + string`** (the spec's `_+_` overload) is a construct of its own, `Concatenation`, in the
+  `Computed` profile only. No implicit conversion; the profile has no `string()`.
+- **Null rule: refuse.** CEL's `+` has no null overload; SQL's `||` answers `NULL`. An operand that can be null is
+  refused unless written with the profile's own coalescing construct, `has(f) ? f : ''`. This deliberately does
+  *not* follow the arithmetic precedent (`null * x` propagates on both backends): a name silently empty for every
+  row missing one part reads as data, and relaxing a refusal later is additive.
+- **Dev-4 narrowed:** a **text** constant in a value position is written inline, through the one function per
+  engine that quotes one — `IFieldSqlRenderer.RenderStringLiteral` (default `null`: a dialect that has not decided
+  its quoting declines, and the constant is bound and refused as before). Numeric constants and a comparison's
+  operands stay bound, so Dev-4's refusal still answers `unit_price * 1.2`. The escaping Dev-4 worried about is now
+  exercised: a property test per engine reads generated literals back **through the engine itself**, and the
+  shared suite writes a breakout payload into a real column on both engines.
+- **PostgreSQL writes `E'…'`, not the standard literal** — a deviation from the brief's "standard SQL, assume
+  `standard_conforming_strings = on` and document it". With the setting off a standard literal is broken out of
+  by a backslash before a quote; an escape string reads the same under both settings, measured on a real server.
+  SQLite reads the standard literal (`AlvoSqlStringLiteral`), where a backslash is an ordinary character.
+- **Declared type and length are checked** (`ComputedValueShape`): a text result needs a `string`/`text` field and
+  the reverse; a join longer than a declared `maxLength` is refused, because PostgreSQL's `varchar(n)` refuses the
+  write where SQLite stores it — the same §0-principle-3 divergence class as Dev-13; and an expression reading no
+  field is refused (it is a `default`).
+- **Fix round 1:** a field is known present anywhere inside the branch its `has()` guards (the
+  separator-only-when-present shapes validate); a computed field reading another computed field is refused
+  (PostgreSQL refuses it at apply, SQLite accepts — a principle-3 divergence, closed at validation);
+  `RenderStringConcatenation` defaults to throwing; `AlvoSqlStringLiteral` is `internal` with
+  `InternalsVisibleTo` to the two drivers.
+- **Backstop not widened:** `ComputedColumnSql` still refuses a bound value; it does not repeat the type/length
+  checks, which need the descriptor's declared field and live in the validator.
 
 ## Acceptance
 

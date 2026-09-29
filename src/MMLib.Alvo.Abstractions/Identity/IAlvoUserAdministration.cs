@@ -27,6 +27,15 @@
 /// of a swappable adapter where it would be optional by construction.
 /// </para>
 /// <para>
+/// <b>Writes are unversioned, and the later one wins, column by column — by decision, for now.</b> No
+/// member takes the version of the person the caller last saw, so an implementation cannot refuse a write
+/// made from a stale view; it can only apply it to the row as stored (each member changes its own column
+/// and nothing else) and refuse a write that races another <em>inside</em> the call. That is why the role
+/// member is a replacement a screen must compute from a fresh read, never from a snapshot it has held. An
+/// expected-version check (an <c>If-Match</c> on the route, a version on the member) is the follow-up —
+/// <c>docs/todo-admin.md</c> §8d item 37.
+/// </para>
+/// <para>
 /// <b>The bootstrap administrator is not a target of this surface.</b> Two members refuse it by
 /// name — see each one — because it is the identity the whole default-deny story rests on: a
 /// project whose <c>access</c> block admits nobody still has exactly one person who can fix it.
@@ -49,7 +58,8 @@ public interface IAlvoUserAdministration
     /// <remarks>
     /// <b>No password.</b> A credential that travels as a value is readable by whoever handles it —
     /// the same reason this repository refuses a bootstrap password supplied as configuration. The
-    /// new operator sets their own through <see cref="IssueCredentialTokenAsync"/>.
+    /// new operator sets their own by redeeming a token from <see cref="IssueCredentialTokenAsync"/> —
+    /// in the standalone image, on the dashboard's set-password page.
     /// </remarks>
     /// <param name="creation">The address, the roles and the tenant.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
@@ -81,11 +91,18 @@ public interface IAlvoUserAdministration
 
     /// <summary>Bars a person from signing in, or lets them back.</summary>
     /// <remarks>
+    /// <para>
     /// <b>Refuses the bootstrap administrator by name.</b> The context resolver answers
     /// <see langword="null"/> for a disabled account <em>before</em> anything consults the bootstrap
     /// branch, and the seed does not reset an existing row — so a deployment whose <c>access</c>
     /// block admits nobody else, which is the default, would be locked out of its own management
     /// surface with no way back but editing the identity database by hand.
+    /// </para>
+    /// <para>
+    /// <b>A disable ends every session the person holds and every credential token outstanding for
+    /// them</b>, and letting them back in does not revive either: they sign in again, and a person who had
+    /// not set a password yet needs a new token.
+    /// </para>
     /// </remarks>
     /// <param name="user">Whom to disable or restore.</param>
     /// <param name="disabled">Whether they are barred.</param>
@@ -94,6 +111,36 @@ public interface IAlvoUserAdministration
     /// <exception cref="NotSupportedException">This host does not disable accounts.</exception>
     Task<AlvoUser> SetDisabledAsync(
         UserId user, bool disabled, CancellationToken cancellationToken = default);
+
+    /// <summary>Ends a temporary lockout from failed sign-ins now, and forgets the failed attempts.</summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The operator's answer to a lockout somebody else caused.</b> Repeated wrong passwords lock an account
+    /// for a few minutes whoever typed them, so a stranger who knows an address can keep its owner out
+    /// (<c>docs/todo-admin.md</c> §8d item 46). This lets an administrator let the person try again at once. It
+    /// changes nothing else: the lockout still guards the account afterwards, and the next run of wrong
+    /// passwords locks it again. A person with no lockout standing is answered as they are — the call is safe
+    /// to repeat.
+    /// </para>
+    /// <para>
+    /// <b>Refuses a disabled person, with <see cref="Management.ManagementRequestException"/>.</b> A disable and
+    /// a lockout share a column in some stores, and an implementation that cleared it for a disabled person
+    /// would let them back in by a door that decides nothing about a disable. Letting a disabled person back in
+    /// is <see cref="SetDisabledAsync"/>. The check is made on the person as stored at the call, in the same
+    /// unit of work as the write, so a disable written meanwhile is never undone.
+    /// </para>
+    /// <para>
+    /// <b>Sessions are untouched.</b> Nothing about who holds a session changed, so, unlike a disable, it ends
+    /// none and invalidates no credential token. <b>The bootstrap administrator is not refused</b>: ending
+    /// their lockout gives back the one account that can always recover a project, rather than taking it away.
+    /// </para>
+    /// </remarks>
+    /// <param name="user">Whose lockout to end.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>The person as they now are.</returns>
+    /// <exception cref="Management.ManagementRequestException">The person is disabled, not locked out.</exception>
+    /// <exception cref="NotSupportedException">This host keeps no lockout to end.</exception>
+    Task<AlvoUser> ClearLockoutAsync(UserId user, CancellationToken cancellationToken = default);
 
     /// <summary>Mints a single-use token with which a person sets their own password.</summary>
     /// <remarks>
@@ -106,8 +153,10 @@ public interface IAlvoUserAdministration
     /// <para>
     /// <b>Nothing in this build delivers the token.</b> There is no mail transport, and
     /// <c>templates</c> is a warned subsystem whose reach is an after-hook on an entity write
-    /// rather than an identity event. It is returned for an administrator to hand over out of band,
-    /// and a screen that renders it says so.
+    /// rather than an identity event. It is returned for an administrator to hand over out of band —
+    /// the dashboard renders it as a link to its set-password page, where the person redeems it once
+    /// and then signs in — and a screen that renders it says so. Redeeming it ends every session the
+    /// person held.
     /// </para>
     /// </remarks>
     /// <param name="user">Who is setting a password.</param>

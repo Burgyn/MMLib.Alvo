@@ -39,6 +39,7 @@ public sealed class DesignTokenTests
         { "--panel", "--warn-fg" },
         { "--panel", "--danger-fg" },
         { "--panel", "--neutral-fg" },
+        { "--panel", "--accentInk" },
     };
 
     [Fact]

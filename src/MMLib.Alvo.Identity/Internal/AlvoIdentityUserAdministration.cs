@@ -1,5 +1,7 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using MMLib.Alvo.Management;
 
 namespace MMLib.Alvo.Identity.Internal;
 
@@ -18,45 +20,46 @@ namespace MMLib.Alvo.Identity.Internal;
 /// It is registered under <see cref="AlvoUserAdministration.UnguardedKey"/> precisely so that
 /// nothing but that decorator can resolve it.
 /// </para>
+/// <para>
+/// <b>Every write is its own unit of work</b> through <see cref="AlvoIdentityUnitOfWork"/>, and a write
+/// that lost a race to another administrator's is refused as
+/// <see cref="MMLib.Alvo.Data.AlvoPreconditionFailedException"/> — never as a raw EF exception, and
+/// never leaving rows behind for the next write to trip over.
+/// </para>
 /// </remarks>
 /// <param name="users">Identity's user manager over the Alvo identity store.</param>
 /// <param name="roles">Identity's role manager, for the rows a membership needs.</param>
 /// <param name="store">The identity store, for the paged read.</param>
 /// <param name="bootstrap">Who the bootstrap administrator is, for the refusals the core applies.</param>
+/// <param name="tokens">The credential token's lifetime, so the stated expiry is the real one.</param>
 internal sealed class AlvoIdentityUserAdministration(
     UserManager<AlvoIdentityUser> users,
     RoleManager<AlvoIdentityRole> roles,
     AlvoIdentityDbContext store,
-    IAlvoBootstrapAdmin bootstrap) : IAlvoUserAdministration
+    IAlvoBootstrapAdmin bootstrap,
+    IOptions<DataProtectionTokenProviderOptions> tokens) : IAlvoUserAdministration
 {
     /// <inheritdoc/>
+    /// <remarks>
+    /// <b>Ordered and paged by the normalised user name</b>, not the raw address: it is the column
+    /// Identity keeps unique and indexed (<c>UserNameIndex</c>), and every writer here sets the user
+    /// name to the address, so it orders the same people case-insensitively, a page is an index range
+    /// rather than a sort, and two equal keys — which would make the keyset skip the second one
+    /// forever — cannot exist. The cursor stays opaque to the caller; it happens to be that name.
+    /// </remarks>
     public async Task<AlvoUserPage> ListAsync(
         AlvoUserQuery query, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        var rows = store.Users.AsNoTracking().OrderBy(row => row.Email).AsQueryable();
+        var matching = Matching(query.Search);
 
-        if (query.Search is { Length: > 0 } search)
-        {
-            rows = rows.Where(row => row.Email != null && row.Email.Contains(search));
-        }
-
-        /* The cursor is the last address seen. Keyset over a unique ordered column, which is what
-           the Data API's own paging does and for the same reason: an offset drifts under a
-           concurrent insert, and a page that silently skips a row is worse than a slow one. */
-        if (query.After is { Length: > 0 } after)
-        {
-            /* Ordinal, because the cursor is compared in the database and the database's
-               collation is what actually orders the rows — a culture-aware comparison here would
-               be a different order from the one the page was built with, which is how a keyset
-               cursor starts skipping rows. */
-            rows = rows.Where(row => string.Compare(row.Email, after, StringComparison.Ordinal) > 0);
-        }
-
-        var total = await rows.LongCountAsync(cancellationToken).ConfigureAwait(false);
+        /* Counted before the cursor narrows it: the port's total is how many there are, not how
+           many are left after the page on screen. */
+        var total = await matching.LongCountAsync(cancellationToken).ConfigureAwait(false);
         var limit = Math.Clamp(query.Limit, 1, 200);
-        var page = await rows.Take(limit + 1).ToListAsync(cancellationToken).ConfigureAwait(false);
+        var page = await After(matching, query.After).Take(limit + 1)
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
 
         var more = page.Count > limit;
         var taken = more ? page[..limit] : page;
@@ -67,15 +70,62 @@ internal sealed class AlvoIdentityUserAdministration(
             projected.Add(await ProjectAsync(row).ConfigureAwait(false));
         }
 
-        return new AlvoUserPage(projected, more ? taken[^1].Email : null, total);
+        return new AlvoUserPage(projected, more ? taken[^1].NormalizedUserName : null, total);
+    }
+
+    /// <summary>The people a search matches, in the order the pages walk.</summary>
+    /// <remarks>
+    /// Matched as signing in matches an address (<c>FindByEmailAsync</c>): on the normalised column,
+    /// through Identity's own normaliser, so a search ignores case on every engine rather than
+    /// following each one's collation.
+    /// </remarks>
+    /// <param name="search">An address fragment, or nothing.</param>
+    private IQueryable<AlvoIdentityUser> Matching(string? search)
+    {
+        var rows = store.Users.AsNoTracking().OrderBy(row => row.NormalizedUserName).AsQueryable();
+        if (search is not { Length: > 0 })
+        {
+            return rows;
+        }
+
+        var normalized = users.NormalizeEmail(search);
+        return rows.Where(row => row.NormalizedEmail != null && row.NormalizedEmail.Contains(normalized));
+    }
+
+    /// <summary>The rows after the cursor: keyset over a unique ordered column.</summary>
+    /// <remarks>
+    /// What the Data API's own paging does and for the same reason: an offset drifts under a
+    /// concurrent insert, and a page that silently skips a row is worse than a slow one. The
+    /// two-argument Compare is what EF translates to SQL's own <c>&gt;</c>, so the cursor is compared
+    /// by the database's collation — the one that ordered the page; the Ordinal overload this once
+    /// used has no translation at all, so every second page threw.
+    /// </remarks>
+    /// <param name="rows">The ordered rows.</param>
+    /// <param name="after">The previous page's cursor, or nothing.</param>
+    private static IQueryable<AlvoIdentityUser> After(IQueryable<AlvoIdentityUser> rows, string? after)
+    {
+        if (after is not { Length: > 0 })
+        {
+            return rows;
+        }
+
+        /* CA1309 is about a comparison .NET runs; this one is an expression tree SQL runs. */
+#pragma warning disable CA1309
+        return rows.Where(row => string.Compare(row.NormalizedUserName, after) > 0);
+#pragma warning restore CA1309
     }
 
     /// <inheritdoc/>
-    public async Task<AlvoUser> CreateAsync(
+    public Task<AlvoUser> CreateAsync(
         AlvoUserCreation creation, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(creation);
+        return AlvoIdentityUnitOfWork.RunAsync(store, () => CreateRowAsync(creation), cancellationToken);
+    }
 
+    /// <inheritdoc cref="CreateAsync"/>
+    private async Task<AlvoUser> CreateRowAsync(AlvoUserCreation creation)
+    {
         var row = new AlvoIdentityUser
         {
             Id = Guid.CreateVersion7(),
@@ -101,11 +151,16 @@ internal sealed class AlvoIdentityUserAdministration(
     }
 
     /// <inheritdoc/>
-    public async Task<AlvoUser> SetRolesAsync(
+    public Task<AlvoUser> SetRolesAsync(
         UserId user, IReadOnlyList<string> roleNames, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(roleNames);
+        return AlvoIdentityUnitOfWork.RunAsync(store, () => ReplaceRolesAsync(user, roleNames), cancellationToken);
+    }
 
+    /// <inheritdoc cref="SetRolesAsync"/>
+    private async Task<AlvoUser> ReplaceRolesAsync(UserId user, IReadOnlyList<string> roleNames)
+    {
         var row = await RequireAsync(user).ConfigureAwait(false);
         var existing = await users.GetRolesAsync(row).ConfigureAwait(false);
 
@@ -120,47 +175,101 @@ internal sealed class AlvoIdentityUserAdministration(
     }
 
     /// <inheritdoc/>
-    public async Task<AlvoUser> SetTenantAsync(
+    public Task<AlvoUser> SetTenantAsync(
         UserId user, TenantId? tenant, CancellationToken cancellationToken = default)
-    {
-        var row = await RequireAsync(user).ConfigureAwait(false);
-        row.TenantId = tenant?.Value;
-        Succeeded(await users.UpdateAsync(row).ConfigureAwait(false), user.ToString());
-        return await ProjectAsync(row).ConfigureAwait(false);
-    }
+        => AlvoIdentityUnitOfWork.RunAsync(store, async () =>
+        {
+            var row = await RequireAsync(user).ConfigureAwait(false);
+            row.TenantId = tenant?.Value;
+            Succeeded(await users.UpdateAsync(row).ConfigureAwait(false), user.ToString());
+            return await ProjectAsync(row).ConfigureAwait(false);
+        }, cancellationToken);
 
     /// <inheritdoc/>
-    public async Task<AlvoUser> SetDisabledAsync(
+    public Task<AlvoUser> SetDisabledAsync(
         UserId user, bool disabled, CancellationToken cancellationToken = default)
+        => AlvoIdentityUnitOfWork.RunAsync(store, () => WriteDisabledAsync(user, disabled), cancellationToken);
+
+    /// <inheritdoc cref="SetDisabledAsync"/>
+    private async Task<AlvoUser> WriteDisabledAsync(UserId user, bool disabled)
     {
         var row = await RequireAsync(user).ConfigureAwait(false);
+        var wasDisabled = AlvoIdentityLockout.IsDisabled(row.LockoutEnd);
 
-        /* A lockout with no end is what "disabled" means here, and the resolver reads exactly that:
-           it answers null for a user whose LockoutEnd is in the future. DateTimeOffset.MaxValue is
-           Identity's own idiom for "indefinitely". */
+        /* A lockout with no end is what "disabled" means here, and the resolver reads exactly that
+           through AlvoIdentityLockout — which also says why a lockout *with* an end, the one failed
+           sign-ins write, is deliberately not read as disabled. */
         Succeeded(
             await users.SetLockoutEnabledAsync(row, enabled: true).ConfigureAwait(false),
             user.ToString());
         Succeeded(
-            await users.SetLockoutEndDateAsync(row, disabled ? DateTimeOffset.MaxValue : null)
+            await users.SetLockoutEndDateAsync(row, disabled ? AlvoIdentityLockout.Disabled : null)
                 .ConfigureAwait(false),
             user.ToString());
+
+        /* A disable also rotates the security stamp, in the same unit of work, so every cookie and circuit the
+           person holds ends and every credential token outstanding for them dies. The lockout alone refuses
+           them only while it stands: a cookie not presented during the disable — a stolen one, say — would
+           stand again after "let them back in". OWASP's session guidance ends sessions on a disable; the cost
+           is that a person let back in signs in again, and needs a new token if they had not set a password.
+           Only the move from enabled to disabled rotates it: disabling a person already disabled changes nothing,
+           so a token issued during the disable, which the panel says works once they are let back in, still does. */
+        if (disabled && !wasDisabled)
+        {
+            Succeeded(await users.UpdateSecurityStampAsync(row).ConfigureAwait(false), user.ToString());
+        }
 
         return await ProjectAsync(row).ConfigureAwait(false);
     }
 
     /// <inheritdoc/>
-    public async Task<AlvoCredentialToken> IssueCredentialTokenAsync(
-        UserId user, CancellationToken cancellationToken = default)
+    public Task<AlvoUser> ClearLockoutAsync(UserId user, CancellationToken cancellationToken = default)
+        => AlvoIdentityUnitOfWork.RunAsync(store, () => EndLockoutAsync(user), cancellationToken);
+
+    /// <inheritdoc cref="ClearLockoutAsync"/>
+    /// <remarks>
+    /// The disable is checked on the row this unit of work just read, and the write that follows carries that read's
+    /// concurrency stamp: a disable committed in between fails the write as a lost race rather than being overwritten
+    /// by a lockout end of <see langword="null"/>, which is what a disable would otherwise quietly become. The security
+    /// stamp is left alone — no session changed hands.
+    /// </remarks>
+    private async Task<AlvoUser> EndLockoutAsync(UserId user)
     {
         var row = await RequireAsync(user).ConfigureAwait(false);
-        var token = await users.GeneratePasswordResetTokenAsync(row).ConfigureAwait(false);
+        if (AlvoIdentityLockout.IsDisabled(row.LockoutEnd))
+        {
+            throw new ManagementRequestException(
+                $"{row.Email ?? user.ToString()} is disabled, not locked out after failed sign-ins, so there is no "
+                + "lockout to end. Let them back in instead: ending a lockout never undoes a disable.");
+        }
 
-        /* Identity's own lifetime for a data-protector token is one day, and it is not readable
-           from here without reaching into the provider's options — so the expiry is stated as the
-           default rather than computed, and a screen that renders it says "about". Overstating it
-           would be worse than approximating it. */
-        return new AlvoCredentialToken(user, token, DateTimeOffset.UtcNow.AddDays(1));
+        Succeeded(await users.ResetAccessFailedCountAsync(row).ConfigureAwait(false), user.ToString());
+        if (row.LockoutEnd is not null)
+        {
+            Succeeded(await users.SetLockoutEndDateAsync(row, null).ConfigureAwait(false), user.ToString());
+        }
+
+        return await ProjectAsync(row).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public Task<AlvoCredentialToken> IssueCredentialTokenAsync(
+        UserId user, CancellationToken cancellationToken = default)
+        => AlvoIdentityUnitOfWork.RunAsync(store, () => MintCredentialTokenAsync(user), cancellationToken);
+
+    /// <inheritdoc cref="IssueCredentialTokenAsync"/>
+    private async Task<AlvoCredentialToken> MintCredentialTokenAsync(UserId user)
+    {
+        var row = await RequireAsync(user).ConfigureAwait(false);
+
+        /* The issue time is read before the provider stamps its own, so the stated expiry is at most
+           microseconds early and never late: the lifetime is the options the provider itself reads,
+           Identity's one-day default unless the host configured its own. Issuing does not rotate the security
+           stamp, so an earlier outstanding token keeps working until the first redemption (design
+           §8.4): rotating here would sign the person out because an administrator clicked a button. */
+        var issued = DateTimeOffset.UtcNow;
+        var token = await users.GeneratePasswordResetTokenAsync(row).ConfigureAwait(false);
+        return new AlvoCredentialToken(user, token, issued + tokens.Value.TokenLifespan);
     }
 
     /// <summary>Who the bootstrap administrator is, so the core's refusals can name them.</summary>
@@ -212,7 +321,8 @@ internal sealed class AlvoIdentityUserAdministration(
         Id = new UserId(row.Id),
         Email = row.Email ?? row.UserName ?? string.Empty,
         RoleNames = [.. await users.GetRolesAsync(row).ConfigureAwait(false)],
-        IsDisabled = row.LockoutEnd is { } until && until > DateTimeOffset.UtcNow,
+        IsDisabled = AlvoIdentityLockout.IsDisabled(row.LockoutEnd),
+        LockedOutUntil = AlvoIdentityLockout.LockedOutUntil(row.LockoutEnd),
         Tenant = row.TenantId is { } tenant ? new TenantId(tenant) : null,
     };
 
@@ -223,6 +333,7 @@ internal sealed class AlvoIdentityUserAdministration(
             return;
         }
 
+        AlvoIdentityUnitOfWork.ThrowIfRaced(result);
         var reasons = string.Join("; ", result.Errors.Select(error => error.Description));
         throw new InvalidOperationException($"The account '{who}' could not be written: {reasons}");
     }

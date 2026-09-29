@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Admin.Tests.EndToEnd;
+﻿using Microsoft.Playwright;
+
+namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>
 /// Administering the people who can reach the project.
@@ -12,7 +14,7 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/access");
 
-        var text = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var text = await session.Content.InnerTextAsync();
         text.ShouldContain("Membership");
         text.ShouldContain("waits for an apply");
         text.ShouldContain(AdminWorld.AdminEmail);
@@ -36,56 +38,83 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
         (await session.Page.Locator("input[type=password]").CountAsync())
             .ShouldBe(0, "the create form asks for a password");
 
-        await session.Page.FillAsync("#new-person-email", "dispatcher@alvo.test");
-        await session.Page.ClickAsync("button:has-text('Create')");
-
-        /* Waiting for the row rather than settling and reading: the list re-renders over the
-           circuit, and network-idle is true the whole time a WebSocket is quiet. */
-        await session.Page.GetByText("dispatcher@alvo.test").First.WaitForAsync();
+        await session.CreatePersonAsync("dispatcher@alvo.test");
 
         /* Addressed by the person's own id rather than by a row that happens to contain their
-           address: `.a-row` nests, so a text-scoped locator can match an ancestor whose "Change"
-           button belongs to somebody else. */
-        var person = await IdOfAsync(session, "dispatcher@alvo.test");
-        await session.Page.ClickAsync($"#change-{person}");
-        await session.Page.Locator($"#issue-token-{person}").WaitForAsync();
-        await session.Page.ClickAsync($"#issue-token-{person}");
+           address: rows nest inside the panel, so a text-scoped locator can match an ancestor whose
+           "Change" button belongs to somebody else. */
+        var person = await session.PersonIdAsync("dispatcher@alvo.test");
+        var editor = await session.OpenPersonAsync(person);
+        await editor.GetByTestId("person-issue-token").ClickAsync();
 
         /* Waiting on "out of band" rather than on "credential token": the latter is also the text
            of the button that was just clicked, so the wait would match the control instead of the
            panel and return before anything had happened. */
-        await session.Page.GetByText("out of band").First.WaitForAsync();
+        await editor.GetByText("out of band").First.WaitForAsync();
 
-        var text = await session.Page.Locator("main.a-content").InnerTextAsync();
+        var text = await editor.InnerTextAsync();
         text.ShouldContain("Credential token");
         text.ShouldContain("out of band");
+
+        /* The token is handed over as the set-password link, the address and token in its fragment and both escaped
+           (design §1.2): the one thing the person needs is something to open. */
+        var link = (await editor.GetByTestId("person-token-link").InnerTextAsync()).Trim();
+        link.ShouldStartWith($"{world.BaseAddress}{AlvoAdmin.SetPasswordPath}#email=dispatcher%40alvo.test&token=");
+        var token = (await editor.GetByTestId("person-token").InnerTextAsync()).Trim();
+        link.ShouldEndWith($"&token={Uri.EscapeDataString(token)}");
         session.AssertConsoleClean();
     }
 
     /// <summary>
-    /// Nobody grants themselves a tenant, and the refusal names the recorded alternative.
+    /// Nobody grants themselves a tenant, and their own editor says so instead of offering the control.
     /// </summary>
     /// <remarks>
-    /// The guard is in the core, not in this screen — the screen only has to render what the core
-    /// refused. Asserting it here therefore measures both halves at once: that the guard fires, and
-    /// that the operator is told what to do instead.
+    /// The guard is in the core, not in this screen (§3.7 U3.2). The screen used to offer Grant on the
+    /// operator's own row and then render the core's refusal at the top of the page (D-10); it now offers
+    /// no tenant box and no Remove there and says, beside the tenant, who can make the change. Another
+    /// person's editor still carries both, which is what keeps this from passing on a screen that dropped
+    /// them for everybody.
     /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task An_administrator_cannot_grant_themselves_a_tenant()
+    public async Task An_administrator_is_not_offered_a_tenant_for_themselves()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/access");
 
-        var me = await IdOfAsync(session, AdminWorld.AdminEmail);
-        await session.Page.ClickAsync($"#change-{me}");
-        await session.Page.Locator($"#tenant-{me}").WaitForAsync();
-        await session.Page.FillAsync($"#tenant-{me}", "9f1c4a20-7d38-4a5e-9c11-2b6e0d4f8a4e");
-        await session.Page.ClickAsync($"#grant-tenant-{me}");
-        await session.Page.GetByText("higher management level").First.WaitForAsync();
+        var me = await session.PersonIdAsync(AdminWorld.AdminEmail);
+        var mine = await session.OpenPersonAsync(me);
+        await mine.GetByTestId("tenant-self").WaitForAsync();
 
-        var text = await session.Page.Locator("main.a-content").InnerTextAsync();
-        text.ShouldContain("higher management level");
-        text.ShouldContain("Another administrator");
+        (await session.Page.Locator($"#tenant-{me}").CountAsync()).ShouldBe(0);
+        (await session.Page.Locator($"#clear-tenant-{me}").CountAsync()).ShouldBe(0);
+        (await mine.GetByTestId("tenant-self").InnerTextAsync())
+            .ShouldContain("You cannot grant yourself a tenant — another administrator can.");
+
+        /* The administrator holds only the built-in `admin` role, so a declared role is known to be
+           unassigned in their editor. */
+        (await mine.GetByRole(AriaRole.Button, new() { Name = "dispatcher", Exact = true })
+            .GetAttributeAsync("aria-pressed")).ShouldBe("false");
+        await mine.GetByTestId("editor-cancel").ClickAsync();
+        await mine.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+
+        // --- another person's editor keeps both tenant controls, and a role pressed there is assigned on Save
+        await session.CreatePersonAsync("tenant-peer@alvo.test");
+
+        var peer = await session.PersonIdAsync("tenant-peer@alvo.test");
+        var theirs = await session.OpenPersonAsync(peer);
+
+        (await session.Page.Locator($"#tenant-{peer}").CountAsync()).ShouldBe(1);
+        (await session.Page.Locator($"#clear-tenant-{peer}").CountAsync()).ShouldBe(1);
+
+        var dispatcher = theirs.GetByRole(AriaRole.Button, new() { Name = "dispatcher", Exact = true });
+        (await dispatcher.GetAttributeAsync("aria-pressed")).ShouldBe("false");
+        await dispatcher.ClickAsync();
+        await theirs.GetByRole(AriaRole.Button, new() { Name = "dispatcher", Exact = true, Pressed = true }).WaitForAsync();
+        await theirs.GetByTestId("person-save").ClickAsync();
+
+        await session.SnackbarAsync("Saved tenant-peer@alvo.test");
+        await session.Page.Locator($"#person-{peer}").Filter(new() { HasText = "dispatcher" }).WaitForAsync();
+
         session.AssertConsoleClean();
     }
 
@@ -104,32 +133,11 @@ public sealed class AccessScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/access");
 
-        var me = await IdOfAsync(session, AdminWorld.AdminEmail);
-        await session.Page.ClickAsync($"#change-{me}");
-        await session.Page.Locator($"#disable-{me}").WaitForAsync();
-        await session.Page.ClickAsync($"#disable-{me}");
-        await session.Page.GetByText("bootstrap administrator cannot be").First.WaitForAsync();
+        var me = await session.PersonIdAsync(AdminWorld.AdminEmail);
+        var editor = await session.OpenPersonAsync(me);
+        await editor.GetByTestId("person-disable").ClickAsync();
+        await session.Dialog("disable-person").GetByTestId("disable-person-run").ClickAsync();
+        await session.Content.GetByText("bootstrap administrator cannot be").First.WaitForAsync();
         session.AssertConsoleClean();
-    }
-
-    /// <summary>
-    /// The id of the row whose text contains an address.
-    /// </summary>
-    /// <remarks>
-    /// Read off the row's own <c>id</c> attribute, which the screen sets per person. The
-    /// alternative — locating by text and hoping the right ancestor matches — is what this replaced
-    /// after it clicked the wrong row's button.
-    /// </remarks>
-    /// <param name="session">The signed-in session.</param>
-    /// <param name="email">Whose row.</param>
-    /// <returns>The uuid in the row's id.</returns>
-    private static async Task<string> IdOfAsync(AdminSession session, string email)
-    {
-        var id = await session.Page
-            .Locator($".a-row[id^='person-']:has-text('{email}')").First
-            .GetAttributeAsync("id");
-
-        id.ShouldNotBeNull($"no person row carries {email}");
-        return id["person-".Length..];
     }
 }

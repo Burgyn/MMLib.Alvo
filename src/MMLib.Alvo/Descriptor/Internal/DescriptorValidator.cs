@@ -15,7 +15,8 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// Layered descriptor validator: (1) a schema pass against the build-time Corvus-generated
 /// <see cref="GeneratedProjectDescriptor"/> (from project.schema.json), (2) a semantic pass for
 /// cross-field rules the schema cannot express, (3) a rule-compilation pass that runs every
-/// <c>rules</c>/<c>hidden</c>/<c>readOnly</c> CEL expression through <see cref="ICelCompiler"/> —
+/// <c>rules</c>/<c>hidden</c>/<c>readOnly</c> CEL expression through <see cref="ICelCompiler"/>, and every
+/// <c>computed</c> one through <see cref="ComputedFieldCheck"/> —
 /// each producing agent-first <see cref="DescriptorValidationError"/>s with fix suggestions, so a
 /// rule that references an unknown column or the retired singular <c>@user.role</c> idiom fails
 /// here, when the descriptor is applied, never at request time.
@@ -136,9 +137,11 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             return [];
         }
 
-        return PolicyCatalog.TryBuild(descriptor, schema, _compiler, out _, out var errors)
+        var errors = PolicyCatalog.TryBuild(descriptor, schema, _compiler, out _, out var ruleErrors)
             ? []
-            : [.. errors];
+            : ruleErrors.ToList();
+        errors.AddRange(ComputedFieldCheck.Errors(schema, _compiler));
+        return errors;
     }
 
     private static DescriptorValidationError Malformed(JsonException ex) =>

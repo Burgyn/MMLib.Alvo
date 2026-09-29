@@ -257,7 +257,7 @@ public class AlvoBootServiceTests
         var databasePath = AlvoHostWorld.TempDatabasePath();
         var builder = WebApplication.CreateSlimBuilder();
         builder.WebHost.UseTestServer();
-        builder.Services.AddAlvo(alvo => alvo.UseSqlite($"Data Source={databasePath}"));
+        builder.Services.AddAlvo(alvo => alvo.UseSqlite(AlvoHostWorld.ConnectionStringFor(databasePath)));
 
         await using var app = builder.Build();
 

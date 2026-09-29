@@ -24,9 +24,9 @@ public class FrameworkTableReservationTests
     }
 
     [Fact]
-    public void The_reserved_set_is_the_three_bookkeeping_tables_plus_the_seven_identity_ones()
+    public void The_reserved_set_is_the_four_bookkeeping_tables_plus_the_seven_identity_ones()
     {
-        AlvoFrameworkTables.NamesFor("alvo").Count.ShouldBe(10);
+        AlvoFrameworkTables.NamesFor("alvo").Count.ShouldBe(11);
         AlvoFrameworkTables.IdentitySuffixes.Count.ShouldBe(7);
     }
 

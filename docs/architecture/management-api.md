@@ -24,8 +24,9 @@ because it is infrastructure configuration rather than a block a locked-out proj
 | `POST {m}/projects/{project}/policy/simulate` | `SimulatePolicyAsync` | `viewer` |
 | `PUT {m}/projects/{project}/descriptor` | `ApplyDescriptorAsync` | `developer` |
 | `POST {m}/projects/{project}/revisions/{revision:int}/rollback` | `RollbackAsync` | `developer` |
+| `PUT {m}/ai/connection` | `SetAiConnectionAsync` | `admin` |
 
-And six more, from a second contract — see *Administering people*:
+And seven more, from a second contract — see *Administering people*:
 
 | Route | `IAlvoUserAdministration` member | Level |
 |---|---|---|
@@ -35,6 +36,7 @@ And six more, from a second contract — see *Administering people*:
 | `PUT {m}/projects/{project}/users/{user:guid}/tenant` | `SetTenantAsync` | `admin` |
 | `PUT {m}/projects/{project}/users/{user:guid}/disabled` | `SetDisabledAsync` | `admin` |
 | `POST {m}/projects/{project}/users/{user:guid}/credential-reset` | `IssueCredentialTokenAsync` | `admin` |
+| `DELETE {m}/projects/{project}/users/{user:guid}/lockout` | `ClearLockoutAsync` | `admin` |
 
 **This table is generated from nothing.** It is prose, and prose drifts — so it is not what holds the
 mapping. `ManagementContractTests` does, reflectively and in four directions: every member of
@@ -48,7 +50,7 @@ the code is right.
 one table mapping an operation to the level it needs, and an operation it does not list requires `admin` —
 the most restrictive answer, not the most convenient one. Two of the thirteen operations
 (`ManageApiKeys`, `DeleteProject`) have no route at all; see *What is deliberately absent*.
-`ManageUsers` gained six in F5 — see *Administering people*.
+`ManageUsers` gained seven in F5 — see *Administering people*.
 
 ### The one place a route's level is not the whole answer
 
@@ -257,7 +259,7 @@ management-shaped scope is ever wanted, and note it would then need a default fo
 
 ## `info` reports the data provider, not the engine
 
-`GET {m}/info` answers `{ version, mode, dataProvider, startupMode }`. `dataProvider` is the **registered
+`GET {m}/info` answers `{ version, mode, dataProvider, startupMode, ai }`. `dataProvider` is the **registered
 port implementation's type name** — `EfAlvoData`, `InMemoryAlvoData` — or `"none"` when no driver is
 registered, which is a supported composition.
 
@@ -266,6 +268,50 @@ an engine's name: that is the provider-model principle, and `IAlvoData` delibera
 identity. Reporting one would mean either a `switch` over type names in the core — the engine-specific `if`
 that principle forbids — or a new port member whose only consumer is a diagnostic string.
 
+## `PUT {m}/ai/connection` is an administrator's route
+
+Writing the AI connection is on this surface, at `admin`, beside issuing an API key — because it
+*is* a credential. Repointing the endpoint sends the descriptor, the resolved schema and every
+operator's prompts wherever it now points, so a `developer` who may change what the backend is still
+may not change where it is described to.
+
+It replaces the record whole: the endpoint, the model and the key change together, and writing them
+under three names would leave a window in which a screen reports one and the agent dials another. It
+answers with what `GET {m}/info` would now report, so a caller learns the state it produced without
+the credential travelling back.
+
+Two refusals are the deployment's own rather than the caller's mistake, and both are 400 with the
+framework's wording: a deployment whose secrets come from its own configuration reads and never
+writes them, and one with no mounted encryption key has no writable store at all.
+
+## `ai` says whether one is configured, never where it dials
+
+`ai` is `{ configured, kind, model, source, keyState }`, always present — an older instance that did not report AI and
+an instance with none are two different things, and a screen that had to tell them apart from an absent field
+would have two empty states. `configured` answers the first question; `kind` and `model` are what a reader
+recognises; `source` is `configuration`, `store` or `null`, which is what turns "why is it still using the
+old model" into one glance.
+
+`keyState` is `present`, `missing`, `not-needed`, or `none` when nothing is configured (`AiKeyState`, serialised by
+name, in the kebab case of its sibling `kind`). **Read it beside `configured`, never after it:** a connection whose key is `missing` is configured and refused
+on every call — the live case (24 Sep 2026) where `Alvo:Ai:ApiKeySecretRef` named a secret nobody had saved, `info`
+said configured, and every turn was a 401. The resolver decides it, because only the resolver knows a reference went
+unanswered: a reference that resolves nothing (absent, undecryptable, blank, or not a secret name) is `missing`
+whatever the endpoint; with no reference and no stored key, the known key-only hosts — `api.openai.com`,
+`*.openai.azure.com`, `*.cognitiveservices.azure.com`, `*.services.ai.azure.com` — are `missing`, and any other
+endpoint is `not-needed`, because a local Ollama or vLLM is keyless on purpose. It is a state only: never the key,
+and not the secret's name either, which the host's log carries (event 6102) and the deployment's own configuration
+already holds. A reference that is not a secret name is logged by its length alone (event 6104), once per value per
+process rather than on every resolve: it is most likely the key itself, pasted into the setting that should name it.
+
+**There is no endpoint, and there never will be one.** The reasoning is `WebhookDelivery`'s: an address is
+where a credential ends up in practice — in a query string, in a userinfo segment — and an internal host name
+is reconnaissance on its own. What a reader needs is whether it is on, whether it is the model they meant,
+and whether their deployment or the dashboard decided that.
+
+It is resolved per request rather than remembered at boot, because both layers it reads — the deployment's
+own configuration and the secret store — change without a restart.
+
 `mode` is `standalone` or `embedded`, two values and no more; it is computed from the registered `AlvoMode`,
 whose default is `Standalone`, which is why the standalone image needs no configuration to describe itself.
 `AlvoManagementOptions.ModeLabel` is `internal` precisely so `mode` stays a two-valued contract an agent can
@@ -273,8 +319,19 @@ branch on.
 
 ## Administering people
 
-Six routes over `IAlvoUserAdministration`, all at `admin` under the single `ManageUsers` operation —
+Seven routes over `IAlvoUserAdministration`, all at `admin` under the single `ManageUsers` operation —
 **including the read**, because listing a project's people enumerates its administrators.
+
+**Ending a lockout is its own route, and refuses a disabled person.** `DELETE …/users/{user}/lockout` ends a
+temporary lockout from failed sign-ins and resets the failed-attempt count (todo-admin §8d items 39, 46(i)); it
+is a `DELETE` because it removes something the person has and is safe to repeat. It changes nothing else — no
+security stamp, so no session ends — and it is admitted for the bootstrap administrator, whose lockout is the one
+a stranger most wants to keep. A disabled person is answered 422 with a sentence saying to let them back in:
+Identity keeps a disable and a lockout in one column, so clearing it would re-enable them by a door that decides
+nothing about a disable. The check runs in the implementation's unit of work, on the row it writes, not in the
+guard, which could only read before a concurrent disable commits; the contract suite
+(`UserAdministrationContractTests`) holds every implementation to it. `AlvoUser.LockedOutUntil` is how a caller
+sees the lockout in the first place.
 
 **They are management routes rather than a surface of their own**, because `ManageUsers` was already a
 `ManagementOperation` in the level table and a second surface would need a second gate. They are mapped only

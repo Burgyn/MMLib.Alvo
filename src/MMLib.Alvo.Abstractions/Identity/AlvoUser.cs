@@ -26,6 +26,26 @@ public sealed record AlvoUser
     /// <summary>Gets a value indicating whether this user is barred from signing in.</summary>
     public bool IsDisabled { get; init; }
 
+    /// <summary>
+    /// Gets when a temporary lockout from failed sign-ins ends, while one stands; otherwise <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A lockout is not a disable, and the two are never both set.</b> Repeated wrong passwords bar a person
+    /// for a few minutes, and anyone who knows the address can cause that; a disable is an administrator's
+    /// decision and has no end. A disabled person therefore carries <see cref="IsDisabled"/> and no value here,
+    /// and a person who is merely locked out is not disabled — an operator asked why somebody cannot sign in
+    /// reads the one that is true (<c>docs/todo-admin.md</c> §8d item 39).
+    /// </para>
+    /// <para>
+    /// <b>A reading, not a promise.</b> It is the lockout as the store held it when this value was read, in
+    /// UTC, and it ends by itself at that instant; a value already in the past was not a lockout when read and
+    /// is never projected. An implementation with no notion of a temporary lockout leaves it
+    /// <see langword="null"/>. <see cref="IAlvoUserAdministration.ClearLockoutAsync"/> ends one early.
+    /// </para>
+    /// </remarks>
+    public DateTimeOffset? LockedOutUntil { get; init; }
+
     /// <summary>Gets the one tenant this operator acts in, when they have been granted one.</summary>
     /// <remarks>
     /// <para>

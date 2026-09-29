@@ -1,0 +1,31 @@
+﻿@*
+    The planner's steps as sentences — the rendering Preview had inline, now shared with a rollback's dry run so
+    the two plans read alike. PlanStep says why a step is reworded and what is carried through unchanged.
+*@
+@foreach (var step in Steps.Select(PlanStep.Parse))
+{
+    <ListRow data-testid="plan-step" class="a-listrow--inline">
+        <span class="@($"a-badge a-listrow__aside {(step.Destructive ? "a-badge--danger" : "a-badge--ok")}")">
+            @(step.Destructive ? "destroys" : "safe")
+        </span>
+        <span class="a-grow a-value">
+            @* One expression with its trailing space: a bare `@step.Verb` followed by the element on the next line
+               lost the whitespace between them ("Drop columncustomers.notes"). *@
+            @($"{step.Verb} ")
+            @if (step.Target.Length > 0)
+            {
+                <code class="a-mono">@step.Target</code>
+            }
+            @if (step.Consequence is { } consequence)
+            {
+                <text> — @consequence</text>
+            }
+        </span>
+    </ListRow>
+}
+
+@code {
+    /// <summary>The planner's lines, verbatim and in order (<c>ManagementPlanSummary.Steps</c>).</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<string> Steps { get; set; } = [];
+}

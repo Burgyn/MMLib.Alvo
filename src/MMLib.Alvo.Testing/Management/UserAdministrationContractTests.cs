@@ -71,6 +71,8 @@ public abstract class UserAdministrationContractTests
             () => surface.SetDisabledAsync(Administrator, disabled: true));
         await Should.ThrowAsync<ManagementForbiddenException>(
             () => surface.IssueCredentialTokenAsync(Administrator));
+        await Should.ThrowAsync<ManagementForbiddenException>(
+            () => surface.ClearLockoutAsync(Administrator));
     }
 
     /// <summary>
@@ -167,6 +169,52 @@ public abstract class UserAdministrationContractTests
 
         await Should.ThrowAsync<ManagementEscalationException>(
             () => AsAdministrator().SetDisabledAsync(BootstrapAdministrator, disabled: true));
+    }
+
+    /// <summary>Ending a lockout never lets a disabled person back in.</summary>
+    /// <remarks>
+    /// <b>A contract fact because it fails open.</b> A store that keeps a disable and a lockout in one column — ASP.NET
+    /// Core Identity does — would re-enable a disabled person by clearing it, through a door that decides nothing
+    /// about a disable and leaves their sessions standing. Every implementation refuses by name instead, and letting
+    /// them back in stays <see cref="IAlvoUserAdministration.SetDisabledAsync"/>.
+    /// </remarks>
+    [Fact]
+    public async Task A_disabled_persons_lockout_cannot_be_cleared()
+    {
+        EnsureAvailable();
+        var administration = AsAdministrator();
+        var person = await administration.CreateAsync(
+            new AlvoUserCreation($"disabled-{Guid.CreateVersion7():N}@alvo.test", []));
+        await administration.SetDisabledAsync(person.Id, disabled: true);
+
+        await Should.ThrowAsync<ManagementRequestException>(() => administration.ClearLockoutAsync(person.Id));
+
+        var page = await administration.ListAsync(new AlvoUserQuery(person.Email));
+        page.Users.ShouldHaveSingleItem().IsDisabled.ShouldBeTrue("a refused unlock left the person disabled");
+    }
+
+    /// <summary>Ending the bootstrap administrator's lockout is not refused.</summary>
+    /// <remarks>
+    /// <para>
+    /// The one write aimed at the bootstrap administrator that the guards admit, deliberately: ending their lockout
+    /// gives back the account that can always recover a project, where the two refused writes would take it away.
+    /// </para>
+    /// <para>
+    /// <b>What this measures, and what it cannot.</b> The port has no member that causes a lockout — only failed
+    /// sign-ins do, and they are the store's — so the account is not locked first, and the fact is that the call is
+    /// admitted and leaves the person enabled with no lockout. That a real lockout ends is each implementation's own
+    /// suite (for ASP.NET Core Identity, <c>AlvoIdentityUserAdministrationLockoutTests</c>).
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task Ending_the_bootstrap_administrators_lockout_is_not_refused()
+    {
+        EnsureAvailable();
+
+        var after = await AsAdministrator().ClearLockoutAsync(BootstrapAdministrator);
+
+        after.LockedOutUntil.ShouldBeNull();
+        after.IsDisabled.ShouldBeFalse();
     }
 
     /// <summary>The bootstrap administrator's credential cannot be reset from here.</summary>

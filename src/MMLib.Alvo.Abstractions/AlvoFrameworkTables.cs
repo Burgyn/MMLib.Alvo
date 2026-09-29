@@ -48,6 +48,9 @@ internal static class AlvoFrameworkTables
     /// <summary>The suffix of the table holding the transactional outbox.</summary>
     internal const string OutboxSuffix = "_outbox";
 
+    /// <summary>The suffix of the table holding this deployment's encrypted secrets.</summary>
+    internal const string SecretsSuffix = "_secrets";
+
     /// <summary>The suffix of the table holding administrator accounts.</summary>
     internal const string IdentityUsersSuffix = "_identity_users";
 
@@ -107,6 +110,7 @@ internal static class AlvoFrameworkTables
             schemaPrefix + DescriptorVersionsSuffix,
             schemaPrefix + IdempotencySuffix,
             schemaPrefix + OutboxSuffix,
+            schemaPrefix + SecretsSuffix,
             .. IdentitySuffixes.Select(suffix => schemaPrefix + suffix),
         ];
     }

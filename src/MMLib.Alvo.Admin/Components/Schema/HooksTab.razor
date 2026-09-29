@@ -1,0 +1,222 @@
+﻿@*
+    What runs on a write.
+
+    A before-hook and an after-hook are not the same editor and must not look like one: the frozen
+    schema's `$defs/beforeHookList` admits `reject` and `mutate` only — "no network, no external
+    calls" — because a before-hook runs inside the write's own transaction. An after-hook is where
+    a webhook or an email belongs. The point's name is therefore shown with what it may contain,
+    rather than the two being flattened into one list of "actions".
+
+    All six points are honoured by this build — PR5a landed the three `after*`, PR5b the three
+    `before*` — which is what unblocked editing them at all. What is still refused is three of the
+    five *action types*, and those are read off `capabilities` rather than listed here, so the day
+    one of them lands the tab stops warning about it without anybody editing this file.
+*@
+@inject AdminInterop Interop
+
+@* A create inside a tab sits in its section's head, right-aligned (spec §3.7). *@
+<SectionHead Title="On write">
+    <Subtitle>
+        Before-hooks run inside the transaction and can only refuse or change the row.
+        After-hooks run once it is committed and are where anything that leaves the process belongs.
+    </Subtitle>
+    <Actions>
+        @if (Editable)
+        {
+            <AlvoButton Small="true" data-testid="hook-new" OnClick="_ => _adding = true">New hook</AlvoButton>
+        }
+    </Actions>
+</SectionHead>
+
+@*
+    Folded by default. Three refusals at full length were the first screen of this tab on a phone — the
+    operator scrolled past a wall to reach what the entity actually declares. Shut, it is one line that
+    still says the count and the names; the wording inside is the framework's own, unshortened.
+*@
+@if (HookRefusals.Count > 0)
+{
+    <details class="a-refused a-refused--fold" data-testid="hooks-refused">
+        <summary>
+            @HookRefusals.Count thing@(HookRefusals.Count == 1 ? "" : "s") this build refuses on a hook —
+            <span class="a-mono">@string.Join(", ", HookRefusals.Select(refusal => refusal.Slot))</span>
+        </summary>
+        @foreach (var refusal in HookRefusals)
+        {
+            <span class="a-refused__reason">@refusal.Consequence</span>
+        }
+    </details>
+}
+
+@if (Hooks.Count == 0)
+{
+    <EmptyState Title="Nothing runs on a write to this entity"
+                Body="No hooks are declared. Writes are validated against the field facets and the rules, and nothing else happens." />
+}
+else
+{
+    @foreach (var point in Hooks)
+    {
+        <ListRow class="a-listrow--roomy a-listrow--stacked">
+            <div class="a-row">
+                <span class="@($"a-badge {(HookBuilder.IsBefore(point.Key) ? "a-badge--warn" : "a-badge--accent")}")">@point.Key</span>
+                <span class="a-section__sub">
+                    @(HookBuilder.IsBefore(point.Key)
+                        ? "in the transaction · may refuse or change the row · no network"
+                        : "after the commit · may leave the process")
+                </span>
+            </div>
+
+            @{
+                var declared = Declared(point.Value);
+                var name = point.Key;
+            }
+
+            @for (var position = 0; position < declared.Count; position++)
+            {
+                var hook = declared[position];
+                var at = position;
+
+                @*
+                    The control sits under the declaration on a phone and beside it on a desktop. Beside it
+                    at 375 px, the code block gave up a third of the row to one word and every condition
+                    wrapped mid-token.
+                *@
+                <div class="a-hookrow" data-testid="hook-row" id="@RowId(name, at)"
+                     data-alvo-new="@(RowId(name, at) == _reveal ? "true" : null)">
+                    @if (Staged.IsNewHook(name, at))
+                    {
+                        <span class="a-badge a-badge--accent a-hookrow__badge"
+                              data-testid="hook-staged">new</span>
+                    }
+                    <CodeBlock Json="@hook" />
+                    @if (Editable)
+                    {
+                        <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" class="a-hookrow__remove"
+                                    data-testid="hook-remove" aria-label="@($"Remove hook {at + 1} of {name}")"
+                                    OnClick="_ => _removing = new PendingRemoval(name, hook)">Remove</AlvoButton>
+                    }
+                </div>
+            }
+        </ListRow>
+    }
+}
+
+@if (_reveal is { } added)
+{
+    @RevealOnRender.On($"#{added}", _reveals)
+}
+
+@if (_adding)
+{
+    <AlvoEditor TestId="hook-editor" Title="New hook" SubmitText="Add to the working copy" SubmitTestId="hook-add"
+                Subtitle="The point decides what the action may be. A before-hook runs in the transaction and may only refuse or patch the row; a beforeDelete may only refuse, because the row is going."
+                Dirty="Dirty" OnSubmit="AddAsync" OnClose="CloseAdding">
+        @RefusalPanel.Of(_refusal, "That hook cannot be added")
+
+        <Field Label="When" LabelId="hook-points-label">
+            <ChipGroup TValue="string" Items="HookBuilder.Points" Selected="[_hook.Point]" aria-labelledby="hook-points-label"
+                       data-testid="hook-points" SelectedChanged="points => Choose(points[0])" />
+        </Field>
+
+        <Field Label="Only when (optional)" For="hook-condition">
+            <ChildContent>
+                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-condition" Class="a-mono"
+                              autocomplete="off" Placeholder="@_hook.Example" aria-describedby="hook-condition-hint"
+                              Value="_hook.Condition" ValueChanged="text => _hook.Condition = text ?? string.Empty" />
+            </ChildContent>
+            <Hint>
+                <span data-testid="hook-condition-hint">
+                    CEL over @((MarkupString)_hook.Images) and <code class="a-mono">@@user</code>. Left empty, the hook
+                    runs on every write.
+                </span>
+            </Hint>
+        </Field>
+
+        <Field Label="Then" LabelId="hook-actions-label">
+            <ChipGroup TValue="string" Items="_hook.Kinds" Selected="[_hook.Kind]" aria-labelledby="hook-actions-label"
+                       data-testid="hook-actions" SelectedChanged="kinds => _hook.Kind = kinds[0]" />
+        </Field>
+
+        @ActionFields
+    </AlvoEditor>
+}
+
+@* Names the hook by its point and shows what it does, which is all a hook is: its position is not a name. *@
+<AlvoConfirm Open="_removing is not null" TestId="remove-hook" ConfirmTestId="remove-hook-run"
+             CancelTestId="remove-hook-cancel" Title="@($"Remove this {_removing?.Point} hook?")"
+             Consequence="It leaves the working copy now; writes stop running it when you apply."
+             Verb="Remove hook" OnConfirm="RemoveAsync" OnCancel="CancelRemoval">
+    @if (_removing is { } removing)
+    {
+        <CodeBlock Json="@removing.Json" />
+    }
+</AlvoConfirm>
+
+@code {
+    /// <summary>The boxes the chosen action takes.</summary>
+    private RenderFragment ActionFields => @<text>
+        @switch (_hook.Kind)
+        {
+            case HookBuilder.Reject:
+                <Field Label="Refuse with" For="hook-reject">
+                    <ChildContent>
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-reject" autocomplete="off"
+                                      aria-describedby="hook-reject-hint" MaxLength="500" Placeholder="A completed work order cannot be reopened."
+                                      Value="_hook.RejectMessage" ValueChanged="text => _hook.RejectMessage = text ?? string.Empty" />
+                    </ChildContent>
+                    <Hint>
+                        Becomes the <code class="a-mono">detail</code> of the RFC 7807 problem the caller
+                        reads, so write it for them rather than for the log.
+                    </Hint>
+                </Field>
+                break;
+            case HookBuilder.Mutate:
+                <div class="a-field-row">
+                    <Field Label="Field" For="hook-mutate-field">
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-mutate-field"
+                                      Class="a-mono" autocomplete="off" Placeholder="completed_on"
+                                      Value="_hook.MutateField" ValueChanged="text => _hook.MutateField = text ?? string.Empty" />
+                    </Field>
+                    <Field Label="Set to" For="hook-mutate-value">
+                        <ChildContent>
+                            <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-mutate-value"
+                                          aria-describedby="hook-mutate-value-hint" Class="a-mono" autocomplete="off" Placeholder="now()"
+                                          Value="_hook.MutateValue" ValueChanged="text => _hook.MutateValue = text ?? string.Empty" />
+                        </ChildContent>
+                        <Hint>
+                            A CEL expression, stored as <code class="a-mono">{"$cel": "…"}</code>. Wrap it in
+                            quotes for a literal string.
+                        </Hint>
+                    </Field>
+                </div>
+                break;
+            case HookBuilder.Webhook:
+                <Field Label="Endpoint" For="hook-endpoint">
+                    <ChildContent>
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-endpoint" Class="a-mono"
+                                      aria-describedby="hook-endpoint-hint" autocomplete="off" Placeholder="dispatch"
+                                      Value="_hook.Endpoint" ValueChanged="text => _hook.Endpoint = text ?? string.Empty" />
+                    </ChildContent>
+                    <Hint>
+                        A name declared under <code class="a-mono">webhooks.endpoints</code>, not a URL — the
+                        managed path is the one this build delivers on.
+                    </Hint>
+                </Field>
+                break;
+            case HookBuilder.Email:
+                <div class="a-field-row">
+                    <Field Label="Template" For="hook-template">
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-template"
+                                      Class="a-mono" autocomplete="off" Placeholder="work_order_completed"
+                                      Value="_hook.Template" ValueChanged="text => _hook.Template = text ?? string.Empty" />
+                    </Field>
+                    <Field Label="To" For="hook-to">
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-to"
+                                      Class="a-mono" autocomplete="off" Placeholder="{{new.contact_email}}"
+                                      Value="_hook.To" ValueChanged="text => _hook.To = text ?? string.Empty" />
+                    </Field>
+                </div>
+                break;
+        }
+    </text>;
+}

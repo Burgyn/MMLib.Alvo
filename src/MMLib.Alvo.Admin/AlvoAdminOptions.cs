@@ -31,4 +31,34 @@ public sealed class AlvoAdminOptions
     /// of the <c>Alvo:</c> section, rather than a line of code somebody has to find.
     /// </remarks>
     public bool Enabled { get; set; } = true;
+
+    /// <summary>
+    /// Where this host serves its interactive API documentation, or <see langword="null"/> when it serves
+    /// none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>It arrives from the host because the dashboard cannot know it.</b> Serving a document is a hosting
+    /// decision — the core deliberately never calls <c>AddOpenApi</c> — and this package references
+    /// Abstractions and nothing else, so it can neither read the standalone host's route constant nor guess
+    /// an embedded host's. The alternative was the one already in the code: the API tab stated
+    /// <c>/openapi/v1.json</c> in prose, on every deployment, including the ones that serve nothing there.
+    /// </para>
+    /// <para>
+    /// <b><see langword="null"/> is the default, and it means no link rather than a broken one.</b> An
+    /// embedded host mounts its documentation where it likes, or not at all; a link rendered on the
+    /// assumption is a 404 an operator reaches from a screen that promised a contract.
+    /// </para>
+    /// </remarks>
+    public string? DocsPath { get; set; }
+
+    /// <summary>
+    /// Where this host serves the OpenAPI document itself, or <see langword="null"/> when it serves none.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="DocsPath"/> because the two have different readers: a person opens the docs
+    /// UI, and an agent fetches the document. Alvo is built for the second one, so the raw URL is offered
+    /// rather than buried one click inside a viewer.
+    /// </remarks>
+    public string? OpenApiPath { get; set; }
 }

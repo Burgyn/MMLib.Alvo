@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Playwright;
 using MMLib.Alvo.Host;
@@ -29,7 +30,7 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// which is the failure mode where a suite goes green in the wrong order and red in CI.
 /// </para>
 /// </remarks>
-public sealed class AdminWorld : IAsyncLifetime
+public class AdminWorld : IAsyncLifetime
 {
     /// <summary>
     /// How long any one scenario may take before it is a failure rather than a wait.
@@ -76,6 +77,16 @@ public sealed class AdminWorld : IAsyncLifetime
     public IServiceProvider Services => _app?.Services
         ?? throw new InvalidOperationException("The world has not started yet.");
 
+    /// <summary>
+    /// The temporary directory this world's own files live in.
+    /// </summary>
+    /// <remarks>
+    /// Exposed for a derived world that has to supply a file a deployment supplies — an encryption key, a
+    /// second descriptor — beside the four the base world already writes. It is created before the
+    /// configuration seam runs and deleted with the world.
+    /// </remarks>
+    protected string Root => _root;
+
     /// <inheritdoc/>
     public async ValueTask InitializeAsync()
     {
@@ -83,7 +94,7 @@ public sealed class AdminWorld : IAsyncLifetime
 
         var descriptor = Path.Combine(_root, "descriptor.json");
         var password = Path.Combine(_root, "bootstrap.pwd");
-        await File.WriteAllTextAsync(descriptor, Descriptors.FieldService).ConfigureAwait(false);
+        await File.WriteAllTextAsync(descriptor, Descriptor).ConfigureAwait(false);
         await File.WriteAllTextAsync(password, AdminPassword).ConfigureAwait(false);
 
         var port = FreePort();
@@ -96,31 +107,48 @@ public sealed class AdminWorld : IAsyncLifetime
            provider is absent, and every asset is then served as an empty 200. Which is worse than a
            404: the page renders, unstyled and inert, and every assertion but the ones about
            interactivity still passes. */
+        var settings = new Dictionary<string, string?>
+        {
+            ["Alvo:DescriptorPath"] = descriptor,
+            ["Alvo:Database:Provider"] = "Sqlite",
+            ["Alvo:Database:SqliteConnectionString"] = $"Data Source={Path.Combine(_root, "alvo.db")}",
+            ["Alvo:Admin:BootstrapEmail"] = AdminEmail,
+            ["Alvo:Admin:BootstrapPasswordFile"] = password,
+
+            /* Every scenario signs in, from the one loopback address, and a class runs many scenarios a minute:
+               the shipped limit of 20 credential posts per client per minute would throttle the suite rather than
+               a stranger. The throttling scenario sets its own low limit. */
+            ["Alvo:Admin:CredentialAttemptsPerMinute"] = "100000",
+            ["Alvo:Admin:CredentialCeilingPerMinute"] = "100000",
+
+            /* Quiet, and this is not cosmetic. The host runs INSIDE the test process, so every
+               log line it writes goes through the test platform's own output sink — and at the
+               default level that is one line per EF command, which a screen like Rules produces
+               dozens of per render. The sink becomes the bottleneck and the suite looks like it
+               is hanging while it is really writing SQL to a buffer. A warning that matters
+               still comes through. */
+            ["Logging:LogLevel:Default"] = "Warning",
+            ["Logging:LogLevel:Microsoft.EntityFrameworkCore"] = "Warning",
+            ["Logging:LogLevel:Microsoft.AspNetCore"] = "Warning",
+        };
+
+        /* The configuration half of the one seam a derived world has. A world that needs a deployment to
+           have supplied something more than the four above — an encryption key file, which is what makes
+           the secret store writable — says so here rather than standing in a service for it. */
+        Configure(settings);
+
         var builder = AlvoHost.CreateBuilder(
             ["--environment", "Development"],
-            configuration => configuration.AddInMemoryCollection(
-            new Dictionary<string, string?>
-            {
-                ["Alvo:DescriptorPath"] = descriptor,
-                ["Alvo:Database:Provider"] = "Sqlite",
-                ["Alvo:Database:SqliteConnectionString"] = $"Data Source={Path.Combine(_root, "alvo.db")}",
-                ["Alvo:Admin:BootstrapEmail"] = AdminEmail,
-                ["Alvo:Admin:BootstrapPasswordFile"] = password,
-
-                /* Quiet, and this is not cosmetic. The host runs INSIDE the test process, so every
-                   log line it writes goes through the test platform's own output sink — and at the
-                   default level that is one line per EF command, which a screen like Rules produces
-                   dozens of per render. The sink becomes the bottleneck and the suite looks like it
-                   is hanging while it is really writing SQL to a buffer. A warning that matters
-                   still comes through. */
-                ["Logging:LogLevel:Default"] = "Warning",
-                ["Logging:LogLevel:Microsoft.EntityFrameworkCore"] = "Warning",
-                ["Logging:LogLevel:Microsoft.AspNetCore"] = "Warning",
-            }));
+            configuration => configuration.AddInMemoryCollection(settings));
 
         /* Through configuration rather than UseUrls: WebApplicationBuilder's web-host shim is
            deliberately narrow, and "urls" is the key it reads anyway. */
         builder.Configuration["urls"] = BaseAddress;
+
+        /* The one seam a derived world has. Registrations added here land after the host's own, so a
+           plain Add wins over the TryAdd the host made — which is how the assistant scenarios put a
+           scripted agent in front of the real one without a second host. */
+        Configure(builder.Services);
 
         _app = await AlvoHost.BuildAsync(builder).ConfigureAwait(false);
         await _app.StartAsync().ConfigureAwait(false);
@@ -129,9 +157,49 @@ public sealed class AdminWorld : IAsyncLifetime
         _browser = await _playwright.Chromium.LaunchAsync(new() { Headless = true }).ConfigureAwait(false);
     }
 
+    /// <summary>The descriptor this world boots — the field-service example unless a derived world names another.</summary>
+    /// <remarks>
+    /// A seam for a world whose scenario is about another example's data — the bike-workshop customers the computed
+    /// <c>full_name</c> request was made over — rather than a way to write a descriptor for a test.
+    /// </remarks>
+    protected virtual string Descriptor => Descriptors.FieldService;
+
+    /// <summary>
+    /// Adds this world's own services to the shipped host.
+    /// </summary>
+    /// <remarks>
+    /// Empty by default, so the ordinary suite runs exactly what the container runs. A world that
+    /// overrides it is stating which one service it is standing in for, and everything else stays real.
+    /// </remarks>
+    /// <param name="services">The host's service collection, after the host registered its own.</param>
+    protected virtual void Configure(IServiceCollection services)
+    {
+    }
+
+    /// <summary>
+    /// Adds this world's own configuration to the four settings every world supplies.
+    /// </summary>
+    /// <remarks>
+    /// Empty by default, for the reason the services seam is. It runs after <see cref="Root"/> exists, so a
+    /// world may write a file there and point a key at it — which is the case that earned it: the secret
+    /// store is writable only when <c>Alvo:Secrets:EncryptionKeyFile</c> names one, and "can this deployment
+    /// save an AI connection at all" is a question about a mounted file rather than about a service.
+    /// </remarks>
+    /// <param name="settings">The configuration this world boots with, before the host reads it.</param>
+    protected virtual void Configure(IDictionary<string, string?> settings)
+    {
+    }
+
     /// <inheritdoc/>
+    /// <remarks>
+    /// <c>SuppressFinalize</c> because the type is no longer sealed — <see cref="AssistantWorld"/> derives
+    /// from it to stand one service in — and a derived type that introduced a finalizer would otherwise have
+    /// to re-implement disposal to reach it.
+    /// </remarks>
     public async ValueTask DisposeAsync()
     {
+        GC.SuppressFinalize(this);
+
         if (_browser is not null)
         {
             await _browser.DisposeAsync().ConfigureAwait(false);
@@ -171,14 +239,36 @@ public sealed class AdminWorld : IAsyncLifetime
     /// time stops at the next one rather than at the end of the last wait.
     /// </param>
     /// <param name="width">The viewport width — 1400 for a desktop, 375 for the phone criterion.</param>
+    /// <param name="colorScheme">
+    /// The system theme the browser reports from its first request, for a scenario about a viewer who never chose
+    /// one; the browser's own default when <see langword="null"/>.
+    /// </param>
     /// <returns>The session.</returns>
-    public async Task<AdminSession> SignInAsync(CancellationToken cancel, int width = 1400)
+    public Task<AdminSession> SignInAsync(CancellationToken cancel, int width = 1400, ColorScheme? colorScheme = null)
+        => SignInAsAsync(AdminEmail, AdminPassword, cancel, width, colorScheme);
+
+    /// <summary>
+    /// Opens a page, signed in as <paramref name="email"/>, with the console asserted clean.
+    /// </summary>
+    /// <remarks>
+    /// For a scenario whose person is not the bootstrap administrator — one the dashboard created, who set their
+    /// own password from a credential token's link. Everything else is <see cref="SignInAsync"/>'s.
+    /// </remarks>
+    /// <param name="email">Who signs in.</param>
+    /// <param name="password">Their password: a test value the scenario itself set.</param>
+    /// <param name="cancel">The scenario's own token, as <see cref="SignInAsync"/> takes it.</param>
+    /// <param name="width">The viewport width.</param>
+    /// <param name="colorScheme">The system theme the browser reports, or its own default.</param>
+    /// <returns>The session.</returns>
+    public async Task<AdminSession> SignInAsAsync(
+        string email, string password, CancellationToken cancel, int width = 1400, ColorScheme? colorScheme = null)
     {
         cancel.ThrowIfCancellationRequested();
 
         var context = await Browser.NewContextAsync(new()
         {
             ViewportSize = new ViewportSize { Width = width, Height = width < 720 ? 780 : 950 },
+            ColorScheme = colorScheme,
         }).ConfigureAwait(false);
 
         /* A minute, for the reason the sign-in wait below carries: a server-interactive circuit's
@@ -190,8 +280,8 @@ public sealed class AdminWorld : IAsyncLifetime
         session.Watch();
 
         await session.Page.GotoAsync($"{BaseAddress}{AlvoAdmin.SignInPath}").ConfigureAwait(false);
-        await session.Page.FillAsync("#email", AdminEmail).ConfigureAwait(false);
-        await session.Page.FillAsync("#password", AdminPassword).ConfigureAwait(false);
+        await session.Page.FillAsync("#email", email).ConfigureAwait(false);
+        await session.Page.FillAsync("#password", password).ConfigureAwait(false);
         cancel.ThrowIfCancellationRequested();
         await session.Page.ClickAsync("button[type=submit]").ConfigureAwait(false);
 

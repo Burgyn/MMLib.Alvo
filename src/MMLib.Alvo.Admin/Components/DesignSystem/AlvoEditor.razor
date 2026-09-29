@@ -1,0 +1,327 @@
+﻿@*
+    Creating or editing one item with more than one value (spec §3.1): a right-hand modal side sheet.
+
+    A right-positioned MudDialog rather than a MudDrawer, because the dialog brings role=dialog, aria-modal, a focus
+    trap, Escape and focus return, and the drawer brings none of them (study §4.1, verified in the spike). Full height
+    and 560 px wide, so on a phone it is the whole screen (plan V4).
+
+    The policy this adds on top of the dialog:
+    * Escape and Cancel ask "Discard your changes?" when Dirty (EditorCloseGuard). The question replaces the form in
+      place instead of opening a second dialog (spec §3.1). The scrim never closes the editor. Escape presses the
+      control marked data-alvo-escape, Cancel or, while the question is asked, Keep editing (alvo.js): the library's
+      dialog keeps Escape for its own close and never hands it to OnKeyDown, and a close must ask first. An extra
+      action that leaves the editor for a confirm after it (Delete record) asks the same question (LeaveAsync).
+    * Enter in a single-line field submits (a real form with a submit button), Ctrl/Cmd+Enter submits from anywhere,
+      and the primary button is busy and disabled while OnSubmit runs (SubmitGate). Cancel stays enabled. The chord is
+      alvo.js's (data-alvo-chord-submit), not a keydown handler here: the browser's own Enter-submit plus a server
+      handler would be two submits for one keystroke.
+
+    Closed means absent: the owner removes this component, and disposing it closes the dialog, so focus goes back to
+    the trigger.
+
+    The content renders inside MudDialogProvider, not under the page. A cascade from the page does not reach it, so
+    a CascadingValue the content needs (an AdminProblem for ErrorPanel) goes inside ChildContent. Nor does the
+    layout's ErrorBoundary, so the content and the extra actions each sit in a ContainedFault: a render bug in a
+    field editor draws the layout's panel with Reload here instead of ending the circuit, and while it is on screen
+    the form cannot be submitted, because the operator can no longer see what it holds.
+*@
+@implements IAsyncDisposable
+@inject AdminInterop Interop
+
+<MudDialog @ref="_dialog" Visible="true" Options="_options" Class="a-editor" ContentClass="a-editor__body"
+           ActionsClass="a-editor__actions" data-testid="@TestId">
+    <TitleContent>
+        <div class="a-editor__head">
+            @if (Eyebrow is { Length: > 0 })
+            {
+                <span class="a-pagehead__eyebrow">@Eyebrow</span>
+            }
+            <span class="a-editor__title">@Title</span>
+            @if (Subtitle is { Length: > 0 })
+            {
+                <span class="a-section__sub">@Subtitle</span>
+            }
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_guard.Asking)
+        {
+            <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" Title="@(LeaveQuestion?.Title ?? "Discard your changes?")"
+                       TakeFocus="true" TestId="editor-discard-question">
+                <ChildContent>@QuestionBody</ChildContent>
+                <Actions>
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Danger" Small="true" data-testid="editor-discard"
+                                OnClick="DiscardAsync">@(LeaveQuestion?.Leave ?? "Discard changes")</AlvoButton>
+                    <AlvoButton Small="true" data-testid="editor-keep" data-alvo-escape
+                                OnClick="KeepEditing">Keep editing</AlvoButton>
+                </Actions>
+            </AlvoAlert>
+        }
+        @* `hidden` wins over .a-stack's display only because alvo.css's base layer says [hidden]{display:none!important}. *@
+        @*
+            novalidate: the engine is the one authority on a value, and its refusal is drawn at the field (spec §3.8). The
+            browser's own check ran first and silently: a fraction in a whole-number box was a native bubble, and the
+            submit never reached the form.
+        *@
+        <form id="@_formId" class="a-stack" hidden="@_guard.Asking" novalidate data-alvo-chord-submit
+              @onsubmit="SubmitAsync">
+            @ContainedFault.Around(ChildContent, FaultPanel, faulted => Faulted(ref _contentFaulted, faulted))
+        </form>
+    </DialogContent>
+    <DialogActions>
+        @if (!_guard.Asking)
+        {
+            @ContainedFault.Around(ExtraActions, FaultPanel, faulted => Faulted(ref _actionsFaulted, faulted))
+            <span class="a-spacer"></span>
+            <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" data-testid="editor-cancel" data-alvo-escape
+                        OnClick="RequestCloseAsync">Cancel</AlvoButton>
+            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" form="@_formId" Busy="@(Busy || _gate.Busy)"
+                        Disabled="@(!CanSubmit || HoldsFault)" data-testid="@SubmitTestId">@SubmitText</AlvoButton>
+        }
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private static int _editors;
+    private readonly string _formId = $"alvo-editor-{Interlocked.Increment(ref _editors)}";
+    private readonly EditorCloseGuard _guard = new();
+    private readonly SubmitGate _gate = new();
+    private readonly DialogOptions _options = new()
+    {
+        Position = DialogPosition.CenterRight,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true,
+        CloseOnEscapeKey = false,
+        BackdropClick = false,
+        CloseButton = false,
+        DefaultFocus = DefaultFocus.FirstChild,
+    };
+
+    private MudDialog? _dialog;
+    private bool _contentFaulted;
+    private bool _actionsFaulted;
+    private ScrollLock? _scrollLock;
+    private Func<Task>? _leave;
+
+    /// <summary>Whether the next render gives focus back to the form, which Keep editing asks for.</summary>
+    private bool _refocus;
+
+    /// <summary>"New …" or "Edit …" (spec §3.1).</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>What the subject belongs to, set above the title the way a page header sets its section.</summary>
+    [Parameter]
+    public string? Eyebrow { get; set; }
+
+    /// <summary>One line under the title, or nothing.</summary>
+    [Parameter]
+    public string? Subtitle { get; set; }
+
+    /// <summary>
+    /// The primary action's label, by kind (spec §3.1): "Create record" / "Save changes" for what applies at once,
+    /// "Add to the working copy" / "Save to the working copy" for what is staged.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public string SubmitText { get; set; } = string.Empty;
+
+    /// <summary>The primary action's test id.</summary>
+    [Parameter]
+    public string SubmitTestId { get; set; } = "editor-submit";
+
+    /// <summary>The dialog's test id.</summary>
+    [Parameter]
+    public string TestId { get; set; } = "editor";
+
+    /// <summary>Whether the form holds something closing would lose.</summary>
+    [Parameter]
+    public bool Dirty { get; set; }
+
+    /// <summary>Whether the owner is still busy with something the form started, beyond the submit itself.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    /// <summary>Whether the primary action is available.</summary>
+    [Parameter]
+    public bool CanSubmit { get; set; } = true;
+
+    /// <summary>Raised on the primary action, on Enter in a single-line field, and on Ctrl/Cmd+Enter.</summary>
+    [Parameter]
+    public EventCallback OnSubmit { get; set; }
+
+    /// <summary>Raised when the operator closes it, once any discard question has been answered.</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    /// <summary>The fields.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Actions left of Cancel, such as "Save and add another" or "Delete record".</summary>
+    [Parameter]
+    public RenderFragment? ExtraActions { get; set; }
+
+    private ScrollLock Lock => _scrollLock ??= new ScrollLock(Interop);
+
+    /// <summary>Something any way out would lose that the owner's draft does not hold, cascaded by the page that knows.</summary>
+    [CascadingParameter]
+    private EditorLeaveQuestion? LeaveQuestion { get; set; }
+
+    /// <summary>Whether closing, by any way out, loses something.</summary>
+    private bool LosesSomething => Dirty || LeaveQuestion is not null;
+
+    private string QuestionBody => LeaveQuestion is { } question
+        ? Dirty ? $"{question.Body} What you changed here has not been saved either." : question.Body
+        : "What you changed here has not been saved, and closing loses it.";
+
+    private bool HoldsFault => _contentFaulted || _actionsFaulted;
+
+    /// <summary>The layout's own panel for a render fault, with its Reload, drawn where the fault happened.</summary>
+    private RenderFragment<ContainedFault.Caught> FaultPanel => caught =>
+        @<ErrorPanel Fault="@caught.Fault" TakeFocus="true">
+            <Actions>
+                <AlvoButton Small="true" data-testid="error-reload" OnClick="_ => caught.Recover()">Reload</AlvoButton>
+            </Actions>
+        </ErrorPanel>;
+
+    private void Faulted(ref bool part, bool faulted)
+    {
+        part = faulted;
+        StateHasChanged();
+    }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await Lock.HoldAsync();
+        }
+
+        if (_refocus)
+        {
+            _refocus = false;
+            await Interop.FocusFirstOnceShownAsync([FirstControl]);
+        }
+    }
+
+    /// <summary>
+    /// Gives focus back to the form's first control, as Keep editing does: for an owner whose form was read again under
+    /// a panel that had focus, such as the record form's Reload after a lost write.
+    /// </summary>
+    /// <remarks>Internal, for <see cref="LeaveAsync"/>'s reason.</remarks>
+    internal void FocusFirstControl()
+    {
+        _refocus = true;
+        StateHasChanged();
+    }
+
+    /// <summary>The form's first control, which takes focus back after Keep editing.</summary>
+    /// <remarks>
+    /// Not one inside an alert: a refusal's own action (Reload) is a control in the form too, and the library draws the
+    /// content a render after this component, so a panel on its way out is still there to be focused — and focus goes
+    /// with it to the page when it goes.
+    /// </remarks>
+    private string FirstControl
+        => $"#{_formId} :is(input:not([type='hidden']), textarea, select, button, [tabindex]:not([tabindex='-1'])):not([role='alert'] *)";
+
+    /// <summary>
+    /// Submits, once the operator chose to leave when a cascaded question says the submit would lose something: a
+    /// submit closes the editor as surely as Cancel does. A form that cannot submit asks nothing, because its answer
+    /// would lead nowhere.
+    /// </summary>
+    private Task SubmitAsync() => !Submittable ? Task.CompletedTask
+        : LeaveQuestion is null ? RunSubmitAsync() : LeaveAsync(RunSubmitAsync);
+
+    /// <summary>Whether the primary action can run now.</summary>
+    private bool Submittable => CanSubmit && !Busy && !HoldsFault;
+
+    private async Task RunSubmitAsync()
+    {
+        if (!Submittable || !_gate.TryBegin())
+        {
+            return;
+        }
+
+        try
+        {
+            await OnSubmit.InvokeAsync();
+        }
+        finally
+        {
+            _gate.End();
+        }
+    }
+
+    private Task RequestCloseAsync() => LeaveAsync(() => OnClose.InvokeAsync());
+
+    /// <summary>
+    /// Leaves the editor for <paramref name="leave"/>, such as a delete confirmed after the editor has closed; asks
+    /// "Discard your changes?" first when it holds any, and runs <paramref name="leave"/> only on Discard.
+    /// </summary>
+    /// <remarks>Internal, so no member of the public component carries it (spec D5's reason).</remarks>
+    internal async Task LeaveAsync(Func<Task> leave)
+    {
+        if (_guard.RequestClose(LosesSomething))
+        {
+            _leave = null;
+            await leave();
+            return;
+        }
+
+        _leave = leave;
+        StateHasChanged();
+    }
+
+    private Task DiscardAsync()
+    {
+        _guard.Discard();
+        var leave = _leave ?? (() => OnClose.InvokeAsync());
+        _leave = null;
+        return leave();
+    }
+
+    /// <summary>
+    /// Takes the question away and gives focus back to the form: the Keep editing that had it is gone, and focus left
+    /// on the page would put the next Escape out of the editor's reach.
+    /// </summary>
+    private void KeepEditing()
+    {
+        _guard.KeepEditing();
+        _leave = null;
+        _refocus = true;
+    }
+
+    /// <summary>
+    /// Closes the dialog, unless the circuit has already gone or the provider is already disposing it. The editor is
+    /// disposed on both of those paths too, and closing then has nothing left to close.
+    /// </summary>
+    private async Task CloseQuietlyAsync()
+    {
+        if (_dialog is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _dialog.CloseAsync();
+        }
+        catch (Exception exception) when (exception is JSDisconnectedException or ObjectDisposedException
+                                              or OperationCanceledException)
+        {
+            /* Nothing is left to close. */
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        await CloseQuietlyAsync();
+
+        if (_scrollLock is not null)
+        {
+            await _scrollLock.ReleaseAsync();
+        }
+    }
+}

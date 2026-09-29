@@ -25,6 +25,7 @@ internal static class ManagementOperations
         [ManagementOperation.SimulatePolicy] = ManagementLevel.Viewer,
         [ManagementOperation.ApplyDescriptor] = ManagementLevel.Developer,
         [ManagementOperation.RollbackRevision] = ManagementLevel.Developer,
+        [ManagementOperation.SetAiConnection] = ManagementLevel.Admin,
         [ManagementOperation.ManageApiKeys] = ManagementLevel.Admin,
         [ManagementOperation.ManageUsers] = ManagementLevel.Admin,
         [ManagementOperation.DeleteProject] = ManagementLevel.Admin,

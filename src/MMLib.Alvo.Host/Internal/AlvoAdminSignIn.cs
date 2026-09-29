@@ -1,6 +1,8 @@
 ﻿using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -10,7 +12,7 @@ using MMLib.Alvo.Identity;
 namespace MMLib.Alvo.Host.Internal;
 
 /// <summary>
-/// The two endpoints the dashboard's sign-in screen posts to.
+/// The endpoints the dashboard's sign-in and set-password screens post to.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -33,7 +35,7 @@ namespace MMLib.Alvo.Host.Internal;
 internal static class AlvoAdminSignIn
 {
     /// <summary>
-    /// Maps the sign-in and sign-out endpoints, unless the dashboard is turned off.
+    /// Maps the sign-in, sign-out and set-password endpoints, unless the dashboard is turned off.
     /// </summary>
     /// <remarks>
     /// <b>It honours the same switch <c>MapAlvoAdmin</c> does, and the two must not drift.</b>
@@ -51,8 +53,13 @@ internal static class AlvoAdminSignIn
             return;
         }
 
-        app.MapPost(AlvoAdmin.SignInEndpoint, SignInAsync).ExcludeFromDescription();
-        app.MapPost(AlvoAdmin.SignOutEndpoint, SignOutAsync).ExcludeFromDescription();
+        /* AllowAnonymous says what these are, and it is what the identity package's cookie re-check skips on:
+           signing in and out, and setting a password, must work with no session. The two posts that take a
+           credential are rate-limited by their handlers, after the antiforgery check (AlvoAdminCredentialLimit). */
+        app.MapPost(AlvoAdmin.SignInEndpoint, SignInAsync).AllowAnonymous().ExcludeFromDescription();
+        app.MapPost(AlvoAdmin.SignOutEndpoint, SignOutAsync).AllowAnonymous().ExcludeFromDescription();
+        app.MapPost(AlvoAdmin.SetPasswordEndpoint, AlvoAdminSetPassword.SetPasswordAsync).AllowAnonymous()
+            .ExcludeFromDescription();
     }
 
     /// <summary>
@@ -64,9 +71,13 @@ internal static class AlvoAdminSignIn
     /// the browser's resubmission prompt.
     /// </remarks>
     private static async Task<IResult> SignInAsync(
-        HttpContext http, AlvoSignIn signIn, IAntiforgery antiforgery)
+        HttpContext http,
+        AlvoSignIn signIn,
+        IAntiforgery antiforgery,
+        AlvoAdminCredentialLimit limit,
+        ILookupNormalizer normalizer)
     {
-        if (!await ValidAsync(http, antiforgery).ConfigureAwait(false))
+        if (!WithinSize(http) || !await ValidAsync(http, antiforgery).ConfigureAwait(false))
         {
             return Results.Redirect(AlvoAdmin.SignInPath);
         }
@@ -76,26 +87,63 @@ internal static class AlvoAdminSignIn
         var password = form["password"].ToString();
         var returnUrl = Local(form["returnUrl"].ToString());
 
+        if (email.Length > AlvoAdminSetPassword.MaximumEmailLength)
+        {
+            return Results.Redirect(Failed(returnUrl));
+        }
+
+        if (limit.Charge(http, AlvoAdminCredentialLimit.SignInSubject(normalizer.NormalizeEmail(email))) is { } wait)
+        {
+            return AlvoAdminCredentialLimit.Throttled(
+                http, wait, $"{AlvoAdmin.SignInPath}?throttled=true&returnUrl={Uri.EscapeDataString(returnUrl)}");
+        }
+
         if (email.Length == 0 || password.Length == 0
             || !await signIn.PasswordSignInAsync(email, password).ConfigureAwait(false))
         {
-            return Results.Redirect(
-                $"{AlvoAdmin.SignInPath}?failed=true&returnUrl={Uri.EscapeDataString(returnUrl)}");
+            return Results.Redirect(Failed(returnUrl));
         }
 
         return Results.Redirect(returnUrl);
     }
 
+    /// <summary>Back to sign-in, saying the credentials did not match, and keeping where the person was going.</summary>
+    private static string Failed(string returnUrl)
+        => $"{AlvoAdmin.SignInPath}?failed=true&returnUrl={Uri.EscapeDataString(returnUrl)}";
+
     /// <summary>Clears the cookie and returns to the sign-in screen.</summary>
     private static async Task<IResult> SignOutAsync(
         HttpContext http, AlvoSignIn signIn, IAntiforgery antiforgery)
     {
-        if (await ValidAsync(http, antiforgery).ConfigureAwait(false))
+        if (WithinSize(http) && await ValidAsync(http, antiforgery).ConfigureAwait(false))
         {
             await signIn.SignOutAsync().ConfigureAwait(false);
         }
 
         return Results.Redirect(AlvoAdmin.SignInPath);
+    }
+
+    /// <summary>The most a credential form's body may carry; a real one is well under a kilobyte.</summary>
+    internal const long MaximumFormBytes = 16 * 1024;
+
+    /// <summary>
+    /// Bounds an anonymous post's body before anything reads it, and says whether its declared length is within it.
+    /// </summary>
+    /// <remarks>
+    /// The antiforgery check and the form read buffer the whole body under the server's defaults (tens of megabytes)
+    /// before the fields' own bounds apply, and the rate limit bounds how often, not how big. A declared length over
+    /// the bound is answered at once; a chunked body that grows past it is cut off by the server, which the lowered
+    /// maximum below asks for, and <see cref="ValidAsync"/> answers that cut-off with the page like any refusal.
+    /// </remarks>
+    /// <param name="http">The request.</param>
+    internal static bool WithinSize(HttpContext http)
+    {
+        if (http.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } body)
+        {
+            body.MaxRequestBodySize = MaximumFormBytes;
+        }
+
+        return http.Request.ContentLength is not > MaximumFormBytes;
     }
 
     /// <summary>Validates the antiforgery token on a posted form.</summary>
@@ -104,7 +152,7 @@ internal static class AlvoAdminSignIn
     /// is a form left open until its token expired, and a person who reads "Bad Request" has no
     /// idea that submitting again would work.
     /// </remarks>
-    private static async Task<bool> ValidAsync(HttpContext http, IAntiforgery antiforgery)
+    internal static async Task<bool> ValidAsync(HttpContext http, IAntiforgery antiforgery)
     {
         try
         {
@@ -113,6 +161,14 @@ internal static class AlvoAdminSignIn
         }
         catch (AntiforgeryValidationException)
         {
+            return false;
+        }
+        catch (BadHttpRequestException tooLarge) when (tooLarge.StatusCode == StatusCodes.Status413PayloadTooLarge)
+        {
+            /* A chunked body that grew past WithinSize's bound, cut off by the server while the token was being
+               read: the same refusal as a declared length over it, not an exception page. Today the antiforgery
+               token store already turns this IOException into an AntiforgeryValidationException (measured: the
+               chunked fact stays green without this clause); this catch keeps the answer if that detail changes. */
             return false;
         }
     }
