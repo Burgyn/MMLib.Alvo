@@ -14,12 +14,15 @@
 #                                      password that signs in to it is then unknown
 #   scripts/demo-admin --no-build      skip `dotnet build` (the previous build is used as it stands)
 #   scripts/demo-admin --no-ai         start without the schema assistant, and ask nothing about it
+#   scripts/demo-admin --ai-setup      ask for the assistant's connection again, ignoring what was remembered
 #
-# The schema assistant needs a model. Whatever of ALVO_DEMO_AI_* below is not set is asked for, one
-# value at a time, with a default to accept by Enter; the answers except the key are remembered in the
-# demo directory (ai.env) and offered as the defaults next time. The key is read without echo, passed to
-# the host through its secret store, and never written to disk — export ALVO_DEMO_AI_KEY to skip that
-# question. Without a terminal to ask on (CI, a pipe) the demo starts without the assistant.
+# The schema assistant needs a model. Each part of the connection is taken from the first place that has
+# it — ALVO_DEMO_AI_*, the host's own Alvo__Ai__*, then what an earlier run was told (ai.env in the demo
+# directory) — and only what none of them has is asked for, with a default Enter accepts. The key comes
+# from ALVO_DEMO_AI_KEY, OPENAI_API_KEY (api.openai.com) or AZURE_OPENAI_API_KEY (azure-openai), or from
+# ai.key if you let an earlier run remember it (mode 600, delete it to forget); it is read without echo,
+# never printed, and reaches the host through its secret store. With nothing missing nothing is asked;
+# without a terminal to ask on (CI, a pipe) an incomplete connection starts the demo without the assistant.
 #
 # Environment:
 #   ALVO_DEMO_AI_KIND      openai-compatible (default) or azure-openai
@@ -55,6 +58,7 @@ port=5080
 keep=0
 build=1
 ai=1
+ai_setup=0
 webhook_port=5081
 
 while [ $# -gt 0 ]; do
@@ -64,6 +68,7 @@ while [ $# -gt 0 ]; do
     --keep) keep=1; shift ;;
     --no-build) build=0; shift ;;
     --no-ai) ai=0; shift ;;
+    --ai-setup) ai_setup=1; shift ;;
     -h|--help) sed -n '2,/^# Requires:/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "[demo-admin] unknown argument: $1 (try --help)" >&2; exit 2 ;;
   esac
@@ -128,6 +133,7 @@ host_log="$dir/host.log"
 # ---------------------------------------------------------------------------------------------------
 ai_env="$dir/ai.env"
 ai_secret_name="demo_ai_key"
+ai_key_file="$dir/ai.key"
 
 # Reads one line from the terminal, offering a default that Enter accepts. /dev/tty rather than stdin,
 # so the answer comes from the person even when the script's input is redirected.
@@ -147,43 +153,79 @@ ask_secret() {
   printf '%s' "$answer"
 }
 
-configure_ai() {
-  # The previous run's answers are the defaults; the environment wins over both.
-  local saved_kind="" saved_endpoint="" saved_model=""
-  if [ -f "$ai_env" ]; then
-    saved_kind="$(sed -n 's/^kind=//p' "$ai_env")"
-    saved_endpoint="$(sed -n 's/^endpoint=//p' "$ai_env")"
-    saved_model="$(sed -n 's/^model=//p' "$ai_env")"
-  fi
-  ai_kind="${ALVO_DEMO_AI_KIND:-}"
-  ai_endpoint="${ALVO_DEMO_AI_ENDPOINT:-}"
-  ai_model="${ALVO_DEMO_AI_MODEL:-}"
-  ai_key="${ALVO_DEMO_AI_KEY:-}"
+saved() { if [ -f "$ai_env" ]; then sed -n "s/^$1=//p" "$ai_env" | head -n 1; fi; }
 
-  if [ -n "$ai_kind" ] && [ -n "$ai_endpoint" ] && [ -n "$ai_model" ]; then
-    return
-  fi
-  if ! (: </dev/tty) 2>/dev/null; then
-    say "no terminal to ask on and ALVO_DEMO_AI_* incomplete — starting without the schema assistant"
+# The key the connection would send, from the first place that has one: ALVO_DEMO_AI_KEY, the
+# provider's usual variable, then the key this demo was told to remember (ai.key, readable by you only).
+known_key() {
+  if [ -n "${ALVO_DEMO_AI_KEY:-}" ]; then printf '%s' "$ALVO_DEMO_AI_KEY"; return; fi
+  case "$ai_kind" in
+    azure-openai) if [ -n "${AZURE_OPENAI_API_KEY:-}" ]; then printf '%s' "$AZURE_OPENAI_API_KEY"; return; fi ;;
+    *) case "$ai_endpoint" in
+         https://api.openai.com/*) if [ -n "${OPENAI_API_KEY:-}" ]; then printf '%s' "$OPENAI_API_KEY"; return; fi ;;
+       esac ;;
+  esac
+  if [ -s "$ai_key_file" ]; then tr -d '[:space:]' <"$ai_key_file"; fi
+}
+
+# A key is needed when the provider always refuses without one; a local endpoint may run keyless.
+key_needed() {
+  [ "$ai_kind" = "azure-openai" ] && return 0
+  case "$ai_endpoint" in https://api.openai.com/*) return 0 ;; esac
+  [ "$(saved keyless)" != "1" ]
+}
+
+# OpenAI's own keys start with sk-; one that does not was mistyped or mis-pasted (a stray first
+# character is the usual case), and the provider would refuse it on the first turn.
+plausible_key() {
+  case "$ai_endpoint" in https://api.openai.com/*) case "$1" in sk-*) ;; *) return 1 ;; esac ;; esac
+  return 0
+}
+
+configure_ai() {
+  # Each value from the first place that has it: ALVO_DEMO_AI_*, the host's own Alvo__Ai__*, then
+  # what the previous run was told. Only what none of them has is asked for.
+  ai_kind="${ALVO_DEMO_AI_KIND:-${Alvo__Ai__Kind:-$( [ "$ai_setup" -eq 1 ] || saved kind )}}"
+  ai_endpoint="${ALVO_DEMO_AI_ENDPOINT:-${Alvo__Ai__Endpoint:-$( [ "$ai_setup" -eq 1 ] || saved endpoint )}}"
+  ai_model="${ALVO_DEMO_AI_MODEL:-${Alvo__Ai__Model:-$( [ "$ai_setup" -eq 1 ] || saved model )}}"
+  ai_key=""
+
+  if [ "$ai_setup" -eq 0 ] && [ "$(saved enabled)" = "0" ] && [ -z "${ALVO_DEMO_AI_KIND:-}${ALVO_DEMO_AI_ENDPOINT:-}${ALVO_DEMO_AI_MODEL:-}" ]; then
+    say "the schema assistant is off, as chosen before (--ai-setup asks again)"
     ai=0
     return
   fi
 
-  say "the schema assistant needs a model (--no-ai skips this; Enter accepts the [default])"
-  case "$(ask 'Use the schema assistant? (y/n)' y)" in
-    y|Y|yes|a|A|ano|áno) ;;
-    *) ai=0; say "starting without the schema assistant"; return ;;
-  esac
+  if [ -n "$ai_kind" ] && [ -n "$ai_endpoint" ] && [ -n "$ai_model" ]; then
+    ai_key="$(known_key)"
+    if [ -n "$ai_key" ] || ! key_needed; then return; fi
+  fi
+
+  if ! (: </dev/tty) 2>/dev/null; then
+    say "no terminal to ask on and the AI connection is incomplete — starting without the schema assistant"
+    ai=0
+    return
+  fi
+
+  local asked_anything=0
+  if [ -z "$ai_kind" ] && [ -z "$ai_endpoint" ] && [ -z "$ai_model" ]; then
+    say "the schema assistant needs a model (--no-ai skips this; Enter accepts the [default])"
+    case "$(ask 'Use the schema assistant? (y/n)' y)" in
+      y|Y|yes|a|A|ano|áno) ;;
+      *) ai=0; printf 'enabled=0\n' >"$ai_env"; say "starting without the schema assistant"; return ;;
+    esac
+    asked_anything=1
+  fi
 
   while [ -z "$ai_kind" ]; do
-    ai_kind="$(ask 'Kind: openai-compatible or azure-openai' "${saved_kind:-openai-compatible}")"
+    ai_kind="$(ask 'Kind: openai-compatible or azure-openai' openai-compatible)"
     case "$ai_kind" in
       openai-compatible|azure-openai) ;;
       *) say "'$ai_kind' is neither — type openai-compatible or azure-openai"; ai_kind="" ;;
     esac
   done
-  local endpoint_default="${saved_endpoint:-https://api.openai.com/v1}"
-  if [ "$ai_kind" = "azure-openai" ] && [ -z "$saved_endpoint" ]; then endpoint_default=""; fi
+  local endpoint_default="https://api.openai.com/v1"
+  if [ "$ai_kind" = "azure-openai" ]; then endpoint_default=""; fi
   while [ -z "$ai_endpoint" ]; do
     ai_endpoint="$(ask 'Endpoint' "$endpoint_default")"
     case "$ai_endpoint" in
@@ -194,31 +236,35 @@ configure_ai() {
   local model_label='Model'
   if [ "$ai_kind" = "azure-openai" ]; then model_label='Deployment name'; fi
   while [ -z "$ai_model" ]; do
-    ai_model="$(ask "$model_label" "${saved_model:-gpt-4.1-mini}")"
+    ai_model="$(ask "$model_label" gpt-4.1-mini)"
   done
+
+  local keyless=0
+  ai_key="$(known_key)"
   while [ -z "$ai_key" ]; do
     ai_key="$(ask_secret 'API key')"
     # A pasted key carries stray whitespace often enough to strip it; its value is never echoed.
     ai_key="$(printf '%s' "$ai_key" | tr -d '[:space:]')"
-    [ -n "$ai_key" ] || break
-    # OpenAI's own keys start with sk-; one that does not was mistyped or mis-pasted (a stray first
-    # character is the usual case), and the provider would refuse it on the first turn.
-    case "$ai_endpoint" in
-      https://api.openai.com/*)
-        case "$ai_key" in
-          sk-*) ;;
-          *) say "an OpenAI key starts with 'sk-' — this one does not (${#ai_key} characters); enter it again"; ai_key="" ;;
-        esac ;;
+    if [ -z "$ai_key" ]; then
+      case "$ai_kind:$ai_endpoint" in
+        azure-openai:*|*:https://api.openai.com/*)
+          say "$ai_endpoint needs a key — starting without the schema assistant"; ai=0; return ;;
+      esac
+      keyless=1
+      break
+    fi
+    if ! plausible_key "$ai_key"; then
+      say "an OpenAI key starts with 'sk-' — this one does not (${#ai_key} characters); enter it again"
+      ai_key=""
+      continue
+    fi
+    case "$(ask "Remember the key in $ai_key_file, readable by you only? (y/n)" y)" in
+      y|Y|yes|a|A|ano|áno) (umask 077; printf '%s' "$ai_key" >"$ai_key_file"); say "key remembered — delete $ai_key_file to forget it" ;;
+      *) rm -f "$ai_key_file" ;;
     esac
   done
-  if [ -z "$ai_key" ] && [ "$ai_kind" = "azure-openai" ]; then
-    say "azure-openai needs a key — starting without the schema assistant"
-    ai=0
-    return
-  fi
 
-  # Never the key: it is asked again, or read from ALVO_DEMO_AI_KEY.
-  printf 'kind=%s\nendpoint=%s\nmodel=%s\n' "$ai_kind" "$ai_endpoint" "$ai_model" >"$ai_env"
+  printf 'enabled=1\nkind=%s\nendpoint=%s\nmodel=%s\nkeyless=%s\n' "$ai_kind" "$ai_endpoint" "$ai_model" "$keyless" >"$ai_env"
 }
 
 if [ "$ai" -eq 1 ]; then configure_ai; fi
