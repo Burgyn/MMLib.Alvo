@@ -68,7 +68,7 @@ internal static class TurnTrace
     /// <summary>The trace of a turn's calls, and how it ended.</summary>
     internal static JsonObject Of(TurnHeader header, IReadOnlyList<TracedCall> calls, string end)
     {
-        var trace = Header(header, calls, end);
+        var trace = (JsonObject)SecretScrub.Scrub(Header(header, calls, end))!;
         var entries = trace["calls"]!.AsArray();
         for (var index = 0; index < calls.Count; index++)
         {

@@ -322,6 +322,22 @@ public sealed class AlvoAssistantTests
         updates.OfType<AssistantUpdate.TurnTraced>().Single().Json.ShouldContain(quoted);
     }
 
+    /// <summary>
+    /// A tool name is the model's own text, so it never reaches a log template raw: a name with a newline cannot forge a
+    /// log line, and it appears only JSON-escaped inside the call (final review L1).
+    /// </summary>
+    [Fact]
+    public async Task A_made_up_tool_name_reaches_the_log_only_escaped()
+    {
+        var logger = new CapturingLogger();
+
+        await RunAsync(Describing(revision: 1), Configured(), new ScriptedChatClient(
+            Scripted.Calls("evil\nFORGED log line", []), Scripted.Says("ok")), logger);
+
+        logger.EventIds.ShouldContain(6202);
+        logger.Lines.ShouldNotContain(line => line.Contains("\nFORGED", StringComparison.Ordinal));
+    }
+
     /// <summary>One structured event per call and one for the turn's end.</summary>
     [Fact]
     public async Task Every_call_is_logged_as_6202_and_the_turns_end_as_6203()

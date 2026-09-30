@@ -21,6 +21,18 @@ public sealed class TurnTraceTests
     [InlineData("aws AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE")]
     [InlineData("jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl")]
     [InlineData("Server=db;User Id=alvo;Password=hunter2;", "hunter2")]
+    [InlineData("key sk-proj-AbCdEfGhIjKlMnOpQrStUv_wx-yz12", "sk-proj-AbCdEfGhIjKlMnOpQrStUv_wx-yz12")]
+    [InlineData("azure 0123456789abcdef0123456789abcdef", "0123456789abcdef0123456789abcdef")]
+    [InlineData("Authorization: Bearer abc.def-ghi_jkl.mno12345", "abc.def-ghi_jkl.mno12345")]
+    [InlineData("Bearer 3f9a-77bc-1234-abcd-ef00", "3f9a-77bc-1234-abcd-ef00")]
+    [InlineData("password=\"hunter2 x\"", "hunter2 x")]
+    [InlineData("password: 'hunter2'", "hunter2")]
+    [InlineData("client_secret=abcDEF123", "abcDEF123")]
+    [InlineData("OPENAI_API_KEY=abc123def", "abc123def")]
+    [InlineData("token=abcdef123", "abcdef123")]
+    [InlineData("AccountName=a;AccountKey=abc+def/ghi==;EndpointSuffix=core", "abc+def/ghi==")]
+    [InlineData("Endpoint=sb://x/;SharedAccessKeyName=r;SharedAccessKey=xyz+ab/c=", "xyz+ab/c=")]
+    [InlineData("postgres://alvo:pass123@db:5432/app", "pass123")]
     public void A_secret_like_value_is_redacted(string text, string secret)
     {
         var scrubbed = SecretScrub.Scrub(text);
@@ -34,6 +46,10 @@ public sealed class TurnTraceTests
     [InlineData("/entities/service_orders/fields/problem_description")]
     [InlineData("'admin' in @user.roles || assigned_user_id == @user.id")]
     [InlineData("A Rule expression must evaluate to a boolean; this expression evaluates to String.")]
+    [InlineData("row.pin == 'Pa55w0rd-XYZ'")]
+    [InlineData("api_token == @user.id")]
+    [InlineData("/entities/tokens/fields/token")]
+    [InlineData("https://api.openai.com/v1")]
     public void A_descriptor_text_is_left_alone(string text) => SecretScrub.Scrub(text).ShouldBe(text);
 
     /// <summary>Every string of a JSON tree is scrubbed, keys and nesting kept (pre-flight M5: no mutation while walking).</summary>
@@ -55,6 +71,29 @@ public sealed class TurnTraceTests
         text.ShouldNotContain("AKIAIOSFODNN7EXAMPLE");
         node["e"]!.GetValue<int>().ShouldBe(3);
         node["c"]![0]!.GetValue<string>().ShouldBe("ok");
+    }
+
+    /// <summary>A key is a string too (D44 "every string"): a secret-like key is redacted, its value kept.</summary>
+    [Fact]
+    public void A_secret_like_key_is_redacted_and_its_value_kept()
+    {
+        var node = new JsonObject { ["sk-live-0123456789abcdefghij"] = "value", ["plain"] = 1 };
+
+        var text = SecretScrub.Scrub(node)!.ToJsonString();
+
+        text.ShouldNotContain("sk-live-0123456789abcdefghij");
+        text.ShouldContain(SecretScrub.Redacted);
+        text.ShouldContain("\"value\"");
+        text.ShouldContain("\"plain\":1");
+    }
+
+    /// <summary>The header's strings are scrubbed like the entries': a model or project name holding a key is redacted.</summary>
+    [Fact]
+    public void The_header_is_scrubbed_too()
+    {
+        var trace = TurnTrace.Json(TurnTrace.Of(new TurnHeader("v", "OpenAiCompatible", "sk-live-0123456789abcdefghij", "p"), [], TurnEnd.Answered));
+
+        trace.ShouldNotContain("sk-live-0123456789abcdefghij");
     }
 
     /// <summary>A turn of forty 10 KB patches stays under the cap, and still says how it ended.</summary>

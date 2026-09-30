@@ -7,9 +7,12 @@ namespace MMLib.Alvo.Ai.Internal;
 /// <remarks>
 /// <para>
 /// A trace carries a descriptor's text — patch values, refusals quoting a rule — and an operator pastes connection
-/// strings and keys into places they should never be. Three shapes are recognised: a provider token by its prefix, an
-/// unbroken alphanumeric run of 32 or more (a key without a known prefix), and a <c>password=…</c>-style pair, whose
-/// value alone is replaced.
+/// strings and keys into places they should never be. These shapes are recognised: a provider token by its prefix; a
+/// <c>Bearer</c> credential; the password of a URI's userinfo (<c>postgres://user:pass@host</c>); an unbroken
+/// alphanumeric run of 32 or more (a key without a known prefix, a 32-hex Azure key); and a <c>name=value</c> or
+/// <c>name: value</c> pair whose name is a secret's — <c>password</c>, <c>token</c>, <c>client_secret</c>, an
+/// <c>…_API_KEY</c>, Azure's <c>AccountKey</c> and <c>SharedAccessKey</c> — with its value, quoted or not, replaced. A
+/// <c>==</c> is a comparison, not a pair, so a CEL rule over a field called <c>token</c> is left alone.
 /// </para>
 /// <para>
 /// <b>What a trace is for survives it.</b> A snake_case name always has an <c>_</c> and a pointer a <c>/</c>, so
@@ -25,6 +28,8 @@ internal static partial class SecretScrub
     internal static string Scrub(string text)
     {
         var scrubbed = Token().Replace(text, Redacted);
+        scrubbed = Bearer().Replace(scrubbed, "${scheme}" + Redacted);
+        scrubbed = UserInfo().Replace(scrubbed, "${user}" + Redacted + "@");
         scrubbed = LongRun().Replace(scrubbed, Redacted);
         return KeyValue().Replace(scrubbed, "${name}${separator}" + Redacted);
     }
@@ -48,6 +53,7 @@ internal static partial class SecretScrub
         }
     }
 
+    /// <summary>Scrubs each member's value, and its key: a key is a string too (D44), and an unknown one is kept by name.</summary>
     private static void ScrubMembers(JsonObject members)
     {
         foreach (var key in members.Select(member => member.Key).ToList())
@@ -56,7 +62,29 @@ internal static partial class SecretScrub
             {
                 members[key] = scrubbed;
             }
+
+            RenameIfSecret(members, key);
         }
+    }
+
+    /// <summary>Moves a member whose key looks like a secret under the scrubbed key, keeping its value.</summary>
+    private static void RenameIfSecret(JsonObject members, string key)
+    {
+        var scrubbed = Scrub(key);
+        if (scrubbed == key)
+        {
+            return;
+        }
+
+        var value = members[key];
+        members.Remove(key);
+        var renamed = scrubbed;
+        for (var index = 2; members.ContainsKey(renamed); index++)
+        {
+            renamed = $"{scrubbed} {index}";
+        }
+
+        members[renamed] = value;
     }
 
     private static void ScrubItems(JsonArray items)
@@ -75,11 +103,22 @@ internal static partial class SecretScrub
         RegexOptions.CultureInvariant)]
     private static partial Regex Token();
 
+    [GeneratedRegex(@"(?<scheme>\bBearer\s+)[A-Za-z0-9._~+/=\-]{16,}", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex Bearer();
+
+    [GeneratedRegex(@"(?<user>\b[a-z][a-z0-9+.\-]*://[^/\s:@]+:)[^@\s/]+@", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex UserInfo();
+
     [GeneratedRegex(@"\b[A-Za-z0-9]{32,}\b", RegexOptions.CultureInvariant)]
     private static partial Regex LongRun();
 
+    /// <summary>
+    /// A secret's name — after any <c>WORD_</c> prefixes, so <c>OPENAI_API_KEY</c> and <c>client_secret</c> match, where
+    /// a <c>\b</c> after the underscore never would — then <c>=</c> (not <c>==</c>) or <c>:</c>, then the value, quoted or bare.
+    /// </summary>
     [GeneratedRegex(
-        @"(?<name>\b(?:password|pwd|secret|api[_-]?key|access[_-]?token)\b)(?<separator>\s*[=:]\s*)[^;\s""',]+",
+        @"(?<name>(?<![A-Za-z0-9])(?:[A-Za-z0-9]+_)*(?:password|passwd|pwd|secret|client[_-]?secret|api[_-]?key|access[_-]?token|token|accountkey|sharedaccesskey)\b)"
+        + @"(?<separator>\s*(?:=(?!=)|:)\s*)(?:""[^""]*""|'[^']*'|[^;\s""',]+)",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex KeyValue();
 }

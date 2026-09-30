@@ -424,7 +424,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             yield return new DescriptorValidationError(
                 path,
                 $"Field references unknown entity '{target}'.",
-                $"Point 'entity' at one the descriptor declares ({Declared(entityNames)}), or add an entity named '{target}'.",
+                UnknownRefFix(target, entityNames),
                 DescriptorValidationSeverity.Error);
         }
 
@@ -734,25 +734,30 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     /// forbidden as a descriptor-declared key, but <c>ref</c> fields may target it — see
     /// schema/project.schema.json's "entities" and "field.entity" descriptions).
     /// </summary>
+    /// <summary>How many declared entities an unknown ref's fix names before it cuts the list with <c>…</c>.</summary>
+    private const int DeclaredEntitiesListed = 8;
+
+    /// <summary>
+    /// The fix for a ref to an undeclared entity: the declared entities first (ordinal, capped), then the built-in
+    /// <c>users</c>, and only then a new entity — so a ref named by the operator's word is steered to what the project
+    /// already has, and never told to add a <c>users</c> the schema reserves.
+    /// </summary>
+    /// <param name="target">The entity the ref named.</param>
+    /// <param name="entityNames">The entities the descriptor declares.</param>
+    internal static string UnknownRefFix(string target, IReadOnlyCollection<string> entityNames)
+    {
+        var names = entityNames.Order(StringComparer.Ordinal).ToList();
+        var listed = string.Join(", ", names.Take(DeclaredEntitiesListed)) + (names.Count > DeclaredEntitiesListed ? ", …" : string.Empty);
+        return names.Count == 0
+            ? $"Point 'entity' at '{ReservedUsersEntity}', or add an entity named '{target}'."
+            : $"Point 'entity' at one the descriptor declares ({listed}) or at '{ReservedUsersEntity}', or add an entity named '{target}'.";
+    }
+
     private const string ReservedUsersEntity = "users";
 
     // TODO(#F7): dynamic entities (evidencie) will also be valid ref targets that never appear
     // as a declared key here — this exemption will need to generalize from a single reserved
     // name to "known at runtime, not from the descriptor" once that late binding lands.
-    /// <summary>How many declared entities an unknown ref's fix names before it cuts the list with <c>…</c>.</summary>
-    private const int DeclaredEntitiesListed = 8;
-
-    /// <summary>
-    /// The declared entities, ordinal and capped, for an unknown ref's fix: an existing entity is offered before a new
-    /// one, so a ref named by the operator's word is steered to what the project already has.
-    /// </summary>
-    private static string Declared(HashSet<string> entityNames)
-    {
-        var names = entityNames.Order(StringComparer.Ordinal).ToList();
-        var listed = string.Join(", ", names.Take(DeclaredEntitiesListed));
-        return names.Count > DeclaredEntitiesListed ? listed + ", …" : listed;
-    }
-
     private static bool IsUnknownRef(JsonElement field, HashSet<string> entityNames, out string target)
     {
         target = "";

@@ -20,6 +20,7 @@ public sealed class InternalGrantArchitectureTests
     [InlineData("MMLib.Alvo.Rules.PolicyDecision::.ctor")]
     [InlineData("MMLib.Alvo.Rules.PolicyDecision::Allow")]
     [InlineData("MMLib.Alvo.Expressions.CompiledExpression::.ctor")]
+    [InlineData("MMLib.Alvo.Identity.Role::Application")]
     public void The_dashboard_never_reaches_a_security_core_member(string member)
     {
         InternalMemberReferences.SecurityCoreOnly.ShouldContain(member);

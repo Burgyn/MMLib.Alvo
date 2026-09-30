@@ -172,7 +172,7 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
             foreach (var call in calls)
             {
                 var line = LogLineOf(call);
-                CallTraced(_logger, call.Round, call.Tool, line);
+                CallTraced(_logger, call.Round, line);
             }
         }
 
@@ -392,8 +392,12 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
         "No AI connection is configured for this instance, so there is nothing to ask. Set one under "
         + "Settings, or pin one in the deployment's own configuration under Alvo:Ai.";
 
-    [LoggerMessage(EventId = 6202, Level = LogLevel.Information, Message = "Assistant call {Round} {Tool}: {Call}")]
-    private static partial void CallTraced(ILogger logger, int round, string tool, string call);
+    /// <remarks>
+    /// No <c>{Tool}</c> placeholder: a tool name is the model's own text, and one it made up could carry a newline that
+    /// forges a log line. The name is inside <c>{Call}</c>, scrubbed and JSON-escaped.
+    /// </remarks>
+    [LoggerMessage(EventId = 6202, Level = LogLevel.Information, Message = "Assistant call {Round}: {Call}")]
+    private static partial void CallTraced(ILogger logger, int round, string call);
 
     [LoggerMessage(EventId = 6203, Level = LogLevel.Information, Message = "Assistant turn ended ({End}) after {Calls} calls in {Rounds} tool rounds.")]
     private static partial void TurnEnded(ILogger logger, string end, int calls, int rounds);

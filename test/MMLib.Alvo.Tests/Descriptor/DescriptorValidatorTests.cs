@@ -36,7 +36,7 @@ public class DescriptorValidatorTests
         var refusal = _validator.Validate(json).Errors.ShouldHaveSingleItem();
 
         refusal.Message.ShouldBe("Field references unknown entity 'products'.");
-        refusal.FixSuggestion.ShouldBe("Point 'entity' at one the descriptor declares (bikes, parts), or add an entity named 'products'.");
+        refusal.FixSuggestion.ShouldBe("Point 'entity' at one the descriptor declares (bikes, parts) or at 'users', or add an entity named 'products'.");
     }
 
     /// <summary>The list of declared entities in that fix is capped, so a large project cannot flood the refusal.</summary>
@@ -51,9 +51,14 @@ public class DescriptorValidatorTests
 
         var fix = _validator.Validate(json).Errors.ShouldHaveSingleItem().FixSuggestion;
 
-        fix.ShouldBe("Point 'entity' at one the descriptor declares (bikes, e00, e01, e02, e03, e04, e05, e06, …), "
+        fix.ShouldBe("Point 'entity' at one the descriptor declares (bikes, e00, e01, e02, e03, e04, e05, e06, …) or at 'users', "
             + "or add an entity named 'products'.");
     }
+
+    /// <summary>With no declared entity to offer, the fix names only <c>users</c>, never an empty list.</summary>
+    [Fact]
+    public void An_unknown_ref_fix_with_no_declared_entity_offers_users_and_no_empty_list() =>
+        DescriptorValidator.UnknownRefFix("products", []).ShouldBe("Point 'entity' at 'users', or add an entity named 'products'.");
 
     [Fact]
     public void Schema_violation_is_a_structured_error()

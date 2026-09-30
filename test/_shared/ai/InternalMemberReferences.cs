@@ -16,12 +16,16 @@ namespace MMLib.Alvo.Ai.Tests;
 /// </remarks>
 internal static class InternalMemberReferences
 {
-    /// <summary>The members only the core may reach: an allow decision and a compiled, trusted expression.</summary>
+    /// <summary>
+    /// The members only the core may reach: an allow decision, a compiled, trusted expression, and an application role
+    /// minted past <c>RoleCatalog</c>.
+    /// </summary>
     internal static IReadOnlyList<string> SecurityCoreOnly { get; } =
     [
         "MMLib.Alvo.Rules.PolicyDecision::.ctor",
         "MMLib.Alvo.Rules.PolicyDecision::Allow",
         "MMLib.Alvo.Expressions.CompiledExpression::.ctor",
+        "MMLib.Alvo.Identity.Role::Application",
     ];
 
     internal static IReadOnlySet<string> Of(Assembly assembly)
