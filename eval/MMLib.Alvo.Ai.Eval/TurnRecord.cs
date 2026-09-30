@@ -42,8 +42,10 @@ internal sealed record TurnRecord(
     internal IReadOnlyList<JsonObject> Outcomes =>
         [.. Calls.Where(call => _dryRuns.Contains(call.Tool)).Select(call => ObjectOf(call.Result)).OfType<JsonObject>()];
 
+    /// <summary>The dry runs that were refused.</summary>
+    /// <remarks>An <c>unchecked</c> budget answer was no dry run (D41), so it is not counted.</remarks>
     internal int RefusedAttempts =>
-        Outcomes.Count(outcome => !(outcome["valid"] is JsonValue flag && flag.TryGetValue<bool>(out var valid) && valid));
+        Outcomes.Where(outcome => outcome["unchecked"] is null).Count(outcome => !(outcome["valid"] is JsonValue flag && flag.TryGetValue<bool>(out var valid) && valid));
 
     internal IReadOnlyList<string> ChangedPaths =>
         Proposal is { } proposal ? DescriptorDiff.Paths(OriginalDescriptor, proposal.DescriptorJson) : [];

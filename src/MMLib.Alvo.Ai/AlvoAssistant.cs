@@ -27,7 +27,8 @@ namespace MMLib.Alvo.Ai;
 /// once cannot overwrite each other silently.
 /// </para>
 /// <para>
-/// <b>A turn is bounded twice.</b> The tools refuse after three refused attempts; the loop itself ends after
+/// <b>A turn is bounded twice.</b> The tools stop dry-running after three refusals that made no progress, or six in
+/// all (D41); the loop itself ends after
 /// <see cref="MaximumIterations"/> model round-trips, so a model that never stops calling tools ends as a turn
 /// rather than a bill.
 /// </para>

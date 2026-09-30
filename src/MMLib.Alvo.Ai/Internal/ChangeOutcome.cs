@@ -8,22 +8,30 @@ namespace MMLib.Alvo.Ai.Internal;
 /// <param name="Plan">The migration plan the dry run produced, or the destructive plan it refused.</param>
 /// <param name="ChangedPaths">What the patch touched, computed by Alvo rather than claimed by the model.</param>
 /// <param name="Violations">Every refusal and warning, each at the pointer it concerns.</param>
-/// <param name="AttemptsLeft">How many more refused attempts this turn may make.</param>
+/// <param name="AttemptsLeft">
+/// How many more refusals that make no progress this turn may make — or fewer, when the turn's ceiling on refusals is
+/// nearer (D41).
+/// </param>
+/// <param name="Unchecked">
+/// <see langword="true"/> only on the budget answer: this attempt was not dry-run, so nothing about it is known.
+/// </param>
 internal sealed record ChangeOutcome(
     bool Valid,
     int Revision,
     ManagementPlanSummary? Plan,
     IReadOnlyList<string> ChangedPaths,
     IReadOnlyList<ToolViolation> Violations,
-    int AttemptsLeft)
+    int AttemptsLeft,
+    bool? Unchecked = null)
 {
     internal static ChangeOutcome From(DraftAttempt attempt, int attemptsLeft) =>
         new(attempt.Valid, attempt.CurrentRevision, attempt.Plan, attempt.ChangedPaths, attempt.Violations, attemptsLeft);
 
-    /// <summary>The answer once the refusal budget is spent: only the instruction to stop.</summary>
+    /// <summary>The answer once the refusal budget is spent: not dry-run, and saying so, with the last refusal (D41).</summary>
     /// <param name="revision">The revision the descriptor was last read at — never the model's claimed base.</param>
-    internal static ChangeOutcome BudgetSpent(int revision) =>
-        new(Valid: false, revision, Plan: null, [], [ViolationMapping.BudgetSpent()], AttemptsLeft: 0);
+    /// <param name="lastRefusals">What the last refused dry run refused, verbatim.</param>
+    internal static ChangeOutcome BudgetSpent(int revision, IReadOnlyList<string> lastRefusals) =>
+        new(Valid: false, revision, Plan: null, [], [ViolationMapping.BudgetSpent(lastRefusals)], AttemptsLeft: 0, Unchecked: true);
 }
 
 /// <summary>One thing the framework — or the tool — refused or warned about, at the pointer it concerns.</summary>
@@ -54,6 +62,12 @@ internal sealed record ToolViolation(
 
     /// <summary>Whether this stops the change.</summary>
     internal bool Blocks => Severity == ErrorSeverity;
+
+    /// <summary>
+    /// What "the same violation" means to the refusal budget (D41): the source, pointer, code and message, joined by
+    /// U+001F — a separator none of them carries. The fix and the op are left out: they are hints, not the defect.
+    /// </summary>
+    internal string Key => string.Join('\u001f', Source, Pointer, Code ?? string.Empty, Message);
 
     /// <summary>The string <see cref="AssistantUpdate.Proposal.Refusals"/> has always carried.</summary>
     internal string AsRefusal() =>

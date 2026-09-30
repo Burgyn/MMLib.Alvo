@@ -7,6 +7,7 @@ using MMLib.Alvo.Migrations;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -411,34 +412,121 @@ public sealed class ManagementToolsTests
     }
 
     /// <summary>
-    /// Three refused attempts spend the budget, whichever tool made them; the fourth is not dry-run at all.
+    /// Three identical refusals spend the budget; the same patch a fourth time is not dry-run, and says so.
     /// </summary>
     /// <remarks>
-    /// The instruction is verbatim because the eval grades on it, and the three received calls prove the fourth
-    /// never reached the Management API.
+    /// The RCA's turn (spec §8.1 step 4): the fourth call was never checked, and the old message invited the model to
+    /// tell the operator it was refused. The answer now says it was not checked and carries the last checked refusal.
     /// </remarks>
     [Fact]
-    public async Task The_fourth_attempt_after_three_refusals_gets_only_the_budget_violation()
+    public async Task The_same_patch_after_three_stalled_refusals_is_answered_unchecked_with_the_last_refusal()
     {
         var management = Serving(Descriptor);
-        Refusing(management, new DescriptorValidationException(new DescriptorValidationResult(
-            [new DescriptorValidationError("/entities", "No.", null, DescriptorValidationSeverity.Error)])));
+        Refusing(management, Refusal("gross"));
         var tools = ManagementTools.For(management, Project);
 
         var left = new List<int>();
-        for (var attempt = 0; attempt < 3; attempt++)
+        for (var attempt = 0; attempt < ManagementTools.MaximumStalledRefusals; attempt++)
         {
-            var outcome = JsonNode.Parse(await InvokeAsync(tools, "check_change", Change("check_change", AddNotes)))!;
-            left.Add(outcome["attemptsLeft"]!.GetValue<int>());
+            left.Add(JsonNode.Parse(await InvokeAsync(tools, "check_change", Change("check_change", AddNotes)))!["attemptsLeft"]!.GetValue<int>());
         }
 
-        var fourth = Violations(await InvokeAsync(tools, "propose_change", Change("propose_change", AddNotes))).Single();
+        var fourth = JsonNode.Parse(await InvokeAsync(tools, "propose_change", Change("propose_change", AddNotes)))!;
 
         left.ShouldBe([2, 1, 0]);
-        fourth["source"]!.GetValue<string>().ShouldBe("budget");
-        fourth["message"]!.GetValue<string>()
-            .ShouldBe("Stop proposing. Explain to the operator what the framework refused, quoting it.");
+        fourth["unchecked"]!.GetValue<bool>().ShouldBeTrue();
+        var budget = fourth["violations"]!.AsArray().Single()!;
+        budget["source"]!.GetValue<string>().ShouldBe("budget");
+        budget["message"]!.GetValue<string>().ShouldStartWith(ViolationMapping.UncheckedLead);
+        budget["message"]!.GetValue<string>().ShouldContain("/entities/bikes/fields/gross: No.");
         await management.ReceivedWithAnyArgs(3).ApplyDescriptorAsync(default!, default!, Ct);
+    }
+
+    /// <summary>A refusal that fixed something spends no attempt, so a model converging on a fix reaches it.</summary>
+    [Fact]
+    public async Task Refusals_that_make_progress_spend_no_attempt_and_a_valid_fourth_is_filed()
+    {
+        var management = Serving(Descriptor);
+        var answers = new Queue<string[]>(_progressingRefusals);
+        management.ApplyDescriptorAsync(Project, Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Answer(answers.Dequeue()));
+        var tools = ManagementTools.For(management, Project);
+
+        var left = new List<int>();
+        foreach (var field in _fourFields.Take(3))
+        {
+            left.Add(JsonNode.Parse(await InvokeAsync(tools, "propose_change", Change("propose_change", Adding(field))))!["attemptsLeft"]!.GetValue<int>());
+        }
+
+        var fourth = JsonNode.Parse(await InvokeAsync(tools, "propose_change", Change("propose_change", Adding(_fourFields[3]))))!;
+
+        left.ShouldBe([2, 2, 2]);
+        fourth["valid"]!.GetValue<bool>().ShouldBeTrue();
+        tools.Proposal!.Refusals.ShouldBeEmpty();
+    }
+
+    /// <summary>With the three attempts spent, a patch not yet checked is still dry-run, and a valid one is filed.</summary>
+    [Fact]
+    public async Task A_new_patch_after_the_attempts_are_spent_is_still_dry_run()
+    {
+        var management = SpentOnNotesAcceptingColour();
+        var tools = ManagementTools.For(management, Project);
+        for (var attempt = 0; attempt < ManagementTools.MaximumStalledRefusals; attempt++)
+        {
+            await InvokeAsync(tools, "propose_change", Change("propose_change", AddNotes));
+        }
+
+        var fresh = JsonNode.Parse(await InvokeAsync(tools, "propose_change", Change("propose_change", Adding("colour"))))!;
+
+        fresh["valid"]!.GetValue<bool>().ShouldBeTrue();
+        fresh["unchecked"].ShouldBeNull();
+        tools.Proposal!.Refusals.ShouldBeEmpty();
+    }
+
+    /// <summary>
+    /// With the three attempts spent, a patch that was checked <em>valid</em> is dry-run again when it is proposed,
+    /// and filed: only an already refused patch is answered unchecked.
+    /// </summary>
+    /// <remarks>
+    /// The natural sequence a model follows — ask "would this work?", then propose the same patch — must not be
+    /// punished by the budget: remembering valid patches would answer the proposal unchecked and file nothing.
+    /// </remarks>
+    [Fact]
+    public async Task A_patch_checked_valid_after_the_attempts_are_spent_is_filed_when_proposed()
+    {
+        var management = SpentOnNotesAcceptingColour();
+        var tools = ManagementTools.For(management, Project);
+        for (var attempt = 0; attempt < ManagementTools.MaximumStalledRefusals; attempt++)
+        {
+            await InvokeAsync(tools, "check_change", Change("check_change", AddNotes));
+        }
+
+        await InvokeAsync(tools, "check_change", Change("check_change", Adding("colour")));
+        var proposed = JsonNode.Parse(await InvokeAsync(tools, "propose_change", Change("propose_change", Adding("colour"))))!;
+
+        proposed["valid"]!.GetValue<bool>().ShouldBeTrue();
+        proposed["unchecked"].ShouldBeNull();
+        JsonNode.Parse(tools.Proposal!.DescriptorJson)!["entities"]!["bikes"]!["fields"]!["colour"].ShouldNotBeNull();
+    }
+
+    /// <summary>Six refusals end the turn's dry runs even when every one of them changed something (D41's ceiling).</summary>
+    [Fact]
+    public async Task Six_refusals_are_the_most_a_turn_dry_runs_even_when_each_made_progress()
+    {
+        var management = Serving(Descriptor);
+        var calls = 0;
+        management.ApplyDescriptorAsync(Project, Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Throws(_ => Refusal(calls++ % 2 == 0 ? "a" : "b"));
+        var tools = ManagementTools.For(management, Project);
+        for (var attempt = 0; attempt < ManagementTools.MaximumRefusals; attempt++)
+        {
+            await InvokeAsync(tools, "check_change", Change("check_change", Adding(string.Create(CultureInfo.InvariantCulture, $"f{attempt}"))));
+        }
+
+        var seventh = JsonNode.Parse(await InvokeAsync(tools, "check_change", Change("check_change", Adding("f6"))))!;
+
+        seventh["unchecked"]!.GetValue<bool>().ShouldBeTrue();
+        await management.ReceivedWithAnyArgs(ManagementTools.MaximumRefusals).ApplyDescriptorAsync(default!, default!, Ct);
     }
 
     /// <summary>A spent budget still reports the revision the descriptor is at, never the one the model claimed.</summary>
@@ -446,7 +534,7 @@ public sealed class ManagementToolsTests
     public async Task A_spent_budget_reports_the_revision_the_descriptor_is_at_rather_than_the_claimed_base()
     {
         var tools = ManagementTools.For(Serving(Descriptor), Project);
-        for (var attempt = 0; attempt < ManagementTools.MaximumRefusedAttempts; attempt++)
+        for (var attempt = 0; attempt < ManagementTools.MaximumStalledRefusals; attempt++)
         {
             await InvokeAsync(tools, "check_change", Change("check_change", AddNotes, baseRevision: 1));
         }
@@ -529,6 +617,37 @@ public sealed class ManagementToolsTests
     private static void Refusing(IAlvoManagement management, Exception refusal) =>
         management.ApplyDescriptorAsync(Project, Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
             .Throws(refusal);
+
+    private static readonly string[][] _progressingRefusals = [["a", "b"], ["a"], ["c"], []];
+    private static readonly string[] _fourFields = ["one", "two", "three", "four"];
+
+    /// <summary>A refusal at one field of <c>bikes</c> per name — the blocking set a test controls.</summary>
+    private static DescriptorValidationException Refusal(params string[] fields) =>
+        new(new DescriptorValidationResult(
+            [.. fields.Select(field => new DescriptorValidationError("/entities/bikes/fields/" + field, "No.", null, DescriptorValidationSeverity.Error))]));
+
+    /// <summary>The dry run's answer: valid when nothing is refused, else the refusal.</summary>
+    private static ManagementApplyResult Answer(string[] refused) =>
+        refused.Length == 0 ? new ManagementApplyResult(Applied: false, Revision, EmptyPlan) : throw Refusal(refused);
+
+    /// <summary>A one-operation patch adding a text field — built, not written as a raw string, so no brace run closes it.</summary>
+    private static string Adding(string field) =>
+        new JsonArray(new JsonObject
+        {
+            ["op"] = "add",
+            ["path"] = "/entities/bikes/fields/" + field,
+            ["value"] = new JsonObject { ["type"] = "text" },
+        }).ToJsonString();
+
+    /// <summary>Refuses every patch at <c>gross</c> except one adding <c>colour</c>, which it accepts.</summary>
+    private static IAlvoManagement SpentOnNotesAcceptingColour()
+    {
+        var management = Serving(Descriptor);
+        management.ApplyDescriptorAsync(Project, Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Returns(call => Answer(call.Arg<ManagementApplyRequest>().DescriptorJson.Contains("\"colour\"", StringComparison.Ordinal) ? [] : ["gross"]));
+
+        return management;
+    }
 
     private static Dictionary<string, object?> Change(string tool, string operations, int baseRevision = Revision)
     {

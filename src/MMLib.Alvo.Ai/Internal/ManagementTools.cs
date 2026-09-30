@@ -21,8 +21,17 @@ namespace MMLib.Alvo.Ai.Internal;
 /// <para>
 /// <b>An instance per turn, because the proposal and the budget are state.</b> The last <em>valid</em>
 /// <c>propose_change</c> is the proposal; with none valid, the last refused one is, carrying its refusals.
-/// Three refused attempts spend the budget, and every later attempt is answered with only the instruction to
-/// stop. Built per turn, none of that can outlive the conversation it belongs to.
+/// Built per turn, none of that can outlive the conversation it belongs to.
+/// </para>
+/// <para>
+/// <b>The budget measures progress (D41).</b> A refusal spends one of three attempts only when it made no progress:
+/// the same blocking violations as the refusal before it, or more (the first refusal is measured against none, so it
+/// always spends one). Six refusals are the ceiling, progress or not — and the ceiling is what bounds a model that
+/// oscillates between two defect sets, or keeps retrying a CEL expression that is refused differently each time.
+/// A patch not yet refused is always dry-run before a budget answer: only one that was already refused, against the
+/// same base revision, is answered without a dry run once the three are spent, and that answer says it was not
+/// checked (<c>unchecked: true</c>) and quotes the last refusal. A patch that was checked <em>valid</em> is never
+/// remembered, so "would this work?" followed by the same <c>propose_change</c> is dry-run twice and filed.
 /// </para>
 /// <para>
 /// <b>Only a refusal spends budget.</b> An attempt that ends in an exception — one <c>AnsweredAsync</c> maps, a
@@ -31,9 +40,9 @@ namespace MMLib.Alvo.Ai.Internal;
 /// round-trip — the eval's tool-call ceiling is the guard there).
 /// </para>
 /// <para>
-/// <b>The state assumes sequential invocation.</b> The budget check, the count and the filed proposal are plain
-/// fields, correct because the agent's function invoker runs one call at a time
-/// (<c>AllowConcurrentInvocation</c> off, set so explicitly and pinned by <c>AlvoAssistantTests</c>). Turning that
+/// <b>The state assumes sequential invocation.</b> The budget check, the two counts, the refused patches, the last
+/// blocking set and the filed proposal are plain fields, correct because the agent's function invoker runs one call
+/// at a time (<c>AllowConcurrentInvocation</c> off, set so explicitly and pinned by <c>AlvoAssistantTests</c>). Turning that
 /// on would let parallel calls all pass an exhausted budget.
 /// </para>
 /// <para>
@@ -44,8 +53,11 @@ namespace MMLib.Alvo.Ai.Internal;
 /// </remarks>
 internal sealed class ManagementTools
 {
-    /// <summary>How many refused <c>check_change</c>/<c>propose_change</c> attempts one turn may make.</summary>
-    internal const int MaximumRefusedAttempts = 3;
+    /// <summary>How many refusals that made no progress one turn may make (D41).</summary>
+    internal const int MaximumStalledRefusals = 3;
+
+    /// <summary>How many refusals one turn may make in all, progress or not — the hard ceiling (D41).</summary>
+    internal const int MaximumRefusals = 6;
 
     private const string BaseRevisionHelp =
         "The revision get_descriptor returned. A change written against another revision is refused; read again.";
@@ -64,7 +76,11 @@ internal sealed class ManagementTools
 
     private readonly IAlvoManagement _management;
     private readonly string _project;
-    private int _refusedAttempts;
+    private readonly List<(int BaseRevision, JsonElement Operations)> _refused = [];
+    private HashSet<string> _lastBlocking = new(StringComparer.Ordinal);
+    private IReadOnlyList<string> _lastRefusals = [];
+    private int _stalledRefusals;
+    private int _refusals;
     private int _currentRevision;
     private ProposedDraft? _lastValid;
     private ProposedDraft? _lastRefused;
@@ -109,8 +125,9 @@ internal sealed class ManagementTools
     /// <summary>The tools, in the order they are declared.</summary>
     internal IReadOnlyList<AIFunction> Functions { get; }
 
-    /// <summary>How many more refused attempts this turn may make.</summary>
-    private int AttemptsLeft => Math.Max(0, MaximumRefusedAttempts - _refusedAttempts);
+    /// <summary>The smaller of the two remainders: stalled refusals left, and refusals left in all.</summary>
+    private int AttemptsLeft =>
+        Math.Max(0, Math.Min(MaximumStalledRefusals - _stalledRefusals, MaximumRefusals - _refusals));
 
     /// <summary>Builds the tool set for one turn over one project.</summary>
     /// <param name="management">The Management API, exactly as every other client reaches it.</param>
@@ -186,25 +203,47 @@ internal sealed class ManagementTools
     private async Task<(DraftAttempt? Attempt, ChangeOutcome Outcome)> AttemptAsync(
         int baseRevision, JsonElement operations, CancellationToken ct)
     {
-        if (AttemptsLeft == 0)
+        if (Unchecked(baseRevision, operations))
         {
-            return (null, ChangeOutcome.BudgetSpent(_currentRevision));
+            return (null, ChangeOutcome.BudgetSpent(_currentRevision, _lastRefusals));
         }
 
         var attempt = await DescriptorDraft.BuildAsync(_management, _project, baseRevision, operations, ct).ConfigureAwait(false);
-        Record(attempt);
+        Record(attempt, baseRevision, operations);
 
         return (attempt, ChangeOutcome.From(attempt, AttemptsLeft));
     }
 
-    /// <summary>Remembers the revision the attempt learned the descriptor is at, and spends budget on a refusal.</summary>
-    private void Record(DraftAttempt attempt)
+    /// <summary>
+    /// Whether this attempt is answered without a dry run: the ceiling is spent, or the three attempts are and this
+    /// exact patch was already refused.
+    /// </summary>
+    private bool Unchecked(int baseRevision, JsonElement operations) =>
+        _refusals >= MaximumRefusals
+        || (_stalledRefusals >= MaximumStalledRefusals
+            && _refused.Exists(done => done.BaseRevision == baseRevision && JsonElement.DeepEquals(done.Operations, operations)));
+
+    /// <summary>Remembers the revision the attempt learned the descriptor is at, and counts a refusal.</summary>
+    private void Record(DraftAttempt attempt, int baseRevision, JsonElement operations)
     {
         _currentRevision = attempt.CurrentRevision;
         if (!attempt.Valid)
         {
-            _refusedAttempts++;
+            Refused(attempt, baseRevision, operations);
         }
+    }
+
+    /// <summary>Counts a refusal, remembers the patch, and spends an attempt only when it made no progress (D41).</summary>
+    private void Refused(DraftAttempt attempt, int baseRevision, JsonElement operations)
+    {
+        var blocking = attempt.Violations
+            .Where(violation => violation.Blocks)
+            .Select(violation => violation.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        _refused.Add((baseRevision, operations.Clone()));
+        _refusals++;
+        _stalledRefusals += blocking.IsSupersetOf(_lastBlocking) ? 1 : 0;
+        (_lastBlocking, _lastRefusals) = (blocking, attempt.Refusals);
     }
 
     /// <summary>Files the attempt: a valid one as the proposal, a refused one as the fallback while none is valid.</summary>

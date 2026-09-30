@@ -29,6 +29,16 @@ public sealed class EvalCasesTests
             .ShouldBe(name);
 
     [Fact]
+    public void An_unchecked_budget_answer_is_no_refused_attempt()
+    {
+        var budget = Turns.Refused("budget", "This attempt was not checked: the turn's refusal budget is spent.");
+        budget["unchecked"] = true;
+
+        Turns.Turn(answer: "ok", calls: [Turns.Propose(Turns.Refused("validation", "No."), round: 1), Turns.Propose(budget, round: 2)])
+            .RefusedAttempts.ShouldBe(1);
+    }
+
+    [Fact]
     public void Full_name_passes_one_added_field()
     {
         var proposed = Edited(document => document.Fields("customers")["full_name"] =

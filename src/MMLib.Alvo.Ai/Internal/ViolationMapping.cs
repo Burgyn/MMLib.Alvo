@@ -22,6 +22,9 @@ internal static class ViolationMapping
     internal const string StaleRevisionCode = "stale-revision";
     internal const string AttemptsExhaustedCode = "attempts-exhausted";
     internal const string AccessReservedCode = "access-reserved";
+
+    /// <summary>How the budget answer begins: the attempt was not checked, so it must never be reported as refused.</summary>
+    internal const string UncheckedLead = "This attempt was not checked: the turn's refusal budget is spent.";
     private const string AccessPointer = "/access";
     private const string EntitiesToken = "entities";
     private const string FieldsToken = "fields";
@@ -42,10 +45,13 @@ internal static class ViolationMapping
         ToolViolation.Access, AccessPointer, escalation.Message,
         "Leave /access unchanged; an administrator has to make that change.", Code: AccessReservedCode);
 
-    internal static ToolViolation BudgetSpent() => new(
+    /// <summary>The budget answer: this attempt was not checked, and the last refused one said what it quotes (D41).</summary>
+    /// <param name="lastRefusals">The last refused dry run's refusals, verbatim.</param>
+    internal static ToolViolation BudgetSpent(IReadOnlyList<string> lastRefusals) => new(
         ToolViolation.Budget, string.Empty,
-        "Stop proposing. Explain to the operator what the framework refused, quoting it.", Fix: null,
-        Code: AttemptsExhaustedCode);
+        $"{UncheckedLead} The last refused attempt said: {string.Join(" | ", lastRefusals)}. "
+        + "Quote that refusal to the operator; never call this attempt refused.",
+        Fix: null, Code: AttemptsExhaustedCode);
 
     internal static IReadOnlyList<ToolViolation> FromValidation(DescriptorValidationException refused, IReadOnlyList<string?> targets) =>
     [

@@ -26,8 +26,8 @@ public sealed partial class AssistantInstructionsTests
     private static readonly string[] _toolFacts =
     [
         "Read each violation's `message` and `fix`", "Apply it at the `pointer`", "The `pointer` is authoritative",
-        "`move` puts the member last", "`propose_change` needs a `summary`", "spends one of the same three attempts",
-        "`stale-revision`", "`severity` is `warning` does not block",
+        "`move` puts the member last", "`propose_change` needs a `summary`", "only when it makes no progress",
+        "`stale-revision`", "`severity` is `warning` does not block", "`\"unchecked\": true`",
     ];
 
     /// <summary>
