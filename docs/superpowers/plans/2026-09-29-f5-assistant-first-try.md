@@ -20,7 +20,8 @@ MTP, Shouldly.
 `docs/superpowers/specs/2026-09-28-f5-assistant-reliability-design.md`, whose tool surface, budget (3), iteration
 cap (12), instructions and eval are built and unchanged; deviations D15–D21 are the spec's. Tasks 5–10 build the
 spec's §7, *Skills (scope extension, 2026-09-29)*, and its deviations D22–D36. Tasks 11–14 build §8, *RCA of the
-task-management turn (2026-09-30)*, and its decisions D41–D46.
+task-management turn (2026-09-30)*, and its decisions D41–D46. Tasks 15–17 build §9, *RCA 2: the turn that stopped
+with attempts left (2026-09-30)*, and its decisions D47–D53.
 
 ## Global Constraints
 
@@ -4063,3 +4064,977 @@ None of these is a task step.
   - culture → `string.Create`/`ToString(CultureInfo.InvariantCulture)` in the test loops.
 - **Open for the maintainer:** D46. The dashboard shows the trace to the operator who asked, not only to the
   `admin` level. A level gate needs a caller-level query on `IAlvoManagement`, which is public API.
+
+---
+
+## RCA 2 extension — Tasks 15–17 (spec §9, D47–D53)
+
+**Goal:** fix what the second task-management turn (spec §9.1) showed: a model that stopped with two attempts left, on a
+refusal it could have fixed in one edit, over a draft whose owner rule could never be true.
+- **A + B + C** (T15): one automatic follow-up per turn; the stop clause narrowed; the managed-column fix reads as one
+  action.
+- **D + E** (T16): a refusal names the skill it needs; comparing `@user.id` with a ref to another entity is a warning,
+  and warnings reach the model on a valid dry run.
+- **F** (T17): the eval case `task_management_workers`.
+
+**Architecture:**
+- T15 adds an internal `FollowUp` to `MMLib.Alvo.Ai` and a per-turn `AgentSession` in `AlvoAssistant`; it changes
+  `ManagementTools` state, one table in the core's `ManagedColumnNames`, and the base prompt.
+- T16 adds `SkillAreas` (Ai), `OwnerComparisonCheck` (core, **security core**), and one internal member on
+  Abstractions' `ManagementApplyResult` that the core already has a grant to fill and the Ai one to read (D52).
+- T17 is eval code and its ring0 suite.
+
+**Evidence base:** `…/scratchpad/rca2/analysis.md` (the drawer's trace). Every line number below was re-read on this
+branch at `fc4a4a7`. The always-in-context size was **measured** there at **22,693** bytes of 22,758 (the T13 step 0
+procedure), which leaves **65** bytes.
+
+### Global Constraints, added for Tasks 15–17
+
+Everything above still holds, with these amendments:
+- **Instructions v6.** T15 moves the resource's first line and `AssistantInstructions.VersionLine` to
+  `<!-- alvo-schema-assistant v6 -->`, and the two tests that pin `v5` (`AlvoAssistantTests.cs:251`,
+  `TurnTraceTests.cs:15`) and the `TurnHeader` doc example (`TurnTrace.cs:9`). T16 edits stay under v6.
+- **Security literals unchanged.** The follow-up (D47) adds a model round, never a tool: every dry run is still
+  `DryRun: true, AllowDestructive: false`, and the follow-up message carries only validator pointers.
+- **The always-in-context budget is not raised** (22,758 B). Each task that edits the base prompt measures first
+  (T13 step 0) and records before/after in its commit body. Trim prose only, never a drift-tested fact or a
+  `_toolFacts` phrase.
+- **Public API:** no `PublicApi.*.verified.txt` moves in any of the three tasks, and no `InternalsVisibleTo` line is
+  added. T16's `ManagementApplyResult.Warnings` is `internal` (D52): the grants to `MMLib.Alvo` and `MMLib.Alvo.Ai`
+  exist (`src/MMLib.Alvo.Abstractions/Properties/AssemblyInfo.cs:3`, `:56`). If the turn-review gate stops on a grown
+  baseline, the change is wrong. `MMLib.Alvo.Admin` is not touched, so `scripts/test-admin-e2e` is not a gate. If an
+  implementer finds a reason to touch Admin, stop and ask; touching it makes that script, run whole, a gate.
+- **Security core (T16):** `OwnerComparisonCheck` sits on the rule-compile boundary.
+  - Apply the `alvo-security-core-review` checklist.
+  - The PR report marks T16 **needs-deep-review**.
+  - `/security-review` is user-only here: the controller dispatches a reviewer subagent labelled a substitute.
+- **The lessons of this branch, restated for every step:**
+  - **Facts first, run red, then implement.**
+  - Release `-warnaserror` catches what Debug rings do not:
+    - CA1861: a constant array argument becomes a `static readonly` field;
+    - CA1875: `Regex.Count`, never `.Matches(...).Count`;
+    - CA1859: a private helper returns its concrete type;
+    - CA1870: `SearchValues` or the `string` overload;
+    - IDE0065: `using`s above `namespace`.
+  - **CA1873 caught T14 only in `docker build`.** A log call whose arguments cost anything (a `string.Join`, a
+    `Select`, a serialisation) is guarded with `if (_logger.IsEnabled(LogLevel.…))`, as `AlvoAssistant.LogTurn` does.
+    A local Release build did not reproduce it; the Dockerfile's build did.
+  - Windows CI checks out CRLF: a regex over Markdown ends a line with `\r?$` or captures `[^\r\n]`, and text is
+    `.ReplaceLineEndings("\n")` before it is parsed or measured.
+  - A `$$"""…"""` raw string must not contain `}}` or `{{`: a JSON object nested to its end is built with
+    `JsonObject`/`JsonArray`, or concatenated.
+  - Culture-sensitive interpolation goes through `string.Create(CultureInfo.InvariantCulture, …)`.
+  - `.cs` files are UTF-8 with BOM and CRLF, and a file written by a shell tool is normalised before commit. Skill and
+    prompt files are UTF-8 without BOM, LF.
+- **Every task ends with**, all green:
+  - `scripts/test-ring1`;
+  - `dotnet build MMLib.Alvo.slnx -c Release -warnaserror`, with 0 warnings and 0 errors.
+- **T17, the last task, also runs:**
+  - `scripts/test-ring2` (the two known `PagingPerformanceTests` Npgsql *connect* timeouts are infrastructure: read the
+    trace first);
+  - `docker build -f src/MMLib.Alvo.Host/Dockerfile .`, the only build that reproduces CI's analyzers (CA1873);
+  - `git diff --stat fc4a4a7 -- '*.verified.*'`, which must be **empty**.
+- **Commits:** one per task, Conventional Commits, ending with
+  `Claude-Session: https://claude.ai/code/session_01TrcGmun8WAuVxN5FYAtu6H`. Never push. Never switch branch. One writer
+  in the worktree.
+
+---
+
+### Task 15: One follow-up when a turn stops with attempts left; the stop clause narrowed; the managed-column fix as one action (A, B, C; D47–D49)
+
+**Files:**
+- Create: `src/MMLib.Alvo.Ai/Internal/FollowUp.cs`
+- Modify: `src/MMLib.Alvo.Ai/AlvoAssistant.cs`:
+  - `AnswerAsync` (`:122-160`): a per-turn session, the held answer, and the follow-up run;
+  - `Translate` (`:328-345`): releases held text on a call;
+  - `TurnState`: `FollowUpAfterRound`;
+  - `LogTurn` and the 6203 template: `FollowedUp`;
+  - the class remarks' *"A turn is bounded twice"* paragraph.
+- Modify: `src/MMLib.Alvo.Ai/Internal/ManagementTools.cs` (the last dry run, `FollowUpMayBeDue`,
+  `FollowUpPointersAsync`)
+- Modify: `src/MMLib.Alvo.Ai/Internal/TurnTrace.cs` (`Of` gains `int? followUpAfterRound = null`; the header member)
+- Modify: `src/MMLib.Alvo/Descriptor/Internal/ManagedColumnNames.cs` (`:132-183`, the seven fixes)
+- Modify: `src/MMLib.Alvo.Ai/Instructions/schema-assistant.md`:
+  - line 1 → v6;
+  - `:88`, the `move` sentence;
+  - `:248`, example (f)'s stop line;
+  - `:328-332`, the stop clause.
+- Modify: `src/MMLib.Alvo.Ai/Internal/AssistantInstructions.cs` (`VersionLine`)
+- Test:
+  - `test/MMLib.Alvo.Ai.Tests/AlvoAssistantFollowUpTests.cs` (new);
+  - `test/MMLib.Alvo.Ai.Tests/ScriptedChatClient.cs` (`Requests`);
+  - `test/MMLib.Alvo.Ai.Tests/AssistantInstructionsTests.cs` (`_toolFacts`);
+  - `test/MMLib.Alvo.Ai.Tests/AlvoAssistantTests.cs` and `TurnTraceTests.cs` (`v6`);
+  - `test/MMLib.Alvo.Tests/Descriptor/DescriptorValidatorTests.cs` (one theory).
+
+**Interfaces:**
+```csharp
+// FollowUp (internal static, MMLib.Alvo.Ai.Internal)
+internal const string Lead = "Alvo (not the operator): ";
+internal static string Message(IReadOnlyList<string> pointers);
+// ManagementTools
+internal bool FollowUpMayBeDue { get; }                                   // (a)–(d) of D47; synchronous, no I/O
+internal Task<IReadOnlyList<string>?> FollowUpPointersAsync(CancellationToken ct);  // null unless (a)–(e) hold
+// TurnTrace
+internal static JsonObject Of(TurnHeader header, IReadOnlyList<TracedCall> calls, string end, int? followUpAfterRound = null);
+```
+
+- [ ] **Step 0: Measure the headroom** (T13 step 0): set `AlwaysInContextBudget = 0`, run
+  `dotnet test --project test/MMLib.Alvo.Ai.Tests --filter-method "*The_always_in_context_instructions*"`, read *"but
+  was N"*, restore the constant. Expected **22,693**. The step 5 texts net **+41** bytes (measured with a UTF-8 byte
+  count against `fc4a4a7`: stop clause +64, example (f) +26, `move` −49), so about **22,734** afterwards.
+
+- [ ] **Step 1: The failing facts.**
+
+  (a) `ScriptedChatClient` records each request whole, so a test can tell one follow-up from a follow-up re-sent in
+  every later request of the session:
+
+```csharp
+    /// <summary>Each request's messages, one list per request, in order.</summary>
+    internal List<List<ChatMessage>> Requests { get; } = [];
+```
+
+  In both `GetResponseAsync` and `GetStreamingResponseAsync`, add `Requests.Add([.. messages]);` beside
+  `Sent.AddRange(messages);`.
+
+  (b) `AlvoAssistantFollowUpTests` (new). It reuses the arrangement idioms of `AlvoAssistantTests`: copy `RunAsync`,
+  `Describing`, `Proposing` and `Configured` as private helpers here, or make them `internal static` there and call
+  them. Do not duplicate `CapturingLogger`. Every management substitute arranges `GetCapabilitiesAsync` explicitly,
+  because NSubstitute answers a sealed record with `null`.
+
+```csharp
+public sealed class AlvoAssistantFollowUpTests
+{
+    private static readonly ManagementPlanSummary EmptyPlan = new(IsEmpty: false, HasDestructiveChanges: false, []);
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
+
+    /// <summary>
+    /// The RCA 2 turn (spec §9.1): refused with attempts left, the model answers; the harness follows up once, the
+    /// retry is valid and filed, and the operator reads only the answer that came after it (D47).
+    /// </summary>
+    [Fact]
+    public async Task A_turn_that_stops_on_a_refusal_with_attempts_left_is_followed_up_once_and_its_retry_is_filed()
+    {
+        var management = Refusing(then: Valid());
+        var model = new ScriptedChatClient(
+            Scripted.Calls("propose_change", Proposing(revision: 4)),
+            Scripted.Says("It was refused."),
+            Scripted.Calls("propose_change", Proposing(revision: 4)),
+            Scripted.Says("I proposed a notes field."));
+
+        var updates = await RunAsync(management, model);
+
+        updates.OfType<AssistantUpdate.Proposal>().ShouldHaveSingleItem().Refusals.ShouldBeEmpty();
+        string.Concat(updates.OfType<AssistantUpdate.Text>().Select(text => text.Delta)).ShouldBe("I proposed a notes field.");
+        FollowUps(model).ShouldBe(1);
+    }
+
+    /// <summary>The follow-up continues the same conversation: it is sent after the refused call's own result.</summary>
+    [Fact]
+    public async Task The_follow_up_is_sent_after_the_refused_calls_result_in_the_same_session()
+    {
+        var model = new ScriptedChatClient(
+            Scripted.Calls("propose_change", Proposing(revision: 4)), Scripted.Says("It was refused."), Scripted.Says("Still refused."));
+
+        await RunAsync(Refusing(then: null), model);
+
+        var followUp = model.Requests.Single(request => IsFollowUp(request[^1]));
+        followUp.SelectMany(message => message.Contents).OfType<FunctionResultContent>().ShouldHaveSingleItem();
+        followUp[^1].Text.ShouldContain("/entities/bikes/fields/notes");
+    }
+
+    /// <summary>A follow-up run that ends refused again is not followed up: one per turn, the most (D47).</summary>
+    [Fact]
+    public async Task A_turn_is_followed_up_at_most_once()
+    {
+        var model = new ScriptedChatClient(
+            Scripted.Calls("propose_change", Proposing(revision: 4)), Scripted.Says("Refused."),
+            Scripted.Calls("propose_change", Proposing(revision: 4)), Scripted.Says("Refused again."));
+
+        var updates = await RunAsync(Refusing(then: null), model);
+
+        FollowUps(model).ShouldBe(1);
+        string.Concat(updates.OfType<AssistantUpdate.Text>().Select(text => text.Delta)).ShouldBe("Refused again.");
+    }
+
+    /// <summary>What the budget, the operator or the build must decide is never followed up (D47 (c)–(e)).</summary>
+    [Theory]
+    [InlineData("attempts-spent")]
+    [InlineData("destructive")]
+    [InlineData("access")]
+    [InlineData("unsupported")]
+    public async Task A_refusal_the_model_cannot_fix_is_not_followed_up(string why)
+    {
+        var model = new ScriptedChatClient(Stopping(why));
+
+        var updates = await RunAsync(Stopped(why), model);
+
+        FollowUps(model).ShouldBe(0);
+        updates.OfType<AssistantUpdate.Text>().ShouldNotBeEmpty();
+    }
+
+    /// <summary>A valid proposal, or a refused <c>check_change</c> (an answer to "would this work?"), is never followed up.</summary>
+    [Theory]
+    [InlineData("check_change")]
+    [InlineData("valid")]
+    public async Task A_turn_that_proposed_validly_or_only_checked_is_not_followed_up(string shape)
+    {
+        var model = new ScriptedChatClient(
+            Scripted.Calls(shape == "valid" ? "propose_change" : "check_change", shape == "valid" ? Proposing(4) : Checking(4)),
+            Scripted.Says("Answered."));
+
+        await RunAsync(shape == "valid" ? Answering(Valid()) : Refusing(then: null), model);
+
+        FollowUps(model).ShouldBe(0);
+    }
+
+    /// <summary>A followed-up turn still makes at most <see cref="AlvoAssistant.MaximumIterations"/> tool rounds.</summary>
+    /// <remarks>
+    /// Counted as invocations of a tool nothing else calls (<c>get_revisions</c>), not as <c>ToolInvoked</c> updates: the
+    /// invoker's last response at the cap may name a call it never runs, and the draft pipeline reads the descriptor
+    /// itself, so neither of those counts is one call per round.
+    /// </remarks>
+    [Fact]
+    public async Task A_followed_up_turn_never_passes_the_iteration_cap()
+    {
+        var management = Refusing(then: null);
+        var first = Enumerable.Range(0, AlvoAssistant.MaximumIterations - 2).Select(_ => Scripted.Calls("get_revisions", []));
+        var looping = Enumerable.Range(0, 30).Select(_ => Scripted.Calls("get_revisions", []));
+        var model = new ScriptedChatClient(
+            [.. first, Scripted.Calls("propose_change", Proposing(revision: 4)), Scripted.Says("Refused."), .. looping]);
+
+        await RunAsync(management, model);
+
+        FollowUps(model).ShouldBe(1);
+        await management.Received(AlvoAssistant.MaximumIterations - 1).ListRevisionsAsync("p", Arg.Any<CancellationToken>());
+        await management.ReceivedWithAnyArgs(1).ApplyDescriptorAsync(default!, default!, Ct);
+    }
+
+    /// <summary>The trace marks the follow-up by round; its words reach no update, no trace byte and no log line.</summary>
+    [Fact]
+    public async Task The_follow_up_is_marked_in_the_trace_and_its_words_reach_nothing_the_operator_sees()
+    {
+        var logger = new CapturingLogger();
+        var model = new ScriptedChatClient(
+            Scripted.Calls("propose_change", Proposing(revision: 4)), Scripted.Says("Refused."), Scripted.Says("Stopped."));
+
+        var updates = await RunAsync(Refusing(then: null), model, logger, trace: true);
+
+        var trace = updates.OfType<AssistantUpdate.TurnTraced>().Single().Json;
+        JsonNode.Parse(trace)!["followUpAfterRound"]!.GetValue<int>().ShouldBe(2);
+        trace.ShouldNotContain(FollowUp.Lead.Trim());
+        logger.Lines.ShouldAllBe(line => !line.Contains(FollowUp.Lead.Trim(), StringComparison.Ordinal));
+        updates.OfType<AssistantUpdate.Text>().ShouldAllBe(text => !text.Delta.Contains(FollowUp.Lead.Trim(), StringComparison.Ordinal));
+    }
+
+    /// <summary>The endpoint failing during the follow-up shows the held answer first, then the failure.</summary>
+    [Fact]
+    public async Task An_endpoint_failure_during_the_follow_up_shows_the_held_answer_then_the_failure()
+    {
+        var model = new FailingAfter(2, new ScriptedChatClient(Scripted.Calls("propose_change", Proposing(revision: 4)), Scripted.Says("Refused.")));
+
+        var updates = await RunAsync(Refusing(then: null), model);
+
+        updates.OfType<AssistantUpdate.Text>().ShouldHaveSingleItem().Delta.ShouldBe("Refused.");
+        updates[^1].ShouldBeOfType<AssistantUpdate.Failed>();
+    }
+
+    private static int FollowUps(ScriptedChatClient model) => model.Requests.Count(request => IsFollowUp(request[^1]));
+
+    private static bool IsFollowUp(ChatMessage message) =>
+        message.Role == ChatRole.User && message.Text.StartsWith(FollowUp.Lead, StringComparison.Ordinal);
+}
+```
+
+  The helpers these facts name, below them in the same class:
+  - `Refusing(then)`: `Describing(4)`; `GetCapabilitiesAsync` → `new ManagementCapabilities([], [], [])`; the first
+    `ApplyDescriptorAsync` throws a validation refusal at `/entities/bikes/fields/notes` (`"No."`, fix `"Fix it."`); the
+    next answers `then` (a valid `ManagementApplyResult`), or throws the same refusal again when `then` is null.
+  - `Answering(result)` and `Valid()`: the same, answering `result` every time.
+  - `Stopping(why)` / `Stopped(why)`: the script and the management for each theory row:
+    - `attempts-spent`: three identical `propose_change` calls, then an answer (the third answers `attemptsLeft` 0);
+    - `destructive`: one call refused with `DestructiveChangeNotAllowedException` (source `plan`);
+    - `access`: one call refused with `ManagementEscalationException`;
+    - `unsupported`: one call refused with the message `"Not in this build."`, and `GetCapabilitiesAsync` returns one
+      `ManagementRefusedFeature("field.validation", "Not in this build.", "Remove it.")`.
+  - `FailingAfter(n, inner)`: a `DelegatingChatClient` that throws `HttpRequestException` on its `n+1`-th request. It
+    sits under the recorder exactly as `ThrowingChatClient` does in `AlvoAssistantTests`; reuse that type if it can
+    take a count.
+  - `CapturingLogger.Lines`: use whatever member `AlvoAssistantTests` already reads the log lines through; add none.
+
+  `ThrowingChatClient`, `CapturingLogger`, `Checking` and `Describing` exist in or beside `AlvoAssistantTests`
+  (`:400-470`); read them before writing the helpers.
+
+  (c) `AssistantInstructionsTests._toolFacts` gains `"every fix adds something the operator did not ask for"` and
+  `"is an ordinary fix"`. `"When a refusal carries `attemptsLeft` 0"` stays, unchanged.
+
+  (d) `DescriptorValidatorTests` gains, beside
+  `A_declared_framework_managed_column_is_reported_with_its_path_and_its_own_reason` (`:695-720`), a theory over the
+  same seven rows:
+
+```csharp
+    /// <summary>
+    /// A managed column's fix leads with the one edit that fixes it; the alternative, dropping the trait, is a later
+    /// sentence, so a model cannot read the pair as "the fix changes what was asked" (spec §9, D49).
+    /// </summary>
+    [Theory]
+    [InlineData(@"""audit"": true", "created_at")]
+    [InlineData(@"""audit"": true", "created_by")]
+    [InlineData(@"""audit"": true", "updated_at")]
+    [InlineData(@"""audit"": true", "updated_by")]
+    [InlineData(@"""tenancy"": ""scoped""", "tenant_id")]
+    [InlineData(@"""softDelete"": true", "deleted_at")]
+    [InlineData(@"""audit"": true", "id")]
+    public void A_managed_columns_fix_leads_with_the_single_edit(string traits, string column)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "orders": { {{traits}}, "fields": {
+            "title": { "type": "string" },
+            "{{column}}": { "type": "datetime" } } } } }
+        """;
+
+        var fix = Validate(json).Errors.Single(error => error.Path == $"/entities/orders/fields/{column}").FixSuggestion.ShouldNotBeNull();
+        var first = fix[..(fix.IndexOf(". ", StringComparison.Ordinal) + 1)];
+
+        fix.ShouldStartWith($"Remove '{column}' from the fields: ");
+        first.ShouldNotContain("drop", Case.Sensitive);
+        first.ShouldNotContain(" or ", Case.Sensitive);
+    }
+```
+
+  The `$$` string ends in `} } } } }` with spaces: no brace run, as the neighbouring theory already proves.
+
+- [ ] **Step 2: Run** Ai.Tests and `dotnet test --project test/MMLib.Alvo.Tests --filter-class "*DescriptorValidatorTests"`.
+  Expected reds: `FollowUp` does not exist (the new suite does not compile), `_toolFacts`, and the fix theory (7 rows).
+
+- [ ] **Step 3: `FollowUp` and the tool state.**
+  1. `FollowUp.cs`:
+
+```csharp
+namespace MMLib.Alvo.Ai.Internal;
+
+/// <summary>The one message the harness sends a model that stopped on a refusal it could still fix (D47).</summary>
+/// <remarks>
+/// Framework text, never the operator's: it reaches the model only, as a user-role turn (a system turn after the first
+/// is refused by several OpenAI-compatible servers), led by <see cref="Lead"/> so the model does not quote it as the
+/// operator's words. It carries validator pointers and nothing else.
+/// </remarks>
+internal static class FollowUp
+{
+    internal const string Lead = "Alvo (not the operator): ";
+
+    internal static string Message(IReadOnlyList<string> pointers) =>
+        $"{Lead}your last propose_change was refused at {string.Join(", ", pointers)}, and attempts are left. "
+        + "Apply each violation's fix at its pointer and call propose_change again. Answer the operator only after a "
+        + "valid proposal, or when the refusal says the construct is unsupported or every fix adds something the "
+        + "operator did not ask for.";
+}
+```
+
+  2. `ManagementTools` remembers the last dry run's answer and whether it was a proposal. Set it in `CheckChangeAsync`
+     and `ProposeAsync` from the outcome they return, including the budget answer:
+
+```csharp
+    private (bool Proposed, ChangeOutcome Outcome)? _lastDryRun;
+
+    /// <summary>
+    /// Whether the turn's last dry run leaves the model something to fix (D47 (a)–(d)): a refused
+    /// <c>propose_change</c>, no valid proposal filed, attempts left, checked, and nothing only the budget, the
+    /// operator or an administrator can decide. Synchronous and free, so the stream can ask it per text chunk.
+    /// </summary>
+    internal bool FollowUpMayBeDue =>
+        _lastValid is null
+        && _lastDryRun is { Proposed: true, Outcome: { Valid: false, Unchecked: not true, AttemptsLeft: > 0 } last }
+        && !last.Violations.Any(violation => violation.Blocks && _notTheModels.Contains(violation.Source));
+
+    /// <summary>The refused pointers to follow up on, or <see langword="null"/> when no follow-up is due (D47 (a)–(e)).</summary>
+    /// <remarks>
+    /// "Unsupported" is the framework's own list: a blocking violation whose message carries a consequence
+    /// <c>get_capabilities</c> refuses. Read once, only here; a read that throws, or answers nothing, means no follow-up.
+    /// </remarks>
+    internal async Task<IReadOnlyList<string>?> FollowUpPointersAsync(CancellationToken ct)
+    {
+        if (!FollowUpMayBeDue)
+        {
+            return null;
+        }
+
+        var blocking = _lastDryRun!.Value.Outcome.Violations.Where(violation => violation.Blocks).ToList();
+        var refused = await RefusedConsequencesAsync(ct).ConfigureAwait(false);
+        return refused is null || blocking.Exists(violation => refused.Exists(consequence => violation.Message.Contains(consequence, StringComparison.Ordinal)))
+            ? null
+            : [.. blocking.Select(violation => violation.Pointer.Length == 0 ? "(the whole change)" : violation.Pointer).Distinct(StringComparer.Ordinal)];
+    }
+```
+
+     - `_notTheModels` is `static readonly HashSet<string>` of `ToolViolation.Budget`, `ToolViolation.Plan` and
+       `ToolViolation.Access` (CA1861 forbids an inline array).
+     - `RefusedConsequencesAsync` calls `_management.GetCapabilitiesAsync(_project, ct)` and returns
+       `[.. capabilities.Refused.Select(feature => feature.Consequence)]`. It returns `null` when the answer is `null`,
+       and `null` on `ManagementForbiddenException` or `ManagementProjectNotFoundException`, the two it documents.
+       Anything else is a bug and propagates.
+     - Keep each member ≤ ~25 lines; `FollowUpPointersAsync` may need its `Pointers(blocking)` helper extracted.
+     - The class remarks gain one paragraph: *"The last dry run is state too (D47): the assistant asks it whether a
+       turn that stopped may be followed up."*
+
+- [ ] **Step 4: The assistant's follow-up** (`AlvoAssistant.cs`).
+  1. `AnswerAsync` builds the agent once, opens a session with `await agent.CreateSessionAsync(ct)`, and streams the
+     first run with `agent.RunStreamingAsync(Conversation(request), session, options: null, ct)`. Both are
+     `Microsoft.Agents.AI` 1.22.0 public API: `AIAgent.CreateSessionAsync(CancellationToken)` and
+     `RunStreamingAsync(IEnumerable<ChatMessage>, AgentSession, AgentRunOptions, CancellationToken)`.
+  2. When the first run ended answered (not `EndpointFailed`), `recorder.ToolRounds < MaximumIterations` and
+     `await tools.FollowUpPointersAsync(ct)` answers pointers, then:
+     - set `turn.FollowUpAfterRound = recorder.Requests`. Expose `Requests` on `TurnRecorder` as a read-only count of
+       `_requests`;
+     - discard the held text;
+     - set the agent's invoker cap to the remainder:
+       `agent.ChatClient.GetService<FunctionInvokingChatClient>()!.MaximumIterationsPerRequest = MaximumIterations - recorder.ToolRounds;`
+     - stream `agent.RunStreamingAsync(new ChatMessage(ChatRole.User, FollowUp.Message(pointers)), session, options: null, ct)`.
+       It is the same translation loop, with holding **off**, because a second follow-up is never due.
+  3. **The held answer.** Replace the `StringBuilder answer` with a private nested `TurnAnswer`. Its operations are:
+     - `Add(text, hold)`: appends to the held buffer when `hold`, else to the shown text, and yields a `Text` update;
+     - `Release()`: moves the held text to the shown text and yields one `Text` update, when there is any;
+     - `Discard()`;
+     - `Shown`, which `SummaryOf` reads.
+
+     `Translate` calls `Release()` before it yields a `ToolInvoked`, since text before a call was a preface. It calls
+     `Add(text, hold: holding && tools.FollowUpMayBeDue)` for text. `holding` is true only in the first run.
+  4. At the end of the first run, when no follow-up is due, `Release()` shows the held text. On an endpoint failure in
+     either run, `Release()` goes first and the `Failed` update after it. The proposal comes last, as today
+     (`A_valid_proposal_becomes_the_turns_proposal_after_the_dry_run` pins `IndexOf(proposal) == Count - 1`).
+  5. `turn.End` is computed after the last run, as today (`:155`).
+  6. **Method size.** `AnswerAsync` is ~35 lines today, and this adds a second run. Extract `StreamAsync(run, model,
+     answer, turn, holding)`, the existing `NextAsync` loop plus `Translate`, and a `FollowUpAsync` that returns the
+     follow-up's stream or an empty one. Each stays ≤ ~25 lines. `yield return` cannot sit in a `try` with a `catch`,
+     which is why `NextAsync` exists; keep it.
+  7. The trace and the log:
+     - `TurnTrace.Of(HeaderOf(...), recorder.Calls, turn.End, turn.FollowUpAfterRound)`. `Header` writes
+       `["followUpAfterRound"] = followUpAfterRound` only when it is not null. That member is written before any entry
+       is measured, so `Reserve` still covers only `droppedCalls`.
+     - The 6203 template becomes
+       `"Assistant turn ended ({End}) after {Calls} calls in {Rounds} tool rounds; followed up: {FollowedUp}."`, with a
+       `bool followedUp` parameter. Its arguments are fields, so no `IsEnabled` guard is needed. A computed argument
+       would need one (CA1873).
+  8. The class remarks: *"A turn is bounded twice"* gains *"— and followed up at most once, inside the same cap
+     (D47): a turn that stopped on a refusal it could still fix gets one more run, and the operator reads only the
+     answer that came after it."*
+
+- [ ] **Step 5: The instructions** (`schema-assistant.md`), exact texts. Keep the file's line width.
+  1. Line 1 → `<!-- alvo-schema-assistant v6 -->`; `AssistantInstructions.VersionLine` the same.
+  2. `:88`, the second line of the rename bullet, becomes `` `move` puts the member last; leave it there. `` The
+     bullet's first line (`:87`) does not change.
+  3. `:248`: `Stop here: the only fix adds a field the operator did not ask for; that is theirs to choose. Reply: quote the message and the fix in a quote`
+     (re-wrap the paragraph).
+  4. `:330-332`, the end of the refusal bullet:
+
+```markdown
+  again. When a refusal carries `attemptsLeft` 0 or a violation's `source` is `budget` — or at once, when the
+  refusal says the construct is unsupported or every fix adds something the operator did not ask for — stop and
+  explain. Removing or renaming what you added yourself is an ordinary fix.
+```
+
+- [ ] **Step 6: The managed-column fixes** (`ManagedColumnNames.cs:132-183`). The consequences (the first tuple
+  member) do not move. Each fix:
+  - `id`: `$"Remove 'id' from the fields: the store assigns it. {DeclareYourOwn}"`;
+  - `tenant_id`: `$"Remove 'tenant_id' from the fields: 'tenancy' already adds it. {TenantNarrowing} " + DeclareYourOwn`;
+  - `created_at`, `created_by` and `updated_by`:
+    `$"Remove '<col>' from the fields: 'audit: true' already adds it. {AuditAlternative} {DeclareYourOwn}"`;
+  - `updated_at`: `"Remove 'updated_at' from the fields: 'audit: true' already adds it. Only if the entity should keep
+    no audit trail at all, drop 'audit' instead; that removes all four audit columns and the row versioning that
+    'ETag' and 'If-Match' need. " + DeclareYourOwn`;
+  - `deleted_at`: `$"Remove 'deleted_at' from the fields: 'softDelete' already adds it. {DeclareYourOwn}"`.
+
+  `AuditAlternative` is a new `private const string`: *"Only if the entity should keep no audit trail at all, drop
+  'audit' instead; that removes all four audit columns."* Give it a `<summary>` in the style of `DeclareYourOwn`'s.
+  Then `git grep -n "puts it there"` must find nothing under `src/`, `test/`, `.claude/` or `eval/`.
+
+- [ ] **Step 7: Run** Ai.Tests, `MMLib.Alvo.Tests` and Host.Tests.
+  - Every new fact should be green.
+  - Existing facts whose script ends on a refused `propose_change` now get one more request. Read each red one:
+    - `A_refused_attempts_entry_carries_its_violations_and_attempts_left` asserts only `calls[0]`, so it stays
+      green;
+    - a fact that counts `Sent`, `Options` or requests must count the follow-up, or arrange
+      `GetCapabilitiesAsync` to refuse it.
+  - Never loosen an assertion about operator or model text reaching a log or the trace.
+  - Host.Tests' `InstructionExampleOutcomeTests` still runs example (f) and its claimed `"attemptsLeft": 2`.
+  - Then measure again (step 0) and write both numbers in the commit body.
+
+- [ ] **Step 8: Gates and commit.**
+  - Run `scripts/test-ring1`.
+  - Run `dotnet build MMLib.Alvo.slnx -c Release -warnaserror`.
+  - Commit `feat(ai): a turn that stops on a refusal it can fix is followed up once, and the stop rule no longer reads a fix as a choice`.
+    Its body holds the measured sizes.
+
+---
+
+### Task 16: A refusal names its skill; comparing `@user.id` with another entity's ref is a warning, and warnings reach a valid dry run (D, E; D50–D52)
+
+**Security core** (the rule-compile boundary): apply the `alvo-security-core-review` checklist, and mark the PR
+report *needs-deep-review*. **The accepted set does not move.** `OwnerComparisonCheck` emits only
+`DescriptorValidationSeverity.Warning`, runs outside `CelCompiler`, and reads compiled trees it never changes.
+
+**Files:**
+- Create: `src/MMLib.Alvo.Ai/Internal/SkillAreas.cs`
+- Create: `src/MMLib.Alvo/Rules/Internal/OwnerComparisonCheck.cs`
+- Modify: `src/MMLib.Alvo/Descriptor/Internal/DescriptorValidator.cs` (`RuleErrors`, `:124-145`)
+- Modify: `src/MMLib.Alvo.Abstractions/Management/ManagementModels.cs` (`ManagementApplyResult`, `:264-265`)
+- Modify: `src/MMLib.Alvo/Migrations/DescriptorApplyPreview.cs`; `src/MMLib.Alvo/Migrations/RuntimeSchemaService.cs`
+  (`PreviewAsync` `:170-185`, `Validate` `:251-257`); `src/MMLib.Alvo/Management/Internal/AlvoManagementService.cs`
+  (`AppliedAsync` `:238-240`, `AppendAsync` `:498`)
+- Modify: `src/MMLib.Alvo.Ai/Internal/DescriptorDraft.cs` (`DryRunAsync`, `Draft.Accepted`),
+  `ViolationMapping.cs` (`FromWarnings`, `SkillHint`), `ChangeOutcome.cs` (`ToolViolation.Skill`, `ChangeOutcome.Hint`),
+  `ManagementTools.cs` (the ledger, `WithSkillHints`), `TurnRecorder.cs` (`LoadedSkills`), `TurnTrace.cs` (the hint,
+  and `skill` on a log line), `FollowUp.cs` (the skill sentence), `AlvoAssistant.cs` (passes the ledger)
+- Modify: `eval/MMLib.Alvo.Ai.Eval/SkillsRead.cs` (`AreaOf` delegates to `SkillAreas.AreaOf`)
+- Modify: `src/MMLib.Alvo.Ai/Instructions/schema-assistant.md` (`:108`, the warning bullet; `:309`, example (h)'s first
+  sentence); `.claude/skills/alvo-descriptor-rules-and-cel/SKILL.md` (`:51`)
+- Modify: `test/MMLib.Alvo.Ai.Tests/InternalGrantArchitectureTests.cs` (the second granted use);
+  `src/MMLib.Alvo.Abstractions/Properties/AssemblyInfo.cs` (the comment over the `MMLib.Alvo.Ai` grant names the new use)
+- Test:
+  - `test/MMLib.Alvo.Tests/Rules/OwnerComparisonCheckTests.cs` (new);
+  - `test/MMLib.Alvo.Api.Tests/Management/ManagementApplyTests.cs` (two facts);
+  - `test/MMLib.Alvo.Ai.Tests/ManagementToolsTests.cs` (four facts) and `SkillAreasTests.cs` (new);
+  - `test/MMLib.Alvo.Ai.Tests/AlvoAssistantFollowUpTests.cs` (the message fact);
+  - `test/MMLib.Alvo.Host.Tests/SkillClaimTests.cs` (the real dry run);
+  - `test/MMLib.Alvo.Ai.Tests/AssistantInstructionsTests.cs` (`_toolFacts`).
+
+**Interfaces:**
+```csharp
+// Abstractions — internal: no PublicApi line, no wire member (D52)
+public sealed record ManagementApplyResult(bool Applied, int Revision, ManagementPlanSummary Plan, bool Replayed = false)
+{
+    internal IReadOnlyList<DescriptorValidationError> Warnings { get; init; } = [];
+}
+// core
+internal sealed record DescriptorApplyPreview(MigrationPlan Plan, int CurrentRevision, bool AllowedByGuardrail)
+{
+    internal IReadOnlyList<DescriptorValidationError> Warnings { get; init; } = [];
+}
+internal static class OwnerComparisonCheck
+{
+    internal static IReadOnlyList<DescriptorValidationError> Warnings(AlvoDescriptor descriptor, SchemaModel schema, ICelCompiler compiler);
+}
+// Ai
+internal static class SkillAreas
+{
+    internal static string? AreaOf(string path, JsonNode? proposed);   // moved from SkillsRead, unchanged
+    internal static string? ForViolation(string pointer);               // AreaOf(pointer, null), plus managed columns → traits
+}
+internal sealed record ToolViolation(..., string Severity = ErrorSeverity, string? Skill = null);
+internal sealed record ChangeOutcome(..., bool? Unchecked = null, string? Hint = null);
+internal static ManagementTools For(IAlvoManagement management, string project, Func<IReadOnlySet<string>>? loadedSkills = null);
+internal IReadOnlySet<string> LoadedSkills { get; }                     // TurnRecorder
+```
+
+- [ ] **Step 1: The failing facts — the warning (core).** `OwnerComparisonCheckTests` goes through the real
+  `DescriptorValidator`, built as `DescriptorValidatorTests` builds it (`:888-890`). The descriptor has:
+  - `technicians` (with `user_id` `uuid`);
+  - `tasks`, with `technician_id` → `technicians`, `assigned_user_id` → `users`, `owner_uuid` (`uuid`) and `title`
+    (`string`).
+
+  Every row is a fact: the outcome is `IsValid` **and** the warning count at that pointer.
+
+| Where | Source | Warnings |
+|---|---|---|
+| `tasks.rules.update` | `technician_id == @user.id` | 1 |
+| `tasks.rules.update` | `technician_id != @user.id` | 1 |
+| `tasks.rules.update` | `@user.id == technician_id` | 1 |
+| `tasks.rules.update` | `'admin' in @user.roles \|\| technician_id == @user.id` | 1 |
+| `tasks.rules.update` | `assigned_user_id == @user.id` (ref → `users`) | 0 |
+| `tasks.rules.update` | `owner_uuid == @user.id` (`uuid`) | 0 |
+| `tasks.rules.update` | `title == @user.id` (plain `string`) | 0 |
+| `tasks.hooks.beforeUpdate[0].condition` | `new.technician_id != @user.id` (with a `reject`) | 1 |
+| `tasks.hooks.beforeUpdate[0].condition` | `old.technician_id == @user.id` | 1 |
+| `tasks.rules.update` | `technician_id == @user.id &&` (does not compile) | 0, and the compile error stays |
+
+  Plus these facts:
+  - the warning's `Path` is the rule's or the condition's pointer (`/entities/tasks/rules/update`,
+    `/entities/tasks/hooks/beforeUpdate/0/condition`);
+  - its message starts *"'technician_id' holds a technicians id, and @user.id is a user id"*;
+  - its fix contains *"refs 'users'"*;
+  - its severity is `Warning`;
+  - **every** `examples/*/*.alvo.json` validates with **0** warnings, found with
+    `Directory.EnumerateFiles(Path.Combine(RepositoryRoot, "examples"), "*.alvo.json", SearchOption.AllDirectories)`.
+    Use this suite's own repository-root helper; `ShippedSources.cs` is the place to look.
+
+  Build each descriptor with `JsonObject`, or with a `$$` raw string that ends in spaced braces, as
+  `DescriptorWithRule` (`:905`) does. `CelAcceptanceCorpusTests` is **not** edited. It must stay green with its
+  baseline untouched, and step 6 proves it.
+
+- [ ] **Step 2: The failing facts — the warning reaches a valid dry run (D52).**
+  1. `ManagementApplyTests` gains `A_dry_run_carries_the_validators_warnings_in_process`. It works in-process
+     through `world.Services.GetRequiredService<IAlvoManagement>()`. `ManagementApplyWorld`'s managed-fleet
+     descriptor gains an entity with a ref to another entity and a rule comparing it with `@user.id`, built with
+     `DescriptorEdits`' idiom. The dry run's `result.Warnings` has one warning at that rule's pointer, and
+     `result.Applied` is false.
+  2. `The_apply_response_carries_no_warnings_member`: the same descriptor through `ApplyAsync(…, query: "?dryRun=true")`.
+     The response JSON has no `warnings` property at any depth. **The wire is unchanged.**
+
+  Api.Tests has the Abstractions grant (`AssemblyInfo.cs:44`).
+
+- [ ] **Step 3: The failing facts — the Ai side.**
+  1. `ManagementToolsTests`:
+     - `A_valid_dry_run_carries_its_warnings`: `ApplyDescriptorAsync` returns
+       `new ManagementApplyResult(false, Revision, EmptyPlan) { Warnings = [new("/entities/bikes/rules/update", "Never true.", "Ref users.", DescriptorValidationSeverity.Warning)] }`.
+       The answer is `valid: true`, with one violation of `severity: "warning"` at that pointer. The filed proposal
+       has no refusals, and `attemptsLeft` stays 3.
+     - `A_refusal_in_an_unloaded_skills_area_names_the_skill`: a ledger of `{"alvo-descriptor-entities-and-fields"}`,
+       and a refusal at `/entities/tasks/fields/created_at`. The violation carries
+       `"skill": "alvo-descriptor-traits-and-tenancy"`, and the outcome's `hint` equals `ViolationMapping.SkillHint`.
+     - `A_refusal_whose_skill_is_loaded_names_none`: the same refusal, with that skill in the ledger. There is no
+       `skill` and no `hint`.
+     - `A_warning_never_names_a_skill`: the valid answer above, with an empty ledger. There is no `skill` and no
+       `hint`.
+     - `Without_a_ledger_no_refusal_names_a_skill`: `ManagementTools.For(management, Project)`, refused. There is no
+       `skill`.
+  2. `SkillAreasTests`: `ForViolation` maps these pointers:
+     - `/entities/x/rules/update` → `rules-and-cel`;
+     - `/entities/x/hooks/beforeUpdate/0/condition` → `hooks`;
+     - `/entities/x/indexes/0` → `indexes`;
+     - `/entities/x/audit` → `traits-and-tenancy`;
+     - `/entities/x/fields/created_at` → `traits-and-tenancy`, and the same for every name in
+       `AlvoManagedColumns.For(TenancyMode.Scoped, audit: true, softDelete: true)`, enumerated rather than typed;
+     - `/entities/x/fields/total/computed` → `computed-and-rollups`;
+     - `/entities/x/fields/notes` → `entities-and-fields`;
+     - `/access` → `project-access`;
+     - `#/entities/x` → `null`;
+     - `""` → `null`.
+  3. `AlvoAssistantFollowUpTests` gains `The_follow_up_says_to_load_a_named_skill`: the follow-up message contains
+     *"Load any skill a violation names"*.
+  4. `AlvoAssistantTests` gains
+     `A_turns_loaded_skills_are_what_it_loaded_before_the_dry_run`. The script is `load_skill`
+     (`alvo-descriptor-entities-and-fields`), then a refused `propose_change` at `/entities/bikes/fields/created_at`.
+     In the trace, `calls[1].result.violations[0].skill` is `alvo-descriptor-traits-and-tenancy`, and the 6202 line
+     of that call carries `skill` too.
+  5. Host.Tests `SkillClaimTests` gains
+     `Comparing_the_caller_with_a_technician_ref_is_a_warning_on_a_valid_dry_run`. On `bike-workshop` through
+     `InstructionExampleOutcomeTests.AttemptAsync`:
+     - `/entities/service_orders/rules/update` set to
+       `"'admin' in @user.roles || technician_id == @user.id"` is valid, with exactly one warning violation at that
+       pointer;
+     - the same with `assigned_user_id` is valid with none;
+     - the rules skill's body contains *"compare it only with a field that refs `users`"*.
+  6. `_toolFacts` gains `"even on a valid answer"`.
+
+- [ ] **Step 4: Run** `MMLib.Alvo.Tests`, Api.Tests, Ai.Tests, Eval.Tests and Host.Tests. The expected reds are every
+  fact above; the rest must be green. `Warnings`, `SkillAreas`, `Skill` and `Hint` do not compile yet.
+
+- [ ] **Step 5: The core.**
+  1. `OwnerComparisonCheck`:
+     - For each `schema.Entities` entity, take `descriptor.Entities.GetValueOrDefault(entity.Name)`.
+     - Compile each non-null `Rules.List/Get/Create/Update/Delete` with `CelProfile.Rule`, at
+       `/entities/{name}/rules/{op}` (lower-case op). Compile each
+       `Hooks.BeforeCreate/BeforeUpdate/BeforeDelete[i].Condition` with `CelProfile.Condition`, at
+       `/entities/{name}/hooks/{point}/{i}/condition`.
+     - A failed compile yields nothing.
+     - Walk the root with `CelTree.Children`, and for each
+       `CelBinary { Operator: CelBinaryOperator.Equal or CelBinaryOperator.NotEqual }` take the pair of operands in
+       either order: a `CelContextRef { Value: CelContextValue.UserId }` and a `CelFieldRef`.
+     - The field is `entity.Fields.FirstOrDefault(field => field.Name == fieldRef.FieldName)`. Warn when its
+       `Reference is { TargetEntity: var target }` and `target != "users"` (ordinal).
+     - One warning per comparison. Its message and fix are D51's, with `'{field}'` and `{target}` interpolated
+       ordinally; the strings hold no culture-sensitive value.
+     - The class remarks carry:
+       - why it is a separate pass: `PolicyCatalogBuilder` refuses on any entry (`:49-54`);
+       - why after-hooks are skipped: they cannot read `@user`;
+       - why `uuid`/`string` are not warned (`assigned_user_id`, `assigned_to` are correct uses);
+       - that the row's own `id` is out of scope;
+       - that each source is compiled a second time, per apply, never per request.
+  2. `DescriptorValidator.RuleErrors`: after `errors.AddRange(ComputedFieldCheck.Errors(schema, _compiler));`, add
+     `errors.AddRange(OwnerComparisonCheck.Warnings(descriptor, schema, _compiler));`. It runs whether or not
+     `TryBuild` succeeded, so a refused first attempt already carries the warning beside its errors.
+  3. `DescriptorApplyPreview` gains the `Warnings` init property. `RuntimeSchemaService.Validate` returns the
+     `DescriptorValidationResult` it checked (the throw is unchanged). `PreviewAsync` sets
+     `Warnings = [.. result.Errors.Where(error => error.Severity == DescriptorValidationSeverity.Warning)]`.
+     `ApplyAsync`'s own `Validate` call ignores the return value.
+  4. `ManagementApplyResult` gains the internal `Warnings` property with a `<summary>`:
+     - *"The validator's warnings on this descriptor: advisory, never blocking. Internal (D52): the assistant reads
+       them; the wire and the public contract do not carry them until a client earns it."*
+
+     `AlvoManagementService`:
+     - `AppliedAsync`'s dry-run branch gets `with { Warnings = preview.Warnings }`, and so does `AppendAsync`'s
+       result (`:498`);
+     - `RollbackAsync` and the replay (`:604`) carry none;
+     - one remark says why.
+  5. `AssemblyInfo.cs`: the comment above the `MMLib.Alvo.Ai` grant (`:56`) names the second use, the apply result's
+     warnings (D52).
+
+- [ ] **Step 6: The Ai side.**
+  1. `ViolationMapping.FromWarnings(IReadOnlyList<DescriptorValidationError> warnings, IReadOnlyList<string?> targets)`
+     maps as `FromValidation` does, with `Severity: ToolViolation.WarningSeverity`.
+     `DescriptorDraft.DryRunAsync` passes `ViolationMapping.FromWarnings(result.Warnings, draft.Targets)` to
+     `draft.Accepted(result.Plan, warnings)`.
+  2. `SkillAreas`: move `SkillsRead.AreaOf`, `EntityFacetArea`, `IsDerived`, the area constants and `_traits`
+     verbatim into `MMLib.Alvo.Ai.Internal.SkillAreas`. Add `ForViolation(pointer)`: when the pointer is
+     `/entities/{e}/fields/{f}` and `f` is managed on some entity, answer `traits-and-tenancy`; else
+     `AreaOf(pointer, null)`. "Managed on some entity" is the public
+     `AlvoManagedColumns.For(TenancyMode.Scoped, audit: true, softDelete: true)`, the union spec §3 already pins. The
+     internal `AlvoManagedColumns.All` would be a third use of the Abstractions grant, and nothing earns it. `SkillsRead.AreaOf` becomes `=> SkillAreas.AreaOf(path, proposed)`, and its `Areas` list reads
+     `SkillAreas`' constants. `SkillsReadTests` must pass unchanged.
+  3. `TurnRecorder.LoadedSkills`: the `skillName` of every `load_skill` call whose `Result` is null (answered later in
+     the same round, which the sequential invoker runs first) or does not start with `"Error:"`. It is read as
+     `SkillsRead.Skill` reads it: `JsonElement` string, or `ToString()`.
+  4. `ManagementTools.For(…, Func<IReadOnlySet<string>>? loadedSkills = null)`. In `AttemptAsync`, a refused outcome
+     is passed through `WithSkillHints`:
+     - for each **blocking** violation whose `SkillAreas.ForViolation(pointer)` names an area whose
+       `"alvo-descriptor-" + area` is not in the ledger, add `Skill` to that violation;
+     - when any got one, set `Hint = ViolationMapping.SkillHint`, which is D50's sentence;
+     - no ledger means no hint;
+     - `ToolViolation.Key` does not include `Skill`, so the budget (D41) is unchanged.
+  5. `AlvoAssistant.AnswerAsync` passes `() => recorder.LoadedSkills`.
+  6. `TurnTrace`:
+     - `_dryRunMembers` gains `"hint"`;
+     - `_loggedViolationMembers` gains `"skill"` (a catalogue name, never author text);
+     - the `LogLine` remarks say so.
+  7. `FollowUp.Message`'s second sentence becomes *"Load any skill a violation names, apply each violation's fix at
+     its pointer, and call propose_change again."*
+  8. `InternalGrantArchitectureTests`:
+     - the summary says the grant is used for the trace seam **and** the apply result's warnings;
+     - a second control fact, `_referenced.ShouldContain("MMLib.Alvo.Management.ManagementApplyResult::get_Warnings")`,
+       shows the scan sees the new use;
+     - the security-core deny list is unchanged.
+
+- [ ] **Step 7: The texts.** Measure first (T15 step 0). Expected: T15's end size.
+  1. `schema-assistant.md:108` becomes:
+
+```markdown
+- A violation whose `severity` is `warning` does not block, even on a valid answer: fix the `error` ones, and a
+  warning that says the change cannot do what the operator asked.
+```
+
+  2. `:309`: drop *"The field name stays English snake_case; only the prose follows the operator. "*. The §3 name rule
+     already says it, and T13 step 0 named this sentence the first to trim. Re-wrap the paragraph.
+
+     Measured with a UTF-8 byte count against `fc4a4a7`, the two edits net **+13** bytes, so about **22,747** after
+     T15's +41. If the measurement says otherwise and crosses 22,758, shorten the bullet's second clause. Never trim
+     the `_toolFacts` phrase.
+  3. The rules skill, `:51`, after *"An owner clause compares a `ref` to `users` with `@user.id`."*:
+
+```markdown
+`@user.id` is a `users` id: compare it only with a field that refs `users`, or with a `uuid` that holds a user id. A
+ref to any other entity holds that entity's id and never equals it, and the validator warns.
+```
+
+     The skill stays ≤ 6,144 bytes (4,256 now) and ≤ 200 lines, with UTF-8 without BOM and LF. `EmbeddedSkillsTests`
+     proves the embed equals the file.
+
+- [ ] **Step 8: Run** every suite of step 4, and they should be green.
+  - `CelAcceptanceCorpusTests` is green, and `git diff fc4a4a7 -- src/MMLib.Alvo/Expressions test/MMLib.Alvo.Tests/Expressions`
+    is **empty**. The compiler and its corpus did not move.
+  - `git diff --stat fc4a4a7 -- '*.verified.*'` is **empty**. In particular
+    `PublicApi.MMLib.Alvo.Abstractions.verified.txt` does not move, because the new member is internal.
+  - Security-core checklist (`alvo-security-core-review`), answered in the commit body:
+    - the check can only add a `Warning`, never an `Error`, and never removes one;
+    - it reads compiled trees and changes none;
+    - it runs on the apply path only;
+    - a descriptor that was valid is still valid, and one that was refused is refused with the same errors.
+
+- [ ] **Step 9: Gates and commit.**
+  - Run `scripts/test-ring1`.
+  - Run `dotnet build MMLib.Alvo.slnx -c Release -warnaserror`. Watch for:
+    - CA1861 on the pointer tables in `SkillAreasTests`;
+    - CA1859 on the walker's return type;
+    - CA1873 on any new log argument.
+  - Commit `feat(ai): a refusal names the skill it needs, and a rule comparing the caller with another entity's ref is a warning the model sees`.
+    The body holds the measured sizes and the checklist answers.
+
+---
+
+### Task 17: The eval case `task_management_workers`, and the counts that name the suite (F, D53)
+
+**Files:**
+- Create: `eval/MMLib.Alvo.Ai.Eval/EvalCases.TaskManagement.cs`
+- Modify: `eval/MMLib.Alvo.Ai.Eval/EvalCases.cs` (`All`, and the class summary's case count at `:34-36`)
+- Modify: `eval/MMLib.Alvo.Ai.Eval/RecordingChatClient.cs` (`FollowUps`); `TurnRecord.cs` (`FollowUps`);
+  `EvalRunner.cs` (the verdict line)
+- Modify: `test/_shared/ai/SkillCaseAnswers.cs` (`TaskManagement`, **not** in `RightAnswers`: `SkillCasesTests`'
+  theories over `RightAnswers` assume one skill per case)
+- Modify: `CLAUDE.md` (the assistant-eval paragraph); `scripts/eval-assistant` (`:6`, `:152`)
+- Test:
+  - `test/MMLib.Alvo.Ai.Eval.Tests/TaskManagementCaseTests.cs` (new);
+  - `test/MMLib.Alvo.Ai.Eval.Tests/EvalCasesTests.cs` (`:17`, 16 → 17);
+  - `test/MMLib.Alvo.Host.Tests/SkillCaseAnswerTests.cs` (one fact).
+
+- [ ] **Step 1: The right answer**, in `SkillCaseAnswers`. It is `bike-workshop`'s shape of the RCA turn, with its two
+  defects fixed:
+  - no `created_at`/`updated_at`;
+  - the assignee's owner clause goes through a ref to `users`.
+
+```csharp
+    /// <summary>
+    /// <c>task_management_workers</c>' right answer (spec §9, D53): tasks linked to a technician, a customer and a part,
+    /// and a discussion on each — audited, no managed column declared, and every owner clause on a ref to users.
+    /// </summary>
+    internal const string TaskManagement = """
+        [{"op": "add", "path": "/entities/tasks",
+          "value": {"audit": true,
+                    "fields": {"title": {"type": "string", "required": true, "maxLength": 200},
+                               "status": {"type": "enum", "required": true, "values": ["open", "done"], "default": "open"},
+                               "technician_id": {"type": "ref", "entity": "technicians", "onDelete": "setNull"},
+                               "assigned_user_id": {"type": "ref", "entity": "users"},
+                               "customer_id": {"type": "ref", "entity": "customers", "onDelete": "setNull"},
+                               "part_id": {"type": "ref", "entity": "parts", "onDelete": "setNull"}},
+                    "rules": {"list": "'authenticated' in @user.roles", "get": "'authenticated' in @user.roles",
+                              "create": "'admin' in @user.roles || 'manager' in @user.roles",
+                              "update": "'admin' in @user.roles || 'manager' in @user.roles || assigned_user_id == @user.id",
+                              "delete": "'admin' in @user.roles"}}},
+         {"op": "add", "path": "/entities/task_comments",
+          "value": {"audit": true,
+                    "fields": {"task_id": {"type": "ref", "entity": "tasks", "onDelete": "cascade", "required": true},
+                               "author_id": {"type": "ref", "entity": "users", "required": true},
+                               "body": {"type": "text", "required": true}},
+                    "rules": {"list": "'authenticated' in @user.roles", "get": "'authenticated' in @user.roles",
+                              "create": "author_id == @user.id", "update": "author_id == @user.id",
+                              "delete": "'admin' in @user.roles || author_id == @user.id"}}}]
+        """;
+```
+
+  `SkillCaseAnswerTests` gains `The_task_management_right_answer_passes_the_real_dry_run_with_no_warning`, through
+  its own `AttemptAsync`. The attempt is valid, and `attempt.Violations` holds **0** entries of severity
+  `"warning"` (D52 puts them there).
+  - If the dry run refuses the patch, fix the **answer**, never the grader, and re-run. The likely causes are an
+    `onDelete` on a ref to `users` (D38) or a `setNull` on a `required` ref.
+
+- [ ] **Step 2: The failing facts** (`TaskManagementCaseTests`). They follow `SkillCasesTests`: the right turn is
+  `SkillCaseAnswers.TaskManagement` applied to `Turns.Original` through `DescriptorDiff.Patched`. It loads
+  `entities-and-fields`, `rules-and-cel` and `traits-and-tenancy` in round 1, reads `get_descriptor` in round 1,
+  proposes valid in round 2, and answers *"I proposed tasks and task comments. Nothing changes until you apply it
+  from Preview."*.
+  - `The_right_answer_passes_its_case` and `The_right_answer_passes_the_whole_grading` (`EvalRunner.Graded`, English).
+  - One fact per clause, each the right turn with **exactly one** thing wrong, and each must fail its case:
+    1. *not valid*: the same proposal, with `refusals: ["refused"]` and a refused `Propose`;
+    2. *fewer than two new entities*: the `task_comments` operation removed;
+    3. *a changed path that is not a new entity*: `bikes.notes` added beside;
+    4. *a missing link*: `part_id` removed, so `parts` is never referenced;
+    5. *a ref to an undeclared entity*: `part_id` → `products` (the RCA 1 defect; graded, though validity implies
+       it, D16's reasoning);
+    6. *a managed column declared*: `created_at` added to `tasks` (audited);
+    7. *the caller compared with another entity's ref*: `update` ends `|| technician_id == @user.id` — and, as a second
+       row, a `beforeUpdate` condition `new.technician_id != @user.id` with a `reject`;
+    8. *two refusals*: two refused `Propose` calls before the valid one.
+  - Whole-grading facts that are not case clauses:
+    - the right turn without the `traits-and-tenancy` load fails `EvalRunner.Graded` (`SkillsRead`);
+    - with the answer *"I created the tables."* it fails too (`ProposalWording`).
+  - `EvalCasesTests.The_suite_has_the_reliability_first_try_and_skill_cases` → `ShouldBe(17)`.
+
+- [ ] **Step 3: Run** `dotnet test --project test/MMLib.Alvo.Ai.Eval.Tests` and Host.Tests' `SkillCaseAnswerTests`.
+  Expect red: the case is missing and the count is 16.
+
+- [ ] **Step 4: The case** (`EvalCases.TaskManagement.cs`, `internal static partial class EvalCases`):
+  1. `All` gains, after `can_alvo_call_http`:
+
+```csharp
+        new("task_management_workers",
+            "Create tables for task management for workers: a task links to the employee, the customer they may serve and the goods, and each task has a discussion.",
+            "Vytvor tabuľky na správu úloh pre pracovníkov: úloha je priradená zamestnancovi, zákazníkovi, ktorého môže obslúžiť, a tovaru, a ku každej úlohe sa dá viesť diskusia.",
+            TaskManagementWorkers),
+```
+
+  2. The grader, one clause per fact, with a `Why` naming each clause's reading, as `AuditWhy` does:
+     - `newEntities`: every `turn.ChangedPaths` matches `EntityPointer()`, and `DescriptorDiff.At(original, path)` is
+       null. There must be at least 2.
+     - `links`: the union of the new entities' ref targets (`field.Value?["entity"]`) ⊇ `{technicians, customers, parts}`.
+     - `declared`: every ref target is an original entity, a new entity, or `users`.
+     - `managed`: `DeclaredManagedColumns(entity)` is empty for every new entity.
+     - `callerVsRef`: over every new entity's rule strings and before-hook `condition`s, normalised with `Normal`, the
+       regex `(?:new\.|old\.)?([a-z][a-z0-9_]*)(?:==|!=)@user\.id|@user\.id(?:==|!=)(?:new\.|old\.)?([a-z][a-z0-9_]*)`
+       captures field names. A captured field whose declared `type` is `ref` and whose `entity` is not `users` fails
+       the turn.
+       - The regex is a `[GeneratedRegex]` with `CultureInvariant`.
+       - It runs over `Normal`'s output, which drops whitespace and reads `"` as `'`.
+     - `turn.RefusedAttempts <= 1`, and `turn.HasValidProposal`.
+  3. The skills and *"proposed"* are **not** repeated here. `SkillsRead` and `ProposalWording` grade every turn (D53,
+     spec §9.5).
+
+- [ ] **Step 5: The follow-up is visible in the eval** (D47, D53).
+  - `RecordingChatClient.FollowUps` counts sent requests whose last message is user-role and starts with
+    `FollowUp.Lead`. The eval has the Ai grant (`src/MMLib.Alvo.Ai/Properties/AssemblyInfo.cs`).
+  - Count each follow-up once, where it is first sent: a request whose last message is the follow-up is exactly that
+    request.
+  - `TurnRecord` gains a trailing `int FollowUps = 0`.
+  - `EvalRunner`'s verdict line prints `followUps=N` for every turn, so a real run shows how often A fired. Its
+    format lives in `CaseRun.Line`, which uses `string.Create(CultureInfo.InvariantCulture, …)`.
+  - A fact in `RecordingChatClientTests` counts one follow-up over a two-request session.
+
+- [ ] **Step 6: The counts.**
+  - `CLAUDE.md`, in the *assistant eval* paragraph: *"asks a real model the seven cases of
+    `docs/superpowers/specs/2026-09-28-f5-assistant-reliability-design.md` §4.2"* becomes *"asks a real model the
+    seventeen cases: the seven of `docs/superpowers/specs/2026-09-28-f5-assistant-reliability-design.md` §4.2 and the
+    ten of `docs/superpowers/specs/2026-09-29-f5-assistant-first-try-design.md` (§5, §7.5, §9)"*. Nothing else in
+    `CLAUDE.md` moves.
+  - `scripts/eval-assistant:6` and `:152`: *"sixteen"* → *"seventeen"*. Add an example `--case task_management_workers`
+    line beside `:13`.
+  - `EvalCases.cs:34-36`, the class summary, adds *"and the RCA 2 case (§9, D53)"*.
+  - `git grep -n "sixteen\|16 cases"` over `CLAUDE.md scripts eval test/MMLib.Alvo.Ai.Eval.Tests` then finds
+    nothing. Sweep for the claim, not the file.
+  - `bash -n scripts/eval-assistant`. The script is **not run**: it needs a real model (D8).
+
+- [ ] **Step 7: The last task's gates**, all green:
+  - `scripts/test-ring1`.
+  - `dotnet build MMLib.Alvo.slnx -c Release -warnaserror`, with 0 warnings and 0 errors.
+  - `scripts/test-ring2`. Read a `PagingPerformanceTests` connect timeout's trace before calling it a regression.
+  - `docker build -f src/MMLib.Alvo.Host/Dockerfile .`. This is the build that caught CA1873 in T14; a local
+    Release build is not a substitute.
+  - `git diff --stat fc4a4a7 -- '*.verified.*'` is **empty**. `git diff --stat fc4a4a7 -- src/MMLib.Alvo.Admin` is
+    **empty**, so `scripts/test-admin-e2e` is not a gate. If either is non-empty, stop: the first means the change is
+    wrong, the second makes the e2e script, run whole, a gate.
+
+- [ ] **Step 8: Commit** `test(eval): the task-management turn is a graded case, and the eval shows each follow-up`.
+
+The controller then runs, none of which is a task step:
+- `alvo-plan-guard`;
+- the reviewer subagents substituting for `/code-review` and `/security-review` (T16 is security core);
+- the PR report (`alvo-pr-report`), which marks T16 *needs-deep-review* and records D52's internal member.
+
+---
+
+## Self-review — RCA 2 extension (Tasks 15–17)
+
+- **Spec coverage (§9):**
+  - D47, D48 and D49 → T15;
+  - D50, D51 and D52 → T16;
+  - D53 → T17.
+- **AC map (§9.4):**
+  - AC1 → T15 step 1 (b);
+  - AC2 → T15 steps 0, 1 (c)–(d) and 7;
+  - AC3 → T16 step 3;
+  - AC4 → T16 steps 1–3 and 8;
+  - AC5 → T17 steps 1–2;
+  - AC6 → the gates of each task, and T17 step 7.
+- **Order:**
+  - T15 introduces `FollowUp` before T16 amends its message.
+  - T16's `FromWarnings` lands before T17's right answer asserts zero warnings on a valid attempt.
+  - T15 moves the instructions to v6 before T16 edits them.
+- **Checked against the code at `fc4a4a7`:**
+  - `AlvoAssistant.cs:122-160`, `:328-345`, and `LogTurn`; `TurnRecorder` (`ToolRounds`, `_requests`);
+  - `ManagementTools.cs:160-256` (`CheckChangeAsync` to `Refused`); `ChangeOutcome`'s positional shape;
+    `ToolViolation.Key`;
+  - `ViolationMapping.FromValidation` and `SeverityOf`, which already map a `Warning`; `DescriptorDraft.cs:69-94`,
+    `:128-129`;
+  - `ManagedColumnNames.cs:106-183`; `DescriptorValidatorTests.cs:695-720`, `:888-905`;
+  - `DescriptorValidator.cs:124-145`; `PolicyCatalogBuilder.cs:49-54`, `:117-136`; `BeforeHookCompiler.cs:98-160`;
+    `AfterHookCompiler.HonoursTheEnvelope`;
+  - `CelTree.Children`, and the public node records `CelBinary`, `CelFieldRef` and `CelContextRef`;
+    `RefSchema.TargetEntity`;
+  - `RuntimeSchemaService.cs:170-185`, `:251-257`; `AlvoManagementService.cs:230-240`, `:498`, `:604`;
+    `ManagementModels.cs:264-265`;
+  - Abstractions' grants (`AssemblyInfo.cs:3`, `:44`, `:56-58`); Ai's grants (Ai.Tests, Host.Tests, Ai.Eval);
+    `InternalGrantArchitectureTests`;
+  - `SkillsRead.AreaOf` (eval); `SkillCasesTests`' `RightAnswers` theories, the reason `TaskManagement` stays out;
+  - `CapabilityReport.Project()`, whose `Refused` consequences are `UnhonouredFeatures.EveryRefusal`'s, the same
+    text the validator reports (`DescriptorValidator.cs:555`);
+  - `Microsoft.Agents.AI` 1.22.0: `AIAgent.CreateSessionAsync(CancellationToken)` and
+    `RunStreamingAsync(ChatMessage, AgentSession, …)`, read from the package's XML docs;
+  - the size **22,693 B**, measured.
+- **Traps restated per task:**
+  - CA1873 → the 6203 arguments are fields, and any computed one is guarded (T15 step 4.7, T16 step 9);
+  - `$$` → spaced closing braces or `JsonObject` (T15 step 1 (d), T16 step 1);
+  - CRLF → `ReplaceLineEndings("\n")` wherever Markdown is read or measured;
+  - CA1861 → the static theory and pointer tables;
+  - culture → `string.Create` in the verdict line (T17 step 5).
+- **Open for the maintainer:**
+  - D52 keeps the warnings internal, so Preview does not draw them and HTTP clients do not see them. Publishing them
+    is one public member and a baseline line, whenever the dashboard earns it.
+  - D47's held answer delays a refused turn's text until the turn ends; the maintainer judges that in the drawer.
