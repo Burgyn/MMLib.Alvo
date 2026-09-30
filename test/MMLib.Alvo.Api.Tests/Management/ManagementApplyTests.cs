@@ -52,6 +52,26 @@ public class ManagementApplyTests
         result.Warnings.ShouldHaveSingleItem().Path.ShouldBe(DescriptorEdits.OwnerComparisonRule);
     }
 
+    /// <summary>
+    /// The internal warnings take no part in a result's equality (final review L4): the public record compares by its
+    /// public values, as it did before D52.
+    /// </summary>
+    [Fact]
+    public void Two_results_that_differ_only_in_their_warnings_are_equal()
+    {
+        var plan = new ManagementPlanSummary(IsEmpty: true, HasDestructiveChanges: false, []);
+        var plain = new ManagementApplyResult(Applied: false, Revision: 1, plan);
+        var warned = plain with
+        {
+            Warnings = [new Descriptor.DescriptorValidationError("/entities/x/rules/update", "Never true.", null, Descriptor.DescriptorValidationSeverity.Warning)],
+        };
+
+        warned.ShouldBe(plain);
+        warned.GetHashCode().ShouldBe(plain.GetHashCode());
+        warned.Warnings.ShouldHaveSingleItem();
+        (warned with { Revision = 2 }).ShouldNotBe(plain);
+    }
+
     /// <summary>The same warning-drawing dry run over HTTP: the response has no <c>warnings</c> member at any depth.</summary>
     /// <remarks>The wire is unchanged (D52): the member is internal, and System.Text.Json writes public members only.</remarks>
     [Fact]

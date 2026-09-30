@@ -23,6 +23,11 @@ internal static partial class EvalCases
     /// and a managed column are graded although validity implies them (D16's reasoning): a validator that stopped
     /// refusing either still fails the case. The skills and the word "proposed" are graded on every turn by
     /// <see cref="SkillsRead"/> and <see cref="ProposalWording"/>, so they are not repeated here.
+    /// <para>
+    /// <b>Watch <c>links</c> on the first real run</b> (final review L6): it asks for a ref to <c>technicians</c>, as D53
+    /// is written, and a model that models "the employee" as a ref to <c>users</c> — a defensible reading, and the
+    /// owner column D51 recommends — fails it. Read such a FAIL before calling it a regression.
+    /// </para>
     /// </remarks>
     private static Verdict TaskManagementWorkers(TurnRecord turn)
     {

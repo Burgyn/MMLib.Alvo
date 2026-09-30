@@ -490,11 +490,19 @@ boot_descriptor="$descriptor"
 if [ "$keep" -eq 1 ] && [ -f "$dir/alvo.db" ]; then
   if command -v sqlite3 >/dev/null 2>&1; then
     latest="$dir/descriptor.latest.alvo.json"
-    if sqlite3 "$dir/alvo.db" "select descriptor_json from alvo_descriptor_versions order by revision desc limit 1" \
-        >"$latest" 2>/dev/null && [ -s "$latest" ] && jq -e . "$latest" >/dev/null 2>&1; then
-      if [ "$(jq -S . "$latest")" != "$(jq -S . "$descriptor")" ]; then
-        revision="$(sqlite3 "$dir/alvo.db" "select max(revision) from alvo_descriptor_versions")"
-        say "--keep: the database is at revision $revision, newer than $(basename "$descriptor") — booting that revision"
+    # The table is keyed (project, revision): read this project's rows only. The name is a SQL literal, so a quote
+    # in it is doubled. -init /dev/null keeps a ~/.sqliterc (".headers on", ".mode box") out of the export.
+    project="$(jq -r '.name' "$descriptor")"
+    quote="'"
+    project_sql="${project//$quote/$quote$quote}"
+    demo_sql() { sqlite3 -batch -init /dev/null -noheader -list "$dir/alvo.db" "$1" 2>/dev/null; }
+    if demo_sql "select descriptor_json from alvo_descriptor_versions where project = '$project_sql' order by revision desc limit 1" \
+        >"$latest" && [ -s "$latest" ]; then
+      if ! jq -e . "$latest" >/dev/null 2>&1; then
+        say "--keep: the database's latest revision did not parse as JSON, so the host boots $(basename "$descriptor"); if the database moved on, it will stand down"
+      elif [ "$(jq -S . "$latest")" != "$(jq -S . "$descriptor")" ]; then
+        revision="$(demo_sql "select max(revision) from alvo_descriptor_versions where project = '$project_sql'")"
+        say "--keep: the database is at revision $revision, which differs from $(basename "$descriptor") — booting that revision"
         boot_descriptor="$latest"
       fi
     fi

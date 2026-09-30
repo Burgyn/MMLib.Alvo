@@ -66,7 +66,9 @@ public sealed class AlvoAssistantFollowUpTests
 
         await RunAsync(Refusing(then: null), model);
 
-        model.Requests.Single(request => IsFollowUp(request[^1]))[^1].Text.ShouldContain("Load any skill a violation names");
+        var message = model.Requests.Single(request => IsFollowUp(request[^1]))[^1].Text;
+        message.ShouldContain("Load any skill a violation names");
+        message.ShouldContain("every fix adds something the operator did not ask for, or removes or changes what they asked for");
     }
 
     /// <summary>A follow-up run that ends refused again is not followed up: one per turn, the most (D47).</summary>

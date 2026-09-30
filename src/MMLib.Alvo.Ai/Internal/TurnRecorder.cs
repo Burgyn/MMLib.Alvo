@@ -42,7 +42,8 @@ internal sealed class TurnRecorder(IChatClient inner) : DelegatingChatClient(inn
     /// <remarks>
     /// "Before" is by position in the calls (pre-flight L1): a skill loaded later in the same answer as the dry run had
     /// not been read when the dry run was checked. A load in the same answer and earlier is counted, and its answer is
-    /// still null then, because the sequential invoker runs it first.
+    /// still null then, because the sequential invoker runs it first — so one that goes on to fail is counted too, and
+    /// hides the hint for that dry run (final review L5): conservative, and the failed load's own answer says so.
     /// </remarks>
     internal IReadOnlySet<string> LoadedSkills
     {

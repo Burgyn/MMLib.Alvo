@@ -265,11 +265,38 @@ public sealed record ManagementRollbackRequest(
 public sealed record ManagementApplyResult(
     bool Applied, int Revision, ManagementPlanSummary Plan, bool Replayed = false)
 {
+    private readonly EqualityNeutral<IReadOnlyList<DescriptorValidationError>> _warnings = new([]);
+
     /// <summary>
     /// The validator's warnings on this descriptor: advisory, never blocking. Internal (D52): the assistant reads
     /// them; the wire and the public contract do not carry them until a client earns it.
     /// </summary>
-    internal IReadOnlyList<DescriptorValidationError> Warnings { get; init; } = [];
+    /// <remarks>
+    /// <b>Not part of the record's equality</b> (final review L4): the public record compares by its public values, as
+    /// it did before D52. The backing field's wrapper compares equal to any other, so the compiler-generated
+    /// <c>Equals</c> and <c>GetHashCode</c> — which read every field — are unmoved without being written out, and the
+    /// published surface does not change.
+    /// </remarks>
+    internal IReadOnlyList<DescriptorValidationError> Warnings
+    {
+        get => _warnings.Value;
+        init => _warnings = new(value);
+    }
+}
+
+/// <summary>A value a record carries without comparing it: every instance is equal to every other, and hashes alike.</summary>
+/// <typeparam name="T">The carried value's type.</typeparam>
+/// <param name="value">The carried value.</param>
+internal sealed class EqualityNeutral<T>(T value)
+{
+    /// <summary>The carried value.</summary>
+    internal T Value { get; } = value;
+
+    /// <inheritdoc/>
+    public override bool Equals(object? obj) => obj is EqualityNeutral<T>;
+
+    /// <inheritdoc/>
+    public override int GetHashCode() => 0;
 }
 
 /// <summary>A migration plan, in the shape a diff view needs.</summary>
