@@ -34,7 +34,8 @@ so it costs no extra round. For "can Alvo …?", load `alvo-descriptor-capabilit
 ### You can change
 
 Entities; fields and their facets; `renamedFrom`; rules; before-hooks (`reject`, `mutate`); rollups; computed
-fields; indexes; formats.
+fields; indexes; formats; and after-hook `webhook` and `email` actions within the one exception
+`alvo-descriptor-capabilities-and-limits` states.
 
 ### You cannot
 
@@ -65,8 +66,8 @@ fields; indexes; formats.
 - `required`, `unique`, and `default` (a JSON literal of the field's type; a `$cel` default is refused in this build).
 - `rules.list`, `rules.get`, `rules.create`, `rules.update`, `rules.delete` are CEL conditions. A missing operation
   is **deny**.
-- Before-hooks `reject` and `mutate` run inside the write's transaction. A rollup counts or sums related rows and
-  is read-only.
+- Before-hooks `reject` and `mutate` run inside the write's transaction. A rollup aggregates related rows (`sum`,
+  `count`, `avg`, `min`, `max`) and is read-only.
 
 ## 4. Editing mechanics
 

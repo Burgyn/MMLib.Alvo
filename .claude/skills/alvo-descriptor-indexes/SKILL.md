@@ -41,4 +41,4 @@ Adding one depends on whether the entity already has the list:
 ```
 
 In the dashboard: read with `get_descriptor`, then `check_change` or `propose_change` the operation.
-In this repo: edit the descriptor file and run the validator (`dotnet test`), or the Management API.
+In this repo: edit `examples/**/*.alvo.json` or your own descriptor, then run `scripts/test-ring0` or `PUT …/descriptor?dryRun=true`.

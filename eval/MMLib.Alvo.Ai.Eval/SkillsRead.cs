@@ -97,7 +97,6 @@ internal static class SkillsRead
         return [.. areas.Distinct(StringComparer.Ordinal)];
     }
 
-
     /// <summary>The skills a turn's proposal needs, ordinal; none when it filed none.</summary>
     internal static IReadOnlyList<string> Needed(TurnRecord turn) =>
     [

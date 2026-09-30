@@ -21,7 +21,7 @@ public sealed class SkillRegionTests
     private static readonly string[] _heldInHostTests =
     [
         "reserved-fields", "cel-rule", "cel-condition", "cel-mutate", "mutate-functions", "cel-computed", "cel-access",
-        "honoured", "warned", "refused-actions",
+        "honoured", "warned", "refused",
     ];
 
     [Fact]

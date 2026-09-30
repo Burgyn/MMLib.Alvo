@@ -25,4 +25,4 @@ A role literal must be a built-in role or one declared in `auth.roles`; a typo i
 say that an administrator has to make it, and do not look for a way around it.
 
 In the dashboard: read with `get_descriptor`, then `check_change` or `propose_change` the operations.
-In this repo: edit the descriptor file and run the validator (`dotnet test`), or the Management API.
+In this repo: edit `examples/**/*.alvo.json` or your own descriptor, then run `scripts/test-ring0` or `PUT …/descriptor?dryRun=true`.

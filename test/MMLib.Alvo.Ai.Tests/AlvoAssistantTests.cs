@@ -155,11 +155,6 @@ public sealed class AlvoAssistantTests
             .ShouldBe(AlvoAssistant.MaximumIterations);
     }
 
-    /// <summary>The agent's own invoker is capped, and invokes one tool call at a time.</summary>
-    /// <remarks>
-    /// <see cref="Internal.ManagementTools"/> keeps its budget and proposal in plain fields; concurrent invocation
-    /// would let parallel calls in one response all pass an exhausted budget, so the setting is pinned here.
-    /// </remarks>
     /// <summary>
     /// What the model always reads — the base prompt and the skill list — is no larger than the v3 base prompt alone
     /// (spec §7.4 AC 3). Measured LF-normalised, so a CRLF checkout measures the same text.
@@ -175,6 +170,11 @@ public sealed class AlvoAssistantTests
             .ShouldBeLessThanOrEqualTo(AlwaysInContextBudget);
     }
 
+    /// <summary>The agent's own invoker is capped, and invokes one tool call at a time.</summary>
+    /// <remarks>
+    /// <see cref="Internal.ManagementTools"/> keeps its budget and proposal in plain fields; concurrent invocation
+    /// would let parallel calls in one response all pass an exhausted budget, so the setting is pinned here.
+    /// </remarks>
     [Fact]
     public void The_agents_invoker_is_capped_and_sequential()
     {

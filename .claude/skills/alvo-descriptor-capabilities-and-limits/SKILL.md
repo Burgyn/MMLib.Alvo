@@ -21,22 +21,26 @@ These are declared by the schema and accepted, and are not honoured, or only in 
 `dynamicEntities` `automation` `templates` `webhooks` `functions` `auth.providers` `entity.storage` `entity.realtime`
 <!-- /gen:warned -->
 
-`templates` and `webhooks` are used from an after-hook: an after-hook `email` renders its template, and an
-after-hook `webhook` posts to its endpoint. That delivery is **unsigned**: no `secretRef` is read, no HMAC header is
-sent and the payload is not projected per endpoint, so the receiver cannot verify the sender. Referenced only from
-`automation`, they do nothing.
+**After-hook `webhook` and `email`, the one exception.** An after-hook `webhook` or `email` action runs, and may be
+proposed, but only against an endpoint under `webhooks.endpoints` or a template under `templates` that the descriptor
+already declares — never a new `webhooks` or `templates` block, which is a warned block. The delivery is
+**unsigned**: no `secretRef` is read, no HMAC header is sent and the payload is not projected per endpoint, so the
+receiver cannot verify the sender. Say so when you offer it. Referenced only from `automation`, they do nothing.
 
-These after-hook action types are refused at apply:
+These are refused at apply, each with its reason in the capability report (`field.default` is a `$cel` default; a
+literal is honoured):
 
-<!-- gen:refused-actions -->
-`function` `http.call` `entity.update`
-<!-- /gen:refused-actions -->
+<!-- gen:refused -->
+`field.validation` `field.default` `entity.softDelete` `rollup.where` `trigger.event` `JSONata` `email.data` `bodyFile` `function` `http.call` `entity.update`
+<!-- /gen:refused -->
+
+The last three are after-hook action types. The skills of each area say what to use instead.
 
 ## How to answer
 
 - Never propose an unhonoured block or a refused action, and never describe one as working.
-- Offer the lowest honoured rung that does the job: a rule, a before-hook, a rollup, a computed field, or an
-  after-hook `webhook` or `email`. Say what it does not do; for a `webhook`, that it arrives unsigned.
+- Offer the lowest honoured rung that does the job: a rule, a before-hook, a rollup, a computed field, or the
+  after-hook exception above. Say what it does not do.
 - Never promise a date or a release for what is missing.
 - Rows are not the descriptor: the dashboard assistant never reads or writes rows and never applies a change.
 
@@ -47,4 +51,4 @@ What the missing parts are, so they can be explained without being offered:
 - `functions` — custom C# script (csx) functions.
 
 In the dashboard: call `get_capabilities` and quote it; `check_change` shows whether a change would be refused.
-In this repo: `GET /projects/<project>/capabilities` on the Management API, or run the validator (`dotnet test`).
+In this repo: `GET /management/projects/<project>/capabilities`, or `PUT /management/projects/<project>/descriptor?dryRun=true`.

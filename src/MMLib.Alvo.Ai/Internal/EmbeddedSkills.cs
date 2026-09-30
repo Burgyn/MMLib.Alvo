@@ -26,10 +26,10 @@ namespace MMLib.Alvo.Ai.Internal;
 /// </remarks>
 internal static partial class EmbeddedSkills
 {
-    internal const string SkillsPrefix = "MMLib.Alvo.Ai.Skills/";
     internal const string SchemaResourceName = "MMLib.Alvo.Ai.Schema/project.schema.json";
     internal const string SchemaReference = "schema/project.schema.json#";
 
+    private const string SkillsPrefix = "MMLib.Alvo.Ai.Skills/";
     private const string SkillFile = "/SKILL.md";
     private const string SliceDescription = "A slice of the descriptor's JSON Schema, schema/project.schema.json.";
 

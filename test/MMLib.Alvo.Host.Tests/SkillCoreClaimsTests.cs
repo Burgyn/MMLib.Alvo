@@ -108,8 +108,14 @@ public sealed class SkillCoreClaimsTests
             UnhonouredSubsystems.All.Concat(UnhonouredSubsystems.WithinBlocks).Concat(UnhonouredSubsystems.ReportedOnly).Select(block => block.Block));
 
     [Fact]
-    public void The_refused_action_types_are_the_unhonoured_features() =>
-        SkillCatalogue.Tokens(Region("capabilities-and-limits", "refused-actions")).ShouldBe(UnhonouredFeatures.EveryActionType);
+    public void The_refused_slots_are_the_unhonoured_features() =>
+        SkillCatalogue.Tokens(Region("capabilities-and-limits", "refused")).ShouldBe(
+            UnhonouredFeatures.EveryRefusal.Select(refusal => refusal.Slot), ignoreOrder: true);
+
+    [Fact]
+    public void The_refused_region_ends_with_the_refused_action_types() =>
+        SkillCatalogue.Tokens(Region("capabilities-and-limits", "refused")).TakeLast(UnhonouredFeatures.EveryActionType.Count)
+            .ShouldBe(UnhonouredFeatures.EveryActionType);
 
     /// <summary>
     /// The entity another profile is tried against: the region's own, so its fields resolve, except that an access level

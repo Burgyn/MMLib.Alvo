@@ -40,8 +40,12 @@ no arithmetic, no joins.
 A `mutate` value cannot compare. For a flag decided by a comparison, let the `condition` compare and the `mutate`
 write the literal, with a second hook for the opposite case.
 
-An existing list is extended with an `add` at `/entities/<entity>/hooks/<slot>/-`; an entity without `hooks` gets
-an `add` at `/entities/<entity>/hooks` holding the whole object.
+Adding a hook depends on what the entity already has:
+
+- The slot exists: `add` at `/entities/<entity>/hooks/<slot>/-`.
+- `hooks` exists without that slot: `add` at `/entities/<entity>/hooks/<slot>` with a list holding the hook. An
+  append to a list that does not exist is refused.
+- No `hooks` at all: `add` at `/entities/<entity>/hooks` holding the whole object.
 
 <!-- example: order-lines-reject-zero-price -->
 **A new order line may not have a zero unit price.**
@@ -57,8 +61,22 @@ an `add` at `/entities/<entity>/hooks` holding the whole object.
 {"valid": true, "changedPaths": ["/entities/order_lines/hooks/beforeCreate/1"]}
 ```
 
+<!-- example: service-orders-reject-negative-labour -->
+**A new service order may not book negative labour hours** — `service_orders` has `hooks`, but no `beforeCreate`.
+
+```json
+{"tool": "propose_change", "baseRevision": 1, "summary": "Refuses a new service order with negative labour hours.",
+ "operations": [{"op": "add", "path": "/entities/service_orders/hooks/beforeCreate",
+                 "value": [{"condition": "new.labour_hours < 0.0",
+                            "action": {"reject": "Labour hours cannot be negative. Enter the hours worked, or 0."}}]}]}
+```
+
+```json
+{"valid": true, "changedPaths": ["/entities/service_orders/hooks/beforeCreate"]}
+```
+
 After-hooks (`afterCreate`, `afterUpdate`, `afterDelete`) run after the commit, and only some of their action types
 run in this build: see `alvo-descriptor-capabilities-and-limits`.
 
 In the dashboard: read with `get_descriptor`, then `check_change` or `propose_change` the operations.
-In this repo: edit the descriptor file and run the validator (`dotnet test`), or the Management API.
+In this repo: edit `examples/**/*.alvo.json` or your own descriptor, then run `scripts/test-ring0` or `PUT …/descriptor?dryRun=true`.

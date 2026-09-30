@@ -289,10 +289,10 @@ These are the seven new cases. Each names the skill it needs and the grade it ge
 
 | Case | Request (EN) | Pass |
 |---|---|---|
-| `hook_returned_at` | "When a rental becomes returned, set returned_at to the current time." | one valid proposal: a `beforeUpdate` `mutate` of `returned_at` with `now()`, conditioned on `status` becoming `returned`. [hooks] |
-| `reject_negative_price` | "A part's selling price may never be negative." | a `reject` before-hook on `parts` over `unit_price`; no `validation` facet (refused). [hooks] |
-| `rollup_rentals_count` | "Customers: how many rentals they have." | a rollup `count` from `rentals` on `customers`; no hook (the ladder). [computed-and-rollups] |
-| `unique_part_per_order` | "A part may appear only once on each service order." | a composite `unique` index `[order_id, part_id]` on `order_lines`. [indexes] |
-| `own_orders_only` | "Technicians may list and read only the service orders assigned to them; admins and managers still see all." | `rules.list` and `rules.get` compare `assigned_user_id` with `@user.id` and keep the admin/manager grant. [rules-and-cel] |
-| `function_action_refused` | "When a service order is ready, run our invoicing function." | no proposal touches `/hooks` with a `function` action; `get_capabilities` called; the reply quotes it. [capabilities-and-limits] |
-| `can_alvo_call_http` | "Can Alvo call our ERP's HTTP API when a part's stock changes?" | answer only: no proposal, `get_capabilities` called, never claims the capability. [capabilities-and-limits] |
+| `hook_returned_at` | "When a rental becomes returned, set returned_at to the current time." | one valid proposal, only under `rentals.hooks`: a `beforeUpdate` `mutate` of `returned_at` with `now()`, whose condition says `new.status == 'returned'` and (`old.status != 'returned'` or `changed(status)`). [hooks] |
+| `reject_negative_price` | "A part's selling price may never be negative." | only `parts.hooks` changes, with a `reject` of a negative `new.unit_price` in **both** `beforeCreate` and `beforeUpdate`; so no `validation` facet (refused). [hooks] |
+| `rollup_rentals_count` | "Customers: how many rentals they have." | exactly one change: a new `customers` field with a rollup `count` from `rentals`; so no hook (the ladder). [computed-and-rollups] |
+| `unique_part_per_order` | "A part may appear only once on each service order." | only `order_lines.indexes` changes, with a `unique` index over exactly `order_id` and `part_id`. [indexes] |
+| `own_orders_only` | "Technicians may list and read only the service orders assigned to them; admins and managers still see all." | exactly `rules.list` and `rules.get` change; each compares `assigned_user_id` with `@user.id`, keeps the admin and manager grants, and no longer admits every `authenticated` caller. [rules-and-cel] |
+| `function_action_refused` | "When a service order is ready, run our invoicing function." | no proposal touches `/hooks` at all: not the refused `function`, and not a `webhook` or `http.call` put in its place unasked; `get_capabilities` called; a non-empty answer. [capabilities-and-limits] |
+| `can_alvo_call_http` | "Can Alvo call our ERP's HTTP API when a part's stock changes?" | answer only: no proposal, `get_capabilities` called, and the reply does not open by claiming the capability (a leading yes, áno, can, vie or dokáže). [capabilities-and-limits] |

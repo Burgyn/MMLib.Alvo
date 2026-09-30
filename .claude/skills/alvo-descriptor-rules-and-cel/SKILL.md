@@ -45,4 +45,4 @@ replacing the rule. Before a `replace` of a rule, `test` its current value.
 ```
 
 In the dashboard: read with `get_descriptor`, then `check_change` or `propose_change` the operations.
-In this repo: edit the descriptor file and run the validator (`dotnet test`), or the Management API.
+In this repo: edit `examples/**/*.alvo.json` or your own descriptor, then run `scripts/test-ring0` or `PUT …/descriptor?dryRun=true`.

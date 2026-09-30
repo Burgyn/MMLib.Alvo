@@ -63,4 +63,4 @@ shared reference data every tenant sees.
 
 In the dashboard: read with `get_descriptor`, quote `get_capabilities` for what is not honoured, then
 `check_change` or `propose_change` the operations.
-In this repo: edit the descriptor file and run the validator (`dotnet test`), or the Management API.
+In this repo: edit `examples/**/*.alvo.json` or your own descriptor, then run `scripts/test-ring0` or `PUT …/descriptor?dryRun=true`.
