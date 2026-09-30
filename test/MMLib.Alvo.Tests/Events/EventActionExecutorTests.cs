@@ -65,6 +65,10 @@ public sealed class EventActionExecutorTests : IDisposable
         AlvoEventJson.Read(receiver.Bodies.ShouldHaveSingleItem()).ShouldBe(@event);
     }
 
+    /// <summary>
+    /// A whole-body placeholder posts the JSON string <c>"Big deal"</c>, not the raw text <c>Big deal</c>: the
+    /// body goes out as <c>application/json</c>, and a bare placeholder renders as one JSON value.
+    /// </summary>
     [Fact]
     public async Task A_webhook_action_posts_its_rendered_template_when_one_is_declared()
     {
@@ -75,7 +79,74 @@ public sealed class EventActionExecutorTests : IDisposable
             SampleEvent(Record(("title", "Big deal"))),
             Cancellation);
 
-        receiver.Bodies.ShouldHaveSingleItem().ShouldBe("Big deal");
+        receiver.Bodies.ShouldHaveSingleItem().ShouldBe("\"Big deal\"");
+    }
+
+    /// <summary>
+    /// The injection a caller who can write <c>title</c> had: an array payload was accepted, and a value
+    /// carrying <c>", "</c> forged a second element in the body the receiver parses.
+    /// </summary>
+    [Fact]
+    public async Task A_row_value_cannot_forge_structure_in_a_delivered_payload()
+    {
+        var receiver = new RecordingWebhookReceiver();
+        const string Forgery = "x\", \"admin\": true, \"y";
+
+        await Subject(receiver).ExecuteAsync(
+            WebhookHook(payload: "[\"{{new.title}}\", {{new.commission_note}}]"),
+            SampleEvent(Record(("title", Forgery), ("commission_note", "1], [\"forged\""))),
+            Cancellation);
+
+        using var body = System.Text.Json.JsonDocument.Parse(receiver.Bodies.ShouldHaveSingleItem());
+        body.RootElement.GetArrayLength().ShouldBe(2);
+        body.RootElement[0].GetString().ShouldBe(Forgery);
+        body.RootElement[1].GetString().ShouldBe("1], [\"forged\"");
+    }
+
+    /// <summary>
+    /// A rendered recipient is exactly one mailbox, or the message is not sent — and the refusal throws, so it
+    /// takes the dispatcher's release-and-retry path to the attempt ceiling like every other failed action.
+    /// </summary>
+    /// <remarks>
+    /// The value is absent from the exception on purpose: the dispatcher attaches it to a Warning line, and a
+    /// line break in it would forge a log line of its own.
+    /// </remarks>
+    [Theory]
+    [InlineData("a@x.com\r\nBcc: victim@y.com")]
+    [InlineData("a@x.com, victim@y.com")]
+    [InlineData("Boss <victim@y.com>")]
+    [InlineData("")]
+    public async Task A_rendered_recipient_that_is_not_exactly_one_mailbox_is_refused_before_the_port(string owner)
+    {
+        var mail = new RecordingEmailSender();
+
+        var refusal = await Should.ThrowAsync<InvalidOperationException>(() => Subject(mail: mail).ExecuteAsync(
+            EmailHook(to: "{{new.owner_email}}", subject: "Deal won"),
+            SampleEvent(Record(("owner_email", owner))),
+            Cancellation));
+
+        mail.Messages.ShouldBeEmpty();
+        refusal.Message.ShouldContain(HookPath);
+        refusal.Message.ShouldContain("'to'");
+        if (owner.Length > 0)
+        {
+            refusal.Message.ShouldNotContain(owner);
+        }
+    }
+
+    [Fact]
+    public async Task A_rendered_subject_carrying_a_line_break_is_refused_before_the_port()
+    {
+        var mail = new RecordingEmailSender();
+
+        var refusal = await Should.ThrowAsync<InvalidOperationException>(() => Subject(mail: mail).ExecuteAsync(
+            EmailHook(to: "ops@example.com", subject: "Deal won: {{new.title}}"),
+            SampleEvent(Record(("title", "Big deal\r\nBcc: victim@y.com"))),
+            Cancellation));
+
+        mail.Messages.ShouldBeEmpty();
+        refusal.Message.ShouldContain("'subject'");
+        _logs.Entries.ShouldBeEmpty();
     }
 
     /// <summary>
@@ -353,7 +424,7 @@ public sealed class EventActionExecutorTests : IDisposable
         await Subject(receiver).ExecuteAsync(
             WebhookHook(payload: "{{new.commission_note}}"), @event, Cancellation);
 
-        receiver.Bodies.ShouldHaveSingleItem().ShouldBe("12%");
+        receiver.Bodies.ShouldHaveSingleItem().ShouldBe("\"12%\"");
         var line = _logs.Entries.ShouldHaveSingleItem();
         line.Level.ShouldBe(LogLevel.Information);
         line.Message.ShouldContain(HookPath);
@@ -384,14 +455,51 @@ public sealed class EventActionExecutorTests : IDisposable
     [Fact]
     public async Task The_console_sender_writes_the_whole_message_and_names_itself_a_dev_provider()
     {
-        await new ConsoleEmailSender(_loggers.CreateLogger<ConsoleEmailSender>())
+        using var logs = new CapturingLogger();
+        using var loggers = LoggerFactory.Create(builder => builder.AddProvider(logs).SetMinimumLevel(LogLevel.Debug));
+
+        await new ConsoleEmailSender(loggers.CreateLogger<ConsoleEmailSender>())
             .SendAsync(new AlvoMailMessage("o@x.z", "Deal won", "Big deal closed."), Cancellation);
 
-        var line = _logs.Entries.ShouldHaveSingleItem().Message;
-        line.ShouldContain("o@x.z");
-        line.ShouldContain("Deal won");
-        line.ShouldContain("Big deal closed.");
-        line.ShouldContain("development");
+        var message = string.Join(" ", logs.Entries.Select(entry => entry.Message));
+        message.ShouldContain("o@x.z");
+        message.ShouldContain("Deal won");
+        message.ShouldContain("Big deal closed.");
+        message.ShouldContain("development");
+    }
+
+    /// <summary>
+    /// The body is the part of a message most likely to carry a <c>hidden</c> field, so it is written at Debug
+    /// and never on the Information line a production pipeline commonly ships.
+    /// </summary>
+    [Fact]
+    public async Task The_console_sender_never_writes_the_body_at_information()
+    {
+        await new ConsoleEmailSender(_loggers.CreateLogger<ConsoleEmailSender>())
+            .SendAsync(new AlvoMailMessage("o@x.z", "Deal won", "commission 12%"), Cancellation);
+
+        var line = _logs.Entries.ShouldHaveSingleItem();
+        line.Level.ShouldBe(LogLevel.Information);
+        line.Message.ShouldContain("o@x.z");
+        line.Message.ShouldNotContain("commission 12%");
+    }
+
+    /// <summary>
+    /// A text formatter substitutes a parameter verbatim, so an unescaped line break in a logged value would
+    /// write a line that reads like the log's own. Every value is escaped first.
+    /// </summary>
+    [Fact]
+    public async Task A_line_break_in_a_logged_mail_value_cannot_forge_a_log_line()
+    {
+        using var logs = new CapturingLogger();
+        using var loggers = LoggerFactory.Create(builder => builder.AddProvider(logs).SetMinimumLevel(LogLevel.Debug));
+
+        await new ConsoleEmailSender(loggers.CreateLogger<ConsoleEmailSender>()).SendAsync(
+            new AlvoMailMessage("o@x.z\r\nfail: forged", "s\nfail: forged", "b\r\nfail: forged"), Cancellation);
+
+        logs.Entries.Count.ShouldBe(2);
+        logs.Entries.ShouldAllBe(entry => !entry.Message.Contains('\n') && !entry.Message.Contains('\r'));
+        logs.Entries.ShouldContain(entry => entry.Message.Contains("\\nfail: forged"));
     }
 
     /// <summary>

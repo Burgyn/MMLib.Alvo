@@ -60,9 +60,9 @@ internal sealed class WebhookDelivery(IHttpClientFactory clients)
     /// <exception cref="TimeoutException">The request did not complete inside the named client's timeout.</exception>
     /// <remarks>
     /// The content type is always <c>application/json</c>, which is the endpoint's contract and the envelope's
-    /// own media type. A cost worth naming: a <c>payload</c> template renders to whatever the author wrote, and
-    /// nothing re-checks that the result is JSON — the template engine renders text, so an author who writes
-    /// <c>{{new.title}}</c> as a whole payload sends a bare string under a JSON content type.
+    /// own media type. A <c>payload</c> body is JSON by the time it reaches here: the executor renders it through
+    /// <see cref="JsonPayload"/>, which encodes every value for its position and refuses a body that does not
+    /// parse, so a whole-body <c>{{new.title}}</c> posts the JSON string <c>"Big deal"</c>.
     /// </remarks>
     internal async Task PostAsync(WebhookTarget target, string body, CancellationToken cancellationToken)
     {
