@@ -13,8 +13,20 @@
 #                                      refused when that database's bootstrap.pwd is gone, since the
 #                                      password that signs in to it is then unknown
 #   scripts/demo-admin --no-build      skip `dotnet build` (the previous build is used as it stands)
+#   scripts/demo-admin --no-ai         start without the schema assistant, and ask nothing about it
+#
+# The schema assistant needs a model. Whatever of ALVO_DEMO_AI_* below is not set is asked for, one
+# value at a time, with a default to accept by Enter; the answers except the key are remembered in the
+# demo directory (ai.env) and offered as the defaults next time. The key is read without echo, passed to
+# the host through its secret store, and never written to disk — export ALVO_DEMO_AI_KEY to skip that
+# question. Without a terminal to ask on (CI, a pipe) the demo starts without the assistant.
 #
 # Environment:
+#   ALVO_DEMO_AI_KIND      openai-compatible (default) or azure-openai
+#   ALVO_DEMO_AI_ENDPOINT  the base address (default https://api.openai.com/v1; e.g. http://localhost:11434/v1
+#                          for Ollama, https://<resource>.openai.azure.com for Azure OpenAI)
+#   ALVO_DEMO_AI_MODEL     the model, or the Azure deployment name (default gpt-4.1-mini)
+#   ALVO_DEMO_AI_KEY       the API key (none for a local endpoint that needs none)
 #   ALVO_DEMO_DIR        where the database, password file and logs live
 #                        (default: ${TMPDIR:-/tmp}/alvo-demo-admin; its database is recreated unless --keep)
 #   ALVO_DEMO_ARTIFACTS  the build's --artifacts-path (default: <repo>/artifacts/demo-admin, gitignored).
@@ -42,6 +54,7 @@ artifacts="${ALVO_DEMO_ARTIFACTS:-$root/artifacts/demo-admin}"
 port=5080
 keep=0
 build=1
+ai=1
 webhook_port=5081
 
 while [ $# -gt 0 ]; do
@@ -50,7 +63,8 @@ while [ $# -gt 0 ]; do
     --port=*) port="${1#--port=}"; shift ;;
     --keep) keep=1; shift ;;
     --no-build) build=0; shift ;;
-    -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --no-ai) ai=0; shift ;;
+    -h|--help) sed -n '2,/^# Requires:/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "[demo-admin] unknown argument: $1 (try --help)" >&2; exit 2 ;;
   esac
 done
@@ -108,6 +122,94 @@ api_key="$key_id.$key_secret"
 
 base="http://127.0.0.1:$port"
 host_log="$dir/host.log"
+
+# ---------------------------------------------------------------------------------------------------
+# The schema assistant's model: from ALVO_DEMO_AI_*, else asked for, else off.
+# ---------------------------------------------------------------------------------------------------
+ai_env="$dir/ai.env"
+ai_secret_name="demo_ai_key"
+
+# Reads one line from the terminal, offering a default that Enter accepts. /dev/tty rather than stdin,
+# so the answer comes from the person even when the script's input is redirected.
+ask() {
+  local label="$1" default="$2" answer
+  if [ -n "$default" ]; then printf '[demo-admin] %s [%s]: ' "$label" "$default" >/dev/tty
+  else printf '[demo-admin] %s: ' "$label" >/dev/tty; fi
+  IFS= read -r answer </dev/tty || answer=""
+  printf '%s' "${answer:-$default}"
+}
+
+ask_secret() {
+  local answer
+  printf '[demo-admin] %s (input hidden, Enter for none): ' "$1" >/dev/tty
+  IFS= read -rs answer </dev/tty || answer=""
+  printf '\n' >/dev/tty
+  printf '%s' "$answer"
+}
+
+configure_ai() {
+  # The previous run's answers are the defaults; the environment wins over both.
+  local saved_kind="" saved_endpoint="" saved_model=""
+  if [ -f "$ai_env" ]; then
+    saved_kind="$(sed -n 's/^kind=//p' "$ai_env")"
+    saved_endpoint="$(sed -n 's/^endpoint=//p' "$ai_env")"
+    saved_model="$(sed -n 's/^model=//p' "$ai_env")"
+  fi
+  ai_kind="${ALVO_DEMO_AI_KIND:-}"
+  ai_endpoint="${ALVO_DEMO_AI_ENDPOINT:-}"
+  ai_model="${ALVO_DEMO_AI_MODEL:-}"
+  ai_key="${ALVO_DEMO_AI_KEY:-}"
+
+  if [ -n "$ai_kind" ] && [ -n "$ai_endpoint" ] && [ -n "$ai_model" ]; then
+    return
+  fi
+  if ! (: </dev/tty) 2>/dev/null; then
+    say "no terminal to ask on and ALVO_DEMO_AI_* incomplete — starting without the schema assistant"
+    ai=0
+    return
+  fi
+
+  say "the schema assistant needs a model (--no-ai skips this; Enter accepts the [default])"
+  case "$(ask 'Use the schema assistant? (y/n)' y)" in
+    y|Y|yes|a|A|ano|áno) ;;
+    *) ai=0; say "starting without the schema assistant"; return ;;
+  esac
+
+  while [ -z "$ai_kind" ]; do
+    ai_kind="$(ask 'Kind: openai-compatible or azure-openai' "${saved_kind:-openai-compatible}")"
+    case "$ai_kind" in
+      openai-compatible|azure-openai) ;;
+      *) say "'$ai_kind' is neither — type openai-compatible or azure-openai"; ai_kind="" ;;
+    esac
+  done
+  local endpoint_default="${saved_endpoint:-https://api.openai.com/v1}"
+  if [ "$ai_kind" = "azure-openai" ] && [ -z "$saved_endpoint" ]; then endpoint_default=""; fi
+  while [ -z "$ai_endpoint" ]; do
+    ai_endpoint="$(ask 'Endpoint' "$endpoint_default")"
+    case "$ai_endpoint" in
+      http://*|https://*) ;;
+      *) say "the endpoint must start with http:// or https://"; ai_endpoint="" ;;
+    esac
+  done
+  local model_label='Model'
+  if [ "$ai_kind" = "azure-openai" ]; then model_label='Deployment name'; fi
+  while [ -z "$ai_model" ]; do
+    ai_model="$(ask "$model_label" "${saved_model:-gpt-4.1-mini}")"
+  done
+  if [ -z "$ai_key" ]; then
+    ai_key="$(ask_secret 'API key')"
+  fi
+  if [ -z "$ai_key" ] && [ "$ai_kind" = "azure-openai" ]; then
+    say "azure-openai needs a key — starting without the schema assistant"
+    ai=0
+    return
+  fi
+
+  # Never the key: it is asked again, or read from ALVO_DEMO_AI_KEY.
+  printf 'kind=%s\nendpoint=%s\nmodel=%s\n' "$ai_kind" "$ai_endpoint" "$ai_model" >"$ai_env"
+}
+
+if [ "$ai" -eq 1 ]; then configure_ai; fi
 
 # ---------------------------------------------------------------------------------------------------
 # Build.
@@ -187,6 +289,17 @@ start_host() {
     export Alvo__Auth__DevKeys__0__Roles__1=admin
     export Alvo__Auth__DevKeys__0__Scopes__0='*:read'
     export Alvo__Auth__DevKeys__0__Scopes__1='*:write'
+    if [ "$ai" -eq 1 ]; then
+      export Alvo__Ai__Kind="$ai_kind"
+      export Alvo__Ai__Endpoint="$ai_endpoint"
+      export Alvo__Ai__Model="$ai_model"
+      if [ -n "$ai_key" ]; then
+        # Through the secret store, as a deployment would: the connection names the secret, the
+        # environment of this one process holds its value.
+        export "Alvo__Secrets__Values__$ai_secret_name=$ai_key"
+        export Alvo__Ai__ApiKeySecretRef="$ai_secret_name"
+      fi
+    fi
     exec dotnet MMLib.Alvo.Host.dll \
       --environment Development \
       --Logging:LogLevel:Microsoft.EntityFrameworkCore=Warning \
@@ -305,6 +418,8 @@ cat <<EOF
     Dashboard   $base/admin
     Sign in     $admin_email
     Password    $admin_password
+
+    Assistant   $( if [ "$ai" -eq 1 ]; then printf '%s at %s (%s%s)' "$ai_model" "$ai_endpoint" "$ai_kind" "$( [ -n "$ai_key" ] && printf ', key set' || printf ', no key' )"; else printf 'off'; fi )
 
     API docs    $base/scalar
     API key     X-Alvo-Api-Key: $api_key   (admin, for this run only)
