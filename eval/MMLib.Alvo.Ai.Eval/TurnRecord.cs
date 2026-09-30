@@ -16,9 +16,10 @@ namespace MMLib.Alvo.Ai.Eval;
 /// all, <see langword="null"/> when nothing failed — the status only, never the provider's message, which can echo the
 /// request.
 /// </param>
+/// <param name="FollowUps">How many follow-ups the harness sent the model this turn (D47): 0 or 1.</param>
 internal sealed record TurnRecord(
     string OriginalDescriptor, IReadOnlyList<AssistantUpdate> Updates, TimeSpan Elapsed, int Requests, int ToolRounds,
-    long Tokens, IReadOnlyList<RecordedCall> Calls, string? ProviderStatus = null)
+    long Tokens, IReadOnlyList<RecordedCall> Calls, string? ProviderStatus = null, int FollowUps = 0)
 {
     private static readonly HashSet<string> _dryRuns = new(StringComparer.Ordinal) { "check_change", "propose_change" };
 
@@ -30,14 +31,22 @@ internal sealed record TurnRecord(
 
     internal IReadOnlyList<string> ToolCalls => [.. Updates.OfType<AssistantUpdate.ToolInvoked>().Select(update => update.Tool)];
 
+    /// <summary>The management tools the turn called — what the ≤ 6 bar counts (D34).</summary>
+    internal int ManagementCalls => ToolCalls.Count(tool => !SkillsRead.SkillTools.Contains(tool));
+
+    /// <summary>The skill loads and resource reads the turn made, bounded apart (D34).</summary>
+    internal int SkillReads => ToolCalls.Count(SkillsRead.SkillTools.Contains);
+
     internal int ProposeCalls => ToolCalls.Count(tool => tool == "propose_change");
 
     /// <summary>What every dry-run tool answered, parsed; an answer that is not a JSON object is left out.</summary>
     internal IReadOnlyList<JsonObject> Outcomes =>
         [.. Calls.Where(call => _dryRuns.Contains(call.Tool)).Select(call => ObjectOf(call.Result)).OfType<JsonObject>()];
 
+    /// <summary>The dry runs that were refused.</summary>
+    /// <remarks>An <c>unchecked</c> budget answer was no dry run (D41), so it is not counted.</remarks>
     internal int RefusedAttempts =>
-        Outcomes.Count(outcome => !(outcome["valid"] is JsonValue flag && flag.TryGetValue<bool>(out var valid) && valid));
+        Outcomes.Where(outcome => outcome["unchecked"] is null).Count(outcome => !(outcome["valid"] is JsonValue flag && flag.TryGetValue<bool>(out var valid) && valid));
 
     internal IReadOnlyList<string> ChangedPaths =>
         Proposal is { } proposal ? DescriptorDiff.Paths(OriginalDescriptor, proposal.DescriptorJson) : [];

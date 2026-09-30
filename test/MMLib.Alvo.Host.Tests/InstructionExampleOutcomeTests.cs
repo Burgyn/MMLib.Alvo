@@ -81,6 +81,15 @@ public sealed partial class InstructionExampleOutcomeTests
 
         var outcome = await InvokeAsync(management, example);
 
+        AssertClaims(example, outcome);
+    }
+
+    /// <summary>
+    /// Holds <paramref name="outcome"/> to what <paramref name="example"/> claims: every claimed member equal, except
+    /// <c>revision</c>, and every claimed violation among the real ones.
+    /// </summary>
+    internal static void AssertClaims(InstructionExample example, JsonElement outcome)
+    {
         foreach (var claimed in example.Outcome.EnumerateObject().Where(member => member.Name is not ("violations" or "revision")))
         {
             outcome.TryGetProperty(claimed.Name, out var actual).ShouldBeTrue($"the outcome has no '{claimed.Name}': {outcome}");
@@ -121,10 +130,13 @@ public sealed partial class InstructionExampleOutcomeTests
         }
     }
 
-    private static async Task<DraftAttempt> AttemptAsync(IAlvoManagement management, string path, string field)
+    internal static Task<DraftAttempt> AttemptAsync(IAlvoManagement management, string path, string field) =>
+        AttemptAsync(management, JsonSerializer.SerializeToElement(new[] { new { op = "add", path, value = JsonNode.Parse(field) } }));
+
+    /// <summary>Dry-runs a whole JSON Patch <paramref name="operations"/> array against the current revision, as the tools do.</summary>
+    internal static async Task<DraftAttempt> AttemptAsync(IAlvoManagement management, JsonElement operations)
     {
         var current = await management.GetDescriptorAsync(Project, Ct);
-        var operations = JsonSerializer.SerializeToElement(new[] { new { op = "add", path, value = JsonNode.Parse(field) } });
         return await DescriptorDraft.BuildAsync(management, Project, current.Revision, operations, Ct);
     }
 
@@ -142,7 +154,7 @@ public sealed partial class InstructionExampleOutcomeTests
         return said;
     }
 
-    private static async Task<JsonElement> InvokeAsync(IAlvoManagement management, InstructionExample example)
+    internal static async Task<JsonElement> InvokeAsync(IAlvoManagement management, InstructionExample example)
     {
         var current = await management.GetDescriptorAsync(Project, Ct);
         var tool = ManagementTools.For(management, Project).Functions.Single(function => function.Name == example.Tool);
@@ -165,22 +177,23 @@ public sealed partial class InstructionExampleOutcomeTests
             _ => JsonElement.DeepEquals(value, member.Value),
         });
 
+    /// <summary>The computed skill's <c>## What Computed allows</c> section, up to the next heading or the end.</summary>
     private static string ComputedSection()
     {
-        var text = AssistantInstructions.Text;
-        var start = text.IndexOf("## 4. What Computed allows", StringComparison.Ordinal);
-        var end = text.IndexOf("## 5.", start, StringComparison.Ordinal);
+        var text = SkillCatalogue.Named("computed-and-rollups").Body;
+        var start = text.IndexOf("## What Computed allows", StringComparison.Ordinal);
         start.ShouldBeGreaterThanOrEqualTo(0);
+        var end = text.IndexOf("\n## ", start + 1, StringComparison.Ordinal);
 
-        return text[start..end];
+        return end < 0 ? text[start..] : text[start..end];
     }
 
     private static string Collapsed(string text) => Whitespace().Replace(text, " ").TrimEnd('…');
 
-    private static string BikeWorkshop { get; } =
+    internal static string BikeWorkshop { get; } =
         Path.Combine(RepositoryRoot.Find(), "examples", "bike-workshop", "bike-workshop.alvo.json");
 
-    private static AlvoPrincipal Administrator() => new()
+    internal static AlvoPrincipal Administrator() => new()
     {
         Context = new AlvoContext { User = UserId.New(), Roles = new HashSet<Role> { Role.Admin } },
         Scopes = new HashSet<ApiKeyScope>(),

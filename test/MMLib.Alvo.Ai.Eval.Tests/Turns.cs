@@ -15,8 +15,23 @@ internal static class Turns
               "phone": { "type": "string", "required": true },
               "street": { "type": "string", "maxLength": 120 } } },
             "bikes": { "fields": { "brand": { "type": "string" } } },
-            "parts": { "fields": { "name": { "type": "string" } },
-              "rules": { "delete": "'admin' in @user.roles || 'manager' in @user.roles" } }
+            "parts": { "fields": { "name": { "type": "string" }, "unit_price": { "type": "decimal", "required": true, "precision": 8, "scale": 2 } },
+              "rules": { "delete": "'admin' in @user.roles || 'manager' in @user.roles" } },
+            "technicians": { "fields": { "full_name": { "type": "string" } } },
+            "rentals": { "fields": {
+              "customer_id": { "type": "ref", "entity": "customers", "required": true },
+              "status": { "type": "enum", "required": true, "values": ["reserved", "active", "returned", "overdue", "cancelled"] },
+              "returned_at": { "type": "datetime" } },
+              "hooks": { "afterCreate": [ { "action": { "type": "webhook", "endpoint": "rental-desk" } } ] } },
+            "service_orders": { "fields": {
+              "status": { "type": "enum", "required": true, "values": ["received", "ready", "collected"] },
+              "assigned_user_id": { "type": "uuid" } },
+              "rules": { "list": "'authenticated' in @user.roles", "get": "'authenticated' in @user.roles" },
+              "hooks": { "afterUpdate": [] } },
+            "order_lines": { "fields": {
+              "order_id": { "type": "ref", "entity": "service_orders", "required": true },
+              "part_id": { "type": "ref", "entity": "parts" } },
+              "indexes": [ { "fields": ["order_id"] } ] }
           }
         }
         """;
@@ -50,6 +65,10 @@ internal static class Turns
     /// <summary>A <c>propose_change</c> call that answered <paramref name="outcome"/>.</summary>
     internal static RecordedCall Propose(JsonObject outcome, int round = 1) =>
         new(round, $"call_{round}", "propose_change", Arguments: null, outcome.ToJsonString());
+
+    /// <summary>A <c>load_skill</c> call, answered with the skill's body as the provider wraps it.</summary>
+    internal static RecordedCall Loads(string skill, int round = 1) =>
+        new(round, $"load_{skill}_{round}", "load_skill", new Dictionary<string, object?> { ["skillName"] = skill }, "<instructions>…</instructions>");
 
     /// <summary>A tool call that is not a dry run.</summary>
     internal static RecordedCall Read(string tool, int round = 1) => new(round, $"call_{round}", tool, Arguments: null, "{}");

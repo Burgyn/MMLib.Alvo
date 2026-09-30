@@ -15,7 +15,7 @@ internal sealed record EvalOptions(
 {
     internal const string ApiKeyVariable = "ALVO_EVAL_API_KEY";
     private const int DefaultRuns = 3;
-    private static readonly string[] _allLanguages = ["en", "sk"];
+    private static readonly string[] _allLanguages = [ReplyLanguage.English, ReplyLanguage.Slovak];
     private static readonly HashSet<string> _known = new(StringComparer.Ordinal)
     {
         "--repository", "--endpoint", "--model", "--kind", "--runs", "--case", "--language", "--trace",
@@ -103,7 +103,7 @@ internal sealed record EvalOptions(
     private static string[] LanguagesFrom(string? language) => language switch
     {
         null => _allLanguages,
-        "en" or "sk" => [language],
+        ReplyLanguage.English or ReplyLanguage.Slovak => [language],
         _ => throw new ArgumentException($"--language '{language}' is neither en nor sk."),
     };
 }

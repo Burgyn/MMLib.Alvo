@@ -59,6 +59,32 @@ public sealed class AssistantScenarios(AssistantWorld world) : IClassFixture<Ass
     }
 
     /// <summary>
+    /// A turn's details show the calls it made, and copy as the JSON a maintainer can paste into an issue (spec §8, D46).
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_turns_details_show_its_calls_and_copy_as_json()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.Page.Context.GrantPermissionsAsync(["clipboard-read", "clipboard-write"]);
+        await session.GoAsync("/schema");
+
+        await session.Page.ClickAsync("[data-testid='assistant-launch']");
+        await session.Page.FillAsync("#assistant-message", "add an invoices entity");
+        await session.Page.ClickAsync("[data-testid='assistant-send']");
+        await session.Page.Locator("[data-testid='assistant-proposal']").WaitForAsync();
+
+        await session.Page.ClickAsync("[data-testid='assistant-turn-details'] > summary");
+        (await session.Page.Locator("[data-testid='assistant-trace']").InnerTextAsync()).ShouldContain("\"tool\": \"propose_change\"");
+        await session.Page.ClickAsync("[data-testid='assistant-trace-copy']");
+
+        await session.SnackbarAsync("Turn details copied");
+        var copied = await session.Page.EvaluateAsync<string>("() => navigator.clipboard.readText()");
+        System.Text.Json.Nodes.JsonNode.Parse(copied)!["calls"]!.AsArray().Count.ShouldBe(2);
+        copied.ShouldNotContain("add an invoices entity");
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
     /// The launcher and the open drawer look as they did before the component library was referenced (spec D8).
     /// </summary>
     /// <remarks>

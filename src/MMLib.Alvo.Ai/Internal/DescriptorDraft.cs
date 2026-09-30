@@ -70,7 +70,7 @@ internal static class DescriptorDraft
         try
         {
             var result = await management.ApplyDescriptorAsync(project, request, ct).ConfigureAwait(false);
-            return draft.Accepted(result.Plan);
+            return draft.Accepted(result.Plan, ViolationMapping.FromWarnings(result.Warnings, draft.Targets));
         }
         catch (DescriptorValidationException refused)
         {
@@ -104,7 +104,8 @@ internal static class DescriptorDraft
         plan.HasDestructiveChanges,
         [.. plan.Steps.Where(step => step.Reason is { Length: > 0 }).Select(step => step.Reason!)]);
 
-    private static JsonElement Unwrapped(JsonElement operations) =>
+    /// <summary>The patch itself: a string of JSON is parsed, so an array and its string form are one patch.</summary>
+    internal static JsonElement Unwrapped(JsonElement operations) =>
         operations.ValueKind == JsonValueKind.String && TryParse(operations.GetString()!, out var parsed) ? parsed : operations;
 
     private static bool TryParse(string text, out JsonElement parsed)
@@ -124,8 +125,8 @@ internal static class DescriptorDraft
 
     private sealed record Draft(string DescriptorJson, int Revision, IReadOnlyList<string> ChangedPaths, IReadOnlyList<string?> Targets)
     {
-        internal DraftAttempt Accepted(ManagementPlanSummary plan) =>
-            new(DescriptorJson, Revision, Valid: true, plan, ChangedPaths, []);
+        internal DraftAttempt Accepted(ManagementPlanSummary plan, IReadOnlyList<ToolViolation> warnings) =>
+            new(DescriptorJson, Revision, Valid: true, plan, ChangedPaths, warnings);
 
         internal DraftAttempt Refused(IReadOnlyList<ToolViolation> violations, ManagementPlanSummary? plan = null) =>
             new(DescriptorJson, Revision, Valid: false, plan, ChangedPaths, violations);

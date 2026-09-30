@@ -41,9 +41,12 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/events/SqliteOutboxProbe.cs" Link="_shared/SqliteOutboxProbe.cs" />
   </ItemGroup>
 
-  <!-- The instructions' worked-example parser, shared with MMLib.Alvo.Ai.Tests — see the same link there. -->
+  <!-- The instructions' worked-example and name-claims parsers, the skill catalogue and the skill cases' right answers, shared with MMLib.Alvo.Ai.Tests — see the same links there. -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InstructionExamples.cs" Link="_shared/InstructionExamples.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InstructionClaims.cs" Link="_shared/InstructionClaims.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/SkillCatalogue.cs" Link="_shared/SkillCatalogue.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/SkillCaseAnswers.cs" Link="_shared/SkillCaseAnswers.cs" />
     <Using Include="MMLib.Alvo.Ai.Tests" />
   </ItemGroup>
 

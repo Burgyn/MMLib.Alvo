@@ -12,6 +12,7 @@
 @inject AdminSession Session
 @inject NavigationManager Navigation
 @inject AdminInterop Interop
+@inject ISnackbar Snackbar
 @implements IDisposable
 
 <div class="a-assistant" data-testid="assistant-drawer" @onkeydown="OnKeyDownAsync">
@@ -89,6 +90,19 @@
     }
 
     @*
+        What the turn did, for the operator who asked it (D46): the calls it made and what each was told — never a word
+        of the conversation. Closed by default, so it costs the thread nothing until somebody opens it.
+    *@
+    @if (_trace is { } trace && !_busy)
+    {
+        <details class="a-disclosure" data-testid="assistant-turn-details">
+            <summary>Turn details</summary>
+            <pre class="a-mono a-assistant__trace" data-testid="assistant-trace">@trace</pre>
+            <AlvoButton Small="true" data-testid="assistant-trace-copy" OnClick="_ => CopyTraceAsync(trace)">Copy JSON</AlvoButton>
+        </details>
+    }
+
+    @*
         Taking a proposal to Preview replaces the working copy, and the proposal is written against the applied
         revision, not the copy: a copy with edits in it is asked about first (spec §3.2). Cancel keeps both.
     *@
@@ -136,6 +150,15 @@
     private ElementReference _thread;
     private MudTextField<string>? _question;
     private AssistantUpdate.Proposal? _proposal;
+
+    /// <summary>The last turn's trace, indented for reading, when the assistant sent one.</summary>
+    private string? _trace;
+
+    private static readonly JsonSerializerOptions _indented = new()
+    {
+        WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
 
     /// <summary>The proposal waiting on the question about the copy's unapplied edits, while it is asked.</summary>
     private AssistantUpdate.Proposal? _reviewing;
@@ -234,7 +257,7 @@
 
         try
         {
-            var request = new AssistantRequest(await ProjectAsync(), asked, [.. _turns]);
+            var request = new AssistantRequest(await ProjectAsync(), asked, [.. _turns]) { IncludeTrace = true };
             await foreach (var update in Assistant.AskAsync(request, _lifetime.Token))
             {
                 Apply(update);
@@ -256,6 +279,7 @@
         _busy = true;
         _failure.Clear();
         _proposal = null;
+        _trace = null;
         _streaming = string.Empty;
         _tools.Clear();
         _message = string.Empty;
@@ -290,6 +314,30 @@
             case AssistantUpdate.Failed failed:
                 _failure.Show(failed.Reason);
                 break;
+            case AssistantUpdate.TurnTraced traced:
+                _trace = Indented(traced.Json);
+                break;
+        }
+    }
+
+    /// <summary>The trace, indented and with <c>č</c> kept as <c>č</c>; Razor encodes it where it is drawn.</summary>
+    private static string Indented(string json) => System.Text.Json.Nodes.JsonNode.Parse(json)!.ToJsonString(_indented);
+
+    /// <summary>
+    /// Copies the turn's details; a clipboard the browser withholds is said in place, with how to copy by hand — never
+    /// a snackbar alone (Access's pattern).
+    /// </summary>
+    private async Task CopyTraceAsync(string trace)
+    {
+        try
+        {
+            await Interop.CopyAsync(trace);
+            Snackbar.Confirm("Turn details copied");
+        }
+        catch (JSException)
+        {
+            _failure.Show("The browser did not let this page use the clipboard. Select the turn details above and copy them by hand.",
+                title: "The turn details could not be copied");
         }
     }
 

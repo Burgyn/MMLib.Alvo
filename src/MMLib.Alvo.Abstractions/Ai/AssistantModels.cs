@@ -24,7 +24,15 @@ public sealed record AssistantTurn(AssistantRole Role, string Text);
 /// <param name="Project">The project the question is about; every tool call is scoped to it.</param>
 /// <param name="Message">The operator's message.</param>
 /// <param name="History">The turns before this one, oldest first.</param>
-public sealed record AssistantRequest(string Project, string Message, IReadOnlyList<AssistantTurn> History);
+public sealed record AssistantRequest(string Project, string Message, IReadOnlyList<AssistantTurn> History)
+{
+    /// <summary>Whether the caller wants the turn's trace as its last update. The dashboard only (D45).</summary>
+    /// <remarks>
+    /// Internal and opt-in: a third-party consumer of <see cref="IAlvoAssistant"/> never asks, so it never meets an
+    /// update it cannot name, and the trace's shape stays a diagnostic rather than a contract.
+    /// </remarks>
+    internal bool IncludeTrace { get; init; }
+}
 
 /// <summary>
 /// One thing that happened while the agent was answering.
@@ -97,4 +105,12 @@ public abstract record AssistantUpdate
     /// </remarks>
     /// <param name="Reason">What went wrong, in words an operator can act on and with no secret in them.</param>
     public sealed record Failed(string Reason) : AssistantUpdate;
+
+    /// <summary>The turn's trace, as JSON (<c>alvo.assistant.turn/1</c>): emitted last, and only when the request asked.</summary>
+    /// <remarks>
+    /// Internal (D45): only this family produces and consumes it. It carries the calls the tools made — patch operations
+    /// included — but never the operator's message, the history or the model's text, and every string in it is scrubbed.
+    /// </remarks>
+    /// <param name="Json">The trace, serialised.</param>
+    internal sealed record TurnTraced(string Json) : AssistantUpdate;
 }

@@ -223,6 +223,10 @@ internal sealed partial class AlvoManagementService(
     }
 
     /// <summary>Previews, guards, then either reports the plan or appends the revision.</summary>
+    /// <remarks>
+    /// Both answers carry the validator's warnings (D52), so the assistant reads them on a valid dry run. A rollback
+    /// and a replay carry none: a rollback restores a revision that already applied, and a replay ran nothing.
+    /// </remarks>
     /// <param name="project">The project being changed.</param>
     /// <param name="request">What the caller asked for.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -236,7 +240,7 @@ internal sealed partial class AlvoManagementService(
         Guard(project, preview);
 
         return request.DryRun
-            ? new ManagementApplyResult(Applied: false, preview.CurrentRevision, Summary(preview.Plan))
+            ? new ManagementApplyResult(Applied: false, preview.CurrentRevision, Summary(preview.Plan)) { Warnings = preview.Warnings }
             : await AppendAsync(schema, project, request, options, preview, ct).ConfigureAwait(false);
     }
 
@@ -495,7 +499,7 @@ internal sealed partial class AlvoManagementService(
         var applied = await schema.ApplyAsync(
             project, request.DescriptorJson, request.ExpectedRevision, options, ct).ConfigureAwait(false);
 
-        return new ManagementApplyResult(Applied: true, applied.Revision, Summary(preview.Plan));
+        return new ManagementApplyResult(Applied: true, applied.Revision, Summary(preview.Plan)) { Warnings = preview.Warnings };
     }
 
     /// <summary>

@@ -21,8 +21,18 @@ namespace MMLib.Alvo.Ai.Internal;
 /// <para>
 /// <b>An instance per turn, because the proposal and the budget are state.</b> The last <em>valid</em>
 /// <c>propose_change</c> is the proposal; with none valid, the last refused one is, carrying its refusals.
-/// Three refused attempts spend the budget, and every later attempt is answered with only the instruction to
-/// stop. Built per turn, none of that can outlive the conversation it belongs to.
+/// Built per turn, none of that can outlive the conversation it belongs to.
+/// </para>
+/// <para>
+/// <b>The budget measures progress (D41).</b> A refusal spends one of three attempts only when it made no progress:
+/// the same blocking violations as the refusal before it, or more (the first refusal is measured against none, so it
+/// always spends one). Six refusals are the ceiling, progress or not — and the ceiling is what bounds a model that
+/// oscillates between two defect sets, or keeps retrying a CEL expression that is refused differently each time.
+/// A patch not yet refused is always dry-run before a budget answer: only one that was already refused, against the
+/// same base revision, is answered without a dry run once the three are spent, and that answer says it was not
+/// checked (<c>unchecked: true</c>). It quotes that patch's own earlier refusal (the last refusal, when the ceiling
+/// stopped a patch never refused), and says so when a valid proposal is already filed. A patch that was checked <em>valid</em> is never
+/// remembered, so "would this work?" followed by the same <c>propose_change</c> is dry-run twice and filed.
 /// </para>
 /// <para>
 /// <b>Only a refusal spends budget.</b> An attempt that ends in an exception — one <c>AnsweredAsync</c> maps, a
@@ -31,10 +41,13 @@ namespace MMLib.Alvo.Ai.Internal;
 /// round-trip — the eval's tool-call ceiling is the guard there).
 /// </para>
 /// <para>
-/// <b>The state assumes sequential invocation.</b> The budget check, the count and the filed proposal are plain
-/// fields, correct because the agent's function invoker runs one call at a time
-/// (<c>AllowConcurrentInvocation</c> off, set so explicitly and pinned by <c>AlvoAssistantTests</c>). Turning that
+/// <b>The state assumes sequential invocation.</b> The budget check, the two counts, the refused patches, the last
+/// blocking set and the filed proposal are plain fields, correct because the agent's function invoker runs one call
+/// at a time (<c>AllowConcurrentInvocation</c> off, set so explicitly and pinned by <c>AlvoAssistantTests</c>). Turning that
 /// on would let parallel calls all pass an exhausted budget.
+/// </para>
+/// <para>
+/// <b>The last dry run is state too (D47):</b> the assistant asks it whether a turn that stopped may be followed up.
 /// </para>
 /// <para>
 /// <b>Every tool answers, none of them throws.</b> A refusal the framework raised is something to tell the
@@ -44,8 +57,11 @@ namespace MMLib.Alvo.Ai.Internal;
 /// </remarks>
 internal sealed class ManagementTools
 {
-    /// <summary>How many refused <c>check_change</c>/<c>propose_change</c> attempts one turn may make.</summary>
-    internal const int MaximumRefusedAttempts = 3;
+    /// <summary>How many refusals that made no progress one turn may make (D41).</summary>
+    internal const int MaximumStalledRefusals = 3;
+
+    /// <summary>How many refusals one turn may make in all, progress or not — the hard ceiling (D41).</summary>
+    internal const int MaximumRefusals = 6;
 
     private const string BaseRevisionHelp =
         "The revision get_descriptor returned. A change written against another revision is refused; read again.";
@@ -62,17 +78,31 @@ internal sealed class ManagementTools
         "propose_change needs a summary: one sentence, in the operator's language, saying what the change does. "
         + "Nothing was dry-run or filed.";
 
+    /// <summary>The sources only the budget, the operator or an administrator can resolve: never followed up (D47 (d)).</summary>
+    private static readonly HashSet<string> _notTheModels =
+        new(StringComparer.Ordinal) { ToolViolation.Budget, ToolViolation.Plan, ToolViolation.Access };
+
+    /// <summary>What every descriptor skill's name starts with; an area name follows it.</summary>
+    private const string SkillPrefix = "alvo-descriptor-";
+
     private readonly IAlvoManagement _management;
     private readonly string _project;
-    private int _refusedAttempts;
+    private readonly Func<IReadOnlySet<string>>? _loadedSkills;
+    private readonly List<RefusedPatch> _refused = [];
+    private HashSet<string> _lastBlocking = new(StringComparer.Ordinal);
+    private IReadOnlyList<string> _lastRefusals = [];
+    private int _stalledRefusals;
+    private int _refusals;
     private int _currentRevision;
     private ProposedDraft? _lastValid;
     private ProposedDraft? _lastRefused;
+    private (bool Proposed, ChangeOutcome Outcome)? _lastDryRun;
 
-    private ManagementTools(IAlvoManagement management, string project)
+    private ManagementTools(IAlvoManagement management, string project, Func<IReadOnlySet<string>>? loadedSkills)
     {
         _management = management;
         _project = project;
+        _loadedSkills = loadedSkills;
         Functions =
         [
             AIFunctionFactory.Create(
@@ -109,18 +139,33 @@ internal sealed class ManagementTools
     /// <summary>The tools, in the order they are declared.</summary>
     internal IReadOnlyList<AIFunction> Functions { get; }
 
-    /// <summary>How many more refused attempts this turn may make.</summary>
-    private int AttemptsLeft => Math.Max(0, MaximumRefusedAttempts - _refusedAttempts);
+    /// <summary>
+    /// Whether the turn's last dry run leaves the model something to fix (D47 (a)–(d)): a refused
+    /// <c>propose_change</c>, no valid proposal filed, attempts left, checked, and nothing only the budget, the
+    /// operator or an administrator can decide. Synchronous and free, so the stream can ask it per text chunk.
+    /// </summary>
+    internal bool FollowUpMayBeDue =>
+        _lastValid is null
+        && _lastDryRun is { Proposed: true, Outcome: { Valid: false, Unchecked: not true, AttemptsLeft: > 0 } last }
+        && !last.Violations.Any(violation => violation.Blocks && _notTheModels.Contains(violation.Source));
+
+    /// <summary>The smaller of the two remainders: stalled refusals left, and refusals left in all.</summary>
+    private int AttemptsLeft =>
+        Math.Max(0, Math.Min(MaximumStalledRefusals - _stalledRefusals, MaximumRefusals - _refusals));
 
     /// <summary>Builds the tool set for one turn over one project.</summary>
     /// <param name="management">The Management API, exactly as every other client reaches it.</param>
     /// <param name="project">The project every tool call is scoped to.</param>
-    internal static ManagementTools For(IAlvoManagement management, string project)
+    /// <param name="loadedSkills">
+    /// The skills the turn has loaded so far (D50), read per dry run; <see langword="null"/> names no skill in any
+    /// refusal, so a tool set built without it answers exactly as before.
+    /// </param>
+    internal static ManagementTools For(IAlvoManagement management, string project, Func<IReadOnlySet<string>>? loadedSkills = null)
     {
         ArgumentNullException.ThrowIfNull(management);
         ArgumentException.ThrowIfNullOrWhiteSpace(project);
 
-        return new ManagementTools(management, project);
+        return new ManagementTools(management, project, loadedSkills);
     }
 
     /// <summary>The descriptor as it is applied now — as an object, never a string of JSON — and its revision.</summary>
@@ -147,7 +192,7 @@ internal sealed class ManagementTools
         [Description(BaseRevisionHelp)] int baseRevision,
         [Description(OperationsHelp)] JsonElement operations,
         CancellationToken ct) =>
-        AnsweredAsync(async () => Json((await AttemptAsync(baseRevision, operations, ct).ConfigureAwait(false)).Outcome));
+        AnsweredAsync(async () => Json((await AttemptAsync(proposed: false, baseRevision, operations, ct).ConfigureAwait(false)).Outcome));
 
     /// <summary>Dry-runs a patch and files the result as this turn's proposal.</summary>
     /// <param name="baseRevision">The revision the operations were written against.</param>
@@ -173,7 +218,7 @@ internal sealed class ManagementTools
             return Error(InvalidRequestCode, SummaryRequired);
         }
 
-        var (attempt, outcome) = await AttemptAsync(baseRevision, operations, ct).ConfigureAwait(false);
+        var (attempt, outcome) = await AttemptAsync(proposed: true, baseRevision, operations, ct).ConfigureAwait(false);
         if (attempt is not null)
         {
             FileProposal(attempt, summary);
@@ -183,28 +228,152 @@ internal sealed class ManagementTools
     }
 
     /// <summary>One attempt at a change, within the budget: the draft it produced, if any, and the model's answer.</summary>
+    /// <remarks>
+    /// The last dry run is forgotten first, so an attempt that ends in an exception leaves none behind for
+    /// <see cref="FollowUpMayBeDue"/> to read.
+    /// </remarks>
+    /// <param name="proposed">Whether the call was a <c>propose_change</c> rather than a <c>check_change</c>.</param>
+    /// <param name="baseRevision">The revision the operations were written against.</param>
+    /// <param name="operations">The RFC 6902 patch.</param>
+    /// <param name="ct">A token to cancel the call.</param>
     private async Task<(DraftAttempt? Attempt, ChangeOutcome Outcome)> AttemptAsync(
-        int baseRevision, JsonElement operations, CancellationToken ct)
+        bool proposed, int baseRevision, JsonElement operations, CancellationToken ct)
     {
-        if (AttemptsLeft == 0)
+        _lastDryRun = null;
+        var earlier = RefusedBefore(baseRevision, DescriptorDraft.Unwrapped(operations));
+        if (_refusals >= MaximumRefusals || (_stalledRefusals >= MaximumStalledRefusals && earlier is not null))
         {
-            return (null, ChangeOutcome.BudgetSpent(_currentRevision));
+            return Remembered(proposed, null, BudgetSpent(earlier));
         }
 
         var attempt = await DescriptorDraft.BuildAsync(_management, _project, baseRevision, operations, ct).ConfigureAwait(false);
-        Record(attempt);
+        Record(attempt, baseRevision, operations);
 
-        return (attempt, ChangeOutcome.From(attempt, AttemptsLeft));
+        return Remembered(proposed, attempt, WithSkillHints(ChangeOutcome.From(attempt, AttemptsLeft)));
     }
 
-    /// <summary>Remembers the revision the attempt learned the descriptor is at, and spends budget on a refusal.</summary>
-    private void Record(DraftAttempt attempt)
+    /// <summary>
+    /// Names, on each blocking validator violation, the skill of its area when the turn has not loaded it, and adds
+    /// <see cref="ViolationMapping.SkillHint"/> when any got one (D50). A valid answer, and a tool set with no ledger,
+    /// are passed through: a warning never tells the model to retry.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>validation</c> violations (pre-flight M4): a patch, plan, access or concurrency refusal is not about a
+    /// rule a skill states. <see cref="ToolViolation.Key"/> leaves <c>Skill</c> out, so the budget (D41) is unchanged.
+    /// </remarks>
+    private ChangeOutcome WithSkillHints(ChangeOutcome outcome)
+    {
+        if (_loadedSkills is null || outcome.Valid)
+        {
+            return outcome;
+        }
+
+        var loaded = _loadedSkills();
+        List<ToolViolation> violations = [.. outcome.Violations.Select(violation => violation with { Skill = MissingSkill(violation, loaded) })];
+        return violations.Exists(violation => violation.Skill is not null)
+            ? outcome with { Violations = violations, Hint = ViolationMapping.SkillHint }
+            : outcome;
+    }
+
+    /// <summary>The skill a blocking validator violation's area needs, when the turn has not loaded it; else none.</summary>
+    private static string? MissingSkill(ToolViolation violation, IReadOnlySet<string> loaded) =>
+        violation is { Blocks: true, Source: ToolViolation.Validation }
+        && SkillAreas.ForViolation(violation.Pointer) is { } area
+        && !loaded.Contains(SkillPrefix + area)
+            ? SkillPrefix + area
+            : null;
+
+    /// <summary>Remembers the attempt's answer as the turn's last dry run, and passes it on.</summary>
+    private (DraftAttempt? Attempt, ChangeOutcome Outcome) Remembered(bool proposed, DraftAttempt? attempt, ChangeOutcome outcome)
+    {
+        _lastDryRun = (proposed, outcome);
+
+        return (attempt, outcome);
+    }
+
+    /// <summary>The refused pointers to follow up on, or <see langword="null"/> when no follow-up is due (D47 (a)–(e)).</summary>
+    /// <remarks>
+    /// "Unsupported" is the framework's own list: a blocking violation whose message carries a consequence
+    /// <c>get_capabilities</c> refuses. Read once, only here; a read refused as forbidden or as no such project, or
+    /// one that answers nothing, means no follow-up.
+    /// </remarks>
+    internal async Task<IReadOnlyList<string>?> FollowUpPointersAsync(CancellationToken ct)
+    {
+        if (_lastDryRun is not { } last || !FollowUpMayBeDue)
+        {
+            return null;
+        }
+
+        var blocking = last.Outcome.Violations.Where(violation => violation.Blocks).ToList();
+        var refused = await RefusedConsequencesAsync(ct).ConfigureAwait(false);
+        return refused is null || blocking.Exists(violation => refused.Exists(consequence => violation.Message.Contains(consequence, StringComparison.Ordinal)))
+            ? null
+            : Pointers(blocking);
+    }
+
+    /// <summary>Each blocking violation's pointer, once, in order; the whole change named as such.</summary>
+    private static List<string> Pointers(List<ToolViolation> blocking) =>
+        [.. blocking.Select(violation => violation.Pointer.Length == 0 ? "(the whole change)" : violation.Pointer).Distinct(StringComparer.Ordinal)];
+
+    /// <summary>
+    /// The consequences this build refuses, from <c>get_capabilities</c> — empty ones left out, since every message
+    /// contains an empty string — or <see langword="null"/> when the read answered nothing or was refused.
+    /// </summary>
+    /// <remarks>
+    /// Only the two refusals the Management API documents for this read are caught; anything else is a bug. The
+    /// <see langword="null"/> answer guards a contract violation, not a real answer — the port returns a
+    /// non-nullable report — and a test double that was never told what to answer is the one thing that gives it.
+    /// </remarks>
+    private async Task<List<string>?> RefusedConsequencesAsync(CancellationToken ct)
+    {
+        try
+        {
+            var capabilities = await _management.GetCapabilitiesAsync(_project, ct).ConfigureAwait(false);
+            return capabilities is null
+                ? null
+                : [.. capabilities.Refused.Select(feature => feature.Consequence).Where(consequence => consequence.Length > 0)];
+        }
+        catch (Exception refusal) when (refusal is ManagementForbiddenException or ManagementProjectNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>This exact patch's earlier refusal, when it was refused before in this turn; else none.</summary>
+    /// <param name="baseRevision">The revision the patch was written against.</param>
+    /// <param name="patch">The patch, unwrapped — so an array and its string form are the same patch.</param>
+    private RefusedPatch? RefusedBefore(int baseRevision, JsonElement patch) =>
+        _refused.Find(done => done.BaseRevision == baseRevision && JsonElement.DeepEquals(done.Operations, patch));
+
+    /// <summary>
+    /// The unchecked answer: it quotes the patch's own earlier refusal when there is one, else the last refusal, and
+    /// says when a valid proposal is already filed, so the model does not report a failure the card contradicts.
+    /// </summary>
+    private ChangeOutcome BudgetSpent(RefusedPatch? earlier) => ChangeOutcome.BudgetSpent(
+        _currentRevision,
+        ViolationMapping.BudgetSpent(earlier?.Refusals ?? _lastRefusals, ownRefusal: earlier is not null, proposalFiled: _lastValid is not null));
+
+    /// <summary>Remembers the revision the attempt learned the descriptor is at, and counts a refusal.</summary>
+    private void Record(DraftAttempt attempt, int baseRevision, JsonElement operations)
     {
         _currentRevision = attempt.CurrentRevision;
         if (!attempt.Valid)
         {
-            _refusedAttempts++;
+            Refused(attempt, baseRevision, operations);
         }
+    }
+
+    /// <summary>Counts a refusal, remembers the patch, and spends an attempt only when it made no progress (D41).</summary>
+    private void Refused(DraftAttempt attempt, int baseRevision, JsonElement operations)
+    {
+        var blocking = attempt.Violations
+            .Where(violation => violation.Blocks)
+            .Select(violation => violation.Key)
+            .ToHashSet(StringComparer.Ordinal);
+        _refused.Add(new RefusedPatch(baseRevision, DescriptorDraft.Unwrapped(operations).Clone(), attempt.Refusals));
+        _refusals++;
+        _stalledRefusals += blocking.IsSupersetOf(_lastBlocking) ? 1 : 0;
+        (_lastBlocking, _lastRefusals) = (blocking, attempt.Refusals);
     }
 
     /// <summary>Files the attempt: a valid one as the proposal, a refused one as the fallback while none is valid.</summary>
@@ -266,6 +435,12 @@ internal sealed class ManagementTools
 /// <param name="Summary">The model's one-sentence summary, used when the turn's answer is empty.</param>
 /// <param name="Refusals">What the dry run refused, verbatim.</param>
 internal sealed record ProposedDraft(string DescriptorJson, int ExpectedRevision, string Summary, IReadOnlyList<string> Refusals);
+
+/// <summary>A patch this turn already had refused, with what it was refused with (D41).</summary>
+/// <param name="BaseRevision">The revision it was written against.</param>
+/// <param name="Operations">The patch, unwrapped.</param>
+/// <param name="Refusals">Its blocking refusals, verbatim.</param>
+internal sealed record RefusedPatch(int BaseRevision, JsonElement Operations, IReadOnlyList<string> Refusals);
 
 /// <summary>What <c>get_descriptor</c> returns: the descriptor as an object, never a string of JSON.</summary>
 /// <param name="Project">The project it belongs to.</param>

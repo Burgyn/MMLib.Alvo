@@ -15,6 +15,9 @@ internal sealed class EvalRunner(EvalWorld world, EvalOptions options, EvalTrace
 {
     private const int MaximumToolCalls = 6;
 
+    /// <summary>How many skill loads and resource reads one turn may make (D34).</summary>
+    internal const int MaximumSkillReads = 4;
+
     /// <summary>Runs the suite, adding each graded turn to <paramref name="runs"/> as it finishes.</summary>
     /// <remarks>The caller owns the list, so a cancelled run still has every turn that finished to report.</remarks>
     /// <param name="runs">Where the graded turns go.</param>
@@ -43,9 +46,15 @@ internal sealed class EvalRunner(EvalWorld world, EvalOptions options, EvalTrace
     /// how often tools are invoked, and the loop may ask once more for the answer after the last round.
     /// </para>
     /// <para>
-    /// <b>The ≤ 12 term cannot fail today</b>, and is kept anyway: every round carries at least one call, so the ≤ 6
-    /// tool-call bar is met first. It is the spec's invariant (§4.2) stated where a later change to either bound would
-    /// be read, and <c>requests=</c> is printed beside it so a loop that ended at the cap is visible.
+    /// <b>The ≤ 12 term cannot fail today</b>, and is kept anyway: every round carries at least one call, so the
+    /// ≤ 6 management calls and ≤ 4 skill reads are met first, at 10 calls. It is the spec's invariant (§4.2)
+    /// stated where a later change to any bound would be read, and <c>requests=</c> is printed beside it so a loop that
+    /// ended at the cap is visible.
+    /// </para>
+    /// <para>
+    /// <b>Skill reads are bounded apart (D34)</b>: the ≤ 6 bar predates skills, and a turn that loads what the
+    /// instructions ask would otherwise fail for obeying them. A separate ≤ 4 still catches a model browsing the
+    /// catalogue.
     /// </para>
     /// </remarks>
     internal static Verdict Invariants(TurnRecord turn)
@@ -57,12 +66,25 @@ internal sealed class EvalRunner(EvalWorld world, EvalOptions options, EvalTrace
 
         var wholeDocument = turn.HasViolation("code", JsonPatchError.WholeDocumentReplace);
         return Verdict.When(
-            turn.ToolRounds <= AlvoAssistant.MaximumIterations && turn.ToolCalls.Count <= MaximumToolCalls && !wholeDocument,
-            $"requests={turn.Requests} toolRounds={turn.ToolRounds} toolCalls={turn.ToolCalls.Count} wholeDocument={wholeDocument}");
+            turn.ToolRounds <= AlvoAssistant.MaximumIterations && turn.ManagementCalls <= MaximumToolCalls
+                && turn.SkillReads <= MaximumSkillReads && !wholeDocument,
+            $"requests={turn.Requests} toolRounds={turn.ToolRounds} toolCalls={turn.ManagementCalls} skillReads={turn.SkillReads} "
+            + $"wholeDocument={wholeDocument}");
     }
 
-    /// <summary>The invariants first; a turn that holds them is graded by its case, with both diagnostics kept.</summary>
-    internal static Verdict Graded(EvalCase evalCase, TurnRecord turn)
+    /// <summary>
+    /// The invariants first; a turn that holds them is graded by its case, by the two behaviour rules, and by whether
+    /// it loaded the skills its proposal needed (D31).
+    /// </summary>
+    /// <remarks>
+    /// The wording, language and skill graders apply to every case (D21, D31): "Done." or a Czech reply to a Slovak
+    /// question is a failure the operator sees whatever was asked, and a proposal made without its area's skill is one
+    /// the skill existed to get right. Every diagnostic is kept, pass or fail.
+    /// </remarks>
+    /// <param name="evalCase">The case the turn answered.</param>
+    /// <param name="language">The language the case was asked in.</param>
+    /// <param name="turn">What the turn produced.</param>
+    internal static Verdict Graded(EvalCase evalCase, string language, TurnRecord turn)
     {
         var invariants = Invariants(turn);
         if (!invariants.Passed)
@@ -70,23 +92,33 @@ internal sealed class EvalRunner(EvalWorld world, EvalOptions options, EvalTrace
             return invariants;
         }
 
-        var verdict = evalCase.Grade(turn);
-        return verdict with { Why = $"{verdict.Why} | {invariants.Why}" };
+        Verdict[] verdicts =
+        [
+            evalCase.Grade(turn), ProposalWording.Judge(turn), ReplyLanguage.Judge(turn, language), SkillsRead.Judge(turn), invariants,
+        ];
+        return new Verdict(verdicts.All(verdict => verdict.Passed), string.Join(" | ", verdicts.Select(verdict => verdict.Why)));
     }
 
     private async Task<CaseRun> RunOnceAsync(EvalCase evalCase, string language, CancellationToken ct)
     {
-        var turn = await AskAsync(evalCase.Prompt(language), ct).ConfigureAwait(false);
-        return new CaseRun(evalCase.Name, language, turn, Graded(evalCase, turn));
+        var turn = await AskAsync(evalCase, language, ct).ConfigureAwait(false);
+        return new CaseRun(evalCase.Name, language, turn, Graded(evalCase, language, turn));
     }
 
-    private async Task<TurnRecord> AskAsync(string prompt, CancellationToken ct)
+    private async Task<TurnRecord> AskAsync(EvalCase evalCase, string language, CancellationToken ct)
     {
         world.ActAsAdministrator();
         var original = await world.Management.GetDescriptorAsync(EvalWorld.Project, ct).ConfigureAwait(false);
-        return await AskAsync(world.Management, options.Connection, ChatClientFactory.For, original.DescriptorJson, prompt, ct)
+        return await AskAsync(
+            world.Management, options.Connection, DialFor(evalCase), original.DescriptorJson, evalCase.Prompt(language), ct)
             .ConfigureAwait(false);
     }
+
+    /// <summary>The provider, with the second operator between it and the recorder when the case forces a stale revision.</summary>
+    private Func<AlvoAiConnection, IChatClient> DialFor(EvalCase evalCase) =>
+        evalCase.ForcesStaleRevision
+            ? connection => new InterferingChatClient(ChatClientFactory.For(connection), world.EditAsAnotherOperatorAsync)
+            : ChatClientFactory.For;
 
     /// <summary>One turn of the real assistant over <paramref name="management"/>, dialling through <paramref name="dial"/>.</summary>
     /// <remarks>
@@ -116,7 +148,7 @@ internal sealed class EvalRunner(EvalWorld world, EvalOptions options, EvalTrace
 
         return new TurnRecord(
             original, updates, clock.Elapsed, recorder?.Requests ?? 0, recorder?.ToolRounds ?? 0, recorder?.Tokens ?? 0,
-            recorder?.Calls ?? [], timedOut ? TimedOut : logger.Status);
+            recorder?.Calls ?? [], timedOut ? TimedOut : logger.Status, recorder?.FollowUps ?? 0);
     }
 
     /// <summary>The status a turn whose provider timed out is recorded with.</summary>
@@ -159,5 +191,5 @@ internal sealed record CaseRun(string Case, string Language, TurnRecord Turn, Ve
 {
     internal string Line => string.Create(
         CultureInfo.InvariantCulture,
-        $"{Case} [{Language}] {(Verdict.Passed ? "PASS" : "FAIL")} {Verdict.Why} ({Turn.ToolCalls.Count} calls, {Turn.Elapsed.TotalSeconds:0.0}s)");
+        $"{Case} [{Language}] {(Verdict.Passed ? "PASS" : "FAIL")} {Verdict.Why} ({Turn.ToolCalls.Count} calls, followUps={Turn.FollowUps}, {Turn.Elapsed.TotalSeconds:0.0}s)");
 }

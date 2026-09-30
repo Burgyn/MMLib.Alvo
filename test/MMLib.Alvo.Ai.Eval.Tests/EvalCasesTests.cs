@@ -14,6 +14,31 @@ public sealed class EvalCasesTests
     private const string PlanFix = "Only the operator can allow a destructive change, from Preview. Say first what data it loses.";
 
     [Fact]
+    public void The_suite_has_the_reliability_first_try_and_skill_cases() => EvalCases.All.Count.ShouldBe(17);
+
+    [Theory]
+    [InlineData("hook_returned_at")]
+    [InlineData("reject_negative_price")]
+    [InlineData("rollup_rentals_count")]
+    [InlineData("unique_part_per_order")]
+    [InlineData("own_orders_only")]
+    [InlineData("function_action_refused")]
+    [InlineData("can_alvo_call_http")]
+    public void A_skill_case_can_be_asked_for_by_name(string name) =>
+        EvalOptions.Parse(["--repository", ".", "--endpoint", "http://localhost:11434/v1", "--model", "m", "--case", name]).Case
+            .ShouldBe(name);
+
+    [Fact]
+    public void An_unchecked_budget_answer_is_no_refused_attempt()
+    {
+        var budget = Turns.Refused("budget", "This attempt was not checked: the turn's refusal budget is spent.");
+        budget["unchecked"] = true;
+
+        Turns.Turn(answer: "ok", calls: [Turns.Propose(Turns.Refused("validation", "No."), round: 1), Turns.Propose(budget, round: 2)])
+            .RefusedAttempts.ShouldBe(1);
+    }
+
+    [Fact]
     public void Full_name_passes_one_added_field()
     {
         var proposed = Edited(document => document.Fields("customers")["full_name"] =
@@ -188,7 +213,7 @@ public sealed class EvalCasesTests
             ProviderStatus = "404",
         };
 
-        var verdict = EvalRunner.Graded(Case("automation_refused"), turn);
+        var verdict = EvalRunner.Graded(Case("automation_refused"), ReplyLanguage.English, turn);
 
         verdict.Passed.ShouldBeFalse();
         verdict.Why.ShouldContain("provider status: 404");
@@ -213,12 +238,169 @@ public sealed class EvalCasesTests
     [Fact]
     public void A_pass_keeps_both_diagnostics_so_it_can_be_audited()
     {
-        var verdict = EvalRunner.Graded(Case("automation_refused"), Turn(answer: "No automation here.", calls: Read("get_capabilities")));
+        var verdict = EvalRunner.Graded(
+            Case("automation_refused"), ReplyLanguage.English,
+            Turn(answer: "This build does not run automation, so there is nothing to propose.", calls: Read("get_capabilities")));
 
         verdict.Passed.ShouldBeTrue();
         verdict.Why.ShouldContain("namesAutomation=True");
         verdict.Why.ShouldContain("requests=");
+        verdict.Why.ShouldContain("language=en");
     }
+
+    [Fact]
+    public void A_turn_its_case_passes_fails_when_it_answers_in_another_language()
+    {
+        var verdict = EvalRunner.Graded(
+            Case("automation_refused"), ReplyLanguage.Slovak,
+            Turn(answer: "This build does not run automation, so there is nothing to propose.", calls: Read("get_capabilities")));
+
+        verdict.Passed.ShouldBeFalse();
+        verdict.Why.ShouldContain("language=en asked=sk");
+    }
+
+    [Fact]
+    public void A_turn_its_case_passes_fails_when_it_claims_done()
+    {
+        var verdict = EvalRunner.Graded(
+            Case("automation_refused"), ReplyLanguage.English,
+            Turn(answer: "This build does not run automation. Done.", calls: Read("get_capabilities")));
+
+        verdict.Passed.ShouldBeFalse();
+        verdict.Why.ShouldContain("claimsDone=True");
+    }
+
+    [Fact]
+    public void Audit_passes_one_new_entity_proposed_on_the_first_attempt() =>
+        Grade("audit_entity", Turn(WithEntity("customer_audits", AuditFields()), "I proposed customer_audits.", calls: Propose(Valid())))
+            .Passed.ShouldBeTrue();
+
+    [Fact]
+    public void Audit_fails_the_transcripts_turn_that_got_there_on_the_third_attempt()
+    {
+        var turn = Turn(WithEntity("customer_audits", AuditFields()), "I proposed customer_audits.", calls:
+        [
+            Propose(Refused("validation", "The string value does not match the pattern."), round: 1),
+            Propose(Refused("validation", "Field 'id' is a framework-managed column and cannot be declared."), round: 2),
+            Propose(Valid(), round: 3),
+        ]);
+
+        Grade("audit_entity", turn).Passed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Audit_fails_a_proposal_that_also_hooks_customers()
+    {
+        var proposed = Edited(document =>
+        {
+            document["entities"]!.AsObject()["customer_audits"] = new JsonObject { ["fields"] = AuditFields() };
+            document["entities"]!["customers"]!["hooks"] = new JsonObject { ["afterUpdate"] = new JsonArray() };
+        });
+
+        Grade("audit_entity", Turn(proposed, "I proposed it.", calls: Propose(Valid()))).Passed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Audit_fails_a_declared_managed_column_even_when_the_dry_run_passed_it()
+    {
+        var fields = AuditFields();
+        fields["id"] = new JsonObject { ["type"] = "uuid" };
+
+        Grade("audit_entity", Turn(WithEntity("customer_audits", fields), "I proposed it.", calls: Propose(Valid()))).Passed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void The_forced_case_passes_a_turn_that_rebased_after_the_stale_refusal()
+    {
+        var turn = Turn(WithNicknameAfterTheOtherOperator(rebased: true), "I proposed nickname.", calls:
+        [
+            Read("get_descriptor", round: 1),
+            Propose(Refused("concurrency", "The descriptor is at revision 2.", code: "stale-revision"), round: 2),
+            Read("get_descriptor", round: 3),
+            Propose(Valid(), round: 4),
+        ]);
+
+        Grade("stale_revision_recovered", turn).Passed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void The_forced_case_fails_when_the_force_did_not_land() =>
+        Grade("stale_revision_recovered", Turn(WithNicknameAfterTheOtherOperator(rebased: true), "I proposed it.", calls: Propose(Valid())))
+            .Passed.ShouldBeFalse();
+
+    [Fact]
+    public void The_forced_case_fails_a_proposal_without_the_other_operators_edit()
+    {
+        var turn = Turn(WithNicknameAfterTheOtherOperator(rebased: false), "I proposed it.", calls:
+        [
+            Propose(Refused("concurrency", "The descriptor is at revision 2.", code: "stale-revision"), round: 1),
+            Propose(Valid(), round: 2),
+        ]);
+
+        Grade("stale_revision_recovered", turn).Passed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Audit_fails_a_new_entity_whose_name_is_not_snake_case_even_when_the_dry_run_passed_it() =>
+        Grade("audit_entity", Turn(WithEntity("CustomerAudits", AuditFields()), "I proposed it.", calls: Propose(Valid())))
+            .Passed.ShouldBeFalse();
+
+    [Fact]
+    public void Audit_grades_a_tenancy_that_is_not_text_instead_of_throwing()
+    {
+        var proposed = Edited(document => document["entities"]!.AsObject()["customer_audits"] =
+            new JsonObject { ["tenancy"] = true, ["fields"] = AuditFields() });
+
+        Should.NotThrow(() => Grade("audit_entity", Turn(proposed, "I proposed it.", calls: Propose(Valid()))));
+    }
+
+    [Fact]
+    public void The_forced_case_fails_a_turn_that_needed_a_third_proposal()
+    {
+        var turn = Turn(WithNicknameAfterTheOtherOperator(rebased: true), "I proposed nickname.", calls:
+        [
+            Read("get_descriptor", round: 1),
+            Propose(Refused("concurrency", "The descriptor is at revision 2.", code: "stale-revision"), round: 2),
+            Propose(Refused("validation", "The string value does not match the pattern."), round: 3),
+            Propose(Valid(), round: 4),
+        ]);
+
+        Grade("stale_revision_recovered", turn).Passed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void The_forced_case_fails_a_nickname_made_required()
+    {
+        var turn = Turn(WithNicknameAfterTheOtherOperator(rebased: true, required: true), "I proposed nickname.", calls:
+        [
+            Read("get_descriptor", round: 1),
+            Propose(Refused("concurrency", "The descriptor is at revision 2.", code: "stale-revision"), round: 2),
+            Read("get_descriptor", round: 3),
+            Propose(Valid(), round: 4),
+        ]);
+
+        Grade("stale_revision_recovered", turn).Passed.ShouldBeFalse();
+    }
+
+    private static JsonObject AuditFields() => new()
+    {
+        ["customer_id"] = new JsonObject { ["type"] = "ref", ["entity"] = "customers", ["onDelete"] = "cascade" },
+        ["previous_version"] = new JsonObject { ["type"] = "json", ["required"] = true },
+    };
+
+    private static string WithEntity(string name, JsonObject fields) =>
+        Edited(document => document["entities"]!.AsObject()[name] = new JsonObject { ["fields"] = fields });
+
+    private static string WithNicknameAfterTheOtherOperator(bool rebased, bool required = false) => Edited(document =>
+    {
+        document.Fields("technicians")["nickname"] = required
+            ? new JsonObject { ["type"] = "string", ["required"] = true }
+            : new JsonObject { ["type"] = "string" };
+        if (rebased)
+        {
+            document["entities"]!["bikes"]!["description"] = "edited by another operator";
+        }
+    });
 
     private static Verdict Grade(string name, TurnRecord turn) => Case(name).Grade(turn);
 

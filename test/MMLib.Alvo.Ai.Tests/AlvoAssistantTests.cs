@@ -4,7 +4,9 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Management;
 
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -19,6 +21,12 @@ namespace MMLib.Alvo.Ai.Tests;
 /// </remarks>
 public sealed class AlvoAssistantTests
 {
+    /// <summary>The v3 base prompt's size in UTF-8 bytes, before skills (spec §7.4 AC 3).</summary>
+    private const int AlwaysInContextBudget = 22_758;
+
+    private static readonly string[] _operatorAndModelText =
+        ["typed-words-marker", "history-words-marker", "reply-words-marker", "summary-words-marker"];
+
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     /// <summary>
@@ -151,6 +159,21 @@ public sealed class AlvoAssistantTests
             .ShouldBe(AlvoAssistant.MaximumIterations);
     }
 
+    /// <summary>
+    /// What the model always reads — the base prompt and the skill list — is no larger than the v3 base prompt alone
+    /// (spec §7.4 AC 3). Measured LF-normalised, so a CRLF checkout measures the same text.
+    /// </summary>
+    [Fact]
+    public async Task The_always_in_context_instructions_do_not_outgrow_the_v3_base_prompt()
+    {
+        var model = new ScriptedChatClient(Scripted.Says("ok"));
+
+        await RunAsync(Describing(revision: 1), Configured(), model);
+
+        Encoding.UTF8.GetByteCount(model.Options[0].ShouldNotBeNull().Instructions.ShouldNotBeNull().ReplaceLineEndings("\n"))
+            .ShouldBeLessThanOrEqualTo(AlwaysInContextBudget);
+    }
+
     /// <summary>The agent's own invoker is capped, and invokes one tool call at a time.</summary>
     /// <remarks>
     /// <see cref="Internal.ManagementTools"/> keeps its budget and proposal in plain fields; concurrent invocation
@@ -210,18 +233,246 @@ public sealed class AlvoAssistantTests
         logger.Lines.ShouldNotBeEmpty();
     }
 
-    private static async Task<List<AssistantUpdate>> RunAsync(
+    /// <summary>A traced turn ends with its trace: one entry per call, in order, with what each asked and was told.</summary>
+    [Fact]
+    public async Task A_traced_turn_ends_with_one_entry_per_call_and_how_it_ended()
+    {
+        var management = Describing(revision: 4);
+        management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ManagementApplyResult(Applied: false, Revision: 4, EmptyPlan));
+
+        var updates = await RunAsync(management, Configured(), new ScriptedChatClient(
+            Scripted.Calls("get_descriptor", []),
+            Scripted.Calls("load_skill", new Dictionary<string, object?> { ["skillName"] = "alvo-descriptor-entities-and-fields" }),
+            Scripted.Calls("propose_change", Proposing(revision: 4)),
+            Scripted.Says("I proposed notes.")), trace: true);
+
+        var trace = JsonNode.Parse(updates[^1].ShouldBeOfType<AssistantUpdate.TurnTraced>().Json)!;
+        trace["instructions"]!.GetValue<string>().ShouldBe("alvo-schema-assistant v6");
+        trace["model"]!.GetValue<string>().ShouldBe("qwen3:8b");
+        trace["baseRevision"]!.GetValue<int>().ShouldBe(4);
+        trace["end"]!.GetValue<string>().ShouldBe("answered");
+        trace["callCount"]!.GetValue<int>().ShouldBe(3);
+        var calls = trace["calls"]!.AsArray();
+        calls.Select(call => call!["tool"]!.GetValue<string>()).ShouldBe(["get_descriptor", "load_skill", "propose_change"]);
+        calls[1]!["arguments"]!["skillName"]!.GetValue<string>().ShouldBe("alvo-descriptor-entities-and-fields");
+        calls[1]!["result"]!["found"]!.GetValue<bool>().ShouldBeTrue();
+        calls[2]!["arguments"]!["operations"]![0]!["path"]!.GetValue<string>().ShouldBe("/entities/bikes/fields/notes");
+        calls[2]!["result"]!["valid"]!.GetValue<bool>().ShouldBeTrue();
+        calls[2]!["result"]!["attemptsLeft"]!.GetValue<int>().ShouldBe(Internal.ManagementTools.MaximumStalledRefusals);
+    }
+
+    /// <summary>A refused dry run's trace entry carries its violations and what the budget has left.</summary>
+    [Fact]
+    public async Task A_refused_attempts_entry_carries_its_violations_and_attempts_left()
+    {
+        var management = Describing(revision: 4);
+        management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Throws(new DescriptorValidationException(new DescriptorValidationResult(
+                [new DescriptorValidationError("/entities/bikes/fields/notes", "No.", "Fix it.", DescriptorValidationSeverity.Error)])));
+
+        var updates = await RunAsync(management, Configured(), new ScriptedChatClient(
+            Scripted.Calls("propose_change", Proposing(revision: 4)), Scripted.Says("It was refused.")), trace: true);
+
+        var result = JsonNode.Parse(updates.OfType<AssistantUpdate.TurnTraced>().Single().Json)!["calls"]![0]!["result"]!;
+        result["attemptsLeft"]!.GetValue<int>().ShouldBe(2);
+        result["violations"]![0]!["pointer"]!.GetValue<string>().ShouldBe("/entities/bikes/fields/notes");
+        result["violations"]![0]!["fix"]!.GetValue<string>().ShouldBe("Fix it.");
+    }
+
+    /// <summary>Neither the trace nor the log carries a word the operator or the model wrote (D44).</summary>
+    [Fact]
+    public async Task Neither_the_trace_nor_the_log_carries_what_the_operator_or_the_model_wrote()
+    {
+        var logger = new CapturingLogger();
+        var management = Describing(revision: 4);
+        management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ManagementApplyResult(Applied: false, Revision: 4, EmptyPlan));
+        var proposing = Proposing(revision: 4);
+        proposing["summary"] = "summary-words-marker";
+
+        var updates = await RunAsync(management, Configured(), new ScriptedChatClient(
+                Scripted.Calls("propose_change", proposing), Scripted.Says("reply-words-marker")),
+            logger, message: "typed-words-marker", trace: true,
+            history: [new AssistantTurn(AssistantRole.Operator, "history-words-marker")]);
+
+        var written = updates.OfType<AssistantUpdate.TurnTraced>().Single().Json + string.Join('\n', logger.Lines);
+        _operatorAndModelText.ShouldAllBe(marker => !written.Contains(marker, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A refusal that quotes the author's rule (D42) reaches the trace, which the operator asked for, and no log line:
+    /// the log keeps a violation's source, pointer, code and severity only (pre-flight H3).
+    /// </summary>
+    [Fact]
+    public async Task A_quoted_rule_in_a_refusal_reaches_no_log_line()
+    {
+        const string quoted = "'author_id == @user.id'";
+        var logger = new CapturingLogger();
+        var management = Describing(revision: 4);
+        management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Throws(new DescriptorValidationException(new DescriptorValidationResult(
+                [new DescriptorValidationError("/entities/bikes/rules/get", $"The expression: `{quoted}`.", "Remove the outer quotes.", DescriptorValidationSeverity.Error)])));
+
+        var updates = await RunAsync(management, Configured(), new ScriptedChatClient(
+            Scripted.Calls("check_change", Checking(revision: 4)), Scripted.Says("Refused.")), logger, trace: true);
+
+        logger.Lines.Count(line => line.Contains(quoted, StringComparison.Ordinal)).ShouldBe(0);
+        logger.EventIds.ShouldContain(6202);
+        updates.OfType<AssistantUpdate.TurnTraced>().Single().Json.ShouldContain(quoted);
+    }
+
+    /// <summary>
+    /// A tool name is the model's own text, so it never reaches a log template raw: a name with a newline cannot forge a
+    /// log line, and it appears only JSON-escaped inside the call (final review L1).
+    /// </summary>
+    [Fact]
+    public async Task A_made_up_tool_name_reaches_the_log_only_escaped()
+    {
+        var logger = new CapturingLogger();
+
+        await RunAsync(Describing(revision: 1), Configured(), new ScriptedChatClient(
+            Scripted.Calls("evil\nFORGED log line", []), Scripted.Says("ok")), logger);
+
+        logger.EventIds.ShouldContain(6202);
+        logger.Lines.ShouldNotContain(line => line.Contains("\nFORGED", StringComparison.Ordinal));
+    }
+
+    /// <summary>One structured event per call and one for the turn's end.</summary>
+    [Fact]
+    public async Task Every_call_is_logged_as_6202_and_the_turns_end_as_6203()
+    {
+        var logger = new CapturingLogger();
+
+        await RunAsync(Describing(revision: 1), Configured(), new ScriptedChatClient(
+            Scripted.Calls("get_descriptor", []), Scripted.Calls("get_schema", []), Scripted.Says("ok")), logger);
+
+        logger.EventIds.Count(id => id == 6202).ShouldBe(2);
+        logger.EventIds.Count(id => id == 6203).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// The log has one line per call even when the trace had to drop calls to stay under its cap: the log is built from
+    /// the calls, not from the capped trace (pre-flight M2).
+    /// </summary>
+    [Fact]
+    public async Task Every_call_is_logged_even_when_the_trace_dropped_it()
+    {
+        var logger = new CapturingLogger();
+        var management = Describing(revision: 4);
+        management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Throws(new DescriptorValidationException(new DescriptorValidationResult(
+                [new DescriptorValidationError("/entities/bikes/fields/notes", string.Concat(Enumerable.Repeat("long refusal ", 800)), null, DescriptorValidationSeverity.Error)])));
+        var calls = Enumerable.Range(0, AlvoAssistant.MaximumIterations).Select(_ => Scripted.Calls("check_change", Checking(revision: 4))).ToArray();
+
+        var updates = await RunAsync(management, Configured(), new ScriptedChatClient(calls), logger, trace: true);
+
+        var trace = JsonNode.Parse(updates.OfType<AssistantUpdate.TurnTraced>().Single().Json)!;
+        trace["droppedCalls"]!.GetValue<int>().ShouldBeGreaterThan(0);
+        logger.EventIds.Count(id => id == 6202).ShouldBe(AlvoAssistant.MaximumIterations);
+    }
+
+    /// <summary>A turn the caller abandons still logs its end, from the enumerator's <c>finally</c> (pre-flight L12).</summary>
+    [Fact]
+    public async Task An_abandoned_turn_still_logs_its_end()
+    {
+        var logger = new CapturingLogger();
+        var assistant = new AlvoAssistant(Describing(revision: 1), Configured(), _ => new ScriptedChatClient(
+            Scripted.Calls("get_descriptor", []), Scripted.Says("ok")), logger);
+
+        await foreach (var update in assistant.AskAsync(new AssistantRequest("p", "hi", []), Ct))
+        {
+            _ = update;
+            break;
+        }
+
+        logger.EventIds.Count(id => id == 6203).ShouldBe(1);
+    }
+
+    /// <summary>
+    /// A refusal names the skill of its area when the turn loaded only another one (D50): the trace's violation says
+    /// so, and so does that call's 6202 line — a catalogue name, never author text.
+    /// </summary>
+    [Fact]
+    public async Task A_turns_loaded_skills_are_what_it_loaded_before_the_dry_run()
+    {
+        var logger = new CapturingLogger();
+        var model = new ScriptedChatClient(
+            Scripted.Calls("load_skill", new Dictionary<string, object?> { ["skillName"] = "alvo-descriptor-entities-and-fields" }),
+            Scripted.Calls("propose_change", Proposing(revision: 4)),
+            Scripted.Says("Refused."));
+
+        var updates = await RunAsync(RefusingAtCreatedAt(), Configured(), model, logger, trace: true);
+
+        var call = JsonNode.Parse(updates.OfType<AssistantUpdate.TurnTraced>().Single().Json)!["calls"]![1]!;
+        call["result"]!["violations"]![0]!["skill"]!.GetValue<string>().ShouldBe(TraitsSkill);
+        logger.Lines.ShouldContain(line => line.StartsWith("Assistant call 2:", StringComparison.Ordinal) && line.Contains(TraitsSkill, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A skill counts only when it was loaded before the dry run (pre-flight L1): loaded after it in the same answer, it
+    /// had not been read when the dry run was checked.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_skill_counts_only_when_it_was_loaded_before_the_dry_run(bool loadedFirst)
+    {
+        var load = new FunctionCallContent("load", "load_skill", new Dictionary<string, object?> { ["skillName"] = TraitsSkill });
+        var propose = new FunctionCallContent("propose", "propose_change", Proposing(revision: 4));
+        var model = new ScriptedChatClient(
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, loadedFirst ? [load, propose] : [propose, load])),
+            Scripted.Says("Refused."));
+
+        var updates = await RunAsync(RefusingAtCreatedAt(), Configured(), model, trace: true);
+
+        var calls = JsonNode.Parse(updates.OfType<AssistantUpdate.TurnTraced>().Single().Json)!["calls"]!.AsArray();
+        var violation = calls.Single(call => call!["tool"]!.GetValue<string>() == "propose_change")!["result"]!["violations"]![0]!.AsObject();
+        violation.ContainsKey("skill").ShouldBe(!loadedFirst);
+    }
+
+    private const string TraitsSkill = "alvo-descriptor-traits-and-tenancy";
+
+    /// <summary>A project whose every dry run is refused at <c>/entities/bikes/fields/created_at</c>, a managed column.</summary>
+    private static IAlvoManagement RefusingAtCreatedAt()
+    {
+        var management = Describing(revision: 4);
+        management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Throws(new DescriptorValidationException(new DescriptorValidationResult(
+                [new DescriptorValidationError("/entities/bikes/fields/created_at", "No.", "Remove it.", DescriptorValidationSeverity.Error)])));
+
+        return management;
+    }
+
+    /// <summary>A caller that did not ask gets no trace: a third-party consumer never meets a case it cannot name (D45).</summary>
+    [Fact]
+    public async Task An_untraced_request_gets_no_trace() =>
+        (await RunAsync(Describing(revision: 1), Configured(), new ScriptedChatClient(Scripted.Says("ok"))))
+            .OfType<AssistantUpdate.TurnTraced>().ShouldBeEmpty();
+
+    /// <summary>A turn whose endpoint failed still ends with its trace, saying so.</summary>
+    [Fact]
+    public async Task A_failed_turns_trace_says_the_endpoint_failed()
+    {
+        var updates = await RunAsync(Substitute.For<IAlvoManagement>(), Configured(), new ThrowingChatClient("boom"), trace: true);
+
+        JsonNode.Parse(updates.OfType<AssistantUpdate.TurnTraced>().Single().Json)!["end"]!.GetValue<string>().ShouldBe("endpoint-failed");
+    }
+
+    internal static async Task<List<AssistantUpdate>> RunAsync(
         IAlvoManagement management,
         IAiConnectionResolver connections,
         IChatClient client,
         ILogger<AlvoAssistant>? logger = null,
-        string message = "add a note column")
+        string message = "add a note column",
+        bool trace = false,
+        IReadOnlyList<AssistantTurn>? history = null)
     {
         var assistant = new AlvoAssistant(
             management, connections, _ => client, logger ?? new CapturingLogger());
 
         var updates = new List<AssistantUpdate>();
-        await foreach (var update in assistant.AskAsync(new AssistantRequest("p", message, []), Ct))
+        await foreach (var update in assistant.AskAsync(new AssistantRequest("p", message, history ?? []) { IncludeTrace = trace }, Ct))
         {
             updates.Add(update);
         }
@@ -229,7 +480,7 @@ public sealed class AlvoAssistantTests
         return updates;
     }
 
-    private static IAlvoManagement Describing(int revision)
+    internal static IAlvoManagement Describing(int revision)
     {
         var management = Substitute.For<IAlvoManagement>();
         management.GetDescriptorAsync("p", Arg.Any<CancellationToken>()).Returns(new ManagementDescriptor(
@@ -238,7 +489,7 @@ public sealed class AlvoAssistantTests
         return management;
     }
 
-    private static Dictionary<string, object?> Proposing(int revision) => new()
+    internal static Dictionary<string, object?> Proposing(int revision) => new()
     {
         ["baseRevision"] = revision,
         ["operations"] = JsonDocument.Parse(
@@ -246,7 +497,14 @@ public sealed class AlvoAssistantTests
         ["summary"] = "Adds notes.",
     };
 
-    private static IAiConnectionResolver Configured() => Resolving(new AlvoAiConnection(
+    internal static Dictionary<string, object?> Checking(int revision)
+    {
+        var checking = Proposing(revision);
+        checking.Remove("summary");
+        return checking;
+    }
+
+    internal static IAiConnectionResolver Configured() => Resolving(new AlvoAiConnection(
         AiConnectionKind.OpenAiCompatible, new Uri("http://localhost:11434/v1"), "qwen3:8b", null));
 
     private static IAiConnectionResolver Unconfigured() => Resolving(null);
@@ -290,9 +548,11 @@ public sealed class AlvoAssistantTests
     }
 
     /// <summary>A logger that keeps what it was told, so a test can assert what was not.</summary>
-    private sealed class CapturingLogger : ILogger<AlvoAssistant>
+    internal sealed class CapturingLogger : ILogger<AlvoAssistant>
     {
         internal List<string> Lines { get; } = [];
+
+        internal List<int> EventIds { get; } = [];
 
         public IDisposable? BeginScope<TState>(TState state)
             where TState : notnull => null;
@@ -305,6 +565,9 @@ public sealed class AlvoAssistantTests
             TState state,
             Exception? exception,
             Func<TState, Exception?, string> formatter)
-            => Lines.Add(formatter(state, exception) + " " + exception);
+        {
+            EventIds.Add(eventId.Id);
+            Lines.Add(formatter(state, exception) + " " + exception);
+        }
     }
 }

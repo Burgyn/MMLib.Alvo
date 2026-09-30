@@ -40,6 +40,26 @@ internal static class DescriptorEdits
         return Write(root);
     }
 
+    /// <summary>The pointer of the rule <see cref="AddOwnerComparison"/> writes, where its warning lands.</summary>
+    internal const string OwnerComparisonRule = "/entities/shifts/rules/update";
+
+    /// <summary>
+    /// Adds a <c>shifts</c> entity whose <c>depot_id</c> refs <c>depots</c> and whose update rule compares it with
+    /// <c>@user.id</c> — valid, and never true, so the validator warns (spec §9, D51).
+    /// </summary>
+    /// <param name="descriptorJson">The descriptor to edit.</param>
+    internal static string AddOwnerComparison(string descriptorJson)
+    {
+        var root = JsonNode.Parse(descriptorJson)!.AsObject();
+        root["entities"]!.AsObject()["shifts"] = new JsonObject
+        {
+            ["fields"] = new JsonObject { ["depot_id"] = new JsonObject { ["type"] = "ref", ["entity"] = "depots" } },
+            ["rules"] = new JsonObject { ["get"] = "'dispatcher' in @user.roles", ["update"] = "depot_id == @user.id" },
+        };
+
+        return Write(root);
+    }
+
     /// <summary>Removes one entity — a <c>DropEntity</c> step, which is what destructive means.</summary>
     /// <remarks>
     /// <c>managed-fleet</c> declares no <c>ref</c> between its entities, so dropping one leaves nothing
