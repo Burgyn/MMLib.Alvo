@@ -6,8 +6,13 @@ namespace MMLib.Alvo.Ai.Internal;
 
 /// <summary>
 /// Which descriptor skill a path belongs to — the one routing the eval's skill grade and a refusal's skill hint share
-/// (D50), so the grade and the hint cannot disagree.
+/// (D50).
 /// </summary>
+/// <remarks>
+/// They agree on every path except, by design, a field named as a managed column: the hint sends it to
+/// <c>traits-and-tenancy</c> (<see cref="ForViolation"/>), the skill that says which trait adds it, while the grade
+/// (<see cref="AreaOf"/>) reads a changed field path as <c>entities-and-fields</c>.
+/// </remarks>
 internal static class SkillAreas
 {
     internal const string ProjectAccess = "project-access";

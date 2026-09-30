@@ -52,6 +52,31 @@ public sealed class OwnerComparisonCheckTests
         result.Errors.ShouldNotContain(error => error.Severity == DescriptorValidationSeverity.Warning);
     }
 
+    /// <summary>
+    /// A condition the phase check refuses (<c>old.</c> in <c>beforeCreate</c>) carries its error only: a warning beside
+    /// an error at the same pointer is noise, and the error is the answer (T16 review L1).
+    /// </summary>
+    [Fact]
+    public void A_condition_refused_for_its_phase_carries_the_error_and_no_warning()
+    {
+        var json = Descriptor("condition", "old.technician_id == @user.id").Replace("beforeUpdate", "beforeCreate", StringComparison.Ordinal);
+        const string pointer = "/entities/tasks/hooks/beforeCreate/0/condition";
+
+        var result = _validator.Validate(json);
+
+        result.Errors.ShouldContain(error => error.Path == pointer && error.Severity == DescriptorValidationSeverity.Error);
+        Warnings(result, pointer).ShouldBeEmpty();
+    }
+
+    /// <summary>A rule that repeats one comparison draws one warning, not one per repetition (T16 review I1).</summary>
+    [Fact]
+    public void A_repeated_comparison_draws_one_warning()
+    {
+        var result = _validator.Validate(Descriptor("rule", "technician_id == @user.id || technician_id == @user.id"));
+
+        Warnings(result, UpdateRule).ShouldHaveSingleItem();
+    }
+
     /// <summary>The warning names the field, the entity it holds an id of, and the fix.</summary>
     [Fact]
     public void The_warning_says_what_the_field_holds_and_how_to_compare_the_caller()

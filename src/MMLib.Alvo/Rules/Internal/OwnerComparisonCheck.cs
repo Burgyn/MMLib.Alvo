@@ -26,7 +26,9 @@ namespace MMLib.Alvo.Rules.Internal;
 /// <para>
 /// <b>Each source is compiled a second time</b>, through the same <see cref="ICelCompiler"/> and profile the catalog
 /// uses: per apply, never per request. A source that does not compile draws nothing here; its error is already
-/// reported.
+/// reported. A before-hook condition that compiles and is then refused for its phase (<c>old.</c> in
+/// <c>beforeCreate</c>) does draw one, and <c>DescriptorValidator</c> drops a warning at any pointer that already
+/// carries an error. A comparison repeated in one source is warned once.
 /// </para>
 /// </remarks>
 internal static class OwnerComparisonCheck
@@ -87,7 +89,8 @@ internal static class OwnerComparisonCheck
             .OfType<string>()
             .Select(name => entity.Fields.FirstOrDefault(field => field.Name == name))
             .Where(field => field?.Reference is { } reference && !string.Equals(reference.TargetEntity, UsersEntity, StringComparison.Ordinal))
-            .Select(field => Warning(source.Pointer, field!.Name, field.Reference!.TargetEntity));
+            .Select(field => Warning(source.Pointer, field!.Name, field.Reference!.TargetEntity))
+            .Distinct();
     }
 
     /// <summary>The node and every node below it, read through <see cref="CelTree.Children"/> — the one walker shape.</summary>

@@ -142,8 +142,22 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             ? []
             : ruleErrors.ToList();
         errors.AddRange(ComputedFieldCheck.Errors(schema, _compiler));
-        errors.AddRange(OwnerComparisonCheck.Warnings(descriptor, schema, _compiler));
+        errors.AddRange(OwnerWarnings(descriptor, schema, errors));
         return errors;
+    }
+
+    /// <summary>
+    /// The owner-comparison warnings (D51), less any at a pointer that already carries an error: a condition the
+    /// phase check refuses compiles, and a warning beside its error would be noise (T16 review L1).
+    /// </summary>
+    private IEnumerable<DescriptorValidationError> OwnerWarnings(
+        AlvoDescriptor descriptor, SchemaModel schema, List<DescriptorValidationError> errors)
+    {
+        var refused = errors
+            .Where(error => error.Severity == DescriptorValidationSeverity.Error)
+            .Select(error => error.Path)
+            .ToHashSet(StringComparer.Ordinal);
+        return OwnerComparisonCheck.Warnings(descriptor, schema, _compiler).Where(warning => !refused.Contains(warning.Path));
     }
 
     private static DescriptorValidationError Malformed(JsonException ex) =>
