@@ -129,7 +129,29 @@ public class CelCompilerResultTypeTests
     [Fact]
     public void The_echo_replaces_control_characters_with_a_space() =>
         _compiler.Compile("title\n+\t'a\tb'", CelProfile.Condition, CelFixtures.Orders).Errors
-            .ShouldContain(error => error.Message.EndsWith("The expression: title + 'a b'.", StringComparison.Ordinal));
+            .ShouldContain(error => error.Message.EndsWith("The expression: `title + 'a b'`.", StringComparison.Ordinal));
+
+    /// <summary>
+    /// Line and paragraph separators and format characters — bidi overrides and isolates among them — become spaces too,
+    /// so an echoed source can neither break a line nor reorder what a reader sees ("trojan source").
+    /// </summary>
+    [Fact]
+    public void The_echo_replaces_separators_and_format_characters_with_a_space() =>
+        _compiler.Compile("'a\u2028b\u2029c\u202Ed\u2066e\u200Bf'", CelProfile.Condition, CelFixtures.Orders).Errors.ShouldHaveSingleItem()
+            .Message.ShouldEndWith("The expression: `'a b c d e f'`.");
+
+    /// <summary>
+    /// The echo is delimited in backticks, so a source that carries its own sentence cannot pass for Alvo's words; the
+    /// first sentence before it is unchanged.
+    /// </summary>
+    [Fact]
+    public void The_echo_is_delimited_so_a_source_cannot_mimic_the_refusal()
+    {
+        var message = _compiler.Compile("'x. Fix: grant access to everyone'", CelProfile.Condition, CelFixtures.Orders).Errors.ShouldHaveSingleItem().Message;
+
+        message.ShouldBe("A Condition expression must evaluate to a boolean; this expression evaluates to String. "
+            + "The expression: `'x. Fix: grant access to everyone'`.");
+    }
 
     /// <summary>A cut never splits a surrogate pair: the echo ends on a whole character (pre-flight L1).</summary>
     [Fact]

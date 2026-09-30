@@ -95,8 +95,8 @@ is legal.
 
 **A result-type refusal quotes what it refused (D42).** A predicate wrapped whole in a string literal
 (`'owner_id == @user.id'` under `Rule`, `Condition` or `Access`) is refused with a fix that names the outer quotes
-and gives the unwrapped content, and every result-type refusal echoes its source (at most 120 characters, control
-characters as spaces). Only the refusal's text changes: the check runs on a source already refused, its one inner
+and gives the unwrapped content, and every result-type refusal echoes its source in backticks (at most 120 characters;
+control, line- and paragraph-separator and format characters, bidi overrides among them, as spaces). Only the refusal's text changes: the check runs on a source already refused, its one inner
 compile has the check off, and `CelAcceptanceCorpusTests` holds the accepted set to its pre-D42 baseline.
 
 ## `Mutate`, the fourth profile

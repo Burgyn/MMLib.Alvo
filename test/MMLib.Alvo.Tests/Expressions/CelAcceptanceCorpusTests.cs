@@ -52,7 +52,7 @@ public sealed class CelAcceptanceCorpusTests
         drifted.ShouldBeEmpty();
     }
 
-    internal static Outcome Judge(CelCompiler compiler, string source, CelProfile profile)
+    private static Outcome Judge(CelCompiler compiler, string source, CelProfile profile)
     {
         var result = compiler.Compile(source, profile, CelFixtures.Orders);
         return new Outcome(
@@ -71,7 +71,8 @@ public sealed class CelAcceptanceCorpusTests
 
     private static IReadOnlyList<Outcome> Baseline()
     {
-        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(BaselineResource)!;
+        using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(BaselineResource)
+            ?? throw new InvalidOperationException($"The embedded CEL baseline {BaselineResource} is missing; check the EmbeddedResource LogicalName in MMLib.Alvo.Tests.csproj.");
         using var reader = new StreamReader(stream);
         return [.. reader.ReadToEnd().Split('\n')
             .Select(line => line.TrimEnd('\r'))

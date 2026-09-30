@@ -1,5 +1,7 @@
 ﻿using MMLib.Alvo.Schema;
 
+using System.Globalization;
+
 namespace MMLib.Alvo.Expressions.Internal;
 
 /// <summary>
@@ -14,7 +16,8 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// on a source already refused for its result type, and only ever rewrites that refusal's text. The unwrapped content
 /// is compiled once more with the check off (<c>detectQuoted: false</c>), so the inner compile cannot recurse: at most
 /// two compilations per source, by construction. Every result-type refusal also echoes its source, cut at
-/// <see cref="EchoLength"/> characters on a whole character, with control characters turned into spaces.
+/// <see cref="EchoLength"/> characters on a whole character, in backticks, with every character that could break a
+/// line or reorder what a reader sees turned into a space.
 /// </remarks>
 internal sealed class CelCompiler : ICelCompiler
 {
@@ -148,7 +151,7 @@ internal sealed class CelCompiler : ICelCompiler
         var quoted = QuotedPredicate(authored);
         return new CelCompilationError(
             $"A {authored.Profile} expression must evaluate to a boolean; this expression evaluates to {resultType}."
-            + (quoted is null ? EchoSentence(authored.Source) : $" The whole expression is one quoted string: {Echo(authored.Source)}."),
+            + (quoted is null ? EchoSentence(authored.Source) : $" The whole expression is one quoted string: `{Echo(authored.Source)}`."),
             quoted is null
                 ? "Add a comparison, e.g. field == value, so the expression yields true/false."
                 : QuotedFixLead + Echo(quoted),
@@ -170,11 +173,12 @@ internal sealed class CelCompiler : ICelCompiler
             ? content
             : null;
 
-    private static string EchoSentence(string source) => $" The expression: {Echo(source)}.";
+    private static string EchoSentence(string source) => $" The expression: `{Echo(source)}`.";
 
     /// <summary>
-    /// The source as a refusal quotes it: control characters become spaces, so the refusal stays one line, and a source
-    /// longer than <see cref="EchoLength"/> is cut there, plus <c>…</c> — never between the halves of a surrogate pair.
+    /// The source as a refusal quotes it: every character that could break a line or reorder the text becomes a space,
+    /// so the refusal stays one line that reads as written, and a source longer than <see cref="EchoLength"/> is cut
+    /// there, plus <c>…</c> — never between the halves of a surrogate pair.
     /// </summary>
     private static string Echo(string source)
     {
@@ -188,11 +192,34 @@ internal sealed class CelCompiler : ICelCompiler
         {
             for (var index = 0; index < span.Length; index++)
             {
-                span[index] = char.IsControl(text[index]) ? ' ' : text[index];
+                span[index] = IsUnsafeToEcho(text, index) ? ' ' : text[index];
             }
         });
 
         return length < source.Length ? echoed + "…" : echoed;
+    }
+
+    /// <summary>
+    /// Whether the character at <paramref name="index"/> is a control character, a line or paragraph separator, or a
+    /// format character (bidi overrides and isolates, zero-width characters) — judged by the whole code point, so an
+    /// astral format character is caught in both of its halves.
+    /// </summary>
+    private static bool IsUnsafeToEcho(string text, int index) =>
+        CodePointAt(text, index) is var codePoint
+        && CharUnicodeInfo.GetUnicodeCategory(codePoint) is UnicodeCategory.Control or UnicodeCategory.LineSeparator
+            or UnicodeCategory.ParagraphSeparator or UnicodeCategory.Format;
+
+    private static int CodePointAt(string text, int index)
+    {
+        var character = text[index];
+        if (char.IsHighSurrogate(character) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]))
+        {
+            return char.ConvertToUtf32(character, text[index + 1]);
+        }
+
+        return char.IsLowSurrogate(character) && index > 0 && char.IsHighSurrogate(text[index - 1])
+            ? char.ConvertToUtf32(text[index - 1], character)
+            : character;
     }
 
     /// <summary>
@@ -219,9 +246,6 @@ internal sealed class CelCompiler : ICelCompiler
     /// no <c>$cel</c> at all.
     /// </summary>
     private static bool IsMutateValue(CelValueType type) => IsScalar(type) || type == CelValueType.Bool;
-
-    /// <summary>What was authored, and how: the one argument the result-type check needs.</summary>
-    private readonly record struct Authored(string Source, CelProfile Profile, EntitySchema Entity, CelNode Parsed, bool DetectQuoted);
 
     private static CelCompilationError? ValidateTreeDepth(CelNode root)
     {
@@ -256,4 +280,7 @@ internal sealed class CelCompiler : ICelCompiler
 
         return maxDepth;
     }
+
+    /// <summary>What was authored, and how: the one argument the result-type check needs.</summary>
+    private readonly record struct Authored(string Source, CelProfile Profile, EntitySchema Entity, CelNode Parsed, bool DetectQuoted);
 }
