@@ -16,9 +16,10 @@ namespace MMLib.Alvo.Ai.Eval;
 /// all, <see langword="null"/> when nothing failed — the status only, never the provider's message, which can echo the
 /// request.
 /// </param>
+/// <param name="FollowUps">How many follow-ups the harness sent the model this turn (D47): 0 or 1.</param>
 internal sealed record TurnRecord(
     string OriginalDescriptor, IReadOnlyList<AssistantUpdate> Updates, TimeSpan Elapsed, int Requests, int ToolRounds,
-    long Tokens, IReadOnlyList<RecordedCall> Calls, string? ProviderStatus = null)
+    long Tokens, IReadOnlyList<RecordedCall> Calls, string? ProviderStatus = null, int FollowUps = 0)
 {
     private static readonly HashSet<string> _dryRuns = new(StringComparer.Ordinal) { "check_change", "propose_change" };
 

@@ -31,8 +31,8 @@ internal sealed record Verdict(bool Passed, string Why)
 }
 
 /// <summary>
-/// The suite: the reliability design's seven §4.2 cases plus the first-try design's two (D15, D16) and its seven skill
-/// cases (§7.5, D36), each graded on its outcomes — and every turn also on its wording, its language and the skills its
+/// The suite: the reliability design's seven §4.2 cases plus the first-try design's two (D15, D16), its seven skill
+/// cases (§7.5, D36) and the RCA 2 case (§9, D53), each graded on its outcomes — and every turn also on its wording, its language and the skills its
 /// proposal needed (D21, D31).
 /// </summary>
 /// <remarks>
@@ -132,6 +132,10 @@ internal static partial class EvalCases
             "Can Alvo call our ERP's HTTP API when a part's stock changes?",
             "Vie Alvo zavolať HTTP API nášho ERP, keď sa zmení sklad dielu?",
             CanAlvoCallHttp),
+        new("task_management_workers",
+            "Create tables for task management for workers: a task links to the employee, the customer they may serve and the goods, and each task has a discussion.",
+            "Vytvor tabuľky na správu úloh pre pracovníkov: úloha je priradená zamestnancovi, zákazníkovi, ktorého môže obslúžiť, a tovaru, a ku každej úlohe sa dá viesť diskusia.",
+            TaskManagementWorkers),
     ];
 
     private static Verdict FullName(TurnRecord turn) =>

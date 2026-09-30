@@ -29,6 +29,19 @@ public sealed class SkillCaseAnswerTests
         attempt.Valid.ShouldBeTrue($"{name}: {string.Join(" | ", attempt.Refusals)}");
     }
 
+    /// <summary>
+    /// <c>task_management_workers</c>' right answer is valid on the real dry run and draws no warning (D52 puts any on a
+    /// valid attempt's violations): no managed column, and every owner clause on a ref to users.
+    /// </summary>
+    [Fact]
+    public async Task The_task_management_right_answer_passes_the_real_dry_run_with_no_warning()
+    {
+        var attempt = await AttemptAsync(SkillCaseAnswers.TaskManagement);
+
+        attempt.Valid.ShouldBeTrue(string.Join(" | ", attempt.Refusals));
+        attempt.Violations.Where(violation => violation.Severity == "warning").ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task The_function_cases_wrong_answer_is_refused_as_unhonoured()
     {

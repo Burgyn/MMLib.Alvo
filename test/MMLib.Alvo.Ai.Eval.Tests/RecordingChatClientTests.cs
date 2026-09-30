@@ -45,6 +45,33 @@ public sealed class RecordingChatClientTests
         recorder.Calls.ShouldHaveSingleItem().Result.ShouldBe("""{"valid":false}""");
     }
 
+    /// <summary>
+    /// A follow-up is counted once, on the request that first sends it (D47, D53): a later request of the session still
+    /// carries it in its history, and that is not a second follow-up.
+    /// </summary>
+    [Fact]
+    public async Task A_follow_up_is_counted_once_on_the_request_that_sends_it()
+    {
+        var model = new ScriptedModel([new TextContent("Refused.")], [new TextContent("Proposed.")], [new TextContent("Done.")]);
+        using var recorder = new RecordingChatClient(model);
+        var followUp = new ChatMessage(ChatRole.User, RecordingChatClient.FollowUpLead + "your last propose_change was refused.");
+        ChatMessage[] first = [new(ChatRole.User, "hi")];
+        ChatMessage[] followedUp = [.. first, new(ChatRole.Assistant, "Refused."), followUp];
+
+        await SendAsync(recorder, first);
+        await SendAsync(recorder, followedUp);
+        await SendAsync(recorder, [.. followedUp, new(ChatRole.Assistant, "Proposed.")]);
+
+        recorder.FollowUps.ShouldBe(1);
+    }
+
+    private static async Task SendAsync(RecordingChatClient client, ChatMessage[] messages)
+    {
+        await foreach (var _ in client.GetStreamingResponseAsync(messages, cancellationToken: Ct))
+        {
+        }
+    }
+
     private static FunctionResultContent Result(string callId, string json) =>
         new(callId, JsonSerializer.SerializeToElement(json));
 

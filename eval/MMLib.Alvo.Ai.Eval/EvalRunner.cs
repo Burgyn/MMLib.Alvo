@@ -148,7 +148,7 @@ internal sealed class EvalRunner(EvalWorld world, EvalOptions options, EvalTrace
 
         return new TurnRecord(
             original, updates, clock.Elapsed, recorder?.Requests ?? 0, recorder?.ToolRounds ?? 0, recorder?.Tokens ?? 0,
-            recorder?.Calls ?? [], timedOut ? TimedOut : logger.Status);
+            recorder?.Calls ?? [], timedOut ? TimedOut : logger.Status, recorder?.FollowUps ?? 0);
     }
 
     /// <summary>The status a turn whose provider timed out is recorded with.</summary>
@@ -191,5 +191,5 @@ internal sealed record CaseRun(string Case, string Language, TurnRecord Turn, Ve
 {
     internal string Line => string.Create(
         CultureInfo.InvariantCulture,
-        $"{Case} [{Language}] {(Verdict.Passed ? "PASS" : "FAIL")} {Verdict.Why} ({Turn.ToolCalls.Count} calls, {Turn.Elapsed.TotalSeconds:0.0}s)");
+        $"{Case} [{Language}] {(Verdict.Passed ? "PASS" : "FAIL")} {Verdict.Why} ({Turn.ToolCalls.Count} calls, followUps={Turn.FollowUps}, {Turn.Elapsed.TotalSeconds:0.0}s)");
 }

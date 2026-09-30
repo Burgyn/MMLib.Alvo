@@ -14,7 +14,7 @@ public sealed class EvalCasesTests
     private const string PlanFix = "Only the operator can allow a destructive change, from Preview. Say first what data it loses.";
 
     [Fact]
-    public void The_suite_has_the_reliability_first_try_and_skill_cases() => EvalCases.All.Count.ShouldBe(16);
+    public void The_suite_has_the_reliability_first_try_and_skill_cases() => EvalCases.All.Count.ShouldBe(17);
 
     [Theory]
     [InlineData("hook_returned_at")]

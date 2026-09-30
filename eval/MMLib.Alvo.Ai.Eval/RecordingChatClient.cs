@@ -37,6 +37,16 @@ internal sealed class RecordingChatClient(IChatClient inner) : DelegatingChatCli
     /// <summary>The tokens the provider reported, in and out.</summary>
     internal long Tokens { get; private set; }
 
+    /// <summary>How the harness's follow-up message starts (D47) — <see cref="Internal.FollowUp.Lead"/>, for the suite.</summary>
+    internal const string FollowUpLead = Internal.FollowUp.Lead;
+
+    /// <summary>How many follow-ups the turn sent (D47), each counted on the request whose last message it is.</summary>
+    /// <remarks>
+    /// A later request of the same session still carries the follow-up in its history, so "the last message" is what
+    /// makes a request the one that sent it.
+    /// </remarks>
+    internal int FollowUps { get; private set; }
+
     /// <summary>Every tool call, in the order the model made them.</summary>
     internal IReadOnlyList<RecordedCall> Calls => [.. _calls];
 
@@ -67,6 +77,7 @@ internal sealed class RecordingChatClient(IChatClient inner) : DelegatingChatCli
     {
         var sent = messages.ToList();
         Requests++;
+        FollowUps += sent is [.., { } last] && last.Role == ChatRole.User && last.Text.StartsWith(FollowUpLead, StringComparison.Ordinal) ? 1 : 0;
         foreach (var result in sent.SelectMany(message => message.Contents).OfType<FunctionResultContent>())
         {
             var index = _calls.FindLastIndex(call => call.CallId == result.CallId && call.Result is null);

@@ -149,8 +149,8 @@ prototype it drives. `scripts/gen-prototype-fixtures --check` proves the prototy
 content still matches the repository it was derived from.
 
 **The assistant eval is in no ring, like load.** `scripts/eval-assistant` asks a real model
-the sixteen cases of `docs/superpowers/specs/2026-09-28-f5-assistant-reliability-design.md` §4.2 and
-`docs/superpowers/specs/2026-09-29-f5-assistant-first-try-design.md` §3 and §7.5 over the real host and grades outcomes,
+the seventeen cases of `docs/superpowers/specs/2026-09-28-f5-assistant-reliability-design.md` §4.2 and
+`docs/superpowers/specs/2026-09-29-f5-assistant-first-try-design.md` §3, §7.5 and §9 over the real host and grades outcomes,
 plus the reply's wording, its language, and whether it loaded the skills its proposal needed; it costs tokens and measures a model, so it is run on demand and its table is to be published per
 model in `docs/assistant-evals.md` (created by the first real run). Every graded turn, passes included, is traced to `artifacts/eval-assistant/traces/`.
 The graders themselves are pure and tested in ring0 (`test/MMLib.Alvo.Ai.Eval.Tests`).
