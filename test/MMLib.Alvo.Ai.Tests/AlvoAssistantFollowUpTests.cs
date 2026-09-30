@@ -102,6 +102,88 @@ public sealed class AlvoAssistantFollowUpTests
         FollowUps(model).ShouldBe(0);
     }
 
+    /// <summary>
+    /// A refused retry after a valid proposal is not followed up (D47 (b)): the valid one is filed, and a follow-up
+    /// would replace the answer the operator reads beside it.
+    /// </summary>
+    [Fact]
+    public async Task A_refusal_after_a_valid_proposal_is_not_followed_up()
+    {
+        var model = new ScriptedChatClient(
+            Scripted.Calls("propose_change", Proposing(revision: 4)), Scripted.Calls("propose_change", Proposing(revision: 4)),
+            Scripted.Says("The first one is filed."));
+
+        var updates = await RunAsync(ValidThenRefused(), model);
+
+        FollowUps(model).ShouldBe(0);
+        updates.OfType<AssistantUpdate.Proposal>().ShouldHaveSingleItem().Refusals.ShouldBeEmpty();
+        string.Concat(updates.OfType<AssistantUpdate.Text>().Select(text => text.Delta)).ShouldBe("The first one is filed.");
+    }
+
+    /// <summary>
+    /// A capability read refused as forbidden or as no such project means no follow-up, and the held answer is shown
+    /// (D47 (e)): the follow-up is optional, the answer is not.
+    /// </summary>
+    [Theory]
+    [InlineData("forbidden")]
+    [InlineData("project-not-found")]
+    public async Task A_refused_capability_read_means_no_follow_up_and_the_held_answer_is_shown(string refusal)
+    {
+        var management = Refusing(then: null);
+        management.GetCapabilitiesAsync("p", Arg.Any<CancellationToken>()).Returns<ManagementCapabilities>(_ => throw (refusal == "forbidden"
+            ? new ManagementForbiddenException("No.")
+            : new ManagementProjectNotFoundException("No.")));
+        var model = new ScriptedChatClient(Scripted.Calls("propose_change", Proposing(revision: 4)), Scripted.Says("Refused."));
+
+        var updates = await RunAsync(management, model);
+
+        FollowUps(model).ShouldBe(0);
+        updates.OfType<AssistantUpdate.Text>().ShouldHaveSingleItem().Delta.ShouldBe("Refused.");
+    }
+
+    /// <summary>The 6203 line says whether the turn was followed up.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task The_turns_end_line_says_whether_it_was_followed_up(bool followedUp)
+    {
+        var logger = new CapturingLogger();
+        var model = new ScriptedChatClient(
+            Scripted.Calls("propose_change", Proposing(revision: 4)), Scripted.Says("Refused."), Scripted.Says("Stopped."));
+
+        await RunAsync(followedUp ? Refusing(then: null) : Answering(Valid()), model, logger);
+
+        EndLine(logger).ShouldEndWith($"followed up: {followedUp}. ");
+    }
+
+    /// <summary>
+    /// A turn cancelled between its runs (during the capability read) or inside the follow-up ends abandoned, and its
+    /// end line says whether the follow-up had started.
+    /// </summary>
+    [Theory]
+    [InlineData("between")]
+    [InlineData("inside")]
+    public async Task A_turn_cancelled_between_or_inside_its_runs_is_logged_as_abandoned(string where)
+    {
+        var logger = new CapturingLogger();
+        var management = Refusing(then: null);
+        if (where == "between")
+        {
+            management.GetCapabilitiesAsync("p", Arg.Any<CancellationToken>())
+                .Returns<ManagementCapabilities>(_ => throw new OperationCanceledException());
+        }
+
+        var model = new FailingAfter(
+            2,
+            new ScriptedChatClient(Scripted.Calls("propose_change", Proposing(revision: 4)), Scripted.Says("Refused.")),
+            () => new OperationCanceledException());
+
+        await Should.ThrowAsync<OperationCanceledException>(() => RunAsync(management, model, logger));
+
+        EndLine(logger).ShouldContain("(abandoned)");
+        EndLine(logger).ShouldEndWith($"followed up: {where == "inside"}. ");
+    }
+
     /// <summary>A followed-up turn still makes at most <see cref="AlvoAssistant.MaximumIterations"/> tool rounds.</summary>
     /// <remarks>
     /// Counted as invocations of a tool nothing else calls (<c>get_revisions</c>), not as <c>ToolInvoked</c> updates: the
@@ -153,6 +235,10 @@ public sealed class AlvoAssistantFollowUpTests
         updates[^1].ShouldBeOfType<AssistantUpdate.Failed>();
     }
 
+    /// <summary>The turn's one 6203 line, as the capturing logger formats it (the message, a space, no exception).</summary>
+    private static string EndLine(CapturingLogger logger) =>
+        logger.Lines[logger.EventIds.IndexOf(6203)].ShouldNotBeNull();
+
     private static int FollowUps(ScriptedChatClient model) => model.Requests.Count(request => IsFollowUp(request[^1]));
 
     private static bool IsFollowUp(ChatMessage message) =>
@@ -172,6 +258,17 @@ public sealed class AlvoAssistantFollowUpTests
         var refusal = Refusal("No.");
         management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
             .Returns(_ => throw refusal, _ => then ?? throw refusal);
+
+        return management;
+    }
+
+    /// <summary>A project whose first dry run is valid and whose every later one is refused.</summary>
+    private static IAlvoManagement ValidThenRefused()
+    {
+        var management = Arranged([]);
+        var refusal = Refusal("No.");
+        management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Valid(), _ => throw refusal);
 
         return management;
     }
@@ -235,21 +332,22 @@ public sealed class AlvoAssistantFollowUpTests
     private static DescriptorValidationException Refusal(string message) => new(new DescriptorValidationResult(
         [new DescriptorValidationError("/entities/bikes/fields/notes", message, "Fix it.", DescriptorValidationSeverity.Error)]));
 
-    /// <summary>An endpoint that answers <c>requests</c> requests and then fails the way a dropped connection does.</summary>
-    private sealed class FailingAfter(int requests, IChatClient inner) : DelegatingChatClient(inner)
+    /// <summary>
+    /// An endpoint that answers <c>requests</c> requests and then fails the way a dropped connection does — or with
+    /// <c>failure</c>'s exception, such as a cancellation.
+    /// </summary>
+    private sealed class FailingAfter(int requests, IChatClient inner, Func<Exception>? failure = null) : DelegatingChatClient(inner)
     {
         private int _requests;
 
         public override Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
-            ++_requests > requests
-                ? throw new HttpRequestException("The endpoint went away.")
-                : base.GetResponseAsync(messages, options, cancellationToken);
+            ++_requests > requests ? throw Failure() : base.GetResponseAsync(messages, options, cancellationToken);
 
         public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default) =>
-            ++_requests > requests
-                ? throw new HttpRequestException("The endpoint went away.")
-                : base.GetStreamingResponseAsync(messages, options, cancellationToken);
+            ++_requests > requests ? throw Failure() : base.GetStreamingResponseAsync(messages, options, cancellationToken);
+
+        private Exception Failure() => failure?.Invoke() ?? new HttpRequestException("The endpoint went away.");
     }
 }

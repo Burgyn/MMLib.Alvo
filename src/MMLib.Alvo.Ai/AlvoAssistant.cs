@@ -132,9 +132,9 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
         [EnumeratorCancellation] CancellationToken ct)
     {
         var tools = ManagementTools.For(_management, request.Project);
-        var agent = AgentFor(recorder, tools);
+        var (agent, invoker) = Constrained(recorder, tools);
         var session = await agent.CreateSessionAsync(ct).ConfigureAwait(false);
-        var run = new TurnRun(agent, session, recorder, tools, connection.Model, new TurnAnswer(), turn);
+        var run = new TurnRun(agent, invoker, session, recorder, tools, connection.Model, new TurnAnswer(), turn);
         var first = agent.RunStreamingAsync(Conversation(request), session, options: null, ct);
         await foreach (var update in StreamAsync(run, first, holding: true, ct).ConfigureAwait(false))
         {
@@ -182,37 +182,44 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
         var updates = stream.GetAsyncEnumerator(ct);
         await using (updates.ConfigureAwait(false))
         {
-            for (var moved = 0; ; moved++)
+            for (var first = true; ; first = false)
             {
                 var next = await NextAsync(updates, run.Model).ConfigureAwait(false);
-                if (next.Failure is { } failure)
+                var translated = next switch
                 {
-                    run.State.End = TurnEnd.EndpointFailed;
-                    if (run.Answer.Release() is { } held)
-                    {
-                        yield return held;
-                    }
-
-                    yield return failure;
-                    yield break;
+                    { Failure: { } failure } => Failed(run, failure),
+                    { Moved: false } => [],
+                    _ => Translated(run, updates.Current, first, holding),
+                };
+                foreach (var update in translated)
+                {
+                    yield return update;
                 }
 
                 if (!next.Moved)
                 {
                     yield break;
                 }
-
-                if (moved == 0)
-                {
-                    run.Answer.Discard();
-                }
-
-                foreach (var translated in Translate(updates.Current, run.Tools, run.Answer, holding))
-                {
-                    yield return translated;
-                }
             }
         }
+    }
+
+    /// <summary>A failed run: what the turn held, then the failure — and the turn ends as <see cref="TurnEnd.EndpointFailed"/>.</summary>
+    private static List<AssistantUpdate> Failed(TurnRun run, AssistantUpdate.Failed failure)
+    {
+        run.State.End = TurnEnd.EndpointFailed;
+        return run.Answer.Release() is { } held ? [held, failure] : [failure];
+    }
+
+    /// <summary>One update of a run, translated — the run's first discarding what the run before it held (B1).</summary>
+    private static List<AssistantUpdate> Translated(TurnRun run, AgentResponseUpdate update, bool first, bool holding)
+    {
+        if (first)
+        {
+            run.Answer.Discard();
+        }
+
+        return [.. Translate(update, run.Tools, run.Answer, holding)];
     }
 
     /// <summary>
@@ -233,8 +240,7 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
         }
 
         run.State.FollowUpAfterRound = run.Recorder.Requests;
-        run.Agent.ChatClient.GetService<FunctionInvokingChatClient>()!.MaximumIterationsPerRequest =
-            MaximumIterations - run.Recorder.ToolRounds;
+        run.Invoker.MaximumIterationsPerRequest = MaximumIterations - run.Recorder.ToolRounds;
         var followUp = run.Agent.RunStreamingAsync(new ChatMessage(ChatRole.User, FollowUp.Message(pointers)), run.Session, options: null, ct);
         await foreach (var update in StreamAsync(run, followUp, holding: false, ct).ConfigureAwait(false))
         {
@@ -283,9 +289,16 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
         internal int? FollowUpAfterRound { get; set; }
     }
 
-    /// <summary>What every run of one turn shares: the agent and its session, the recorder, the tools and the answer.</summary>
+    /// <summary>What every run of one turn shares: the agent, its invoker and its session, the recorder, the tools and the answer.</summary>
     private sealed record TurnRun(
-        ChatClientAgent Agent, AgentSession Session, TurnRecorder Recorder, ManagementTools Tools, string Model, TurnAnswer Answer, TurnState State);
+        ChatClientAgent Agent,
+        FunctionInvokingChatClient Invoker,
+        AgentSession Session,
+        TurnRecorder Recorder,
+        ManagementTools Tools,
+        string Model,
+        TurnAnswer Answer,
+        TurnState State);
 
     /// <summary>
     /// The turn's answer: the text shown, and the text held while a follow-up may be due (D47) — released when a tool
@@ -395,7 +408,10 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     /// <summary>
     /// The agent for one turn: the fixed instructions, the tools, the descriptor skills, and a capped, sequential invoker.
     /// </summary>
-    internal static ChatClientAgent AgentFor(IChatClient client, ManagementTools tools)
+    internal static ChatClientAgent AgentFor(IChatClient client, ManagementTools tools) => Constrained(client, tools).Agent;
+
+    /// <summary>The agent for one turn, and the invoker <see cref="Constrain"/> capped — which a follow-up re-caps (D47).</summary>
+    private static (ChatClientAgent Agent, FunctionInvokingChatClient Invoker) Constrained(IChatClient client, ManagementTools tools)
     {
         var agent = new ChatClientAgent(
             client,
@@ -407,9 +423,8 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
             },
             loggerFactory: null,
             services: null);
-        Constrain(agent);
 
-        return agent;
+        return (agent, Constrain(agent));
     }
 
     /// <summary>
@@ -428,12 +443,14 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     /// inserts one is fixed per package version, not per endpoint, and the iteration-cap fact fails first.
     /// </para>
     /// </remarks>
-    private static void Constrain(ChatClientAgent agent)
+    private static FunctionInvokingChatClient Constrain(ChatClientAgent agent)
     {
         var invoker = agent.ChatClient.GetService<FunctionInvokingChatClient>()
             ?? throw new InvalidOperationException("The agent built no function-invoking client to cap.");
         invoker.MaximumIterationsPerRequest = MaximumIterations;
         invoker.AllowConcurrentInvocation = false;
+
+        return invoker;
     }
 
     /// <summary>The conversation as the model sees it: the caller's history, then this turn's message.</summary>

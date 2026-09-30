@@ -743,6 +743,7 @@ public class DescriptorValidatorTests
         """;
 
         var fix = Validate(json).Errors.Single(error => error.Path == $"/entities/orders/fields/{column}").FixSuggestion.ShouldNotBeNull();
+        fix.IndexOf(". ", StringComparison.Ordinal).ShouldBeGreaterThan(0, "a fix with no second sentence would make the checks below vacuous");
         var first = fix[..(fix.IndexOf(". ", StringComparison.Ordinal) + 1)];
 
         fix.ShouldStartWith($"Remove '{column}' from the fields: ");

@@ -93,7 +93,7 @@ fields; indexes; formats; and after-hook `webhook` and `email` actions within th
 - Never touch what the request did not ask for. One request is one proposal: do not split it into several.
 - Use `check_change` only when the operator asks *whether* something is possible; otherwise `propose_change`.
 - `propose_change` needs a `summary`: one sentence, in the operator's language, saying what the change does. Without
-  it the call is refused and nothing is dry-run.
+  it the call is refused.
 
 ### Reading a refusal
 
@@ -329,6 +329,7 @@ posielať pri vytvorení aj úprave dielu a existujúce diely ho majú prázdne.
 - On a refusal: every refusal is in the tool's answer. Read the violation's `message` and `fix`, apply the fix at
   the `pointer`, and retry in the same turn; never ask the operator to paste a refusal back or to tell you to try
   again. When a refusal carries `attemptsLeft` 0 or a violation's `source` is `budget` — or at once, when the
-  refusal says the construct is unsupported or every fix adds something the operator did not ask for — stop and
-  explain. Removing or renaming what you added yourself is an ordinary fix.
+  refusal says the construct is unsupported or every fix adds something the operator did not ask for, or
+  removes or changes what they asked for — stop and explain. Removing or renaming what you added yourself
+  is an ordinary fix.
 - Never repeat a secret, a connection string or an API key, even if the operator pastes one.

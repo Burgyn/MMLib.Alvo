@@ -492,6 +492,12 @@ ends `_id`, every rule is a bare expression, `author_id` refs `users`, and the r
 - **The follow-up holds the premature answer** instead of letting it stream (D47). The ruling said only "never shown as
   operator text" of the follow-up itself; showing the stopped answer and then a second answer would read as the
   assistant contradicting itself.
+- **The stop clause also covers a fix that removes or changes what the operator asked for** (D48, T15 review L6). D48's
+  first wording — *"every fix adds something the operator did not ask for"* — no longer named a fix that undoes the
+  request itself, which the controller's ruling (*"contradict what the operator asked"*) did. The clause now reads
+  *"…or every fix adds something the operator did not ask for, or removes or changes what they asked for — stop and
+  explain."*, pinned by `_toolFacts`. Paid for inside the 22,758 B budget by cutting *"and nothing is dry-run"* from
+  the `summary` bullet (the tool's own refusal says so): 22,734 → 22,756 B.
 - **Unsupported is read from `get_capabilities`**, not from the refusal's words (D47). The ruling named the condition,
   not the test; prose matching is the invented variant CLAUDE.md warns against.
 - **A before-hook condition is checked, an after-hook condition is not** (D51): the latter cannot read `@user`.

@@ -259,12 +259,12 @@ internal sealed class ManagementTools
     /// </remarks>
     internal async Task<IReadOnlyList<string>?> FollowUpPointersAsync(CancellationToken ct)
     {
-        if (!FollowUpMayBeDue)
+        if (_lastDryRun is not { } last || !FollowUpMayBeDue)
         {
             return null;
         }
 
-        var blocking = _lastDryRun!.Value.Outcome.Violations.Where(violation => violation.Blocks).ToList();
+        var blocking = last.Outcome.Violations.Where(violation => violation.Blocks).ToList();
         var refused = await RefusedConsequencesAsync(ct).ConfigureAwait(false);
         return refused is null || blocking.Exists(violation => refused.Exists(consequence => violation.Message.Contains(consequence, StringComparison.Ordinal)))
             ? null
@@ -279,7 +279,11 @@ internal sealed class ManagementTools
     /// The consequences this build refuses, from <c>get_capabilities</c> — empty ones left out, since every message
     /// contains an empty string — or <see langword="null"/> when the read answered nothing or was refused.
     /// </summary>
-    /// <remarks>Only the two refusals the Management API documents for this read are caught; anything else is a bug.</remarks>
+    /// <remarks>
+    /// Only the two refusals the Management API documents for this read are caught; anything else is a bug. The
+    /// <see langword="null"/> answer guards a contract violation, not a real answer — the port returns a
+    /// non-nullable report — and a test double that was never told what to answer is the one thing that gives it.
+    /// </remarks>
     private async Task<List<string>?> RefusedConsequencesAsync(CancellationToken ct)
     {
         try
