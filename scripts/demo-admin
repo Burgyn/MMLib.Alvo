@@ -196,9 +196,21 @@ configure_ai() {
   while [ -z "$ai_model" ]; do
     ai_model="$(ask "$model_label" "${saved_model:-gpt-4.1-mini}")"
   done
-  if [ -z "$ai_key" ]; then
+  while [ -z "$ai_key" ]; do
     ai_key="$(ask_secret 'API key')"
-  fi
+    # A pasted key carries stray whitespace often enough to strip it; its value is never echoed.
+    ai_key="$(printf '%s' "$ai_key" | tr -d '[:space:]')"
+    [ -n "$ai_key" ] || break
+    # OpenAI's own keys start with sk-; one that does not was mistyped or mis-pasted (a stray first
+    # character is the usual case), and the provider would refuse it on the first turn.
+    case "$ai_endpoint" in
+      https://api.openai.com/*)
+        case "$ai_key" in
+          sk-*) ;;
+          *) say "an OpenAI key starts with 'sk-' — this one does not (${#ai_key} characters); enter it again"; ai_key="" ;;
+        esac ;;
+    esac
+  done
   if [ -z "$ai_key" ] && [ "$ai_kind" = "azure-openai" ]; then
     say "azure-openai needs a key — starting without the schema assistant"
     ai=0
