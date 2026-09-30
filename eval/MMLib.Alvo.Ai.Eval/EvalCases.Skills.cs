@@ -49,6 +49,10 @@ internal static partial class EvalCases
     /// <c>beforeUpdate</c> — hooks are the only way this build keeps a price non-negative, since a field's
     /// <c>validation</c> is refused, and a <c>validation</c> added beside them is a change outside the hooks.
     /// </summary>
+    /// <remarks>
+    /// The price is the row as it will be (<c>new.unit_price</c>): <c>&lt; 0</c>, <c>0 &gt;</c>, or <c>!(… &gt;= 0)</c>.
+    /// <b>A known limit:</b> a wrapped operand such as <c>double(new.unit_price) &lt; 0.0</c> is not recognised and fails.
+    /// </remarks>
     private static Verdict RejectNegativePrice(TurnRecord turn)
     {
         var guarded = _priceSlots.Where(slot => Entries(turn.Proposed($"{PartsHooks}/{slot}"))
@@ -117,6 +121,9 @@ internal static partial class EvalCases
     /// <remarks>
     /// The claim is read at the start of the model's own prose with emphasis stripped: a leading yes or áno, or
     /// "Alvo / it can", "vie", "dokáže". A negative answer ("No, …", "Nie, …") is never a claim.
+    /// <b>A known limit (D36):</b> "Yes, via an unsigned webhook" is graded a claim, although an after-hook webhook is the
+    /// honoured rung the capabilities skill offers; the case asks about <c>http.call</c>, and "no, but …" is the answer
+    /// it expects.
     /// </remarks>
     private static Verdict CanAlvoCallHttp(TurnRecord turn)
     {
@@ -148,7 +155,9 @@ internal static partial class EvalCases
         members.Aggregate(node, (current, member) => current is JsonObject owner ? owner[member] : null) is JsonValue value
             && value.TryGetValue<string>(out var text) ? text : string.Empty;
 
-    [GeneratedRegex(@"(?:(?:new\.)?unit_price<0(?:\.0+)?|0(?:\.0+)?>(?:new\.)?unit_price)(?![0-9.])", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(
+        @"(?<![\w.])(?:new\.unit_price<0(?:\.0+)?(?![0-9.])|0(?:\.0+)?>new\.unit_price(?![\w.])|!\(new\.unit_price>=0(?:\.0+)?\))",
+        RegexOptions.CultureInvariant)]
     private static partial Regex NegativePrice();
 
     [GeneratedRegex(@"[*_]+", RegexOptions.CultureInvariant)]

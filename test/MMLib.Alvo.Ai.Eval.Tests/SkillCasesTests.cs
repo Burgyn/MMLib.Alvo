@@ -113,6 +113,9 @@ public sealed class SkillCasesTests
     [InlineData("new.unit_price > 100.0")]
     [InlineData("new.unit_price < 0.5")]
     [InlineData("new.name == ''")]
+    [InlineData("old.unit_price < 0.0")]
+    [InlineData("unit_price < 0.0")]
+    [InlineData("!(old.unit_price >= 0.0)")]
     public void Negative_price_fails_a_condition_that_is_not_a_negative_price(string condition) =>
         Grade("reject_negative_price", Proposing("reject_negative_price", document => EachPriceHook(document, hook => hook["condition"] = condition)))
             .Passed.ShouldBeFalse();
@@ -120,7 +123,8 @@ public sealed class SkillCasesTests
     [Theory]
     [InlineData("new.unit_price < 0")]
     [InlineData("0.0 > new.unit_price")]
-    [InlineData("unit_price < 0.00")]
+    [InlineData("new.unit_price < 0.00")]
+    [InlineData("!(new.unit_price >= 0.0)")]
     public void Negative_price_passes_every_way_of_writing_a_negative_price(string condition) =>
         Grade("reject_negative_price", Proposing("reject_negative_price", document => EachPriceHook(document, hook => hook["condition"] = condition)))
             .Passed.ShouldBeTrue();
@@ -148,6 +152,15 @@ public sealed class SkillCasesTests
             .Passed.ShouldBeFalse();
 
     [Fact]
+    public void Rentals_count_fails_the_right_rollup_on_another_entity() =>
+        Grade("rollup_rentals_count", Proposing("rollup_rentals_count", document =>
+        {
+            var field = document.Fields("customers")["rentals_count"]!.DeepClone();
+            document.Fields("customers").Remove("rentals_count");
+            document.Fields("bikes")["rentals_count"] = field;
+        })).Passed.ShouldBeFalse();
+
+    [Fact]
     public void Unique_part_fails_the_right_index_beside_a_part_unique_across_the_table() =>
         Grade("unique_part_per_order", Proposing("unique_part_per_order", document =>
             document.Fields("order_lines")["part_id"]!["unique"] = true)).Passed.ShouldBeFalse();
@@ -167,10 +180,18 @@ public sealed class SkillCasesTests
     [InlineData("list", "'admin' in @user.roles || assigned_user_id == @user.id")]
     [InlineData("get", "'admin' in @user.roles || assigned_user_id == @user.id")]
     [InlineData("list", "'admin' in @user.roles || 'manager' in @user.roles")]
+    [InlineData("get", "'manager' in @user.roles || assigned_user_id == @user.id")]
     [InlineData("get", "'admin' in @user.roles || 'manager' in @user.roles || 'authenticated' in @user.roles || assigned_user_id == @user.id")]
     public void Own_orders_fails_a_read_rule_that_drops_a_grant_or_keeps_everyone(string operation, string rule) =>
         Grade("own_orders_only", Proposing("own_orders_only", document => document["entities"]!["service_orders"]!["rules"]![operation] = rule))
             .Passed.ShouldBeFalse();
+
+    [Theory]
+    [InlineData("list")]
+    [InlineData("get")]
+    public void Own_orders_fails_a_change_to_only_one_of_the_read_rules(string kept) =>
+        Grade("own_orders_only", Proposing("own_orders_only", document =>
+            document["entities"]!["service_orders"]!["rules"]![kept] = "'authenticated' in @user.roles")).Passed.ShouldBeFalse();
 
     [Fact]
     public void Own_orders_fails_the_right_read_rules_beside_a_changed_update_rule() =>
