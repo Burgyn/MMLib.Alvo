@@ -93,6 +93,12 @@ is legal.
   is additive, so a level written against a future typed claim compiles without this table
   changing, and admitting the operator today expresses nothing a role membership could not.
 
+**A result-type refusal quotes what it refused (D42).** A predicate wrapped whole in a string literal
+(`'owner_id == @user.id'` under `Rule`, `Condition` or `Access`) is refused with a fix that names the outer quotes
+and gives the unwrapped content, and every result-type refusal echoes its source (at most 120 characters, control
+characters as spaces). Only the refusal's text changes: the check runs on a source already refused, its one inner
+compile has the check off, and `CelAcceptanceCorpusTests` holds the accepted set to its pre-D42 baseline.
+
 ## `Mutate`, the fourth profile
 
 `Mutate` compiles a before-hook's `mutate` value — the one descriptor slot that is a *value*

@@ -61,4 +61,96 @@ public class CelCompilerResultTypeTests
         result.Errors.ShouldNotBeEmpty();
         result.Errors.ShouldAllBe(error => !string.IsNullOrWhiteSpace(error.FixSuggestion));
     }
+
+    /// <summary>
+    /// A rule wrapped whole in quotes is a string, and the refusal says to remove the quotes — not to add a comparison it
+    /// already has (spec §8.1 step 3; the three shapes the RCA's model sent).
+    /// </summary>
+    [Theory]
+    [InlineData("'owner_id == @user.id'", "owner_id == @user.id")]
+    [InlineData("\"owner_id == @user.id\"", "owner_id == @user.id")]
+    [InlineData("'true'", "true")]
+    public void A_predicate_wrapped_whole_in_quotes_is_refused_with_the_quotes_named(string source, string content)
+    {
+        var result = _compiler.Compile(source, CelProfile.Rule, CelFixtures.Orders);
+
+        result.IsSuccess.ShouldBeFalse();
+        var error = result.Errors.ShouldHaveSingleItem();
+        error.Message.ShouldStartWith("A Rule expression must evaluate to a boolean");
+        error.Message.ShouldContain(source);
+        error.FixSuggestion.ShouldBe(CelCompiler.QuotedFixLead + content);
+    }
+
+    /// <summary>A quoted string whose content is no predicate keeps the generic fix: there is nothing to unwrap to.</summary>
+    /// <remarks>
+    /// Regression pins: both pass before D42 too. The second is a quoted predicate nested in quotes — its content
+    /// <c>'true'</c> is itself only a string, and the inner compile runs with the quote check off, so it is never
+    /// unwrapped twice. That bound is by construction (<c>detectQuoted: false</c>), and this pins its visible half.
+    /// </remarks>
+    [Theory]
+    [InlineData("'admin'")]
+    [InlineData("\"'true'\"")]
+    public void A_quoted_string_that_is_no_quoted_predicate_keeps_the_generic_fix(string source) =>
+        _compiler.Compile(source, CelProfile.Rule, CelFixtures.Orders).Errors.ShouldHaveSingleItem()
+            .FixSuggestion.ShouldNotStartWith("Remove the outer quotes");
+
+    /// <summary>Access and Condition are predicates too, and get the same refusal.</summary>
+    [Theory]
+    [InlineData(CelProfile.Access)]
+    [InlineData(CelProfile.Condition)]
+    public void Every_predicate_profile_names_a_quoted_predicate(CelProfile profile) =>
+        _compiler.Compile("'true'", profile, CelFixtures.Orders).Errors.ShouldHaveSingleItem()
+            .FixSuggestion.ShouldBe(CelCompiler.QuotedFixLead + "true");
+
+    /// <summary>Every result-type refusal quotes the source it refused, cut at a bound so a long one cannot flood the answer.</summary>
+    [Fact]
+    public void A_result_type_refusal_echoes_its_source_and_cuts_a_long_one()
+    {
+        var longSource = "'" + new string('x', 300) + "'";
+
+        _compiler.Compile("total", CelProfile.Rule, CelFixtures.Orders).Errors.Single().Message.ShouldContain("total");
+        var echoed = _compiler.Compile(longSource, CelProfile.Condition, CelFixtures.Orders).Errors.Single().Message;
+        echoed.ShouldContain(longSource[..CelCompiler.EchoLength] + "…");
+        echoed.ShouldNotContain(longSource);
+    }
+
+    /// <summary>The unwrapped content in the fix is capped like the echo (pre-flight M3).</summary>
+    [Fact]
+    public void A_long_quoted_predicate_is_capped_in_the_fix()
+    {
+        var content = string.Concat(Enumerable.Repeat("owner_id == @user.id || ", 6)) + "true";
+
+        var fix = _compiler.Compile("'" + content + "'", CelProfile.Rule, CelFixtures.Orders).Errors.ShouldHaveSingleItem().FixSuggestion;
+
+        fix.ShouldBe(CelCompiler.QuotedFixLead + content[..CelCompiler.EchoLength] + "…");
+    }
+
+    /// <summary>The echo turns a control character into a space, so a refusal is one line of plain text (pre-flight L1).</summary>
+    [Fact]
+    public void The_echo_replaces_control_characters_with_a_space() =>
+        _compiler.Compile("title\n+\t'a\tb'", CelProfile.Condition, CelFixtures.Orders).Errors
+            .ShouldContain(error => error.Message.EndsWith("The expression: title + 'a b'.", StringComparison.Ordinal));
+
+    /// <summary>A cut never splits a surrogate pair: the echo ends on a whole character (pre-flight L1).</summary>
+    [Fact]
+    public void The_echo_never_ends_on_half_a_surrogate_pair()
+    {
+        var source = "'" + new string('x', CelCompiler.EchoLength - 2) + "\U0001F600" + new string('y', 20) + "'";
+
+        var message = _compiler.Compile(source, CelProfile.Condition, CelFixtures.Orders).Errors.ShouldHaveSingleItem().Message;
+
+        message.ShouldContain(source[..(CelCompiler.EchoLength - 1)] + "…");
+        message.Where((character, index) => char.IsHighSurrogate(character)
+            && (index + 1 == message.Length || !char.IsLowSurrogate(message[index + 1]))).ShouldBeEmpty();
+    }
+
+    /// <summary>A quoted string stays a legitimate Computed or Mutate value: no unwrap is offered there.</summary>
+    /// <remarks>A regression pin: it passes before D42 too, and holds the accepted set still under Mutate.</remarks>
+    [Fact]
+    public void A_quoted_string_is_never_refused_under_mutate()
+    {
+        var result = _compiler.Compile("'owner_id == @user.id'", CelProfile.Mutate, CelFixtures.Orders);
+
+        result.IsSuccess.ShouldBeTrue();
+    }
 }
