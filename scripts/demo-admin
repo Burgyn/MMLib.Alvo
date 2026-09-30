@@ -20,8 +20,9 @@
 # it — ALVO_DEMO_AI_*, the host's own Alvo__Ai__*, then what an earlier run was told (ai.env in the demo
 # directory) — and only what none of them has is asked for, with a default Enter accepts. The key comes
 # from ALVO_DEMO_AI_KEY, OPENAI_API_KEY (api.openai.com) or AZURE_OPENAI_API_KEY (azure-openai), or from
-# ai.key if you let an earlier run remember it (mode 600, delete it to forget); it is read without echo,
-# never printed, and reaches the host through its secret store. With nothing missing nothing is asked;
+# ai.key if you let an earlier run remember it (mode 600, delete it to forget) — reused only for the endpoint it
+# was remembered for (ai.key.endpoint), and asked again for any other; it is read without echo, never printed in
+# full (the summary shows its prefix and last four characters), and reaches the host through its secret store. With nothing missing nothing is asked;
 # without a terminal to ask on (CI, a pipe) an incomplete connection starts the demo without the assistant.
 #
 # Environment:
@@ -134,6 +135,7 @@ host_log="$dir/host.log"
 ai_env="$dir/ai.env"
 ai_secret_name="demo_ai_key"
 ai_key_file="$dir/ai.key"
+ai_key_endpoint_file="$dir/ai.key.endpoint"
 ai_key_source=""
 
 # Reads one line from the terminal, offering a default that Enter accepts. /dev/tty rather than stdin,
@@ -157,7 +159,8 @@ ask_secret() {
 saved() { if [ -f "$ai_env" ]; then sed -n "s/^$1=//p" "$ai_env" | head -n 1; fi; }
 
 # The key the connection would send, from the first place that has one: ALVO_DEMO_AI_KEY, the
-# provider's usual variable, then the key this demo was told to remember (ai.key, readable by you only).
+# provider's usual variable, then the key this demo was told to remember (ai.key, readable by you only) —
+# only when it was remembered for this same endpoint, so a key never goes to a host it was not typed for.
 known_key() {
   ai_key="" ai_key_source=""
   if [ -n "${ALVO_DEMO_AI_KEY:-}" ]; then ai_key="$ALVO_DEMO_AI_KEY" ai_key_source=ALVO_DEMO_AI_KEY; return; fi
@@ -167,7 +170,22 @@ known_key() {
          https://api.openai.com/*) if [ -n "${OPENAI_API_KEY:-}" ]; then ai_key="$OPENAI_API_KEY" ai_key_source=OPENAI_API_KEY; return; fi ;;
        esac ;;
   esac
-  if [ -s "$ai_key_file" ]; then ai_key="$(tr -d '[:space:]' <"$ai_key_file")" ai_key_source="$ai_key_file"; fi
+  if [ -s "$ai_key_file" ] && [ -s "$ai_key_endpoint_file" ] && [ "$(cat "$ai_key_endpoint_file")" = "$ai_endpoint" ]; then
+    ai_key="$(tr -d '[:space:]' <"$ai_key_file")" ai_key_source="$ai_key_file"
+  fi
+}
+
+# A key as the summary shows it: its provider prefix up to the first '-' after a known one (sk-proj-, sk-ant-, sk-)
+# and its last four characters — and nothing of a key of twelve characters or fewer, which that would give away.
+masked_key() {
+  local key="$1" prefix=""
+  if [ "${#key}" -le 12 ]; then printf '(set, %s characters)' "${#key}"; return; fi
+  case "$key" in
+    sk-proj-*) prefix="sk-proj-" ;;
+    sk-ant-*) prefix="sk-ant-" ;;
+    sk-*) prefix="sk-" ;;
+  esac
+  printf '%s…%s' "$prefix" "${key: -4}"
 }
 
 # A key is needed when the provider always refuses without one; a local endpoint may run keyless.
@@ -262,8 +280,10 @@ configure_ai() {
       continue
     fi
     case "$(ask "Remember the key in $ai_key_file, readable by you only? (y/n)" y)" in
-      y|Y|yes|a|A|ano|áno) (umask 077; printf '%s' "$ai_key" >"$ai_key_file"); say "key remembered — delete $ai_key_file to forget it" ;;
-      *) rm -f "$ai_key_file" ;;
+      y|Y|yes|a|A|ano|áno)
+        (umask 077; printf '%s' "$ai_key" >"$ai_key_file"; printf '%s' "$ai_endpoint" >"$ai_key_endpoint_file")
+        say "key remembered for $ai_endpoint — delete $ai_key_file to forget it" ;;
+      *) rm -f "$ai_key_file" "$ai_key_endpoint_file" ;;
     esac
   done
 
@@ -480,7 +500,7 @@ cat <<EOF
     Sign in     $admin_email
     Password    $admin_password
 
-    Assistant   $( if [ "$ai" -eq 1 ]; then printf '%s at %s (%s%s)' "$ai_model" "$ai_endpoint" "$ai_kind" "$( [ -n "$ai_key" ] && printf ', key %s…%s from %s' "${ai_key:0:6}" "${ai_key: -4}" "$ai_key_source" || printf ', no key' )"; else printf 'off'; fi )
+    Assistant   $( if [ "$ai" -eq 1 ]; then printf '%s at %s (%s%s)' "$ai_model" "$ai_endpoint" "$ai_kind" "$( [ -n "$ai_key" ] && printf ', key %s from %s' "$(masked_key "$ai_key")" "$ai_key_source" || printf ', no key' )"; else printf 'off'; fi )
 
     API docs    $base/scalar
     API key     X-Alvo-Api-Key: $api_key   (admin, for this run only)
