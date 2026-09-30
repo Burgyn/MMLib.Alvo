@@ -56,17 +56,17 @@ is neither is refused at apply. Reuse a declared format before adding one: the d
 {"valid": true, "changedPaths": ["/entities/rentals/fields/deposit_note"]}
 ```
 
-<!-- example: add-rental-checked-in-by -->
+<!-- example: add-rental-check-in-technician -->
 **Which technician checked a returned rental in, kept when that technician is deleted.**
 
 ```json
-{"tool": "propose_change", "baseRevision": 1, "summary": "Adds checked_in_by, the technician who checked the rental in.",
- "operations": [{"op": "add", "path": "/entities/rentals/fields/checked_in_by",
+{"tool": "propose_change", "baseRevision": 1, "summary": "Adds check_in_technician_id, the technician who checked the rental in.",
+ "operations": [{"op": "add", "path": "/entities/rentals/fields/check_in_technician_id",
                  "value": {"type": "ref", "entity": "technicians", "onDelete": "setNull"}}]}
 ```
 
 ```json
-{"valid": true, "changedPaths": ["/entities/rentals/fields/checked_in_by"]}
+{"valid": true, "changedPaths": ["/entities/rentals/fields/check_in_technician_id"]}
 ```
 
 In the dashboard: read with `get_descriptor`, then `check_change` or `propose_change` the operations.

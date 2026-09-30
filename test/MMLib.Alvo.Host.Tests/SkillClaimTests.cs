@@ -41,6 +41,8 @@ public sealed class SkillClaimTests
         (BeforeCreate, """{"condition": "changed(quantity)", "action": {"reject": "No."}}""", false),
         (BeforeUpdate, """[{"action": {"mutate": {"description": {"$cel": "@user.id"}}}}]""", false),
         (BeforeUpdate, """[{"action": {"mutate": {"unit_price": {"$cel": "old.unit_price"}}}}]""", true),
+        ("/entities/technicians/rules/update", "\"'user_id == @user.id'\"", false),
+        ("/entities/technicians/rules/update", "\"user_id == @user.id\"", true),
     ];
 
     /// <summary>
@@ -80,6 +82,21 @@ public sealed class SkillClaimTests
         var attempt = await InstructionExampleOutcomeTests.AttemptAsync(management, path, field);
 
         attempt.Valid.ShouldBe(accepted, $"{path}: {string.Join(" | ", attempt.Refusals)}");
+    }
+
+    /// <summary>A rule wrapped whole in quotes draws the fix the rules skill quotes, naming the bare rule (D42, D43).</summary>
+    [Fact]
+    public async Task A_rule_wrapped_whole_in_quotes_is_refused_with_the_fix_the_rules_skill_quotes()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(InstructionExampleOutcomeTests.BikeWorkshop);
+        var management = world.Services.GetRequiredService<IAlvoManagement>();
+        world.Services.GetRequiredService<IAlvoContextAccessor>().Principal = InstructionExampleOutcomeTests.Administrator();
+
+        var attempt = await InstructionExampleOutcomeTests.AttemptAsync(management, "/entities/technicians/rules/update", "\"'user_id == @user.id'\"");
+
+        attempt.Valid.ShouldBeFalse();
+        attempt.Violations.ShouldContain(violation => violation.Fix == "Remove the outer quotes; the value is the expression itself: user_id == @user.id");
+        SkillCatalogue.Named("rules-and-cel").Body.ShouldContain("*\"Remove the outer quotes\"*");
     }
 
     [Theory]

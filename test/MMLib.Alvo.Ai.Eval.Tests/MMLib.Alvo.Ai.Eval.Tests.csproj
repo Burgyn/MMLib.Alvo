@@ -22,6 +22,7 @@
        validator, this one grades the turns built from them, and one source keeps the two on the same answers. -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/SkillCaseAnswers.cs" Link="_shared/SkillCaseAnswers.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InstructionExamples.cs" Link="_shared/InstructionExamples.cs" />
   </ItemGroup>
 
 </Project>

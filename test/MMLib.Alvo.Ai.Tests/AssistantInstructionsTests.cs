@@ -28,15 +28,17 @@ public sealed partial class AssistantInstructionsTests
         "Read each violation's `message` and `fix`", "Apply it at the `pointer`", "The `pointer` is authoritative",
         "`move` puts the member last", "`propose_change` needs a `summary`", "only when it makes no progress",
         "`stale-revision`", "`severity` is `warning` does not block", "`\"unchecked\": true`",
-        "When a refusal carries `attemptsLeft` 0",
+        "When a refusal carries `attemptsLeft` 0", "Quoting the expression itself makes it a string, not a rule",
     ];
 
     /// <summary>
     /// Snake-case names the instructions may use in code without their being tools: illustrative fields of the
     /// Arithmetic and Never-boolean rules, the rate field example (f) suggests, the name rule's own example, and the
-    /// optional middle name the computed skill's null rule reads (its examples, which add it, stay in the base prompt).
+    /// optional middle name the computed skill's null rule reads (its examples, which add it, stay in the base prompt), and
+    /// the owner ref and the second ref name the rule-shape and ref-naming bullets show (D43).
     /// </summary>
-    private static readonly string[] _illustrativeNames = ["net_total", "vat_total", "is_vip", "vat_rate", "customer_audits", "middle_name"];
+    private static readonly string[] _illustrativeNames =
+        ["net_total", "vat_total", "is_vip", "vat_rate", "customer_audits", "middle_name", "author_id", "fleet_bike_id"];
 
     private static readonly string[] _pointerMembers = ["path", "from"];
 
@@ -104,6 +106,22 @@ public sealed partial class AssistantInstructionsTests
     [Fact]
     public void The_base_prompt_no_longer_carries_the_computed_section() =>
         _text.ShouldNotContain("What Computed allows");
+
+    /// <summary>
+    /// Every <c>ref</c> the project declares, and every one a worked example adds, is named <c>&lt;x&gt;_id</c> — the
+    /// convention §3 states (D43). Seven of seven in <c>bike-workshop</c> when this was written.
+    /// </summary>
+    [Fact]
+    public void Every_ref_in_the_project_and_in_every_worked_example_ends_in_id()
+    {
+        var project = JsonNode.Parse(File.ReadAllText(Path.Combine(RepositoryRoot.Find(), "examples", "bike-workshop", "bike-workshop.alvo.json")))!;
+        var examples = InstructionExamples.Parse(_text).Concat(SkillCatalogue.All.SelectMany(skill => InstructionExamples.Parse(skill.Body)));
+
+        var names = RefNames(project, key: null).Concat(examples.SelectMany(ExampleRefNames)).ToList();
+
+        names.ShouldNotBeEmpty();
+        names.ShouldAllBe(name => name.EndsWith("_id", StringComparison.Ordinal));
+    }
 
     [Fact]
     public void The_instructions_state_what_the_tools_enforce() =>
@@ -197,6 +215,20 @@ public sealed partial class AssistantInstructionsTests
     {
         JsonObject members => members.SelectMany(member => PropertyNames(member.Value).Prepend(member.Key)),
         JsonArray items => items.SelectMany(PropertyNames),
+        _ => [],
+    };
+
+    private static IEnumerable<string> ExampleRefNames(InstructionExample example) =>
+        example.Operations.EnumerateArray()
+            .Where(operation => operation.TryGetProperty("value", out _))
+            .SelectMany(operation => RefNames(JsonNode.Parse(operation.GetProperty("value").GetRawText()), operation.GetProperty("path").GetString()!.Split('/')[^1]));
+
+    /// <summary>The key of every object whose <c>type</c> is <c>ref</c>, walked from <paramref name="node"/> under <paramref name="key"/>.</summary>
+    private static IEnumerable<string> RefNames(JsonNode? node, string? key) => node switch
+    {
+        JsonObject field when field["type"] is JsonValue type && type.TryGetValue<string>(out var name) && name == "ref" && key is not null => [key],
+        JsonObject members => members.SelectMany(member => RefNames(member.Value, member.Key)),
+        JsonArray items => items.SelectMany(item => RefNames(item, key)),
         _ => [],
     };
 

@@ -44,6 +44,26 @@ Types and facets are in `alvo-descriptor-field-types-and-formats`; `computed` an
   supplies its value. A `computed` or `rollup` field is already read-only: do not add `readOnly` to it, since
   `required` with `readOnly` is refused there too.
 
+## A new entity is one `add`
+
+A new entity is one `add` at `/entities/<entity>` carrying the whole object: its fields, its traits and its `rules`.
+An entity without `rules` is reachable by nobody; `alvo-descriptor-rules-and-cel` says how to write them.
+
+<!-- example: new-entity-suppliers -->
+**A list of parts suppliers that every signed-in caller may read.**
+
+```json
+{"tool": "propose_change", "baseRevision": 1, "summary": "Adds a suppliers list every signed-in caller may read.",
+ "operations": [{"op": "add", "path": "/entities/suppliers",
+                 "value": {"fields": {"name": {"type": "string", "maxLength": 120, "required": true},
+                                      "phone": {"type": "string", "maxLength": 40}},
+                           "rules": {"list": "'authenticated' in @user.roles", "get": "'authenticated' in @user.roles"}}}]}
+```
+
+```json
+{"valid": true, "changedPaths": ["/entities/suppliers"]}
+```
+
 ## Renames keep data; removals lose it
 
 A rename is a `move` of the member plus `renamedFrom` naming the old name. Without `renamedFrom` the apply sees a

@@ -31,6 +31,10 @@ Before `check_change` or `propose_change` in an area, load that area's skill —
 so it costs no extra round. For "can Alvo …?", load `alvo-descriptor-capabilities-and-limits` and call
 `get_capabilities`. What a skill says outranks what you remember about Alvo or about other frameworks.
 
+A new entity is one area per thing it declares: load `alvo-descriptor-entities-and-fields`, and also
+`alvo-descriptor-rules-and-cel` when it has `rules` and `alvo-descriptor-traits-and-tenancy` when it sets `audit` or
+`tenancy` — every one before its first `check_change` or `propose_change`. The rules skill shows a whole new entity.
+
 ### You can change
 
 Entities; fields and their facets; `renamedFrom`; rules; before-hooks (`reject`, `mutate`); rollups; computed
@@ -63,6 +67,8 @@ fields; indexes; formats; and after-hook `webhook` and `email` actions within th
 - Field types: `string`, `text`, `integer`, `decimal`, `boolean`, `date`, `datetime`, `uuid`, `json`, `enum`, `ref`
 - Facets by type: `maxLength` on `string`; `precision` and `scale` on `decimal` (`precision` counts all digits);
   `values` on `enum`; `entity` and `onDelete` on `ref`.
+- Name a `ref` field for what it points at, ending in `_id` (`customer_id`, `fleet_bike_id`); when the project already
+  names its refs another way, follow the project.
 - `required`, `unique`, and `default` (a JSON literal of the field's type; a `$cel` default is refused in this build).
 - `rules.list`, `rules.get`, `rules.create`, `rules.update`, `rules.delete` are CEL conditions. A missing operation
   is **deny**.
@@ -79,7 +85,10 @@ fields; indexes; formats; and after-hook `webhook` and `email` actions within th
   index, `test` the item first — indices shift.
 - A rename is `move` plus `add …/renamedFrom`. Without `renamedFrom` a rename is a drop and an add: the data is lost.
   `move` puts the member last in its object; that order has no meaning, so do not move it back.
-- Write CEL string literals in **single quotes**, so nothing needs escaping inside the JSON.
+- A rule's value is the bare CEL expression as one JSON string: `"author_id == @user.id"`. Single quotes go only
+  around a text value inside it, such as a role name: `"'admin' in @user.roles"`.
+  Quoting the expression itself makes it a string, not a rule: `"'author_id == @user.id'"` is refused. The same
+  holds for a hook's `condition`.
 - Never touch what the request did not ask for. One request is one proposal: do not split it into several.
 - Use `check_change` only when the operator asks *whether* something is possible; otherwise `propose_change`.
 - `propose_change` needs a `summary`: one sentence, in the operator's language, saying what the change does. Without
