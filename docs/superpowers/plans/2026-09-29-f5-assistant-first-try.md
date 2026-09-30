@@ -19,7 +19,8 @@ MTP, Shouldly.
 **Spec:** `docs/superpowers/specs/2026-09-29-f5-assistant-first-try-design.md` (#289). It builds on
 `docs/superpowers/specs/2026-09-28-f5-assistant-reliability-design.md`, whose tool surface, budget (3), iteration
 cap (12), instructions and eval are built and unchanged; deviations D15–D21 are the spec's. Tasks 5–10 build the
-spec's §7, *Skills (scope extension, 2026-09-29)*, and its deviations D22–D36.
+spec's §7, *Skills (scope extension, 2026-09-29)*, and its deviations D22–D36. Tasks 11–14 build §8, *RCA of the
+task-management turn (2026-09-30)*, and its decisions D41–D46.
 
 ## Global Constraints
 
@@ -2780,3 +2781,1285 @@ step.
   - An approval halt is `ToolApprovalRequestContent` in M.E.AI 10.10, not `FunctionApprovalRequestContent`.
   - `CelTypeChecker._allowedProfiles` and `CelConstructKind` are `private` → probes (D35).
   - `%(RecursiveDir)` is backslashed on Windows → the loader normalises it.
+
+---
+
+## RCA extension — Tasks 11–14 (spec §8, D41–D46)
+
+**Goal:** fix what the RCA of the task-management turn (spec §8) proved and the maintainer approved in this PR.
+- **S1**, the refusal budget measures progress and never answers "refused" for an attempt it did not check (T11).
+- **S3**, the CEL compiler names a whole expression wrapped in quotes and echoes the source (T12).
+- **S2**, the instructions and the rules skill teach a rule's JSON shape, a whole new entity, and `<x>_id` ref naming
+  (T13).
+- **S7**, every turn leaves a trace: in the log, and in the dashboard for the operator who asked (T14).
+
+S4, S5, S6 and S8 are #292 and out of scope.
+
+**Architecture:**
+- T11 is `ManagementTools` state plus one outcome flag.
+- T12 is one refusal branch in the core's `CelCompiler`, which is **security core**.
+- T13 is Markdown with drift and outcome tests.
+- T14 adds an internal `TurnRecorder`, `TurnTrace` and `SecretScrub` to `MMLib.Alvo.Ai`, and two log events. Two
+  internal members of Abstractions carry the trace to `MMLib.Alvo.Admin`, whose drawer shows it (D45, D46).
+
+**Evidence base:** `…/scratchpad/rca/analysis.md` and `probe-out.txt` (the RCA's probe over real
+`AlvoHostWorld`/`DescriptorDraft`/`ManagementTools`/validator/`CelCompiler`). Every line number below was re-read on
+this branch at `c440388`.
+
+### Global Constraints, added for Tasks 11–14
+
+Everything above still holds, with these amendments:
+- **The budget text changes (D41).** It supersedes the reliability plan's "tool set, caps, budget text:
+  unchanged" for the budget only. The tool set and the 12-iteration cap are unchanged.
+- **Instructions v5.** The first task that edits `schema-assistant.md` (T11) moves both the resource's first line and
+  `AssistantInstructions.VersionLine` to `<!-- alvo-schema-assistant v5 -->`. T13 edits stay under v5.
+- **`MMLib.Alvo.Admin` is touched in T14 (D46), so `scripts/test-admin-e2e` whole is a gate for T14.** This lifts
+  the earlier "do not touch Admin" constraint for T14 only.
+- **Public API (D45):** no public type or member is added anywhere.
+  - The only baseline allowed to move is `test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt`,
+    and only by the four `InternalsVisibleTo` lines T14 adds.
+  - The turn-review gate will stop on that growth. Answer it against `alvo-architecture-rules` with D45's text:
+    grants only, no symbol.
+  - Any other `*.verified.*` diff means the change is wrong.
+- **Security core (T12):** `CelCompiler` is the CEL compile boundary.
+  - Apply the `alvo-security-core-review` checklist.
+  - The PR report marks T12 **needs-deep-review**.
+  - `/security-review` is user-only in this environment, so the controller dispatches a reviewer subagent and labels
+    it a substitute.
+- **These lessons from this branch still apply to every step:**
+  - Release `-warnaserror` catches CA1861 (a constant array argument becomes a `static readonly` field), CA1875
+    (`Regex.Count`), CA1859 (return the concrete type), CA1870 (`SearchValues`/`string` overloads) and IDE0065
+    (`using`s above `namespace`).
+  - Windows CI checks out CRLF: every regex over Markdown ends a line with `\r?$` or captures `[^\r\n]`, and text is
+    `.ReplaceLineEndings("\n")` before it is parsed or measured.
+  - A `$$"""…"""` raw string must not contain a literal `}}` or `{{`. A JSON object nested to its end is exactly
+    that, so build it with `JsonObject`/`JsonArray` or concatenate.
+  - Culture-sensitive interpolation goes through `string.Create(CultureInfo.InvariantCulture, …)`.
+  - `.cs` files are UTF-8 with BOM and CRLF, and a file written by a shell tool is normalised before commit.
+  - Skill files are UTF-8 without BOM, LF.
+- **Write the failing facts first**, run them red, then implement.
+- **Every task ends with**, all green:
+  - `scripts/test-ring1`;
+  - `dotnet build MMLib.Alvo.slnx -c Release -warnaserror`, with 0 warnings and 0 errors.
+- **T14 also runs**:
+  - `scripts/test-ring2` (the two known `PagingPerformanceTests` Npgsql *connect* timeouts are infrastructure: read
+    the trace first);
+  - `scripts/test-admin-e2e` **whole**;
+  - `docker build -f src/MMLib.Alvo.Host/Dockerfile .`.
+- **Commits:** one per task, Conventional Commits, ending with
+  `Claude-Session: https://claude.ai/code/session_01TrcGmun8WAuVxN5FYAtu6H`. Never push. Never switch branch. One
+  writer in the worktree.
+
+---
+
+### Task 11: The refusal budget measures progress, and never calls an unchecked attempt refused (S1, D41)
+
+**Files:**
+- Modify: `src/MMLib.Alvo.Ai/Internal/ManagementTools.cs` (the constants, the state, `AttemptAsync`, `Record`, and
+  the class remarks)
+- Modify: `src/MMLib.Alvo.Ai/Internal/ChangeOutcome.cs` (`Unchecked`, `BudgetSpent`, `ToolViolation.Key`)
+- Modify: `src/MMLib.Alvo.Ai/Internal/ViolationMapping.cs` (`BudgetSpent(lastRefusals)`, `UncheckedLead`)
+- Modify: `src/MMLib.Alvo.Ai/AlvoAssistant.cs` (the "bounded twice" remark only)
+- Modify: `src/MMLib.Alvo.Ai/Instructions/schema-assistant.md` (the version line; §4 *Reading a refusal*, last bullet;
+  §6's stop rule); `src/MMLib.Alvo.Ai/Internal/AssistantInstructions.cs` (`VersionLine`)
+- Modify: `eval/MMLib.Alvo.Ai.Eval/TurnRecord.cs` (`RefusedAttempts` skips an `unchecked` answer)
+- Test: `test/MMLib.Alvo.Ai.Tests/ManagementToolsTests.cs` (lines 414–459: the two budget facts rewritten, three new
+  facts), `test/MMLib.Alvo.Ai.Tests/AssistantInstructionsTests.cs` (`_toolFacts`),
+  `test/MMLib.Alvo.Ai.Eval.Tests/EvalCasesTests.cs` (one fact)
+
+**Interfaces:**
+```csharp
+// ManagementTools
+internal const int MaximumStalledRefusals = 3;   // replaces MaximumRefusedAttempts; a refusal with no progress spends one
+internal const int MaximumRefusals = 6;          // every refusal counts; the hard ceiling per turn
+// ChangeOutcome — a trailing optional member; null is omitted by ToolJson (WhenWritingNull)
+internal sealed record ChangeOutcome(bool Valid, int Revision, ManagementPlanSummary? Plan, IReadOnlyList<string> ChangedPaths,
+    IReadOnlyList<ToolViolation> Violations, int AttemptsLeft, bool? Unchecked = null);
+internal static ChangeOutcome BudgetSpent(int revision, IReadOnlyList<string> lastRefusals);
+// ToolViolation
+internal string Key { get; }   // Source, Pointer, Code, Message joined by U+001F: what "the same violation" means
+// ViolationMapping
+internal const string UncheckedLead = "This attempt was not checked: the turn's refusal budget is spent.";
+internal static ToolViolation BudgetSpent(IReadOnlyList<string> lastRefusals);
+```
+
+- [ ] **Step 1: The failing facts.** In `ManagementToolsTests`, replace
+  `The_fourth_attempt_after_three_refusals_gets_only_the_budget_violation` (lines 413–442) and add the three new facts
+  below it. `A_spent_budget_reports_the_revision…` (444–459) keeps its body, with `MaximumRefusedAttempts` renamed to
+  `MaximumStalledRefusals`. Three stale refusals have one identical violation, so they stall, and the fourth, identical
+  call is still answered unchecked with revision 7.
+
+```csharp
+    /// <summary>
+    /// Three identical refusals spend the budget; the same patch a fourth time is not dry-run, and says so.
+    /// </summary>
+    /// <remarks>
+    /// The RCA's turn (spec §8.1 step 4): the fourth call was never checked, and the old message invited the model to
+    /// tell the operator it was refused. The answer now says it was not checked and carries the last checked refusal.
+    /// </remarks>
+    [Fact]
+    public async Task The_same_patch_after_three_stalled_refusals_is_answered_unchecked_with_the_last_refusal()
+    {
+        var management = Serving(Descriptor);
+        Refusing(management, Refusal("gross"));
+        var tools = ManagementTools.For(management, Project);
+
+        var left = new List<int>();
+        for (var attempt = 0; attempt < ManagementTools.MaximumStalledRefusals; attempt++)
+        {
+            left.Add(JsonNode.Parse(await InvokeAsync(tools, "check_change", Change("check_change", AddNotes)))!["attemptsLeft"]!.GetValue<int>());
+        }
+
+        var fourth = JsonNode.Parse(await InvokeAsync(tools, "propose_change", Change("propose_change", AddNotes)))!;
+
+        left.ShouldBe([2, 1, 0]);
+        fourth["unchecked"]!.GetValue<bool>().ShouldBeTrue();
+        var budget = fourth["violations"]!.AsArray().Single()!;
+        budget["source"]!.GetValue<string>().ShouldBe("budget");
+        budget["message"]!.GetValue<string>().ShouldStartWith(ViolationMapping.UncheckedLead);
+        budget["message"]!.GetValue<string>().ShouldContain("/entities/bikes/fields/gross: No.");
+        await management.ReceivedWithAnyArgs(3).ApplyDescriptorAsync(default!, default!, Ct);
+    }
+
+    /// <summary>A refusal that fixed something spends no attempt, so a model converging on a fix reaches it.</summary>
+    [Fact]
+    public async Task Refusals_that_make_progress_spend_no_attempt_and_a_valid_fourth_is_filed()
+    {
+        var management = Serving(Descriptor);
+        var answers = new Queue<string[]>(_progressingRefusals);
+        management.ApplyDescriptorAsync(Project, Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Returns(_ => Answer(answers.Dequeue()));
+        var tools = ManagementTools.For(management, Project);
+
+        var left = new List<int>();
+        foreach (var field in _fourFields.Take(3))
+        {
+            left.Add(JsonNode.Parse(await InvokeAsync(tools, "propose_change", Change("propose_change", Adding(field))))!["attemptsLeft"]!.GetValue<int>());
+        }
+
+        var fourth = JsonNode.Parse(await InvokeAsync(tools, "propose_change", Change("propose_change", Adding(_fourFields[3]))))!;
+
+        left.ShouldBe([2, 2, 2]);
+        fourth["valid"]!.GetValue<bool>().ShouldBeTrue();
+        tools.Proposal!.Refusals.ShouldBeEmpty();
+    }
+
+    /// <summary>With the three attempts spent, a patch not yet checked is still dry-run, and a valid one is filed.</summary>
+    [Fact]
+    public async Task A_new_patch_after_the_attempts_are_spent_is_still_dry_run()
+    {
+        var management = Serving(Descriptor);
+        Refusing(management, Refusal("gross"));
+        management.ApplyDescriptorAsync(
+                Project, Arg.Is<ManagementApplyRequest>(request => request.DescriptorJson.Contains("\"colour\"", StringComparison.Ordinal)), Arg.Any<CancellationToken>())
+            .Returns(new ManagementApplyResult(Applied: false, Revision, EmptyPlan));
+        var tools = ManagementTools.For(management, Project);
+        for (var attempt = 0; attempt < ManagementTools.MaximumStalledRefusals; attempt++)
+        {
+            await InvokeAsync(tools, "propose_change", Change("propose_change", AddNotes));
+        }
+
+        var fresh = JsonNode.Parse(await InvokeAsync(tools, "propose_change", Change("propose_change", Adding("colour"))))!;
+
+        fresh["valid"]!.GetValue<bool>().ShouldBeTrue();
+        fresh["unchecked"].ShouldBeNull();
+        tools.Proposal!.Refusals.ShouldBeEmpty();
+    }
+
+    /// <summary>Six refusals end the turn's dry runs even when every one of them changed something (D41's ceiling).</summary>
+    [Fact]
+    public async Task Six_refusals_are_the_most_a_turn_dry_runs_even_when_each_made_progress()
+    {
+        var management = Serving(Descriptor);
+        var calls = 0;
+        management.ApplyDescriptorAsync(Project, Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Throws(_ => Refusal(calls++ % 2 == 0 ? "a" : "b"));
+        var tools = ManagementTools.For(management, Project);
+        for (var attempt = 0; attempt < ManagementTools.MaximumRefusals; attempt++)
+        {
+            await InvokeAsync(tools, "check_change", Change("check_change", Adding(string.Create(CultureInfo.InvariantCulture, $"f{attempt}"))));
+        }
+
+        var seventh = JsonNode.Parse(await InvokeAsync(tools, "check_change", Change("check_change", Adding("f6"))))!;
+
+        seventh["unchecked"]!.GetValue<bool>().ShouldBeTrue();
+        await management.ReceivedWithAnyArgs(ManagementTools.MaximumRefusals).ApplyDescriptorAsync(default!, default!, Ct);
+    }
+```
+
+  Add these helpers beside `Change`. The static fields avoid CA1861.
+
+```csharp
+    private static readonly string[][] _progressingRefusals = [["a", "b"], ["a"], ["c"], []];
+    private static readonly string[] _fourFields = ["one", "two", "three", "four"];
+
+    /// <summary>A refusal at one field of <c>bikes</c> per name — the blocking set a test controls.</summary>
+    private static DescriptorValidationException Refusal(params string[] fields) =>
+        new(new DescriptorValidationResult(
+            [.. fields.Select(field => new DescriptorValidationError("/entities/bikes/fields/" + field, "No.", null, DescriptorValidationSeverity.Error))]));
+
+    /// <summary>The dry run's answer: valid when nothing is refused, else the refusal.</summary>
+    private static ManagementApplyResult Answer(string[] refused) =>
+        refused.Length == 0 ? new ManagementApplyResult(Applied: false, Revision, EmptyPlan) : throw Refusal(refused);
+
+    /// <summary>A one-operation patch adding a text field — built, not written as a raw string, so no brace run closes it.</summary>
+    private static string Adding(string field) =>
+        new JsonArray(new JsonObject
+        {
+            ["op"] = "add",
+            ["path"] = "/entities/bikes/fields/" + field,
+            ["value"] = new JsonObject { ["type"] = "text" },
+        }).ToJsonString();
+```
+
+  - `using System.Globalization;` goes into the file's `System.*` block.
+  - `.Throws(Func<CallInfo, Exception>)` is `NSubstitute.ExceptionExtensions`, which the file already imports.
+  - In `Refusals_that_make_progress…`, the first refusal is stalled against the empty set, so 2. `{a}` is not a
+    superset of `{a, b}`, so 2. `{c}` is not a superset of `{a}`, so 2.
+
+  In `AssistantInstructionsTests._toolFacts`, replace `"spends one of the same three attempts"` with
+  `"only when it makes no progress"`, and add `"`\"unchecked\": true`"`.
+
+  In `EvalCasesTests`, add this fact. It is built from `Turns.Turn`, `Turns.Propose` and `Turns.Refused`, which
+  exist:
+
+```csharp
+    [Fact]
+    public void An_unchecked_budget_answer_is_no_refused_attempt()
+    {
+        var budget = Turns.Refused("budget", "This attempt was not checked: the turn's refusal budget is spent.");
+        budget["unchecked"] = true;
+
+        Turns.Turn(answer: "ok", calls: [Turns.Propose(Turns.Refused("validation", "No."), round: 1), Turns.Propose(budget, round: 2)])
+            .RefusedAttempts.ShouldBe(1);
+    }
+```
+
+- [ ] **Step 2: Run** `dotnet test --project test/MMLib.Alvo.Ai.Tests` and
+  `dotnet test --project test/MMLib.Alvo.Ai.Eval.Tests`. They fail to compile (`MaximumStalledRefusals`,
+  `UncheckedLead`), and that is the red state.
+
+- [ ] **Step 3: Implement.**
+  1. In `ChangeOutcome.cs`:
+     - add `bool? Unchecked = null` as the record's last positional member, with a `<param>`: *"`true` only on the
+       budget answer: this attempt was not dry-run, so nothing about it is known."*;
+     - change `BudgetSpent(int revision, IReadOnlyList<string> lastRefusals)` to
+       `new(Valid: false, revision, Plan: null, [], [ViolationMapping.BudgetSpent(lastRefusals)], AttemptsLeft: 0, Unchecked: true)`;
+     - add to `ToolViolation`:
+       `internal string Key => string.Join('\u001f', Source, Pointer, Code ?? string.Empty, Message);`
+  2. In `ViolationMapping.cs`, replace `BudgetSpent()`:
+
+```csharp
+    internal const string UncheckedLead = "This attempt was not checked: the turn's refusal budget is spent.";
+
+    internal static ToolViolation BudgetSpent(IReadOnlyList<string> lastRefusals) => new(
+        ToolViolation.Budget, string.Empty,
+        $"{UncheckedLead} The last checked attempt was refused with: {string.Join(" | ", lastRefusals)}. "
+        + "Quote that refusal to the operator; never call this attempt refused.",
+        Fix: null, Code: AttemptsExhaustedCode);
+```
+
+  3. In `ManagementTools.cs`:
+     - rename the constant;
+     - add `MaximumRefusals`;
+     - replace `_refusedAttempts` with the following, and change `AttemptsLeft` and the attempt path:
+
+```csharp
+    private readonly List<(int BaseRevision, JsonElement Operations)> _checked = [];
+    private HashSet<string> _lastBlocking = new(StringComparer.Ordinal);
+    private IReadOnlyList<string> _lastRefusals = [];
+    private int _stalledRefusals;
+    private int _refusals;
+
+    private int AttemptsLeft =>
+        Math.Max(0, Math.Min(MaximumStalledRefusals - _stalledRefusals, MaximumRefusals - _refusals));
+
+    private async Task<(DraftAttempt? Attempt, ChangeOutcome Outcome)> AttemptAsync(
+        int baseRevision, JsonElement operations, CancellationToken ct)
+    {
+        if (Unchecked(baseRevision, operations))
+        {
+            return (null, ChangeOutcome.BudgetSpent(_currentRevision, _lastRefusals));
+        }
+
+        var attempt = await DescriptorDraft.BuildAsync(_management, _project, baseRevision, operations, ct).ConfigureAwait(false);
+        Record(attempt, baseRevision, operations);
+
+        return (attempt, ChangeOutcome.From(attempt, AttemptsLeft));
+    }
+
+    /// <summary>Whether this attempt is answered without a dry run: the ceiling is spent, or the budget is and it was already checked.</summary>
+    private bool Unchecked(int baseRevision, JsonElement operations) =>
+        _refusals >= MaximumRefusals
+        || (_stalledRefusals >= MaximumStalledRefusals
+            && _checked.Exists(done => done.BaseRevision == baseRevision && JsonElement.DeepEquals(done.Operations, operations)));
+
+    private void Record(DraftAttempt attempt, int baseRevision, JsonElement operations)
+    {
+        _currentRevision = attempt.CurrentRevision;
+        _checked.Add((baseRevision, operations.Clone()));
+        if (!attempt.Valid)
+        {
+            Refused(attempt);
+        }
+    }
+
+    /// <summary>Counts a refusal, and spends an attempt only when it made no progress (D41).</summary>
+    private void Refused(DraftAttempt attempt)
+    {
+        var blocking = attempt.Violations.Where(violation => violation.Blocks).Select(violation => violation.Key).ToHashSet(StringComparer.Ordinal);
+        _refusals++;
+        _stalledRefusals += blocking.IsSupersetOf(_lastBlocking) ? 1 : 0;
+        (_lastBlocking, _lastRefusals) = (blocking, attempt.Refusals);
+    }
+```
+
+     - rewrite the class remarks' budget paragraphs to D41:
+       - *"A refusal spends one of three attempts only when it made no progress: the same blocking violations as the
+         refusal before it, or more."*
+       - *"Six refusals are the ceiling, progress or not."*
+       - *"A patch not yet checked is always dry-run before a budget answer, and that answer says it was not checked
+         (`unchecked: true`)."*
+     - the "sequential invocation" paragraph stays true; say that the new fields are plain state too.
+  4. In `AlvoAssistant.cs`, the remark becomes *"The tools stop dry-running after three refusals that made no
+     progress, or six in all (D41)…"*.
+  5. In `schema-assistant.md`:
+     - version line `v5`;
+     - replace the last bullet of *Reading a refusal* with:
+
+```markdown
+- A refusal spends one of three attempts only when it makes no progress — the same blocking violations as the
+  refusal before it, or more; `attemptsLeft` says how many remain, and a turn ends after six refusals in all. An
+  answer with `"unchecked": true` was **not** dry-run: never call that attempt refused — quote the last checked
+  refusal its message carries, and stop.
+```
+
+     - in §6, the refusal bullet's *"After three refused attempts — or at once, …"* becomes
+       *"When `attemptsLeft` is 0 or a violation's `source` is `budget` — or at once, …"*.
+  6. In `AssistantInstructions.cs`: `VersionLine = "<!-- alvo-schema-assistant v5 -->"`.
+  7. In `eval/MMLib.Alvo.Ai.Eval/TurnRecord.cs`, change `RefusedAttempts` to
+     `Outcomes.Where(outcome => outcome["unchecked"] is null).Count(outcome => !(…valid…))`, keeping the existing
+     predicate. Remark: *"An `unchecked` budget answer was no dry run (D41)."*
+
+- [ ] **Step 4: Run** Ai.Tests and Eval.Tests, which should be green. Then run Host.Tests: the worked examples' claimed
+  `"attemptsLeft": 2` (examples (e) and (f)) still hold, because a first refusal is stalled against the empty set.
+  `git grep -n "MaximumRefusedAttempts\|Stop proposing"` should find nothing live outside `docs/`.
+- [ ] **Step 5: Measure the always-in-context budget.** `AlvoAssistantTests.The_always_in_context_instructions…`
+  must stay green, because §4 grew by about 150 bytes. Record the measured size in the commit body (see T13 step 0
+  for how to read it).
+- [ ] **Step 6: Gates and commit.**
+  - Run `scripts/test-ring1`.
+  - Run `dotnet build MMLib.Alvo.slnx -c Release -warnaserror`.
+  - Commit `fix(ai): the refusal budget measures progress, and an unchecked attempt is never called refused`.
+
+---
+### Task 12: A rule wrapped whole in quotes gets its own refusal, and every result-type refusal echoes its source (S3, D42)
+
+**Security core** (CEL compile): apply the `alvo-security-core-review` checklist, and mark the PR report
+*needs-deep-review*. The accepted set must not move. The change only ever rewrites the text of a refusal the
+compiler already returns.
+
+**Files:**
+- Modify: `src/MMLib.Alvo/Expressions/Internal/CelCompiler.cs` (`Compile`, `CheckAndAssemble`,
+  `AppendResultTypeError`, `ValidateResultType`, plus a private `Authored` record struct and `Echo`)
+- Modify: `docs/architecture/cel.md` (one sentence in the result-type section)
+- Test: `test/MMLib.Alvo.Tests/Expressions/CelCompilerResultTypeTests.cs`
+
+**Nothing quotes the changed text today.** `git grep -n "must evaluate to a boolean\|Add a comparison"` finds it
+only in `CelCompiler.cs` and a historical plan. `alvo-descriptor-computed-and-rollups` quotes *"A computed-field
+expression must evaluate to a non-boolean scalar"*, and `CelProfileTests.cs:95` asserts `"non-boolean scalar"`. Both
+are kept, because every message keeps its first sentence as its prefix. T13 adds the one new quote, the fix's
+*"Remove the outer quotes"*, and a fact that holds it to the dry run.
+
+**Interfaces:**
+```csharp
+namespace MMLib.Alvo.Expressions.Internal;
+internal sealed class CelCompiler : ICelCompiler
+{
+    internal const int EchoLength = 120;                                   // an echoed source is cut here, plus "…"
+    internal const string QuotedFixLead = "Remove the outer quotes; the value is the expression itself: ";
+    public CelCompilationResult Compile(string source, CelProfile profile, EntitySchema entity);   // unchanged contract
+}
+```
+
+- [ ] **Step 1: The failing facts**, added to `CelCompilerResultTypeTests`. `CelFixtures.Orders` has `owner_id`
+  (a nullable uuid) and `title`. `owner_id == @user.id` compiles under `Rule` (`CelCompilerTests.cs:16`).
+
+```csharp
+    /// <summary>
+    /// A rule wrapped whole in quotes is a string, and the refusal says to remove the quotes — not to add a comparison it
+    /// already has (spec §8.1 step 3; the three shapes the RCA's model sent).
+    /// </summary>
+    [Theory]
+    [InlineData("'owner_id == @user.id'", "owner_id == @user.id")]
+    [InlineData("\"owner_id == @user.id\"", "owner_id == @user.id")]
+    [InlineData("'true'", "true")]
+    public void A_predicate_wrapped_whole_in_quotes_is_refused_with_the_quotes_named(string source, string content)
+    {
+        var result = _compiler.Compile(source, CelProfile.Rule, CelFixtures.Orders);
+
+        result.IsSuccess.ShouldBeFalse();
+        var error = result.Errors.ShouldHaveSingleItem();
+        error.Message.ShouldStartWith("A Rule expression must evaluate to a boolean");
+        error.Message.ShouldContain(source);
+        error.FixSuggestion.ShouldBe(CelCompiler.QuotedFixLead + content);
+    }
+
+    /// <summary>A quoted string whose content is no predicate keeps the generic fix: there is nothing to unwrap to.</summary>
+    [Theory]
+    [InlineData("'admin'")]
+    [InlineData("\"'true'\"")]
+    public void A_quoted_string_that_is_no_quoted_predicate_keeps_the_generic_fix(string source) =>
+        _compiler.Compile(source, CelProfile.Rule, CelFixtures.Orders).Errors.ShouldHaveSingleItem()
+            .FixSuggestion.ShouldNotStartWith("Remove the outer quotes");
+
+    /// <summary>Access and Condition are predicates too, and get the same refusal.</summary>
+    [Theory]
+    [InlineData(CelProfile.Access)]
+    [InlineData(CelProfile.Condition)]
+    public void Every_predicate_profile_names_a_quoted_predicate(CelProfile profile) =>
+        _compiler.Compile("'true'", profile, CelFixtures.Orders).Errors.ShouldHaveSingleItem()
+            .FixSuggestion.ShouldBe(CelCompiler.QuotedFixLead + "true");
+
+    /// <summary>Every result-type refusal quotes the source it refused, cut at a bound so a long one cannot flood the answer.</summary>
+    [Fact]
+    public void A_result_type_refusal_echoes_its_source_and_cuts_a_long_one()
+    {
+        var longSource = "'" + new string('x', 300) + "'";
+
+        _compiler.Compile("total", CelProfile.Rule, CelFixtures.Orders).Errors.Single().Message.ShouldContain("total");
+        var echoed = _compiler.Compile(longSource, CelProfile.Condition, CelFixtures.Orders).Errors.Single().Message;
+        echoed.ShouldContain(longSource[..CelCompiler.EchoLength] + "…");
+        echoed.ShouldNotContain(longSource);
+    }
+
+    /// <summary>A quoted string stays a legitimate Computed or Mutate value: no unwrap is offered there.</summary>
+    [Fact]
+    public void A_quoted_string_is_never_refused_under_mutate()
+    {
+        var result = _compiler.Compile("'owner_id == @user.id'", CelProfile.Mutate, CelFixtures.Orders);
+
+        result.IsSuccess.ShouldBeTrue();
+    }
+```
+
+  - The 302-character literal is well under `CelParser.MaxSourceLength` (2000).
+  - Its `Condition` result is `String`, so it is refused.
+  - Its content (`xxx…`) is no field, so it takes the generic fix, and the echo is what is asserted.
+  - The existing `A_result_type_rejection_names_the_type…` and `…always_carries_a_fix_suggestion` theories must stay
+    green unchanged.
+
+- [ ] **Step 2: Run** `dotnet test --project test/MMLib.Alvo.Tests --filter-class "*CelCompilerResultTypeTests"`. It
+  does not compile, because `QuotedFixLead` and `EchoLength` do not exist yet.
+
+- [ ] **Step 3: Implement.** Keep every method ≤ ~25 lines.
+  1. Add `private readonly record struct Authored(string Source, CelProfile Profile, EntitySchema Entity, CelNode Parsed, bool DetectQuoted);`.
+  2. `Compile` delegates to `private static CelCompilationResult Compile(string source, CelProfile profile, EntitySchema entity, bool detectQuoted)`.
+     The public overload passes `true`, and the argument checks stay in the public one.
+  3. `CheckAndAssemble(Authored authored)` passes `authored` and the checker's `resultType`/`position` to
+     `AppendResultTypeError`.
+  4. `ValidateResultType(Authored authored, CelValueType resultType, int position)`:
+     - keep each existing branch's first sentence byte for byte;
+     - append `" The expression: " + Echo(authored.Source) + "."` to each message;
+     - in the predicate branch, choose the fix:
+
+```csharp
+        if (IsPredicateProfile(authored.Profile) && resultType != CelValueType.Bool)
+        {
+            var quoted = QuotedPredicate(authored);
+            return new CelCompilationError(
+                $"A {authored.Profile} expression must evaluate to a boolean; this expression evaluates to {resultType}."
+                + (quoted is null ? " The expression: " : " The whole expression is one quoted string: ") + Echo(authored.Source) + ".",
+                quoted is null ? "Add a comparison, e.g. field == value, so the expression yields true/false." : QuotedFixLead + quoted,
+                position);
+        }
+```
+
+  5. Add the two helpers:
+
+```csharp
+    /// <summary>
+    /// The content of a string literal that is itself a predicate, or <see langword="null"/>. Compiled once, with this check
+    /// off, so nesting cannot recurse: at most two compilations per source, and only for a source already refused.
+    /// </summary>
+    private static string? QuotedPredicate(Authored authored) =>
+        authored.DetectQuoted
+        && authored.Parsed is CelLiteral { Type: CelValueType.String, Value: string content }
+        && Compile(content, authored.Profile, authored.Entity, detectQuoted: false).IsSuccess
+            ? content
+            : null;
+
+    private static string Echo(string source) =>
+        source.Length <= EchoLength ? source : string.Concat(source.AsSpan(0, EchoLength), "…");
+```
+
+     `IsSuccess` under a predicate profile already implies a `Bool` result, because the branch above refuses anything
+     else.
+  6. Add a class-remark paragraph: *"A quoted predicate (D42): the refusal names the quotes. The accepted set is
+     untouched — the check runs only on a source already refused, and the inner compile cannot recurse."*
+  7. In `docs/architecture/cel.md`, the result-type section gets one sentence: *"A predicate wrapped whole in a string
+     literal is refused with a fix that names the outer quotes, and every result-type refusal echoes its source (at
+     most 120 characters)."*
+
+- [ ] **Step 4: Run** the whole `MMLib.Alvo.Tests` project, then Host.Tests. The skills' Computed quotes
+  (`InstructionExampleOutcomeTests`) and `SkillCoreClaimsTests` are fragment matches, so they must stay green. A red
+  one means a first sentence moved: restore it, and never loosen the test.
+- [ ] **Step 5: Security-core pass.**
+  - Walk the `alvo-security-core-review` checklist against the diff, and record in the commit body, one line each:
+    - no source's `IsSuccess` changed (Step 1's negative facts, and the unchanged existing suites);
+    - the inner compile is bounded (`detectQuoted: false`);
+    - the echo is capped;
+    - no exception can escape `Compile`: the inner call is the same no-throw path.
+  - Before the PR, mutation runs on `main` post-merge, so run it on demand via `workflow_dispatch` if the controller
+    judges the merge risky (CLAUDE.md, Hard rules).
+- [ ] **Step 6: Gates and commit.**
+  - Run `scripts/test-ring1`.
+  - Run `dotnet build MMLib.Alvo.slnx -c Release -warnaserror`.
+  - Commit `fix(cel): a predicate wrapped whole in quotes is refused with the quotes named, and the source echoed`.
+
+---
+
+### Task 13: Teach a rule's JSON shape, a whole new entity, and `<x>_id` ref naming (S2, D43)
+
+**Files:**
+- Modify: `src/MMLib.Alvo.Ai/Instructions/schema-assistant.md`:
+  - §2 `### Skills`: a new-entity load rule, as its own paragraph;
+  - §3: ref naming;
+  - §4: line 82, the rule shape;
+  - §5: example (i), `new-entity-bike-notes`.
+- Modify: `.claude/skills/alvo-descriptor-rules-and-cel/SKILL.md`:
+  - the rule-shape paragraph replaces lines 17–18's last sentence;
+  - `gen:cel-rule` gains two refused entries;
+  - the worked example `new-entity-with-rules`.
+- Modify: `.claude/skills/alvo-descriptor-field-types-and-formats/SKILL.md` (lines 59–70: `checked_in_by` becomes
+  `check_in_technician_id`)
+- Test:
+  - `test/MMLib.Alvo.Host.Tests/SkillClaimTests.cs` (two probes and one fact);
+  - `test/MMLib.Alvo.Ai.Tests/AssistantInstructionsTests.cs` (the ref-naming fact; `_toolFacts`);
+  - `test/MMLib.Alvo.Ai.Eval.Tests/InstructionRepliesTests.cs` (`WorkedReplies` 9 → 10);
+  - `test/MMLib.Alvo.Ai.Eval.Tests/NewEntityLoadRuleTests.cs` (new);
+  - `test/MMLib.Alvo.Ai.Eval.Tests/MMLib.Alvo.Ai.Eval.Tests.csproj` (links `_shared/ai/InstructionExamples.cs`).
+
+**The two caps, measured first.** The always-in-context text (base prompt plus skill list) is ≤ **22,758** bytes
+(`AlvoAssistantTests.AlwaysInContextBudget`). D39 measured it at about 21.4 KB, which leaves about 1.35 KB. This task
+adds about 1.3 KB there. `rules-and-cel/SKILL.md` is 2,577 of **6,144** bytes (`SkillConformanceTests.MaximumSkillBytes`)
+and gains about 1.9 KB.
+
+- [ ] **Step 0: Measure the headroom.**
+  1. Temporarily set `AlwaysInContextBudget = 0` in `AlvoAssistantTests`.
+  2. Run `dotnet test --project test/MMLib.Alvo.Ai.Tests --filter-method "*The_always_in_context_instructions*"`.
+     Shouldly's message states the actual size (*"should be less than or equal to 0 but was N"*).
+  3. Restore the constant, and write `N` (after T11) in the commit body.
+  4. Draft the base-prompt text below. If `N` plus the draft exceeds 22,758, trim prose, in this order:
+     - the example (h) sentence *"The field name stays English snake_case; only the prose follows the operator."*
+       (the name rule in §3 already says it);
+     - §4's *"`move` puts the member last in its object; that order has no meaning, so do not move it back."*, shortened
+       to *"`move` puts the member last; leave it there."*. Keep the `_toolFacts` phrase *"`move` puts the member last"*.
+  5. **Never raise the budget, and never trim a drift-tested fact or a `_toolFacts` phrase.**
+
+- [ ] **Step 1: The failing facts.**
+
+  (a) `SkillClaimTests._probes` gains two rows, the RCA's B1 and B4 on this branch's `technicians`:
+
+```csharp
+        ("/entities/technicians/rules/update", "\"'user_id == @user.id'\"", false),
+        ("/entities/technicians/rules/update", "\"user_id == @user.id\"", true),
+```
+
+  In RFC 6902, `add` onto an existing member replaces it, so the probe's `add` op needs no change. Then add the fact
+  that holds the skill's quote to the dry run:
+
+```csharp
+    /// <summary>A rule wrapped whole in quotes draws the fix the rules skill quotes, naming the bare rule (D42, D43).</summary>
+    [Fact]
+    public async Task A_rule_wrapped_whole_in_quotes_is_refused_with_the_fix_the_rules_skill_quotes()
+    {
+        await using var world = await AlvoHostWorld.StartAsync(InstructionExampleOutcomeTests.BikeWorkshop);
+        var management = world.Services.GetRequiredService<IAlvoManagement>();
+        world.Services.GetRequiredService<IAlvoContextAccessor>().Principal = InstructionExampleOutcomeTests.Administrator();
+
+        var attempt = await InstructionExampleOutcomeTests.AttemptAsync(management, "/entities/technicians/rules/update", "\"'user_id == @user.id'\"");
+
+        attempt.Valid.ShouldBeFalse();
+        attempt.Violations.ShouldContain(violation => violation.Fix == "Remove the outer quotes; the value is the expression itself: user_id == @user.id");
+        SkillCatalogue.Named("rules-and-cel").Body.ShouldContain("*\"Remove the outer quotes\"*");
+    }
+```
+
+  (b) `AssistantInstructionsTests` gains the ref-naming fact:
+
+```csharp
+    /// <summary>
+    /// Every <c>ref</c> the project declares, and every one a worked example adds, is named <c>&lt;x&gt;_id</c> — the
+    /// convention §3 states (D43). Seven of seven in <c>bike-workshop</c> when this was written.
+    /// </summary>
+    [Fact]
+    public void Every_ref_in_the_project_and_in_every_worked_example_ends_in_id()
+    {
+        var project = JsonNode.Parse(File.ReadAllText(Path.Combine(RepositoryRoot.Find(), "examples", "bike-workshop", "bike-workshop.alvo.json")))!;
+        var examples = InstructionExamples.Parse(_text).Concat(SkillCatalogue.All.SelectMany(skill => InstructionExamples.Parse(skill.Body)));
+
+        RefNames(project, key: null).Concat(examples.SelectMany(ExampleRefNames)).ShouldAllBe(name => name.EndsWith("_id", StringComparison.Ordinal));
+    }
+
+    private static IEnumerable<string> ExampleRefNames(InstructionExample example) =>
+        example.Operations.EnumerateArray()
+            .Where(operation => operation.TryGetProperty("value", out _))
+            .SelectMany(operation => RefNames(JsonNode.Parse(operation.GetProperty("value").GetRawText()), operation.GetProperty("path").GetString()!.Split('/')[^1]));
+
+    /// <summary>The key of every object whose <c>type</c> is <c>ref</c>, walked from <paramref name="node"/> under <paramref name="key"/>.</summary>
+    private static IEnumerable<string> RefNames(JsonNode? node, string? key) => node switch
+    {
+        JsonObject field when field["type"] is JsonValue type && type.GetValue<string>() == "ref" && key is not null => [key],
+        JsonObject members => members.SelectMany(member => RefNames(member.Value, member.Key)),
+        JsonArray items => items.SelectMany(item => RefNames(item, key)),
+        _ => [],
+    };
+```
+
+  `SkillCatalogue.All` and `SkillOnDisk.Body` are the real members, and `SkillCatalogue.cs` and `InstructionExamples.cs`
+  are already linked into Ai.Tests. Add to `_toolFacts`: `"Never wrap the whole expression in quotes"`.
+
+  (c) `Eval.Tests/NewEntityLoadRuleTests.cs`, new. In the csproj, link `../_shared/ai/InstructionExamples.cs` beside
+  `SkillCaseAnswers.cs`:
+
+```csharp
+using MMLib.Alvo.Ai.Tests;
+
+using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+
+namespace MMLib.Alvo.Ai.Eval.Tests;
+
+/// <summary>
+/// The base prompt's load rule for a new entity names exactly the skills the eval's grader needs for the prompt's own
+/// whole-entity example (D43) — so the instruction and the grade cannot drift apart.
+/// </summary>
+public sealed partial class NewEntityLoadRuleTests
+{
+    private const string Lead = "A new entity is one area per thing it declares";
+
+    private static readonly string _instructions = File.ReadAllText(
+        Path.Combine(RepositoryRoot.Find(), "src", "MMLib.Alvo.Ai", "Instructions", "schema-assistant.md")).ReplaceLineEndings("\n");
+
+    [Fact]
+    public void The_new_entity_load_rule_names_what_the_grader_needs_for_the_whole_entity_example()
+    {
+        var rule = _instructions.Split("\n\n").Single(paragraph => paragraph.StartsWith(Lead, StringComparison.Ordinal));
+        var example = InstructionExamples.Parse(_instructions).Single(candidate => candidate.Name == "new-entity-bike-notes");
+        var operation = example.Operations.EnumerateArray().Single();
+
+        var needed = SkillsRead.AreasOf(operation.GetProperty("path").GetString()!, JsonNode.Parse(operation.GetProperty("value").GetRawText()))
+            .Select(area => "alvo-descriptor-" + area);
+
+        SkillName().Matches(rule).Select(match => match.Value).Distinct().Order(StringComparer.Ordinal)
+            .ShouldBe(needed.Order(StringComparer.Ordinal));
+    }
+
+    [GeneratedRegex("alvo-descriptor-[a-z-]*[a-z]", RegexOptions.CultureInvariant)]
+    private static partial Regex SkillName();
+}
+```
+
+  (d) `InstructionRepliesTests.WorkedReplies = 10`.
+
+- [ ] **Step 2: Run** Ai.Tests, Eval.Tests and Host.Tests. Expect these reds:
+  - the two probes (the quoted-rule message exists after T12, but the skill does not quote it yet);
+  - `NewEntityLoadRuleTests`, because neither the paragraph nor the example exists;
+  - `WorkedReplies`;
+  - `_toolFacts`.
+
+  The ref-naming fact is red **only** for `checked_in_by`.
+
+- [ ] **Step 3: The base prompt.** These are the exact texts; keep the Markdown line width of the file.
+  1. The `### Skills` section gets a second paragraph, after the first:
+
+```markdown
+A new entity is one area per thing it declares: load `alvo-descriptor-entities-and-fields`, and also
+`alvo-descriptor-rules-and-cel` when it has `rules` and `alvo-descriptor-traits-and-tenancy` when it sets `audit` or
+`tenancy` — every one before its first `check_change` or `propose_change`.
+```
+
+     The pin reads exactly the three `alvo-descriptor-*` names in this paragraph. Hooks, indexes and computed fields
+     are covered by the per-area sentence above it. If a later example declares one of those, extend both the
+     paragraph and the example.
+  2. In §3, after the facets bullet:
+
+```markdown
+- Name a `ref` field for what it points at, ending in `_id` (`customer_id`, `fleet_bike_id`); when the project already
+  names its refs another way, follow the project.
+```
+
+  3. In §4, replace line 82 (*"Write CEL string literals in **single quotes**…"*):
+
+```markdown
+- A rule's value is the bare CEL expression as one JSON string: `"user_id == @user.id"`. Never wrap the whole
+  expression in quotes; only a text value inside it, such as a role name, goes in single quotes:
+  `"'admin' in @user.roles"`. The same holds for a hook's `condition` and a `$cel` value.
+```
+
+  4. In §5, the new example goes last, after (h):
+
+````markdown
+<!-- example: new-entity-bike-notes -->
+**(i) A new entity, whole: notes on a bike, each written and edited only by its author.**
+
+```json
+{"tool": "propose_change", "baseRevision": 1, "summary": "Adds bike notes, each editable only by its author.",
+ "operations": [{"op": "add", "path": "/entities/bike_notes",
+                 "value": {"audit": true,
+                           "fields": {"bike_id": {"type": "ref", "entity": "bikes", "onDelete": "cascade", "required": true},
+                                      "author_id": {"type": "ref", "entity": "users", "required": true},
+                                      "body": {"type": "text", "required": true}},
+                           "rules": {"list": "'authenticated' in @user.roles", "get": "'authenticated' in @user.roles",
+                                     "create": "author_id == @user.id", "update": "author_id == @user.id"}}}]}
+```
+
+```json
+{"valid": true, "changedPaths": ["/entities/bike_notes"]}
+```
+
+One `add` carries the whole entity: its fields, its trait and its `rules`, each rule a bare expression. Reply: *I
+proposed a bike notes entity. Once you apply it from Preview, any signed-in caller can read notes, a caller can write
+a note only as its author and edit only their own, deleting a bike deletes its notes, and nobody can delete a note,
+since no delete rule is given.*
+````
+
+     The reply puts no new snake_case name in backticks: `Every_snake_case_name_in_code…` knows `bike_notes` only
+     from the pointer, and `author_id` from nowhere. It says *proposed*, and it is English.
+- [ ] **Step 4: The rules skill** (`.claude/skills/alvo-descriptor-rules-and-cel/SKILL.md`). The file is UTF-8
+  without BOM, LF, and ≤ 6,144 bytes.
+  1. Lines 17–18's *"Write CEL string literals in single quotes."* becomes:
+
+```markdown
+A rule's value is the bare CEL expression as one JSON string: `"user_id == @user.id"`. Never wrap the whole expression
+in quotes; only a text value inside it, such as a role name, goes in single quotes. A rule wrapped whole in quotes is
+a string, not a condition, and is refused with *"Remove the outer quotes"*.
+```
+
+  2. `gen:cel-rule`'s refused line gains, at its end, `` `'user_id == @user.id'` `'true'` ``. `SkillCoreClaimsTests`
+     then proves three things:
+     - both are refused under `Rule`, and after T12 they draw the quoted-predicate refusal;
+     - both compile under another profile (`Computed` and `Mutate` accept a string);
+     - the allowed `user_id == @user.id` is already on the allowed line.
+  3. Before the tool-neutral closing lines, add a paragraph and the example:
+
+````markdown
+A new entity carries its whole `rules` object in the `add` that creates it. Say every operation the request allows;
+a missing one is denied. An owner clause compares a `ref` to `users` with `@user.id`.
+
+<!-- example: new-entity-with-rules -->
+**Comments on a service order: everyone signed in reads them, each author edits and deletes their own, admins delete any.**
+
+```json
+{"tool": "propose_change", "baseRevision": 1, "summary": "Adds comments on service orders, each editable by its author.",
+ "operations": [{"op": "add", "path": "/entities/order_comments",
+                 "value": {"audit": true,
+                           "fields": {"order_id": {"type": "ref", "entity": "service_orders", "onDelete": "cascade", "required": true},
+                                      "author_id": {"type": "ref", "entity": "users", "required": true},
+                                      "body": {"type": "text", "required": true}},
+                           "rules": {"list": "'authenticated' in @user.roles", "get": "'authenticated' in @user.roles",
+                                     "create": "author_id == @user.id", "update": "author_id == @user.id",
+                                     "delete": "'admin' in @user.roles || author_id == @user.id"}}}]}
+```
+
+```json
+{"valid": true, "changedPaths": ["/entities/order_comments"]}
+```
+````
+
+     A `ref` to `users` takes no `onDelete` (D38); a `ref` to `service_orders` does.
+  4. The field-types skill: rename the example `add-rental-checked-in-by` to `add-rental-check-in-technician`.
+     - Its heading stays.
+     - Its path and `changedPaths` become `/entities/rentals/fields/check_in_technician_id`.
+     - Its summary becomes *"Adds check_in_technician_id, the technician who checked the rental in."*
+     - `git grep -n checked_in_by` must then find nothing.
+- [ ] **Step 5: Run** Ai.Tests, Eval.Tests and Host.Tests. Everything should be green, and these facts are the proof:
+  - `SkillExampleOutcomeTests` runs `new-entity-with-rules` and `add-rental-check-in-technician` through the real tool
+    on `bike-workshop`;
+  - `InstructionExampleOutcomeTests` runs `new-entity-bike-notes`;
+  - `SkillConformanceTests` holds the 6,144-byte and 200-line caps and the patch claims;
+  - `AlvoAssistantTests` holds the 22,758-byte budget;
+  - `EmbeddedSkillsTests` proves the embedded catalogue equals the files after LF normalisation.
+
+  The eval's `SkillsRead` pin passes with `[alvo-descriptor-entities-and-fields, alvo-descriptor-rules-and-cel,
+  alvo-descriptor-traits-and-tenancy]`.
+
+  If an outcome test refuses an example, read the refusal and fix the **example**, never the claim, then re-run.
+  Likely causes:
+  - a `ref` to `users` with `required` refused;
+  - an `onDelete` on `users`.
+- [ ] **Step 6: Gates and commit.**
+  - Run `scripts/test-ring1`.
+  - Run `dotnet build MMLib.Alvo.slnx -c Release -warnaserror`.
+  - Commit `feat(ai): the assistant is taught a rule's JSON shape, a whole new entity, and ref naming`. The body
+    records the measured always-in-context size, before and after.
+
+---
+### Task 14: Every turn leaves a trace — in the log, and in the drawer for the operator who asked (S7, D44–D46)
+
+**Files:**
+- Create in `src/MMLib.Alvo.Ai/Internal/`:
+  - `TurnRecorder.cs` (a `DelegatingChatClient`, plus `TracedCall`);
+  - `TurnTrace.cs` (the builder, the cap, `TurnHeader`, `TurnEnd`);
+  - `SecretScrub.cs`.
+- Modify: `src/MMLib.Alvo.Ai/AlvoAssistant.cs` (wraps the client, emits the trace, events 6202/6203, remarks)
+- Modify in Abstractions:
+  - `src/MMLib.Alvo.Abstractions/Ai/AssistantModels.cs` (`AssistantRequest.IncludeTrace` and
+    `AssistantUpdate.TurnTraced`, both `internal`);
+  - `src/MMLib.Alvo.Abstractions/Properties/AssemblyInfo.cs` (four grants, D45).
+- Modify in Admin:
+  - `src/MMLib.Alvo.Admin/Components/Assistant/AssistantDrawer.razor` (asks for the trace, and *Turn details* /
+    *Copy JSON*);
+  - `src/MMLib.Alvo.Admin/wwwroot/alvo.css` (`.a-assistant__trace`).
+- Test:
+  - `test/MMLib.Alvo.Ai.Tests/AlvoAssistantTests.cs` (the trace facts; `RunAsync` gains `trace` and `history`;
+    `CapturingLogger` keeps event ids);
+  - `test/MMLib.Alvo.Ai.Tests/TurnTraceTests.cs` (new: the cap and the scrub);
+  - `test/MMLib.Alvo.Admin.Tests.EndToEnd/ScriptedAssistant.cs` (emits a trace when asked);
+  - `test/MMLib.Alvo.Admin.Tests.EndToEnd/AssistantScenarios.cs` (one scenario).
+- Baseline: `test/MMLib.Alvo.Abstractions.Tests/PublicApi.MMLib.Alvo.Abstractions.verified.txt` gains exactly four
+  `InternalsVisibleTo` lines, and nothing else.
+
+**Interfaces:**
+```csharp
+// MMLib.Alvo.Abstractions — no public symbol (D45)
+public sealed record AssistantRequest(string Project, string Message, IReadOnlyList<AssistantTurn> History)
+{
+    /// <summary>Whether the caller wants the turn's trace as its last update. The dashboard only (D45).</summary>
+    internal bool IncludeTrace { get; init; }
+}
+public abstract record AssistantUpdate
+{
+    /// <summary>The turn's trace, as JSON (<c>alvo.assistant.turn/1</c>): emitted last, and only when the request asked.</summary>
+    internal sealed record TurnTraced(string Json) : AssistantUpdate;
+}
+
+// MMLib.Alvo.Ai.Internal
+internal sealed class TurnRecorder(IChatClient inner) : DelegatingChatClient(inner)
+{
+    internal int ToolRounds { get; }
+    internal IReadOnlyList<TracedCall> Calls { get; }   // RecordedCall's members, so a trace line and an eval line read alike
+}
+internal sealed record TracedCall(int Round, string CallId, string Tool, IDictionary<string, object?>? Arguments, string? Result);
+internal sealed record TurnHeader(string Instructions, string Provider, string Model, string Project);
+internal static class TurnEnd { internal const string Answered = "answered", IterationCap = "iteration-cap", EndpointFailed = "endpoint-failed"; }
+internal static class TurnTrace
+{
+    internal const string Format = "alvo.assistant.turn/1";
+    internal const int MaximumBytes = 65_536;
+    internal static JsonObject Of(TurnHeader header, IReadOnlyList<TracedCall> calls, string end);
+    internal static JsonObject LogLine(JsonObject entry);   // the entry with each operation reduced to its op and path
+}
+internal static partial class SecretScrub
+{
+    internal const string Redacted = "[redacted]";
+    internal static string Scrub(string text);
+    internal static JsonNode? Scrub(JsonNode? node);   // every string value, in place of a copy
+}
+```
+
+**What the trace holds (D44).** It is built at the turn's end from `TurnRecorder.Calls`:
+- **Header:**
+  - `format`;
+  - `instructions`, which is `AssistantInstructions.VersionLine` without `<!-- ` and ` -->`;
+  - `provider` (`connection.Kind`), `model` and `project`;
+  - `baseRevision`, the `revision` of the first `get_descriptor` answer, or null;
+  - `end`, `rounds` and `calls`;
+  - `truncated: true` whenever the cap cost anything, and `droppedCalls` when whole entries were dropped.
+- **One entry per call**, `{round, tool, arguments, result}`:
+  - `arguments` keeps `baseRevision`, `operations` (the patch, parsed if it arrived as a string), `skillName` and
+    `resourceName`. `summary` becomes `summaryChars`, and any other key becomes its name only.
+  - `result` for `check_change` and `propose_change`: `valid`, `revision`, `changedPaths`, `attemptsLeft`,
+    `unchecked`, and `violations` (every member), or `{error, message}`.
+  - `result` for `get_descriptor`: `{revision}`.
+  - `result` for `load_skill` and `read_skill_resource`: `{chars, found}`, where `found` is false when the answer
+    starts `Error:`.
+  - `result` for any other read: `{chars}`.
+- **Never:** the request's `Message`, its `History`, the model's text, or the `summary` argument's text.
+- **Scrubbed:** every string, after the trace is built.
+- **Capped at 65,536 bytes of UTF-8:** an entry that would cross the cap first loses its `operations`
+  (`{"omittedBytes": n}`), and the header says `truncated`. If it still crosses, recording stops, and `droppedCalls`
+  says how many calls were left out.
+
+- [ ] **Step 1: The Abstractions seam first, so the facts compile.**
+  - Add the two internal members above, with their `<summary>`s.
+  - In `AssemblyInfo.cs`, add a comment block in the file's style, then the grants:
+    - `MMLib.Alvo.Ai`, the producer;
+    - `MMLib.Alvo.Admin`, the one consumer;
+    - `MMLib.Alvo.Ai.Tests`;
+    - `MMLib.Alvo.Admin.Tests.EndToEnd`, whose scripted assistant emits it.
+
+    Say why internal (D45, and this file's own `AlvoFrameworkTables` precedent: un-publishing is breaking, publishing
+    is one word away), why opt-in (a third-party consumer never meets a case it cannot name), and the forgeability
+    caveat.
+  - Run `dotnet test --project test/MMLib.Alvo.Abstractions.Tests`. The public-API approval fails with exactly four
+    added `InternalsVisibleTo` lines: accept that `.received.txt` as the new `.verified.txt`, and check that the diff
+    is those four lines.
+  - The turn-review gate will send you to the snapshot judge and to `alvo-architecture-rules` for a grown
+    `PublicApi` baseline. The justification is D45: grants only, no symbol.
+
+- [ ] **Step 2: The failing facts.** `TurnTraceTests.cs`, new:
+
+```csharp
+using MMLib.Alvo.Ai.Internal;
+
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
+namespace MMLib.Alvo.Ai.Tests;
+
+/// <summary>What a trace may hold and how big it may get (D44): no secret, no more than its cap, always its end.</summary>
+public sealed class TurnTraceTests
+{
+    private static readonly TurnHeader _header = new("alvo-schema-assistant v5", "OpenAiCompatible", "m", "p");
+
+    [Theory]
+    [InlineData("key sk-live-0123456789abcdefghij", "sk-live-0123456789abcdefghij")]
+    [InlineData("token ghp_0123456789abcdefghijABCDEFGHIJ", "ghp_0123456789abcdefghijABCDEFGHIJ")]
+    [InlineData("hook xoxb-1234567890-abcdefghij", "xoxb-1234567890-abcdefghij")]
+    [InlineData("aws AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE")]
+    [InlineData("jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl")]
+    [InlineData("Server=db;User Id=alvo;Password=hunter2;", "hunter2")]
+    public void A_secret_like_value_is_redacted(string text, string secret)
+    {
+        var scrubbed = SecretScrub.Scrub(text);
+
+        scrubbed.ShouldNotContain(secret);
+        scrubbed.ShouldContain(SecretScrub.Redacted);
+    }
+
+    /// <summary>What a trace is for survives the scrub: pointers, CEL, and the framework's own refusals.</summary>
+    [Theory]
+    [InlineData("/entities/service_orders/fields/problem_description")]
+    [InlineData("'admin' in @user.roles || assigned_user_id == @user.id")]
+    [InlineData("A Rule expression must evaluate to a boolean; this expression evaluates to String.")]
+    public void A_descriptor_text_is_left_alone(string text) => SecretScrub.Scrub(text).ShouldBe(text);
+
+    /// <summary>A turn of forty 10 KB patches stays under the cap, and still says how it ended.</summary>
+    [Fact]
+    public void A_trace_never_exceeds_its_cap_and_keeps_its_header()
+    {
+        var note = string.Concat(Enumerable.Repeat("a long note ", 850));
+        var calls = Enumerable.Range(1, 40).Select(round => new TracedCall(
+            round, "c" + round.ToString(System.Globalization.CultureInfo.InvariantCulture), "propose_change",
+            new Dictionary<string, object?> { ["baseRevision"] = 1, ["operations"] = Patch(note), ["summary"] = "s" },
+            """{"valid":false,"violations":[],"attemptsLeft":2}""")).ToList();
+
+        var trace = TurnTrace.Of(_header, calls, TurnEnd.IterationCap);
+
+        Encoding.UTF8.GetByteCount(trace.ToJsonString()).ShouldBeLessThanOrEqualTo(TurnTrace.MaximumBytes);
+        trace["end"]!.GetValue<string>().ShouldBe(TurnEnd.IterationCap);
+        trace["format"]!.GetValue<string>().ShouldBe(TurnTrace.Format);
+        trace["truncated"]!.GetValue<bool>().ShouldBeTrue();
+    }
+
+    /// <summary>The log line names where a patch wrote, never what it wrote (D44).</summary>
+    [Fact]
+    public void A_log_line_keeps_each_operations_path_and_drops_its_value()
+    {
+        var trace = TurnTrace.Of(_header, [new TracedCall(1, "c1", "propose_change",
+            new Dictionary<string, object?> { ["baseRevision"] = 1, ["operations"] = Patch("private words") }, """{"valid":true}""")], TurnEnd.Answered);
+
+        var line = TurnTrace.LogLine(trace["calls"]![0]!.AsObject()).ToJsonString();
+
+        line.ShouldContain("/entities/bikes/fields/notes");
+        line.ShouldNotContain("private words");
+    }
+
+    private static JsonElement Patch(string description) => JsonSerializer.SerializeToElement(new JsonArray(new JsonObject
+    {
+        ["op"] = "add",
+        ["path"] = "/entities/bikes/fields/notes",
+        ["value"] = new JsonObject { ["type"] = "text", ["description"] = description },
+    }));
+}
+```
+
+  The note repeats words with spaces, so the scrub's long-token rule does not shrink it and the cap is what is
+  measured.
+
+  `AlvoAssistantTests`:
+  - `RunAsync` gains `bool trace = false, IReadOnlyList<AssistantTurn>? history = null` and builds
+    `new AssistantRequest("p", message, history ?? []) { IncludeTrace = trace }`.
+  - `CapturingLogger` gains `internal List<int> EventIds { get; } = [];`, filled in `Log`.
+
+```csharp
+    /// <summary>A traced turn ends with its trace: one entry per call, in order, with what each asked and was told.</summary>
+    [Fact]
+    public async Task A_traced_turn_ends_with_one_entry_per_call_and_how_it_ended()
+    {
+        var management = Describing(revision: 4);
+        management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ManagementApplyResult(Applied: false, Revision: 4, EmptyPlan));
+
+        var updates = await RunAsync(management, Configured(), new ScriptedChatClient(
+            Scripted.Calls("get_descriptor", []),
+            Scripted.Calls("load_skill", new Dictionary<string, object?> { ["skillName"] = "alvo-descriptor-entities-and-fields" }),
+            Scripted.Calls("propose_change", Proposing(revision: 4)),
+            Scripted.Says("I proposed notes.")), trace: true);
+
+        var trace = JsonNode.Parse(updates[^1].ShouldBeOfType<AssistantUpdate.TurnTraced>().Json)!;
+        trace["instructions"]!.GetValue<string>().ShouldBe("alvo-schema-assistant v5");
+        trace["model"]!.GetValue<string>().ShouldBe("qwen3:8b");
+        trace["baseRevision"]!.GetValue<int>().ShouldBe(4);
+        trace["end"]!.GetValue<string>().ShouldBe("answered");
+        var calls = trace["calls"]!.AsArray();
+        calls.Select(call => call!["tool"]!.GetValue<string>()).ShouldBe(["get_descriptor", "load_skill", "propose_change"]);
+        calls[1]!["arguments"]!["skillName"]!.GetValue<string>().ShouldBe("alvo-descriptor-entities-and-fields");
+        calls[2]!["arguments"]!["operations"]![0]!["path"]!.GetValue<string>().ShouldBe("/entities/bikes/fields/notes");
+        calls[2]!["result"]!["valid"]!.GetValue<bool>().ShouldBeTrue();
+        calls[2]!["result"]!["attemptsLeft"]!.GetValue<int>().ShouldBe(Internal.ManagementTools.MaximumStalledRefusals);
+    }
+
+    /// <summary>A refused dry run's trace entry carries its violations and what the budget has left.</summary>
+    [Fact]
+    public async Task A_refused_attempts_entry_carries_its_violations_and_attempts_left()
+    {
+        var management = Describing(revision: 4);
+        management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Throws(new DescriptorValidationException(new DescriptorValidationResult(
+                [new DescriptorValidationError("/entities/bikes/fields/notes", "No.", "Fix it.", DescriptorValidationSeverity.Error)])));
+
+        var updates = await RunAsync(management, Configured(), new ScriptedChatClient(
+            Scripted.Calls("propose_change", Proposing(revision: 4)), Scripted.Says("It was refused.")), trace: true);
+
+        var result = JsonNode.Parse(updates.OfType<AssistantUpdate.TurnTraced>().Single().Json)!["calls"]![0]!["result"]!;
+        result["attemptsLeft"]!.GetValue<int>().ShouldBe(2);
+        result["violations"]![0]!["pointer"]!.GetValue<string>().ShouldBe("/entities/bikes/fields/notes");
+        result["violations"]![0]!["fix"]!.GetValue<string>().ShouldBe("Fix it.");
+    }
+
+    /// <summary>Neither the trace nor the log carries a word the operator or the model wrote (D44).</summary>
+    [Fact]
+    public async Task Neither_the_trace_nor_the_log_carries_what_the_operator_or_the_model_wrote()
+    {
+        var logger = new CapturingLogger();
+        var management = Describing(revision: 4);
+        management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ManagementApplyResult(Applied: false, Revision: 4, EmptyPlan));
+        var proposing = Proposing(revision: 4);
+        proposing["summary"] = "summary-words-marker";
+
+        var updates = await RunAsync(management, Configured(), new ScriptedChatClient(
+                Scripted.Calls("propose_change", proposing), Scripted.Says("reply-words-marker")),
+            logger, message: "typed-words-marker", trace: true,
+            history: [new AssistantTurn(AssistantRole.Operator, "history-words-marker")]);
+
+        var written = updates.OfType<AssistantUpdate.TurnTraced>().Single().Json + string.Join('\n', logger.Lines);
+        _operatorAndModelText.ShouldAllBe(marker => !written.Contains(marker, StringComparison.Ordinal));
+    }
+
+    /// <summary>One structured event per call and one for the turn's end.</summary>
+    [Fact]
+    public async Task Every_call_is_logged_as_6202_and_the_turns_end_as_6203()
+    {
+        var logger = new CapturingLogger();
+
+        await RunAsync(Describing(revision: 1), Configured(), new ScriptedChatClient(
+            Scripted.Calls("get_descriptor", []), Scripted.Calls("get_schema", []), Scripted.Says("ok")), logger);
+
+        logger.EventIds.Count(id => id == 6202).ShouldBe(2);
+        logger.EventIds.Count(id => id == 6203).ShouldBe(1);
+    }
+
+    /// <summary>A caller that did not ask gets no trace: a third-party consumer never meets a case it cannot name (D45).</summary>
+    [Fact]
+    public async Task An_untraced_request_gets_no_trace() =>
+        (await RunAsync(Describing(revision: 1), Configured(), new ScriptedChatClient(Scripted.Says("ok"))))
+            .OfType<AssistantUpdate.TurnTraced>().ShouldBeEmpty();
+
+    /// <summary>A turn whose endpoint failed still ends with its trace, saying so.</summary>
+    [Fact]
+    public async Task A_failed_turns_trace_says_the_endpoint_failed()
+    {
+        var updates = await RunAsync(Substitute.For<IAlvoManagement>(), Configured(), new ThrowingChatClient("boom"), trace: true);
+
+        JsonNode.Parse(updates.OfType<AssistantUpdate.TurnTraced>().Single().Json)!["end"]!.GetValue<string>().ShouldBe("endpoint-failed");
+    }
+```
+
+  Add the static `_operatorAndModelText` array (CA1861):
+  `["typed-words-marker", "history-words-marker", "reply-words-marker", "summary-words-marker"]`.
+  - `using NSubstitute.ExceptionExtensions;` goes into the file's `NSubstitute` block.
+  - `get_schema` on a bare substitute answers `null`, which the tool serialises as `null`, so the call is still a call.
+  - `A_failed_turns_trace…` also holds `With_no_connection…`'s rule the other way: the no-connection answer stays a
+    single `Failed`, with no trace, because nothing ran.
+
+- [ ] **Step 3: Run** `dotnet test --project test/MMLib.Alvo.Ai.Tests`. It fails to compile (`TurnTrace`,
+  `SecretScrub`, `TracedCall`), which is the red state.
+
+- [ ] **Step 4: Implement `MMLib.Alvo.Ai`.**
+  1. `TurnRecorder`:
+     - the eval's `RecordingChatClient` algorithm, re-stated (D44: the shape is reused, not the class): a call is keyed
+       by round and call id, and a result is matched to the latest unanswered call with its id;
+     - `Tokens` and `Requests` are left out;
+     - the remark cites `eval/MMLib.Alvo.Ai.Eval/RecordingChatClient.cs` as the rule's other home.
+  2. `SecretScrub`, with three `[GeneratedRegex]`s, `RegexOptions.CultureInvariant`:
+     - Tokens, replaced whole:
+       `sk-(?:ant-|proj-|live-)?[A-Za-z0-9_\-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[abprs]-[A-Za-z0-9\-]{10,}|AKIA[0-9A-Z]{16}|eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+`;
+     - an unbroken alphanumeric run: `\b[A-Za-z0-9]{32,}\b`. A snake_case name always has `_`, so it cannot match,
+       and a pointer has `/`;
+     - a key–value pair, whose value is replaced:
+       `(?<name>\b(?:password|pwd|secret|api[_-]?key|access[_-]?token)\b)(?<separator>\s*[=:]\s*)[^;\s"',]+`,
+       with `RegexOptions.IgnoreCase`, replaced with `${name}${separator}[redacted]`.
+
+     `Scrub(JsonNode?)` walks `JsonObject`/`JsonArray` and replaces each `JsonValue` string in place.
+  3. `TurnTrace.Of`:
+     - build the header, then add the entries one by one;
+     - after each, measure with `Encoding.UTF8.GetByteCount(trace.ToJsonString())`;
+     - over the cap, the entry's `arguments.operations` becomes `{"omittedBytes": n}`, and `truncated` is set. Still
+       over, remove the entry, set `droppedCalls`, and stop;
+     - scrub once at the end.
+
+     The quadratic re-measure is bounded by 12 rounds of calls and by the cap. Keep each method ≤ ~25 lines: extract
+     `Header`, `Entry`, `Arguments`, `Result`, `DryRunResult` and `TryAdd`.
+  4. `TurnTrace.LogLine`: a deep clone of the entry, whose `arguments.operations` becomes
+     `[{op, path, from?}]` only.
+  5. `AlvoAssistant.AskAsync`:
+     - wrap `_clients(connection)` in `new TurnRecorder(client)` and hand the recorder to `RunAsync`/`AgentFor`, so
+       it sits **under** the function-invoking loop, as the eval's does;
+     - on each exit path, after the proposal or after the `Failed`, call `Finish(recorder, request, connection, end)`:
+       - it logs one `CallTraced` (6202) per entry, with `TurnTrace.LogLine`, and one `TurnEnded` (6203);
+       - when `request.IncludeTrace`, it yields `new AssistantUpdate.TurnTraced(trace.ToJsonString())`.
+     - `end` is `TurnEnd.EndpointFailed` on the failure path, `IterationCap` when
+       `recorder.ToolRounds >= MaximumIterations`, and `Answered` otherwise;
+     - extract helpers so that `AskAsync` stays readable, because it is already past 25 lines.
+
+```csharp
+    [LoggerMessage(EventId = 6202, Level = LogLevel.Information, Message = "Assistant call {Round} {Tool}: {Call}")]
+    private static partial void CallTraced(ILogger logger, int round, string tool, string call);
+
+    [LoggerMessage(EventId = 6203, Level = LogLevel.Information, Message = "Assistant turn ended ({End}) after {Calls} calls in {Rounds} tool rounds.")]
+    private static partial void TurnEnded(ILogger logger, string end, int calls, int rounds);
+```
+
+     The remark *"Nothing the operator typed is logged"* gains: *"…and neither is what the model wrote. The trace
+     (D44) records calls, not prose, and the log records where a patch wrote, never what."*
+
+- [ ] **Step 5: Run** Ai.Tests. Everything should be green, including the untouched
+  `The_operators_message_is_never_logged` and the iteration-cap fact.
+
+- [ ] **Step 6: The drawer.** Every addition to `AssistantDrawer.razor` is `private`, so the Admin baseline does
+  not move.
+  1. `AskAsync` sends `new AssistantRequest(await ProjectAsync(), asked, [.. _turns]) { IncludeTrace = true }`.
+  2. There is a new field, `private string? _trace;`. `Begin` clears it. `Apply` gains the case
+     `case AssistantUpdate.TurnTraced traced: _trace = Indented(traced.Json); break;`, where `Indented` is
+     `JsonNode.Parse(json)!.ToJsonString(_indented)` over a `static readonly JsonSerializerOptions { WriteIndented = true }`.
+  3. Under the proposal block, and above the confirm, add the following. The `a-disclosure` pattern is the one
+     `RecordForm.razor:87` and `FieldEditor.razor:322` use.
+
+```razor
+    @if (_trace is { } trace && !_busy)
+    {
+        <details class="a-disclosure" data-testid="assistant-turn-details">
+            <summary>Turn details</summary>
+            <pre class="a-mono a-assistant__trace" data-testid="assistant-trace">@trace</pre>
+            <AlvoButton Small="true" data-testid="assistant-trace-copy" OnClick="_ => CopyTraceAsync(trace)">Copy JSON</AlvoButton>
+        </details>
+    }
+```
+
+  4. `CopyTraceAsync` follows `Access.razor:526-545`: `Interop.CopyAsync`. On a `JSException`, it shows the
+     refusal panel (`_failure.Show`, titled *"The turn details could not be copied"*) saying to select the text above
+     by hand. It never shows a snackbar alone.
+  5. In `alvo.css`, beside `.a-assistant__tools`:
+     `.a-assistant__trace { max-height: 16rem; overflow: auto; white-space: pre-wrap; font-size: var(--a-font-size-sm, .8125rem); }`.
+     Reuse the file's existing size token; read the neighbouring rules first.
+  6. Run `dotnet test --project test/MMLib.Alvo.Admin.Tests`. The pattern-language, public-API and gallery facts
+     should be green, and the Admin baseline unchanged.
+
+- [ ] **Step 7: The e2e scenario.** In `ScriptedAssistant.AskAsync`, add
+  `if (request.IncludeTrace) { yield return new AssistantUpdate.TurnTraced(TraceJson); }` as the last update of both
+  proposal branches. `TraceJson` is an `internal const` holding a two-call trace, and it names no operator text:
+  `{"format":"alvo.assistant.turn/1","end":"answered","calls":[{"round":1,"tool":"get_descriptor"},{"round":2,"tool":"propose_change"}]}`.
+  In `AssistantScenarios`:
+
+```csharp
+    /// <summary>
+    /// A turn's details show the calls it made, and copy as the JSON a maintainer can paste into an issue (spec §8, D46).
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_turns_details_show_its_calls_and_copy_as_json()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.Page.Context.GrantPermissionsAsync(["clipboard-read", "clipboard-write"]);
+        await session.GoAsync("/schema");
+
+        await session.Page.ClickAsync("[data-testid='assistant-launch']");
+        await session.Page.FillAsync("#assistant-message", "add an invoices entity");
+        await session.Page.ClickAsync("[data-testid='assistant-send']");
+        await session.Page.Locator("[data-testid='assistant-proposal']").WaitForAsync();
+
+        await session.Page.ClickAsync("[data-testid='assistant-turn-details'] > summary");
+        (await session.Page.Locator("[data-testid='assistant-trace']").InnerTextAsync()).ShouldContain("\"tool\": \"propose_change\"");
+        await session.Page.ClickAsync("[data-testid='assistant-trace-copy']");
+
+        var copied = await session.Page.EvaluateAsync<string>("() => navigator.clipboard.readText()");
+        System.Text.Json.Nodes.JsonNode.Parse(copied)!["calls"]!.AsArray().Count.ShouldBe(2);
+        copied.ShouldNotContain("add an invoices entity");
+        session.AssertConsoleClean();
+    }
+```
+
+  `GrantPermissionsAsync` and `EvaluateAsync<string>` are the pattern `PersonEditorScenarios.cs:89-99` already uses.
+
+- [ ] **Step 8: Gates.** These are the last task's gates, all green:
+  - `scripts/test-ring1`.
+  - `dotnet build MMLib.Alvo.slnx -c Release -warnaserror`, with 0 warnings and 0 errors. Watch for:
+    - CA1861 on the new arrays;
+    - CA1859 on private helpers returning `IEnumerable`;
+    - IDE0065 in the new files.
+  - `scripts/test-ring2`.
+  - `scripts/test-admin-e2e`, **whole** and not filtered, because Admin moved (D46). Every assistant scenario must
+    still pass unchanged: the added `<details>` is closed by default, and `LibraryProbe` measures only the launcher
+    and the question box.
+  - `docker build -f src/MMLib.Alvo.Host/Dockerfile .`.
+  - `git diff --stat main -- '*.verified.*'`: exactly one file,
+    `PublicApi.MMLib.Alvo.Abstractions.verified.txt`, **+4 lines**, all of them `InternalsVisibleTo`.
+
+- [ ] **Step 9: Commit** `feat(ai): every assistant turn leaves a trace, logged per call and shown in the drawer on request`.
+
+The controller then:
+- runs `alvo-plan-guard`;
+- runs the reviewer subagents substituting for `/code-review` and `/security-review` (T12 is security core);
+- builds the PR report (`alvo-pr-report`), which marks T12 *needs-deep-review* and records D46's open question for
+  the maintainer.
+
+None of these is a task step.
+
+---
+
+## Self-review — RCA extension (Tasks 11–14)
+
+- **Spec coverage (§8):**
+  - D41 → T11;
+  - D42 → T12;
+  - D43 → T13;
+  - D44, D45 and D46 → T14.
+- **AC map (§8.4):**
+  - AC1 → T11 steps 1 and 4;
+  - AC2 → T12 step 1;
+  - AC3 → T13 steps 0, 1 and 5;
+  - AC4 → T14 steps 2, 5 and 7;
+  - AC5 → T14 step 8.
+- **Order:**
+  - T12 lands before T13, so the skill's quote *"Remove the outer quotes"* is held to a refusal that exists.
+  - T11 moves the instructions to v5 before T13 adds to them.
+  - T14 asserts `"alvo-schema-assistant v5"`.
+- **Checked against the code at `c440388`:**
+  - `ManagementTools.cs:48` (the constant), `:183-205` (the attempt path), `ViolationMapping.cs:45-48`;
+  - `ChangeOutcome`'s `WhenWritingNull` serialisation (`ToolJson.Options`), so `unchecked` is absent unless true;
+  - `CelCompiler.cs:81-113`, and the lexer's unescaped `StringLiteral` text (`CelLexer.cs:148-166`);
+  - `schema-assistant.md:28-32`, `:82`, `:99-100`, `:317-319`; `rules-and-cel/SKILL.md` at 2,577 bytes;
+  - `SkillsRead.AreasOf` (eval);
+  - `AssistantUpdate`'s private constructor, which a nested record may call;
+  - `AdminInterop.CopyAsync`; the `a-disclosure` pattern.
+- **Traps this branch hit, restated per task:**
+  - `$$` brace runs → `Adding()` and `Patch()` are built from `JsonArray`;
+  - CA1861 → the static test arrays;
+  - CRLF → `ReplaceLineEndings("\n")` in `NewEntityLoadRuleTests`;
+  - culture → `string.Create`/`ToString(CultureInfo.InvariantCulture)` in the test loops.
+- **Open for the maintainer:** D46. The dashboard shows the trace to the operator who asked, not only to the
+  `admin` level. A level gate needs a caller-level query on `IAlvoManagement`, which is public API.

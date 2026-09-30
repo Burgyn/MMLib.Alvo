@@ -296,3 +296,112 @@ These are the seven new cases. Each names the skill it needs and the grade it ge
 | `own_orders_only` | "Technicians may list and read only the service orders assigned to them; admins and managers still see all." | exactly `rules.list` and `rules.get` change; each compares `assigned_user_id` with `@user.id`, keeps the admin and manager grants, and no longer admits every `authenticated` caller. [rules-and-cel] |
 | `function_action_refused` | "When a service order is ready, run our invoicing function." | no proposal touches `/hooks` at all: not the refused `function`, and not a `webhook` or `http.call` put in its place unasked; `get_capabilities` called; a non-empty answer. [capabilities-and-limits] |
 | `can_alvo_call_http` | "Can Alvo call our ERP's HTTP API when a part's stock changes?" | answer only: no proposal, `get_capabilities` called, and the reply does not open by claiming the capability (a leading yes, áno, can, vie or dokáže). [capabilities-and-limits] |
+
+## 8. RCA of the task-management turn (2026-09-30)
+
+The maintainer asked the demo build (`gpt-4.1-mini`, `bike-workshop`) for task management: tasks and task comments,
+comments editable only by their author. The turn ended on a card that said the rule *"must evaluate to a boolean"*,
+and on a reply claiming the framework had refused an attempt it never checked. The RCA re-ran every shape the model
+sent against the real `AlvoHostWorld`, `DescriptorDraft`, `ManagementTools`, validator and `CelCompiler`, in an xUnit
+probe over a `git archive` copy of this branch. What follows is what the probe **proved**. A guess stays out.
+
+### 8.1 The proven sequence
+
+1. **The first proposal carried two independent defects**, and the validator reported both in one answer:
+   `tasks.product` referenced an entity `products` that does not exist, and `task_comments.rules.update` read
+   `assigned_to`, a field of `tasks`. The two violations were *"Field references unknown entity 'products'"* and
+   *"'assigned_to' is not a field of entity 'task_comments'"*, whose fix lists the known fields. That is the
+   operator's first refusal, verbatim.
+2. **A schema-level defect hides the rule pass completely** (probes A6, A8). A `maxLength` on a `text`, or an `enum`
+   with `options`, in one entity suppresses the rule error in the other. Each schema defect then fans out into 3–4
+   violations (`type`, `then`, `allOf`, the keyword), and their pointers start with `#/`, so `op` is null. This is #292
+   (S4).
+3. **The model then wrapped the whole rule in quotes.** `"'author == @user.id'"`, `"\"author == @user.id\""` and
+   `"'true'"` each draw *"A Rule expression must evaluate to a boolean; this expression evaluates to String."* with
+   the fix *"Add a comparison, e.g. field == value, so the expression yields true/false."* That fix is wrong for this
+   defect: the expression already is a comparison. `{"$cel": …}` draws a schema type error. The bare
+   `"author == @user.id"` is **valid**. So is `"true"`, which opens the operation to every caller (#292, S5).
+4. **The budget spent itself on one unchanged defect.** Four `propose_change` calls with the same patch: #1–#3 were
+   dry-run (`attemptsLeft` 2, 1, 0). **#4 was never dry-run** and got only
+   `{"source":"budget","message":"Stop proposing. Explain to the operator what the framework refused, quoting it."}`.
+   The filed proposal stayed #3. A later *valid* `check_change` also got only the budget answer
+   (`ManagementTools.cs:48`, `:107`, `:176-179`, `:189-191`, `:199-205`; `ViolationMapping.cs:47`). The model told
+   the operator the last attempt was refused. The budget message invited that claim: it says to explain "what the
+   framework refused" about an attempt the framework never saw.
+5. **Nobody could reconstruct the turn afterwards.** The drawer receives tool names only (`AlvoAssistant.cs:262`). The
+   host logs only EventId 6201, on an endpoint failure (`:320-326`). The sequence above had to be rebuilt by probing.
+   The eval already records every call (`RecordingChatClient.cs:70-91`, `EvalTrace.cs:73`). The product does not.
+
+### 8.2 Root causes, ranked
+
+| # | Cause | Evidence | Fixed by |
+|---|---|---|---|
+| 1 | **Nothing states a rule's JSON value shape, and every example starts with `'`.** *"Write CEL string literals in single quotes, so nothing needs escaping inside the JSON"* reads as "wrap the expression" | `schema-assistant.md:82`; `alvo-descriptor-rules-and-cel/SKILL.md:17-18`; examples: base prompt (c) `:139-150`, the skill's only example; 40 of 40 `bike-workshop` rules begin with a role literal. No whole rule of the shape `field == @user.id` is shown anywhere | D43 |
+| 2 | **The budget counts attempts, not progress, and never validates the 4th.** Its message invites a false "refused" | `ManagementTools.cs:189-191`; `ViolationMapping.cs:45-48` | D41 |
+| 3 | **The compiler's fix is wrong for a quoted expression.** It says to add a comparison, never echoes the source, never says to remove the outer quotes | `CelCompiler.cs:108-113` | D42 |
+| 4 | **No skill covers a multi-area new entity.** The load rule is per area. `SkillsRead.AreasOf` needs `entities-and-fields` + `rules-and-cel` + `traits-and-tenancy`, and the turn loaded two. No example composes fields, `audit`, rules, a `ref` to `users` and a `ref` to an existing entity; every rules example is a `test` + `replace` of an existing rule | `schema-assistant.md:30`; `eval/…/SkillsRead.cs` (`AreasOf`) | D43 |
+| 5 | Staged validator passes and cascade noise | `DescriptorValidator.cs:115-117`, `:131-138`, `:165-176` | #292 (S4) |
+| 6 | Nothing forbids loosening access as a workaround | `alvo-descriptor-rules-and-cel/SKILL.md:30`; the stop rule `schema-assistant.md:317-319` | #292 (S5) |
+| 7 | The design turn was never checked against the descriptor (`products`). The `<x>_id` ref naming (7 of 7 refs in `bike-workshop`) is not taught, and the skill example `checked_in_by` teaches the opposite | `DescriptorValidator.cs:422-428`; `alvo-descriptor-field-types-and-formats/SKILL.md:60-70` | naming: D43; the design-time check: #292 (S8) |
+| 8 | No turn record | `AlvoAssistant.cs:262`, `:320-326` | D44–D46 |
+
+### 8.3 Decisions
+
+| # | Decision | What it forecloses, and why it is still right |
+|---|---|---|
+| D41 | **The refusal budget measures progress** (S1). A refusal is *stalled* when its set of blocking violations (keyed by `source`, `pointer`, `code` and `message`) equals, or is a superset of, the previous refusal's set. The first refusal is stalled against the empty set. Only a stalled refusal spends one of **3** attempts. A turn stops after **6** refusals in all, stalled or not. A patch is dry-run unless the 6 are spent, or the 3 are spent **and** that exact patch (`baseRevision` plus operations, `JsonElement.DeepEquals`) was already dry-run in this turn. A new patch shape is therefore always checked before any budget answer. That answer says the attempt was **not** checked, quotes the last checked refusal verbatim, and carries `"unchecked": true`. `attemptsLeft` is the smaller of the two remainders | A model that keeps changing its defects without converging can now make 6 dry runs instead of 3: at most 3 more validator runs per turn, still inside the 12-iteration cap. `attemptsLeft` no longer falls on every refusal, so the instructions' sentence "every refused call spends one of the same three attempts" is rewritten. The reliability design's Global Constraint "budget text unchanged" is superseded here, deliberately. Oscillating between two defect sets never stalls, and the 6-refusal ceiling is exactly what bounds it. The eval's `RefusedAttempts` stops counting an `unchecked` answer, because it was no dry run |
+| D42 | **A quoted whole expression gets its own refusal** (S3; security core, CEL compile: *needs-deep-review*). In `CelCompiler.ValidateResultType`, under a predicate profile (`Rule`, `Condition`, `Access`), when the parsed root is a `String` literal whose content compiles to `Bool` under the same profile and entity, the fix is *"Remove the outer quotes; the value is the expression itself: `<content>`"*. **Every** result-type refusal also echoes its source, truncated to 120 characters plus `…`. The existing first sentence of each message is kept as its prefix, so every fragment the skills and tests quote still matches | **The accepted set does not move.** The check runs only on a source already refused, and only ever changes the text of the refusal. The content is compiled **once** more with the quote check off, so nesting cannot recurse: at most two compilations per source. `Computed` and `Mutate` get the echo only, because a string literal is a legitimate value there. A message now carries author text, so a test that quotes a whole result-type message must match a fragment. None does today (`git grep` finds the sentence only in `CelCompiler.cs`) |
+| D43 | **The rule's JSON shape is taught, and a new entity has a worked example** (S2). (1) The single-quote line becomes, in both the base prompt and `rules-and-cel`: *a rule's value is the bare CEL expression as one JSON string (`"user_id == @user.id"`); never wrap the whole expression in quotes; only a text value inside it, such as a role name, goes in single quotes*. (2) `gen:cel-rule` gains the refused `'user_id == @user.id'` and `'true'`. (3) The worked example `new-entity-with-rules` in the rules skill: `order_comments` with `audit`, a `ref` to `service_orders` with `onDelete`, a `ref` to `users` without one, and the whole `rules` object with an owner clause. (4) A whole-entity example (i) `bike_notes` in the base prompt. Both are proven by the Host outcome tests. (5) The load rule for a new entity: `entities-and-fields`, plus the skill of every area it declares (`rules-and-cel` for rules, `traits-and-tenancy` for `audit` or `tenancy`), pinned against `SkillsRead.AreasOf`. (6) A `ref` is named for what it points at, ending `_id`, following the project. The `checked_in_by` example becomes `check_in_technician_id` | The base prompt grows by about 1.3 KB against a budget that had about 1.35 KB of headroom (D39: about 21.4 KB of 22,758). The budget is **not** raised: the task measures it first and trims prose if it must, never a drift-tested fact. The worked-reply count moves from 9 to 10. The instructions become **v5**. The naming rule is a convention, not a validator rule, so a project that names refs otherwise is followed, not corrected. The design-time name check stays #292 (S8) |
+| D44 | **Every turn is traced** (S7). `TurnTrace`, internal to `MMLib.Alvo.Ai`, holds a header, one entry per call and an end reason. The header has `format` (`alvo.assistant.turn/1`), the instructions version, the provider kind, the model, the project and the base revision (the first `get_descriptor`'s). Each entry has `round`, `tool`, the arguments and a result summary. The arguments are `baseRevision`, the patch `operations`, `skillName` and `resourceName`; the `summary` appears only as its length. The result summary has `valid`, `revision`, `changedPaths`, `attemptsLeft`, `unchecked` and every violation for a dry run; the `revision` for `get_descriptor`; a length for any other read. The end reason is `answered`, `iteration-cap` or `endpoint-failed`. It is recorded by an internal `TurnRecorder : DelegatingChatClient` under the function-invoking loop, with the eval's call-matching rule (round plus call id). The entries mirror the eval's `RecordedCall` members, so a trace line and an eval line read alike. **Never operator text**: not the message, the history, the model's reply, or the `summary` argument. Every string is scrubbed of secret-like values. The trace is capped at **65,536** bytes. Each call is logged as **EventId 6202** and the turn's end as **EventId 6203**, with operation paths but never operation values | The eval keeps its own recorder: it also counts tokens and requests, and sharing the type would need a grant from `MMLib.Alvo.Ai` to the eval's suite. The shape is what is reused, not the class; merging the two is a later tidy-up. The log deliberately carries less than the trace. A host ships Information logs to aggregators, and a descriptor's text is the operator's, so the log names *where* a patch wrote, and only the screen shows *what* |
+| D45 | **The trace crosses `IAlvoAssistant` as an internal, opt-in update.** `AssistantRequest` gains `internal bool IncludeTrace { get; init; }` and `AssistantUpdate` gains the nested `internal sealed record TurnTraced(string Json)`, emitted last and only when the request asked. `MMLib.Alvo.Abstractions` grants `InternalsVisibleTo` to `MMLib.Alvo.Ai` and `MMLib.Alvo.Admin` (the producer and the one consumer), and to `MMLib.Alvo.Ai.Tests` and `MMLib.Alvo.Admin.Tests.EndToEnd` (the scripted assistant there emits it). **No public type or member is added.** `PublicApi.MMLib.Alvo.Abstractions.verified.txt` moves by exactly those four attribute lines, and every other baseline stays put | This is Abstractions' own precedent (`AlvoFrameworkTables`, `IAlvoDataReachability`): a seam only this family uses is internal, because un-publishing is breaking and publishing is one word away. The rejected alternative was a public `AssistantUpdate.Trace(string Json)`: it would freeze a diagnostic shape as contract, and every third-party consumer would receive it. Opt-in means such a consumer never meets a case it cannot name. **This departs from `ToolInvoked`'s remark** (*"the name only; an argument list would carry the descriptor…"*): the trace carries operations, but only to the screen that asked for it, never into a log line. A third-party `IAlvoAssistant` cannot emit a trace, and the drawer then shows none, which is the correct empty state. The grants carry the family's forgeability caveat (unsigned, a name match) |
+| D46 | **"Admin-only" is read as the dashboard only, and as the operator who asked the turn, not as the `admin` access level.** The drawer shows a collapsed *Turn details* (the existing `a-disclosure` pattern) holding the pretty-printed trace and a *Copy JSON* button (`AdminInterop.CopyAsync`); the text stays selectable when the clipboard is refused | The dashboard cannot tell an administrator today. `IAlvoManagement` has no caller-level query, and Access already works by attempt-and-refuse (ux-pass D-10). A level gate would need a new public member on `IAlvoManagement`, which is not earned by a diagnostic panel. It would also protect nothing: every value in the trace was read by tools running under **that operator's own publication**, it holds no operator text, and it is scrubbed. **Open for the maintainer:** if the level gate is wanted, it is a follow-up that adds the caller-level query |
+
+### 8.4 Acceptance criteria
+
+1. **Budget (D41):**
+   - three refusals whose blocking sets each change, then a valid fourth: `attemptsLeft` reads 2, 2, 2 and the fourth
+     is filed as the proposal;
+   - three identical refusals, then the same patch: the fourth is not dry-run (3 Management dry runs), carries
+     `"unchecked": true`, and its message starts *"This attempt was not checked"* and contains the last refusal
+     verbatim;
+   - after three stalled refusals, a **new** patch is dry-run, and a valid one is filed;
+   - the seventh refusal-bound attempt is never dry-run: exactly **6** refused dry runs per turn, the most;
+   - the instructions state the progress rule and `unchecked` (drift-tested `_toolFacts`).
+2. **CEL (D42):**
+   - under `Rule`, `'owner_id == @user.id'`, `"owner_id == @user.id"` and `'true'` are refused, each with a fix that
+     starts *"Remove the outer quotes"* and names the content;
+   - `'admin'` (content that does not compile) keeps the generic fix;
+   - every result-type refusal contains its source, and a 300-character source is echoed as 120 characters plus `…`;
+   - no fixture that compiled before now fails, and none that failed now compiles.
+3. **Teaching (D43):**
+   - the always-in-context instructions stay ≤ **22,758** bytes, and every `SKILL.md` stays ≤ **6,144** bytes and
+     ≤ 200 lines;
+   - `new-entity-with-rules` and example (i) are valid on `bike-workshop` through the real tool;
+   - the quoted rule is refused with the D42 fix and the bare rule accepted, both by the dry run (`SkillClaimTests`);
+   - the new-entity load rule names exactly `SkillsRead.AreasOf` of example (i);
+   - every `ref` in `bike-workshop` and in every worked example ends in `_id`;
+   - `InstructionRepliesTests.WorkedReplies` is 10.
+4. **Trace (D44–D46):**
+   - a traced turn's last update is `TurnTraced`, with one entry per call in order, `skillName` on `load_skill`,
+     `operations` on dry runs, and `attemptsLeft`/violations in their results;
+   - the trace is ≤ **65,536** bytes UTF-8 for a 40-call turn of 10 KB patches, and still has its header and end
+     reason;
+   - the operator's message, a history turn, the model's reply and the `summary` argument appear in **0** trace
+     bytes and **0** log lines;
+   - the six secret shapes (OpenAI-style `sk-`, GitHub `gh?_`, Slack `xox?-`, AWS `AKIA`, a JWT, and a
+     connection-string password) are redacted;
+   - EventId 6202 is logged once per call and 6203 once per turn;
+   - an untraced request gets no `TurnTraced`;
+   - `scripts/test-admin-e2e` runs **whole** and green, including the drawer's *Turn details* and *Copy JSON*
+     scenario.
+5. **Public API:** no public symbol is added. The only baseline that moves is the Abstractions baseline, by the four
+   D45 `InternalsVisibleTo` lines. ring2, `dotnet build MMLib.Alvo.slnx -c Release -warnaserror` and
+   `docker build -f src/MMLib.Alvo.Host/Dockerfile .` are green.
+
+### 8.5 Out of scope: #292
+
+The RCA's remaining solutions are filed as **#292**:
+- **S4**: every validator pass at once, `#`-free pointers, one leaf error per schema defect (cause 5);
+- **S5**: never loosen access as a workaround, and an `access-widened` warning (cause 6);
+- **S6**: the two-turn `task_management` eval case, which needs history-carrying cases;
+- **S8**: check names at design time (cause 7, first half). D43 only *teaches* the `<x>_id` convention.
