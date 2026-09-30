@@ -3,13 +3,14 @@
 #
 # IN NO RING, like scripts/test-load: it calls a model provider over the network and costs tokens, and its
 # verdict measures a model rather than gating the code. Nothing in CI runs it. It boots the real host over a
-# temporary SQLite database from examples/bike-workshop, asks the reliability and first-try designs' nine cases in
-# English and Slovak, and grades outcomes (the proposal, the dry-run violations, the calls) and the reply's wording
-# and language.
+# temporary SQLite database from examples/bike-workshop, asks the reliability and first-try designs' sixteen cases
+# in English and Slovak, and grades outcomes (the proposal, the dry-run violations, the calls), the reply's wording
+# and language, and the skills each turn loaded.
 #
 # Usage:
 #   scripts/eval-assistant --endpoint http://localhost:11434/v1 --model qwen3:8b [--runs 3]
 #                          [--kind openai-compatible|azure-openai] [--case full_name] [--language en|sk]
+#   scripts/eval-assistant --endpoint … --model … --case hook_returned_at     runs one skill case
 #
 # Environment:
 #   ALVO_EVAL_API_KEY     the endpoint's key, when it needs one (always for azure-openai) — read from the
@@ -26,7 +27,7 @@ set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 artifacts="${ALVO_EVAL_ARTIFACTS:-$root/artifacts/eval-assistant}"
 
-usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; }
 
 case "${1:-}" in
   -h|--help) usage; exit 0 ;;
