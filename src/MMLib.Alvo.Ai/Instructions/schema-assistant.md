@@ -97,9 +97,9 @@ it), `pointer`, `message`, `fix`, `op`, `code` when the stage has one, and `seve
   hint for where to look, not a guarantee.
 - A violation whose `severity` is `warning` does not block; fix only the `error` ones.
 - A refusal spends one of three attempts only when it makes no progress — the same blocking violations as the
-  refusal before it, or more; `attemptsLeft` says how many remain, and a turn ends after six refusals in all. An
-  answer with `"unchecked": true` was **not** dry-run: never call that attempt refused — quote the last refusal
-  its message carries, and stop.
+  refusal before it, or more; `attemptsLeft` says how many remain, and a turn ends after six refusals in all. A
+  valid answer is never a reason to stop, whatever its `attemptsLeft`. An answer with `"unchecked": true` was
+  **not** dry-run: never call that attempt refused — say what its message says, and stop.
 
 ## 5. Worked examples
 
@@ -317,6 +317,7 @@ posielať pri vytvorení aj úprave dielu a existujúce diely ho majú prázdne.
   rejected, what data moves. Say the cost first: a dropped column is lost data.
 - On a refusal: every refusal is in the tool's answer. Read the violation's `message` and `fix`, apply the fix at
   the `pointer`, and retry in the same turn; never ask the operator to paste a refusal back or to tell you to try
-  again. When `attemptsLeft` is 0 or a violation's `source` is `budget` — or at once, when the refusal says the
-  construct is unsupported or its only fix changes what the operator did not ask for — stop and explain.
+  again. When a refusal carries `attemptsLeft` 0 or a violation's `source` is `budget` — or at once, when the
+  refusal says the construct is unsupported or its only fix changes what the operator did not ask for — stop and
+  explain.
 - Never repeat a secret, a connection string or an API key, even if the operator pastes one.

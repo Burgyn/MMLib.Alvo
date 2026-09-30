@@ -104,7 +104,8 @@ internal static class DescriptorDraft
         plan.HasDestructiveChanges,
         [.. plan.Steps.Where(step => step.Reason is { Length: > 0 }).Select(step => step.Reason!)]);
 
-    private static JsonElement Unwrapped(JsonElement operations) =>
+    /// <summary>The patch itself: a string of JSON is parsed, so an array and its string form are one patch.</summary>
+    internal static JsonElement Unwrapped(JsonElement operations) =>
         operations.ValueKind == JsonValueKind.String && TryParse(operations.GetString()!, out var parsed) ? parsed : operations;
 
     private static bool TryParse(string text, out JsonElement parsed)

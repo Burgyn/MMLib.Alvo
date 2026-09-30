@@ -27,11 +27,11 @@ internal sealed record ChangeOutcome(
     internal static ChangeOutcome From(DraftAttempt attempt, int attemptsLeft) =>
         new(attempt.Valid, attempt.CurrentRevision, attempt.Plan, attempt.ChangedPaths, attempt.Violations, attemptsLeft);
 
-    /// <summary>The answer once the refusal budget is spent: not dry-run, and saying so, with the last refusal (D41).</summary>
+    /// <summary>The answer once the refusal budget is spent: not dry-run, and saying so (D41).</summary>
     /// <param name="revision">The revision the descriptor was last read at — never the model's claimed base.</param>
-    /// <param name="lastRefusals">What the last refused dry run refused, verbatim.</param>
-    internal static ChangeOutcome BudgetSpent(int revision, IReadOnlyList<string> lastRefusals) =>
-        new(Valid: false, revision, Plan: null, [], [ViolationMapping.BudgetSpent(lastRefusals)], AttemptsLeft: 0, Unchecked: true);
+    /// <param name="budget">The budget violation, as <see cref="ViolationMapping.BudgetSpent"/> words it.</param>
+    internal static ChangeOutcome BudgetSpent(int revision, ToolViolation budget) =>
+        new(Valid: false, revision, Plan: null, [], [budget], AttemptsLeft: 0, Unchecked: true);
 }
 
 /// <summary>One thing the framework — or the tool — refused or warned about, at the pointer it concerns.</summary>

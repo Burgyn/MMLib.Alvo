@@ -30,7 +30,8 @@ namespace MMLib.Alvo.Ai.Internal;
 /// oscillates between two defect sets, or keeps retrying a CEL expression that is refused differently each time.
 /// A patch not yet refused is always dry-run before a budget answer: only one that was already refused, against the
 /// same base revision, is answered without a dry run once the three are spent, and that answer says it was not
-/// checked (<c>unchecked: true</c>) and quotes the last refusal. A patch that was checked <em>valid</em> is never
+/// checked (<c>unchecked: true</c>). It quotes that patch's own earlier refusal (the last refusal, when the ceiling
+/// stopped a patch never refused), and says so when a valid proposal is already filed. A patch that was checked <em>valid</em> is never
 /// remembered, so "would this work?" followed by the same <c>propose_change</c> is dry-run twice and filed.
 /// </para>
 /// <para>
@@ -76,7 +77,7 @@ internal sealed class ManagementTools
 
     private readonly IAlvoManagement _management;
     private readonly string _project;
-    private readonly List<(int BaseRevision, JsonElement Operations)> _refused = [];
+    private readonly List<RefusedPatch> _refused = [];
     private HashSet<string> _lastBlocking = new(StringComparer.Ordinal);
     private IReadOnlyList<string> _lastRefusals = [];
     private int _stalledRefusals;
@@ -203,9 +204,10 @@ internal sealed class ManagementTools
     private async Task<(DraftAttempt? Attempt, ChangeOutcome Outcome)> AttemptAsync(
         int baseRevision, JsonElement operations, CancellationToken ct)
     {
-        if (Unchecked(baseRevision, operations))
+        var earlier = RefusedBefore(baseRevision, DescriptorDraft.Unwrapped(operations));
+        if (_refusals >= MaximumRefusals || (_stalledRefusals >= MaximumStalledRefusals && earlier is not null))
         {
-            return (null, ChangeOutcome.BudgetSpent(_currentRevision, _lastRefusals));
+            return (null, BudgetSpent(earlier));
         }
 
         var attempt = await DescriptorDraft.BuildAsync(_management, _project, baseRevision, operations, ct).ConfigureAwait(false);
@@ -214,14 +216,19 @@ internal sealed class ManagementTools
         return (attempt, ChangeOutcome.From(attempt, AttemptsLeft));
     }
 
+    /// <summary>This exact patch's earlier refusal, when it was refused before in this turn; else none.</summary>
+    /// <param name="baseRevision">The revision the patch was written against.</param>
+    /// <param name="patch">The patch, unwrapped — so an array and its string form are the same patch.</param>
+    private RefusedPatch? RefusedBefore(int baseRevision, JsonElement patch) =>
+        _refused.Find(done => done.BaseRevision == baseRevision && JsonElement.DeepEquals(done.Operations, patch));
+
     /// <summary>
-    /// Whether this attempt is answered without a dry run: the ceiling is spent, or the three attempts are and this
-    /// exact patch was already refused.
+    /// The unchecked answer: it quotes the patch's own earlier refusal when there is one, else the last refusal, and
+    /// says when a valid proposal is already filed, so the model does not report a failure the card contradicts.
     /// </summary>
-    private bool Unchecked(int baseRevision, JsonElement operations) =>
-        _refusals >= MaximumRefusals
-        || (_stalledRefusals >= MaximumStalledRefusals
-            && _refused.Exists(done => done.BaseRevision == baseRevision && JsonElement.DeepEquals(done.Operations, operations)));
+    private ChangeOutcome BudgetSpent(RefusedPatch? earlier) => ChangeOutcome.BudgetSpent(
+        _currentRevision,
+        ViolationMapping.BudgetSpent(earlier?.Refusals ?? _lastRefusals, ownRefusal: earlier is not null, proposalFiled: _lastValid is not null));
 
     /// <summary>Remembers the revision the attempt learned the descriptor is at, and counts a refusal.</summary>
     private void Record(DraftAttempt attempt, int baseRevision, JsonElement operations)
@@ -240,7 +247,7 @@ internal sealed class ManagementTools
             .Where(violation => violation.Blocks)
             .Select(violation => violation.Key)
             .ToHashSet(StringComparer.Ordinal);
-        _refused.Add((baseRevision, operations.Clone()));
+        _refused.Add(new RefusedPatch(baseRevision, DescriptorDraft.Unwrapped(operations).Clone(), attempt.Refusals));
         _refusals++;
         _stalledRefusals += blocking.IsSupersetOf(_lastBlocking) ? 1 : 0;
         (_lastBlocking, _lastRefusals) = (blocking, attempt.Refusals);
@@ -305,6 +312,12 @@ internal sealed class ManagementTools
 /// <param name="Summary">The model's one-sentence summary, used when the turn's answer is empty.</param>
 /// <param name="Refusals">What the dry run refused, verbatim.</param>
 internal sealed record ProposedDraft(string DescriptorJson, int ExpectedRevision, string Summary, IReadOnlyList<string> Refusals);
+
+/// <summary>A patch this turn already had refused, with what it was refused with (D41).</summary>
+/// <param name="BaseRevision">The revision it was written against.</param>
+/// <param name="Operations">The patch, unwrapped.</param>
+/// <param name="Refusals">Its blocking refusals, verbatim.</param>
+internal sealed record RefusedPatch(int BaseRevision, JsonElement Operations, IReadOnlyList<string> Refusals);
 
 /// <summary>What <c>get_descriptor</c> returns: the descriptor as an object, never a string of JSON.</summary>
 /// <param name="Project">The project it belongs to.</param>

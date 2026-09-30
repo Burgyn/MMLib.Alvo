@@ -25,6 +25,15 @@ internal static class ViolationMapping
 
     /// <summary>How the budget answer begins: the attempt was not checked, so it must never be reported as refused.</summary>
     internal const string UncheckedLead = "This attempt was not checked: the turn's refusal budget is spent.";
+
+    /// <summary>How the budget answer quotes a re-sent patch's own earlier refusal.</summary>
+    internal const string OwnRefusalLead = "This exact patch was refused earlier:";
+
+    /// <summary>What the budget answer says when a valid proposal is already filed this turn.</summary>
+    internal const string ProposalFiledNote = "A valid proposal is already filed for the operator to review";
+
+    /// <summary>What the budget answer says when the refusal it would quote carried no blocking violation.</summary>
+    internal const string NothingToQuoteNote = "The last refused attempt carried no blocking violation to quote.";
     private const string AccessPointer = "/access";
     private const string EntitiesToken = "entities";
     private const string FieldsToken = "fields";
@@ -45,13 +54,30 @@ internal static class ViolationMapping
         ToolViolation.Access, AccessPointer, escalation.Message,
         "Leave /access unchanged; an administrator has to make that change.", Code: AccessReservedCode);
 
-    /// <summary>The budget answer: this attempt was not checked, and the last refused one said what it quotes (D41).</summary>
-    /// <param name="lastRefusals">The last refused dry run's refusals, verbatim.</param>
-    internal static ToolViolation BudgetSpent(IReadOnlyList<string> lastRefusals) => new(
+    /// <summary>The budget answer: this attempt was not checked, what it quotes, and what to tell the operator (D41).</summary>
+    /// <param name="refusals">The refusals to quote, verbatim: the patch's own when it was refused before, else the last.</param>
+    /// <param name="ownRefusal">Whether <paramref name="refusals"/> are this exact patch's own earlier refusal.</param>
+    /// <param name="proposalFiled">Whether a valid proposal is already filed this turn.</param>
+    internal static ToolViolation BudgetSpent(IReadOnlyList<string> refusals, bool ownRefusal, bool proposalFiled) => new(
         ToolViolation.Budget, string.Empty,
-        $"{UncheckedLead} The last refused attempt said: {string.Join(" | ", lastRefusals)}. "
-        + "Quote that refusal to the operator; never call this attempt refused.",
+        $"{UncheckedLead} {Quoted(refusals, ownRefusal)} {Closing(proposalFiled)}",
         Fix: null, Code: AttemptsExhaustedCode);
+
+    /// <summary>The refusal the budget answer carries, ending in one full stop — or the note that there is none.</summary>
+    private static string Quoted(IReadOnlyList<string> refusals, bool ownRefusal)
+    {
+        if (refusals.Count == 0)
+        {
+            return NothingToQuoteNote;
+        }
+
+        var quoted = string.Join(" | ", refusals);
+        return $"{(ownRefusal ? OwnRefusalLead : "The last refused attempt said:")} {quoted}{(quoted.EndsWith('.') ? string.Empty : ".")}";
+    }
+
+    private static string Closing(bool proposalFiled) => proposalFiled
+        ? $"{ProposalFiledNote}; tell the operator about it, and never call this attempt refused."
+        : "Quote that refusal to the operator; never call this attempt refused.";
 
     internal static IReadOnlyList<ToolViolation> FromValidation(DescriptorValidationException refused, IReadOnlyList<string?> targets) =>
     [
