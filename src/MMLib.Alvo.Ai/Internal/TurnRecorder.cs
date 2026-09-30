@@ -29,6 +29,9 @@ internal sealed class TurnRecorder(IChatClient inner) : DelegatingChatClient(inn
     /// <summary>How many of the model's answers asked for at least one tool: what the iteration cap bounds.</summary>
     internal int ToolRounds { get; private set; }
 
+    /// <summary>How many requests the turn has sent so far: the round its latest answer is recorded under.</summary>
+    internal int Requests => _requests;
+
     /// <summary>Every tool call, in the order the model made them.</summary>
     internal IReadOnlyList<TracedCall> Calls => [.. _calls];
 

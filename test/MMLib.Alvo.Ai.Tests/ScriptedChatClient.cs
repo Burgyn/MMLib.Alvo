@@ -29,10 +29,14 @@ internal sealed class ScriptedChatClient(params IReadOnlyList<ChatResponse> resp
     /// <summary>The options each request carried, in order: the tools and instructions the model saw on each call.</summary>
     internal List<ChatOptions?> Options { get; } = [];
 
+    /// <summary>Each request's messages, one list per request, in order.</summary>
+    internal List<List<ChatMessage>> Requests { get; } = [];
+
     public Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null, CancellationToken cancellationToken = default)
     {
         Sent.AddRange(messages);
+        Requests.Add([.. messages]);
         Options.Add(options?.Clone());
 
         return Task.FromResult(Next());
@@ -44,6 +48,7 @@ internal sealed class ScriptedChatClient(params IReadOnlyList<ChatResponse> resp
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         Sent.AddRange(messages);
+        Requests.Add([.. messages]);
         Options.Add(options?.Clone());
 
         foreach (var update in Next().ToChatResponseUpdates())

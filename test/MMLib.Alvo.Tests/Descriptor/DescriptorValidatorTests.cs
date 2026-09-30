@@ -720,6 +720,37 @@ public class DescriptorValidatorTests
     }
 
     /// <summary>
+    /// A managed column's fix leads with the one edit that fixes it; the alternative, dropping the trait, is a later
+    /// sentence, so a model cannot read the pair as "the fix changes what was asked" (spec §9, D49).
+    /// </summary>
+    /// <param name="traits">The entity traits that make the column managed.</param>
+    /// <param name="column">The managed column the entity declares.</param>
+    [Theory]
+    [InlineData(@"""audit"": true", "created_at")]
+    [InlineData(@"""audit"": true", "created_by")]
+    [InlineData(@"""audit"": true", "updated_at")]
+    [InlineData(@"""audit"": true", "updated_by")]
+    [InlineData(@"""tenancy"": ""scoped""", "tenant_id")]
+    [InlineData(@"""softDelete"": true", "deleted_at")]
+    [InlineData(@"""audit"": true", "id")]
+    public void A_managed_columns_fix_leads_with_the_single_edit(string traits, string column)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "orders": { {{traits}}, "fields": {
+            "title": { "type": "string" },
+            "{{column}}": { "type": "datetime" } } } } }
+        """;
+
+        var fix = Validate(json).Errors.Single(error => error.Path == $"/entities/orders/fields/{column}").FixSuggestion.ShouldNotBeNull();
+        var first = fix[..(fix.IndexOf(". ", StringComparison.Ordinal) + 1)];
+
+        fix.ShouldStartWith($"Remove '{column}' from the fields: ");
+        first.ShouldNotContain("drop", Case.Sensitive);
+        first.ShouldNotContain(" or ", Case.Sensitive);
+    }
+
+    /// <summary>
     /// An entity that says nothing about tenancy, in a project that turns tenancy <b>on</b>, still carries a
     /// managed <c>tenant_id</c> — so declaring it is refused there too.
     /// </summary>

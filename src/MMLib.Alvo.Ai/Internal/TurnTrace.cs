@@ -6,7 +6,7 @@ using System.Text.Json.Nodes;
 namespace MMLib.Alvo.Ai.Internal;
 
 /// <summary>What a trace's header names: the instructions, the provider, the model and the project.</summary>
-/// <param name="Instructions">The instructions' version, e.g. <c>alvo-schema-assistant v5</c>.</param>
+/// <param name="Instructions">The instructions' version, e.g. <c>alvo-schema-assistant v6</c>.</param>
 /// <param name="Provider">The connection's kind.</param>
 /// <param name="Model">The model the turn asked for.</param>
 /// <param name="Project">The project the turn was about.</param>
@@ -66,9 +66,16 @@ internal static class TurnTrace
     private static readonly JsonSerializerOptions _writer = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     /// <summary>The trace of a turn's calls, and how it ended.</summary>
-    internal static JsonObject Of(TurnHeader header, IReadOnlyList<TracedCall> calls, string end)
+    /// <param name="header">What the header names.</param>
+    /// <param name="calls">The turn's calls, in order.</param>
+    /// <param name="end">How the turn ended.</param>
+    /// <param name="followUpAfterRound">
+    /// The last round before the turn's one follow-up (D47), or <see langword="null"/> when it had none. Written into
+    /// the header before any entry is measured, so <see cref="Reserve"/> still covers only <c>droppedCalls</c>.
+    /// </param>
+    internal static JsonObject Of(TurnHeader header, IReadOnlyList<TracedCall> calls, string end, int? followUpAfterRound = null)
     {
-        var trace = (JsonObject)SecretScrub.Scrub(Header(header, calls, end))!;
+        var trace = (JsonObject)SecretScrub.Scrub(Header(header, calls, end, followUpAfterRound))!;
         var entries = trace["calls"]!.AsArray();
         for (var index = 0; index < calls.Count; index++)
         {
@@ -119,19 +126,28 @@ internal static class TurnTrace
         return line;
     }
 
-    private static JsonObject Header(TurnHeader header, IReadOnlyList<TracedCall> calls, string end) => new()
+    private static JsonObject Header(TurnHeader header, IReadOnlyList<TracedCall> calls, string end, int? followUpAfterRound)
     {
-        ["format"] = Format,
-        ["instructions"] = header.Instructions,
-        ["provider"] = header.Provider,
-        ["model"] = header.Model,
-        ["project"] = header.Project,
-        ["baseRevision"] = BaseRevision(calls),
-        ["end"] = end,
-        ["rounds"] = calls.Count == 0 ? 0 : calls.Max(call => call.Round),
-        ["callCount"] = calls.Count,
-        ["calls"] = new JsonArray(),
-    };
+        var trace = new JsonObject
+        {
+            ["format"] = Format,
+            ["instructions"] = header.Instructions,
+            ["provider"] = header.Provider,
+            ["model"] = header.Model,
+            ["project"] = header.Project,
+            ["baseRevision"] = BaseRevision(calls),
+            ["end"] = end,
+            ["rounds"] = calls.Count == 0 ? 0 : calls.Max(call => call.Round),
+            ["callCount"] = calls.Count,
+        };
+        if (followUpAfterRound is { } round)
+        {
+            trace["followUpAfterRound"] = round;
+        }
+
+        trace["calls"] = new JsonArray();
+        return trace;
+    }
 
     /// <summary>Adds the entry within the cap: whole, else without its operations, else not at all.</summary>
     private static bool TryAdd(JsonObject trace, JsonArray entries, JsonObject entry)

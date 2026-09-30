@@ -12,7 +12,7 @@ public sealed class TurnTraceTests
 {
     private const string QuotedRule = "'author_id == @user.id'";
 
-    private static readonly TurnHeader _header = new("alvo-schema-assistant v5", "OpenAiCompatible", "m", "p");
+    private static readonly TurnHeader _header = new("alvo-schema-assistant v6", "OpenAiCompatible", "m", "p");
 
     [Theory]
     [InlineData("key sk-live-0123456789abcdefghij", "sk-live-0123456789abcdefghij")]

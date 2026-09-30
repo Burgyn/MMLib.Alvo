@@ -248,7 +248,7 @@ public sealed class AlvoAssistantTests
             Scripted.Says("I proposed notes.")), trace: true);
 
         var trace = JsonNode.Parse(updates[^1].ShouldBeOfType<AssistantUpdate.TurnTraced>().Json)!;
-        trace["instructions"]!.GetValue<string>().ShouldBe("alvo-schema-assistant v5");
+        trace["instructions"]!.GetValue<string>().ShouldBe("alvo-schema-assistant v6");
         trace["model"]!.GetValue<string>().ShouldBe("qwen3:8b");
         trace["baseRevision"]!.GetValue<int>().ShouldBe(4);
         trace["end"]!.GetValue<string>().ShouldBe("answered");
@@ -404,7 +404,7 @@ public sealed class AlvoAssistantTests
         JsonNode.Parse(updates.OfType<AssistantUpdate.TurnTraced>().Single().Json)!["end"]!.GetValue<string>().ShouldBe("endpoint-failed");
     }
 
-    private static async Task<List<AssistantUpdate>> RunAsync(
+    internal static async Task<List<AssistantUpdate>> RunAsync(
         IAlvoManagement management,
         IAiConnectionResolver connections,
         IChatClient client,
@@ -425,7 +425,7 @@ public sealed class AlvoAssistantTests
         return updates;
     }
 
-    private static IAlvoManagement Describing(int revision)
+    internal static IAlvoManagement Describing(int revision)
     {
         var management = Substitute.For<IAlvoManagement>();
         management.GetDescriptorAsync("p", Arg.Any<CancellationToken>()).Returns(new ManagementDescriptor(
@@ -434,7 +434,7 @@ public sealed class AlvoAssistantTests
         return management;
     }
 
-    private static Dictionary<string, object?> Proposing(int revision) => new()
+    internal static Dictionary<string, object?> Proposing(int revision) => new()
     {
         ["baseRevision"] = revision,
         ["operations"] = JsonDocument.Parse(
@@ -442,14 +442,14 @@ public sealed class AlvoAssistantTests
         ["summary"] = "Adds notes.",
     };
 
-    private static Dictionary<string, object?> Checking(int revision)
+    internal static Dictionary<string, object?> Checking(int revision)
     {
         var checking = Proposing(revision);
         checking.Remove("summary");
         return checking;
     }
 
-    private static IAiConnectionResolver Configured() => Resolving(new AlvoAiConnection(
+    internal static IAiConnectionResolver Configured() => Resolving(new AlvoAiConnection(
         AiConnectionKind.OpenAiCompatible, new Uri("http://localhost:11434/v1"), "qwen3:8b", null));
 
     private static IAiConnectionResolver Unconfigured() => Resolving(null);
@@ -493,7 +493,7 @@ public sealed class AlvoAssistantTests
     }
 
     /// <summary>A logger that keeps what it was told, so a test can assert what was not.</summary>
-    private sealed class CapturingLogger : ILogger<AlvoAssistant>
+    internal sealed class CapturingLogger : ILogger<AlvoAssistant>
     {
         internal List<string> Lines { get; } = [];
 

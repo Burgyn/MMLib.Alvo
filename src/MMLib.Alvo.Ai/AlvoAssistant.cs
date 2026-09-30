@@ -28,9 +28,10 @@ namespace MMLib.Alvo.Ai;
 /// once cannot overwrite each other silently.
 /// </para>
 /// <para>
-/// <b>A turn is bounded twice.</b> The tools stop dry-running after three refusals that made no progress, or six in
-/// all (D41); the loop itself ends after
-/// <see cref="MaximumIterations"/> model round-trips, so a model that never stops calling tools ends as a turn
+/// <b>A turn is bounded twice</b> — and followed up at most once, inside the same tool-round cap (D47): a turn that
+/// stopped on a refusal it could still fix gets one more run, and the operator reads only the answer that came after
+/// it. The tools stop dry-running after three refusals that made no progress, or six in all (D41); the loop itself
+/// ends after <see cref="MaximumIterations"/> tool rounds, so a model that never stops calling tools ends as a turn
 /// rather than a bill.
 /// </para>
 /// <para>
@@ -108,54 +109,136 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
 
             if (request.IncludeTrace)
             {
-                yield return new AssistantUpdate.TurnTraced(TurnTrace.Json(TurnTrace.Of(HeaderOf(request, connection), recorder.Calls, turn.End)));
+                yield return new AssistantUpdate.TurnTraced(TurnTrace.Json(
+                    TurnTrace.Of(HeaderOf(request, connection), recorder.Calls, turn.End, turn.FollowUpAfterRound)));
             }
         }
         finally
         {
-            LogTurn(recorder, turn.End);
+            LogTurn(recorder, turn);
         }
     }
 
     /// <summary>
-    /// The turn itself: the agent's stream translated, then the proposal — recording how it ended in
-    /// <paramref name="turn"/>, which the trace and the 6203 line read.
+    /// The turn itself: the agent's stream translated, the one follow-up when it is due (D47), then the proposal —
+    /// recording how it ended in <paramref name="turn"/>, which the trace and the 6203 line read.
     /// </summary>
+    /// <remarks>
+    /// One agent and one session for the turn, so the follow-up continues the conversation the first run had — its
+    /// tool results included — rather than starting a second one. The session lives only as long as the turn.
+    /// </remarks>
     private async IAsyncEnumerable<AssistantUpdate> AnswerAsync(
         TurnRecorder recorder, AssistantRequest request, AlvoAiConnection connection, TurnState turn,
         [EnumeratorCancellation] CancellationToken ct)
     {
         var tools = ManagementTools.For(_management, request.Project);
-        var answer = new StringBuilder();
-        var updates = RunAsync(recorder, tools, request, ct).GetAsyncEnumerator(ct);
+        var agent = AgentFor(recorder, tools);
+        var session = await agent.CreateSessionAsync(ct).ConfigureAwait(false);
+        var run = new TurnRun(agent, session, recorder, tools, connection.Model, new TurnAnswer(), turn);
+        var first = agent.RunStreamingAsync(Conversation(request), session, options: null, ct);
+        await foreach (var update in StreamAsync(run, first, holding: true, ct).ConfigureAwait(false))
+        {
+            yield return update;
+        }
+
+        await foreach (var update in FollowUpAsync(run, ct).ConfigureAwait(false))
+        {
+            yield return update;
+        }
+
+        if (turn.End == TurnEnd.EndpointFailed)
+        {
+            yield break;
+        }
+
+        if (run.Answer.Release() is { } held)
+        {
+            yield return held;
+        }
+
+        turn.End = recorder.ToolRounds >= MaximumIterations ? TurnEnd.IterationCap : TurnEnd.Answered;
+        if (ProposalFrom(tools, run.Answer) is { } proposal)
+        {
+            yield return proposal;
+        }
+    }
+
+    /// <summary>
+    /// One run of the agent, translated: a failed endpoint shows what the turn held, then the failure, and ends the
+    /// run as <see cref="TurnEnd.EndpointFailed"/>.
+    /// </summary>
+    /// <remarks>
+    /// A run's first update discards what the run before it held (B1): that was the premature answer the follow-up
+    /// replaces. On the first run nothing is held yet, so the discard is a no-op there; a follow-up that fails before
+    /// its first update still shows the held answer.
+    /// </remarks>
+    /// <param name="run">The turn the run belongs to.</param>
+    /// <param name="stream">The agent's stream for this run.</param>
+    /// <param name="holding">Whether text is held while a follow-up may be due — the first run only.</param>
+    /// <param name="ct">A token to cancel the run.</param>
+    private async IAsyncEnumerable<AssistantUpdate> StreamAsync(
+        TurnRun run, IAsyncEnumerable<AgentResponseUpdate> stream, bool holding, [EnumeratorCancellation] CancellationToken ct)
+    {
+        var updates = stream.GetAsyncEnumerator(ct);
         await using (updates.ConfigureAwait(false))
         {
-            while (true)
+            for (var moved = 0; ; moved++)
             {
-                var next = await NextAsync(updates, connection.Model).ConfigureAwait(false);
+                var next = await NextAsync(updates, run.Model).ConfigureAwait(false);
                 if (next.Failure is { } failure)
                 {
-                    turn.End = TurnEnd.EndpointFailed;
+                    run.State.End = TurnEnd.EndpointFailed;
+                    if (run.Answer.Release() is { } held)
+                    {
+                        yield return held;
+                    }
+
                     yield return failure;
                     yield break;
                 }
 
                 if (!next.Moved)
                 {
-                    break;
+                    yield break;
                 }
 
-                foreach (var translated in Translate(updates.Current, answer))
+                if (moved == 0)
+                {
+                    run.Answer.Discard();
+                }
+
+                foreach (var translated in Translate(updates.Current, run.Tools, run.Answer, holding))
                 {
                     yield return translated;
                 }
             }
         }
+    }
 
-        turn.End = recorder.ToolRounds >= MaximumIterations ? TurnEnd.IterationCap : TurnEnd.Answered;
-        if (ProposalFrom(tools, answer) is { } proposal)
+    /// <summary>
+    /// The turn's one follow-up (D47), when its first run ended answered, within the tool-round cap, on a refusal the
+    /// model can still fix; otherwise nothing.
+    /// </summary>
+    /// <remarks>
+    /// The follow-up's invoker is capped at what the first run left, so the turn still makes at most
+    /// <see cref="MaximumIterations"/> tool rounds; and it holds nothing, because a second follow-up is never due.
+    /// </remarks>
+    private async IAsyncEnumerable<AssistantUpdate> FollowUpAsync(TurnRun run, [EnumeratorCancellation] CancellationToken ct)
+    {
+        if (run.State.End == TurnEnd.EndpointFailed
+            || run.Recorder.ToolRounds >= MaximumIterations
+            || await run.Tools.FollowUpPointersAsync(ct).ConfigureAwait(false) is not { } pointers)
         {
-            yield return proposal;
+            yield break;
+        }
+
+        run.State.FollowUpAfterRound = run.Recorder.Requests;
+        run.Agent.ChatClient.GetService<FunctionInvokingChatClient>()!.MaximumIterationsPerRequest =
+            MaximumIterations - run.Recorder.ToolRounds;
+        var followUp = run.Agent.RunStreamingAsync(new ChatMessage(ChatRole.User, FollowUp.Message(pointers)), run.Session, options: null, ct);
+        await foreach (var update in StreamAsync(run, followUp, holding: false, ct).ConfigureAwait(false))
+        {
+            yield return update;
         }
     }
 
@@ -164,7 +247,7 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     /// Built from the recorder's calls, not from the capped trace, so a call the trace dropped is still logged
     /// (pre-flight M2); and called from a <c>finally</c>, so an abandoned turn is logged too (L12).
     /// </remarks>
-    private void LogTurn(TurnRecorder recorder, string end)
+    private void LogTurn(TurnRecorder recorder, TurnState turn)
     {
         var calls = recorder.Calls;
         if (_logger.IsEnabled(LogLevel.Information))
@@ -176,7 +259,8 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
             }
         }
 
-        TurnEnded(_logger, end, calls.Count, recorder.ToolRounds);
+        var followedUp = turn.FollowUpAfterRound is not null;
+        TurnEnded(_logger, turn.End, calls.Count, recorder.ToolRounds, followedUp);
     }
 
     /// <summary>One call's 6202 line: its scrubbed trace entry, reduced to what a log may carry.</summary>
@@ -189,11 +273,60 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
             .Replace(" -->", string.Empty, StringComparison.Ordinal),
         connection.Kind.ToString(), connection.Model, request.Project);
 
-    /// <summary>How the turn ended — <see cref="TurnEnd.Abandoned"/> until it says otherwise.</summary>
+    /// <summary>How the turn ended — <see cref="TurnEnd.Abandoned"/> until it says otherwise — and whether it was followed up.</summary>
     /// <remarks>A class, because an async iterator can take no <c>ref</c>: the answer sets it, the trace and the log read it.</remarks>
     private sealed class TurnState
     {
         internal string End { get; set; } = TurnEnd.Abandoned;
+
+        /// <summary>The last round before the turn's follow-up (D47), or <see langword="null"/> when it had none.</summary>
+        internal int? FollowUpAfterRound { get; set; }
+    }
+
+    /// <summary>What every run of one turn shares: the agent and its session, the recorder, the tools and the answer.</summary>
+    private sealed record TurnRun(
+        ChatClientAgent Agent, AgentSession Session, TurnRecorder Recorder, ManagementTools Tools, string Model, TurnAnswer Answer, TurnState State);
+
+    /// <summary>
+    /// The turn's answer: the text shown, and the text held while a follow-up may be due (D47) — released when a tool
+    /// call shows it was a preface or the turn ends without a follow-up, discarded when a follow-up replaces it.
+    /// </summary>
+    private sealed class TurnAnswer
+    {
+        private readonly StringBuilder _shown = new();
+        private readonly StringBuilder _held = new();
+
+        /// <summary>The text the operator was shown, which the proposal's summary reads.</summary>
+        internal string Shown => _shown.ToString();
+
+        /// <summary>Holds the text, or shows it and returns the update that shows it (B2: nothing while holding).</summary>
+        internal AssistantUpdate.Text? Add(string text, bool hold)
+        {
+            if (hold)
+            {
+                _held.Append(text);
+                return null;
+            }
+
+            _shown.Append(text);
+            return new AssistantUpdate.Text(text);
+        }
+
+        /// <summary>Shows everything held as one update, or returns <see langword="null"/> when nothing is.</summary>
+        internal AssistantUpdate.Text? Release()
+        {
+            if (_held.Length == 0)
+            {
+                return null;
+            }
+
+            var held = _held.ToString();
+            _held.Clear();
+            return Add(held, hold: false);
+        }
+
+        /// <summary>Forgets the held text: the answer a follow-up replaces.</summary>
+        internal void Discard() => _held.Clear();
     }
 
     /// <summary>
@@ -259,11 +392,6 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     /// <summary>One step of the agent's stream: whether it moved, or what stopped it.</summary>
     private readonly record struct StreamStep(bool Moved, AssistantUpdate.Failed? Failure);
 
-    /// <summary>Runs the agent loop for one turn.</summary>
-    private static IAsyncEnumerable<AgentResponseUpdate> RunAsync(
-        IChatClient client, ManagementTools tools, AssistantRequest request, CancellationToken ct) =>
-        AgentFor(client, tools).RunStreamingAsync(Conversation(request), session: null, options: null, ct);
-
     /// <summary>
     /// The agent for one turn: the fixed instructions, the tools, the descriptor skills, and a capped, sequential invoker.
     /// </summary>
@@ -310,8 +438,9 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
 
     /// <summary>The conversation as the model sees it: the caller's history, then this turn's message.</summary>
     /// <remarks>
-    /// The caller's history rather than a session the assistant holds: a dashboard that drew a conversation
-    /// is the one authority on what that conversation was, and a session here would outlive the screen.
+    /// The caller's history rather than a session kept across turns: a dashboard that drew a conversation
+    /// is the one authority on what that conversation was, and a session that outlived the turn would outlive the
+    /// screen. The turn's own session (D47) is opened and dropped with the turn.
     /// </remarks>
     private static IEnumerable<ChatMessage> Conversation(AssistantRequest request)
     {
@@ -325,18 +454,31 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     }
 
     /// <summary>One framework update as the updates a caller sees, accumulating the answer as it goes.</summary>
-    private static IEnumerable<AssistantUpdate> Translate(AgentResponseUpdate update, StringBuilder answer)
+    /// <remarks>
+    /// A call releases what was held, since text before a call was a preface; text is held while
+    /// <paramref name="holding"/> and a follow-up may be due (D47).
+    /// </remarks>
+    private static IEnumerable<AssistantUpdate> Translate(
+        AgentResponseUpdate update, ManagementTools tools, TurnAnswer answer, bool holding)
     {
         foreach (var content in update.Contents)
         {
             switch (content)
             {
                 case FunctionCallContent call:
+                    if (answer.Release() is { } preface)
+                    {
+                        yield return preface;
+                    }
+
                     yield return new AssistantUpdate.ToolInvoked(call.Name);
                     break;
                 case TextContent { Text.Length: > 0 } text:
-                    answer.Append(text.Text);
-                    yield return new AssistantUpdate.Text(text.Text);
+                    if (answer.Add(text.Text, hold: holding && tools.FollowUpMayBeDue) is { } shown)
+                    {
+                        yield return shown;
+                    }
+
                     break;
                 default:
                     break;
@@ -352,14 +494,14 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     /// valid proposal, else the last refused one. A turn that only answered a question — or only asked
     /// <c>check_change</c> — has none.
     /// </remarks>
-    private static AssistantUpdate.Proposal? ProposalFrom(ManagementTools tools, StringBuilder answer) =>
+    private static AssistantUpdate.Proposal? ProposalFrom(ManagementTools tools, TurnAnswer answer) =>
         tools.Proposal is { } draft
             ? new AssistantUpdate.Proposal(draft.DescriptorJson, draft.ExpectedRevision, SummaryOf(answer, draft), draft.Refusals)
             : null;
 
     /// <summary>The turn's answer, or the proposal's own summary when the turn said nothing (D10).</summary>
-    private static string SummaryOf(StringBuilder answer, ProposedDraft draft) =>
-        answer.Length > 0 ? answer.ToString() : draft.Summary;
+    private static string SummaryOf(TurnAnswer answer, ProposedDraft draft) =>
+        answer.Shown is { Length: > 0 } shown ? shown : draft.Summary;
 
     /// <summary>What the agent calls itself, which some providers echo back in a response.</summary>
     private const string AgentName = "alvo-schema-assistant";
@@ -399,8 +541,11 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     [LoggerMessage(EventId = 6202, Level = LogLevel.Information, Message = "Assistant call {Round}: {Call}")]
     private static partial void CallTraced(ILogger logger, int round, string call);
 
-    [LoggerMessage(EventId = 6203, Level = LogLevel.Information, Message = "Assistant turn ended ({End}) after {Calls} calls in {Rounds} tool rounds.")]
-    private static partial void TurnEnded(ILogger logger, string end, int calls, int rounds);
+    [LoggerMessage(
+        EventId = 6203,
+        Level = LogLevel.Information,
+        Message = "Assistant turn ended ({End}) after {Calls} calls in {Rounds} tool rounds; followed up: {FollowedUp}.")]
+    private static partial void TurnEnded(ILogger logger, string end, int calls, int rounds, bool followedUp);
 
     [LoggerMessage(
         EventId = 6201,

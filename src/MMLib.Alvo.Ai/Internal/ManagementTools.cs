@@ -47,6 +47,9 @@ namespace MMLib.Alvo.Ai.Internal;
 /// on would let parallel calls all pass an exhausted budget.
 /// </para>
 /// <para>
+/// <b>The last dry run is state too (D47):</b> the assistant asks it whether a turn that stopped may be followed up.
+/// </para>
+/// <para>
 /// <b>Every tool answers, none of them throws.</b> A refusal the framework raised is something to tell the
 /// operator, not a stack trace that ends the turn — so the documented management exceptions become results
 /// the model can read, and everything else still reaches the host's logs as the bug it is.
@@ -75,6 +78,10 @@ internal sealed class ManagementTools
         "propose_change needs a summary: one sentence, in the operator's language, saying what the change does. "
         + "Nothing was dry-run or filed.";
 
+    /// <summary>The sources only the budget, the operator or an administrator can resolve: never followed up (D47 (d)).</summary>
+    private static readonly HashSet<string> _notTheModels =
+        new(StringComparer.Ordinal) { ToolViolation.Budget, ToolViolation.Plan, ToolViolation.Access };
+
     private readonly IAlvoManagement _management;
     private readonly string _project;
     private readonly List<RefusedPatch> _refused = [];
@@ -85,6 +92,7 @@ internal sealed class ManagementTools
     private int _currentRevision;
     private ProposedDraft? _lastValid;
     private ProposedDraft? _lastRefused;
+    private (bool Proposed, ChangeOutcome Outcome)? _lastDryRun;
 
     private ManagementTools(IAlvoManagement management, string project)
     {
@@ -126,6 +134,16 @@ internal sealed class ManagementTools
     /// <summary>The tools, in the order they are declared.</summary>
     internal IReadOnlyList<AIFunction> Functions { get; }
 
+    /// <summary>
+    /// Whether the turn's last dry run leaves the model something to fix (D47 (a)–(d)): a refused
+    /// <c>propose_change</c>, no valid proposal filed, attempts left, checked, and nothing only the budget, the
+    /// operator or an administrator can decide. Synchronous and free, so the stream can ask it per text chunk.
+    /// </summary>
+    internal bool FollowUpMayBeDue =>
+        _lastValid is null
+        && _lastDryRun is { Proposed: true, Outcome: { Valid: false, Unchecked: not true, AttemptsLeft: > 0 } last }
+        && !last.Violations.Any(violation => violation.Blocks && _notTheModels.Contains(violation.Source));
+
     /// <summary>The smaller of the two remainders: stalled refusals left, and refusals left in all.</summary>
     private int AttemptsLeft =>
         Math.Max(0, Math.Min(MaximumStalledRefusals - _stalledRefusals, MaximumRefusals - _refusals));
@@ -165,7 +183,7 @@ internal sealed class ManagementTools
         [Description(BaseRevisionHelp)] int baseRevision,
         [Description(OperationsHelp)] JsonElement operations,
         CancellationToken ct) =>
-        AnsweredAsync(async () => Json((await AttemptAsync(baseRevision, operations, ct).ConfigureAwait(false)).Outcome));
+        AnsweredAsync(async () => Json((await AttemptAsync(proposed: false, baseRevision, operations, ct).ConfigureAwait(false)).Outcome));
 
     /// <summary>Dry-runs a patch and files the result as this turn's proposal.</summary>
     /// <param name="baseRevision">The revision the operations were written against.</param>
@@ -191,7 +209,7 @@ internal sealed class ManagementTools
             return Error(InvalidRequestCode, SummaryRequired);
         }
 
-        var (attempt, outcome) = await AttemptAsync(baseRevision, operations, ct).ConfigureAwait(false);
+        var (attempt, outcome) = await AttemptAsync(proposed: true, baseRevision, operations, ct).ConfigureAwait(false);
         if (attempt is not null)
         {
             FileProposal(attempt, summary);
@@ -201,19 +219,80 @@ internal sealed class ManagementTools
     }
 
     /// <summary>One attempt at a change, within the budget: the draft it produced, if any, and the model's answer.</summary>
+    /// <remarks>
+    /// The last dry run is forgotten first, so an attempt that ends in an exception leaves none behind for
+    /// <see cref="FollowUpMayBeDue"/> to read.
+    /// </remarks>
+    /// <param name="proposed">Whether the call was a <c>propose_change</c> rather than a <c>check_change</c>.</param>
+    /// <param name="baseRevision">The revision the operations were written against.</param>
+    /// <param name="operations">The RFC 6902 patch.</param>
+    /// <param name="ct">A token to cancel the call.</param>
     private async Task<(DraftAttempt? Attempt, ChangeOutcome Outcome)> AttemptAsync(
-        int baseRevision, JsonElement operations, CancellationToken ct)
+        bool proposed, int baseRevision, JsonElement operations, CancellationToken ct)
     {
+        _lastDryRun = null;
         var earlier = RefusedBefore(baseRevision, DescriptorDraft.Unwrapped(operations));
         if (_refusals >= MaximumRefusals || (_stalledRefusals >= MaximumStalledRefusals && earlier is not null))
         {
-            return (null, BudgetSpent(earlier));
+            return Remembered(proposed, null, BudgetSpent(earlier));
         }
 
         var attempt = await DescriptorDraft.BuildAsync(_management, _project, baseRevision, operations, ct).ConfigureAwait(false);
         Record(attempt, baseRevision, operations);
 
-        return (attempt, ChangeOutcome.From(attempt, AttemptsLeft));
+        return Remembered(proposed, attempt, ChangeOutcome.From(attempt, AttemptsLeft));
+    }
+
+    /// <summary>Remembers the attempt's answer as the turn's last dry run, and passes it on.</summary>
+    private (DraftAttempt? Attempt, ChangeOutcome Outcome) Remembered(bool proposed, DraftAttempt? attempt, ChangeOutcome outcome)
+    {
+        _lastDryRun = (proposed, outcome);
+
+        return (attempt, outcome);
+    }
+
+    /// <summary>The refused pointers to follow up on, or <see langword="null"/> when no follow-up is due (D47 (a)–(e)).</summary>
+    /// <remarks>
+    /// "Unsupported" is the framework's own list: a blocking violation whose message carries a consequence
+    /// <c>get_capabilities</c> refuses. Read once, only here; a read refused as forbidden or as no such project, or
+    /// one that answers nothing, means no follow-up.
+    /// </remarks>
+    internal async Task<IReadOnlyList<string>?> FollowUpPointersAsync(CancellationToken ct)
+    {
+        if (!FollowUpMayBeDue)
+        {
+            return null;
+        }
+
+        var blocking = _lastDryRun!.Value.Outcome.Violations.Where(violation => violation.Blocks).ToList();
+        var refused = await RefusedConsequencesAsync(ct).ConfigureAwait(false);
+        return refused is null || blocking.Exists(violation => refused.Exists(consequence => violation.Message.Contains(consequence, StringComparison.Ordinal)))
+            ? null
+            : Pointers(blocking);
+    }
+
+    /// <summary>Each blocking violation's pointer, once, in order; the whole change named as such.</summary>
+    private static List<string> Pointers(List<ToolViolation> blocking) =>
+        [.. blocking.Select(violation => violation.Pointer.Length == 0 ? "(the whole change)" : violation.Pointer).Distinct(StringComparer.Ordinal)];
+
+    /// <summary>
+    /// The consequences this build refuses, from <c>get_capabilities</c> — empty ones left out, since every message
+    /// contains an empty string — or <see langword="null"/> when the read answered nothing or was refused.
+    /// </summary>
+    /// <remarks>Only the two refusals the Management API documents for this read are caught; anything else is a bug.</remarks>
+    private async Task<List<string>?> RefusedConsequencesAsync(CancellationToken ct)
+    {
+        try
+        {
+            var capabilities = await _management.GetCapabilitiesAsync(_project, ct).ConfigureAwait(false);
+            return capabilities is null
+                ? null
+                : [.. capabilities.Refused.Select(feature => feature.Consequence).Where(consequence => consequence.Length > 0)];
+        }
+        catch (Exception refusal) when (refusal is ManagementForbiddenException or ManagementProjectNotFoundException)
+        {
+            return null;
+        }
     }
 
     /// <summary>This exact patch's earlier refusal, when it was refused before in this turn; else none.</summary>

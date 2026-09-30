@@ -30,6 +30,7 @@ public sealed partial class AssistantInstructionsTests
         "`stale-revision`", "`severity` is `warning` does not block", "`\"unchecked\": true`",
         "When a refusal carries `attemptsLeft` 0", "is one string literal, not a rule",
         "one the descriptor declares, or `users`",
+        "every fix adds something the operator did not ask for", "is an ordinary fix",
     ];
 
     /// <summary>
