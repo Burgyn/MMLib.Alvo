@@ -340,15 +340,26 @@ public interface IAlvoData
     /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>
-    /// The created row, with every <c>hidden</c> field stripped — or, on a replay whose caller's <c>get</c> is
-    /// denied outright, an <see cref="AlvoRecord"/> carrying only <c>id</c>, with no row read performed. See
-    /// <paramref name="idempotency"/> and <c>EfAlvoData.ReplayedAsync</c>'s remarks for the safety argument.
+    /// The created row exactly as <see cref="GetAsync"/> by <paramref name="context"/> would return it — under
+    /// the <c>get</c> decision's <c>USING</c>, tenant scope and <c>hidden</c> mask, never the <c>create</c>
+    /// decision's — or an <see cref="AlvoRecord"/> carrying only <c>id</c> when that read would not return it:
+    /// no policy allows <c>get</c> at all (then no row read is performed), or the <c>get</c> rule's own
+    /// predicate excludes the row this caller just wrote. See <paramref name="idempotency"/> and
+    /// <c>EfAlvoData.EchoedAsync</c>'s remarks for the safety argument.
     /// </returns>
     /// <remarks>
+    /// <para>
     /// <b>The row this returns is the row the store holds</b>, re-read inside the write transaction, not the
     /// payload that was sent: that is what gives a database default, a framework-assigned audit value, and
-    /// therefore a usable version a following <see cref="AlvoPrecondition"/> can carry. The id-only replay
-    /// answer above is the one exception, and it is deliberate: it never reads the row at all.
+    /// therefore a usable version a following <see cref="AlvoPrecondition"/> can carry.
+    /// </para>
+    /// <para>
+    /// <b>A write is not a read, and its answer is not a way around <c>get</c>.</b> PostgreSQL RLS makes
+    /// <c>INSERT … RETURNING</c> satisfy the SELECT policy and fails the statement otherwise; an
+    /// implementation of this port answers the id alone instead, because the write was authorized and has
+    /// happened. The same rule holds for <see cref="UpdateAsync"/>, <see cref="ReplaceAsync"/>,
+    /// <see cref="CreateManyAsync"/> and <see cref="UpdateManyAsync"/>.
+    /// </para>
     /// </remarks>
     /// <exception cref="AlvoAuthorizationException">
     /// No policy allows <c>create</c> on this entity for <paramref name="context"/>,
@@ -402,7 +413,11 @@ public interface IAlvoData
     /// The record is scoped to the caller's tenant and user, and a token from an anonymous caller is refused.
     /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>The updated row, with every <c>hidden</c> field stripped.</returns>
+    /// <returns>
+    /// The updated row as <see cref="GetAsync"/> by <paramref name="context"/> would return it, or its id alone
+    /// when that read would not — the rule <see cref="CreateAsync"/> states. An <c>update</c> rule admitting a
+    /// row the <c>get</c> rule excludes does not make that row readable through this answer.
+    /// </returns>
     /// <exception cref="AlvoRecordNotFoundException">
     /// The row does not exist, or the caller's policy <c>USING</c> predicate excludes it — whichever
     /// <paramref name="precondition"/> was supplied, because invisibility outranks the precondition.
@@ -487,6 +502,10 @@ public interface IAlvoData
     /// because it reports the state that request left rather than performing an act of creation.
     /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>
+    /// Which branch ran, and the row as <see cref="GetAsync"/> by <paramref name="context"/> would return it —
+    /// or its id alone when that read would not, on either branch; see <see cref="CreateAsync"/>.
+    /// </returns>
     /// <exception cref="AlvoAuthorizationException">
     /// No policy allows <c>create</c> or no policy allows <c>update</c> on this entity for
     /// <paramref name="context"/>; the candidate row fails the <c>WITH CHECK</c> predicate on whichever
@@ -582,7 +601,11 @@ public interface IAlvoData
     /// freshly resolved <c>get</c> decision, without writing again.
     /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>The rows this batch wrote, or every reason it wrote none.</returns>
+    /// <returns>
+    /// The rows this batch wrote, in request order and one entry per row — each as <see cref="GetAsync"/> by
+    /// <paramref name="context"/> would return it, or its id alone when that read would not (see
+    /// <see cref="CreateAsync"/>) — or every reason it wrote none.
+    /// </returns>
     /// <exception cref="AlvoAuthorizationException">
     /// No policy allows this operation on this entity for <paramref name="context"/> at all. A refusal that
     /// concerns <em>rows</em> travels on <see cref="AlvoBatchResult.Refusals"/> instead: this exception is
@@ -642,7 +665,11 @@ public interface IAlvoData
     /// <see cref="CreateManyAsync"/> for what a replay answers.
     /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
-    /// <returns>The rows this batch wrote, or every reason it wrote none.</returns>
+    /// <returns>
+    /// The rows this batch wrote, in request order and one entry per row — each as <see cref="GetAsync"/> by
+    /// <paramref name="context"/> would return it, or its id alone when that read would not (see
+    /// <see cref="CreateAsync"/>) — or every reason it wrote none.
+    /// </returns>
     /// <exception cref="AlvoAuthorizationException">
     /// No policy allows this operation on this entity for <paramref name="context"/> at all. A refusal that
     /// concerns <em>rows</em> travels on <see cref="AlvoBatchResult.Refusals"/> instead: this exception is

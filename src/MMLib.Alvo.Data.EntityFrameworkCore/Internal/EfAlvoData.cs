@@ -257,9 +257,10 @@ internal sealed class EfAlvoData : IAlvoData
         await EmitAsync(
             db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
             cancellationToken);
+        var echoed = await EchoedAsync(db, schema, context, RowIdOf(stored), cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        return RecordMaterializer.ToRecord(stored, decision.HiddenFields, FrozenSet<string>.Empty);
+        return echoed;
     }
 
     /// <summary>
@@ -563,7 +564,7 @@ internal sealed class EfAlvoData : IAlvoData
             cancellationToken);
         await records.InsertAsync([(Guid)candidate[AlvoDataContext.IdColumn]], now, cancellationToken);
 
-        return RecordMaterializer.ToRecord(stored, decision.HiddenFields, FrozenSet<string>.Empty);
+        return await EchoedAsync(db, schema, context, RowIdOf(stored), cancellationToken);
     }
 
     /// <summary>
@@ -620,17 +621,103 @@ internal sealed class EfAlvoData : IAlvoData
     {
         EnsureSameRequest(record, token);
 
-        var read = _policy.Resolve(schema.Name, DataOperation.Get, context);
-        if (read.IsDenied)
+        return await ReadBackAsync(db, schema, ReadDecision(schema, context), context, RecordedRow(record), cancellationToken)
+            ?? throw new AlvoRecordNotFoundException();
+    }
+
+    /// <summary>
+    /// What a <b>fresh</b> write answers with: the row it wrote, exactly as a <c>GET</c> by this caller would
+    /// return it the moment the write commits — or, when that <c>GET</c> would not return it, the id alone.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Never the post-image under the write's own decision.</b> That was a read-policy bypass: an entity
+    /// whose <c>update</c> rule admits rows its <c>get</c> rule does not (<c>update: status == 'open'</c>,
+    /// <c>get: owner_id == @user.id</c>) handed every non-hidden field of somebody else's open row to a caller
+    /// a <c>GET</c> answers 404 — and <c>create</c> has no <c>USING</c> at all, so a create echoed any row its
+    /// author could place. The row is therefore re-read here, inside the write's own transaction, under a
+    /// freshly resolved <c>get</c> decision: its <c>USING</c>, its tenant scope and its mask, rendered into
+    /// the SQL <c>WHERE</c> like every other read. It is the same mechanism a replay answers with
+    /// (<see cref="ReadBackAsync"/>), so a first attempt and its retry cannot diverge again.
+    /// </para>
+    /// <para>
+    /// <b>Deviation from PostgreSQL RLS, deliberate.</b> RLS makes <c>INSERT/UPDATE … RETURNING</c> require
+    /// the rows to satisfy the SELECT policy and <em>fails the statement</em> when they do not. Alvo answers
+    /// the id alone instead, for the reason the replay's id-only answer gives: the write was authorized and
+    /// has happened, so refusing it after the fact would report a failure for a change that is committed,
+    /// and invite a retry that writes again. The id discloses nothing the caller did not supply (an update, a
+    /// replace) or is not already told by <c>Location</c> (a create). It is the one place this port answers a
+    /// row a <c>get</c> excludes with anything at all, and it is also why this differs from the replay, which
+    /// cannot tell "invisible to me" from "deleted since" and so answers not-found.
+    /// </para>
+    /// <para>
+    /// The cost is one primary-key read per written row, and it is not skipped when the two decisions look
+    /// alike: proving that <c>get</c> admits whatever <c>update</c> admits is a question about two predicates,
+    /// and the answer the store gives is the one that cannot be wrong.
+    /// </para>
+    /// </remarks>
+    /// <param name="db">The context whose open write transaction the read joins.</param>
+    /// <param name="schema">The entity that was written.</param>
+    /// <param name="context">The caller who wrote it.</param>
+    /// <param name="rowId">The written row.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private async Task<AlvoRecord> EchoedAsync(
+        AlvoDataContext db, EntitySchema schema, AlvoContext context, Guid rowId, CancellationToken cancellationToken) =>
+        (await EchoedAsync(db, schema, context, [rowId], cancellationToken))[0];
+
+    /// <inheritdoc cref="EchoedAsync(AlvoDataContext, EntitySchema, AlvoContext, Guid, CancellationToken)"/>
+    /// <param name="db">The context whose open write transaction the reads join.</param>
+    /// <param name="schema">The entity that was written.</param>
+    /// <param name="context">The caller who wrote it.</param>
+    /// <param name="rowIds">The written rows, in the order the answer lists them — one entry per row.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private async Task<List<AlvoRecord>> EchoedAsync(
+        AlvoDataContext db, EntitySchema schema, AlvoContext context, List<Guid> rowIds,
+        CancellationToken cancellationToken)
+    {
+        var read = ReadDecision(schema, context);
+        var echoed = new List<AlvoRecord>(rowIds.Count);
+        foreach (var rowId in rowIds)
         {
-            return IdOnly(RecordedRow(record));
+            echoed.Add(await ReadBackAsync(db, schema, read, context, rowId, cancellationToken) ?? IdOnly(rowId));
         }
 
-        var row = await SingleAsync(db, schema, read, context, RecordedRow(record), lockFor: null, cancellationToken)
-            ?? throw new AlvoRecordNotFoundException();
-
-        return RecordMaterializer.ToRecord(row, read.HiddenFields, FrozenSet<string>.Empty);
+        return echoed;
     }
+
+    /// <summary>
+    /// The one row, read back under <paramref name="read"/> — the id alone when <paramref name="read"/> is
+    /// denied outright, with no row read at all, or <see langword="null"/> when its <c>USING</c> excludes the
+    /// row. Shared by every write's answer and every replay's, which decide the <see langword="null"/>.
+    /// </summary>
+    /// <param name="db">The context whose open transaction the read joins.</param>
+    /// <param name="schema">The entity the row belongs to.</param>
+    /// <param name="read">This caller's freshly resolved <c>get</c> decision.</param>
+    /// <param name="context">The caller the row is read for.</param>
+    /// <param name="rowId">The row to read.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private async Task<AlvoRecord?> ReadBackAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision read, AlvoContext context, Guid rowId,
+        CancellationToken cancellationToken)
+    {
+        if (read.IsDenied)
+        {
+            return IdOnly(rowId);
+        }
+
+        var row = await SingleAsync(db, schema, read, context, rowId, lockFor: null, cancellationToken);
+        return row is null ? null : RecordMaterializer.ToRecord(row, read.HiddenFields, FrozenSet<string>.Empty);
+    }
+
+    /// <summary>
+    /// This caller's <c>get</c> decision, resolved fresh — never the write's, whose <c>USING</c> answers a
+    /// different question (and on a create is <see langword="null"/>, which renders as a constant true).
+    /// </summary>
+    private PolicyDecision ReadDecision(EntitySchema schema, AlvoContext context) =>
+        _policy.Resolve(schema.Name, DataOperation.Get, context);
+
+    /// <summary>The id of a row this port just stored or re-read.</summary>
+    private static Guid RowIdOf(Dictionary<string, object> row) => (Guid)row[AlvoDataContext.IdColumn];
 
     /// <summary>
     /// Refuses a key reused for a different request, before anything is read or written.
@@ -953,11 +1040,11 @@ internal sealed class EfAlvoData : IAlvoData
         await EnsureOutboxTableAsync(db, cancellationToken);
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var postImage = await WrittenAsync(
-            db, transaction, schema, decision, context, id, values, precondition, now, cancellationToken);
+        await WrittenAsync(db, transaction, schema, decision, context, id, values, precondition, now, cancellationToken);
+        var echoed = await EchoedAsync(db, schema, context, id, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
 
-        return RecordMaterializer.ToRecord(postImage, decision.HiddenFields, FrozenSet<string>.Empty);
+        return echoed;
     }
 
     /// <summary>
@@ -1005,11 +1092,10 @@ internal sealed class EfAlvoData : IAlvoData
         AlvoContext context, Guid id, IReadOnlyDictionary<string, object?> values, AlvoPrecondition? precondition,
         IdempotencyScope records, DateTimeOffset now, CancellationToken cancellationToken)
     {
-        var postImage = await WrittenAsync(
-            db, transaction, schema, decision, context, id, values, precondition, now, cancellationToken);
+        await WrittenAsync(db, transaction, schema, decision, context, id, values, precondition, now, cancellationToken);
         await records.InsertAsync([id], now, cancellationToken);
 
-        return RecordMaterializer.ToRecord(postImage, decision.HiddenFields, FrozenSet<string>.Empty);
+        return await EchoedAsync(db, schema, context, id, cancellationToken);
     }
 
     /// <summary>The body of one update inside the caller's transaction: the write, then its event.</summary>
@@ -1315,8 +1401,7 @@ internal sealed class EfAlvoData : IAlvoData
             db, transaction, schema, OutboxOperation.Updated, context, now, Unmasked(postImage), preImage,
             cancellationToken);
 
-        return AlvoReplaceResult.ReplacedRow(
-            RecordMaterializer.ToRecord(postImage, decision.HiddenFields, FrozenSet<string>.Empty));
+        return AlvoReplaceResult.ReplacedRow(await EchoedAsync(db, schema, context, id, cancellationToken));
     }
 
     /// <summary>The create branch: no row this caller can see holds this id.</summary>
@@ -1346,8 +1431,7 @@ internal sealed class EfAlvoData : IAlvoData
             db, transaction, schema, OutboxOperation.Created, context, now, Unmasked(stored), preImage: null,
             cancellationToken);
 
-        return AlvoReplaceResult.CreatedRow(
-            RecordMaterializer.ToRecord(stored, decision.HiddenFields, FrozenSet<string>.Empty));
+        return AlvoReplaceResult.CreatedRow(await EchoedAsync(db, schema, context, RowIdOf(stored), cancellationToken));
     }
 
     /// <summary>
@@ -2417,11 +2501,11 @@ internal sealed class EfAlvoData : IAlvoData
                 cancellationToken);
         }
 
+        var rowIds = stored.Select(RowIdOf).ToList();
+
         return new BatchOutcome(
-            AlvoBatchResult.Wrote(
-                [.. stored.Select(row => RecordMaterializer.ToRecord(row, decision.HiddenFields, FrozenSet<string>.Empty))],
-                stored.Count),
-            [.. stored.Select(row => (Guid)row[AlvoDataContext.IdColumn])]);
+            AlvoBatchResult.Wrote(await EchoedAsync(db, schema, context, rowIds, cancellationToken), stored.Count),
+            rowIds);
     }
 
     /// <summary>
@@ -2637,14 +2721,12 @@ internal sealed class EfAlvoData : IAlvoData
                 cancellationToken);
         }
 
-        var inRequestOrder = written.OrderBy(row => row.Index).ToList();
+        var inRequestOrder = written.OrderBy(row => row.Index).Select(row => row.Id).ToList();
 
         return new BatchOutcome(
             AlvoBatchResult.Wrote(
-                [.. inRequestOrder.Select(row =>
-                    RecordMaterializer.ToRecord(row.PostImage, decision.HiddenFields, FrozenSet<string>.Empty))],
-                inRequestOrder.Count),
-            [.. inRequestOrder.Select(row => row.Id)]);
+                await EchoedAsync(db, schema, context, inRequestOrder, cancellationToken), inRequestOrder.Count),
+            inRequestOrder);
     }
 
     /// <summary>A batch delete: every named row's locked pre-image judged, then every one removed.</summary>
@@ -2800,19 +2882,13 @@ internal sealed class EfAlvoData : IAlvoData
             return AlvoBatchResult.Wrote([], rowIds.Count);
         }
 
-        var read = _policy.Resolve(schema.Name, DataOperation.Get, context);
-        if (read.IsDenied)
-        {
-            return AlvoBatchResult.Wrote([.. rowIds.Select(IdOnly)], rowIds.Count);
-        }
-
+        var read = ReadDecision(schema, context);
         var rows = new List<AlvoRecord>(rowIds.Count);
         foreach (var id in rowIds)
         {
-            var row = await SingleAsync(db, schema, read, context, id, lockFor: null, cancellationToken);
-            if (row is not null)
+            if (await ReadBackAsync(db, schema, read, context, id, cancellationToken) is { } row)
             {
-                rows.Add(RecordMaterializer.ToRecord(row, read.HiddenFields, FrozenSet<string>.Empty));
+                rows.Add(row);
             }
         }
 

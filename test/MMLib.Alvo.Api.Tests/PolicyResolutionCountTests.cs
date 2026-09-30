@@ -107,23 +107,32 @@ public sealed class PolicyResolutionCountTests
         engine.Resolved[0].Operation.ShouldBe(DataOperation.Get);
     }
 
-    /// <summary>Each write is the same two as a list: the HTTP gate, then the port.</summary>
+    /// <summary>
+    /// A write that answers with a row resolves three times — the HTTP gate, the port, and the port's
+    /// <c>get</c> for the answer — and a delete, which answers with none, the same two as a list.
+    /// </summary>
     /// <remarks>
-    /// Deliberately <b>unkeyed</b> creates. A create carrying an <c>Idempotency-Key</c> whose key has already
-    /// been recorded resolves a third time, and that third resolve is a security control rather than waste —
-    /// see <see cref="A_keyed_create_replayed_resolves_get_a_third_time"/>.
+    /// <para>
+    /// <b>The third resolve is a security control, and it moved this number on purpose.</b> A write used to
+    /// echo its row under its own decision, which handed a caller whose <c>update</c> rule admits a row their
+    /// <c>get</c> rule excludes every field of it. The echo is now read under a freshly resolved <c>get</c>,
+    /// exactly as a replay is (<see cref="A_keyed_create_replayed_resolves_get_a_third_time"/>), and the
+    /// cheapest way to make a failing count green here would be to delete that read-policy check.
+    /// </para>
+    /// <para>Deliberately <b>unkeyed</b>, so no replay contributes a resolve of its own.</para>
     /// </remarks>
     [Fact]
-    public async Task A_create_an_update_and_a_delete_each_resolve_the_policy_exactly_twice()
+    public async Task A_create_and_an_update_resolve_get_a_third_time_and_a_delete_resolves_twice()
     {
         var (world, engine) = await CountedAsync();
         await using var _ = world;
         var id = await CreatedIdAsync(world);
 
-        await ResolvesTwiceAsync(world, engine, HttpMethod.Post, "/api/owners", Owner("Ada"));
-        await ResolvesTwiceAsync(
-            world, engine, HttpMethod.Patch, $"/api/owners/{id}", new JsonObject { ["name"] = "Ada Lovelace" });
-        await ResolvesTwiceAsync(world, engine, HttpMethod.Delete, $"/api/owners/{id}", body: null);
+        await ResolvesAsync(world, engine, HttpMethod.Post, "/api/owners", Owner("Ada"), expected: 3);
+        await ResolvesAsync(
+            world, engine, HttpMethod.Patch, $"/api/owners/{id}", new JsonObject { ["name"] = "Ada Lovelace" },
+            expected: 3);
+        await ResolvesAsync(world, engine, HttpMethod.Delete, $"/api/owners/{id}", body: null, expected: 2);
     }
 
     /// <summary>
@@ -159,15 +168,20 @@ public sealed class PolicyResolutionCountTests
             $"the replay's row-level read check must survive: {engine.Trace()}");
     }
 
-    private static async Task ResolvesTwiceAsync(
-        AlvoApiWorld world, CountingPolicyEngine engine, HttpMethod method, string path, JsonObject? body)
+    private static async Task ResolvesAsync(
+        AlvoApiWorld world, CountingPolicyEngine engine, HttpMethod method, string path, JsonObject? body,
+        int expected)
     {
         engine.Clear();
         using var response = await world.SendAsync(method, path, _admin, body: body);
 
         response.IsSuccessStatusCode.ShouldBeTrue(
             $"{method} {path} answered {(int)response.StatusCode}: {await response.ReadTextAsync()}");
-        engine.Resolved.Count.ShouldBe(2, $"{method} {path} resolved {engine.Trace()}");
+        engine.Resolved.Count.ShouldBe(expected, $"{method} {path} resolved {engine.Trace()}");
+        if (expected == 3)
+        {
+            engine.Resolved[^1].Operation.ShouldBe(DataOperation.Get, $"the answer is read under get: {engine.Trace()}");
+        }
     }
 
     /// <summary>

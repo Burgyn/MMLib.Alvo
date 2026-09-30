@@ -650,6 +650,19 @@ transaction closes all four. It goes through the same composed root; `create` ha
 constrains it is the tenant scope the candidate was already checked against plus the row id just written, and
 a row that cannot be read back is an invariant violation rather than a "not found".
 
+**That re-read feeds the event and the rollups; it is not the answer.** A write answers with the row exactly
+as a `GET` by the same caller would return it the moment the write commits — a second in-transaction read
+under a freshly resolved `get` decision (its `USING`, its tenant scope, its `hidden` mask) — or with its id
+alone when that `GET` would not return it. Echoing the post-image under the write's own decision was a
+read-policy bypass: `update: status == 'open'` with `get: owner_id == @user.id` let a caller `PATCH` somebody
+else's open row and read every non-hidden field of it from the 200, while `GET` answered 404 — and `create`,
+with no `USING` at all, echoed any row its author could place. `EfAlvoData.EchoedAsync` and the replay path
+share one read-back (`ReadBackAsync`), so a first attempt and its retry cannot diverge again. **Deviation from
+PostgreSQL RLS, deliberate:** RLS makes `INSERT/UPDATE … RETURNING` satisfy the SELECT policy and *fails the
+statement* otherwise; Alvo answers id-only instead, because the write was authorized and has committed, and
+refusing it after the fact would report a failure for a change that happened. The cost is one primary-key
+read per written row.
+
 ### The `If-Match` precondition channel, landed in PR3 (#90)
 
 PR2 left this as a note saying the *mechanism* was already in the right place — the merge-then-check pre-image

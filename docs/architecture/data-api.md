@@ -757,6 +757,19 @@ answers **404**, exactly as any other read of an unreachable row does. Telling "
 "genuinely gone since" would need a second, policy-free existence probe, and refusing to add one is the
 more conservative of the two errors. Tracked in **#101**.
 
+### A write answers with what a `GET` would, and a write-only key gets the id alone
+
+Every write that answers with a row — `POST`, `PATCH`, `PUT` (both branches) and the batch create and
+update — answers with it exactly as a `GET` by the same caller would, and otherwise with a body carrying only
+`id` (no `ETag`), keeping its status and `Location`. Two layers decide it, because two different things can
+withhold a read. The **port** re-reads the written row under the caller's `get` policy (see
+[data-path.md](data-path.md)): a row the `get` rule excludes, or an entity no policy lets them `get`, answers
+id-only. The **HTTP tier** narrows by **scope**: `ScopeGate` gates each endpoint by its own operation, so a key
+scoped `owners:write` alone passes every write filter and is refused every `GET` — without the narrowing it
+read any row it could write through a no-op `PATCH`. Id-only rather than 403, in both layers, because the
+write passed its gate and has committed. This is the deliberate deviation from PostgreSQL RLS's `RETURNING`,
+which fails the statement instead.
+
 ### `Idempotency-Key` is *ignored* on `PATCH` and `DELETE` — and that label must not overstate
 
 It is accepted and does nothing. Neither operation lists it as a parameter in the OpenAPI document, because

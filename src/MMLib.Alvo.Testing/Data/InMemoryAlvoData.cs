@@ -175,7 +175,7 @@ public sealed class InMemoryAlvoData : IAlvoData
             RecordIdempotencyLocked(idempotency, context, (Guid)candidate[IdField]!);
         }
 
-        return Task.FromResult(Mask(postImage, decision.HiddenFields, FrozenSet<string>.Empty));
+        return Task.FromResult(Echoed(entity, postImage, context));
     }
 
     /// <summary>
@@ -267,6 +267,30 @@ public sealed class InMemoryAlvoData : IAlvoData
     private static AlvoRecord IdOnly(Guid rowId) =>
         new(new Dictionary<string, object?>(StringComparer.Ordinal) { [IdField] = rowId });
 
+    /// <summary>
+    /// What a fresh write answers with: the written row as a <c>get</c> by this caller would return it, or its
+    /// id alone when that <c>get</c> would not — <c>EfAlvoData.EchoedAsync</c>'s rule, and its remarks carry
+    /// the bypass this closes and the deliberate deviation from PostgreSQL RLS's <c>RETURNING</c>.
+    /// </summary>
+    /// <param name="entity">The entity that was written.</param>
+    /// <param name="written">The row as stored.</param>
+    /// <param name="context">The caller who wrote it.</param>
+    private AlvoRecord Echoed(string entity, AlvoRecord written, AlvoContext context) =>
+        Echoed(entity, [written], context)[0];
+
+    /// <inheritdoc cref="Echoed(string, AlvoRecord, AlvoContext)"/>
+    /// <param name="entity">The entity that was written.</param>
+    /// <param name="written">The rows as stored, in the order the answer lists them.</param>
+    /// <param name="context">The caller who wrote them.</param>
+    private List<AlvoRecord> Echoed(string entity, List<AlvoRecord> written, AlvoContext context)
+    {
+        var read = _policy.Resolve(entity, DataOperation.Get, context);
+
+        return [.. written.Select(row => read.IsDenied || !IsVisible(row, read, context)
+            ? IdOnly(RowIdOf(row))
+            : Mask(row, read.HiddenFields, FrozenSet<string>.Empty))];
+    }
+
     private void RecordIdempotencyLocked(AlvoIdempotency? idempotency, AlvoContext context, Guid rowId) =>
         RecordIdempotencyLocked(idempotency, context, [rowId]);
 
@@ -357,7 +381,7 @@ public sealed class InMemoryAlvoData : IAlvoData
             list[index] = merged;
             RecordIdempotencyLocked(idempotency, context, id);
 
-            return Task.FromResult(Mask(merged, decision.HiddenFields, FrozenSet<string>.Empty));
+            return Task.FromResult(Echoed(entity, merged, context));
         }
     }
 
@@ -421,8 +445,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         list[index] = merged;
         RecordIdempotencyLocked(idempotency, context, (Guid)merged[IdField]!);
 
-        return Task.FromResult(
-            AlvoReplaceResult.ReplacedRow(Mask(merged, decision.HiddenFields, FrozenSet<string>.Empty)));
+        return Task.FromResult(AlvoReplaceResult.ReplacedRow(Echoed(entity, merged, context)));
     }
 
     /// <summary>The create branch: no row this caller can see holds this id.</summary>
@@ -469,8 +492,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         list.Add(postImage);
         RecordIdempotencyLocked(idempotency, context, id);
 
-        return Task.FromResult(
-            AlvoReplaceResult.CreatedRow(Mask(postImage, decision.HiddenFields, FrozenSet<string>.Empty)));
+        return Task.FromResult(AlvoReplaceResult.CreatedRow(Echoed(entity, postImage, context)));
     }
 
     /// <summary>
@@ -1181,7 +1203,7 @@ public sealed class InMemoryAlvoData : IAlvoData
                 return Task.FromResult(AlvoBatchResult.Refused(refusals));
             }
 
-            return Task.FromResult(WrittenCreates(entity, judged, decision, context, idempotency));
+            return Task.FromResult(WrittenCreates(entity, judged, context, idempotency));
         }
     }
 
@@ -1211,7 +1233,7 @@ public sealed class InMemoryAlvoData : IAlvoData
                 return Task.FromResult(AlvoBatchResult.Refused(refusals));
             }
 
-            return Task.FromResult(WrittenUpdates(entity, judged, decision, context, idempotency));
+            return Task.FromResult(WrittenUpdates(entity, judged, context, idempotency));
         }
     }
 
@@ -1335,18 +1357,15 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// <summary>The write pass of a batch create: the judged images, stored, and the key recorded.</summary>
     /// <param name="entity">The entity name.</param>
     /// <param name="judged">The post-images the judging pass approved.</param>
-    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
     /// <param name="context">The caller performing the batch.</param>
     /// <param name="idempotency">The caller's token for the whole batch, or <see langword="null"/>.</param>
     private AlvoBatchResult WrittenCreates(
-        string entity, List<AlvoRecord> judged, PolicyDecision decision, AlvoContext context,
-        AlvoIdempotency? idempotency)
+        string entity, List<AlvoRecord> judged, AlvoContext context, AlvoIdempotency? idempotency)
     {
         RowsForLocked(entity).AddRange(judged);
         RecordIdempotencyLocked(idempotency, context, [.. judged.Select(RowIdOf)]);
 
-        return AlvoBatchResult.Wrote(
-            [.. judged.Select(row => Mask(row, decision.HiddenFields, FrozenSet<string>.Empty))], judged.Count);
+        return AlvoBatchResult.Wrote(Echoed(entity, judged, context), judged.Count);
     }
 
     /// <summary>The judging pass of a batch update: each row's merged post-image, or every refusal.</summary>
@@ -1397,11 +1416,10 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// <summary>The write pass of a batch update: the merged images, stored in place.</summary>
     /// <param name="entity">The entity name.</param>
     /// <param name="judged">The merged images the judging pass approved, with the positions they replace.</param>
-    /// <param name="decision">The verdict the policy engine returned for this caller.</param>
     /// <param name="context">The caller performing the batch.</param>
     /// <param name="idempotency">The caller's token for the whole batch, or <see langword="null"/>.</param>
     private AlvoBatchResult WrittenUpdates(
-        string entity, List<(int Index, AlvoRecord Merged)> judged, PolicyDecision decision, AlvoContext context,
+        string entity, List<(int Index, AlvoRecord Merged)> judged, AlvoContext context,
         AlvoIdempotency? idempotency)
     {
         var stored = RowsForLocked(entity);
@@ -1412,9 +1430,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         RecordIdempotencyLocked(idempotency, context, [.. judged.Select(row => RowIdOf(row.Merged))]);
 
-        return AlvoBatchResult.Wrote(
-            [.. judged.Select(row => Mask(row.Merged, decision.HiddenFields, FrozenSet<string>.Empty))],
-            judged.Count);
+        return AlvoBatchResult.Wrote(Echoed(entity, [.. judged.Select(row => row.Merged)], context), judged.Count);
     }
 
     /// <summary>The judging pass of a batch delete: the positions to remove, or every refusal.</summary>

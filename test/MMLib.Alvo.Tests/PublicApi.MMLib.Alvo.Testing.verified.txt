@@ -70,9 +70,11 @@ namespace MMLib.Alvo.Testing.Data
     public abstract class AlvoDataAdversarialTests
     {
         protected AlvoDataAdversarialTests() { }
+        public System.Threading.Tasks.Task A_batch_echoes_each_row_under_the_callers_get_rule() { }
         public System.Threading.Tasks.Task A_count_is_narrowed_by_the_row_rule_and_by_the_callers_own_filter() { }
         public System.Threading.Tasks.Task A_count_is_taken_over_the_policy_filtered_set_and_never_over_the_table() { }
         public System.Threading.Tasks.Task A_count_over_a_hidden_field_filter_is_refused_like_the_read_itself() { }
+        public System.Threading.Tasks.Task A_create_placing_a_row_the_callers_get_rule_excludes_answers_with_the_id_alone() { }
         public System.Threading.Tasks.Task A_delete_on_a_soft_delete_entity_is_refused_rather_than_hard_deleting() { }
         public System.Threading.Tasks.Task A_delete_on_an_ordinary_entity_still_removes_the_row() { }
         public System.Threading.Tasks.Task A_filter_naming_a_hidden_field_is_rejected_rather_than_answered() { }
@@ -98,12 +100,15 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task A_query_limit_is_applied_after_the_policy_predicate_not_before() { }
         public System.Threading.Tasks.Task A_query_with_no_context_at_all_throws_rather_than_defaulting_to_anyone() { }
         public System.Threading.Tasks.Task A_query_with_no_tenant_context_fails_rather_than_returning_every_tenants_rows() { }
+        public System.Threading.Tasks.Task A_replace_the_callers_get_rule_excludes_answers_with_the_id_alone_on_both_branches() { }
         public System.Threading.Tasks.Task A_sort_naming_a_hidden_field_is_rejected_rather_than_leaking_its_ordering() { }
         public System.Threading.Tasks.Task A_tenant_scoped_entity_never_returns_another_tenants_rows() { }
         public System.Threading.Tasks.Task A_tenantless_context_cannot_create_into_a_scoped_entity() { }
         public System.Threading.Tasks.Task A_user_filter_cannot_widen_the_policy_predicate() { }
         public System.Threading.Tasks.Task A_uuid_rule_over_a_dynamic_entity_matches_rows_on_every_engine() { }
         public System.Threading.Tasks.Task A_well_formed_filter_over_the_same_fields_still_answers() { }
+        public System.Threading.Tasks.Task A_write_by_a_caller_no_get_rule_admits_answers_with_the_id_alone() { }
+        public System.Threading.Tasks.Task A_write_the_caller_may_read_back_answers_with_the_row_masked_as_a_get_would() { }
         public System.Threading.Tasks.Task A_write_to_a_read_only_field_is_rejected_rather_than_silently_dropped() { }
         public System.Threading.Tasks.Task An_admin_rule_over_the_role_set_matches_a_multi_role_caller() { }
         public System.Threading.Tasks.Task An_audited_create_stamps_the_caller_and_the_implementations_clock() { }
@@ -111,6 +116,7 @@ namespace MMLib.Alvo.Testing.Data
         public System.Threading.Tasks.Task An_entity_with_no_rule_denies_every_operation() { }
         public System.Threading.Tasks.Task An_in_list_longer_than_the_candidate_cap_is_rejected_rather_than_bound() { }
         public System.Threading.Tasks.Task An_operation_with_no_rule_denies_while_its_siblings_work() { }
+        public System.Threading.Tasks.Task An_update_the_callers_get_rule_excludes_answers_with_the_id_alone() { }
         protected abstract System.Threading.Tasks.Task<MMLib.Alvo.Data.IAlvoData> CreateAsync(MMLib.Alvo.Schema.SchemaModel schema, MMLib.Alvo.Descriptor.AlvoDescriptor descriptor, System.Collections.Generic.IReadOnlyDictionary<string, System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Data.AlvoRecord>> seed);
         public System.Threading.Tasks.Task Create_into_another_tenant_is_denied() { }
         public System.Threading.Tasks.Task Create_of_an_allowed_row_persists_and_is_subsequently_readable() { }

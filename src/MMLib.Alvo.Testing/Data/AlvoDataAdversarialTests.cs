@@ -1206,6 +1206,153 @@ public abstract class AlvoDataAdversarialTests
         fields.ToDictionary(pair => pair.Field, pair => pair.Value, StringComparer.Ordinal);
 
     /// <summary>
+    /// The write-echo oracle: a caller whose <c>update</c> rule admits another user's row, and whose
+    /// <c>get</c> rule does not, must not read that row out of the update's own answer.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The <c>tickets</c> rules are the exploit's shape verbatim — <c>update: status == 'open'</c>,
+    /// <c>get: owner_id == @user.id</c> — so Alice may legitimately rewrite Bob's open ticket and still may
+    /// not read it. Echoing the post-image under the <em>update</em> decision handed her every non-hidden
+    /// field of a row a <c>GET</c> answers 404 for. PostgreSQL RLS closes the same hole by making
+    /// <c>UPDATE … RETURNING</c> require the SELECT policy; this port answers the id alone instead of refusing
+    /// a write that already succeeded.
+    /// </para>
+    /// <para>
+    /// Bob's own re-read is the counterweight: an id-only answer from a write that never landed would satisfy
+    /// the first assertion too.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task An_update_the_callers_get_rule_excludes_answers_with_the_id_alone()
+    {
+        var fixture = await TicketsFixtureAsync();
+
+        var echoed = await fixture.Data.UpdateAsync(
+            "tickets", fixture.BobTicketId, Payload(("title", "rewritten")), fixture.Alice);
+
+        echoed.Values.Keys.ShouldBe([AlvoManagedColumns.Id], "Alice's get rule excludes Bob's ticket");
+        echoed[AlvoManagedColumns.Id].ShouldBe(fixture.BobTicketId);
+        (await fixture.Data.GetAsync("tickets", fixture.BobTicketId, fixture.Bob))!["title"].ShouldBe("rewritten");
+    }
+
+    /// <summary>
+    /// The same oracle on the create, where it is sharper: <c>create</c> has no <c>USING</c> at all, so
+    /// nothing but the read-back stands between a create and an echo of a row its author may not read.
+    /// </summary>
+    [Fact]
+    public async Task A_create_placing_a_row_the_callers_get_rule_excludes_answers_with_the_id_alone()
+    {
+        var fixture = await TicketsFixtureAsync();
+
+        var echoed = await fixture.Data.CreateAsync(
+            "tickets", Ticket(fixture.Bob, "open", "for Bob"), fixture.Alice);
+
+        echoed.Values.Keys.ShouldBe([AlvoManagedColumns.Id], "the row is Bob's, and Alice may not get it");
+        (await fixture.Data.GetAsync("tickets", (Guid)echoed[AlvoManagedColumns.Id]!, fixture.Bob))
+            .ShouldNotBeNull("the create must still have landed");
+    }
+
+    /// <summary>
+    /// A caller no policy lets <c>get</c> at all — the write-only shape the id-only replay already answers —
+    /// gets the same id-only answer on the fresh write, so a first attempt is never more revealing than its
+    /// retry.
+    /// </summary>
+    [Fact]
+    public async Task A_write_by_a_caller_no_get_rule_admits_answers_with_the_id_alone()
+    {
+        var fixture = await TicketsFixtureAsync(new AccessRules { Create = "true", Update = "true" });
+
+        var created = await fixture.Data.CreateAsync("tickets", Ticket(fixture.Alice, "open", "mine"), fixture.Alice);
+        var updated = await fixture.Data.UpdateAsync(
+            "tickets", (Guid)created[AlvoManagedColumns.Id]!, Payload(("title", "still mine")), fixture.Alice);
+
+        created.Values.Keys.ShouldBe([AlvoManagedColumns.Id]);
+        updated.Values.Keys.ShouldBe([AlvoManagedColumns.Id]);
+    }
+
+    /// <summary>
+    /// The positive half: a caller who may read the written row gets it whole, under the <c>get</c>
+    /// decision's own mask. Without it, every fact above is satisfied by a port that answers id-only always.
+    /// </summary>
+    [Fact]
+    public async Task A_write_the_caller_may_read_back_answers_with_the_row_masked_as_a_get_would()
+    {
+        var fixture = await TicketsFixtureAsync();
+
+        var created = await fixture.Data.CreateAsync(
+            "tickets", Ticket(fixture.Alice, "open", "mine", secret: "shh"), fixture.Alice);
+        var updated = await fixture.Data.UpdateAsync(
+            "tickets", (Guid)created[AlvoManagedColumns.Id]!, Payload(("title", "renamed")), fixture.Alice);
+        var read = await fixture.Data.GetAsync("tickets", (Guid)created[AlvoManagedColumns.Id]!, fixture.Alice);
+
+        created["title"].ShouldBe("mine");
+        updated["title"].ShouldBe("renamed");
+        read.ShouldNotBeNull();
+        updated.Values.Keys.OrderBy(key => key, StringComparer.Ordinal)
+            .ShouldBe(read!.Values.Keys.OrderBy(key => key, StringComparer.Ordinal), "an echo is what a get returns");
+        updated.Values.ContainsKey("secret").ShouldBeFalse("hidden from Alice on a get, so hidden on the echo");
+    }
+
+    /// <summary>
+    /// Both branches of a create-or-replace echo under <c>get</c>: replacing Bob's open ticket, and creating a
+    /// row under a fresh id that Bob owns.
+    /// </summary>
+    [Fact]
+    public async Task A_replace_the_callers_get_rule_excludes_answers_with_the_id_alone_on_both_branches()
+    {
+        var fixture = await TicketsFixtureAsync();
+        var freshId = Guid.NewGuid();
+
+        var replaced = await fixture.Data.ReplaceAsync(
+            "tickets", fixture.BobTicketId, Ticket(fixture.Bob, "open", "replaced"), fixture.Alice);
+        var created = await fixture.Data.ReplaceAsync(
+            "tickets", freshId, Ticket(fixture.Bob, "open", "created"), fixture.Alice);
+
+        replaced.Created.ShouldBeFalse();
+        replaced.Row.Values.Keys.ShouldBe([AlvoManagedColumns.Id]);
+        created.Created.ShouldBeTrue();
+        created.Row.Values.Keys.ShouldBe([AlvoManagedColumns.Id]);
+        created.Row[AlvoManagedColumns.Id].ShouldBe(freshId);
+    }
+
+    /// <summary>
+    /// A batch echoes each row on its own merits: the row Alice may read comes back whole, the row she may
+    /// not comes back as its id — in request order, one entry per row, so a caller can still correlate them.
+    /// </summary>
+    [Fact]
+    public async Task A_batch_echoes_each_row_under_the_callers_get_rule()
+    {
+        var fixture = await TicketsFixtureAsync();
+
+        var created = await fixture.Data.CreateManyAsync(
+            "tickets", [Ticket(fixture.Alice, "open", "mine"), Ticket(fixture.Bob, "open", "for Bob")], fixture.Alice);
+        var mine = (Guid)created.Rows[0][AlvoManagedColumns.Id]!;
+        var updated = await fixture.Data.UpdateManyAsync(
+            "tickets",
+            [new AlvoRowPatch(mine, Payload(("title", "a"))), new AlvoRowPatch(fixture.BobTicketId, Payload(("title", "b")))],
+            fixture.Alice);
+
+        created.Rows[0]["title"].ShouldBe("mine");
+        created.Rows[1].Values.Keys.ShouldBe([AlvoManagedColumns.Id]);
+        updated.Rows[0]["title"].ShouldBe("a");
+        updated.Rows[1].Values.Keys.ShouldBe([AlvoManagedColumns.Id]);
+        updated.Rows[1][AlvoManagedColumns.Id].ShouldBe(fixture.BobTicketId);
+    }
+
+    private static Dictionary<string, object?> Ticket(
+        AlvoContext owner, string status, string title, string? secret = null)
+    {
+        var ticket = Payload(("owner_id", owner.User.Value), ("status", status), ("title", title));
+        if (secret is not null)
+        {
+            ticket["secret"] = secret;
+        }
+
+        return ticket;
+    }
+
+    /// <summary>
     /// Reserved parity leg: analysis §2.1 requires this whole suite to pass identically over a dynamic
     /// (metadata-driven) entity, and PR2's obligation was only to leave the mechanism capable of it —
     /// which it does by making the storage shape an <c>IAlvoSqlDialect</c> + <c>IFieldSqlRenderer</c>
@@ -1236,6 +1383,42 @@ public abstract class AlvoDataAdversarialTests
     private sealed record AccountsFixture(IAlvoData Data, Guid RowId, Guid SecondRowId);
 
     private sealed record InvoicesFixture(IAlvoData Data, AlvoContext Caller, Guid RowId);
+
+    private sealed record TicketsFixture(IAlvoData Data, AlvoContext Alice, AlvoContext Bob, Guid BobTicketId);
+
+    /// <summary>
+    /// A global entity whose <c>update</c> rule admits rows its <c>get</c> rule does not — the write-echo
+    /// exploit's shape — seeded with one open ticket of Bob's. <c>secret</c> is hidden from everyone.
+    /// </summary>
+    /// <param name="rules">The rules to declare instead of the exploit's, or <see langword="null"/>.</param>
+    private async Task<TicketsFixture> TicketsFixtureAsync(AccessRules? rules = null)
+    {
+        var alice = NewContext(tenant: null);
+        var bob = NewContext(tenant: null);
+        var fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal)
+        {
+            ["owner_id"] = new() { Type = DescField.Uuid, Required = true },
+            ["status"] = new() { Type = DescField.String },
+            ["title"] = new() { Type = DescField.String },
+            ["secret"] = new() { Type = DescField.String, Hidden = BoolOrCel.FromBoolean(true) },
+        };
+        rules ??= new AccessRules
+        {
+            List = "owner_id == @user.id",
+            Get = "owner_id == @user.id",
+            Create = "true",
+            Update = "status == 'open'",
+        };
+        var (descriptor, schema) = BuildFixture("tickets", fields, EntityTenancy.Global, rules);
+
+        var bobTicket = Guid.NewGuid();
+        var seed = SeedOf(
+            "tickets",
+            Row(bobTicket, ("owner_id", bob.User.Value), ("status", "open"), ("title", "Bob's"), ("secret", "shh")));
+
+        var data = await CreateAsync(schema, descriptor, seed);
+        return new TicketsFixture(data, alice, bob, bobTicket);
+    }
 
     /// <summary>
     /// A global entity declaring <c>audit</c>, so the framework injects and owns the audit quartet. The

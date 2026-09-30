@@ -154,12 +154,17 @@ public sealed class IdempotencyTests
     /// </para>
     /// <para>
     /// <b><c>ledgers</c> declares <c>audit: true</c> deliberately, and this is what "verify rather than assume"
-    /// means for <c>RowVersionETag.For</c>.</b> The first create is an ordinary re-read and carries a real
-    /// <c>ETag</c>; the retry's id-only record has no version column at all, so
-    /// <c>RowVersionETag.For(record, entity)</c> must fall through to <see langword="null"/> rather than throw
-    /// or mint one from a value that is not there. Asserting the retry has <em>no</em> <c>ETag</c> — on an
-    /// entity whose ordinary create does have one — is what tells a genuine degradation apart from this entity
-    /// simply never carrying a version to begin with.
+    /// means for <c>RowVersionETag.For</c>.</b> The entity keeps a version column, and an id-only record has
+    /// none, so <c>RowVersionETag.For(record, entity)</c> must fall through to <see langword="null"/> rather
+    /// than throw or mint one from a value that is not there.
+    /// </para>
+    /// <para>
+    /// <b>The first create answers the same id-only body, and that is the point rather than a lost
+    /// counterweight.</b> It used to carry every field and a real <c>ETag</c>, because a fresh write echoed its
+    /// row under the <c>create</c> decision — handing a caller with no <c>get</c> exactly what the retry
+    /// withholds. A fresh write now echoes under <c>get</c> (and this key holds no read scope either), so the
+    /// first attempt and its retry cannot disagree. The fuller body a reader is owed is asserted where a reader
+    /// exists: <c>DataApiAuthTests.A_key_that_may_also_read_gets_the_written_row_back</c>.
     /// </para>
     /// </remarks>
     [Fact]
@@ -175,7 +180,9 @@ public sealed class IdempotencyTests
             HttpMethod.Post, "/api/ledgers", key, body: body, headers: Key("write-only-1"));
 
         first.StatusCode.ShouldBe(HttpStatusCode.Created, await first.ReadTextAsync());
-        first.Headers.ETag.ShouldNotBeNull("the counterweight: this entity's ordinary create does carry a tag");
+        first.Headers.ETag.ShouldBeNull("the first attempt is no more revealing than its retry");
+        (await first.ReadJsonObjectAsync()).Select(field => field.Key).ShouldBe(
+            ["id"], "a caller who may not get is not handed the row by the create either");
         retried.StatusCode.ShouldBe(
             HttpStatusCode.Created, $"a retry must not be punished for being a retry: {await retried.ReadTextAsync()}");
         retried.Headers.Location!.ToString().ShouldBe(first.Headers.Location!.ToString());
