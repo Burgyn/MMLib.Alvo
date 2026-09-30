@@ -134,22 +134,14 @@ public class JsonPayloadTests
     }
 
     /// <summary>
-    /// A lone surrogate is not valid text, so it cannot round-trip — but it still cannot become structure: the
-    /// body is refused, or it parses to the author's shape.
+    /// A lone surrogate is not valid text and has no JSON spelling, so the body is refused — deterministically,
+    /// through the same not-rendered answer as a body that does not parse, never an encoder exception.
     /// </summary>
-    [Fact]
-    public void A_lone_surrogate_is_refused_or_rendered_without_changing_the_shape()
-    {
-        var value = $"a{(char)0xD800}\"]";
-        string? body = null;
-
-        var refused = Record.Exception(() => body = TryRendered("[\"{{new.title}}\"]", ("title", value)));
-
-        if (refused is null && body is not null)
-        {
-            Parsed(body).GetArrayLength().ShouldBe(1);
-        }
-    }
+    [Theory]
+    [InlineData("[\"{{new.title}}\"]")]
+    [InlineData("[{{new.title}}]")]
+    public void A_lone_surrogate_is_refused_rather_than_thrown(string source)
+        => TryRendered(source, ("title", "a\uD800\"]")).ShouldBeNull();
 
     [Theory]
     [InlineData("{{new.title}}")]

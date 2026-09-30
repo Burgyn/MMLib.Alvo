@@ -220,10 +220,11 @@ namespace MMLib.Alvo.Data;
 /// <para>
 /// <b>A caller whose <c>get</c> is denied outright is not refused a replay — the answer is <c>id</c> alone,
 /// with no row read performed</b>: see <see cref="CreateAsync"/>'s <c>idempotency</c> parameter and return
-/// value for the safety argument. The
-/// case that still refuses is narrower — a <em>configured</em> <c>get</c> whose own predicate excludes this
-/// specific row — and it answers <see cref="AlvoRecordNotFoundException"/>, indistinguishable from a row
-/// that was genuinely deleted, exactly as any other excluded read does.
+/// value for the safety argument. <b>Nor is one whose re-read does not return the row</b> — a
+/// <em>configured</em> <c>get</c> whose own predicate excludes it, or a row deleted since: the answer is the
+/// id alone, which is what the fresh write answered when its <c>get</c> excluded the row, so a retry never
+/// reports a committed write as not found. The two cases are not told apart, because that would need a
+/// policy-free existence read; a batch replay likewise answers one entry per recorded row.
 /// </para>
 /// <para>
 /// The record's identity is the caller's key plus a <b>scope of (tenant, acting user)</b> — see
@@ -335,7 +336,9 @@ public interface IAlvoData
     /// <c>get</c> decision for the replaying caller, never under this <c>create</c> decision — and writes
     /// nothing. When no policy allows <c>get</c> at all, the replay is not refused: it answers with the id
     /// alone, taken from the recorded key and never from a row read, because a match on the record's identity
-    /// already proves this caller created that row. The record is scoped to the caller's tenant <em>and</em>
+    /// already proves this caller created that row. When the re-read does not return the row — the <c>get</c>
+    /// rule's own predicate excludes it, or it has been deleted since — the answer is the id alone too, as the
+    /// first create's was. The record is scoped to the caller's tenant <em>and</em>
     /// user, and a token from an anonymous caller is refused, because there is no identity to scope it by.
     /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
@@ -374,13 +377,6 @@ public interface IAlvoData
     /// </exception>
     /// <exception cref="AlvoConstraintViolationException">
     /// <paramref name="values"/> supplies a value another record already holds on a <c>unique</c> field.
-    /// </exception>
-    /// <exception cref="AlvoRecordNotFoundException">
-    /// <paramref name="idempotency"/> replays a create whose row no longer exists, or is excluded by a
-    /// <em>configured</em> <c>get</c> rule's own predicate for <paramref name="context"/> — an entity whose
-    /// rule is <c>USING (status == 'published')</c>, say. A replay re-reads rather than returning a cached
-    /// body, so a row that has since been deleted or moved out of reach reads exactly as it would on any other
-    /// read. This does <b>not</b> apply when no policy allows <c>get</c> at all: see the id-only answer above.
     /// </exception>
     /// <exception cref="ArgumentException">
     /// <paramref name="idempotency"/> is supplied for an anonymous <paramref name="context"/>. Every anonymous
@@ -598,7 +594,8 @@ public interface IAlvoData
     /// <param name="idempotency">
     /// The caller's token for the whole batch, or <see langword="null"/> for an ordinary write. A replay
     /// carrying the same <see cref="AlvoIdempotency.Fingerprint"/> answers the recorded rows, re-read under a
-    /// freshly resolved <c>get</c> decision, without writing again.
+    /// freshly resolved <c>get</c> decision, without writing again — one entry per recorded row, the id alone
+    /// for a row that read does not return.
     /// </param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>

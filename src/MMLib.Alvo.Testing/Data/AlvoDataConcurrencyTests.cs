@@ -516,23 +516,14 @@ public abstract class AlvoDataConcurrencyTests : AlvoDataFixture
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>Why "no row read" cannot be proved by inspecting the answer alone.</b> A regression that read the
-    /// recorded row under the <c>create</c> decision — the exact bypass the row-level fix above closes — and
-    /// then discarded every field but <c>id</c> would produce an identical-looking id-only record, because
-    /// <c>create</c>'s <c>USING</c> predicate is <see langword="null"/> and a backend renders that as a
-    /// constant true: it matches any existing row, so the read would silently succeed and this fact would pass
-    /// for the wrong reason.
-    /// </para>
-    /// <para>
-    /// <b>The structural proof: the row is hard-deleted before the replay.</b> The <c>dropbox</c> fixture is given a
-    /// <c>delete</c> rule for exactly this — the caller removes their own row outright once created. With the
-    /// row physically gone, <em>any</em> read of <c>record.RowId</c> fails with
-    /// <see cref="AlvoRecordNotFoundException"/>, whichever decision or predicate it is read under — a
-    /// constant-true <c>create</c> predicate included, since there is no row left for any predicate to match.
-    /// The only way this fact can still pass is for the replay to never issue that read at all and answer from
-    /// the idempotency record's own <c>RowId</c> instead, which is exactly the fix's claim. A predicate-based
-    /// proof (excluding the row from a <em>configured</em> rule) cannot do this: it would still let a
-    /// create-decision read through, since that predicate is never consulted.
+    /// <b>What the answer can still prove, and what it no longer can.</b> A replay whose read-back returns
+    /// nothing answers the id alone — the fresh write's rule, so a retry never reports a committed create as
+    /// not found — which means a deleted row no longer makes "no read happened" observable: a regression that
+    /// read under the <c>create</c> decision would find nothing there and answer the id too. So the replay is
+    /// made first <b>while the row still exists</b>. There a <c>create</c>-decision read — whose <c>USING</c> is
+    /// <see langword="null"/> and renders as a constant true — would return the row and hand back its fields,
+    /// which is the bypass this pins. The retry after the row is hard-deleted pins the other half: gone or
+    /// not, the answer still names the row the caller created.
     /// </para>
     /// </remarks>
     [Fact]
@@ -542,13 +533,15 @@ public abstract class AlvoDataConcurrencyTests : AlvoDataFixture
         var token = TokenFor(Dropbox);
 
         var created = await world.Data.CreateAsync(Dropbox, Payload("first"), world.Caller, token, Ct);
+        var whileStored = await world.Data.CreateAsync(Dropbox, Payload("first"), world.Caller, token, Ct);
         await world.Data.DeleteAsync(Dropbox, IdOf(created), world.Caller, cancellationToken: Ct);
+        var afterDelete = await world.Data.CreateAsync(Dropbox, Payload("first"), world.Caller, token, Ct);
 
-        var replay = await world.Data.CreateAsync(Dropbox, Payload("first"), world.Caller, token, Ct);
-
-        IdOf(replay).ShouldBe(IdOf(created), "the replay must still name the row it created, gone or not");
-        replay.Values.Keys.ShouldBe(
-            [AlvoManagedColumns.Id], "no field beyond the id may appear — none but the id was ever read");
+        whileStored.Values.Keys.ShouldBe(
+            [AlvoManagedColumns.Id], "no field beyond the id may appear while the row a create-decision read would find exists");
+        IdOf(whileStored).ShouldBe(IdOf(created));
+        afterDelete.Values.Keys.ShouldBe([AlvoManagedColumns.Id]);
+        IdOf(afterDelete).ShouldBe(IdOf(created), "the replay must still name the row it created, gone or not");
 
         var another = await world.Data.CreateAsync(
             Dropbox, Payload("second"), world.Caller, TokenFor(Dropbox), Ct);
@@ -558,14 +551,23 @@ public abstract class AlvoDataConcurrencyTests : AlvoDataFixture
     /// <summary>
     /// One key on two entities. A conforming fingerprint covers the entity (see
     /// <see cref="AlvoIdempotency.Fingerprint"/>), so this is a different request under a used key — a
-    /// conflict, not a silent nothing. The second arm is the fail-closed branch for a caller whose fingerprint
-    /// does <em>not</em> distinguish the entity: the recorded row id is not in the entity being served, so the
-    /// answer is <see cref="AlvoRecordNotFoundException"/> and never a cross-entity row.
+    /// conflict, not a silent nothing. The second arm is a caller whose fingerprint does <em>not</em>
+    /// distinguish the entity, contrary to that contract: the recorded row id is not in the entity being
+    /// served, so the re-read finds nothing and the answer is the recorded id alone — never a field of a
+    /// cross-entity row, and no write.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// This is what makes the dropped <c>entity</c> column safe. Storing it and never reading it — the first
     /// round's shape — made one key unique per scope across every entity while telling the lookup nothing, so
     /// reusing a key on a second entity silently created nothing at all.
+    /// </para>
+    /// <para>
+    /// The second arm used to answer <see cref="AlvoRecordNotFoundException"/>. It moved when a replay whose
+    /// re-read returns nothing began answering the id alone, so a retry of a create whose row the caller's
+    /// <c>get</c> excludes answers what the first attempt did; telling that apart from this misuse would need
+    /// a policy-free existence read. The conforming arm — the one every HTTP request takes — is unchanged.
+    /// </para>
     /// </remarks>
     [Fact]
     public async Task The_same_key_on_a_different_entity_is_a_conflict_not_a_silent_replay()
@@ -579,8 +581,9 @@ public abstract class AlvoDataConcurrencyTests : AlvoDataFixture
         await Should.ThrowAsync<AlvoIdempotencyConflictException>(() => world.Data.CreateAsync(
             Receipts, Payload("first"), world.Caller, new AlvoIdempotency(key, $"{Receipts}:body"), Ct));
 
-        await Should.ThrowAsync<AlvoRecordNotFoundException>(() => world.Data.CreateAsync(
-            Receipts, Payload("first"), world.Caller, new AlvoIdempotency(key, $"{Orders}:body"), Ct));
+        var misused = await world.Data.CreateAsync(
+            Receipts, Payload("first"), world.Caller, new AlvoIdempotency(key, $"{Orders}:body"), Ct);
+        misused.Values.Keys.ShouldBe([AlvoManagedColumns.Id], "never a field of the other entity's row");
 
         (await world.Data.QueryAsync(new AlvoQuery { Entity = Orders }, world.Caller, Ct)).Items.Count.ShouldBe(1);
         (await world.Data.QueryAsync(new AlvoQuery { Entity = Receipts }, world.Caller, Ct)).Items.ShouldBeEmpty();

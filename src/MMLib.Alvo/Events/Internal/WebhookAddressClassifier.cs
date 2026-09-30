@@ -12,7 +12,8 @@ namespace MMLib.Alvo.Events.Internal;
 /// <b>The ranges are the IANA IPv4 and IPv6 Special-Purpose Address Registries' "not globally reachable"
 /// entries</b> — private (RFC 1918, RFC 4193 ULA), loopback, link-local (which is where
 /// <c>169.254.169.254</c>, every major cloud's instance-metadata endpoint, lives), CGNAT <c>100.64/10</c>
-/// (Alibaba's metadata endpoint), the documentation and benchmarking blocks, multicast, reserved and
+/// (Alibaba's metadata endpoint), the documentation (including RFC 9637's <c>3fff::/20</c>) and benchmarking
+/// blocks, SRv6 SIDs (<c>5f00::/16</c>, RFC 9602), multicast, reserved and
 /// unspecified — the list the OWASP SSRF Prevention Cheat Sheet points at rather than restating.
 /// </para>
 /// <para>
@@ -22,10 +23,12 @@ namespace MMLib.Alvo.Events.Internal;
 /// way past a check that reads only one family.
 /// </para>
 /// <para>
-/// <b>Two deliberate deviations from the registry, both toward refusing.</b> The deprecated IPv4-compatible
-/// block <c>::/96</c> is refused whole rather than unwrapped, and <c>2001::/23</c> (IETF protocol assignments,
-/// Teredo included) is refused whole although a few anycast entries inside it are globally reachable — no
-/// webhook receiver lives there, and Teredo obfuscates the IPv4 address it tunnels to.
+/// <b>Three deliberate deviations from the registry, all toward refusing.</b> The deprecated IPv4-compatible
+/// block <c>::/96</c> and the deprecated SIIT IPv4-translated block <c>::ffff:0:0:0/96</c> (RFC 2765) are
+/// refused whole rather than unwrapped, and <c>2001::/23</c> (IETF protocol assignments, Teredo included) is
+/// refused whole although a few anycast entries inside it are globally reachable — no webhook receiver lives
+/// there, and Teredo obfuscates the IPv4 address it tunnels to. The deprecated 6to4 relay anycast
+/// <c>192.88.99.0/24</c> (RFC 7526) is refused for the same reason.
 /// </para>
 /// </remarks>
 internal static class WebhookAddressClassifier
@@ -84,9 +87,9 @@ internal static class WebhookAddressClassifier
         {
             "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12",
             "192.0.0.0/24", "192.0.2.0/24", "192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24",
-            "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
-            "::/96", "64:ff9b:1::/48", "100::/64", "2001::/23", "2001:db8::/32", "fc00::/7", "fe80::/10",
-            "fec0::/10", "ff00::/8",
+            "192.88.99.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
+            "::/96", "::ffff:0:0:0/96", "64:ff9b:1::/48", "100::/64", "2001::/23", "2001:db8::/32", "3fff::/20",
+            "5f00::/16", "fc00::/7", "fe80::/10", "fec0::/10", "ff00::/8",
         }.Select(network => IPNetwork.Parse(network)),
     ];
 }

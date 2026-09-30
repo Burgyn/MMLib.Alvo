@@ -27,6 +27,7 @@ public sealed class WebhookAddressClassifierTests
     [InlineData("198.18.0.1")]
     [InlineData("198.51.100.7")]
     [InlineData("203.0.113.9")]
+    [InlineData("192.88.99.1")]
     [InlineData("224.0.0.1")]
     [InlineData("239.255.255.250")]
     [InlineData("240.0.0.1")]
@@ -56,6 +57,11 @@ public sealed class WebhookAddressClassifierTests
     [InlineData("fe80::1")]
     [InlineData("fec0::1")]
     [InlineData("ff02::1")]
+    [InlineData("3fff::1")]
+    [InlineData("3fff:fff:ffff::1")]
+    [InlineData("5f00::1")]
+    [InlineData("::ffff:0:8.8.8.8")]
+    [InlineData("::ffff:0:a9fe:a9fe")]
     public void A_non_public_ipv6_address_is_not_public(string address) =>
         WebhookAddressClassifier.IsPublic(IPAddress.Parse(address)).ShouldBeFalse();
 
@@ -73,6 +79,9 @@ public sealed class WebhookAddressClassifierTests
     [InlineData("2002:808:808::1")]
     [InlineData("2606:4700:4700::1111")]
     [InlineData("2a00:1450:4001::200e")]
+    [InlineData("192.88.100.1")]
+    [InlineData("3fff:1000::1")]
+    [InlineData("5f01::1")]
     public void A_globally_reachable_address_is_public(string address) =>
         WebhookAddressClassifier.IsPublic(IPAddress.Parse(address)).ShouldBeTrue();
 

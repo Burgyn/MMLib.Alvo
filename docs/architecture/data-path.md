@@ -738,7 +738,8 @@ CREATE TABLE IF NOT EXISTS alvo_idempotency (
   proves the replay is for the entity the original wrote — and the same key on a different entity is a 409 like
   any other different request. A caller whose fingerprint does *not* distinguish the entity is still never
   handed a wrong row: the recorded id is re-read under the entity being served, is not there, and the answer is
-  `AlvoRecordNotFoundException`. Both arms are pinned by
+  the recorded id alone with no write (it was `AlvoRecordNotFoundException` until a replay whose re-read returns
+  nothing began answering the id, see below). Both arms are pinned by
   `The_same_key_on_a_different_entity_is_a_conflict_not_a_silent_replay`.
 - **`idempotency_key`, not `key`.** `KEY` is reserved in T-SQL, and §0 names Azure SQL as a target engine; this
   repository has already paid once for a T-SQL trap a seam's shape hid (see *Row locking has two grammars*).
@@ -746,8 +747,8 @@ CREATE TABLE IF NOT EXISTS alvo_idempotency (
   would need `nvarchar` there. That mapping is follow-up work for whoever writes that driver rather than a
   guess made here for a driver nobody is writing.
 - **The record stores a row id, never a response body.** A replay re-reads the row through the caller's
-  *current* `get` policy, so it cannot hand back a representation that policy would no longer produce, and a row
-  that has since been deleted answers `AlvoRecordNotFoundException` like any other missing row.
+  *current* `get` policy, so it cannot hand back a representation that policy would no longer produce. A row the
+  re-read does not return — excluded by `get`, or deleted since — answers the id alone, as the fresh write does.
 - **A different fingerprint under one key is a conflict, not a replay** (`AlvoIdempotencyConflictException`).
   Answering with the first row would report success for a create that never happened and silently discard the
   second payload.
@@ -806,16 +807,20 @@ it. The safety argument is the record's own identity: it is keyed on the key, th
 the id their own original `201` already gave them, in the body and in `Location`. This must never fall back to
 reading the row under the `create` decision to mint that id-only record — that read is precisely the bypass
 above, even with every field but `id` then discarded, because `create`'s `null` `Using` predicate would match the
-row regardless of who owns it. `A_replay_on_an_entity_the_caller_cannot_read_performs_no_row_read` pins it, and
-proves the "no read" half structurally by deleting the row before the replay: with the row physically gone, any
-read of it — under any decision, `create`'s constant-true predicate included — answers
-`AlvoRecordNotFoundException`, so the fact can only pass if the replay never reads it at all.
+row regardless of who owns it. `A_replay_on_an_entity_the_caller_cannot_read_performs_no_row_read` pins it by replaying while the row still
+exists, where a `create`-decision read would find the row and hand back its fields. (It used to prove the "no
+read" half by deleting the row first; since an empty re-read now answers the id too, that no longer
+discriminates.)
 
-**The sibling case stays exactly as it was, deliberately.** A *configured* `get` whose own predicate excludes
-this specific row (an entity whose rule is `USING (status == 'published')`, say) still reads, and the replay
-still answers `AlvoRecordNotFoundException` — indistinguishable from a row that was genuinely deleted. Telling
-the two apart would need a second, policy-free read, and refusing to add one is the more conservative of the two
-errors; it is filed as an issue rather than fixed here.
+**The sibling case now answers the id too, and the two are still not told apart.** A *configured* `get` whose
+own predicate excludes this specific row (an entity whose rule is `USING (status == 'published')`, say) still
+reads, finds nothing, and the replay answers the id alone — as does a row deleted since. It used to answer
+`AlvoRecordNotFoundException` (#101). That changed when a fresh write began echoing under `get` and answering
+the id when `get` excludes its row: a replay that then answered 404 would report a committed write as failed
+and invite a duplicate under a fresh key. Telling "excluded" from "deleted since" would need a second,
+policy-free read, and that is still refused; the id disclosed is one the caller's own first answer carried. A
+batch replay follows the same rule and answers one entry per recorded row rather than dropping the ones its
+re-read misses.
 
 **`EfCoreSchemaIntrospector` excludes both bookkeeping tables**, through
 `SystemSchemaInitializer.FrameworkTableNames` — one member returning every framework table rather than a name

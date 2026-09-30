@@ -77,6 +77,36 @@ public sealed class SqliteAlvoDataCreateTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// A batch create echoes every row it wrote through <b>one</b> <c>get</c>-policed read — an
+    /// <c>id IN (…)</c> carrying the owner predicate in its <c>WHERE</c> — rather than one primary-key read per
+    /// row inside the write transaction.
+    /// </summary>
+    [Fact]
+    public async Task A_batch_create_echoes_every_row_in_one_get_policed_read()
+    {
+        var world = await AlvoDataWorlds.NotesAsync(_fixture);
+        world.ClearStatements();
+
+        var created = await world.Data.CreateManyAsync(
+            "notes", [Note(world, "a"), Note(world, "b"), Note(world, "c")], world.Alice,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        created.Rows.Select(row => row["title"]).ShouldBe(["a", "b", "c"], "in request order, one entry per row");
+        world.Statements.Count(statement => statement.Contains("\"owner_id\" = @alvo_u0", StringComparison.Ordinal))
+            .ShouldBe(1, "the echo is one read, not one per row");
+        world.LastStatement.ShouldContain("\"owner_id\" = @alvo_u0", customMessage: "the echo is read under get");
+        world.LastStatement.ShouldContain("\"id\" IN (");
+    }
+
+    private static Dictionary<string, object?> Note(DataWorld world, string title) => new()
+    {
+        ["owner_id"] = world.Alice.User.Value,
+        ["tenant_id"] = world.Tenant.Value,
+        ["title"] = title,
+        ["label"] = title,
+    };
+
+    /// <summary>
     /// The record a create returns is the row the database holds, not the payload the caller sent — so a
     /// column the caller never mentioned comes back with the value the store assigned it. Before this, a 201
     /// had no <c>ETag</c> source, every database default was missing, and PR6's <c>computed</c> column would

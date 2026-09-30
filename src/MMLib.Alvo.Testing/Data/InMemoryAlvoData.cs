@@ -208,8 +208,8 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// </para>
     /// <para>
     /// A <em>configured</em> <c>get</c> whose own predicate excludes this row, or a row that has since been
-    /// deleted, still answers <see cref="AlvoRecordNotFoundException"/> like any other missing row — that
-    /// sibling case is unchanged and deliberately so; see <c>EfAlvoData.ReplayedAsync</c>'s remarks.
+    /// deleted, answers the id alone too — what the fresh write answers when its <c>get</c> excludes the row,
+    /// so a retry never reports a committed write as not found; see <c>EfAlvoData.ReplayedAsync</c>'s remarks.
     /// </para>
     /// </remarks>
     private AlvoRecord? Replay(string entity, AlvoContext context, AlvoIdempotency? idempotency)
@@ -230,7 +230,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         var stored = RowsForLocked(entity).Find(row => IsRow(row, RecordedRow(record)));
         return stored is not null && IsVisible(stored, read, context)
             ? Mask(stored, read.HiddenFields, FrozenSet<string>.Empty)
-            : throw new AlvoRecordNotFoundException();
+            : IdOnly(RecordedRow(record));
     }
 
     /// <summary>Refuses a key reused for a different request, matching <c>EfAlvoData.EnsureSameRequest</c>.</summary>
@@ -1585,8 +1585,8 @@ public sealed class InMemoryAlvoData : IAlvoData
     /// Every recorded row is re-read under a freshly resolved <c>get</c> decision, exactly as a single
     /// write's replay is and for the same reason: the <c>create</c> and <c>update</c> decisions the batch
     /// arrived with do not filter the rows this caller may <em>read</em>. A row that has since been deleted,
-    /// or that a configured <c>get</c> predicate now excludes, drops out — a replay is a read, so it answers
-    /// what a read would.
+    /// or that a configured <c>get</c> predicate excludes, answers its id alone rather than dropping out — one
+    /// entry per recorded row, as the fresh batch answered.
     /// </remarks>
     /// <param name="entity">The entity the batch wrote.</param>
     /// <param name="context">The replaying caller.</param>
@@ -1621,10 +1621,9 @@ public sealed class InMemoryAlvoData : IAlvoData
         foreach (var id in record.RowIds)
         {
             var row = stored.Find(candidate => IsRow(candidate, id));
-            if (row is not null && IsVisible(row, read, context))
-            {
-                rows.Add(Mask(row, read.HiddenFields, FrozenSet<string>.Empty));
-            }
+            rows.Add(row is not null && IsVisible(row, read, context)
+                ? Mask(row, read.HiddenFields, FrozenSet<string>.Empty)
+                : IdOnly(id));
         }
 
         return rows;

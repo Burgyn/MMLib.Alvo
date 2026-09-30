@@ -71,12 +71,17 @@ internal static class MailHeaders
         && address.DisplayName.Length == 0
         && string.Equals(address.Address, value, StringComparison.Ordinal);
 
-    /// <summary>Whether <paramref name="value"/> carries no control character and no Unicode line or paragraph separator.</summary>
+    /// <summary>
+    /// Whether <paramref name="value"/> carries no control character other than a tab, and no Unicode line or
+    /// paragraph separator.
+    /// </summary>
     /// <param name="value">A header value.</param>
     internal static bool IsSingleLine(string value) => !value.Any(BreaksALine);
 
+    private const char HeaderWhitespaceTab = '\t';
+
     private static bool BreaksALine(char character) =>
-        char.IsControl(character)
+        (char.IsControl(character) && character != HeaderWhitespaceTab)
         || char.GetUnicodeCategory(character) is UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator;
 
     /// <summary>A placeholder-free recipient's whole text, which apply can check completely.</summary>

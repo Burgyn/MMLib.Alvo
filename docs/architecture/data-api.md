@@ -751,11 +751,13 @@ original `201` already gave them, in the body and in `Location`, and nothing mor
 field of the row is ever read. Note that an id-only record carries no version, so this one response has no
 `ETag`.
 
-**The sibling case is deliberately out of scope.** When `get` *is* configured but its own predicate
-excludes the row — `USING (status == 'published')`, say — or the row has since been deleted, the replay
-answers **404**, exactly as any other read of an unreachable row does. Telling "invisible to me" from
-"genuinely gone since" would need a second, policy-free existence probe, and refusing to add one is the
-more conservative of the two errors. Tracked in **#101**.
+**The sibling case answers the id too.** When `get` *is* configured but its own predicate excludes the
+row — `USING (status == 'published')`, say — or the row has since been deleted, the replay answers the
+original status with an id-only body, exactly as the fresh write answers when its `get` excludes the row
+(see the next section). It used to answer **404** (#101); once a fresh write could answer id-only, a 404 on
+the retry told the caller a committed write had failed and invited a duplicate under a fresh key. Telling
+"invisible to me" from "genuinely gone since" would still need a policy-free existence probe, which is still
+refused, so both answer the id. A batch replay answers one entry per recorded row on the same rule.
 
 ### A write answers with what a `GET` would, and a write-only key gets the id alone
 

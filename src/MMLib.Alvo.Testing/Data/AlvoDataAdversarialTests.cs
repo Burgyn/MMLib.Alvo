@@ -1240,15 +1240,24 @@ public abstract class AlvoDataAdversarialTests
     /// The same oracle on the create, where it is sharper: <c>create</c> has no <c>USING</c> at all, so
     /// nothing but the read-back stands between a create and an echo of a row its author may not read.
     /// </summary>
+    /// <remarks>
+    /// Made under an idempotency key and retried, because the retry must answer what the first attempt did:
+    /// a replay that answered not-found here would tell the caller a committed create failed, and invite a
+    /// second one under a fresh key.
+    /// </remarks>
     [Fact]
     public async Task A_create_placing_a_row_the_callers_get_rule_excludes_answers_with_the_id_alone()
     {
         var fixture = await TicketsFixtureAsync();
+        var token = new AlvoIdempotency(Guid.NewGuid().ToString("N"), "tickets:for-bob");
 
         var echoed = await fixture.Data.CreateAsync(
-            "tickets", Ticket(fixture.Bob, "open", "for Bob"), fixture.Alice);
+            "tickets", Ticket(fixture.Bob, "open", "for Bob"), fixture.Alice, token);
+        var replayed = await fixture.Data.CreateAsync(
+            "tickets", Ticket(fixture.Bob, "open", "for Bob"), fixture.Alice, token);
 
         echoed.Values.Keys.ShouldBe([AlvoManagedColumns.Id], "the row is Bob's, and Alice may not get it");
+        replayed.Values.ShouldBe(echoed.Values, "a retry answers exactly what the first attempt did");
         (await fixture.Data.GetAsync("tickets", (Guid)echoed[AlvoManagedColumns.Id]!, fixture.Bob))
             .ShouldNotBeNull("the create must still have landed");
     }
@@ -1319,14 +1328,21 @@ public abstract class AlvoDataAdversarialTests
     /// <summary>
     /// A batch echoes each row on its own merits: the row Alice may read comes back whole, the row she may
     /// not comes back as its id — in request order, one entry per row, so a caller can still correlate them.
+    /// A replay of the create answers the same entries, the excluded row's id included, rather than dropping
+    /// it and answering fewer rows than it wrote.
     /// </summary>
     [Fact]
     public async Task A_batch_echoes_each_row_under_the_callers_get_rule()
     {
         var fixture = await TicketsFixtureAsync();
+        var token = new AlvoIdempotency(Guid.NewGuid().ToString("N"), "tickets:batch");
+        List<Dictionary<string, object?>> rows =
+            [Ticket(fixture.Alice, "open", "mine"), Ticket(fixture.Bob, "open", "for Bob")];
 
-        var created = await fixture.Data.CreateManyAsync(
-            "tickets", [Ticket(fixture.Alice, "open", "mine"), Ticket(fixture.Bob, "open", "for Bob")], fixture.Alice);
+        var created = await fixture.Data.CreateManyAsync("tickets", rows, fixture.Alice, token);
+        var replayed = await fixture.Data.CreateManyAsync("tickets", rows, fixture.Alice, token);
+        replayed.Rows.Select(row => row[AlvoManagedColumns.Id]).ShouldBe(created.Rows.Select(row => row[AlvoManagedColumns.Id]));
+        replayed.Rows[1].Values.Keys.ShouldBe([AlvoManagedColumns.Id], "the replay withholds what the first answer did");
         var mine = (Guid)created.Rows[0][AlvoManagedColumns.Id]!;
         var updated = await fixture.Data.UpdateManyAsync(
             "tickets",

@@ -32,7 +32,8 @@ namespace MMLib.Alvo.Events.Internal;
 /// <see cref="TryValidate"/> no row can reach it — which is the point of by-construction rendering — so it
 /// guards the renderer against itself, for the price of one parse per delivery. A value JSON has no spelling
 /// for (a non-finite <see cref="double"/>) is refused one step earlier, by <see cref="Utf8JsonWriter"/>
-/// throwing. Either way the executor throws, which is the existing failure path — released, retried to the
+/// throwing; a text value that is not well-formed UTF-16 (a lone surrogate) is refused before any encoder sees
+/// it, as a body that does not render. Either way the executor throws, which is the existing failure path — released, retried to the
 /// attempt ceiling, logged as a poison event. Retrying a deterministic failure spends a bounded number of
 /// attempts; a separate "permanent" verdict for one failure class would need the dead-letter queue the event
 /// design defers to 7.1, and would be the only such verdict in the dispatcher.
@@ -63,11 +64,36 @@ internal static class JsonPayload
         ArgumentNullException.ThrowIfNull(template);
         ArgumentNullException.ThrowIfNull(@event);
 
-        var rendered = Fill(
-            template, (placeholder, position) => Encoded(placeholder, position, TemplatePlaceholder.ValueOf(placeholder, @event)));
-        body = IsJson(rendered) ? rendered : null;
+        body = template.Placeholders.All(placeholder => IsWellFormedText(TemplatePlaceholder.ValueOf(placeholder, @event)))
+            ? Rendered(template, @event)
+            : null;
 
         return body is not null;
+    }
+
+    private static string? Rendered(AlvoTemplate template, AlvoEvent @event)
+    {
+        var rendered = Fill(
+            template, (placeholder, position) => Encoded(placeholder, position, TemplatePlaceholder.ValueOf(placeholder, @event)));
+
+        return IsJson(rendered) ? rendered : null;
+    }
+
+    private static bool IsWellFormedText(object? value) => value is not string text || IsWellFormedUtf16(text);
+
+    private static bool IsWellFormedUtf16(ReadOnlySpan<char> text)
+    {
+        while (!text.IsEmpty)
+        {
+            if (Rune.DecodeFromUtf16(text, out _, out var consumed) != OperationStatus.Done)
+            {
+                return false;
+            }
+
+            text = text[consumed..];
+        }
+
+        return true;
     }
 
     private const string BareStandIn = "null";

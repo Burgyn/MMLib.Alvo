@@ -569,19 +569,25 @@ internal sealed class EfAlvoData : IAlvoData
 
     /// <summary>
     /// The answer to a replay: the recorded row, <b>re-read through this caller's current policy</b> — or,
-    /// when that policy refuses <c>get</c> outright, the id alone, disclosed with no row read at all.
+    /// when that policy does not return it, the id alone, exactly as the fresh write answers.
     /// </summary>
     /// <remarks>
     /// <para>
     /// Never a stored copy of the first response. Re-reading is what keeps a replay from handing back a
     /// representation the caller's policy would not produce today — a field that has since become
-    /// <c>hidden</c> for them stays hidden, and a row they can no longer see is not resurrected. It also means
-    /// a row that has since been deleted, or that a <em>configured</em> <c>get</c>'s own predicate excludes
-    /// (an entity whose rule is <c>USING (status == 'published')</c>, say), answers
-    /// <see cref="AlvoRecordNotFoundException"/>, which is the same thing every other read of a missing row
-    /// says. That sibling case is deliberately left exactly as it stands: telling "invisible to me" apart from
-    /// "genuinely gone since" would need a second, policy-free read, and refusing to add one is the more
-    /// conservative of the two errors.
+    /// <c>hidden</c> for them stays hidden, and a row they can no longer see is not resurrected.
+    /// </para>
+    /// <para>
+    /// <b>A row the re-read does not return answers the id alone — never not-found.</b> A fresh write whose
+    /// row this caller's <c>get</c> excludes answers id-only (<see cref="EchoedAsync(AlvoDataContext, EntitySchema, AlvoContext, Guid, CancellationToken)"/>),
+    /// so a replay that answered 404 there would tell the caller a committed write failed and invite a second
+    /// one under a fresh key — the duplicate the key exists to prevent. The replay therefore <em>is</em> that
+    /// echo. It cannot tell "a configured <c>get</c> excludes it" from "deleted since", because that would need
+    /// a policy-free existence read, so both answer the id: the write the record proves did happen, and the id
+    /// is one this caller's own first answer already carried. This supersedes the earlier 404 for both (F3
+    /// decision 30, #101), and it narrows one fail-closed arm: a direct caller whose fingerprint does not cover
+    /// the entity, contrary to <see cref="AlvoIdempotency.Fingerprint"/>, replaying a key on a second entity
+    /// now gets the recorded id and no write, rather than not-found — still never a field of any row.
     /// </para>
     /// <para>
     /// <b>Read under a freshly resolved <c>get</c> decision, never under the <c>create</c> decision this call
@@ -621,8 +627,7 @@ internal sealed class EfAlvoData : IAlvoData
     {
         EnsureSameRequest(record, token);
 
-        return await ReadBackAsync(db, schema, ReadDecision(schema, context), context, RecordedRow(record), cancellationToken)
-            ?? throw new AlvoRecordNotFoundException();
+        return await EchoedAsync(db, schema, context, RecordedRow(record), cancellationToken);
     }
 
     /// <summary>
@@ -647,13 +652,14 @@ internal sealed class EfAlvoData : IAlvoData
     /// has happened, so refusing it after the fact would report a failure for a change that is committed,
     /// and invite a retry that writes again. The id discloses nothing the caller did not supply (an update, a
     /// replace) or is not already told by <c>Location</c> (a create). It is the one place this port answers a
-    /// row a <c>get</c> excludes with anything at all, and it is also why this differs from the replay, which
-    /// cannot tell "invisible to me" from "deleted since" and so answers not-found.
+    /// row a <c>get</c> excludes with anything at all, and a replay answers through this same method, so a
+    /// first attempt and its retry agree row for row.
     /// </para>
     /// <para>
-    /// The cost is one primary-key read per written row, and it is not skipped when the two decisions look
-    /// alike: proving that <c>get</c> admits whatever <c>update</c> admits is a question about two predicates,
-    /// and the answer the store gives is the one that cannot be wrong.
+    /// The cost is one read per write — a primary-key read for a single row, one <c>id IN (…)</c> read per
+    /// <see cref="AlvoFilter.MaxInCandidates"/> rows for a batch — and it is not skipped when the two decisions
+    /// look alike: proving that <c>get</c> admits whatever <c>update</c> admits is a question about two
+    /// predicates, and the answer the store gives is the one that cannot be wrong.
     /// </para>
     /// </remarks>
     /// <param name="db">The context whose open write transaction the read joins.</param>
@@ -663,7 +669,7 @@ internal sealed class EfAlvoData : IAlvoData
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     private async Task<AlvoRecord> EchoedAsync(
         AlvoDataContext db, EntitySchema schema, AlvoContext context, Guid rowId, CancellationToken cancellationToken) =>
-        (await EchoedAsync(db, schema, context, [rowId], cancellationToken))[0];
+        await ReadBackAsync(db, schema, ReadDecision(schema, context), context, rowId, cancellationToken) ?? IdOnly(rowId);
 
     /// <inheritdoc cref="EchoedAsync(AlvoDataContext, EntitySchema, AlvoContext, Guid, CancellationToken)"/>
     /// <param name="db">The context whose open write transaction the reads join.</param>
@@ -672,23 +678,19 @@ internal sealed class EfAlvoData : IAlvoData
     /// <param name="rowIds">The written rows, in the order the answer lists them — one entry per row.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     private async Task<List<AlvoRecord>> EchoedAsync(
-        AlvoDataContext db, EntitySchema schema, AlvoContext context, List<Guid> rowIds,
+        AlvoDataContext db, EntitySchema schema, AlvoContext context, IReadOnlyList<Guid> rowIds,
         CancellationToken cancellationToken)
     {
-        var read = ReadDecision(schema, context);
-        var echoed = new List<AlvoRecord>(rowIds.Count);
-        foreach (var rowId in rowIds)
-        {
-            echoed.Add(await ReadBackAsync(db, schema, read, context, rowId, cancellationToken) ?? IdOnly(rowId));
-        }
+        var readable = await ReadBackManyAsync(db, schema, ReadDecision(schema, context), context, rowIds, cancellationToken);
 
-        return echoed;
+        return [.. rowIds.Select(rowId => readable.GetValueOrDefault(rowId) ?? IdOnly(rowId))];
     }
 
     /// <summary>
     /// The one row, read back under <paramref name="read"/> — the id alone when <paramref name="read"/> is
     /// denied outright, with no row read at all, or <see langword="null"/> when its <c>USING</c> excludes the
-    /// row. Shared by every write's answer and every replay's, which decide the <see langword="null"/>.
+    /// row, which <see cref="EchoedAsync(AlvoDataContext, EntitySchema, AlvoContext, Guid, CancellationToken)"/>
+    /// answers as the id alone too.
     /// </summary>
     /// <param name="db">The context whose open transaction the read joins.</param>
     /// <param name="schema">The entity the row belongs to.</param>
@@ -708,6 +710,49 @@ internal sealed class EfAlvoData : IAlvoData
         var row = await SingleAsync(db, schema, read, context, rowId, lockFor: null, cancellationToken);
         return row is null ? null : RecordMaterializer.ToRecord(row, read.HiddenFields, FrozenSet<string>.Empty);
     }
+
+    /// <summary>
+    /// Every row of <paramref name="rowIds"/> that <paramref name="read"/> returns, keyed by id — none when
+    /// <paramref name="read"/> is denied outright, with no row read at all.
+    /// </summary>
+    /// <remarks>
+    /// One <c>id IN (…)</c> statement per <see cref="AlvoFilter.MaxInCandidates"/> ids rather than one
+    /// primary-key read per row, composed through the same <see cref="ReadStatementComposer"/> path as every
+    /// other read — the <c>USING</c>, the tenant scope and the mask are in the SQL, and nothing is filtered in
+    /// memory. The chunk keeps each statement's bind-parameter count under SQLite's ceiling (32 766) and
+    /// PostgreSQL's (65 535) whatever <c>MaxBatchRows</c> a host configures, with room for the policy's own.
+    /// </remarks>
+    /// <param name="db">The context whose open transaction the reads join.</param>
+    /// <param name="schema">The entity the rows belong to.</param>
+    /// <param name="read">This caller's freshly resolved <c>get</c> decision.</param>
+    /// <param name="context">The caller the rows are read for.</param>
+    /// <param name="rowIds">The rows to read.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    private async Task<Dictionary<Guid, AlvoRecord>> ReadBackManyAsync(
+        AlvoDataContext db, EntitySchema schema, PolicyDecision read, AlvoContext context, IReadOnlyList<Guid> rowIds,
+        CancellationToken cancellationToken)
+    {
+        var readable = new Dictionary<Guid, AlvoRecord>(rowIds.Count);
+        if (read.IsDenied)
+        {
+            return readable;
+        }
+
+        foreach (var chunk in rowIds.Chunk(AlvoFilter.MaxInCandidates))
+        {
+            var rows = await PageAsync(db, schema, read, context, RowsIn(chunk), cancellationToken);
+            foreach (var row in rows)
+            {
+                readable[RowIdOf(row)] = RecordMaterializer.ToRecord(row, read.HiddenFields, FrozenSet<string>.Empty);
+            }
+        }
+
+        return readable;
+    }
+
+    /// <summary>The read options naming exactly <paramref name="rowIds"/>, as one <c>in</c> comparison on the id.</summary>
+    private static ReadStatementComposer.ReadStatementOptions RowsIn(Guid[] rowIds) =>
+        new() { Filter = new AlvoComparison(AlvoManagedColumns.Id, AlvoFilterOperator.In, rowIds) };
 
     /// <summary>
     /// This caller's <c>get</c> decision, resolved fresh — never the write's, whose <c>USING</c> answers a
@@ -2854,7 +2899,9 @@ internal sealed class EfAlvoData : IAlvoData
 
     /// <summary>
     /// The answer to a replayed batch: every recorded row, re-read under a freshly resolved <c>get</c>
-    /// decision, exactly as a single write's replay is and for the same reason.
+    /// decision, exactly as a single write's replay is and for the same reason — one entry per recorded row,
+    /// in the recorded order, the id alone for a row that read does not return, so the replay lists what the
+    /// fresh batch listed.
     /// </summary>
     /// <remarks>
     /// <b>A replayed batch delete reads nothing, and the caller tells this method so.</b> Its rows are gone
@@ -2882,16 +2929,6 @@ internal sealed class EfAlvoData : IAlvoData
             return AlvoBatchResult.Wrote([], rowIds.Count);
         }
 
-        var read = ReadDecision(schema, context);
-        var rows = new List<AlvoRecord>(rowIds.Count);
-        foreach (var id in rowIds)
-        {
-            if (await ReadBackAsync(db, schema, read, context, id, cancellationToken) is { } row)
-            {
-                rows.Add(row);
-            }
-        }
-
-        return AlvoBatchResult.Wrote(rows, rowIds.Count);
+        return AlvoBatchResult.Wrote(await EchoedAsync(db, schema, context, rowIds, cancellationToken), rowIds.Count);
     }
 }

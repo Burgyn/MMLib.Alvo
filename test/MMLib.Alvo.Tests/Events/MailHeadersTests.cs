@@ -44,8 +44,16 @@ public class MailHeadersTests
     [InlineData("Deal\u0085won")]
     [InlineData("Deal\u2029won")]
     [InlineData("Deal\u001bwon")]
+    [InlineData("Deal\rwon")]
+    [InlineData("Deal\u0000won")]
+    [InlineData("Deal\u2028won")]
     public void A_subject_with_a_line_break_or_control_character_is_refused(string subject)
         => MailHeaders.RefusedSlot(new AlvoMailMessage("o@x.z", subject, "body")).ShouldBe(ActionSlot.Subject);
+
+    /// <summary>A tab is whitespace a header may carry (RFC 5322 WSP); only a line breaker or another control is refused.</summary>
+    [Fact]
+    public void A_subject_with_a_tab_is_one_line()
+        => MailHeaders.RefusedSlot(new AlvoMailMessage("o@x.z", "Deal\twon", "body")).ShouldBeNull();
 
     [Fact]
     public void A_recipient_is_checked_before_the_subject()
