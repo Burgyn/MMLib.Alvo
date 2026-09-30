@@ -3067,6 +3067,13 @@
     gap: var(--space-2);
   }
 
+  .a-assistant__trace {
+    max-height: 16rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    font-size: var(--text-sm);
+  }
+
   .a-assistant__proposal {
     display: flex;
     flex-direction: column;

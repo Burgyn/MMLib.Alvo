@@ -19,4 +19,9 @@
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/SkillCatalogue.cs" Link="_shared/SkillCatalogue.cs" />
   </ItemGroup>
 
+  <!-- The metadata reader both granted suites hold D45's grant with: see InternalGrantArchitectureTests. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InternalMemberReferences.cs" Link="_shared/InternalMemberReferences.cs" />
+  </ItemGroup>
+
 </Project>

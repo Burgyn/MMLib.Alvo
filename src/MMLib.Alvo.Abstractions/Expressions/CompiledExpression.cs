@@ -26,6 +26,12 @@ namespace MMLib.Alvo.Expressions;
 /// no honest mistake produces an unchecked tree the renderer would trust.
 /// </para>
 /// <para>
+/// <b>Two more assemblies see the constructor</b> since D45: <c>MMLib.Alvo.Ai</c> and <c>MMLib.Alvo.Admin</c>
+/// are granted Abstractions' internals for the assistant's trace seam. An architecture fact in each one's
+/// suite (<c>InternalGrantArchitectureTests</c>) reads the compiled assembly's member references and holds
+/// that neither constructs one.
+/// </para>
+/// <para>
 /// Any cache keyed on a compiled expression (to avoid recompiling a rule on every request) must be
 /// keyed on the descriptor's revision, not only the entity name and source text: a
 /// <see cref="CompiledExpression"/> holds a specific <see cref="Entity"/> snapshot, and a cache entry

@@ -109,16 +109,31 @@ internal sealed class ScriptedAssistant : IAlvoAssistant
             yield return new AssistantUpdate.Text("That change is refused.");
             yield return new AssistantUpdate.Proposal(
                 DescriptorWith("invoices"), Revision, "Drops a column.", [RefusalText]);
+            if (request.IncludeTrace)
+            {
+                yield return new AssistantUpdate.TurnTraced(TraceJson);
+            }
         }
         else
         {
             yield return new AssistantUpdate.Text("Adds an invoices entity with one column.");
             yield return new AssistantUpdate.Proposal(
                 DescriptorWith("invoices"), Revision, "Adds an invoices entity.", []);
+            if (request.IncludeTrace)
+            {
+                yield return new AssistantUpdate.TurnTraced(TraceJson);
+            }
         }
 
         await Task.CompletedTask;
     }
+
+    /// <summary>
+    /// The trace a proposing turn ends with when the drawer asks for one: two calls, and no word the operator typed. The
+    /// trace's own content is proven in <c>MMLib.Alvo.Ai.Tests</c>; this is what the drawer draws and copies.
+    /// </summary>
+    internal const string TraceJson =
+        """{"format":"alvo.assistant.turn/1","end":"answered","calls":[{"round":1,"tool":"get_descriptor"},{"round":2,"tool":"propose_change"}]}""";
 
     /// <summary>What a turn asked to fail reports, which a scenario asserts is drawn in place.</summary>
     internal const string FailureText = "The AI provider refused the key.";

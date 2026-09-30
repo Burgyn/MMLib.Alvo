@@ -7,6 +7,7 @@ using MMLib.Alvo.Management;
 using System.ClientModel;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Ai;
 
@@ -37,8 +38,15 @@ namespace MMLib.Alvo.Ai;
 /// text.
 /// </para>
 /// <para>
-/// <b>Nothing the operator typed is logged.</b> A message to a schema assistant routinely carries a
-/// connection string somebody pasted, and a log line is the place §7.1 asks a secret never to reach.
+/// <b>Nothing the operator typed is logged</b>, and neither is what the model wrote. A message to a schema assistant
+/// routinely carries a connection string somebody pasted, and a log line is the place §7.1 asks a secret never to
+/// reach. The trace (D44) records calls, not prose, and the log records where a patch wrote, never what: each call is
+/// one 6202 line with its operations reduced to op and path and its violations to source, pointer, code and severity,
+/// and the turn's end is one 6203 line.
+/// </para>
+/// <para>
+/// <b>The trace is opt-in</b> (D45): <see cref="AssistantRequest.IncludeTrace"/> asks for it, and it is the turn's last
+/// update, after the proposal or the failure. A turn that never reached an endpoint — no connection — has none.
 /// </para>
 /// </remarks>
 public sealed partial class AlvoAssistant : IAlvoAssistant
@@ -86,15 +94,40 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
             yield break;
         }
 
+        /* Disposed with the turn it belongs to, and the client with it (a DelegatingChatClient disposes its inner
+           client). Today's OpenAI client holds nothing that needs releasing, but IChatClient is IDisposable and a
+           factory that later supplies its own HttpClient would start leaking handlers silently. */
+        using var recorder = new TurnRecorder(_clients(connection));
+        var turn = new TurnState();
+        try
+        {
+            await foreach (var update in AnswerAsync(recorder, request, connection, turn, ct).ConfigureAwait(false))
+            {
+                yield return update;
+            }
+
+            if (request.IncludeTrace)
+            {
+                yield return new AssistantUpdate.TurnTraced(TurnTrace.Json(TurnTrace.Of(HeaderOf(request, connection), recorder.Calls, turn.End)));
+            }
+        }
+        finally
+        {
+            LogTurn(recorder, turn.End);
+        }
+    }
+
+    /// <summary>
+    /// The turn itself: the agent's stream translated, then the proposal — recording how it ended in
+    /// <paramref name="turn"/>, which the trace and the 6203 line read.
+    /// </summary>
+    private async IAsyncEnumerable<AssistantUpdate> AnswerAsync(
+        TurnRecorder recorder, AssistantRequest request, AlvoAiConnection connection, TurnState turn,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
         var tools = ManagementTools.For(_management, request.Project);
         var answer = new StringBuilder();
-
-        /* Disposed with the turn it belongs to. Today's OpenAI client holds nothing that needs releasing,
-           but IChatClient is IDisposable and a factory that later supplies its own HttpClient would start
-           leaking handlers silently. */
-        using var client = _clients(connection);
-
-        var updates = RunAsync(client, tools, request, ct).GetAsyncEnumerator(ct);
+        var updates = RunAsync(recorder, tools, request, ct).GetAsyncEnumerator(ct);
         await using (updates.ConfigureAwait(false))
         {
             while (true)
@@ -102,6 +135,7 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
                 var next = await NextAsync(updates, connection.Model).ConfigureAwait(false);
                 if (next.Failure is { } failure)
                 {
+                    turn.End = TurnEnd.EndpointFailed;
                     yield return failure;
                     yield break;
                 }
@@ -118,10 +152,48 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
             }
         }
 
+        turn.End = recorder.ToolRounds >= MaximumIterations ? TurnEnd.IterationCap : TurnEnd.Answered;
         if (ProposalFrom(tools, answer) is { } proposal)
         {
             yield return proposal;
         }
+    }
+
+    /// <summary>Logs each call as 6202 — its log line, never its values — and the turn's end as 6203.</summary>
+    /// <remarks>
+    /// Built from the recorder's calls, not from the capped trace, so a call the trace dropped is still logged
+    /// (pre-flight M2); and called from a <c>finally</c>, so an abandoned turn is logged too (L12).
+    /// </remarks>
+    private void LogTurn(TurnRecorder recorder, string end)
+    {
+        var calls = recorder.Calls;
+        if (_logger.IsEnabled(LogLevel.Information))
+        {
+            foreach (var call in calls)
+            {
+                var line = LogLineOf(call);
+                CallTraced(_logger, call.Round, call.Tool, line);
+            }
+        }
+
+        TurnEnded(_logger, end, calls.Count, recorder.ToolRounds);
+    }
+
+    /// <summary>One call's 6202 line: its scrubbed trace entry, reduced to what a log may carry.</summary>
+    private static string LogLineOf(TracedCall call) =>
+        TurnTrace.Json(TurnTrace.LogLine((JsonObject)SecretScrub.Scrub(TurnTrace.Entry(call))!));
+
+    /// <summary>The trace's header: the instructions' version, the provider, the model and the project.</summary>
+    private static TurnHeader HeaderOf(AssistantRequest request, AlvoAiConnection connection) => new(
+        AssistantInstructions.VersionLine.Replace("<!-- ", string.Empty, StringComparison.Ordinal)
+            .Replace(" -->", string.Empty, StringComparison.Ordinal),
+        connection.Kind.ToString(), connection.Model, request.Project);
+
+    /// <summary>How the turn ended — <see cref="TurnEnd.Abandoned"/> until it says otherwise.</summary>
+    /// <remarks>A class, because an async iterator can take no <c>ref</c>: the answer sets it, the trace and the log read it.</remarks>
+    private sealed class TurnState
+    {
+        internal string End { get; set; } = TurnEnd.Abandoned;
     }
 
     /// <summary>
@@ -319,6 +391,12 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
     private const string NoConnection =
         "No AI connection is configured for this instance, so there is nothing to ask. Set one under "
         + "Settings, or pin one in the deployment's own configuration under Alvo:Ai.";
+
+    [LoggerMessage(EventId = 6202, Level = LogLevel.Information, Message = "Assistant call {Round} {Tool}: {Call}")]
+    private static partial void CallTraced(ILogger logger, int round, string tool, string call);
+
+    [LoggerMessage(EventId = 6203, Level = LogLevel.Information, Message = "Assistant turn ended ({End}) after {Calls} calls in {Rounds} tool rounds.")]
+    private static partial void TurnEnded(ILogger logger, string end, int calls, int rounds);
 
     [LoggerMessage(
         EventId = 6201,

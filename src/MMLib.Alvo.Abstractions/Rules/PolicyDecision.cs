@@ -12,12 +12,20 @@ namespace MMLib.Alvo.Rules;
 /// <see cref="IPolicyEngine"/> implementation in the core, via <c>InternalsVisibleTo</c>.
 /// </summary>
 /// <remarks>
+/// <para>
 /// That prevents a caller from <em>accidentally</em> assembling a permissive decision by hand, or
 /// <c>with</c>-mutating a denial into an allow — the shape a data port's own code could otherwise
 /// slip into. It is not proof against a deliberate forgery: the assemblies are unsigned, so
 /// <c>InternalsVisibleTo</c> is an encapsulation boundary and reflection walks straight past it. The
 /// guarantee that matters is the one above it — a port that never constructs a decision itself, only
 /// applies the one the engine returned.
+/// </para>
+/// <para>
+/// <b>The grant reaches further than the core</b> since D45: <c>MMLib.Alvo.Ai</c> and <c>MMLib.Alvo.Admin</c>
+/// see Abstractions' internals for the assistant's trace seam, and so could reach this constructor and
+/// <c>Allow</c>. An architecture fact in each one's suite (<c>InternalGrantArchitectureTests</c>) reads the
+/// compiled assembly's member references and holds that neither does.
+/// </para>
 /// </remarks>
 public sealed record PolicyDecision
 {
