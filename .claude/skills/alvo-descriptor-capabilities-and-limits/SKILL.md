@@ -34,7 +34,7 @@ literal is honoured):
 `field.validation` `field.default` `entity.softDelete` `rollup.where` `trigger.event` `JSONata` `email.data` `bodyFile` `function` `http.call` `entity.update`
 <!-- /gen:refused -->
 
-The last three are after-hook action types. The skills of each area say what to use instead.
+The after-hook action types in this list are refused as actions, not as blocks. The skills of each area say what to use instead.
 
 ## How to answer
 
