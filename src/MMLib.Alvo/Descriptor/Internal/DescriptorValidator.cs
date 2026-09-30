@@ -6,6 +6,7 @@ using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using System.Text.Json;
 
@@ -141,6 +142,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             ? []
             : ruleErrors.ToList();
         errors.AddRange(ComputedFieldCheck.Errors(schema, _compiler));
+        errors.AddRange(OwnerComparisonCheck.Warnings(descriptor, schema, _compiler));
         return errors;
     }
 

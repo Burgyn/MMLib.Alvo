@@ -1,8 +1,8 @@
 ﻿namespace MMLib.Alvo.Ai.Tests;
 
 /// <summary>
-/// The Abstractions grant D45 gives this package is used for the trace seam and nothing else: the agent never builds an
-/// allow decision or a compiled expression of its own.
+/// The Abstractions grant D45 gives this package is used for the trace seam and the apply result's warnings (D52), and
+/// nothing else: the agent never builds an allow decision or a compiled expression of its own.
 /// </summary>
 public sealed class InternalGrantArchitectureTests
 {
@@ -12,6 +12,11 @@ public sealed class InternalGrantArchitectureTests
     [Fact]
     public void The_agent_references_the_internal_trace_update_it_was_granted() =>
         _referenced.ShouldContain("MMLib.Alvo.Ai.AssistantUpdate/TurnTraced::.ctor");
+
+    /// <summary>The second control: the scan sees the other granted use, the dry run's warnings (D52).</summary>
+    [Fact]
+    public void The_agent_references_the_internal_apply_warnings_it_was_granted() =>
+        _referenced.ShouldContain("MMLib.Alvo.Management.ManagementApplyResult::get_Warnings");
 
     [Theory]
     [InlineData("MMLib.Alvo.Rules.PolicyDecision::.ctor")]

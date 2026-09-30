@@ -1,4 +1,6 @@
-﻿using System.Net;
+﻿using MMLib.Alvo.Management;
+
+using System.Net;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Tests.Management;
@@ -30,6 +32,39 @@ public class ManagementApplyTests
     private static readonly TestApiKey _owner = new("mgmt-owner", ["owner"], ["*:write"]);
 
     private const string Path = ManagedFleet.Routes + "/descriptor";
+
+    /// <summary>
+    /// An in-process dry run carries the validator's warnings, so the assistant reads them on a valid answer (D52).
+    /// </summary>
+    [Fact]
+    public async Task A_dry_run_carries_the_validators_warnings_in_process()
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+        var management = ManagementInProcessAccessTests.Publish(world, "dispatcher");
+        var current = await management.GetDescriptorAsync(ManagedFleet.Project, Ct);
+
+        var result = await management.ApplyDescriptorAsync(
+            ManagedFleet.Project,
+            new ManagementApplyRequest(DescriptorEdits.AddOwnerComparison(current.DescriptorJson), current.Revision, DryRun: true),
+            Ct);
+
+        result.Applied.ShouldBeFalse();
+        result.Warnings.ShouldHaveSingleItem().Path.ShouldBe(DescriptorEdits.OwnerComparisonRule);
+    }
+
+    /// <summary>The same warning-drawing dry run over HTTP: the response has no <c>warnings</c> member at any depth.</summary>
+    /// <remarks>The wire is unchanged (D52): the member is internal, and System.Text.Json writes public members only.</remarks>
+    [Fact]
+    public async Task The_apply_response_carries_no_warnings_member()
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+
+        var response = await ApplyAsync(
+            world, DescriptorEdits.AddOwnerComparison(await CurrentAsync(world)), ifMatch: "\"1\"", query: "?dryRun=true");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        Names(await response.ReadJsonObjectAsync()).ShouldNotContain("warnings");
+    }
 
     [Fact]
     public async Task An_apply_without_if_match_is_428_and_changes_nothing()
@@ -422,6 +457,16 @@ public class ManagementApplyTests
 
         (await CurrentAsync(world)).ShouldBe(sent, "F5 acceptance criterion 3: no config drift");
     }
+
+    /// <summary>Every property name in the document, at any depth.</summary>
+    private static IEnumerable<string> Names(JsonNode? node) => node switch
+    {
+        JsonObject members => members.SelectMany(member => Names(member.Value).Prepend(member.Key)),
+        JsonArray items => items.SelectMany(Names),
+        _ => [],
+    };
+
+    private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
     private static Task<HttpResponseMessage> ApplyAsync(
         AlvoApiWorld world, string descriptorJson, string ifMatch, bool allowDestructive = false,

@@ -82,8 +82,12 @@ internal sealed class ManagementTools
     private static readonly HashSet<string> _notTheModels =
         new(StringComparer.Ordinal) { ToolViolation.Budget, ToolViolation.Plan, ToolViolation.Access };
 
+    /// <summary>What every descriptor skill's name starts with; an area name follows it.</summary>
+    private const string SkillPrefix = "alvo-descriptor-";
+
     private readonly IAlvoManagement _management;
     private readonly string _project;
+    private readonly Func<IReadOnlySet<string>>? _loadedSkills;
     private readonly List<RefusedPatch> _refused = [];
     private HashSet<string> _lastBlocking = new(StringComparer.Ordinal);
     private IReadOnlyList<string> _lastRefusals = [];
@@ -94,10 +98,11 @@ internal sealed class ManagementTools
     private ProposedDraft? _lastRefused;
     private (bool Proposed, ChangeOutcome Outcome)? _lastDryRun;
 
-    private ManagementTools(IAlvoManagement management, string project)
+    private ManagementTools(IAlvoManagement management, string project, Func<IReadOnlySet<string>>? loadedSkills)
     {
         _management = management;
         _project = project;
+        _loadedSkills = loadedSkills;
         Functions =
         [
             AIFunctionFactory.Create(
@@ -151,12 +156,16 @@ internal sealed class ManagementTools
     /// <summary>Builds the tool set for one turn over one project.</summary>
     /// <param name="management">The Management API, exactly as every other client reaches it.</param>
     /// <param name="project">The project every tool call is scoped to.</param>
-    internal static ManagementTools For(IAlvoManagement management, string project)
+    /// <param name="loadedSkills">
+    /// The skills the turn has loaded so far (D50), read per dry run; <see langword="null"/> names no skill in any
+    /// refusal, so a tool set built without it answers exactly as before.
+    /// </param>
+    internal static ManagementTools For(IAlvoManagement management, string project, Func<IReadOnlySet<string>>? loadedSkills = null)
     {
         ArgumentNullException.ThrowIfNull(management);
         ArgumentException.ThrowIfNullOrWhiteSpace(project);
 
-        return new ManagementTools(management, project);
+        return new ManagementTools(management, project, loadedSkills);
     }
 
     /// <summary>The descriptor as it is applied now — as an object, never a string of JSON — and its revision.</summary>
@@ -240,8 +249,39 @@ internal sealed class ManagementTools
         var attempt = await DescriptorDraft.BuildAsync(_management, _project, baseRevision, operations, ct).ConfigureAwait(false);
         Record(attempt, baseRevision, operations);
 
-        return Remembered(proposed, attempt, ChangeOutcome.From(attempt, AttemptsLeft));
+        return Remembered(proposed, attempt, WithSkillHints(ChangeOutcome.From(attempt, AttemptsLeft)));
     }
+
+    /// <summary>
+    /// Names, on each blocking validator violation, the skill of its area when the turn has not loaded it, and adds
+    /// <see cref="ViolationMapping.SkillHint"/> when any got one (D50). A valid answer, and a tool set with no ledger,
+    /// are passed through: a warning never tells the model to retry.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>validation</c> violations (pre-flight M4): a patch, plan, access or concurrency refusal is not about a
+    /// rule a skill states. <see cref="ToolViolation.Key"/> leaves <c>Skill</c> out, so the budget (D41) is unchanged.
+    /// </remarks>
+    private ChangeOutcome WithSkillHints(ChangeOutcome outcome)
+    {
+        if (_loadedSkills is null || outcome.Valid)
+        {
+            return outcome;
+        }
+
+        var loaded = _loadedSkills();
+        List<ToolViolation> violations = [.. outcome.Violations.Select(violation => violation with { Skill = MissingSkill(violation, loaded) })];
+        return violations.Exists(violation => violation.Skill is not null)
+            ? outcome with { Violations = violations, Hint = ViolationMapping.SkillHint }
+            : outcome;
+    }
+
+    /// <summary>The skill a blocking validator violation's area needs, when the turn has not loaded it; else none.</summary>
+    private static string? MissingSkill(ToolViolation violation, IReadOnlySet<string> loaded) =>
+        violation is { Blocks: true, Source: ToolViolation.Validation }
+        && SkillAreas.ForViolation(violation.Pointer) is { } area
+        && !loaded.Contains(SkillPrefix + area)
+            ? SkillPrefix + area
+            : null;
 
     /// <summary>Remembers the attempt's answer as the turn's last dry run, and passes it on.</summary>
     private (DraftAttempt? Attempt, ChangeOutcome Outcome) Remembered(bool proposed, DraftAttempt? attempt, ChangeOutcome outcome)

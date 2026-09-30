@@ -15,6 +15,10 @@ namespace MMLib.Alvo.Ai.Internal;
 /// <param name="Unchecked">
 /// <see langword="true"/> only on the budget answer: this attempt was not dry-run, so nothing about it is known.
 /// </param>
+/// <param name="Hint">
+/// <see cref="ViolationMapping.SkillHint"/> when a blocking violation names a skill the turn has not loaded (D50);
+/// otherwise absent.
+/// </param>
 internal sealed record ChangeOutcome(
     bool Valid,
     int Revision,
@@ -22,7 +26,8 @@ internal sealed record ChangeOutcome(
     IReadOnlyList<string> ChangedPaths,
     IReadOnlyList<ToolViolation> Violations,
     int AttemptsLeft,
-    bool? Unchecked = null)
+    bool? Unchecked = null,
+    string? Hint = null)
 {
     internal static ChangeOutcome From(DraftAttempt attempt, int attemptsLeft) =>
         new(attempt.Valid, attempt.CurrentRevision, attempt.Plan, attempt.ChangedPaths, attempt.Violations, attemptsLeft);
@@ -42,6 +47,10 @@ internal sealed record ChangeOutcome(
 /// <param name="Op">The op whose landed target best matches the pointer; best-effort — the pointer is authoritative.</param>
 /// <param name="Code">A stable slug to branch on, where the stage has one.</param>
 /// <param name="Severity"><c>error</c> blocks the change; <c>warning</c> does not.</param>
+/// <param name="Skill">
+/// The descriptor skill that states this violation's rule, when the turn has not loaded it (D50) — a catalogue name,
+/// never author text. Not part of <see cref="Key"/>, so it never changes what the budget counts as the same refusal.
+/// </param>
 internal sealed record ToolViolation(
     string Source,
     string Pointer,
@@ -49,7 +58,8 @@ internal sealed record ToolViolation(
     string? Fix,
     int? Op = null,
     string? Code = null,
-    string Severity = ToolViolation.ErrorSeverity)
+    string Severity = ToolViolation.ErrorSeverity,
+    string? Skill = null)
 {
     internal const string Patch = "patch";
     internal const string Validation = "validation";

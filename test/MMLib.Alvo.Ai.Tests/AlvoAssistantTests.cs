@@ -389,6 +389,61 @@ public sealed class AlvoAssistantTests
         logger.EventIds.Count(id => id == 6203).ShouldBe(1);
     }
 
+    /// <summary>
+    /// A refusal names the skill of its area when the turn loaded only another one (D50): the trace's violation says
+    /// so, and so does that call's 6202 line — a catalogue name, never author text.
+    /// </summary>
+    [Fact]
+    public async Task A_turns_loaded_skills_are_what_it_loaded_before_the_dry_run()
+    {
+        var logger = new CapturingLogger();
+        var model = new ScriptedChatClient(
+            Scripted.Calls("load_skill", new Dictionary<string, object?> { ["skillName"] = "alvo-descriptor-entities-and-fields" }),
+            Scripted.Calls("propose_change", Proposing(revision: 4)),
+            Scripted.Says("Refused."));
+
+        var updates = await RunAsync(RefusingAtCreatedAt(), Configured(), model, logger, trace: true);
+
+        var call = JsonNode.Parse(updates.OfType<AssistantUpdate.TurnTraced>().Single().Json)!["calls"]![1]!;
+        call["result"]!["violations"]![0]!["skill"]!.GetValue<string>().ShouldBe(TraitsSkill);
+        logger.Lines.ShouldContain(line => line.StartsWith("Assistant call 2:", StringComparison.Ordinal) && line.Contains(TraitsSkill, StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A skill counts only when it was loaded before the dry run (pre-flight L1): loaded after it in the same answer, it
+    /// had not been read when the dry run was checked.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task A_skill_counts_only_when_it_was_loaded_before_the_dry_run(bool loadedFirst)
+    {
+        var load = new FunctionCallContent("load", "load_skill", new Dictionary<string, object?> { ["skillName"] = TraitsSkill });
+        var propose = new FunctionCallContent("propose", "propose_change", Proposing(revision: 4));
+        var model = new ScriptedChatClient(
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, loadedFirst ? [load, propose] : [propose, load])),
+            Scripted.Says("Refused."));
+
+        var updates = await RunAsync(RefusingAtCreatedAt(), Configured(), model, trace: true);
+
+        var calls = JsonNode.Parse(updates.OfType<AssistantUpdate.TurnTraced>().Single().Json)!["calls"]!.AsArray();
+        var violation = calls.Single(call => call!["tool"]!.GetValue<string>() == "propose_change")!["result"]!["violations"]![0]!.AsObject();
+        violation.ContainsKey("skill").ShouldBe(!loadedFirst);
+    }
+
+    private const string TraitsSkill = "alvo-descriptor-traits-and-tenancy";
+
+    /// <summary>A project whose every dry run is refused at <c>/entities/bikes/fields/created_at</c>, a managed column.</summary>
+    private static IAlvoManagement RefusingAtCreatedAt()
+    {
+        var management = Describing(revision: 4);
+        management.ApplyDescriptorAsync("p", Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Throws(new DescriptorValidationException(new DescriptorValidationResult(
+                [new DescriptorValidationError("/entities/bikes/fields/created_at", "No.", "Remove it.", DescriptorValidationSeverity.Error)])));
+
+        return management;
+    }
+
     /// <summary>A caller that did not ask gets no trace: a third-party consumer never meets a case it cannot name (D45).</summary>
     [Fact]
     public async Task An_untraced_request_gets_no_trace() =>

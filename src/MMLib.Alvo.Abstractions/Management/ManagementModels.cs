@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Ai;
+using MMLib.Alvo.Descriptor;
 
 namespace MMLib.Alvo.Management;
 
@@ -262,7 +263,14 @@ public sealed record ManagementRollbackRequest(
 /// </para>
 /// </param>
 public sealed record ManagementApplyResult(
-    bool Applied, int Revision, ManagementPlanSummary Plan, bool Replayed = false);
+    bool Applied, int Revision, ManagementPlanSummary Plan, bool Replayed = false)
+{
+    /// <summary>
+    /// The validator's warnings on this descriptor: advisory, never blocking. Internal (D52): the assistant reads
+    /// them; the wire and the public contract do not carry them until a client earns it.
+    /// </summary>
+    internal IReadOnlyList<DescriptorValidationError> Warnings { get; init; } = [];
+}
 
 /// <summary>A migration plan, in the shape a diff view needs.</summary>
 /// <param name="IsEmpty">

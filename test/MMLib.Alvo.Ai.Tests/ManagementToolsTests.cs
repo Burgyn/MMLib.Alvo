@@ -687,6 +687,104 @@ public sealed class ManagementToolsTests
         (await InvokeAsync(management, "get_descriptor", [])).ShouldContain("stale-revision");
     }
 
+    /// <summary>A valid dry run carries the validator's warnings (D52): valid, one warning, nothing refused or spent.</summary>
+    [Fact]
+    public async Task A_valid_dry_run_carries_its_warnings()
+    {
+        var tools = ManagementTools.For(Warning(Serving(Descriptor)), Project);
+
+        var answer = JsonNode.Parse(await InvokeAsync(tools, "propose_change", Change("propose_change", AddNotes)))!;
+
+        answer["valid"]!.GetValue<bool>().ShouldBeTrue();
+        var warning = answer["violations"]!.AsArray().ShouldHaveSingleItem()!;
+        warning["severity"]!.GetValue<string>().ShouldBe("warning");
+        warning["pointer"]!.GetValue<string>().ShouldBe(WarnedRule);
+        answer["attemptsLeft"]!.GetValue<int>().ShouldBe(ManagementTools.MaximumStalledRefusals);
+        tools.Proposal.ShouldNotBeNull().Refusals.ShouldBeEmpty();
+    }
+
+    /// <summary>A refusal in an area whose skill the turn has not loaded names that skill, and the outcome says to load it (D50).</summary>
+    [Fact]
+    public async Task A_refusal_in_an_unloaded_skills_area_names_the_skill()
+    {
+        var tools = ManagementTools.For(RefusingAt(Descriptor, ManagedColumn), Project, () => Loaded("alvo-descriptor-entities-and-fields"));
+
+        var answer = JsonNode.Parse(await InvokeAsync(tools, "propose_change", Change("propose_change", AddNotes)))!;
+
+        answer["violations"]![0]!["skill"]!.GetValue<string>().ShouldBe("alvo-descriptor-traits-and-tenancy");
+        answer["hint"]!.GetValue<string>().ShouldBe(ViolationMapping.SkillHint);
+    }
+
+    /// <summary>The same refusal, with that skill loaded, names none.</summary>
+    [Fact]
+    public async Task A_refusal_whose_skill_is_loaded_names_none()
+    {
+        var tools = ManagementTools.For(
+            RefusingAt(Descriptor, ManagedColumn), Project, () => Loaded("alvo-descriptor-entities-and-fields", "alvo-descriptor-traits-and-tenancy"));
+
+        var answer = JsonNode.Parse(await InvokeAsync(tools, "propose_change", Change("propose_change", AddNotes)))!;
+
+        answer["violations"]![0]!.AsObject().ContainsKey("skill").ShouldBeFalse();
+        answer.AsObject().ContainsKey("hint").ShouldBeFalse();
+    }
+
+    /// <summary>A warning never names a skill: a valid answer never tells the model to retry.</summary>
+    [Fact]
+    public async Task A_warning_never_names_a_skill()
+    {
+        var tools = ManagementTools.For(Warning(Serving(Descriptor)), Project, () => Loaded());
+
+        var answer = JsonNode.Parse(await InvokeAsync(tools, "propose_change", Change("propose_change", AddNotes)))!;
+
+        answer["violations"]![0]!.AsObject().ContainsKey("skill").ShouldBeFalse();
+        answer.AsObject().ContainsKey("hint").ShouldBeFalse();
+    }
+
+    /// <summary>A tool set built without a ledger names no skill, so every other fact keeps its output.</summary>
+    [Fact]
+    public async Task Without_a_ledger_no_refusal_names_a_skill()
+    {
+        var answer = JsonNode.Parse(await InvokeAsync(RefusingAt(Descriptor, ManagedColumn), "propose_change", Change("propose_change", AddNotes)))!;
+
+        answer["violations"]![0]!.AsObject().ContainsKey("skill").ShouldBeFalse();
+        answer.AsObject().ContainsKey("hint").ShouldBeFalse();
+    }
+
+    /// <summary>
+    /// Only the validator's refusals name a skill: an <c>access</c> refusal is an administrator's to lift, and no skill
+    /// changes that (pre-flight M4).
+    /// </summary>
+    [Fact]
+    public async Task A_refusal_the_validator_did_not_make_names_no_skill()
+    {
+        var management = Serving(Descriptor);
+        Refusing(management, new ManagementEscalationException());
+        var tools = ManagementTools.For(management, Project, () => Loaded());
+
+        var answer = JsonNode.Parse(await InvokeAsync(tools, "propose_change", Change("propose_change", AddNotes)))!;
+
+        answer["violations"]![0]!["source"]!.GetValue<string>().ShouldBe("access");
+        answer["violations"]![0]!.AsObject().ContainsKey("skill").ShouldBeFalse();
+        answer.AsObject().ContainsKey("hint").ShouldBeFalse();
+    }
+
+    private const string ManagedColumn = "/entities/tasks/fields/created_at";
+    private const string WarnedRule = "/entities/bikes/rules/update";
+
+    private static HashSet<string> Loaded(params string[] skills) => new(skills, StringComparer.Ordinal);
+
+    /// <summary>Answers every dry run valid, with one warning at <see cref="WarnedRule"/>.</summary>
+    private static IAlvoManagement Warning(IAlvoManagement management)
+    {
+        management.ApplyDescriptorAsync(Project, Arg.Any<ManagementApplyRequest>(), Arg.Any<CancellationToken>())
+            .Returns(new ManagementApplyResult(Applied: false, Revision, EmptyPlan)
+            {
+                Warnings = [new DescriptorValidationError(WarnedRule, "Never true.", "Ref users.", DescriptorValidationSeverity.Warning)],
+            });
+
+        return management;
+    }
+
     private static IAlvoManagement Serving(string descriptorJson)
     {
         var management = Substitute.For<IAlvoManagement>();

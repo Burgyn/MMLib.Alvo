@@ -99,6 +99,30 @@ public sealed class SkillClaimTests
         SkillCatalogue.Named("rules-and-cel").Body.ShouldContain("*\"Remove the outer quotes\"*");
     }
 
+    /// <summary>
+    /// Comparing the caller with a ref to <c>technicians</c> is valid and draws one warning on the real dry run (D51,
+    /// D52), comparing it with a <c>uuid</c> that holds a user id draws none, and the rules skill says why.
+    /// </summary>
+    [Fact]
+    public async Task Comparing_the_caller_with_a_technician_ref_is_a_warning_on_a_valid_dry_run()
+    {
+        const string rule = "/entities/service_orders/rules/update";
+        await using var world = await AlvoHostWorld.StartAsync(InstructionExampleOutcomeTests.BikeWorkshop);
+        var management = world.Services.GetRequiredService<IAlvoManagement>();
+        world.Services.GetRequiredService<IAlvoContextAccessor>().Principal = InstructionExampleOutcomeTests.Administrator();
+
+        var technician = await InstructionExampleOutcomeTests.AttemptAsync(management, rule, "\"'admin' in @user.roles || technician_id == @user.id\"");
+        var assigned = await InstructionExampleOutcomeTests.AttemptAsync(management, rule, "\"'admin' in @user.roles || assigned_user_id == @user.id\"");
+
+        technician.Valid.ShouldBeTrue(string.Join(" | ", technician.Refusals));
+        technician.Violations.ShouldHaveSingleItem().ShouldSatisfyAllConditions(
+            warning => warning.Severity.ShouldBe("warning"),
+            warning => warning.Pointer.ShouldBe(rule));
+        assigned.Valid.ShouldBeTrue(string.Join(" | ", assigned.Refusals));
+        assigned.Violations.ShouldBeEmpty();
+        SkillCatalogue.Named("rules-and-cel").Body.ShouldContain("compare it only with a field that refs `users`");
+    }
+
     [Theory]
     [MemberData(nameof(RefusedActions))]
     public async Task A_refused_action_type_is_refused_as_unhonoured(int action)

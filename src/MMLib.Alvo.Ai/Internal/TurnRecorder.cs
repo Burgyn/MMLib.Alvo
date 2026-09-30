@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.AI;
+﻿using Microsoft.Agents.AI;
+using Microsoft.Extensions.AI;
 
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -23,6 +24,8 @@ namespace MMLib.Alvo.Ai.Internal;
 /// <param name="inner">The chat client the turn dials.</param>
 internal sealed class TurnRecorder(IChatClient inner) : DelegatingChatClient(inner)
 {
+    private static readonly HashSet<string> _dryRuns = new(StringComparer.Ordinal) { "check_change", "propose_change" };
+
     private readonly List<TracedCall> _calls = [];
     private int _requests;
 
@@ -31,6 +34,29 @@ internal sealed class TurnRecorder(IChatClient inner) : DelegatingChatClient(inn
 
     /// <summary>How many requests the turn has sent so far: the round its latest answer is recorded under.</summary>
     internal int Requests => _requests;
+
+    /// <summary>
+    /// The skills the turn loaded before its current dry run (D50): the <c>skillName</c> of every <c>load_skill</c> call
+    /// whose answer is not an error, made before the first dry run not yet answered — or all of them when none is.
+    /// </summary>
+    /// <remarks>
+    /// "Before" is by position in the calls (pre-flight L1): a skill loaded later in the same answer as the dry run had
+    /// not been read when the dry run was checked. A load in the same answer and earlier is counted, and its answer is
+    /// still null then, because the sequential invoker runs it first.
+    /// </remarks>
+    internal IReadOnlySet<string> LoadedSkills
+    {
+        get
+        {
+            var current = _calls.FindIndex(call => call.Result is null && _dryRuns.Contains(call.Tool));
+            return (current < 0 ? _calls : _calls.Take(current))
+                .Where(call => call.Tool == AgentSkillsProvider.LoadSkillToolName
+                    && call.Result?.StartsWith("Error:", StringComparison.Ordinal) != true)
+                .Select(call => SkillOf(call.Arguments))
+                .OfType<string>()
+                .ToHashSet(StringComparer.Ordinal);
+        }
+    }
 
     /// <summary>Every tool call, in the order the model made them.</summary>
     internal IReadOnlyList<TracedCall> Calls => [.. _calls];
@@ -86,6 +112,11 @@ internal sealed class TurnRecorder(IChatClient inner) : DelegatingChatClient(inn
 
         ToolRounds += askedForTool ? 1 : 0;
     }
+
+    private static string? SkillOf(IDictionary<string, object?>? arguments) =>
+        arguments?.TryGetValue("skillName", out var value) == true
+            ? value is JsonElement { ValueKind: JsonValueKind.String } element ? element.GetString() : value?.ToString()
+            : null;
 
     private static string? TextOf(object? result) => result switch
     {

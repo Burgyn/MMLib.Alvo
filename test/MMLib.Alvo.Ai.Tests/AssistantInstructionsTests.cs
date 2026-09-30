@@ -31,7 +31,7 @@ public sealed partial class AssistantInstructionsTests
         "When a refusal carries `attemptsLeft` 0", "is one string literal, not a rule",
         "one the descriptor declares, or `users`",
         "every fix adds something the operator did not ask for", "is an ordinary fix",
-        "removes or changes what they asked for",
+        "removes or changes what they asked for", "even on a valid answer",
     ];
 
     /// <summary>

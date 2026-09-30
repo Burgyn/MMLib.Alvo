@@ -131,7 +131,7 @@ public sealed partial class AlvoAssistant : IAlvoAssistant
         TurnRecorder recorder, AssistantRequest request, AlvoAiConnection connection, TurnState turn,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        var tools = ManagementTools.For(_management, request.Project);
+        var tools = ManagementTools.For(_management, request.Project, () => recorder.LoadedSkills);
         var (agent, invoker) = Constrained(recorder, tools);
         var session = await agent.CreateSessionAsync(ct).ConfigureAwait(false);
         var run = new TurnRun(agent, invoker, session, recorder, tools, connection.Model, new TurnAnswer(), turn);

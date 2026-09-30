@@ -49,6 +49,8 @@ replacing the rule. Before a `replace` of a rule, `test` its current value.
 
 A new entity carries its whole `rules` object in the `add` that creates it. Say every operation the request allows;
 a missing one is denied. An owner clause compares a `ref` to `users` with `@user.id`.
+`@user.id` is a `users` id: compare it only with a field that refs `users`, or with a `uuid` that holds a user id. A
+ref to any other entity holds that entity's id and never equals it, and the validator warns.
 
 <!-- example: new-entity-with-rules -->
 **Comments on a service order: everyone signed in reads them, each author edits and deletes their own, admins delete any.**

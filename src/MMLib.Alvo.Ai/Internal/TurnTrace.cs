@@ -59,8 +59,8 @@ internal static class TurnTrace
     private static readonly HashSet<string> _dryRuns = new(StringComparer.Ordinal) { "check_change", "propose_change" };
     private static readonly HashSet<string> _skillReads = new(StringComparer.Ordinal) { "load_skill", "read_skill_resource" };
     private static readonly HashSet<string> _kept = new(StringComparer.Ordinal) { "baseRevision", "skillName", "resourceName" };
-    private static readonly string[] _dryRunMembers = ["valid", "revision", "changedPaths", "attemptsLeft", "unchecked", Violations];
-    private static readonly string[] _loggedViolationMembers = ["source", "pointer", "code", "severity"];
+    private static readonly string[] _dryRunMembers = ["valid", "revision", "changedPaths", "attemptsLeft", "unchecked", "hint", Violations];
+    private static readonly string[] _loggedViolationMembers = ["source", "pointer", "code", "severity", "skill"];
     private static readonly string[] _loggedOperationMembers = ["op", "path", "from"];
 
     private static readonly JsonSerializerOptions _writer = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
@@ -103,9 +103,13 @@ internal static class TurnTrace
 
     /// <summary>
     /// What of an entry reaches a log line (D44, pre-flight H3): each operation as its <c>op</c>, <c>path</c> and
-    /// <c>from</c>, each violation as its <c>source</c>, <c>pointer</c>, <c>code</c> and <c>severity</c>, and a tool
-    /// error as its code — never a value, a message or a fix, which may quote the operator's own descriptor.
+    /// <c>from</c>, each violation as its <c>source</c>, <c>pointer</c>, <c>code</c>, <c>severity</c> and <c>skill</c>, and
+    /// a tool error as its code — never a value, a message or a fix, which may quote the operator's own descriptor.
     /// </summary>
+    /// <remarks>
+    /// <c>skill</c> is a catalogue name the tool chose (D50), never author text, so a log may carry it; the outcome's
+    /// <c>hint</c> is the framework's fixed sentence and is kept in the trace only.
+    /// </remarks>
     internal static JsonObject LogLine(JsonObject entry)
     {
         var line = (JsonObject)entry.DeepClone();

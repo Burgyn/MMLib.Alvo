@@ -39,6 +39,10 @@ internal static class ViolationMapping
     private const string FieldsToken = "fields";
     private const string RebaseFix = "Call get_descriptor again and write the operations against its revision.";
 
+    /// <summary>What an outcome says when a violation names a skill the turn has not loaded (D50).</summary>
+    internal const string SkillHint =
+        "Load the skill a violation names with load_skill before you retry: it states the rule that violation is about.";
+
     internal static ToolViolation FromPatch(JsonPatchError error) =>
         new(ToolViolation.Patch, error.Pointer, error.Message, error.Fix, error.Op, error.Code);
 
@@ -84,6 +88,14 @@ internal static class ViolationMapping
         .. refused.Result.Errors.Select(error => new ToolViolation(
             ToolViolation.Validation, error.Path, error.Message, error.FixSuggestion, OpFor(targets, error.Path),
             Severity: SeverityOf(error.Severity))),
+    ];
+
+    /// <summary>A valid dry run's warnings (D52), mapped as a refusal's violations are, each a <c>warning</c>.</summary>
+    internal static IReadOnlyList<ToolViolation> FromWarnings(IReadOnlyList<DescriptorValidationError> warnings, IReadOnlyList<string?> targets) =>
+    [
+        .. warnings.Select(warning => new ToolViolation(
+            ToolViolation.Validation, warning.Path, warning.Message, warning.FixSuggestion, OpFor(targets, warning.Path),
+            Severity: ToolViolation.WarningSeverity)),
     ];
 
     internal static ToolViolation FromDestructive(DestructiveChangeNotAllowedException refused, IReadOnlyList<string?> targets)

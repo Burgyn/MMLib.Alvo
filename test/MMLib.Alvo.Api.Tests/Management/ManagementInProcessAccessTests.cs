@@ -208,7 +208,7 @@ public class ManagementInProcessAccessTests
     /// <param name="world">The running world.</param>
     /// <param name="roleName">The declared role the caller holds.</param>
     /// <returns>The registered <see cref="IAlvoManagement"/>.</returns>
-    private static IAlvoManagement Publish(AlvoApiWorld world, string roleName)
+    internal static IAlvoManagement Publish(AlvoApiWorld world, string roleName)
     {
         var catalog = world.Services.GetRequiredService<IRoleCatalogProvider>().DeclaredRoles
             ?? RoleCatalog.BuiltInOnly;

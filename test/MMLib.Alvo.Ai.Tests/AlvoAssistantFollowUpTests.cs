@@ -57,6 +57,18 @@ public sealed class AlvoAssistantFollowUpTests
         followUp[^1].Text.ShouldContain("/entities/bikes/fields/notes");
     }
 
+    /// <summary>The follow-up tells the model to load a skill a violation names before it retries (D50).</summary>
+    [Fact]
+    public async Task The_follow_up_says_to_load_a_named_skill()
+    {
+        var model = new ScriptedChatClient(
+            Scripted.Calls("propose_change", Proposing(revision: 4)), Scripted.Says("It was refused."), Scripted.Says("Still refused."));
+
+        await RunAsync(Refusing(then: null), model);
+
+        model.Requests.Single(request => IsFollowUp(request[^1]))[^1].Text.ShouldContain("Load any skill a violation names");
+    }
+
     /// <summary>A follow-up run that ends refused again is not followed up: one per turn, the most (D47).</summary>
     [Fact]
     public async Task A_turn_is_followed_up_at_most_once()

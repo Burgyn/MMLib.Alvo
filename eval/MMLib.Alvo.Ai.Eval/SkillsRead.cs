@@ -28,16 +28,8 @@ internal static class SkillsRead
 {
     private const string Prefix = "alvo-descriptor-";
     private const string SkillName = "skillName";
-    private const string ProjectAccess = "project-access";
-    private const string RulesAndCel = "rules-and-cel";
-    private const string Hooks = "hooks";
-    private const string Indexes = "indexes";
-    private const string TraitsAndTenancy = "traits-and-tenancy";
-    private const string ComputedAndRollups = "computed-and-rollups";
-    private const string EntitiesAndFields = "entities-and-fields";
 
     private static readonly HashSet<string> _dryRuns = new(StringComparer.Ordinal) { "check_change", "propose_change" };
-    private static readonly HashSet<string> _traits = new(StringComparer.Ordinal) { "tenancy", "audit", "softDelete", "storage", "realtime" };
 
     /// <summary>The two skill tools, which are bounded apart from the management tools (D34).</summary>
     internal static IReadOnlySet<string> SkillTools { get; } =
@@ -45,36 +37,16 @@ internal static class SkillsRead
 
     /// <summary>Every area <see cref="AreaOf"/> can name, most specific first.</summary>
     internal static IReadOnlyList<string> Areas { get; } =
-        [ProjectAccess, RulesAndCel, Hooks, Indexes, TraitsAndTenancy, ComputedAndRollups, EntitiesAndFields];
+        [
+            SkillAreas.ProjectAccess, SkillAreas.RulesAndCel, SkillAreas.Hooks, SkillAreas.Indexes, SkillAreas.TraitsAndTenancy,
+            SkillAreas.ComputedAndRollups, SkillAreas.EntitiesAndFields,
+        ];
 
     /// <summary>The names of the skills the assistant is given.</summary>
     internal static IReadOnlyCollection<string> Catalogue { get; } = [.. EmbeddedSkills.All.Select(skill => skill.Frontmatter.Name)];
 
-    /// <summary>
-    /// The area a changed path itself belongs to, read by the position of its segments, and for a new field by its own
-    /// declaration; <see langword="null"/> for none.
-    /// </summary>
-    /// <remarks>
-    /// <b>By position, not by name anywhere in the path</b>: <c>/entities/{entity}/{facet}</c> and
-    /// <c>/entities/{entity}/fields/{field}/{facet}</c>. An entity or a field that happens to be called <c>audit</c>,
-    /// <c>rules</c> or <c>computed</c> is still an entity or a field.
-    /// </remarks>
-    internal static string? AreaOf(string path, JsonNode? proposed)
-    {
-        if (!JsonPointer.TryParse(path, out var pointer) || pointer.IsRoot)
-        {
-            return null;
-        }
-
-        var tokens = pointer.Tokens;
-        return tokens[0] switch
-        {
-            "access" => ProjectAccess,
-            "tenancy" => TraitsAndTenancy,
-            "entities" => tokens.Count < 3 ? EntitiesAndFields : EntityFacetArea(tokens, proposed),
-            _ => null,
-        };
-    }
+    /// <summary>The area a changed path itself belongs to — <see cref="SkillAreas.AreaOf"/>, the routing the refusal hint shares (D50).</summary>
+    internal static string? AreaOf(string path, JsonNode? proposed) => SkillAreas.AreaOf(path, proposed);
 
     /// <summary>
     /// Every area a changed path needs: its own, and — when it adds a whole entity, the entity map, or a fields map —
@@ -124,17 +96,6 @@ internal static class SkillsRead
         _ => [],
     };
 
-    private static string EntityFacetArea(IReadOnlyList<string> tokens, JsonNode? proposed) => tokens[2] switch
-    {
-        "rules" => RulesAndCel,
-        "hooks" => Hooks,
-        "indexes" => Indexes,
-        "fields" when tokens.Count == 4 && IsDerived(proposed) => ComputedAndRollups,
-        "fields" when tokens.Count > 4 && tokens[4] is "computed" or "rollup" => ComputedAndRollups,
-        var facet when _traits.Contains(facet) => TraitsAndTenancy,
-        _ => EntitiesAndFields,
-    };
-
     private static IEnumerable<string> EntitiesMapAreas(JsonNode? proposed) =>
         proposed is JsonObject entities ? entities.SelectMany(entity => EntityAreas(entity.Value)) : [];
 
@@ -146,25 +107,22 @@ internal static class SkillsRead
     private static IEnumerable<string> EntityAreas(JsonNode? proposed) =>
         proposed is JsonObject entity
             ? entity.SelectMany(member => member.Key == "fields" ? FieldsMapAreas(member.Value) : EntityMemberAreas(member.Key))
-                .Append(EntitiesAndFields).Append(RulesAndCel)
+                .Append(SkillAreas.EntitiesAndFields).Append(SkillAreas.RulesAndCel)
             : [];
 
     private static IEnumerable<string> EntityMemberAreas(string key) => key switch
     {
-        "rules" => [RulesAndCel],
-        "hooks" => [Hooks],
-        "indexes" => [Indexes],
-        _ when _traits.Contains(key) => [TraitsAndTenancy],
+        "rules" => [SkillAreas.RulesAndCel],
+        "hooks" => [SkillAreas.Hooks],
+        "indexes" => [SkillAreas.Indexes],
+        _ when SkillAreas.Traits.Contains(key) => [SkillAreas.TraitsAndTenancy],
         _ => [],
     };
 
     private static IEnumerable<string> FieldsMapAreas(JsonNode? proposed) =>
         proposed is JsonObject fields
-            ? fields.Where(field => IsDerived(field.Value)).Select(_ => ComputedAndRollups).Append(EntitiesAndFields)
+            ? fields.Where(field => SkillAreas.IsDerived(field.Value)).Select(_ => SkillAreas.ComputedAndRollups).Append(SkillAreas.EntitiesAndFields)
             : [];
-
-    private static bool IsDerived(JsonNode? proposed) =>
-        proposed is JsonObject field && (field["computed"] is not null || field["rollup"] is not null);
 
     private static string? Skill(RecordedCall call) =>
         call.Arguments?.TryGetValue(SkillName, out var value) == true

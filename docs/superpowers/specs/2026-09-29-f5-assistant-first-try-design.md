@@ -498,6 +498,17 @@ ends `_id`, every rule is a bare expression, `author_id` refs `users`, and the r
   *"…or every fix adds something the operator did not ask for, or removes or changes what they asked for — stop and
   explain."*, pinned by `_toolFacts`. Paid for inside the 22,758 B budget by cutting *"and nothing is dry-run"* from
   the `summary` bullet (the tool's own refusal says so): 22,734 → 22,756 B.
+- **A `string` compared with `@user.id` is refused by the compiler, not accepted unwarned** (D51, T16). The type
+  checker answers *"Cannot compare String to Uuid"*, so that source never reaches the check; it draws **0** warnings
+  because it does not compile. The compiler is untouched, and the fact pins it beside the other non-compiling source.
+- **The warning rides only on the valid retry, not on a refusal that also declares a managed column** (D52, T16
+  pre-flight M1). A declared managed column makes `DescriptorToSchemaMapper.Map` throw, so `RuleErrors` returns before
+  any rule is checked: the RCA's first attempt carries its two errors and no warning. The retry is valid, and that
+  answer is the one D52 exists to carry the warning on.
+- **A skill hint is only for a `validation` violation** (D50, T16 pre-flight M4). A patch, plan, access, concurrency
+  or budget refusal is not about a rule a skill states.
+- **"Loaded" is by position** (D50, T16 pre-flight L1). A `load_skill` counts only when it comes before the first
+  dry run not yet answered, so a skill loaded later in the same model answer does not silence the hint.
 - **Unsupported is read from `get_capabilities`**, not from the refusal's words (D47). The ruling named the condition,
   not the test; prose matching is the invented variant CLAUDE.md warns against.
 - **A before-hook condition is checked, an after-hook condition is not** (D51): the latter cannot read `@user`.

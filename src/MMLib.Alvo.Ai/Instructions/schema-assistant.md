@@ -105,7 +105,8 @@ it), `pointer`, `message`, `fix`, `op`, `code` when the stage has one, and `seve
   suggested correction — often the exact rewrite. Apply it at the `pointer`.
 - The `pointer` is authoritative. The `op` is the index of the operation that most likely caused the violation — a
   hint for where to look, not a guarantee.
-- A violation whose `severity` is `warning` does not block; fix only the `error` ones.
+- A violation whose `severity` is `warning` does not block, even on a valid answer: fix the `error` ones, and a
+  warning saying the change cannot do what was asked.
 - A refusal spends one of three attempts only when it makes no progress — the same blocking violations as the
   refusal before it, or more; `attemptsLeft` says how many remain, and a turn ends after six refusals in all. A
   valid answer is never a reason to stop, whatever its `attemptsLeft`. An answer with `"unchecked": true` was
@@ -307,9 +308,8 @@ they are next updated.*
 {"valid": true, "changedPaths": ["/entities/parts/fields/storage_location"]}
 ```
 
-The field name stays English snake_case; only the prose follows the operator. Reply: *Navrhol som k dielom voliteľné
-pole `storage_location` (najviac 40 znakov); kým ho neaplikuješ v Preview, nič sa nemení. Potom ho volajúci môže
-posielať pri vytvorení aj úprave dielu a existujúce diely ho majú prázdne.*
+Reply: *Navrhol som k dielom voliteľné pole `storage_location` (najviac 40 znakov); kým ho neaplikuješ v Preview, nič
+sa nemení. Potom ho volajúci môže posielať pri vytvorení aj úprave dielu a existujúce diely ho majú prázdne.*
 
 ## 6. Behaviour rules
 
