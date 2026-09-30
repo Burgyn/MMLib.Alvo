@@ -237,25 +237,19 @@ public class SqlPredicateRendererTests
             "(CASE WHEN COALESCE(CAST(\"total\" AS numeric) > CAST(@p0 AS numeric), FALSE) THEN ");
 
     /// <summary>
-    /// The promotion walks into an operator or conditional node, which is what would make
-    /// <c>(price + 1) &gt; 100</c> a decimal comparison — but no comparison operand can <em>be</em> one:
-    /// both operand renderers accept a literal, a field reference and (on the predicate path) a context
-    /// value, and refuse anything else. So those arms of the promotion are unreachable defence-in-depth
-    /// rather than untested logic, and this fact says so instead of leaving it to be rediscovered.
+    /// No comparison operand can <em>be</em> an operator or conditional node: both operand renderers accept a
+    /// literal, a field reference and (on the predicate path) a context value only, so the type checker
+    /// refuses any other shape for the SQL-rendered profiles at compile time. Before that refusal these two
+    /// compiled and then threw <see cref="NotSupportedException"/> from the renderer — a failure at use rather
+    /// than at save.
     /// </summary>
     [Theory]
     [InlineData("total + 1 > 100 ? 1 : 0")]
     [InlineData("-total > 100 ? 1 : 0")]
+    [InlineData("(total > 0 ? total : 0.0) > 100 ? 1 : 0")]
     public void An_operator_node_cannot_be_a_comparison_operand_at_all(string rule)
-        => Should.Throw<NotSupportedException>(() => RenderScalar(rule));
-
-    /// <summary>
-    /// A conditional operand is refused one layer earlier still, by the type checker, so the promotion's
-    /// conditional arm is unreachable from two directions.
-    /// </summary>
-    [Fact]
-    public void A_conditional_cannot_be_a_comparison_operand_either()
-        => Should.Throw<InvalidOperationException>(() => RenderScalar("(total > 0 ? total : 0) > 100 ? 1 : 0"));
+        => Should.Throw<InvalidOperationException>(() => RenderScalar(rule)).Message
+            .ShouldContain("must be a field, a literal or a context value");
 
     [Fact]
     public void An_int_literal_binds_as_a_clr_long()
