@@ -134,6 +134,7 @@ host_log="$dir/host.log"
 ai_env="$dir/ai.env"
 ai_secret_name="demo_ai_key"
 ai_key_file="$dir/ai.key"
+ai_key_source=""
 
 # Reads one line from the terminal, offering a default that Enter accepts. /dev/tty rather than stdin,
 # so the answer comes from the person even when the script's input is redirected.
@@ -158,14 +159,15 @@ saved() { if [ -f "$ai_env" ]; then sed -n "s/^$1=//p" "$ai_env" | head -n 1; fi
 # The key the connection would send, from the first place that has one: ALVO_DEMO_AI_KEY, the
 # provider's usual variable, then the key this demo was told to remember (ai.key, readable by you only).
 known_key() {
-  if [ -n "${ALVO_DEMO_AI_KEY:-}" ]; then printf '%s' "$ALVO_DEMO_AI_KEY"; return; fi
+  ai_key="" ai_key_source=""
+  if [ -n "${ALVO_DEMO_AI_KEY:-}" ]; then ai_key="$ALVO_DEMO_AI_KEY" ai_key_source=ALVO_DEMO_AI_KEY; return; fi
   case "$ai_kind" in
-    azure-openai) if [ -n "${AZURE_OPENAI_API_KEY:-}" ]; then printf '%s' "$AZURE_OPENAI_API_KEY"; return; fi ;;
+    azure-openai) if [ -n "${AZURE_OPENAI_API_KEY:-}" ]; then ai_key="$AZURE_OPENAI_API_KEY" ai_key_source=AZURE_OPENAI_API_KEY; return; fi ;;
     *) case "$ai_endpoint" in
-         https://api.openai.com/*) if [ -n "${OPENAI_API_KEY:-}" ]; then printf '%s' "$OPENAI_API_KEY"; return; fi ;;
+         https://api.openai.com/*) if [ -n "${OPENAI_API_KEY:-}" ]; then ai_key="$OPENAI_API_KEY" ai_key_source=OPENAI_API_KEY; return; fi ;;
        esac ;;
   esac
-  if [ -s "$ai_key_file" ]; then tr -d '[:space:]' <"$ai_key_file"; fi
+  if [ -s "$ai_key_file" ]; then ai_key="$(tr -d '[:space:]' <"$ai_key_file")" ai_key_source="$ai_key_file"; fi
 }
 
 # A key is needed when the provider always refuses without one; a local endpoint may run keyless.
@@ -197,7 +199,7 @@ configure_ai() {
   fi
 
   if [ -n "$ai_kind" ] && [ -n "$ai_endpoint" ] && [ -n "$ai_model" ]; then
-    ai_key="$(known_key)"
+    known_key
     if [ -n "$ai_key" ] || ! key_needed; then return; fi
   fi
 
@@ -240,7 +242,7 @@ configure_ai() {
   done
 
   local keyless=0
-  ai_key="$(known_key)"
+  known_key
   while [ -z "$ai_key" ]; do
     ai_key="$(ask_secret 'API key')"
     # A pasted key carries stray whitespace often enough to strip it; its value is never echoed.
@@ -253,6 +255,7 @@ configure_ai() {
       keyless=1
       break
     fi
+    ai_key_source="typed in"
     if ! plausible_key "$ai_key"; then
       say "an OpenAI key starts with 'sk-' — this one does not (${#ai_key} characters); enter it again"
       ai_key=""
@@ -477,7 +480,7 @@ cat <<EOF
     Sign in     $admin_email
     Password    $admin_password
 
-    Assistant   $( if [ "$ai" -eq 1 ]; then printf '%s at %s (%s%s)' "$ai_model" "$ai_endpoint" "$ai_kind" "$( [ -n "$ai_key" ] && printf ', key set' || printf ', no key' )"; else printf 'off'; fi )
+    Assistant   $( if [ "$ai" -eq 1 ]; then printf '%s at %s (%s%s)' "$ai_model" "$ai_endpoint" "$ai_kind" "$( [ -n "$ai_key" ] && printf ', key %s…%s from %s' "${ai_key:0:6}" "${ai_key: -4}" "$ai_key_source" || printf ', no key' )"; else printf 'off'; fi )
 
     API docs    $base/scalar
     API key     X-Alvo-Api-Key: $api_key   (admin, for this run only)
