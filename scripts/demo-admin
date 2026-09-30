@@ -386,7 +386,7 @@ start_host() {
       --Logging:LogLevel:Microsoft.EntityFrameworkCore=Warning \
       --Logging:LogLevel:System.Net.Http.HttpClient=Warning \
       --urls "$base" \
-      --Alvo:DescriptorPath="$descriptor" \
+      --Alvo:DescriptorPath="$boot_descriptor" \
       --Alvo:Database:Provider=Sqlite \
       "--Alvo:Database:SqliteConnectionString=Data Source=$dir/alvo.db" \
       --Alvo:Admin:BootstrapEmail="$admin_email" \
@@ -482,6 +482,27 @@ already_seeded() {
 }
 
 # ---------------------------------------------------------------------------------------------------
+# A kept database may be ahead of the example file: every apply from the dashboard or the assistant writes a
+# new revision there. Booting the file's older descriptor over it is refused (the host stands down as not ready,
+# since the way back would drop what the newer revision added), so under --keep the host boots the database's
+# own latest descriptor instead — the demo resumes where it was left, and the example file is not touched.
+boot_descriptor="$descriptor"
+if [ "$keep" -eq 1 ] && [ -f "$dir/alvo.db" ]; then
+  if command -v sqlite3 >/dev/null 2>&1; then
+    latest="$dir/descriptor.latest.alvo.json"
+    if sqlite3 "$dir/alvo.db" "select descriptor_json from alvo_descriptor_versions order by revision desc limit 1" \
+        >"$latest" 2>/dev/null && [ -s "$latest" ] && jq -e . "$latest" >/dev/null 2>&1; then
+      if [ "$(jq -S . "$latest")" != "$(jq -S . "$descriptor")" ]; then
+        revision="$(sqlite3 "$dir/alvo.db" "select max(revision) from alvo_descriptor_versions")"
+        say "--keep: the database is at revision $revision, newer than $(basename "$descriptor") — booting that revision"
+        boot_descriptor="$latest"
+      fi
+    fi
+  else
+    say "--keep: sqlite3 not found, so the host boots $(basename "$descriptor"); if the database moved on, it will stand down"
+  fi
+fi
+
 start_receiver
 start_host
 wait_until_ready
