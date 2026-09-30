@@ -37,6 +37,12 @@ namespace MMLib.Alvo.Events.Internal;
 /// receiver that is restarting.
 /// </para>
 /// <para>
+/// <b>Where the request may go is not decided here.</b> The named client's primary handler is
+/// <see cref="WebhookEgressGuard"/>'s, which refuses non-public destinations at connect time and follows no
+/// redirect; a refusal surfaces as the same <see cref="HttpRequestException"/> as an unreachable host, so it
+/// takes the same release-and-retry path and needs no branch here.
+/// </para>
+/// <para>
 /// <b>Nothing this type writes names the endpoint's URL — only <see cref="WebhookTarget.Name"/>.</b>
 /// <c>secretRef</c> is never read and no signature is sent, so a secret embedded in the URL is the only
 /// authentication an author has; the reasoning is <see cref="WebhookTarget"/>'s and this type must not be
@@ -51,6 +57,18 @@ internal sealed class WebhookDelivery(IHttpClientFactory clients)
     /// the timeout and any resilience once, by name, without this type owning any of them.
     /// </summary>
     internal const string HttpClientName = "MMLib.Alvo.Events.Webhook";
+
+    /// <summary>
+    /// How long one delivery attempt may take before it is a failed attempt: ten seconds, the limit GitHub
+    /// documents for its own webhook deliveries, replacing <see cref="HttpClient"/>'s default of 100.
+    /// </summary>
+    /// <remarks>
+    /// A slow receiver must fail an attempt rather than hold the claimed batch: the dispatcher delivers a claim
+    /// serially inside one <see cref="AlvoEventOptions.ClaimLease"/>, and an attempt that outlives its share of
+    /// the lease lets another claimant re-deliver entries still in flight. A host whose endpoint is
+    /// legitimately slower raises it by configuring the named client.
+    /// </remarks>
+    internal static TimeSpan AttemptTimeout { get; } = TimeSpan.FromSeconds(10);
 
     /// <summary>POSTs <paramref name="body"/> to <paramref name="target"/>, throwing unless it succeeded.</summary>
     /// <param name="target">The endpoint's name and validated URL, both resolved when the hook was compiled.</param>

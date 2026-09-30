@@ -103,6 +103,7 @@ namespace MMLib.Alvo.Events
         public bool Enabled { get; set; }
         public int MaxAttempts { get; set; }
         public System.TimeSpan PollInterval { get; set; }
+        public System.Collections.Generic.IList<string> WebhookAllowedNetworks { get; }
     }
 }
 namespace MMLib.Alvo.Management

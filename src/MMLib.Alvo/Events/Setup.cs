@@ -2,9 +2,12 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Options;
 
 using MMLib.Alvo.Events.Internal;
+
+using System.Net;
 
 namespace MMLib.Alvo.Events;
 
@@ -28,7 +31,9 @@ internal static class EventsSetup
     /// <para>
     /// <b>The named <see cref="HttpClient"/> is registered here rather than created by the delivery</b>, so a host
     /// owns the handler, the timeout and any resilience policy by name
-    /// (<c>WebhookDelivery.HttpClientName</c>) without the framework owning any of them.
+    /// (<c>WebhookDelivery.HttpClientName</c>). What it gets unless it says otherwise is secure by default: a
+    /// primary handler that refuses non-public destinations at connect time and follows no redirect
+    /// (<c>WebhookEgressGuard</c>), and a finite per-attempt timeout (<c>WebhookDelivery.AttemptTimeout</c>).
     /// </para>
     /// <para>
     /// <b><see cref="IAlvoEvents"/> is a singleton over the same <see cref="IOutboxStore"/> the dispatcher
@@ -56,6 +61,9 @@ internal static class EventsSetup
             ServiceDescriptor.Singleton<IValidateOptions<AlvoEventOptions>, AlvoEventOptionsConfiguration>(Create));
 
         services.AddHttpClient(WebhookDelivery.HttpClientName);
+        services.Configure<HttpClientFactoryOptions>(WebhookDelivery.HttpClientName, GuardedByDefault);
+        services.TryAddSingleton(new WebhookHostResolver(Dns.GetHostAddressesAsync));
+        services.TryAddSingleton<WebhookEgressGuard>();
         services.TryAddSingleton<WebhookDelivery>();
         services.TryAddSingleton<IEmailSender, ConsoleEmailSender>();
         services.TryAddSingleton<EventActionExecutor>();
@@ -67,5 +75,23 @@ internal static class EventsSetup
 
         static AlvoEventOptionsConfiguration Create(IServiceProvider provider)
             => new(provider.GetService<IConfiguration>());
+    }
+
+    /// <summary>
+    /// Puts the egress-guarded primary handler and the per-attempt timeout <em>first</em> in the named client's
+    /// configuration, so they are the default every later configuration by name builds on or replaces.
+    /// </summary>
+    /// <remarks>
+    /// <b>Inserted at the front rather than appended</b>, because <c>ConfigurePrimaryHttpMessageHandler</c> and
+    /// <c>ConfigureHttpClient</c> are last-wins and a host may configure the client before or after it calls
+    /// <c>AddAlvo</c>: appended, a host's own handler registered earlier would be silently overwritten by the
+    /// guard. A host that replaces the primary handler therefore owns the egress policy — the documented way to
+    /// route webhooks through an SSRF-aware egress proxy — and a test that substitutes the socket still does.
+    /// </remarks>
+    private static void GuardedByDefault(HttpClientFactoryOptions options)
+    {
+        options.HttpClientActions.Insert(0, client => client.Timeout = WebhookDelivery.AttemptTimeout);
+        options.HttpMessageHandlerBuilderActions.Insert(0, builder =>
+            builder.PrimaryHandler = builder.Services.GetRequiredService<WebhookEgressGuard>().CreateHandler());
     }
 }

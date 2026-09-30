@@ -269,6 +269,12 @@ internal static class AfterHookCompiler
     /// <see cref="Uri.IsLoopback"/> host: there is no network to observe, and <c>http://localhost:5000/hook</c>
     /// is the shape a local receiver and this repository's own end-to-end suites use.
     /// </para>
+    /// <para>
+    /// <b>This checks the URL, not the destination.</b> Where a name resolves is unknowable at apply and can
+    /// change before delivery, so the non-public-network refusal lives at connect time in
+    /// <see cref="WebhookEgressGuard"/>, which admits loopback only for the same literal-or-<c>localhost</c>
+    /// hosts <see cref="Uri.IsLoopback"/> admits here.
+    /// </para>
     /// </remarks>
     private static WebhookTarget? ResolveTarget(string name, WebhookEndpoint endpoint, AfterHookScope scope)
     {
