@@ -29,6 +29,7 @@ internal static partial class SecretScrub
     {
         var scrubbed = Token().Replace(text, Redacted);
         scrubbed = Bearer().Replace(scrubbed, "${scheme}" + Redacted);
+        scrubbed = Basic().Replace(scrubbed, "${scheme}" + Redacted);
         scrubbed = UserInfo().Replace(scrubbed, "${user}" + Redacted + "@");
         scrubbed = LongRun().Replace(scrubbed, Redacted);
         return KeyValue().Replace(scrubbed, "${name}${separator}" + Redacted);
@@ -106,6 +107,10 @@ internal static partial class SecretScrub
     [GeneratedRegex(@"(?<scheme>\bBearer\s+)[A-Za-z0-9._~+/=\-]{16,}", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex Bearer();
 
+    /// <summary>HTTP Basic credentials, only after <c>Authorization:</c>, so the word "Basic" in prose is left alone.</summary>
+    [GeneratedRegex(@"(?<scheme>\bAuthorization\s*:\s*Basic\s+)[A-Za-z0-9+/]+=*", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex Basic();
+
     [GeneratedRegex(@"(?<user>\b[a-z][a-z0-9+.\-]*://[^/\s:@]+:)[^@\s/]+@", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex UserInfo();
 
@@ -114,11 +119,16 @@ internal static partial class SecretScrub
 
     /// <summary>
     /// A secret's name — after any <c>WORD_</c> prefixes, so <c>OPENAI_API_KEY</c> and <c>client_secret</c> match, where
-    /// a <c>\b</c> after the underscore never would — then <c>=</c> (not <c>==</c>) or <c>:</c>, then the value, quoted or bare.
+    /// a <c>\b</c> after the underscore never would — then <c>=</c> (not <c>==</c>) or a <c>:</c> right after the name,
+    /// then the value, quoted or bare.
     /// </summary>
+    /// <remarks>
+    /// Not CEL: a name after a <c>.</c> is a field access, and a <c>:</c> after a space is a ternary's
+    /// (<c>has(row.token) ? row.token : 'none'</c>). A bare value stops at a backtick, the delimiter a refusal's echo uses.
+    /// </remarks>
     [GeneratedRegex(
-        @"(?<name>(?<![A-Za-z0-9])(?:[A-Za-z0-9]+_)*(?:password|passwd|pwd|secret|client[_-]?secret|api[_-]?key|access[_-]?token|token|accountkey|sharedaccesskey)\b)"
-        + @"(?<separator>\s*(?:=(?!=)|:)\s*)(?:""[^""]*""|'[^']*'|[^;\s""',]+)",
+        @"(?<name>(?<![A-Za-z0-9.])(?:[A-Za-z0-9]+_)*(?:password|passwd|pwd|secret|client[_-]?secret|api[_-]?key|access[_-]?token|token|accountkey|sharedaccesskey)\b)"
+        + @"(?<separator>\s*=(?!=)\s*|:\s*)(?:""[^""]*""|'[^']*'|[^;\s""',`]+)",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex KeyValue();
 }

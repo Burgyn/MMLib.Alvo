@@ -729,11 +729,6 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             DescriptorValidationSeverity.Error);
     }
 
-    /// <summary>
-    /// Reserved entity name for the built-in auth entity (schema: <c>entities.users</c> is
-    /// forbidden as a descriptor-declared key, but <c>ref</c> fields may target it — see
-    /// schema/project.schema.json's "entities" and "field.entity" descriptions).
-    /// </summary>
     /// <summary>How many declared entities an unknown ref's fix names before it cuts the list with <c>…</c>.</summary>
     private const int DeclaredEntitiesListed = 8;
 
@@ -753,6 +748,11 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             : $"Point 'entity' at one the descriptor declares ({listed}) or at '{ReservedUsersEntity}', or add an entity named '{target}'.";
     }
 
+    /// <summary>
+    /// Reserved entity name for the built-in auth entity (schema: <c>entities.users</c> is
+    /// forbidden as a descriptor-declared key, but <c>ref</c> fields may target it — see
+    /// schema/project.schema.json's "entities" and "field.entity" descriptions).
+    /// </summary>
     private const string ReservedUsersEntity = "users";
 
     // TODO(#F7): dynamic entities (evidencie) will also be valid ref targets that never appear

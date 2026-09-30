@@ -33,6 +33,7 @@ public sealed class TurnTraceTests
     [InlineData("AccountName=a;AccountKey=abc+def/ghi==;EndpointSuffix=core", "abc+def/ghi==")]
     [InlineData("Endpoint=sb://x/;SharedAccessKeyName=r;SharedAccessKey=xyz+ab/c=", "xyz+ab/c=")]
     [InlineData("postgres://alvo:pass123@db:5432/app", "pass123")]
+    [InlineData("Authorization: Basic dXNlcjpwYXNzd29yZA==", "dXNlcjpwYXNzd29yZA==")]
     public void A_secret_like_value_is_redacted(string text, string secret)
     {
         var scrubbed = SecretScrub.Scrub(text);
@@ -50,6 +51,9 @@ public sealed class TurnTraceTests
     [InlineData("api_token == @user.id")]
     [InlineData("/entities/tokens/fields/token")]
     [InlineData("https://api.openai.com/v1")]
+    [InlineData("has(row.token) ? row.token : 'none'")]
+    [InlineData("The expression: `token : x`.")]
+    [InlineData("Basic information about the bike.")]
     public void A_descriptor_text_is_left_alone(string text) => SecretScrub.Scrub(text).ShouldBe(text);
 
     /// <summary>Every string of a JSON tree is scrubbed, keys and nesting kept (pre-flight M5: no mutation while walking).</summary>
