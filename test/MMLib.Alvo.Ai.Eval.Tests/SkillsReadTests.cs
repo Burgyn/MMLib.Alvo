@@ -67,7 +67,7 @@ public sealed class SkillsReadTests
     [Fact]
     public void A_new_entity_map_needs_what_its_entities_declare() =>
         SkillsRead.AreasOf("/entities", JsonNode.Parse("""{"a": {"fields": {}}, "b": {"indexes": [], "fields": {}}}"""))
-            .ShouldBe(["entities-and-fields", "indexes"], ignoreOrder: true);
+            .ShouldBe(["entities-and-fields", "indexes", "rules-and-cel"], ignoreOrder: true);
 
     [Fact]
     public void A_whole_subtree_of_an_unexpected_shape_is_read_without_throwing() =>

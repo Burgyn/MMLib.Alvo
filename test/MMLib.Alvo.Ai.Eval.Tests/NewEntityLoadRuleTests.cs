@@ -17,7 +17,7 @@ namespace MMLib.Alvo.Ai.Eval.Tests;
 /// </remarks>
 public sealed partial class NewEntityLoadRuleTests
 {
-    private const string Lead = "A new entity is one area per thing it declares";
+    private const string Lead = "A new entity spans several areas";
 
     private static readonly string _instructions = Read("src", "MMLib.Alvo.Ai", "Instructions", "schema-assistant.md");
 
@@ -36,6 +36,12 @@ public sealed partial class NewEntityLoadRuleTests
         SkillName().Matches(rule).Select(match => match.Value).Distinct().Order(StringComparer.Ordinal)
             .ShouldBe(needed.Order(StringComparer.Ordinal));
     }
+
+    /// <summary>The rule loads the rules skill for every new entity, because without `rules` nobody reaches it.</summary>
+    [Fact]
+    public void The_new_entity_load_rule_needs_the_rules_skill_even_for_an_entity_that_declares_none() =>
+        SkillsRead.AreasOf("/entities/suppliers", JsonNode.Parse("""{"fields": {"name": {"type": "string"}}}"""))
+            .ShouldBe(["entities-and-fields", "rules-and-cel"], ignoreOrder: true);
 
     private static string Read(params string[] path) =>
         File.ReadAllText(Path.Combine([RepositoryRoot.Find(), .. path])).ReplaceLineEndings("\n");

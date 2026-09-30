@@ -19,6 +19,42 @@ public class DescriptorValidatorTests
         _validator.Validate(json).IsValid.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// A ref to an entity the descriptor does not declare is pointed at the ones it does, first: a model that named
+    /// the target by the operator's word ("products") is steered to the existing entity ("parts") before it is told it
+    /// could add one — which would otherwise duplicate what the project already has (RCA, spec §8.2).
+    /// </summary>
+    [Fact]
+    public void An_unknown_ref_target_is_pointed_at_the_declared_entities_first()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "parts": { "fields": { "name": { "type": "string" } } },
+                        "bikes": { "fields": { "product_id": { "type": "ref", "entity": "products" } } } } }
+        """;
+
+        var refusal = _validator.Validate(json).Errors.ShouldHaveSingleItem();
+
+        refusal.Message.ShouldBe("Field references unknown entity 'products'.");
+        refusal.FixSuggestion.ShouldBe("Point 'entity' at one the descriptor declares (bikes, parts), or add an entity named 'products'.");
+    }
+
+    /// <summary>The list of declared entities in that fix is capped, so a large project cannot flood the refusal.</summary>
+    [Fact]
+    public void The_declared_entities_an_unknown_ref_lists_are_capped()
+    {
+        var entities = string.Join(", ", Enumerable.Range(0, 12).Select(index => $"\"e{index:D2}\": {{ \"fields\": {{ \"name\": {{ \"type\": \"string\" }} }} }}"));
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { {{entities}}, "bikes": { "fields": { "product_id": { "type": "ref", "entity": "products" } } } } }
+        """;
+
+        var fix = _validator.Validate(json).Errors.ShouldHaveSingleItem().FixSuggestion;
+
+        fix.ShouldBe("Point 'entity' at one the descriptor declares (bikes, e00, e01, e02, e03, e04, e05, e06, …), "
+            + "or add an entity named 'products'.");
+    }
+
     [Fact]
     public void Schema_violation_is_a_structured_error()
     {

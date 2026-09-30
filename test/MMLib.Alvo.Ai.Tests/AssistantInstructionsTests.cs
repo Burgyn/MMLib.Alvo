@@ -28,17 +28,18 @@ public sealed partial class AssistantInstructionsTests
         "Read each violation's `message` and `fix`", "Apply it at the `pointer`", "The `pointer` is authoritative",
         "`move` puts the member last", "`propose_change` needs a `summary`", "only when it makes no progress",
         "`stale-revision`", "`severity` is `warning` does not block", "`\"unchecked\": true`",
-        "When a refusal carries `attemptsLeft` 0", "Quoting the expression itself makes it a string, not a rule",
+        "When a refusal carries `attemptsLeft` 0", "is one string literal, not a rule",
+        "one the descriptor declares, or `users`",
     ];
 
     /// <summary>
     /// Snake-case names the instructions may use in code without their being tools: illustrative fields of the
     /// Arithmetic and Never-boolean rules, the rate field example (f) suggests, the name rule's own example, and the
     /// optional middle name the computed skill's null rule reads (its examples, which add it, stay in the base prompt), and
-    /// the owner ref and the second ref name the rule-shape and ref-naming bullets show (D43).
+    /// the owner ref the rule-shape and ref-naming bullets show (D43).
     /// </summary>
     private static readonly string[] _illustrativeNames =
-        ["net_total", "vat_total", "is_vip", "vat_rate", "customer_audits", "middle_name", "author_id", "fleet_bike_id"];
+        ["net_total", "vat_total", "is_vip", "vat_rate", "customer_audits", "middle_name", "author_id"];
 
     private static readonly string[] _pointerMembers = ["path", "from"];
 

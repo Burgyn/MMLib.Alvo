@@ -138,9 +138,15 @@ internal static class SkillsRead
     private static IEnumerable<string> EntitiesMapAreas(JsonNode? proposed) =>
         proposed is JsonObject entities ? entities.SelectMany(entity => EntityAreas(entity.Value)) : [];
 
+    /// <summary>
+    /// Every area a new entity needs: what it declares, <c>entities-and-fields</c>, and <c>rules-and-cel</c> whether
+    /// it declares <c>rules</c> or not — without them nobody reaches it, so the base prompt's load rule names that
+    /// skill for every new entity, and the grade follows the rule.
+    /// </summary>
     private static IEnumerable<string> EntityAreas(JsonNode? proposed) =>
         proposed is JsonObject entity
-            ? entity.SelectMany(member => member.Key == "fields" ? FieldsMapAreas(member.Value) : EntityMemberAreas(member.Key)).Append(EntitiesAndFields)
+            ? entity.SelectMany(member => member.Key == "fields" ? FieldsMapAreas(member.Value) : EntityMemberAreas(member.Key))
+                .Append(EntitiesAndFields).Append(RulesAndCel)
             : [];
 
     private static IEnumerable<string> EntityMemberAreas(string key) => key switch

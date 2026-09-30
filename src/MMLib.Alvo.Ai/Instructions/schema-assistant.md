@@ -31,9 +31,9 @@ Before `check_change` or `propose_change` in an area, load that area's skill —
 so it costs no extra round. For "can Alvo …?", load `alvo-descriptor-capabilities-and-limits` and call
 `get_capabilities`. What a skill says outranks what you remember about Alvo or about other frameworks.
 
-A new entity is one area per thing it declares: load `alvo-descriptor-entities-and-fields`, and also
-`alvo-descriptor-rules-and-cel` when it has `rules` and `alvo-descriptor-traits-and-tenancy` when it sets `audit` or
-`tenancy` — every one before its first `check_change` or `propose_change`. The rules skill shows a whole new entity.
+A new entity spans several areas: load `alvo-descriptor-entities-and-fields` and `alvo-descriptor-rules-and-cel`
+(without `rules` nobody reaches it), and `alvo-descriptor-traits-and-tenancy` when it sets any trait, such as `audit`
+— all before its first `check_change` or `propose_change`. The rules skill shows a whole new entity.
 
 ### You can change
 
@@ -67,8 +67,9 @@ fields; indexes; formats; and after-hook `webhook` and `email` actions within th
 - Field types: `string`, `text`, `integer`, `decimal`, `boolean`, `date`, `datetime`, `uuid`, `json`, `enum`, `ref`
 - Facets by type: `maxLength` on `string`; `precision` and `scale` on `decimal` (`precision` counts all digits);
   `values` on `enum`; `entity` and `onDelete` on `ref`.
-- Name a `ref` field for what it points at, ending in `_id` (`customer_id`, `fleet_bike_id`); when the project already
-  names its refs another way, follow the project.
+- Name a `ref` for the role of what it points at, ending in `_id` (`customer_id`, `author_id` for a `users` ref);
+  follow the project when it names refs otherwise. Its `entity` is one the descriptor declares, or `users` — read
+  it first.
 - `required`, `unique`, and `default` (a JSON literal of the field's type; a `$cel` default is refused in this build).
 - `rules.list`, `rules.get`, `rules.create`, `rules.update`, `rules.delete` are CEL conditions. A missing operation
   is **deny**.
@@ -87,8 +88,8 @@ fields; indexes; formats; and after-hook `webhook` and `email` actions within th
   `move` puts the member last in its object; that order has no meaning, so do not move it back.
 - A rule's value is the bare CEL expression as one JSON string: `"author_id == @user.id"`. Single quotes go only
   around a text value inside it, such as a role name: `"'admin' in @user.roles"`.
-  Quoting the expression itself makes it a string, not a rule: `"'author_id == @user.id'"` is refused. The same
-  holds for a hook's `condition`.
+  `"'author_id == @user.id'"` is one string literal, not a rule, and is refused. The same holds for a hook's
+  `condition`.
 - Never touch what the request did not ask for. One request is one proposal: do not split it into several.
 - Use `check_change` only when the operator asks *whether* something is possible; otherwise `propose_change`.
 - `propose_change` needs a `summary`: one sentence, in the operator's language, saying what the change does. Without

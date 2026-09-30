@@ -17,8 +17,8 @@ Test a role with `in`: `'admin' in @user.roles`. A role literal must be a built-
 `auth.roles`: a typo is refused at apply, because it would otherwise match nobody.
 
 A rule's value is the bare CEL expression as one JSON string: `"author_id == @user.id"`. Single quotes go only around
-a text value inside it, such as a role name. Quoting the expression itself makes it a string, not a rule:
-`"'author_id == @user.id'"` is refused with *"Remove the outer quotes"*.
+a text value inside it, such as a role name. `"'author_id == @user.id'"` is one string literal, not a rule, and is
+refused with *"Remove the outer quotes"*.
 
 What a rule may contain:
 
