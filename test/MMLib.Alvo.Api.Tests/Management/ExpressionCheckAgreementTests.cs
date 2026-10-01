@@ -50,8 +50,9 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
 
     // Observed apply behaviour that may surprise, pinned here as AGREEMENT between check and apply, not as an
     // endorsement of the outcome: `old.` is accepted in an afterCreate condition (while @user.roles and
-    // @tenant.id are refused there); a mutate value of "" is accepted for `quantity`. An empty rule source and one
-    // over 2000 characters are refused by the SCHEMA pass (minLength / maxLength), whose paths read `#/entities/…`.
+    // @tenant.id are refused there). An empty source and one over 2000 characters are refused by the SCHEMA pass
+    // (minLength / maxLength), whose paths read `#/entities/…`; for a mutate value that refusal is reported on the
+    // action above the slot (a oneOf), which the check reports at the slot.
     private static readonly (string Kind, string Pointer, string Source)[] _cases =
     [
         ("rule", Orders + "/rules/list", "'dispatcher' in @user.roles"),
@@ -128,6 +129,35 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         verdict.IsValid.ShouldBe(applied.Count == 0, $"{kind} {slot} = {source}");
     }
 
+    /// <summary>
+    /// A schema error elsewhere hides the slot's own verdict from apply (its rule pass runs only over a descriptor the
+    /// schema accepts), so the check says "not judged" rather than a pass nobody earned.
+    /// </summary>
+    /// <param name="source">A source apply would accept or refuse were the schema not failing elsewhere.</param>
+    /// <returns>A task that completes when both sides have answered.</returns>
+    [Theory]
+    [InlineData("'dispatcher' in @user.roles")]
+    [InlineData("'amdin' in @user.roles")]
+    public async Task A_schema_error_elsewhere_is_refused_by_apply_and_not_judged_by_the_check(string source)
+    {
+        var management = fixture.Management();
+        var current = await WorkingCopyAsync(management);
+        var root = JsonNode.Parse(current.DescriptorJson)!;
+        root["title"] = new string('x', 61);
+        var broken = current with { DescriptorJson = root.ToJsonString() };
+
+        var verdict = await management.CheckExpressionAsync(
+            Project, new ManagementExpressionCheck(broken.DescriptorJson, Orders + "/rules/list", source), Ct);
+        var refused = await Should.ThrowAsync<DescriptorValidationException>(() => management.ApplyDescriptorAsync(
+            Project,
+            new ManagementApplyRequest(Splice(root, Orders + "/rules/list", source).ToJsonString(), current.Revision, DryRun: true),
+            Ct));
+
+        refused.Result.Errors.ShouldContain(f => f.Path == "#/title", "apply refuses the whole descriptor on the schema error");
+        verdict.IsValid.ShouldBeFalse();
+        verdict.Findings.Single().Message.ShouldContain("not judged");
+    }
+
     /// <summary>The corpus reaches every kind and both outcomes in each, or the agreement above is vacuous.</summary>
     /// <returns>A task that completes when every case has been judged by apply.</returns>
     [Fact]
@@ -166,8 +196,25 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         }
         catch (DescriptorValidationException refused)
         {
-            return Errors(refused.Result.Errors.Where(f => IsAtOrUnder(f.Path, pointer)));
+            return ErrorsCausedBy(refused.Result.Errors, pointer);
         }
+    }
+
+    /// <summary>
+    /// The errors at the slot, plus — for a mutate value, a <c>oneOf</c> whose schema failure is reported on the
+    /// action <b>above</b> the slot — one marker for a schema error on an ancestor. The working copy has no schema
+    /// error of its own, so any ancestor schema error is the candidate's.
+    /// </summary>
+    private static List<string> ErrorsCausedBy(IEnumerable<DescriptorValidationError> errors, string pointer)
+    {
+        var all = errors.ToList();
+        var result = Errors(all.Where(f => IsAtOrUnder(f.Path, pointer)));
+        if (all.Any(f => f.Path.StartsWith('#') && !IsAtOrUnder(f.Path, pointer)))
+        {
+            result.Add($"{pointer} :: schema refusal above the slot");
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -202,7 +249,9 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
     private static List<string> Errors(IEnumerable<DescriptorValidationError> findings) =>
         [.. findings
             .Where(f => f.Severity == DescriptorValidationSeverity.Error)
-            .Select(f => $"{f.Path} :: {f.Message}")
+            .Select(f => f.Message.StartsWith("The schema refuses this value", StringComparison.Ordinal)
+                ? $"{f.Path} :: schema refusal above the slot"
+                : $"{f.Path} :: {f.Message}")
             .Order(StringComparer.Ordinal)];
 
     /// <summary>This file's own splice: a mutate target holds <c>{"$cel": source}</c>, every other slot a string.</summary>

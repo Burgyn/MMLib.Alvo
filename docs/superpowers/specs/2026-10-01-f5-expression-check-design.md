@@ -1,4 +1,4 @@
-# F5 — expression check: the first slice of automation, hooks and host functions
+﻿# F5 — expression check: the first slice of automation, hooks and host functions
 
 Status: design, 2026-10-01. Written autonomously: the maintainer asked for the work to proceed without
 check-ins, so the brainstorming approvals (design, spec) are **delegated, not given** — the gate that remains is
@@ -120,7 +120,11 @@ can call the same operation instead of guessing.
 2. **Parity:** for a generated corpus of valid and invalid expressions over every slot kind, the verdict's error
    set equals the apply refusal restricted to that slot (a property test, the `PolicySimulatorAgreementTests`
    pattern). No slot where check is green and apply refuses, or the reverse.
-3. A candidate with one bad expression elsewhere in the descriptor still returns a green verdict for a good slot.
+3. A candidate with one bad *expression* elsewhere in the descriptor (a rule or hook that compiles badly) still
+   returns a green verdict for a good slot. A *schema* failure elsewhere is different: the validator runs its rule,
+   computed and owner passes only over a descriptor the schema accepts, so nothing at the slot was judged — the
+   verdict is one error at the slot, "This expression was not judged: the descriptor fails the schema elsewhere
+   (…)", never a green one. (A schema refusal at, or reported just above, the slot is returned as the slot's own.)
 4. The dashboard shows the finding under rule, hook condition, mutate value and computed inputs within one debounce
    interval of the last keystroke, and never a stale one. As built: an e2e scenario per input in `ExpressionCheckScenarios`
    (Playwright; rule, hook condition, mutate value, computed, plus Escape, save-while-flagged and the unchecked

@@ -3,6 +3,8 @@
 /// <summary>The RFC 6901 JSON pointer, as far as a descriptor slot needs it.</summary>
 internal static class JsonPointerPath
 {
+    private const int MaxEchoedChars = 120;
+
     /// <summary>The unescaped segments of <paramref name="pointer"/>.</summary>
     /// <param name="pointer">A pointer that starts with <c>/</c> and has no empty segment.</param>
     /// <exception cref="ManagementRequestException">The pointer names no node.</exception>
@@ -36,6 +38,11 @@ internal static class JsonPointerPath
     /// <summary>The RFC 6901 pointer of a finding's path: the schema pass's leading <c>#</c> is the fragment marker, not part of it.</summary>
     /// <param name="path">A finding's path.</param>
     internal static string Normalise(string path) => IsSchemaPath(path) ? path[1..] : path;
+
+    /// <summary>A caller's text, cut for an error message: the caller sent it and does not need it back whole.</summary>
+    /// <param name="text">The text to echo.</param>
+    internal static string Shorten(string text) =>
+        text.Length <= MaxEchoedChars ? text : string.Concat(text.AsSpan(0, MaxEchoedChars), "…");
 
     /// <summary>Reads <paramref name="segment"/> as an array index under RFC 6901: <c>0</c> or digits with no leading zero.</summary>
     /// <param name="segment">An unescaped pointer segment.</param>

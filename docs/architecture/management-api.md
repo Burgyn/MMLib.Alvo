@@ -1,4 +1,4 @@
-# The Management API
+﻿# The Management API
 
 The configuration surface: twelve HTTP routes over one service, `IAlvoManagement`, that read and change what a
 project **is** — its descriptor, its revision history, its resolved schema, what this build honours, and who
@@ -105,6 +105,15 @@ That is also the line that keeps it from growing: the day a finding needs stored
 **The size cap.** A viewer can post a whole descriptor on every keystroke, so `descriptor` is capped at
 1,000,000 characters (`MaxCheckedDescriptorChars`) and refused with `422` before it is parsed. The bike-workshop
 descriptor is 24 KB; the cap is a ceiling, not a target. `path` and `source` are not capped yet (a follow-up).
+
+**A schema failure elsewhere is "not judged", not green.** The validator runs its rule, computed and owner passes
+only over a descriptor the schema accepts, so one schema error anywhere hides the slot's own errors. The check
+then answers one `Error` at the slot — "This expression was not judged: the descriptor fails the schema
+elsewhere (up to three places). Fix those first, then it is checked." — rather than a green verdict nobody
+earned. A bad *expression* elsewhere does not do this (a good slot stays green). Schema findings use the URI
+fragment form `#/entities/…`, which the filter reads as the pointer `/entities/…`; a refusal the schema reports
+on a node above the slot (a mutate value is a `oneOf`) is reported at the slot when the descriptor is
+schema-valid with a placeholder in it.
 
 **The slot must already exist.** A pointer to a rule, hook or field the descriptor lacks is a `422`: the check
 splices, it does not create. The dashboard materialises a draft hook or field on a clone of the working copy

@@ -32,6 +32,54 @@ public sealed class ExpressionSlotCheckTests
     }
 
     [Fact]
+    public void A_schema_error_elsewhere_makes_a_bad_slot_not_judged_with_one_error_at_the_slot()
+    {
+        var findings = CheckWithSchemaErrorElsewhere(ListRule, "'amdin' in @user.roles");
+
+        var finding = findings.Where(IsError).ShouldHaveSingleItem();
+        finding.Path.ShouldBe(ListRule);
+        finding.Message.ShouldContain("not judged");
+        finding.Message.ShouldContain("'/title'", Case.Sensitive, "it names where the schema fails");
+        finding.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void A_schema_error_elsewhere_makes_a_good_slot_not_judged_too()
+    {
+        var findings = CheckWithSchemaErrorElsewhere(ListRule, "'clerk' in @user.roles");
+
+        findings.Where(IsError).ShouldHaveSingleItem().Message.ShouldContain("not judged");
+    }
+
+    [Fact]
+    public void A_descriptor_without_a_schema_error_gets_no_not_judged_finding() =>
+        Check(ListRule, "'amdin' in @user.roles").ShouldAllBe(f => !f.Message.Contains("not judged", StringComparison.Ordinal));
+
+    [Fact]
+    public void A_schema_error_at_the_slot_is_returned_as_is_without_a_not_judged_finding()
+    {
+        var findings = CheckWithSchemaErrorElsewhere(ListRule, new string('a', 2001));
+
+        findings.Where(IsError).ShouldNotBeEmpty();
+        findings.ShouldAllBe(f => !f.Message.Contains("not judged", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void The_not_judged_finding_names_at_most_three_places()
+    {
+        var descriptor = Descriptor();
+        descriptor["title"] = new string('x', 61);
+        descriptor["description"] = new string('y', 2000);
+        descriptor["entities"]!["orders"]!["fields"]!["total"]!["precision"] = "wide";
+        descriptor["entities"]!["orders"]!["fields"]!["unit_price"]!["precision"] = "wide";
+
+        var message = Check(descriptor, ListRule, "true").Single(IsError).Message;
+
+        message.ShouldContain("'/title'");
+        message.Split("'/").Length.ShouldBe(4, "three quoted places, the fourth error is left out");
+    }
+
+    [Fact]
     public void A_syntax_error_is_data_not_an_exception() =>
         Check(ListRule, "status ==").Where(IsError).ShouldNotBeEmpty();
 
@@ -74,6 +122,17 @@ public sealed class ExpressionSlotCheckTests
             .Where(IsError).ShouldBeEmpty();
         ExpressionSlotCheck.Check(Validator(), descriptor.ToJsonString(), pointer, "nope(")
             .Where(IsError).ShouldNotBeEmpty();
+    }
+
+    [Fact]
+    public void A_mutate_value_the_schema_refuses_above_the_slot_is_reported_at_the_slot_not_as_not_judged()
+    {
+        var finding = ExpressionSlotCheck.Check(
+                Validator(), DescriptorWithMutateHook().ToJsonString(), "/entities/orders/hooks/beforeCreate/0/action/mutate/status", "")
+            .Single(IsError);
+
+        finding.Path.ShouldBe("/entities/orders/hooks/beforeCreate/0/action/mutate/status");
+        finding.Message.ShouldStartWith(ExpressionSlotCheck.SchemaRefusalPrefix);
     }
 
     [Theory]
@@ -136,10 +195,21 @@ public sealed class ExpressionSlotCheckTests
     [Fact]
     public void A_pointer_with_escaped_segments_addresses_the_right_node()
     {
+        // The schema forbids '/' in an entity key, so the descriptor is (rightly) not judged; what this pins is that
+        // the escaped pointer RESOLVES to the node (no "does not exist" refusal) and the answer is about that slot.
         var descriptor = Descriptor();
         descriptor["entities"]!["a/b"] = descriptor["entities"]!["orders"]!.DeepClone();
 
-        Check(descriptor, "/entities/a~1b/rules/list", "'clerk' in @user.roles").Where(IsError).ShouldBeEmpty();
+        Check(descriptor, "/entities/a~1b/rules/list", "'clerk' in @user.roles").Where(IsError).Single()
+            .Path.ShouldBe("/entities/a~1b/rules/list");
+    }
+
+    private static IReadOnlyList<DescriptorValidationError> CheckWithSchemaErrorElsewhere(string pointer, string source)
+    {
+        var descriptor = Descriptor();
+        descriptor["title"] = new string('x', 61);
+
+        return Check(descriptor, pointer, source);
     }
 
     private static bool IsError(DescriptorValidationError f) => f.Severity == DescriptorValidationSeverity.Error;
