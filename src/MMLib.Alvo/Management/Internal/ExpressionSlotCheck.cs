@@ -16,6 +16,7 @@ namespace MMLib.Alvo.Management.Internal;
 internal static class ExpressionSlotCheck
 {
     private const string MutateSegment = "mutate";
+    private const int MutatePathLength = 8;
 
     /// <summary>The validator's findings at or under <paramref name="pointer"/> with <paramref name="source"/> in place.</summary>
     /// <param name="validator">The validator apply uses.</param>
@@ -32,13 +33,16 @@ internal static class ExpressionSlotCheck
         return [.. validator.Validate(root.ToJsonString()).Errors.Where(f => JsonPointerPath.IsAtOrUnder(f.Path, pointer))];
     }
 
-    private static JsonNode Parse(string descriptorJson)
+    private static JsonObject Parse(string descriptorJson)
     {
         try
         {
-            return JsonNode.Parse(descriptorJson) ?? throw NotADescriptor();
+            // Refused up front: a duplicate key would otherwise throw lazily, deep inside the walk.
+            var options = new JsonDocumentOptions { AllowDuplicateProperties = false };
+
+            return JsonNode.Parse(descriptorJson, documentOptions: options) as JsonObject ?? throw NotADescriptor();
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or ArgumentException)
         {
             throw NotADescriptor();
         }
@@ -55,7 +59,7 @@ internal static class ExpressionSlotCheck
             case JsonObject obj when obj.ContainsKey(last):
                 obj[last] = value;
                 break;
-            case JsonArray array when int.TryParse(last, out var index) && index >= 0 && index < array.Count:
+            case JsonArray array when JsonPointerPath.TryIndex(last, array.Count, out var index):
                 array[index] = value;
                 break;
             default:
@@ -71,7 +75,7 @@ internal static class ExpressionSlotCheck
             node = node switch
             {
                 JsonObject obj when obj.TryGetPropertyValue(segment, out var child) && child is not null => child,
-                JsonArray array when int.TryParse(segment, out var i) && i >= 0 && i < array.Count && array[i] is not null => array[i]!,
+                JsonArray array when JsonPointerPath.TryIndex(segment, array.Count, out var i) && array[i] is not null => array[i]!,
                 _ => throw Absent(pointer),
             };
         }
@@ -79,9 +83,14 @@ internal static class ExpressionSlotCheck
         return node;
     }
 
-    /// <summary>A mutate target holds <c>{"$cel": source}</c>, the one slot that is not a bare string.</summary>
+    /// <summary>
+    /// A mutate target holds <c>{"$cel": source}</c>, the one slot that is not a bare string. Anchored on the whole
+    /// documented shape, so an entity or field that happens to be named <c>mutate</c> is not misread.
+    /// </summary>
     private static bool IsMutateValue(IReadOnlyList<string> segments) =>
-        segments.Count >= 2 && string.Equals(segments[^2], MutateSegment, StringComparison.Ordinal);
+        segments.Count == MutatePathLength
+        && segments[0] == "entities" && segments[2] == "hooks"
+        && segments[5] == "action" && segments[6] == MutateSegment;
 
     private static ManagementRequestException NotADescriptor() => new(
         "The 'descriptor' is not a JSON object. Send the working-copy descriptor exactly as the dashboard holds it.");

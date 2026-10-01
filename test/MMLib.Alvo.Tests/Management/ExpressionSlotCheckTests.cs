@@ -68,6 +68,42 @@ public sealed class ExpressionSlotCheckTests
             .Where(IsError).ShouldNotBeEmpty();
     }
 
+    [Theory]
+    [InlineData("{\"entities\":{},\"entities\":{}}")]
+    [InlineData("[1]")]
+    [InlineData("null")]
+    [InlineData("\"text\"")]
+    public void A_descriptor_that_is_not_a_json_object_is_refused(string descriptorJson) =>
+        Should.Throw<ManagementRequestException>(() => ExpressionSlotCheck.Check(Validator(), descriptorJson, ListRule, "true"));
+
+    [Fact]
+    public void A_field_named_mutate_still_gets_a_string_splice()
+    {
+        var descriptor = Descriptor();
+        descriptor["entities"]!["orders"]!["fields"]!["mutate"] =
+            new JsonObject { ["type"] = "decimal", ["precision"] = 12, ["scale"] = 2, ["computed"] = "total" };
+
+        Check(descriptor, "/entities/orders/fields/mutate/computed", "total * unit_price").Where(IsError).ShouldBeEmpty();
+        Check(descriptor, "/entities/orders/fields/mutate/computed", "total *").Where(IsError).ShouldNotBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("/entities/orders/hooks/beforeCreate/01/condition")]
+    [InlineData("/entities/orders/hooks/beforeCreate/+0/condition")]
+    [InlineData("/entities/orders/hooks/beforeCreate/ 0/condition")]
+    public void An_array_index_outside_the_rfc_6901_grammar_is_refused(string jsonPointer)
+    {
+        var descriptor = Descriptor();
+        descriptor["entities"]!["orders"]!["hooks"] = new JsonObject
+        {
+            ["beforeCreate"] = new JsonArray(Hook(), Hook()),
+        };
+
+        Should.Throw<ManagementRequestException>(() => Check(descriptor, jsonPointer, "true"));
+    }
+
+    private static JsonObject Hook() => new() { ["condition"] = "true", ["action"] = new JsonObject { ["reject"] = "No." } };
+
     [Fact]
     public void A_pointer_with_escaped_segments_addresses_the_right_node()
     {

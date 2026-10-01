@@ -25,6 +25,18 @@ internal static class JsonPointerPath
         string.Equals(path, pointer, StringComparison.Ordinal)
         || path.StartsWith(pointer + "/", StringComparison.Ordinal);
 
+    /// <summary>Reads <paramref name="segment"/> as an array index under RFC 6901: <c>0</c> or digits with no leading zero.</summary>
+    /// <param name="segment">An unescaped pointer segment.</param>
+    /// <param name="count">The length of the array.</param>
+    /// <param name="index">The index, when the segment is one and lies inside the array.</param>
+    internal static bool TryIndex(string segment, int count, out int index)
+    {
+        index = -1;
+        var grammar = segment.Length > 0 && segment.All(char.IsAsciiDigit) && (segment.Length == 1 || segment[0] != '0');
+
+        return grammar && int.TryParse(segment, out index) && index < count;
+    }
+
     private static string Unescape(string segment) =>
         segment.Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal);
 }
