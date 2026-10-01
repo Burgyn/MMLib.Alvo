@@ -22,7 +22,7 @@ because it is infrastructure configuration rather than a block a locked-out proj
 | `GET {m}/projects/{project}/schema` | `GetSchemaAsync` | `viewer` |
 | `GET {m}/projects/{project}/capabilities` | `GetCapabilitiesAsync` | `viewer` |
 | `POST {m}/projects/{project}/policy/simulate` | `SimulatePolicyAsync` | `viewer` |
-| `POST {m}/projects/{project}/cel/check` | `CheckExpressionAsync` | `viewer` |
+| `POST {m}/projects/{project}/cel/check` | `CheckExpressionAsync` | `developer` |
 | `PUT {m}/projects/{project}/descriptor` | `ApplyDescriptorAsync` | `developer` |
 | `POST {m}/projects/{project}/revisions/{revision:int}/rollback` | `RollbackAsync` | `developer` |
 | `PUT {m}/ai/connection` | `SetAiConnectionAsync` | `admin` |
@@ -67,7 +67,7 @@ The rollback arm is the subtler half: a restore carries a **stored** descriptor 
 write, so any project whose history ever held a looser block would otherwise be a standing escalation at a
 `developer`-gated route.
 
-## Why `cel/check` is not the dry run, and why it is Viewer
+## Why `cel/check` is not the dry run, and why it is Developer
 
 `POST {m}/projects/{project}/cel/check` answers one question for the dashboard's expression inputs (a rule, a
 hook condition, a mutate value, a computed field): *what would apply say about this expression, in this
@@ -95,14 +95,21 @@ over the size cap — is a `ManagementRequestException`, `422` through the same 
 body binds nullable so the gate answers first (the `policy/simulate` reason), and an unauthorised caller meets
 `403` before a missing project.
 
-**Viewer, because it reads nothing stored.** Every finding derives from the descriptor the caller sent: the
-role catalog, the entities and the fields are the SENT ones, not the project's. `A_finding_never_carries_stored_state_the_caller_did_not_send`
-pins it — it sends a descriptor whose `auth.roles` differs from the stored one and asserts the stored role is
-refused. A viewer can already read the descriptor (`GetDescriptor`); this adds no read, so it adds no level.
-That is also the line that keeps it from growing: the day a finding needs stored state, it is no longer
-`viewer`.
+**Developer, because it runs the validator over untrusted input exactly as apply does.** The check reads nothing
+stored — every finding derives from the descriptor the caller sent (the role catalog, the entities and the fields
+are the SENT ones; `A_finding_never_carries_stored_state_the_caller_did_not_send` pins it) — so there is no
+disclosure at any level. The exposure is cost and robustness: it parses and validates a caller's text on every
+keystroke, so it inherits apply's exposure and takes apply's level, the principal who edits descriptors in the
+dashboard and can already post the same payload to `PUT descriptor`. (The first design said Viewer, "like
+`policy/simulate`": right about disclosure, wrong about cost.) A Viewer gets no live check; the dashboard shows
+nothing for them, no sentence and no error.
 
-**The size cap.** A viewer can post a whole descriptor on every keystroke, so `descriptorJson` is capped at
+The validator's own weaknesses are apply's too, and are follow-ups, not part of this change: a long `enum`
+`values` with **duplicate** items is slow (the schema's `uniqueItems` reports every duplicate pair, so 2,000
+identical values take seconds); a non-object value under `entities` or `fields` (`"fields":{"zz":1}`) throws
+from `IsUnknownRef` and answers 500; and the same shapes reach every route that validates.
+
+**The size cap.** A developer can post a whole descriptor on every keystroke, so `descriptorJson` is capped at
 1,000,000 characters (`MaxCheckedDescriptorChars`) and refused with `422` before it is parsed. The bike-workshop
 descriptor is 24 KB; the cap is a ceiling, not a target. `source` is capped at 8,000 characters and `path` at 1,024, each refused `422` with a detail that names the cap and
 says what to send instead (otherwise a long `path` or `source` would void the descriptor cap through the ~30 MB
@@ -110,14 +117,18 @@ body limit). A refusal that must quote the pointer quotes at most 120 characters
 
 **The check bounds array length.** A JSON array of more than 2,000 elements anywhere in `descriptorJson` is refused
 `422`, naming the limit and the array's pointer: the validator is roughly quadratic in a long `enum` `values`
-(2,000 values about 0.1 s, 90,000 minutes, all under the size cap) and a Viewer calls the check per keystroke. The
-frozen schema is untouched; the bound is the check's own.
+(2,000 **distinct** values about 0.1 s, 90,000 minutes, all under the size cap) and the check runs per keystroke.
+Duplicate items are slower than that, because the validator reports every duplicate pair (apply behaves the same;
+a follow-up). The frozen schema is untouched; the bound is the check's own.
 
 **A descriptor refused elsewhere is "not checked yet", not green.** The validator runs its rule, computed and owner
 pass only when the schema accepts the descriptor AND the mapper builds it, so one such refusal anywhere hides the
 slot's own errors. The check then answers one `Error` at the slot — "Not checked yet — another part of this draft is
 not valid (up to three places). This box is checked once that is fixed." (the dashboard shows it muted) — rather
-than a green verdict nobody earned; the signal is the validator's own record that the pass ran. A bad *expression* elsewhere does not do this (a good slot stays green). Schema findings use the URI
+than a green verdict nobody earned; the signal is the validator's own record that the pass ran. **Limitation:** that
+record exists only on the shipped `DescriptorValidator`. When the registered `IDescriptorValidator` is a decorator or
+another implementation, the check cannot tell whether the rule pass ran and falls back to the schema pass's `#/…`
+paths as the signal, so a refusal only the mapper makes can then read as green. A bad *expression* elsewhere does not do this (a good slot stays green). Schema findings use the URI
 fragment form `#/entities/…`, which the filter reads as the pointer `/entities/…`; a refusal the schema reports
 on a node above the slot (a mutate value is a `oneOf`) is reported at the slot when the descriptor is
 schema-valid with a placeholder in it.

@@ -111,6 +111,22 @@ public class ManagementGatewayCacheTests
         (await gateway.CheckExpressionAsync("{}", "/p", "x", Ct)).ShouldBeNull();
     }
 
+    /// <summary>The check takes apply's level (Developer): a viewer-only operator sees no sentence and no error.</summary>
+    [Fact]
+    public async Task A_viewer_only_operator_sees_no_check_sentence_and_no_error()
+    {
+        using var gateway = Gateway(new TestNavigation(), out var management);
+        management.CheckExpressionAsync(
+                Arg.Any<string>(), Arg.Any<ManagementExpressionCheck>(), Arg.Any<CancellationToken>())
+            .Returns<Task<ManagementExpressionVerdict>>(_ => throw new ManagementForbiddenException());
+        var check = new MMLib.Alvo.Admin.Components.DesignSystem.ExpressionCheck { DebounceOverride = TimeSpan.Zero };
+
+        await check.SubmitAsync("rule-list", "'amdin' in @user.roles", (source, ct) => gateway.CheckExpressionAsync("{}", "/p", source, ct));
+
+        check.Findings("rule-list").ShouldBeEmpty();
+        check.DescribedBy("rule-list").ShouldBeNull();
+    }
+
     [Fact]
     public async Task An_expression_check_that_hits_a_bug_propagates()
     {

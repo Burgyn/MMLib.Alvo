@@ -54,7 +54,6 @@ public class ManagementOperationsTests
             ManagementOperation.GetCapabilities,
             ManagementOperation.GetInfo,
             ManagementOperation.SimulatePolicy,
-            ManagementOperation.CheckExpression,
         ]);
 
     /// <summary>
@@ -64,9 +63,9 @@ public class ManagementOperationsTests
     /// for it would let a viewer read a plan over a descriptor they may not write.
     /// </summary>
     [Fact]
-    public void A_developer_may_write_configuration()
+    public void A_developer_may_write_configuration_and_check_what_writing_it_would_say()
         => OperationsRequiring(ManagementLevel.Developer).ShouldBe(
-            [ManagementOperation.ApplyDescriptor, ManagementOperation.RollbackRevision]);
+            [ManagementOperation.CheckExpression, ManagementOperation.ApplyDescriptor, ManagementOperation.RollbackRevision]);
 
     /// <summary>
     /// "Settings" is named rather than left to reading: it is the set <c>developer</c> is excluded from

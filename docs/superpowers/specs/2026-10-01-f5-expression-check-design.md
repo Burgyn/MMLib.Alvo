@@ -77,8 +77,11 @@ others. An operator learns what is wrong with a rule after typing the whole chan
 
 ### 4.2 Contract details that decide the shape
 
-* **Level `Viewer`**, like `policy/simulate` and `GetDescriptor`: it reads nothing the caller did not send, and the
-  messages are derived from the descriptor the caller supplied. `A_finding_never_carries_stored_state_the_caller_did_not_send` pins that the role catalog is the sent one.
+* **Level `Developer`** (ApplyDescriptor's), a deviation from the first design's "Viewer, like `policy/simulate`".
+  The reasoning about disclosure held (it reads nothing the caller did not send; messages derive from the descriptor
+  supplied) and the reasoning about cost did not: the check runs the validator over untrusted text per keystroke, so
+  its exposure is apply's, and the validator's own weaknesses (duplicate-heavy `enum`, non-object `fields`/`entities`
+  values) would be reachable by a Viewer through it, which apply never allowed. A Viewer gets no live check; the dashboard shows nothing. `A_finding_never_carries_stored_state_the_caller_did_not_send` pins that the role catalog is the sent one.
 * **Body binds nullable** (`T? body`) and the service refuses null with 422, or the gate sweep
   (`Every_mapped_management_route_refuses_…`) gets a framework 400 ahead of the 403.
 * **Size.** A viewer can POST a whole descriptor on a hot path. `DescriptorJson` is capped at 1,000,000 characters
@@ -116,7 +119,7 @@ can call the same operation instead of guessing.
 
 ## 5. Acceptance criteria (numeric where the sources give none, so they are measured, not invented)
 
-1. `CheckExpressionAsync` and its route exist, one route per member (`ManagementContractTests`), `Viewer` level
+1. `CheckExpressionAsync` and its route exist, one route per member (`ManagementContractTests`), `Developer` level
    (`ManagementOperationsTests`), refuse an unauthorised caller before a missing project, and are absent from the
    OpenAPI document.
 2. **Parity:** for a generated corpus of valid and invalid expressions over every slot kind, the verdict's error
@@ -153,7 +156,7 @@ can call the same operation instead of guessing.
 6. `PublicApi.MMLib.Alvo.Abstractions.verified.txt` grows by exactly the one interface member and two records; each is
    justified in the PR per `alvo-architecture-rules` ("public is the contract"). The Admin baseline also moves:
    `RulesTab`, `FieldEditor` and `HooksTab` gain `IDisposable`, and `HooksTab` a public `Entity` parameter.
-7. `docs/architecture/management-api.md` states the operation, why it is not the dry run, and why it is `Viewer`.
+7. `docs/architecture/management-api.md` states the operation, why it is not the dry run, and why it is `Developer`.
 
 ## 6. Risks
 
@@ -161,8 +164,8 @@ can call the same operation instead of guessing.
   Mitigation: criterion 5; a slot-scoped fast path is a later optimisation behind the same contract.
 * **Splice fidelity** — the mutate form (`$cel` object) is the one slot that is not a bare string. A table-driven
   test covers every slot kind so a new slot cannot silently skip the splice.
-* **Viewer-level amplification** — a viewer can burn validator time. Mitigation: the size cap and the measured cost
-  (criterion 5); throttling stays the host's.
+* **Amplification** — a caller can burn validator time. Mitigation: the Developer level (apply's), the size cap, the
+  array bound and the measured cost (criterion 5); throttling stays the host's.
 
 ## 7. Open questions (none block slice A)
 
@@ -213,6 +216,10 @@ Deferred (not in this slice): `Position`, `cel/scope`, `cel/evaluate`.
 * **Second wave.** "Not judged" is driven by whether the rule pass ran (a refusal by the mapper counts, not only a
   schema error); a lone UTF-16 surrogate is a refusal (apply and check), never a 500; the check bounds arrays at
   2,000 elements; the sentence is calm and muted in the dashboard.
+* **Third wave.** The level is Developer (see §4.2): the original reasoning was right about disclosure and wrong
+  about cost. The check cannot tell whether the rule pass ran when the registered `IDescriptorValidator` is not the
+  shipped `DescriptorValidator`; it then falls back to the `#/…` path heuristic, so a mapper-only refusal can read
+  as green. A 2,000-element enum is about 0.1 s only for distinct values; duplicates are slower (apply too).
 * **I4 — naming.** `ManagementExpressionCheck.Descriptor` is now `DescriptorJson` (wire `descriptorJson`), as
   `ManagementApplyRequest` has it. The debounce-supersede test is bounded at 5 s so it fails instead of hanging.
 
