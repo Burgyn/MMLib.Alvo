@@ -44,8 +44,18 @@ internal sealed class ConsoleEmailSender(ILogger<ConsoleEmailSender> logger) : I
     {
         ArgumentNullException.ThrowIfNull(message);
 
-        EventLog.EmailSentToConsole(logger, Escaped(message.To), Escaped(message.Subject), message.Body.Length);
-        EventLog.EmailBodyToConsole(logger, Escaped(message.Body));
+        if (logger.IsEnabled(LogLevel.Information))
+        {
+            var to = Escaped(message.To);
+            var subject = Escaped(message.Subject);
+            EventLog.EmailSentToConsole(logger, to, subject, message.Body.Length);
+        }
+
+        if (logger.IsEnabled(LogLevel.Debug))
+        {
+            var body = Escaped(message.Body);
+            EventLog.EmailBodyToConsole(logger, body);
+        }
 
         return Task.CompletedTask;
     }
