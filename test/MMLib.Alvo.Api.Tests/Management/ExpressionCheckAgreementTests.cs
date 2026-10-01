@@ -48,6 +48,9 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         return data;
     }
 
+    // Observed apply behaviour that may surprise, pinned here as AGREEMENT between check and apply, not as an
+    // endorsement of the outcome: an empty rule source is accepted; `old.` is accepted in an afterCreate condition
+    // (while @user.roles and @tenant.id are refused there); a mutate value of "" is accepted for `quantity`.
     private static readonly (string Kind, string Pointer, string Source)[] _cases =
     [
         ("rule", Orders + "/rules/list", "'dispatcher' in @user.roles"),
@@ -109,13 +112,14 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
     public async Task Check_and_apply_refuse_the_same_expression_the_same_way(string kind, string slot, string source)
     {
         var management = fixture.Management();
-        var current = await management.GetDescriptorAsync(Project, Ct);
+        var current = await WorkingCopyAsync(management);
 
         var verdict = await management.CheckExpressionAsync(
             Project, new ManagementExpressionCheck(current.DescriptorJson, slot, source), Ct);
         var applied = await ApplyDryRunErrorsAsync(management, current, slot, source);
 
-        Errors(verdict.Findings, slot).ShouldBe(applied, $"{kind} {slot} = {source}");
+        verdict.Findings.ShouldAllBe(f => IsAtOrUnder(f.Path, slot), $"{kind} {slot}: a finding outside the slot");
+        Errors(verdict.Findings).ShouldBe(applied, $"{kind} {slot} = {source}");
         verdict.IsValid.ShouldBe(applied.Count == 0, $"{kind} {slot} = {source}");
     }
 
@@ -125,7 +129,7 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
     public async Task The_corpus_reaches_both_outcomes_for_every_slot_kind()
     {
         var management = fixture.Management();
-        var current = await management.GetDescriptorAsync(Project, Ct);
+        var current = await WorkingCopyAsync(management);
         var outcomes = new List<(string Kind, bool Refused)>();
         foreach (var (kind, pointer, source) in _cases)
         {
@@ -157,15 +161,35 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         }
         catch (DescriptorValidationException refused)
         {
-            return Errors(refused.Result.Errors, pointer);
+            return Errors(refused.Result.Errors.Where(f => IsAtOrUnder(f.Path, pointer)));
         }
     }
 
-    /// <summary>The (path, message) of each error at or under the slot, sorted — this file's own restriction.</summary>
-    private static List<string> Errors(IEnumerable<DescriptorValidationError> findings, string pointer) =>
+    /// <summary>
+    /// The stored descriptor with two <b>other</b> slots broken, as a dashboard working copy mid-edit is.
+    /// </summary>
+    /// <remarks>
+    /// Every case that does not overwrite them therefore has an apply error <em>elsewhere</em> than its slot, so a
+    /// check that returned whole-document findings, or filtered on the wrong prefix, disagrees with apply.
+    /// </remarks>
+    private static async Task<ManagementDescriptor> WorkingCopyAsync(IAlvoManagement management)
+    {
+        var stored = await management.GetDescriptorAsync(Project, Ct);
+        var root = JsonNode.Parse(stored.DescriptorJson)!;
+        Splice(root, Orders + "/rules/delete", "'nobody' in @user.roles");
+        Splice(root, Orders + "/rules/get", "quantity > 'x'");
+
+        return stored with { DescriptorJson = root.ToJsonString() };
+    }
+
+    /// <summary>Whether <paramref name="path"/> is the slot or lies under it — this file's own path logic.</summary>
+    private static bool IsAtOrUnder(string path, string slot) =>
+        path == slot || path.StartsWith(slot + "/", StringComparison.Ordinal);
+
+    /// <summary>The sorted (path, message) key of every error given, <b>unfiltered by slot</b>.</summary>
+    private static List<string> Errors(IEnumerable<DescriptorValidationError> findings) =>
         [.. findings
             .Where(f => f.Severity == DescriptorValidationSeverity.Error)
-            .Where(f => f.Path == pointer || f.Path.StartsWith(pointer + "/", StringComparison.Ordinal))
             .Select(f => $"{f.Path} :: {f.Message}")
             .Order(StringComparer.Ordinal)];
 
