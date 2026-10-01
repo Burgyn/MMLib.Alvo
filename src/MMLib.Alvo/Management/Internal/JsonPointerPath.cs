@@ -19,11 +19,23 @@ internal static class JsonPointerPath
     }
 
     /// <summary>Whether <paramref name="path"/> is the node <paramref name="pointer"/> names or one beneath it.</summary>
-    /// <param name="path">A finding's path.</param>
+    /// <param name="path">A finding's path, as the schema pass (<c>#/entities/…</c>) or another pass (<c>/entities/…</c>) wrote it.</param>
     /// <param name="pointer">The slot's pointer.</param>
-    internal static bool IsAtOrUnder(string path, string pointer) =>
-        string.Equals(path, pointer, StringComparison.Ordinal)
-        || path.StartsWith(pointer + "/", StringComparison.Ordinal);
+    internal static bool IsAtOrUnder(string path, string pointer)
+    {
+        var node = Normalise(path);
+
+        return string.Equals(node, pointer, StringComparison.Ordinal)
+            || node.StartsWith(pointer + "/", StringComparison.Ordinal);
+    }
+
+    /// <summary>Whether <paramref name="path"/> was written by the schema pass, which reports a URI fragment (<c>#/…</c>).</summary>
+    /// <param name="path">A finding's path.</param>
+    internal static bool IsSchemaPath(string path) => path.StartsWith('#');
+
+    /// <summary>The RFC 6901 pointer of a finding's path: the schema pass's leading <c>#</c> is the fragment marker, not part of it.</summary>
+    /// <param name="path">A finding's path.</param>
+    internal static string Normalise(string path) => IsSchemaPath(path) ? path[1..] : path;
 
     /// <summary>Reads <paramref name="segment"/> as an array index under RFC 6901: <c>0</c> or digits with no leading zero.</summary>
     /// <param name="segment">An unescaped pointer segment.</param>

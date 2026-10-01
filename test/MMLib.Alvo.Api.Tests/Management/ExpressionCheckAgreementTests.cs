@@ -49,8 +49,9 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
     }
 
     // Observed apply behaviour that may surprise, pinned here as AGREEMENT between check and apply, not as an
-    // endorsement of the outcome: an empty rule source is accepted; `old.` is accepted in an afterCreate condition
-    // (while @user.roles and @tenant.id are refused there); a mutate value of "" is accepted for `quantity`.
+    // endorsement of the outcome: `old.` is accepted in an afterCreate condition (while @user.roles and
+    // @tenant.id are refused there); a mutate value of "" is accepted for `quantity`. An empty rule source and one
+    // over 2000 characters are refused by the SCHEMA pass (minLength / maxLength), whose paths read `#/entities/…`.
     private static readonly (string Kind, string Pointer, string Source)[] _cases =
     [
         ("rule", Orders + "/rules/list", "'dispatcher' in @user.roles"),
@@ -65,6 +66,8 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("rule", Orders + "/rules/list", "   "),
         ("rule", Orders + "/rules/create", "((((((((((true))))))))))"),
         ("rule", Orders + "/rules/delete", "[1, 2, 3]"),
+        ("rule", Orders + "/rules/list", new string('a', 2001)),
+        ("rule", Orders + "/rules/list", new string('a', 2000)),
         ("beforeHook", BeforeCreate, "new.quantity > 0"),
         ("beforeHook", BeforeCreate, "old.status == 'open'"),
         ("beforeHook", BeforeUpdate, "old.status == 'open' && new.status == 'closed'"),
@@ -89,6 +92,7 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("mutate", Mutate + "quantity", "new.quantity + 1"),
         ("mutate", Mutate + "note", "@user.roles"),
         ("mutate", Mutate + "quantity", ""),
+        ("mutate", Mutate + "note", new string('a', 2001)),
         ("computed", Computed, "quantity * price"),
         ("computed", Computed, "quantity * price > 10"),
         ("computed", Computed, "(quantity + 1) * 2 > price"),
@@ -100,6 +104,7 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("computed", Computed, "title + note"),
         ("computed", Computed, "quantity == 1 ? price : price * 2"),
         ("computed", Computed, "'x'"),
+        ("computed", Computed, new string('a', 2001)),
     ];
 
     /// <summary>For every case, the check's error set equals apply's, restricted to the slot.</summary>
@@ -182,9 +187,16 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         return stored with { DescriptorJson = root.ToJsonString() };
     }
 
-    /// <summary>Whether <paramref name="path"/> is the slot or lies under it — this file's own path logic.</summary>
-    private static bool IsAtOrUnder(string path, string slot) =>
-        path == slot || path.StartsWith(slot + "/", StringComparison.Ordinal);
+    /// <summary>
+    /// Whether <paramref name="path"/> is the slot or lies under it — this file's own path logic. The schema pass
+    /// reports <c>#/entities/…</c> (a URI fragment), every other pass <c>/entities/…</c>; both name the same node.
+    /// </summary>
+    private static bool IsAtOrUnder(string path, string slot)
+    {
+        var pointer = path.TrimStart('#');
+
+        return pointer == slot || pointer.StartsWith(slot + "/", StringComparison.Ordinal);
+    }
 
     /// <summary>The sorted (path, message) key of every error given, <b>unfiltered by slot</b>.</summary>
     private static List<string> Errors(IEnumerable<DescriptorValidationError> findings) =>

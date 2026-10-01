@@ -24,6 +24,14 @@ public sealed class ExpressionSlotCheckTests
     }
 
     [Fact]
+    public void A_source_over_the_schema_length_cap_is_refused_at_its_slot_as_apply_refuses_it()
+    {
+        var findings = Check(ListRule, new string('a', 2001));
+
+        findings.Where(IsError).ShouldNotBeEmpty("apply's schema pass refuses a rule source over 2000 characters");
+    }
+
+    [Fact]
     public void A_syntax_error_is_data_not_an_exception() =>
         Check(ListRule, "status ==").Where(IsError).ShouldNotBeEmpty();
 

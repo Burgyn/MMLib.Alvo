@@ -24,6 +24,10 @@ public sealed class JsonPointerPathTests
     [InlineData("/entities/o/rules/list/x", "/entities/o/rules/list", true)]
     [InlineData("/entities/o/rules/listing", "/entities/o/rules/list", false)]
     [InlineData("/entities/o/rules", "/entities/o/rules/list", false)]
+    [InlineData("#/entities/o/rules/list", "/entities/o/rules/list", true)]
+    [InlineData("#/entities/o/rules/list/x", "/entities/o/rules/list", true)]
+    [InlineData("#/entities/o/rules/listing", "/entities/o/rules/list", false)]
+    [InlineData("#/entities/o/rules", "/entities/o/rules/list", false)]
     public void A_path_is_at_or_under_a_pointer_by_whole_segments(string path, string jsonPointer, bool expected) =>
         JsonPointerPath.IsAtOrUnder(path, jsonPointer).ShouldBe(expected);
 }
