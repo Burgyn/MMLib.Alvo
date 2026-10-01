@@ -78,11 +78,13 @@ others. An operator learns what is wrong with a rule after typing the whole chan
 ### 4.2 Contract details that decide the shape
 
 * **Level `Viewer`**, like `policy/simulate` and `GetDescriptor`: it reads nothing the caller did not send, and the
-  messages are derived from the descriptor the caller supplied. A test pins that no stored state reaches a finding.
+  messages are derived from the descriptor the caller supplied. `A_finding_never_carries_stored_state_the_caller_did_not_send` pins that the role catalog is the sent one.
 * **Body binds nullable** (`T? body`) and the service refuses null with 422, or the gate sweep
   (`Every_mapped_management_route_refuses_…`) gets a framework 400 ahead of the 403.
-* **Size.** A viewer can POST a whole descriptor on a hot path. The request is capped at the size apply already
-  accepts (the plan names the constant), and the endpoint sits behind the existing per-credential limits.
+* **Size.** A viewer can POST a whole descriptor on a hot path. `Descriptor` is capped at 1,000,000 characters
+  (`MaxCheckedDescriptorChars`, refused 422 before it is parsed). The package ships no rate limiter (throttling is a
+  host decision, see `AlvoManagementEndpointRouteBuilderExtensions`), so the cap and the measured cost are the whole
+  defence. `Path` and `Source` are not capped yet (follow-up).
 * **Position is deferred.** The validator collapses `CelCompilationError.Position` into a message; a visual
   underline needs it. v1 shows the message under the input; `Position` is an additive property added when the
   editor (slice B/E) needs a caret, not now.
@@ -120,7 +122,9 @@ can call the same operation instead of guessing.
    pattern). No slot where check is green and apply refuses, or the reverse.
 3. A candidate with one bad expression elsewhere in the descriptor still returns a green verdict for a good slot.
 4. The dashboard shows the finding under rule, hook condition, mutate value and computed inputs within one debounce
-   interval of the last keystroke, and never a stale one (an e2e scenario each, in the existing Playwright suite).
+   interval of the last keystroke, and never a stale one. As built: an e2e scenario per input in `ExpressionCheckScenarios`
+   (Playwright; rule, hook condition, mutate value, computed, plus Escape, save-while-flagged and the unchecked
+   field default), and `ExpressionCheckTests` / `ExpressionSlotsTests` (bUnit) for the latest-wins state.
 5. **Cost is measured and recorded**, not assumed. `ExpressionCheckCostTests` (opt-in, `ALVO_MEASURE=1`, in
    `MMLib.Alvo.Api.Tests`) calls `CheckExpressionAsync` in-process, as the dashboard does, on a rule slot of the
    `bike-workshop` descriptor (24.0 KB): 20 warm-up calls, then 200 alternating a valid and an invalid source.
@@ -139,7 +143,8 @@ can call the same operation instead of guessing.
    measurement on a slower host exceeds 100 ms; it changes the dashboard only. The measurement is in-process; an
    HTTP caller adds the transport and the 1 MB body parse on top.
 6. `PublicApi.MMLib.Alvo.Abstractions.verified.txt` grows by exactly the one interface member and two records; each is
-   justified in the PR per `alvo-architecture-rules` ("public is the contract").
+   justified in the PR per `alvo-architecture-rules` ("public is the contract"). The Admin baseline also moves:
+   `RulesTab`, `FieldEditor` and `HooksTab` gain `IDisposable`, and `HooksTab` a public `Entity` parameter.
 7. `docs/architecture/management-api.md` states the operation, why it is not the dry run, and why it is `Viewer`.
 
 ## 6. Risks
@@ -148,11 +153,34 @@ can call the same operation instead of guessing.
   Mitigation: criterion 5; a slot-scoped fast path is a later optimisation behind the same contract.
 * **Splice fidelity** — the mutate form (`$cel` object) is the one slot that is not a bare string. A table-driven
   test covers every slot kind so a new slot cannot silently skip the splice.
-* **Viewer-level amplification** — a viewer can burn validator time. Mitigation: the size cap and existing limits;
-  revisit only if measured.
+* **Viewer-level amplification** — a viewer can burn validator time. Mitigation: the size cap and the measured cost
+  (criterion 5); throttling stays the host's.
 
 ## 7. Open questions (none block slice A)
 
 * Whether the finding's `Path` should be translated back to the dashboard's input id on the server or in the
   gateway — the dashboard already has `RefusalPlaces`; the plan reuses it.
 * `Position` shape (offset only, as `CelCompilationError` has no length) — decided with the editor, slice B/E.
+
+## 8. As built
+
+Commits since the design (`git log --oneline c24c763..HEAD`):
+
+* Core, `fbcbe57`..`d2370f5`: the slot judge (`ExpressionSlotCheck`), its hardening (duplicate keys, non-object
+  descriptors, anchored mutate splice, strict array indexes), `CheckExpressionAsync` and its route, the agreement
+  and raw-findings tests, the cost measurement.
+* Dashboard, `6422711`..`603e785`: the focus-free `ExpressionCheck` state and gateway call, then the rule, hook
+  condition, mutate value and computed inputs, and a test that the field default is not checked.
+* Docs (this commit): `management-api.md` and this section.
+
+Deviations from the plan, ruled:
+
+* The dashboard check state is focus-free and is **not** `FieldRefusals` (which takes focus on every refusal).
+* Check-as-you-type with a 300 ms debounce, from the measurement in criterion 5.
+* `HooksTab`, `FieldEditor` and `RulesTab` gained `IDisposable` (to cancel an in-flight check) and `HooksTab` a public
+  `Entity` parameter, consistent with their siblings; the Admin public-API baseline records it.
+
+Deferred (not in this slice): `Position`, `cel/scope`, `cel/evaluate`.
+
+Follow-ups: cap `Path` and `Source`; a guided form for conditions; a shared `ExpressionFindings` fragment for the
+four inputs' markup.

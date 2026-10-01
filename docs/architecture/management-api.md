@@ -1,6 +1,6 @@
 # The Management API
 
-The configuration surface: ten HTTP routes over one service, `IAlvoManagement`, that read and change what a
+The configuration surface: twelve HTTP routes over one service, `IAlvoManagement`, that read and change what a
 project **is** — its descriptor, its revision history, its resolved schema, what this build honours, and who
 a policy would admit. It never reads or writes a row of application data. That is not an omission; it is
 deviation **D4**, and the whole shape of this document follows from it.
@@ -22,6 +22,7 @@ because it is infrastructure configuration rather than a block a locked-out proj
 | `GET {m}/projects/{project}/schema` | `GetSchemaAsync` | `viewer` |
 | `GET {m}/projects/{project}/capabilities` | `GetCapabilitiesAsync` | `viewer` |
 | `POST {m}/projects/{project}/policy/simulate` | `SimulatePolicyAsync` | `viewer` |
+| `POST {m}/projects/{project}/cel/check` | `CheckExpressionAsync` | `viewer` |
 | `PUT {m}/projects/{project}/descriptor` | `ApplyDescriptorAsync` | `developer` |
 | `POST {m}/projects/{project}/revisions/{revision:int}/rollback` | `RollbackAsync` | `developer` |
 | `PUT {m}/ai/connection` | `SetAiConnectionAsync` | `admin` |
@@ -48,7 +49,7 @@ the code is right.
 
 **The level is not on the route.** A route carries a `ManagementOperation`; `ManagementOperations` is the
 one table mapping an operation to the level it needs, and an operation it does not list requires `admin` —
-the most restrictive answer, not the most convenient one. Two of the thirteen operations
+the most restrictive answer, not the most convenient one. Two of the fifteen operations
 (`ManageApiKeys`, `DeleteProject`) have no route at all; see *What is deliberately absent*.
 `ManageUsers` gained seven in F5 — see *Administering people*.
 
@@ -65,6 +66,57 @@ itself by editing three lines of JSON, because every accepted apply re-primes th
 The rollback arm is the subtler half: a restore carries a **stored** descriptor the caller never had to
 write, so any project whose history ever held a looser block would otherwise be a standing escalation at a
 `developer`-gated route.
+
+## Why `cel/check` is not the dry run, and why it is Viewer
+
+`POST {m}/projects/{project}/cel/check` answers one question for the dashboard's expression inputs (a rule, a
+hook condition, a mutate value, a computed field): *what would apply say about this expression, in this
+descriptor?* The request is `{descriptor, path, source}` — the working copy the caller holds, the RFC 6901
+pointer of the slot, the candidate as typed — and the answer is a list of `DescriptorValidationError`, the
+type apply already speaks. There is no second diagnostic type and no second code path.
+
+**It is not the dry-run apply.** `?dryRun=true` is `PreviewAsync`: all-or-nothing over the whole descriptor,
+bound to a revision (`If-Match`) and to a migration plan it computes. It cannot answer per keystroke, and one
+bad expression elsewhere in the document would turn the preview red and mask the verdict on the slot being
+edited. The check reads no store, no revision and no runtime, so it has none of those couplings.
+
+**The mechanism is splice and validate.** `ExpressionSlotCheck` parses the supplied descriptor, replaces the
+node at `path` with the candidate (a `{"$cel": source}` object under `/action/mutate/<field>`, the documented
+form; a bare string elsewhere), runs the **same** `IDescriptorValidator` that apply runs, and keeps the
+findings whose `Path` is the slot or sits under it. Compiling alone would pass an undeclared role literal
+(`'amdin' in @user.roles`), `old.` inside a `beforeCreate` hook, and a computed constant that would become a
+bind parameter — each is a refusal at apply, so each is a finding here. `ExpressionCheckAgreementTests` holds
+the two to the same answer for every slot kind, including over a working copy with other slots broken.
+
+**Errors are data; an unanswerable request is a 422.** An expression that does not compile is a `200` with
+findings: that is the answer, not a failure. A request that cannot be answered — no body, a missing part, a
+`path` that is not a pointer into the descriptor, a descriptor that is not a JSON object or repeats a key, one
+over the size cap — is a `ManagementRequestException`, `422` through the same ladder as every other route. The
+body binds nullable so the gate answers first (the `policy/simulate` reason), and an unauthorised caller meets
+`403` before a missing project.
+
+**Viewer, because it reads nothing stored.** Every finding derives from the descriptor the caller sent: the
+role catalog, the entities and the fields are the SENT ones, not the project's. `A_finding_never_carries_stored_state_the_caller_did_not_send`
+pins it — it sends a descriptor whose `auth.roles` differs from the stored one and asserts the stored role is
+refused. A viewer can already read the descriptor (`GetDescriptor`); this adds no read, so it adds no level.
+That is also the line that keeps it from growing: the day a finding needs stored state, it is no longer
+`viewer`.
+
+**The size cap.** A viewer can post a whole descriptor on every keystroke, so `descriptor` is capped at
+1,000,000 characters (`MaxCheckedDescriptorChars`) and refused with `422` before it is parsed. The bike-workshop
+descriptor is 24 KB; the cap is a ceiling, not a target. `path` and `source` are not capped yet (a follow-up).
+
+**The slot must already exist.** A pointer to a rule, hook or field the descriptor lacks is a `422`: the check
+splices, it does not create. The dashboard materialises a draft hook or field on a clone of the working copy
+before it asks, so the working copy itself is never dirtied by a check.
+
+**What it deliberately does not do.**
+
+* No `cel/scope`: its only consumer is completion or a field dropdown, which is a later slice.
+* No `cel/evaluate`: running caller-supplied CEL on a hot path is a denial-of-service and an oracle risk, and
+  `policy/simulate` already covers rules.
+* No `Position`: the validator folds `CelCompilationError.Position` into the message; an underline needs a
+  caret, and the property is additive when an editor needs it.
 
 ## One path, two transports
 
