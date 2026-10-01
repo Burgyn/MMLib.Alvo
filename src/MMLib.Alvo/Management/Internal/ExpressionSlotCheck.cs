@@ -19,6 +19,7 @@ internal static class ExpressionSlotCheck
     private const string MutateSegment = "mutate";
     private const int MutatePathLength = 8;
     private const int MaxNamedPlaces = 3;
+    private const int MaxArrayLength = 2_000;
     private const string Placeholder = "true";
 
     /// <summary>The start of the message a candidate-caused schema refusal carries.</summary>
@@ -154,13 +155,61 @@ internal static class ExpressionSlotCheck
             // Refused up front: a duplicate key would otherwise throw lazily, deep inside the walk.
             var options = new JsonDocumentOptions { AllowDuplicateProperties = false };
 
-            return JsonNode.Parse(descriptorJson, documentOptions: options) as JsonObject ?? throw NotADescriptor();
+            var root = JsonNode.Parse(descriptorJson, documentOptions: options) as JsonObject ?? throw NotADescriptor();
+            EnsureArraysBounded(root);
+
+            return root;
         }
         catch (Exception ex) when (ex is JsonException or ArgumentException)
         {
             throw ex.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) ? DuplicateProperty(ex) : NotADescriptor();
         }
     }
+
+    /// <summary>
+    /// Refuses an array longer than <see cref="MaxArrayLength"/>. The schema is frozen and a descriptor of 2,000
+    /// <c>enum</c> values takes the validator about 0.1 s while 90,000 take minutes, all under the size cap: a check runs
+    /// on every keystroke for a Viewer, so the bound is the check's own and walks the tree once, iteratively.
+    /// </summary>
+    private static void EnsureArraysBounded(JsonNode root)
+    {
+        var pending = new Stack<(JsonNode Node, string Pointer)>([(root, string.Empty)]);
+        while (pending.Count > 0)
+        {
+            var (node, pointer) = pending.Pop();
+            switch (node)
+            {
+                case JsonArray array when array.Count > MaxArrayLength:
+                    throw TooLong(pointer);
+                case JsonArray array:
+                    for (var i = 0; i < array.Count; i++)
+                    {
+                        PushChild(pending, array[i], $"{pointer}/{i}");
+                    }
+
+                    break;
+                case JsonObject obj:
+                    foreach (var (key, child) in obj)
+                    {
+                        PushChild(pending, child, $"{pointer}/{key.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal)}");
+                    }
+
+                    break;
+            }
+        }
+    }
+
+    private static void PushChild(Stack<(JsonNode Node, string Pointer)> pending, JsonNode? child, string pointer)
+    {
+        if (child is JsonArray or JsonObject)
+        {
+            pending.Push((child, pointer));
+        }
+    }
+
+    private static ManagementRequestException TooLong(string pointer) => new(
+        $"The array at '{JsonPointerPath.Shorten(pointer)}' has more than {MaxArrayLength:N0} elements. A check is for one "
+        + "expression; send the descriptor as written — an array this long is not expected.");
 
     private static void Splice(JsonNode root, IReadOnlyList<string> segments, string pointer, string source)
     {

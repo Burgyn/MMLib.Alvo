@@ -127,6 +127,40 @@ public sealed class ExpressionSlotCheckTests
     }
 
     [Fact]
+    public void An_array_over_the_bound_is_refused_naming_the_limit_and_where_it_is()
+    {
+        var refusal = Should.Throw<ManagementRequestException>(
+            () => Check(WithEnumOf(2001), ListRule, "true"));
+
+        refusal.Message.ShouldContain("2,000");
+        refusal.Message.ShouldContain("/entities/orders/fields/big/values");
+    }
+
+    [Fact]
+    public void An_array_at_the_bound_is_checked_and_does_not_take_long()
+    {
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+
+        var findings = Check(WithEnumOf(2000), ListRule, "'clerk' in @user.roles");
+
+        clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(10), "a hang guard, not a benchmark");
+        findings.Where(IsError).ShouldBeEmpty();
+        Console.WriteLine($"[measure] 2000-element enum check: {clock.ElapsedMilliseconds} ms");
+    }
+
+    private static JsonObject WithEnumOf(int count)
+    {
+        var descriptor = Descriptor();
+        descriptor["entities"]!["orders"]!["fields"]!["big"] = new JsonObject
+        {
+            ["type"] = "enum",
+            ["values"] = new JsonArray([.. Enumerable.Range(0, count).Select(i => (JsonNode)JsonValue.Create($"v{i}")!)]),
+        };
+
+        return descriptor;
+    }
+
+    [Fact]
     public void A_descriptor_without_a_schema_error_gets_no_not_judged_finding() =>
         Check(ListRule, "'amdin' in @user.roles").ShouldAllBe(f => !f.Message.Contains("not judged", StringComparison.Ordinal));
 

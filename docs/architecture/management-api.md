@@ -108,6 +108,11 @@ descriptor is 24 KB; the cap is a ceiling, not a target. `source` is capped at 8
 says what to send instead (otherwise a long `path` or `source` would void the descriptor cap through the ~30 MB
 body limit). A refusal that must quote the pointer quotes at most 120 characters of it.
 
+**The check bounds array length.** A JSON array of more than 2,000 elements anywhere in `descriptorJson` is refused
+`422`, naming the limit and the array's pointer: the validator is roughly quadratic in a long `enum` `values`
+(2,000 values about 0.1 s, 90,000 minutes, all under the size cap) and a Viewer calls the check per keystroke. The
+frozen schema is untouched; the bound is the check's own.
+
 **A schema failure elsewhere is "not judged", not green.** The validator runs its rule, computed and owner passes
 only over a descriptor the schema accepts, so one schema error anywhere hides the slot's own errors. The check
 then answers one `Error` at the slot — "This expression was not judged: the descriptor fails the schema

@@ -85,6 +85,23 @@ public class ManagementExpressionCheckTests
     }
 
     [Fact]
+    public async Task An_array_over_the_bound_is_a_422_naming_the_limit()
+    {
+        await using var world = await ManagedFleet.StartAsync([_ops]);
+        var sent = ReadFleetDescriptor();
+        sent["entities"]!["vehicles"]!["fields"]!["big"] = new JsonObject
+        {
+            ["type"] = "enum",
+            ["values"] = new JsonArray([.. Enumerable.Range(0, 2001).Select(i => (JsonNode)JsonValue.Create($"v{i}")!)]),
+        };
+
+        using var response = await world.SendAsync(
+            HttpMethod.Post, $"{ManagedFleet.Routes}/cel/check", _ops, body: Body(sent, ListRule, "true"));
+
+        (await Refusal(response)).ShouldContain("2,000");
+    }
+
+    [Fact]
     public async Task A_missing_body_is_a_422_not_a_framework_400()
     {
         await using var world = await ManagedFleet.StartAsync([_ops]);

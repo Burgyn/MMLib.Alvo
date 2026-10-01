@@ -210,6 +210,9 @@ Deferred (not in this slice): `Position`, `cel/scope`, `cel/evaluate`.
 * **I4 — naming.** `ManagementExpressionCheck.Descriptor` is now `DescriptorJson` (wire `descriptorJson`), as
   `ManagementApplyRequest` has it. The debounce-supersede test is bounded at 5 s so it fails instead of hanging.
 
+Out of scope here: **apply has the same quadratic weakness** for a long `enum` `values` at Developer level; the check
+bounds arrays at 2,000 elements (`ExpressionSlotCheck`), apply does not.
+
 Follow-ups: a guided form for conditions; a shared `ExpressionFindings` fragment for the four inputs' markup; a
 stale verdict when the working copy moves under an unchanged source; accessibility polish; `hooks[point]` that is
 not an array should read as null; a better pin for the unchecked field default.
