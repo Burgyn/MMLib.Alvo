@@ -1,4 +1,4 @@
-﻿# F5 — expression check: the first slice of automation, hooks and host functions
+# F5 — expression check: the first slice of automation, hooks and host functions
 
 Status: design, 2026-10-01. Written autonomously: the maintainer asked for the work to proceed without
 check-ins, so the brainstorming approvals (design, spec) are **delegated, not given** — the gate that remains is

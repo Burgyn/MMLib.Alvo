@@ -1,4 +1,4 @@
-﻿# The Management API
+# The Management API
 
 The configuration surface: twelve HTTP routes over one service, `IAlvoManagement`, that read and change what a
 project **is** — its descriptor, its revision history, its resolved schema, what this build honours, and who
