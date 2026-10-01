@@ -104,9 +104,11 @@ public sealed class ExpressionCheckTests
             return Task.FromResult<ManagementExpressionVerdict?>(null);
         });
         await sut.SubmitAsync("k", "", (_, _) => throw new InvalidOperationException("no call for an empty source"));
-        await first;
+        await first.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
 
-        asked.ShouldBeFalse();
+        first.IsCompletedSuccessfully.ShouldBeTrue("the superseded submit ends by itself, it does not wait out the hour");
+        asked.ShouldBeFalse("it was superseded inside the debounce, so it never reached the check");
+        sut.Findings("k").ShouldBeEmpty();
     }
 
     [Fact]
