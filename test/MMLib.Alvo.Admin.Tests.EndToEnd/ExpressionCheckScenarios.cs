@@ -104,6 +104,28 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
         await ShouldKeepFocusAsync(session, "hook-mutate-value");
     }
 
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_computed_expression_naming_an_undeclared_field_is_flagged_and_the_flag_clears_when_it_is_fixed()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/work_orders");
+        await session.Page.GetByTestId("add-field").ClickAsync();
+        var sheet = session.Page.GetByTestId("field-sheet");
+        await sheet.GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync("double_price");
+        await sheet.GetByRole(AriaRole.Radio, new() { Name = "computed", Exact = true }).ClickAsync();
+        await sheet.GetByRole(AriaRole.Radio, new() { Name = "decimal", Exact = true }).ClickAsync();
+
+        await session.Page.FillAsync("#new-field-computed", "no_such_field * 2");
+        var finding = session.Page.GetByTestId("check-new-field-computed").First;
+        await finding.WaitForAsync(new() { Timeout = 3_000 });
+        (await finding.InnerTextAsync()).ShouldContain("no_such_field");
+        await ShouldKeepFocusAsync(session, "new-field-computed");
+
+        await session.Page.FillAsync("#new-field-computed", "quoted_price * quoted_price");
+        await finding.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 3_000 });
+        await ShouldKeepFocusAsync(session, "new-field-computed");
+    }
+
     /// <summary>What the pending bar says; a check stages nothing, so it must not move.</summary>
     private static async Task<string> PendingTextAsync(AdminSession session)
     {

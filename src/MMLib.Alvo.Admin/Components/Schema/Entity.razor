@@ -220,9 +220,11 @@
         @if (_tab == EntityTabs.First && _editorOpen)
         {
             <CascadingValue Value="_rollupSources">
-                <FieldEditor Entity="@EntityName" Targets="_entities" OnAdd="AddFieldAsync"
-                             Editing="@_editing" EditingJson="@EditedJson" OnClose="CloseEditor"
-                             Siblings="_fieldNames" Refused="_refused" />
+                <CascadingValue Value="Copy">
+                    <FieldEditor Entity="@EntityName" Targets="_entities" OnAdd="AddFieldAsync"
+                                 Editing="@_editing" EditingJson="@EditedJson" OnClose="CloseEditor"
+                                 Siblings="_fieldNames" Refused="_refused" />
+                </CascadingValue>
             </CascadingValue>
         }
     }

@@ -700,7 +700,7 @@ namespace MMLib.Alvo.Admin.Components.Schema
         public void Dispose() { }
         protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
     }
-    public class FieldEditor : Microsoft.AspNetCore.Components.ComponentBase
+    public class FieldEditor : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public FieldEditor() { }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -722,6 +722,7 @@ namespace MMLib.Alvo.Admin.Components.Schema
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<string> Targets { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
         protected override void OnParametersSet() { }
         public sealed class NewField : System.IEquatable<MMLib.Alvo.Admin.Components.Schema.FieldEditor.NewField>
         {

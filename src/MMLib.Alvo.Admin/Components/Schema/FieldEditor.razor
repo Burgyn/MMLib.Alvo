@@ -9,6 +9,9 @@
     Nothing here writes to the database. The field lands in the working copy and goes through the
     same dry run as every other change.
 *@
+@inject ManagementGateway Gateway
+@inject ILogger<FieldEditor> Logger
+@implements IDisposable
 @*
     The chrome belongs to <AlvoEditor>: the right-hand modal side sheet every multi-value edit uses (spec §3.1),
     which guards what was typed, submits on Enter and Ctrl/Cmd+Enter, and cannot submit twice. A field editor that
@@ -41,7 +44,7 @@
                 <MudTextField T="string" @ref="_nameField" Variant="Variant.Outlined" Immediate="true" id="new-field-name"
                               aria-describedby="new-field-name-hint" Placeholder="e.g. scheduled_for" autocomplete="off"
                               Class="a-mono"
-                              Value="_facets.Name" ValueChanged="name => _facets.Name = name ?? string.Empty" />
+                              Value="_facets.Name" ValueChanged="TypeName" />
             </ChildContent>
             <Hint>
                 @if (IsEditing && !string.Equals(_facets.Name, Editing, StringComparison.Ordinal))
@@ -82,7 +85,7 @@
             <Field Label="Type" LabelId="new-field-type">
                 <ChipGroup TValue="FieldType" Items="@(_facets.Kind == FieldKind.Computed ? _facets.ComputedTypesOffered : _types)"
                            Selected="[_facets.Type]" aria-labelledby="new-field-type"
-                           Label="Word" SelectedChanged="types => _facets.Type = types[0]" />
+                           Label="Word" SelectedChanged="types => ChooseType(types[0])" />
             </Field>
         }
 
@@ -245,8 +248,19 @@
                 <ChildContent>
                     <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" Lines="2" id="new-field-computed"
                                   Class="a-mono" spellcheck="false" Placeholder="e.g. unit_price * amount"
-                                  aria-describedby="new-field-computed-hint"
-                                  Value="_facets.Computed" ValueChanged="text => _facets.Computed = text ?? string.Empty" />
+                                  aria-describedby="@ComputedDescribedBy"
+                                  Value="_facets.Computed" ValueChanged="TypeComputed" />
+                    @foreach (var (finding, index) in _check.Findings(ComputedBox).Select((finding, index) => (finding, index)))
+                    {
+                        <p class="a-field__problem" id="@(index == 0 ? $"{ComputedBox}-check" : $"{ComputedBox}-check-{index}")" role="status"
+                           data-testid="@($"check-{ComputedBox}")" data-severity="@finding.Severity">
+                            @finding.Message
+                            @if (finding.FixSuggestion is { } fix)
+                            {
+                                <span class="a-field__fix">@fix</span>
+                            }
+                        </p>
+                    }
                 </ChildContent>
                 <Hint>
                     CEL over this row's own fields — and its rollups. No constants: the column is DDL, which carries no
