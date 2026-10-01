@@ -58,19 +58,30 @@ internal static class ExpressionSlotCheck
     private static Outcome Judge(
         IDescriptorValidator validator, string descriptorJson, IReadOnlyList<string> segments, string pointer, string source)
     {
-        var root = Parse(descriptorJson);
-        Splice(root, segments, pointer, source);
-        var json = root.ToJsonString();
-        if (validator is DescriptorValidator real)
+        try
         {
-            var (result, judged) = real.ValidateWithOutcome(json);
+            var root = Parse(descriptorJson);
+            Splice(root, segments, pointer, source);
+            var json = root.ToJsonString();
+            if (validator is DescriptorValidator real)
+            {
+                var (result, judged) = real.ValidateWithOutcome(json);
 
-            return new Outcome(result.Errors, judged);
+                return new Outcome(result.Errors, judged);
+            }
+
+            var findings = validator.Validate(json).Errors;
+
+            return new Outcome(findings, !findings.Any(f => JsonPointerPath.IsSchemaPath(f.Path)));
         }
-
-        var findings = validator.Validate(json).Errors;
-
-        return new Outcome(findings, !findings.Any(f => JsonPointerPath.IsSchemaPath(f.Path)));
+        catch (InvalidOperationException ex) when (ex.Message.Contains("UTF-16", StringComparison.Ordinal))
+        {
+            // Parse, serialise and the validator all throw this for half a surrogate pair: a request that cannot be
+            // answered (422), never a 500.
+            throw new ManagementRequestException(
+                "The 'descriptorJson' contains text that is not valid Unicode (a lone surrogate: half of a \\uD800-\\uDFFF pair). "
+                + "Send the working-copy descriptor exactly as the dashboard holds it, with each such escape completed or written as the character.");
+        }
     }
 
     private static bool IsError(DescriptorValidationError finding) => finding.Severity == DescriptorValidationSeverity.Error;

@@ -117,6 +117,11 @@ internal sealed class DescriptorValidator : IDescriptorValidator
 
         using (document)
         {
+            if (UnicodeError(document.RootElement) is { } unicode)
+            {
+                return (new DescriptorValidationResult([unicode]), false);
+            }
+
             var schemaErrors = SchemaErrors(document.RootElement);
             var errors = new List<DescriptorValidationError>(schemaErrors);
             errors.AddRange(SemanticErrors(document.RootElement));
@@ -128,6 +133,59 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             }
 
             return (new DescriptorValidationResult(errors), judged);
+        }
+    }
+
+    /// <summary>
+    /// The refusal for text no UTF-8 document can carry: a JSON escape for half a surrogate pair parses, then throws
+    /// from Corvus or <see cref="JsonElement.GetString"/> deep inside every pass (a 500 on every management route).
+    /// </summary>
+    /// <param name="root">The parsed descriptor.</param>
+    /// <returns>The finding, or <see langword="null"/> when every key and string reads as text.</returns>
+    private static DescriptorValidationError? UnicodeError(JsonElement root)
+    {
+        try
+        {
+            var pending = new Stack<JsonElement>([root]);
+            while (pending.Count > 0)
+            {
+                ReadText(pending.Pop(), pending);
+            }
+
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            return new DescriptorValidationError(
+                "/",
+                "The descriptor contains text that is not valid Unicode (a lone surrogate: half of a \\uD800-\\uDFFF pair).",
+                "Write the character itself, or complete the pair, in the key or value that holds the unpaired \\uD800-\\uDFFF escape.",
+                DescriptorValidationSeverity.Error);
+        }
+    }
+
+    private static void ReadText(JsonElement element, Stack<JsonElement> pending)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.String:
+                _ = element.GetString();
+                break;
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    _ = property.Name;
+                    pending.Push(property.Value);
+                }
+
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    pending.Push(item);
+                }
+
+                break;
         }
     }
 
@@ -189,11 +247,19 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             ? "#/" + jsonPath[2..].Replace('.', '/')
             : "#/";
 
-        return new DescriptorValidationError(
-            path,
-            "A value in the descriptor is outside what Alvo can hold" + (path == "#/" ? "." : $" (at '{path}')."),
-            "Use a smaller number or a shorter value there; integer facets such as maxLength, precision and scale must fit a 32-bit integer.",
-            DescriptorValidationSeverity.Error);
+        var where = path == "#/" ? "." : $" (at '{path}').";
+
+        return ex is JsonException
+            ? new DescriptorValidationError(
+                path,
+                "A value in the descriptor is outside what Alvo can hold" + where,
+                "Use a smaller number or a shorter value there; integer facets such as maxLength, precision and scale must fit a 32-bit integer.",
+                DescriptorValidationSeverity.Error)
+            : new DescriptorValidationError(
+                path,
+                "The descriptor could not be read into Alvo's model" + where,
+                $"Check the value named above ({ex.Message}); an apply reports every other problem it finds.",
+                DescriptorValidationSeverity.Error);
     }
 
     private static DescriptorValidationError Malformed(JsonException ex) =>

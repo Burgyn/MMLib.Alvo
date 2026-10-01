@@ -99,6 +99,33 @@ public sealed class ExpressionSlotCheckTests
         return descriptor;
     }
 
+    /// <summary>The five places a lone UTF-16 surrogate can hide, as descriptor text (the escape is the raw JSON text).</summary>
+    public static TheoryData<string> LoneSurrogateAt() => ["entity-key", "field-key", "role", "description", "extension"];
+
+    /// <summary>The descriptor JSON with a lone surrogate escape at <paramref name="where"/>.</summary>
+    private static string WithLoneSurrogate(string compactJson, string where) => where switch
+    {
+        "entity-key" => compactJson.Replace("\"entities\":{", "\"entities\":{\"\\ud800\":{\"fields\":{\"a\":{\"type\":\"string\"}}},", StringComparison.Ordinal),
+        "field-key" => compactJson.Replace("\"fields\":{", "\"fields\":{\"\\ud800\":{\"type\":\"string\"},", StringComparison.Ordinal),
+        "role" => compactJson.Replace("\"roles\":[", "\"roles\":[\"\\ud800\",", StringComparison.Ordinal),
+        "description" => compactJson.Replace("\"description\":\"", "\"description\":\"\\udc00", StringComparison.Ordinal),
+        _ => compactJson.Replace("\"entities\":{", "\"x-a\":\"\\ud800\",\"entities\":{", StringComparison.Ordinal),
+    };
+
+    [Theory]
+    [MemberData(nameof(LoneSurrogateAt))]
+    public void A_lone_surrogate_is_a_request_refusal_naming_unicode_not_an_exception(string where)
+    {
+        var descriptor = Descriptor();
+        descriptor["description"] = "";
+        var json = WithLoneSurrogate(descriptor.ToJsonString(), where);
+        json.ShouldContain("\\ud", Case.Insensitive, "the fixture really carries the escape");
+
+        var refusal = Should.Throw<ManagementRequestException>(() => ExpressionSlotCheck.Check(Validator(), json, ListRule, "true"));
+
+        refusal.Message.ShouldContain("not valid Unicode");
+    }
+
     [Fact]
     public void A_descriptor_without_a_schema_error_gets_no_not_judged_finding() =>
         Check(ListRule, "'amdin' in @user.roles").ShouldAllBe(f => !f.Message.Contains("not judged", StringComparison.Ordinal));

@@ -69,6 +69,21 @@ public class ManagementExpressionCheckTests
         verdict["findings"]!.AsArray().Single()!["message"]!.GetValue<string>().ShouldContain("not judged");
     }
 
+    [Theory]
+    [MemberData(nameof(LoneSurrogateInputs.Places), MemberType = typeof(LoneSurrogateInputs))]
+    public async Task A_lone_surrogate_is_never_a_500(string where)
+    {
+        await using var world = await ManagedFleet.StartAsync([_ops]);
+        var text = LoneSurrogateInputs.At(ReadFleetDescriptor().ToJsonString(), where);
+        text.ShouldContain("\\ud", Case.Insensitive, "the fixture really carries the escape");
+
+        using var response = await world.SendAsync(
+            HttpMethod.Post, $"{ManagedFleet.Routes}/cel/check", _ops,
+            body: new JsonObject { ["descriptorJson"] = text, ["path"] = ListRule, ["source"] = "true" });
+
+        (await Refusal(response)).ShouldContain("not valid Unicode");
+    }
+
     [Fact]
     public async Task A_missing_body_is_a_422_not_a_framework_400()
     {

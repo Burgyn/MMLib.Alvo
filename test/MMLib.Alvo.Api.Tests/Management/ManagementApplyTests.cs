@@ -175,6 +175,22 @@ public class ManagementApplyTests
         (await RevisionAsync(world)).ShouldBe(1);
     }
 
+    /// <summary>A lone surrogate is a structured refusal on the apply path, not a thrown parse error.</summary>
+    /// <param name="where">Which kind of text carries it.</param>
+    /// <returns>A task that completes when the dry run has answered.</returns>
+    [Theory]
+    [MemberData(nameof(LoneSurrogateInputs.Places), MemberType = typeof(LoneSurrogateInputs))]
+    public async Task A_dry_run_with_a_lone_surrogate_is_a_422_refusal_not_a_500(string where)
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+        var text = LoneSurrogateInputs.At(JsonNode.Parse(await CurrentAsync(world))!.ToJsonString(), where);
+
+        var response = await ApplyAsync(world, text, ifMatch: "\"1\"", query: "?dryRun=true");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await RevisionAsync(world)).ShouldBe(1);
+    }
+
     [Fact]
     public async Task A_destructive_apply_is_409_destructive_change_unless_it_was_asked_for()
     {
