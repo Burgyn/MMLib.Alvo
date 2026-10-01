@@ -13,7 +13,7 @@ internal static class JsonPointerPath
         if (string.IsNullOrEmpty(pointer) || pointer[0] != '/' || pointer.Contains("//", StringComparison.Ordinal) || pointer == "/")
         {
             throw new ManagementRequestException(
-                $"'{pointer}' is not a pointer to a descriptor node. Send an RFC 6901 pointer that starts with '/', "
+                $"'{Shorten(pointer)}' is not a pointer to a descriptor node. Send an RFC 6901 pointer that starts with '/', "
                 + "for example '/entities/orders/rules/list'.");
         }
 

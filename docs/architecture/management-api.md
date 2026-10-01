@@ -104,7 +104,9 @@ That is also the line that keeps it from growing: the day a finding needs stored
 
 **The size cap.** A viewer can post a whole descriptor on every keystroke, so `descriptor` is capped at
 1,000,000 characters (`MaxCheckedDescriptorChars`) and refused with `422` before it is parsed. The bike-workshop
-descriptor is 24 KB; the cap is a ceiling, not a target. `path` and `source` are not capped yet (a follow-up).
+descriptor is 24 KB; the cap is a ceiling, not a target. `source` is capped at 8,000 characters and `path` at 1,024, each refused `422` with a detail that names the cap and
+says what to send instead (otherwise a long `path` or `source` would void the descriptor cap through the ~30 MB
+body limit). A refusal that must quote the pointer quotes at most 120 characters of it.
 
 **A schema failure elsewhere is "not judged", not green.** The validator runs its rule, computed and owner passes
 only over a descriptor the schema accepts, so one schema error anywhere hides the slot's own errors. The check

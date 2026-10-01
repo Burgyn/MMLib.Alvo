@@ -84,7 +84,9 @@ others. An operator learns what is wrong with a rule after typing the whole chan
 * **Size.** A viewer can POST a whole descriptor on a hot path. `Descriptor` is capped at 1,000,000 characters
   (`MaxCheckedDescriptorChars`, refused 422 before it is parsed). The package ships no rate limiter (throttling is a
   host decision, see `AlvoManagementEndpointRouteBuilderExtensions`), so the cap and the measured cost are the whole
-  defence. `Path` and `Source` are not capped yet (follow-up).
+  defence. `Source` is capped at 8,000 characters and `Path` at 1,024 (`EnsureCheckable`; the detail names the cap and
+  says what to send instead), so no field can void the descriptor cap through the ~30 MB body limit. A refusal
+  echoes a caller's pointer cut to 120 characters.
 * **Position is deferred.** The validator collapses `CelCompilationError.Position` into a message; a visual
   underline needs it. v1 shows the message under the input; `Position` is an additive property added when the
   editor (slice B/E) needs a caret, not now.

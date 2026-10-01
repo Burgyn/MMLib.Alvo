@@ -168,6 +168,6 @@ internal static class ExpressionSlotCheck
         + "send the working-copy descriptor exactly as the dashboard holds it.");
 
     private static ManagementRequestException Absent(string pointer) => new(
-        $"'{pointer}' does not exist in the descriptor sent. The slot must already be in the descriptor — add the "
+        $"'{JsonPointerPath.Shorten(pointer)}' does not exist in the descriptor sent. The slot must already be in the descriptor — add the "
         + "rule or hook to the working copy first, then check the expression in it.");
 }

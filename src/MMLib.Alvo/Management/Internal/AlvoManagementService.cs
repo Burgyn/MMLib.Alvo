@@ -227,6 +227,12 @@ internal sealed partial class AlvoManagementService(
     /// <summary>The most descriptor text a check will parse: a viewer can call this on every keystroke.</summary>
     private const int MaxCheckedDescriptorChars = 1_000_000;
 
+    /// <summary>The longest expression a check takes: the schema's own ceiling is 2,000, and a viewer needs no more.</summary>
+    private const int MaxCheckedSourceChars = 8_000;
+
+    /// <summary>The longest slot pointer a check takes: real ones are under 150 characters.</summary>
+    private const int MaxCheckedPathChars = 1_024;
+
     private static void EnsureCheckable(ManagementExpressionCheck? request)
     {
         if (request is null || request.Descriptor is null || request.Path is null || request.Source is null)
@@ -236,11 +242,19 @@ internal sealed partial class AlvoManagementService(
                 + "expression in one descriptor, and a missing part would be answered as a pass.");
         }
 
-        if (request.Descriptor.Length > MaxCheckedDescriptorChars)
+        EnsureWithin("descriptor", request.Descriptor, MaxCheckedDescriptorChars,
+            "Send the project's own descriptor; a check is not an apply and takes no more than one.");
+        EnsureWithin("source", request.Source, MaxCheckedSourceChars,
+            "Send the one expression being edited; the schema refuses a rule source over 2,000 characters anyway.");
+        EnsureWithin("path", request.Path, MaxCheckedPathChars,
+            "Send the RFC 6901 pointer of one slot, for example '/entities/orders/rules/list'.");
+    }
+
+    private static void EnsureWithin(string name, string value, int cap, string instead)
+    {
+        if (value.Length > cap)
         {
-            throw new ManagementRequestException(
-                $"The 'descriptor' is over {MaxCheckedDescriptorChars:N0} characters. Send the project's own descriptor; "
-                + "a check is not an apply and takes no more than one.");
+            throw new ManagementRequestException($"The '{name}' is over {cap:N0} characters. {instead}");
         }
     }
 

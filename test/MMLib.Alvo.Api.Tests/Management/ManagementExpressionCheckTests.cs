@@ -81,6 +81,39 @@ public class ManagementExpressionCheckTests
     }
 
     [Fact]
+    public async Task A_source_over_the_cap_is_refused_naming_the_cap()
+    {
+        await using var world = await ManagedFleet.StartAsync([_ops]);
+
+        using var response = await Ask(world, ListRule, new string('a', 8001));
+
+        (await Refusal(response)).ShouldContain("8,000");
+    }
+
+    [Fact]
+    public async Task A_path_over_the_cap_is_refused_naming_the_cap()
+    {
+        await using var world = await ManagedFleet.StartAsync([_ops]);
+
+        using var response = await Ask(world, "/entities/" + new string('p', 1100), "true");
+
+        (await Refusal(response)).ShouldContain("1,024");
+    }
+
+    [Fact]
+    public async Task A_refusal_does_not_echo_a_long_path_back_whole()
+    {
+        await using var world = await ManagedFleet.StartAsync([_ops]);
+        var path = "/entities/" + new string('p', 900);
+
+        using var response = await Ask(world, path, "true");
+
+        var detail = await Refusal(response);
+        detail.ShouldNotContain(path);
+        detail.ShouldContain("…");
+    }
+
+    [Fact]
     public async Task A_finding_never_carries_stored_state_the_caller_did_not_send()
     {
         await using var world = await ManagedFleet.StartAsync([_ops]);
@@ -91,6 +124,13 @@ public class ManagementExpressionCheckTests
             .ContinueWith(t => t.Result.ReadJsonObjectAsync()).Unwrap();
 
         verdict["isValid"]!.GetValue<bool>().ShouldBeFalse("the role catalog is the one the caller sent, not the stored one");
+    }
+
+    private static async Task<string> Refusal(HttpResponseMessage response)
+    {
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+
+        return (await response.ReadJsonObjectAsync())["detail"]!.GetValue<string>();
     }
 
     private static Task<HttpResponseMessage> Ask(AlvoApiWorld world, string pointer, string source) =>
