@@ -126,6 +126,30 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
         await ShouldKeepFocusAsync(session, "new-field-computed");
     }
 
+    /// <summary>A field default is a literal, never an expression, so it is deliberately not checked (spec §4.2).</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_field_default_is_not_checked_even_when_it_is_written_as_an_expression()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/regions");
+        await session.Page.GetByTestId("add-field").ClickAsync();
+        var sheet = session.Page.GetByTestId("field-sheet");
+        await sheet.GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync("dispatch_note");
+
+        await session.Page.FillAsync("#new-field-default", """{"$cel": "no_such_field"}""");
+
+        /* The default box is only drawn for a field callers write, so the pipeline is proved live on the computed box,
+           which is checked; by the time its sentence is up, a check of the default (same debounce, same call) would be too. */
+        await sheet.GetByRole(AriaRole.Radio, new() { Name = "computed", Exact = true }).ClickAsync();
+        await sheet.GetByRole(AriaRole.Radio, new() { Name = "decimal", Exact = true }).ClickAsync();
+        await session.Page.FillAsync("#new-field-computed", "no_such_field * code");
+        await session.Page.GetByTestId("check-new-field-computed").First.WaitForAsync(new() { Timeout = 3_000 });
+
+        await sheet.GetByRole(AriaRole.Radio, new() { Name = "written by callers", Exact = true }).ClickAsync();
+        (await session.Page.InputValueAsync("#new-field-default")).ShouldBe("""{"$cel": "no_such_field"}""");
+        (await session.Page.Locator("[data-testid^='check-']").CountAsync()).ShouldBe(0, "no input of the form shows a check sentence, the default included");
+    }
+
     /// <summary>What the pending bar says; a check stages nothing, so it must not move.</summary>
     private static async Task<string> PendingTextAsync(AdminSession session)
     {
