@@ -20,6 +20,26 @@ public class DescriptorValidatorTests
     }
 
     /// <summary>
+    /// A facet the schema accepts but the typed parse cannot hold (a <c>maxLength</c> beyond <c>int</c>) is a finding
+    /// with a fix, never a thrown parse error — which the management routes would render as a 500 to a viewer.
+    /// </summary>
+    [Fact]
+    public void A_facet_the_typed_parse_cannot_hold_is_a_finding_not_an_exception()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "tasks": { "fields": { "title": { "type": "string", "maxLength": 3000000000 } } } } }
+        """;
+
+        var result = Should.NotThrow(() => _validator.Validate(json));
+
+        var refusal = result.Errors.ShouldHaveSingleItem();
+        refusal.Severity.ShouldBe(DescriptorValidationSeverity.Error);
+        refusal.Path.ShouldBe("#/entities/tasks/fields/title/maxLength");
+        refusal.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    /// <summary>
     /// A ref to an entity the descriptor does not declare is pointed at the ones it does, first: a model that named
     /// the target by the operator's word ("products") is steered to the existing entity ("parts") before it is told it
     /// could add one — which would otherwise duplicate what the project already has (RCA, spec §8.2).

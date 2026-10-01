@@ -43,6 +43,22 @@ public class ManagementExpressionCheckTests
     }
 
     [Fact]
+    public async Task A_facet_beyond_int_is_a_not_judged_finding_not_a_500()
+    {
+        await using var world = await ManagedFleet.StartAsync([_ops]);
+        var sent = ReadFleetDescriptor();
+        sent["entities"]!["vehicles"]!["fields"]!["nickname"] = new JsonObject { ["type"] = "string", ["maxLength"] = 3_000_000_000 };
+
+        using var response = await world.SendAsync(
+            HttpMethod.Post, $"{ManagedFleet.Routes}/cel/check", _ops, body: Body(sent, ListRule, "'dispatcher' in @user.roles"));
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var verdict = await response.ReadJsonObjectAsync();
+        verdict["isValid"]!.GetValue<bool>().ShouldBeFalse("nothing was judged, so nothing may pass");
+        verdict["findings"]!.AsArray().Single()!["message"]!.GetValue<string>().ShouldContain("not judged");
+    }
+
+    [Fact]
     public async Task A_missing_body_is_a_422_not_a_framework_400()
     {
         await using var world = await ManagedFleet.StartAsync([_ops]);

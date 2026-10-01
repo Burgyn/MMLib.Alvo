@@ -158,6 +158,23 @@ public class ManagementApplyTests
             1, "a dry run that appended would be an apply with a friendlier name");
     }
 
+    /// <summary>
+    /// A facet the schema accepts and the typed model cannot hold is a refusal with a fix, not a thrown parse error.
+    /// </summary>
+    /// <returns>A task that completes when the dry run has answered.</returns>
+    [Fact]
+    public async Task A_dry_run_with_a_facet_beyond_int_is_a_422_refusal_not_a_500()
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+        var descriptor = JsonNode.Parse(WithExtraField(await CurrentAsync(world)))!;
+        descriptor["entities"]!["vehicles"]!["fields"]!["nickname"]!["maxLength"] = 3_000_000_000;
+
+        var response = await ApplyAsync(world, descriptor.ToJsonString(), ifMatch: "\"1\"", query: "?dryRun=true");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await RevisionAsync(world)).ShouldBe(1);
+    }
+
     [Fact]
     public async Task A_destructive_apply_is_409_destructive_change_unless_it_was_asked_for()
     {

@@ -137,6 +137,12 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             // double-report the same field, and a mapping failure leaves nothing to compile rules against.
             return [];
         }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            // The schema accepted a value the typed model cannot hold (a maxLength beyond int, say): a finding the
+            // caller can fix, never an exception — every management route would render it as a 500.
+            return [Unrepresentable(ex)];
+        }
 
         var errors = PolicyCatalog.TryBuild(descriptor, schema, _compiler, out _, out var ruleErrors)
             ? []
@@ -158,6 +164,24 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             .Select(error => error.Path)
             .ToHashSet(StringComparer.Ordinal);
         return OwnerComparisonCheck.Warnings(descriptor, schema, _compiler).Where(warning => !refused.Contains(warning.Path));
+    }
+
+    /// <summary>
+    /// The refusal for a value the schema accepts and the typed model cannot hold. Its path is written in the schema
+    /// pass's own fragment form (<c>#/…</c>): it is a refusal of the same kind (the document is not a descriptor Alvo
+    /// can read) and, like a schema error, it stops the rule pass from judging anything.
+    /// </summary>
+    private static DescriptorValidationError Unrepresentable(Exception ex)
+    {
+        var path = ex is JsonException { Path: string jsonPath } && jsonPath.StartsWith("$.", StringComparison.Ordinal)
+            ? "#/" + jsonPath[2..].Replace('.', '/')
+            : "#/";
+
+        return new DescriptorValidationError(
+            path,
+            "A value in the descriptor is outside what Alvo can hold" + (path == "#/" ? "." : $" (at '{path}')."),
+            "Use a smaller number or a shorter value there; integer facets such as maxLength, precision and scale must fit a 32-bit integer.",
+            DescriptorValidationSeverity.Error);
     }
 
     private static DescriptorValidationError Malformed(JsonException ex) =>
