@@ -35,6 +35,43 @@ public sealed class GalleryTests
         _gallery.ShouldContain("a-refused");
     }
 
+    /// <summary>
+    /// Every design-system primitive is drawn here, in the markup it renders.
+    /// </summary>
+    /// <remarks>
+    /// One class per primitive, the one only that primitive emits — so a component added to
+    /// <c>Components/DesignSystem</c> without its drawing, or a drawing left behind when a modifier is
+    /// renamed, fails here rather than in review.
+    /// </remarks>
+    [Theory]
+    [InlineData("a-section--bar")]
+    [InlineData("a-panel--padded")]
+    [InlineData("a-listrow--action")]
+    [InlineData("a-hint")]
+    [InlineData("role=\"radiogroup\"")]
+    [InlineData("a-notyet-panel__consequence")]
+    [InlineData("a-refused__reason")]
+    [InlineData("a-spacer")]
+    public void The_gallery_draws_each_primitive(string marker)
+        => _gallery.ShouldContain(marker);
+
+    /// <summary>
+    /// The gallery documents the wrappers the pattern language is built on, by name, with the rule each carries.
+    /// </summary>
+    /// <remarks>
+    /// It cannot draw them: the gallery links alvo.css from the repository, and the library's stylesheet is in a
+    /// NuGet package, not the repository (plan V1). So it names each wrapper and the §3 rule it implements, which is
+    /// what a reader deciding which component to reach for needs.
+    /// </remarks>
+    [Theory]
+    [InlineData("AlvoEditor")]
+    [InlineData("AlvoConfirm")]
+    [InlineData("AlvoAlert")]
+    [InlineData("AlvoButton")]
+    [InlineData("AlvoTheme")]
+    public void The_gallery_names_each_wrapper(string wrapper)
+        => _gallery.ShouldContain(wrapper);
+
     [Fact]
     public void The_gallery_shows_the_mobile_substitute_for_a_grid_row()
         => _gallery.ShouldContain("a-row-card");

@@ -4,4 +4,14 @@
     <ProjectReference Include="../../src/MMLib.Alvo.Admin/MMLib.Alvo.Admin.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="NSubstitute" />
+  </ItemGroup>
+
+  <!-- The metadata reader both granted suites hold D45's grant with (InternalGrantArchitectureTests), shared with
+       MMLib.Alvo.Ai.Tests. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InternalMemberReferences.cs" Link="_shared/InternalMemberReferences.cs" />
+  </ItemGroup>
+
 </Project>

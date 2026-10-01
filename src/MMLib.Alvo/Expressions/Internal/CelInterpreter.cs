@@ -332,10 +332,21 @@ internal static class CelInterpreter
     {
         CelBinaryOperator.And or CelBinaryOperator.Or => EvaluateLogical(binary, state),
         CelBinaryOperator.In => EvaluateIn(binary, state),
-        CelBinaryOperator.Add or CelBinaryOperator.Subtract or CelBinaryOperator.Multiply or CelBinaryOperator.Divide =>
+        CelBinaryOperator.Add => EvaluateAdd(Evaluate(binary.Left, state), Evaluate(binary.Right, state)),
+        CelBinaryOperator.Subtract or CelBinaryOperator.Multiply or CelBinaryOperator.Divide =>
             EvaluateArithmetic(binary.Operator, Evaluate(binary.Left, state), Evaluate(binary.Right, state)),
         _ => EvaluateComparison(binary, state),
     };
+
+    /// <summary>
+    /// CEL's <c>+</c>: two strings concatenate, anything else is arithmetic. A null operand yields
+    /// <see langword="null"/> either way, which is what SQL's <c>||</c> answers too — unreachable for a
+    /// concatenation the compiler admitted, since it refuses an operand that can be null.
+    /// </summary>
+    private static object? EvaluateAdd(object? left, object? right) =>
+        left is string leftText && right is string rightText
+            ? string.Concat(leftText, rightText)
+            : EvaluateArithmetic(CelBinaryOperator.Add, left, right);
 
     private static bool EvaluateLogical(CelBinary binary, in EvalState state)
     {

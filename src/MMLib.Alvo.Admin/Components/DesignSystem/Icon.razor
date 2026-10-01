@@ -1,0 +1,19 @@
+﻿@*
+    One icon, drawn from `Icons` path data.
+
+    `aria-hidden`, always: every icon in this dashboard sits beside its own label, so a screen
+    reader that announced it would read the name twice.
+*@
+<svg viewBox="0 0 20 20" width="@Size" height="@Size" fill="none" stroke="currentColor"
+     stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+     class="a-icon">@((MarkupString)Path)</svg>
+
+@code {
+    /// <summary>The path data, from <see cref="Icons" />.</summary>
+    [Parameter, EditorRequired]
+    public string Path { get; set; } = string.Empty;
+
+    /// <summary>The edge length in pixels.</summary>
+    [Parameter]
+    public int Size { get; set; } = 16;
+}

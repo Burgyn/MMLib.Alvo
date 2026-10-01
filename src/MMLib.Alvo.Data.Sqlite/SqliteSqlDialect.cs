@@ -97,12 +97,42 @@ public sealed class SqliteSqlDialect : IAlvoSqlDialect
     /// outcome rather than left to connection disposal, because a pooled connection handed back with foreign
     /// keys off would silently stop enforcing them for whatever ran next.
     /// </para>
+    /// <para>
+    /// <b><c>Verify</c> is what makes the suspension safe to commit.</b> With enforcement off, a rebuild that adds or
+    /// retargets a reference over values naming no parent would commit the orphans silently; the check runs inside
+    /// the transaction, and the correlated <c>pragma_foreign_key_list</c> join names the referencing column. It runs
+    /// <c>foreign_key_check(table)</c> per table in scope — the touched tables that still exist, and every table
+    /// referencing one of them — or, when the plan names no table (<c>@touched</c> is <c>NULL</c>), every table.
+    /// </para>
     /// </remarks>
     public MigrationBatchFraming MigrationFraming { get; } = new()
     {
         Before = ["PRAGMA foreign_keys = 0"],
         After = ["PRAGMA foreign_keys = 1"],
+        Verify = """
+            WITH touched(name) AS (SELECT value FROM json_each(@touched)),
+            scope(name) AS (
+                SELECT m.name FROM sqlite_schema AS m
+                WHERE m.type = 'table' AND (@touched IS NULL OR m.name IN (SELECT name FROM touched))
+                UNION
+                SELECT m.name FROM sqlite_schema AS m JOIN pragma_foreign_key_list(m.name) AS f
+                WHERE m.type = 'table' AND f."table" IN (SELECT name FROM touched))
+            SELECT k."table", k.rowid, k.parent, l."from"
+            FROM scope AS s
+            JOIN pragma_foreign_key_check(s.name) AS k
+            JOIN pragma_foreign_key_list(k."table") AS l ON l.id = k.fkid
+            """,
     };
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// <c>ALTER TABLE … ADD COLUMN … STORED</c> is refused on a table holding a row (<c>cannot add a STORED
+    /// column</c>) — SQLite's documented limit on <c>ADD COLUMN</c>, which accepts only <c>VIRTUAL</c> there — and
+    /// the rebuild this asks for runs under <see cref="MigrationFraming"/>, which is what keeps the rebuilt table's
+    /// cascading children. Implemented explicitly: it is the migrator's question, not part of this type's own
+    /// surface.
+    /// </remarks>
+    bool IAlvoSqlDialect.GeneratedColumnAddRequiresTableRebuild => true;
 
     /// <summary><c>SQLITE_CONSTRAINT_UNIQUE</c> (2067): a <c>UNIQUE</c> index refused the row.</summary>
     private const int ConstraintUnique = 2067;

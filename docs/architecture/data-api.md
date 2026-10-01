@@ -1346,7 +1346,13 @@ never warned — which is what ties it to #146's ordering.
 `entity.realtime` is unhonoured too and is **deliberately not in that warning**: the schema declares it per
 entity with a default of `true`, so it is unhonoured for *every* entity of *every* descriptor. Warning only
 on an explicit `realtime: true` would stay silent for the entities equally affected; warning on all of them
-would fire on every descriptor ever applied. Recorded on **#38**.
+would fire on every descriptor ever applied. Recorded on **#38**. It is, however, **reported**: since
+§8d item 27 of `docs/todo-admin.md`, `GET …/capabilities` lists `entity.realtime` under `warned` (from
+`UnhonouredSubsystems.ReportedOnly`), so the dashboard prints the build's own sentence while the apply stays
+quiet — the one deliberate split between the capability report and the apply warning, recorded in
+`CapabilityReport`. Beside it, two keys inside honoured blocks are warned at apply as qualified slots
+(`UnhonouredSubsystems.WithinBlocks`): `entity.storage` for any `storage: dynamic` entity, which the mapper
+drops (F7, #41), and `auth.providers` for any provider other than `local` (#36).
 
 ### Declaring a framework-managed column is refused, and it costs one capability
 

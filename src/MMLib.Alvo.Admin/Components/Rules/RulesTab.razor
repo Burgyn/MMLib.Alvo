@@ -1,0 +1,181 @@
+﻿@*
+    The five operations, and the CEL each is guarded by.
+
+    What this screen deliberately does not do is evaluate anything. The CEL is shown as source; the
+    question "would this caller get rows" is answered on the Rules screen, by the engine, and even
+    there only as a predicate — never as a verdict about a stored row (§2.2.1).
+*@
+<SectionHead Title="Who may do what">
+    <Subtitle>
+        Checked inside the same transaction as the query, against the caller's id, roles and tenant
+        and this record's own fields — nothing else.
+    </Subtitle>
+</SectionHead>
+
+@if (Rules.Count == 0 && !Editable)
+{
+    <EmptyState Title="This entity has no rules"
+                Body="Default-deny: with no rule for an operation, nobody reaches it through the Data API — not an empty page, a refusal.">
+        <AlvoButton Small="true" Href="@AdminPaths.Rules(Entity)">Open Rules</AlvoButton>
+    </EmptyState>
+}
+else if (!Editable)
+{
+    @foreach (var rule in Rules)
+    {
+        <ListRow class="a-listrow--roomy a-listrow--stacked">
+            <div class="a-row">
+                <span class="a-badge a-badge--accent">@rule.Key</span>
+                <code class="a-ident">@Route(rule.Key)</code>
+            </div>
+            <pre class="a-code a-then"><code>@rule.Value</code></pre>
+        </ListRow>
+    }
+
+    @if (Missing.Count > 0)
+    {
+        <p class="a-note">
+            No rule for @string.Join(", ", Missing) — those operations are refused for everyone,
+            which is default-deny working rather than a gap.
+        </p>
+    }
+}
+else
+{
+    @* The editor. One box per operation; an empty box is no rule, which is a refusal for everyone
+       rather than an omission — so the placeholder says that rather than being left blank. The CEL
+       is not parsed here: the apply compiles it against the entity's own columns and refuses a
+       reference to a column that does not exist, which is a fail-fast the client cannot reproduce
+       without a second compiler.
+
+       Nothing is staged when the box loses focus (inventory defect #7: tabbing away staged a change
+       nobody meant). A rule is staged by its Save or by Ctrl/Cmd+Enter in the box, and stays marked
+       unsaved until then; Escape puts back what the working copy declares. Enter is a newline. Each box is its
+       own form, so the chord is alvo.js's one (data-alvo-chord-submit), as in every multi-line box, and the
+       hint under it says all three keys. *@
+    @foreach (var operation in _operations)
+    {
+        var declared = Declared(operation);
+        <ListRow class="a-listrow--roomy a-listrow--stacked">
+            <form class="a-stack a-stack--gap-3" data-alvo-chord-submit novalidate @onsubmit="() => SaveAsync(operation)">
+                @*
+                    The operation and its route are the box's name, above it as every field's is (spec §3.8). The unsaved
+                    mark sits in the same row but out of the name, so the box is not renamed under a screen reader
+                    while it is typed into; the box is described by it instead.
+                *@
+                <Field For="@($"rule-{operation}")">
+                    <LabelContent>
+                        <span class="a-row">
+                            <span class="@($"a-badge {(declared is { Length: > 0 } ? "a-badge--accent" : string.Empty)}")">@operation</span>
+                            <code class="a-ident">@Route(operation)</code>
+                            @if (Drafts.IsDirty(operation, declared))
+                            {
+                                <span class="a-badge a-badge--warn" id="@($"rule-{operation}-dirty")" aria-hidden="true"
+                                      data-testid="@($"rule-dirty-{operation}")">unsaved</span>
+                            }
+                        </span>
+                    </LabelContent>
+                    <ChildContent>
+                        <MudTextField T="string" Variant="Variant.Outlined" Lines="2" Immediate="true" id="@($"rule-{operation}")"
+                                      Class="a-mono" spellcheck="false" Placeholder="@EmptyHint"
+                                      aria-describedby="@DescribedBy(operation, declared)"
+                                      Value="@Drafts.Text(operation, declared)" ValueChanged="text => Drafts.Set(operation, text ?? string.Empty)"
+                                      OnKeyDown="args => RevertOnEscape(operation, args)" />
+                    </ChildContent>
+                    <Hint>@RuleHint</Hint>
+                </Field>
+                <div class="a-row">
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" Submit="true" data-testid="@($"rule-save-{operation}")"
+                                Disabled="@(!Drafts.IsDirty(operation, declared))">Save rule</AlvoButton>
+                </div>
+            </form>
+        </ListRow>
+    }
+
+    <p class="a-note">
+        The rule is checked inside the same transaction as the query and may read the caller's id,
+        their roles, their tenant and this record's own fields — nothing else. It goes through the
+        same dry run as every other change.
+    </p>
+}
+
+@code {
+    private static readonly string[] _operations = ["list", "get", "create", "update", "delete"];
+
+    /// <summary>The rules, as the descriptor declares them.</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<KeyValuePair<string, string>> Rules { get; set; } = [];
+
+    /// <summary>The entity, for the route shapes and the link.</summary>
+    [Parameter, EditorRequired]
+    public string Entity { get; set; } = string.Empty;
+
+    /// <summary>Whether the rules may be edited into the working copy here.</summary>
+    /// <remarks>
+    /// The Rules screen shows them beside the simulator and is read-only; the entity's own tab is
+    /// where they are written. One writer, so there is no question of which screen's version wins.
+    /// </remarks>
+    [Parameter]
+    public bool Editable { get; set; }
+
+    /// <summary>Raised with the operation and its new CEL, when <see cref="Editable"/>.</summary>
+    [Parameter]
+    public EventCallback<(string Operation, string Cel)> OnChanged { get; set; }
+
+    private string? Declared(string operation) => Rules
+        .FirstOrDefault(rule => string.Equals(rule.Key, operation, StringComparison.Ordinal)).Value;
+
+    private const string EmptyHint = "No rule — refused for everyone. Try: 'dispatcher' in @user.roles";
+
+    private readonly RuleDrafts _own = new();
+
+    /// <summary>
+    /// The entity screen's drafts, cascaded so they outlive this tab's body; a tab of its own otherwise.
+    /// </summary>
+    [CascadingParameter]
+    private RuleDrafts? Cascaded { get; set; }
+
+    private RuleDrafts Drafts => Cascaded ?? _own;
+
+    /// <summary>
+    /// Escape puts back what the working copy declares. Ctrl/Cmd+Enter is not handled here: it is alvo.js's chord on
+    /// the box's form, the one submit path every multi-line box has.
+    /// </summary>
+    private void RevertOnEscape(string operation, KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape")
+        {
+            Drafts.Revert(operation);
+        }
+    }
+
+    /// <summary>Every key a rule box answers, said under it (final review M5, T-8).</summary>
+    private static readonly string RuleHint = $"{ChordHint.Of("saves the rule")} Escape puts back the saved rule.";
+
+    /// <summary>The box is described by its hint, and by its unsaved mark while it has one.</summary>
+    private string DescribedBy(string operation, string? declared)
+        => Drafts.IsDirty(operation, declared) ? $"rule-{operation}-hint rule-{operation}-dirty" : $"rule-{operation}-hint";
+
+    /// <summary>Stages what was typed, only when it differs from what the descriptor says.</summary>
+    private Task SaveAsync(string operation)
+    {
+        var declared = Declared(operation);
+        return Drafts.IsDirty(operation, declared)
+            ? OnChanged.InvokeAsync((operation, Drafts.Take(operation, declared)))
+            : Task.CompletedTask;
+    }
+
+    private List<string> Missing => _operations
+        .Where(operation => !Rules.Any(rule => string.Equals(rule.Key, operation, StringComparison.Ordinal)))
+        .ToList();
+
+    private string Route(string operation) => operation switch
+    {
+        "list" => $"GET /api/{Entity}",
+        "get" => $"GET /api/{Entity}/{{id}}",
+        "create" => $"POST /api/{Entity}",
+        "update" => $"PATCH /api/{Entity}/{{id}}",
+        "delete" => $"DELETE /api/{Entity}/{{id}}",
+        _ => string.Empty,
+    };
+}

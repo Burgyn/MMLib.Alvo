@@ -569,7 +569,14 @@ public class EmbeddedSampleTests
     /// <param name="databasePath">The database to remove.</param>
     private static void TryDelete(string databasePath)
     {
-        SqliteConnection.ClearAllPools();
+        // This file's pool only, reached through the exact string both hosts were given: clearing every pool
+        // in the process disposes a connection the other, concurrently running world is in the middle of
+        // opening.
+        using (var connection = new SqliteConnection($"Data Source={databasePath}"))
+        {
+            SqliteConnection.ClearPool(connection);
+        }
+
         try
         {
             File.Delete(databasePath);

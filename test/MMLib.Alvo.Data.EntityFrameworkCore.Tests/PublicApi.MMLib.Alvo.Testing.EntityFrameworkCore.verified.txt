@@ -6,6 +6,7 @@ namespace MMLib.Alvo.Testing.Data
     {
         protected AlvoSqlDialectContractTests() { }
         public void A_column_reference_is_bare() { }
+        public void A_concatenation_keeps_both_operands_in_their_order() { }
         public void A_generated_column_definition_names_the_column_and_the_expression_it_was_handed() { }
         [Xunit.InlineData(new object?[]?[] {
                 " ",
@@ -74,6 +75,10 @@ namespace MMLib.Alvo.Testing.Data
         [Xunit.InlineData(null)]
         public void A_table_source_is_a_from_clause_body_and_nothing_else(MMLib.Alvo.Data.EntityFrameworkCore.PreImageMutation? lockedPreImageFor) { }
         public void A_table_source_is_a_function_of_its_inputs_alone() { }
+        [Xunit.MemberData("HostileText", new object[0])]
+        public void A_text_literal_is_a_function_of_its_input_alone(string value) { }
+        [Xunit.MemberData("HostileText", new object[0])]
+        public void A_text_literal_is_one_token_nothing_inside_it_can_close(string value) { }
         public void An_exception_this_engine_did_not_raise_is_not_decoded_as_a_constraint_violation() { }
         public void An_identifier_that_would_not_strictly_need_delimiting_is_delimited_anyway() { }
         [Xunit.MemberData("CelValueTypes", new object[0])]
@@ -87,6 +92,7 @@ namespace MMLib.Alvo.Testing.Data
         public void Every_cel_value_type_is_answered_rather_than_refused(MMLib.Alvo.Expressions.CelValueType type) { }
         public void Two_different_names_never_render_to_the_same_identifier() { }
         public static Xunit.TheoryData<MMLib.Alvo.Expressions.CelValueType> CelValueTypes() { }
+        public static Xunit.TheoryData<string> HostileText() { }
     }
     public sealed class TSqlSqlDialect : MMLib.Alvo.Data.EntityFrameworkCore.IAlvoSqlDialect
     {

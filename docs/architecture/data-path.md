@@ -934,11 +934,20 @@ exact in binary floating point, so it asserts what the two engines *do* agree on
 Three things about `computed` are refusals rather than behaviour, each because the alternative is a stored
 number that looks like data:
 
-- **A constant in the expression is refused, naming it.** The scalar renderer routes every literal through its
-  parameter bag and DDL has no bind-parameter form, so `unit_price * 1.2` cannot become a column definition.
-  Inlining it would put decimal separators and string escaping — engine-specific, both — into DDL that is then
-  persisted. Field-only arithmetic covers every example the sources give, and `baas-analyza:1358` deliberately
-  puts a contextual constant (a VAT rate) in a before-hook instead.
+- **A constant in the expression is refused, naming it — except text joined into a string.** The scalar renderer
+  routes every literal through its parameter bag and DDL has no bind-parameter form, so `unit_price * 1.2` cannot
+  become a column definition. Field-only arithmetic covers every example the sources give, and `baas-analyza:1358`
+  deliberately puts a contextual constant (a VAT rate) in a before-hook instead. **The one exception** (F5
+  assistant-reliability design, ruling 2) is a text constant in a value position — the `' '` of
+  `first_name + ' ' + last_name` — which the dialect writes inline through `IFieldSqlRenderer.RenderStringLiteral`,
+  the one function per engine that quotes one: the standard literal on SQLite (`AlvoSqlStringLiteral`), an escape
+  string `E'…'` on PostgreSQL so the reading does not depend on `standard_conforming_strings`. The port's default
+  answers `null`, so a dialect that has not decided its quoting binds the constant and is refused. A property test
+  per engine reads generated literals back through the engine itself. The validator also refuses a text result into
+  a non-text field, a join longer than a declared `maxLength` (PostgreSQL's `varchar(n)` refuses the write where
+  SQLite stores it), an expression that reads no field, a computed field reading another computed field
+  (PostgreSQL refuses that generation expression, SQLite accepts it), and — the null rule — an operand that can be
+  null. `RenderStringConcatenation` defaults to throwing, so a dialect must declare its operator.
 - **An engine whose dialect cannot express a stored generated column is refused by name**, rather than the
   field silently becoming plain.
 - **A payload naming a computed field is refused**, rather than dropped. The runtime model marks the property

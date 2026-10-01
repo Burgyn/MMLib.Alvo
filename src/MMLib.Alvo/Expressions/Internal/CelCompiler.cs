@@ -1,14 +1,24 @@
 ﻿using MMLib.Alvo.Schema;
 
+using System.Globalization;
+
 namespace MMLib.Alvo.Expressions.Internal;
 
 /// <summary>
 /// The single fail-fast boundary between authored CEL source and a <see cref="CompiledExpression"/>
 /// a renderer can trust: tokenize/parse, cap the tree's depth, type-check and profile-filter, then
 /// verify the whole expression's result type matches what the profile requires. No exception ever
-/// escapes <see cref="Compile"/> for any source string — every rejection, from a syntax error to a
-/// too-deep tree, comes back as a failed <see cref="CelCompilationResult"/>.
+/// escapes <see cref="Compile(string, CelProfile, EntitySchema)"/> for any source string — every rejection, from a
+/// syntax error to a too-deep tree, comes back as a failed <see cref="CelCompilationResult"/>.
 /// </summary>
+/// <remarks>
+/// <b>A quoted predicate (D42): the refusal names the quotes.</b> The accepted set is untouched — the check runs only
+/// on a source already refused for its result type, and only ever rewrites that refusal's text. The unwrapped content
+/// is compiled once more with the check off (<c>detectQuoted: false</c>), so the inner compile cannot recurse: at most
+/// two compilations per source, by construction. Every result-type refusal also echoes its source, cut at
+/// <see cref="EchoLength"/> characters on a whole character, in backticks, with every character that could break a
+/// line or reorder what a reader sees turned into a space.
+/// </remarks>
 internal sealed class CelCompiler : ICelCompiler
 {
     /// <summary>
@@ -21,12 +31,23 @@ internal sealed class CelCompiler : ICelCompiler
     /// </summary>
     internal const int MaxTreeDepth = 128;
 
+    /// <summary>How much of a refused source a result-type refusal echoes; a longer one is cut here, plus <c>…</c>.</summary>
+    internal const int EchoLength = 120;
+
+    /// <summary>How the fix for a predicate wrapped whole in quotes begins; the unwrapped content follows (D42).</summary>
+    internal const string QuotedFixLead = "Remove the outer quotes; the value is the expression itself: ";
+
     /// <inheritdoc/>
     public CelCompilationResult Compile(string source, CelProfile profile, EntitySchema entity)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(entity);
 
+        return Compile(source, profile, entity, detectQuoted: true);
+    }
+
+    private static CelCompilationResult Compile(string source, CelProfile profile, EntitySchema entity, bool detectQuoted)
+    {
         var parsed = TryParse(source, out var syntaxError);
         if (parsed is null)
         {
@@ -39,7 +60,7 @@ internal sealed class CelCompiler : ICelCompiler
             return CelCompilationResult.Failure(depthError);
         }
 
-        return CheckAndAssemble(source, profile, entity, parsed);
+        return CheckAndAssemble(new Authored(source, profile, entity, parsed, detectQuoted));
     }
 
     private static CelNode? TryParse(string source, out CelCompilationError? syntaxError)
@@ -56,32 +77,40 @@ internal sealed class CelCompiler : ICelCompiler
         }
     }
 
-    private static CelCompilationResult CheckAndAssemble(string source, CelProfile profile, EntitySchema entity, CelNode parsed)
+    private static CelCompilationResult CheckAndAssemble(Authored authored)
     {
-        var (root, resultType, position, errors) = CelTypeChecker.Check(parsed, source, entity, profile);
-        var allErrors = AppendResultTypeError(errors, profile, resultType, position);
+        var (root, resultType, position, errors) =
+            CelTypeChecker.Check(authored.Parsed, authored.Source, authored.Entity, authored.Profile);
+        var allErrors = AppendResultTypeError(errors, authored, resultType, position);
 
         if (allErrors.Count > 0)
         {
             return CelCompilationResult.Failure([.. allErrors]);
         }
 
-        return CelCompilationResult.Success(new CompiledExpression(root, profile, resultType, source, entity));
+        return CelCompilationResult.Success(
+            new CompiledExpression(root, authored.Profile, resultType, authored.Source, authored.Entity));
     }
 
     private static List<CelCompilationError> AppendResultTypeError(
-        IReadOnlyList<CelCompilationError> errors, CelProfile profile, CelValueType resultType, int position)
+        IReadOnlyList<CelCompilationError> errors, Authored authored, CelValueType resultType, int position)
     {
-        var resultTypeError = ValidateResultType(profile, resultType, position);
+        var resultTypeError = ValidateResultType(authored, resultType, position);
         return resultTypeError is null ? [.. errors] : [.. errors, resultTypeError];
     }
 
-    private static CelCompilationError? ValidateResultType(CelProfile profile, CelValueType resultType, int position)
+    private static CelCompilationError? ValidateResultType(Authored authored, CelValueType resultType, int position) =>
+        ValidateValueResult(authored, resultType, position) ?? ValidatePredicateResult(authored, resultType, position);
+
+    /// <summary>The Computed and Mutate refusals: each keeps its first sentence byte for byte, then echoes the source.</summary>
+    private static CelCompilationError? ValidateValueResult(Authored authored, CelValueType resultType, int position)
     {
+        var profile = authored.Profile;
         if (profile == CelProfile.Computed && resultType == CelValueType.Bool)
         {
             return new CelCompilationError(
-                "A computed-field expression must evaluate to a non-boolean scalar; a bare boolean expression cannot be a computed column's value.",
+                "A computed-field expression must evaluate to a non-boolean scalar; a bare boolean expression cannot be a computed column's value."
+                + EchoSentence(authored.Source),
                 "Wrap the condition in a ternary, e.g. condition ? whenTrue : whenFalse.",
                 position);
         }
@@ -89,7 +118,8 @@ internal sealed class CelCompiler : ICelCompiler
         if (profile == CelProfile.Computed && !IsScalar(resultType))
         {
             return new CelCompilationError(
-                $"A computed-field expression must evaluate to a non-boolean scalar; {resultType} is not a scalar value a database column can hold.",
+                $"A computed-field expression must evaluate to a non-boolean scalar; {resultType} is not a scalar value a database column can hold."
+                + EchoSentence(authored.Source),
                 "Compare, extract, or convert to a scalar (string/number/date/uuid) before assigning it as the computed value.",
                 position);
         }
@@ -98,21 +128,98 @@ internal sealed class CelCompiler : ICelCompiler
         {
             return new CelCompilationError(
                 $"A {CelProfile.Mutate} expression must evaluate to a value a field can hold — a scalar or a "
-                + $"boolean; {resultType} is not one.",
+                + $"boolean; {resultType} is not one." + EchoSentence(authored.Source),
                 "Fold, compare or convert to a scalar (string/number/date/uuid) or a boolean before assigning it "
                 + "as the mutate value.",
                 position);
         }
 
-        if (IsPredicateProfile(profile) && resultType != CelValueType.Bool)
+        return null;
+    }
+
+    /// <summary>
+    /// The predicate refusal. Its first sentence is kept byte for byte; a string literal whose content is itself a
+    /// predicate gets a fix that names the outer quotes, and anything else keeps the generic one.
+    /// </summary>
+    private static CelCompilationError? ValidatePredicateResult(Authored authored, CelValueType resultType, int position)
+    {
+        if (!IsPredicateProfile(authored.Profile) || resultType == CelValueType.Bool)
         {
-            return new CelCompilationError(
-                $"A {profile} expression must evaluate to a boolean; this expression evaluates to {resultType}.",
-                "Add a comparison, e.g. field == value, so the expression yields true/false.",
-                position);
+            return null;
         }
 
-        return null;
+        var quoted = QuotedPredicate(authored);
+        return new CelCompilationError(
+            $"A {authored.Profile} expression must evaluate to a boolean; this expression evaluates to {resultType}."
+            + (quoted is null ? EchoSentence(authored.Source) : $" The whole expression is one quoted string: `{Echo(authored.Source)}`."),
+            quoted is null
+                ? "Add a comparison, e.g. field == value, so the expression yields true/false."
+                : QuotedFixLead + Echo(quoted),
+            position);
+    }
+
+    /// <summary>
+    /// The content of a string literal that is itself a predicate, or <see langword="null"/>. Compiled once, with this
+    /// check off, so nesting cannot recurse: at most two compilations per source, and only for a source already refused.
+    /// </summary>
+    /// <remarks>
+    /// Success under a predicate profile already implies a boolean result, because the branch that calls this refuses
+    /// anything else. The inner call is the same no-throw path as <see cref="Compile(string, CelProfile, EntitySchema)"/>.
+    /// </remarks>
+    private static string? QuotedPredicate(Authored authored) =>
+        authored.DetectQuoted
+        && authored.Parsed is CelLiteral { Type: CelValueType.String, Value: string content }
+        && Compile(content, authored.Profile, authored.Entity, detectQuoted: false).IsSuccess
+            ? content
+            : null;
+
+    private static string EchoSentence(string source) => $" The expression: `{Echo(source)}`.";
+
+    /// <summary>
+    /// The source as a refusal quotes it: every character that could break a line or reorder the text becomes a space,
+    /// so the refusal stays one line that reads as written, and a source longer than <see cref="EchoLength"/> is cut
+    /// there, plus <c>…</c> — never between the halves of a surrogate pair.
+    /// </summary>
+    private static string Echo(string source)
+    {
+        var length = source.Length <= EchoLength ? source.Length : EchoLength;
+        if (length < source.Length && char.IsHighSurrogate(source[length - 1]))
+        {
+            length--;
+        }
+
+        var echoed = string.Create(length, source, static (span, text) =>
+        {
+            for (var index = 0; index < span.Length; index++)
+            {
+                span[index] = IsUnsafeToEcho(text, index) ? ' ' : text[index];
+            }
+        });
+
+        return length < source.Length ? echoed + "…" : echoed;
+    }
+
+    /// <summary>
+    /// Whether the character at <paramref name="index"/> is a control character, a line or paragraph separator, or a
+    /// format character (bidi overrides and isolates, zero-width characters) — judged by the whole code point, so an
+    /// astral format character is caught in both of its halves.
+    /// </summary>
+    private static bool IsUnsafeToEcho(string text, int index) =>
+        CodePointAt(text, index) is var codePoint
+        && CharUnicodeInfo.GetUnicodeCategory(codePoint) is UnicodeCategory.Control or UnicodeCategory.LineSeparator
+            or UnicodeCategory.ParagraphSeparator or UnicodeCategory.Format;
+
+    private static int CodePointAt(string text, int index)
+    {
+        var character = text[index];
+        if (char.IsHighSurrogate(character) && index + 1 < text.Length && char.IsLowSurrogate(text[index + 1]))
+        {
+            return char.ConvertToUtf32(character, text[index + 1]);
+        }
+
+        return char.IsLowSurrogate(character) && index > 0 && char.IsHighSurrogate(text[index - 1])
+            ? char.ConvertToUtf32(text[index - 1], character)
+            : character;
     }
 
     /// <summary>
@@ -173,4 +280,7 @@ internal sealed class CelCompiler : ICelCompiler
 
         return maxDepth;
     }
+
+    /// <summary>What was authored, and how: the one argument the result-type check needs.</summary>
+    private readonly record struct Authored(string Source, CelProfile Profile, EntitySchema Entity, CelNode Parsed, bool DetectQuoted);
 }

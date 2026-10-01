@@ -226,7 +226,13 @@ internal sealed class ChildHostHarness : IAsyncDisposable
         await KillQuietlyAsync().ConfigureAwait(false);
         _client.Dispose();
         Receiver.Dispose();
-        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        // This world's pool only: clearing every pool in the process disposes a connection another
+        // concurrently running fixture is in the middle of opening.
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_databasePath}"))
+        {
+            Microsoft.Data.Sqlite.SqliteConnection.ClearPool(connection);
+        }
+
         TryDelete(_workingDirectory);
     }
 

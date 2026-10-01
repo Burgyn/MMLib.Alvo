@@ -11,6 +11,9 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <!-- The session facts run the package's cookie registration in a real pipeline: a cookie that is
+         only re-validated by a handler nobody invokes proves nothing about the next request. -->
+    <PackageReference Include="Microsoft.AspNetCore.TestHost" />
     <!-- The resolver's facts substitute IAlvoUserStore and IRoleCatalogProvider: each is one method,
          and a real store would make "a role the descriptor does not declare" a database-seeding
          exercise rather than a statement about the intersection. -->

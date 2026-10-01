@@ -6,6 +6,7 @@ using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
+using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
 using System.Text.Json;
 
@@ -15,7 +16,8 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// Layered descriptor validator: (1) a schema pass against the build-time Corvus-generated
 /// <see cref="GeneratedProjectDescriptor"/> (from project.schema.json), (2) a semantic pass for
 /// cross-field rules the schema cannot express, (3) a rule-compilation pass that runs every
-/// <c>rules</c>/<c>hidden</c>/<c>readOnly</c> CEL expression through <see cref="ICelCompiler"/> —
+/// <c>rules</c>/<c>hidden</c>/<c>readOnly</c> CEL expression through <see cref="ICelCompiler"/>, and every
+/// <c>computed</c> one through <see cref="ComputedFieldCheck"/> —
 /// each producing agent-first <see cref="DescriptorValidationError"/>s with fix suggestions, so a
 /// rule that references an unknown column or the retired singular <c>@user.role</c> idiom fails
 /// here, when the descriptor is applied, never at request time.
@@ -136,9 +138,26 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             return [];
         }
 
-        return PolicyCatalog.TryBuild(descriptor, schema, _compiler, out _, out var errors)
+        var errors = PolicyCatalog.TryBuild(descriptor, schema, _compiler, out _, out var ruleErrors)
             ? []
-            : [.. errors];
+            : ruleErrors.ToList();
+        errors.AddRange(ComputedFieldCheck.Errors(schema, _compiler));
+        errors.AddRange(OwnerWarnings(descriptor, schema, errors));
+        return errors;
+    }
+
+    /// <summary>
+    /// The owner-comparison warnings (D51), less any at a pointer that already carries an error: a condition the
+    /// phase check refuses compiles, and a warning beside its error would be noise (T16 review L1).
+    /// </summary>
+    private IEnumerable<DescriptorValidationError> OwnerWarnings(
+        AlvoDescriptor descriptor, SchemaModel schema, List<DescriptorValidationError> errors)
+    {
+        var refused = errors
+            .Where(error => error.Severity == DescriptorValidationSeverity.Error)
+            .Select(error => error.Path)
+            .ToHashSet(StringComparer.Ordinal);
+        return OwnerComparisonCheck.Warnings(descriptor, schema, _compiler).Where(warning => !refused.Contains(warning.Path));
     }
 
     private static DescriptorValidationError Malformed(JsonException ex) =>
@@ -421,7 +440,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             yield return new DescriptorValidationError(
                 path,
                 $"Field references unknown entity '{target}'.",
-                $"Add an entity named '{target}', or point 'entity' at an existing one.",
+                UnknownRefFix(target, entityNames),
                 DescriptorValidationSeverity.Error);
         }
 
@@ -724,6 +743,25 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             $"Field '{field}' is a framework-managed column and cannot be declared. {consequence}",
             fix,
             DescriptorValidationSeverity.Error);
+    }
+
+    /// <summary>How many declared entities an unknown ref's fix names before it cuts the list with <c>…</c>.</summary>
+    private const int DeclaredEntitiesListed = 8;
+
+    /// <summary>
+    /// The fix for a ref to an undeclared entity: the declared entities first (ordinal, capped), then the built-in
+    /// <c>users</c>, and only then a new entity — so a ref named by the operator's word is steered to what the project
+    /// already has, and never told to add a <c>users</c> the schema reserves.
+    /// </summary>
+    /// <param name="target">The entity the ref named.</param>
+    /// <param name="entityNames">The entities the descriptor declares.</param>
+    internal static string UnknownRefFix(string target, IReadOnlyCollection<string> entityNames)
+    {
+        var names = entityNames.Order(StringComparer.Ordinal).ToList();
+        var listed = string.Join(", ", names.Take(DeclaredEntitiesListed)) + (names.Count > DeclaredEntitiesListed ? ", …" : string.Empty);
+        return names.Count == 0
+            ? $"Point 'entity' at '{ReservedUsersEntity}', or add an entity named '{target}'."
+            : $"Point 'entity' at one the descriptor declares ({listed}) or at '{ReservedUsersEntity}', or add an entity named '{target}'.";
     }
 
     /// <summary>

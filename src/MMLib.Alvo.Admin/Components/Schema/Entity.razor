@@ -1,0 +1,294 @@
+﻿@page "/admin/schema/{EntityName}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject AdminSession Session
+@inject NavigationManager Navigation
+@inject ILogger<Entity> Logger
+@inject ISnackbar Snackbar
+@inject AdminInterop Interop
+@implements IDisposable
+
+<PageTitle>@EntityName · Schema · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Eyebrow="Schema" EyebrowHref="@AdminPaths.Schema" Title="@EntityName" Mono="true"
+                Subtitle="@(_entity is null ? null : _entity.Description ?? "This entity has no description in the descriptor.")">
+        <Secondary>
+            <AlvoButton Small="true" Href="@AdminPaths.Records(EntityName)">Browse records</AlvoButton>
+            @* Every edit waits on DeclaredHere: on an entity the copy removed, each would be a control that did nothing. *@
+            @if (DeclaredHere)
+            {
+                <AlvoButton Small="true" data-testid="rename-entity" OnClick="_ => OpenRename()">Rename</AlvoButton>
+                <AlvoButton Small="true" data-testid="remove-entity" OnClick="_ => OpenRemoveEntity()">Remove</AlvoButton>
+            }
+        </Secondary>
+    </PageHeader>
+
+    @*
+        Renaming is its own control rather than an editable title: it is the one edit where the name in
+        the descriptor and the name in the database come apart, and it needs a sentence saying so before
+        the operator commits to it.
+    *@
+    @if (_renaming)
+    {
+        <AlvoEditor TestId="rename-sheet" Title="@($"Rename {EntityName}")"
+                    Subtitle="The apply moves the table. Its rows come with it."
+                    SubmitText="@(UnsavedRules ? "Discard the unsaved rule and rename" : "Save to the working copy")"
+                    SubmitTestId="rename-save" Dirty="@(!string.Equals(_newName, EntityName, StringComparison.Ordinal))"
+                    OnSubmit="RenameAsync" OnClose="CloseRename">
+            @RefusalPanel.Of(_renameRefusal, "That name cannot be used")
+            @* Asked here, before anything is staged: the rename moves this screen to a new address, and a rule typed on
+               the Rules tab and not saved would not come with it. *@
+            @if (UnsavedRules)
+            {
+                <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" Title="A rule on this entity is not saved" TestId="rename-unsaved-rules">
+                    Renaming discards it. Cancel and save it first to keep it.
+                </AlvoAlert>
+            }
+            <Field Label="New name" For="rename-entity-name">
+                <ChildContent>
+                    <MudTextField T="string" Value="_newName" ValueChanged="name => _newName = name ?? string.Empty"
+                                  Immediate="true" Variant="Variant.Outlined" id="rename-entity-name"
+                                  autocomplete="off" Class="a-mono" aria-describedby="rename-entity-name-hint" />
+                </ChildContent>
+                <Hint>
+                    @DescriptorNames.Hint The change is carried by <code class="a-mono">renamedFrom</code>, so the apply
+                    moves the table instead of dropping it.
+                </Hint>
+            </Field>
+        </AlvoEditor>
+    }
+
+    @*
+        Every removal asks, not only one something names (spec §3.2): the confirm lists what names the field, and
+        refuses while one of those would leave a descriptor the apply refuses.
+    *@
+    <AlvoConfirm Open="_removal is not null" TestId="remove-field-sheet" ConfirmTestId="remove-field-anyway"
+                 CancelTestId="remove-field-cancel" Title="@($"Remove {_removal?.Field}?")"
+                 Consequence="It leaves the working copy now; the column and its data are dropped only when you apply."
+                 Verb="Remove field" Allowed="@(_removal?.References.Any(reference => reference.Blocks) != true)"
+                 OnConfirm="RemoveAnyway" OnCancel="CloseRemoval">
+        @foreach (var reference in _removal?.References ?? [])
+        {
+            <ListRow data-testid="field-reference">
+                <code class="a-mono a-listrow__key">@reference.Place</code>
+                <span class="@($"a-badge {(reference.Blocks ? "a-badge--danger" : "a-badge--warn")}")">
+                    @(reference.Blocks ? "names it" : "may name it")
+                </span>
+            </ListRow>
+        }
+        @if (_removal?.References.Any(reference => reference.Blocks) == true)
+        {
+            <Refusal data-testid="remove-field-blocked">Change or remove the places that name it first.</Refusal>
+        }
+    </AlvoConfirm>
+
+    @*
+        Removing an entity is wide-blast-radius (spec §3.2 names it): the apply drops its table and every row, so the
+        confirm types the name. What points at it is named first; while one of those would leave a descriptor the apply
+        refuses, there is no name to type and the verb stays disabled (docs/todo-admin.md §8d item 24).
+    *@
+    <AlvoConfirm Open="_removingEntity" TestId="remove-entity-sheet" ConfirmTestId="remove-entity-confirm"
+                 CancelTestId="remove-entity-cancel" Title="@($"Remove {EntityName}?")"
+                 Consequence="@RemoveEntityConsequence" Verb="Remove entity"
+                 TypeToConfirm="@(EntityRemovalBlocked ? null : EntityName)" Allowed="@(!EntityRemovalBlocked)"
+                 OnConfirm="RemoveEntity" OnCancel="CloseRemoveEntity">
+        @if (_inbound.Count == 0)
+        {
+            <p class="a-hint" data-testid="remove-entity-unreferenced">Nothing else in the descriptor points at it.</p>
+        }
+        @foreach (var reference in _inbound)
+        {
+            <ListRow data-testid="entity-reference">
+                <span class="a-grow">
+                    <code class="a-mono a-listrow__key">@reference.Place</code>
+                    <span class="a-meta">@reference.Why</span>
+                </span>
+                <span class="@($"a-badge {(reference.Blocks ? "a-badge--danger" : "a-badge--warn")} a-listrow__aside")">
+                    @(reference.Blocks ? "points here" : "names it")
+                </span>
+            </ListRow>
+        }
+        @if (EntityRemovalBlocked)
+        {
+            <Refusal data-testid="remove-entity-blocked">
+                A ref or a rollup still points here, and the apply refuses one that points at an entity the descriptor
+                does not declare. Change or remove them first.
+            </Refusal>
+        }
+    </AlvoConfirm>
+
+    @if (_problem is not null)
+    {
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
+    }
+    else if (_entity is null)
+    {
+        @if (_schema is null)
+        {
+            <Skeleton Size="Skeleton.SkeletonSize.Lg" />
+        }
+        else
+        {
+            <EmptyState Title="@($"There is no entity called {EntityName}")"
+                        Body="The schema this project serves does not declare it. It may have been renamed, or removed by a later revision." />
+        }
+    }
+    else
+    {
+        <div class="a-row a-row--gap-2 a-row--wrap">
+            @if (_pending && _entity.Storage == EntityStorage.Dynamic)
+            {
+                <span class="a-badge a-badge--warn" data-testid="entity-dynamic">@DynamicStorageWords.Badge</span>
+            }
+            else if (_pending)
+            {
+                <span class="a-badge a-badge--warn">not applied yet</span>
+            }
+            else if (RemovedHere)
+            {
+                <span class="a-badge a-badge--danger" data-testid="entity-removed">removed — not applied yet</span>
+            }
+            <span class="a-badge">@(_entity.Tenancy == TenancyMode.Scoped ? "tenancy: scoped" : "tenancy: global")</span>
+            <span class="a-badge">@(_entity.Audit ? "audited" : "not audited")</span>
+            @if (_entity.SoftDelete)
+            {
+                @* Only a pending entity can carry it — the apply refuses it (UnhonouredFeatures.OnAnEntity) — and a plain
+                   badge read as a working flag (§8a softDelete row). *@
+                @if (RefusalPlaces.On(RefusalScreen.EntityHeader, _refused).FirstOrDefault() is { } refusal)
+                {
+                    <Refusal data-testid="refused-entity.softDelete">
+                        <code class="a-mono">softDelete</code> — @refusal.Consequence @refusal.Fix
+                    </Refusal>
+                }
+                else
+                {
+                    <span class="a-badge">soft delete</span>
+                }
+            }
+            <span class="a-badge">@(_entity.Storage == EntityStorage.Physical ? "physical table" : "dynamic")</span>
+        </div>
+        @if (_pending && _entity.Storage == EntityStorage.Dynamic && _storageWarning is { } storage)
+        {
+            @* The build's own sentence, served verbatim (§2.3). *@
+            <p class="a-note" data-testid="entity-dynamic-note"><code class="a-mono">storage: dynamic</code> — @storage.Consequence</p>
+        }
+        @if (RemovedHere)
+        {
+            <p class="a-note" data-testid="entity-removed-note">Removed in the working copy — Discard or apply to change this.</p>
+        }
+
+        @*
+            MudTabs owns the WAI-ARIA tabs pattern now: the arrows move focus along the strip, Enter or Space opens
+            the focused tab. The open tab is still the address's ?tab=, so a reload, a link and Back all agree.
+            Only the open tab's body is drawn.
+        *@
+        <MudTabs ActivePanelIndex="@ActiveIndex" OnPreviewInteraction="OpenAsync"
+                 Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-entitytabs"
+                 id="entity-tabs">
+            @foreach (var tab in EntityTabs.All)
+            {
+                <MudTabPanel Text="@tab.Title" ID="@tab.Slug">
+                    @if (tab == _tab)
+                    {
+                        @* The staged rows' badges reach the tabs as a cascade, which keeps their model internal. *@
+                        <CascadingValue Value="_staged">
+                            <CascadingValue Value="_ruleDrafts">
+                                <CascadingValue Value="_arrived">
+                                    <CascadingValue Value="_declarations">
+                                        <Panel data-testid="entity-tabpanel">@TabContent(tab)</Panel>
+                                    </CascadingValue>
+                                </CascadingValue>
+                            </CascadingValue>
+                        </CascadingValue>
+                    }
+                </MudTabPanel>
+            }
+        </MudTabs>
+        @TablistName.On("#entity-tabs", $"{EntityName} sections")
+
+        @*
+            The editor is a sheet now, so it is on the page only while somebody is editing. As a
+            permanent panel it was something to scroll past on every visit, and on a phone a second
+            thing competing with the list for the screen.
+        *@
+        @if (_tab == EntityTabs.First && _editorOpen)
+        {
+            <CascadingValue Value="_rollupSources">
+                <FieldEditor Entity="@EntityName" Targets="_entities" OnAdd="AddFieldAsync"
+                             Editing="@_editing" EditingJson="@EditedJson" OnClose="CloseEditor"
+                             Siblings="_fieldNames" Refused="_refused" />
+            </CascadingValue>
+        }
+    }
+</div>
+
+@*
+    Leaving the entity with a rule typed and not saved asks first (spec §3.1: nothing is saved on blur, so nothing is
+    saved on the way out either). Moving between this entity's tabs does not ask: the drafts belong to the screen, not
+    to the tab, and the Rules tab still shows them marked unsaved on the way back.
+*@
+
+<NavigationLock OnBeforeInternalNavigation="GuardRules" ConfirmExternalNavigation="@UnsavedRules" />
+<AlvoConfirm Open="_leavingTo is not null" TestId="unsaved-rules" ConfirmTestId="unsaved-rules-discard"
+             CancelTestId="unsaved-rules-keep" Title="Discard the unsaved rules?"
+             Consequence="A rule you typed on this entity has not been saved to the working copy, and leaving loses it."
+             Verb="Discard and leave" OnConfirm="LeaveDiscardingRules" OnCancel="() => _leavingTo = null" />
+
+@code {
+    /// <summary>The open tab's body.</summary>
+    private RenderFragment TabContent(EntityTab tab) => @<text>
+        @switch (tab.Slug)
+        {
+            case EntityTabs.Fields:
+                <text>@FieldsTab</text>
+                break;
+            case EntityTabs.Relationships:
+                <Relationships Entity="@(_entity!)" Schema="_schema!"
+                               DescriptorJson="@(Copy.Loaded ? Copy.Json : null)"
+                               AppliedJson="@(Copy.Loaded ? Copy.AppliedJson : null)" />
+                break;
+            case EntityTabs.Rules:
+                <RulesTab Rules="_working" Entity="@EntityName" Editable="DeclaredHere" OnChanged="SetRule" />
+                break;
+            case EntityTabs.OnWrite:
+                <HooksTab Hooks="@_hooks" Editable="DeclaredHere" Refused="_refused"
+                          OnAdd="AddHook" OnRemove="RemoveHook" />
+                break;
+            case EntityTabs.Indexes:
+                <Indexes Entity="@IndexView(_entity!)" Declared="_indexes" Editable="DeclaredHere"
+                         OnAdd="AddIndex" OnRemove="RemoveIndex" />
+                break;
+            case EntityTabs.Api:
+                <ApiTab Entity="@(_entity!)" />
+                break;
+        }
+    </text>;
+
+    /// <summary>The Fields tab: its head with the add control, a rename's leftovers, and the list.</summary>
+    /// <remarks>
+    /// The control sits with the list's own heading rather than as a green block above the first row, where it
+    /// outweighed every field on the screen.
+    /// </remarks>
+    private RenderFragment FieldsTab => @<text>
+        <SectionHead Title="Declared fields">
+            <Actions>
+                @if (DeclaredHere)
+                {
+                    <AlvoButton Small="true" data-testid="add-field" OnClick="_ => AddField()">New field</AlvoButton>
+                }
+            </Actions>
+        </SectionHead>
+        @if (_renameLeftovers is { Uncarried.Count: > 0 } leftovers)
+        {
+            <p class="a-note" data-testid="rename-leftovers">
+                <code class="a-mono">@leftovers.From</code> is renamed, and these still name it — the
+                rename could not rewrite them safely, and the apply refuses them until they are edited:
+                <span class="a-mono">@string.Join(", ", leftovers.Uncarried.Select(reference => reference.Place))</span>
+            </p>
+        }
+        <Fields Entity="@FieldsView(_entity!)" Editable="DeclaredHere" OnEdit="EditField" OnRemove="RemoveField" />
+    </text>;
+}

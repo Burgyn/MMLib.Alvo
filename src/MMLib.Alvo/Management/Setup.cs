@@ -25,8 +25,54 @@ internal static class ManagementSetup
         AddManagementOptions(services);
         AddManagementService(services);
         services.TryAddSingleton<ManagementAccessEvaluator>();
+        AddUserAdministration(services);
         return services;
     }
+
+    /// <summary>
+    /// Registers the guarded decorator over whatever implements user administration.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Only when an implementation is registered.</b> The package that holds the membership
+    /// store registers itself under <see cref="AlvoUserAdministration.UnguardedKey"/>; a
+    /// deployment without that package has no keyed service, and this registration's factory
+    /// answers <see langword="null"/> — so the routes are simply absent rather than present and
+    /// broken.
+    /// </para>
+    /// <para>
+    /// <b>The public interface resolves to the decorator and to nothing else.</b> That is what
+    /// makes the guards non-optional: there is no registration anywhere that hands an in-process
+    /// caller the raw implementation, which a guard living inside a swappable adapter could never
+    /// claim.
+    /// </para>
+    /// </remarks>
+    /// <param name="services">The service collection to register into.</param>
+    private static void AddUserAdministration(IServiceCollection services) =>
+        services.TryAddScoped<IAlvoUserAdministration>(provider =>
+            IsRegistered(provider)
+                ? new GuardedUserAdministration(
+                    provider.GetRequiredService<IServiceScopeFactory>(),
+                    provider.GetRequiredService<Auth.IAlvoContextAccessor>(),
+                    provider.GetRequiredService<ManagementAccessEvaluator>(),
+                    provider.GetRequiredService<IRoleCatalogProvider>(),
+                    provider.GetRequiredService<IAlvoBootstrapAdmin>())
+                : throw new InvalidOperationException(
+                    "No IAlvoUserAdministration implementation is registered. A package that "
+                    + "administers membership registers itself under "
+                    + $"'{AlvoUserAdministration.UnguardedKey}'; MMLib.Alvo.Identity does."));
+
+    /// <summary>Whether an implementation is registered under the unguarded key.</summary>
+    /// <remarks>
+    /// Asked of the registrations rather than answered by resolving one: the decorator resolves the
+    /// implementation per call, from a scope of its own, and one constructed here would be an instance
+    /// in the caller's scope that nothing ever uses — for the dashboard, a <c>DbContext</c> held open for
+    /// the life of the circuit to answer a yes-or-no question.
+    /// </remarks>
+    /// <param name="provider">The provider the decorator is being resolved from.</param>
+    private static bool IsRegistered(IServiceProvider provider) =>
+        provider.GetService<IServiceProviderIsKeyedService>() is { } registrations
+        && registrations.IsKeyedService(typeof(IAlvoUserAdministration), AlvoUserAdministration.UnguardedKey);
 
     /// <summary>
     /// Registers the one <see cref="IAlvoManagement"/> implementation, with its data port and its descriptor
@@ -61,6 +107,8 @@ internal static class ManagementSetup
             provider.GetRequiredService<Auth.IAlvoContextAccessor>(),
             provider.GetRequiredService<ManagementAccessEvaluator>(),
             provider.GetRequiredService<Microsoft.Extensions.Logging.ILogger<AlvoManagementService>>(),
+            provider.GetRequiredService<Ai.IAiConnectionResolver>(),
+            provider.GetRequiredService<Secrets.ISecretStore>(),
             provider.GetRequiredService<Migrations.RuntimeSchemaService>));
 
     /// <summary>

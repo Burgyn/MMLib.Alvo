@@ -10,5 +10,8 @@
 /// </summary>
 /// <param name="Change">The schema change being applied.</param>
 /// <param name="IsDestructive">Whether this step is destructive.</param>
-/// <param name="Reason">The reason for the destructive nature, if applicable.</param>
+/// <param name="Reason">
+/// On a destructive step, why it destroys data; on a non-destructive one, what it costs when that is worth saying before
+/// it runs (e.g. that the engine rebuilds the table), or <see langword="null"/>.
+/// </param>
 public sealed record MigrationStep(SchemaChange Change, bool IsDestructive, string? Reason);

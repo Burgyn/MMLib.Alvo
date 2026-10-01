@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# The admin dashboard's end-to-end scenarios (test/MMLib.Alvo.Admin.Tests.EndToEnd).
+#
+# IN NO RING, for scripts/test-load's reason and scripts/test-prototype's: the rings are
+# `dotnet test` tiers over the library, and this downloads a browser, binds a port and applies
+# migrations against a temporary SQLite file. Design §6.2 asks for it whole on the PR rather than
+# affected-scoped, because the flows it covers cross every screen.
+#
+# Usage:
+#   scripts/test-admin-e2e                       every scenario
+#   scripts/test-admin-e2e --filter SignIn       the scenarios whose name matches
+#
+# The first run downloads a headless Chromium through Playwright's own installer.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+project="$root/test/MMLib.Alvo.Admin.Tests.EndToEnd"
+
+echo "[admin-e2e] dotnet build"
+dotnet build "$project/MMLib.Alvo.Admin.Tests.EndToEnd.csproj" -c Debug --nologo
+
+# Playwright ships its browser installer as a script in the build output. It is idempotent and
+# quick once the browser is cached, so it runs every time rather than being guarded by a marker
+# file that would go stale when the package version moves.
+installer="$project/bin/Debug/net10.0/playwright.ps1"
+if [ -f "$installer" ]; then
+  echo "[admin-e2e] playwright install chromium"
+  pwsh "$installer" install chromium --with-deps 2>/dev/null \
+    || pwsh "$installer" install chromium \
+    || echo "[admin-e2e] playwright install failed; assuming a browser is already present" >&2
+else
+  echo "[admin-e2e] no playwright.ps1 in the build output — is Microsoft.Playwright referenced?" >&2
+  exit 1
+fi
+
+echo "[admin-e2e] dotnet test"
+dotnet test --project "$project/MMLib.Alvo.Admin.Tests.EndToEnd.csproj" --no-build -c Debug "$@"
+echo "[admin-e2e] OK"

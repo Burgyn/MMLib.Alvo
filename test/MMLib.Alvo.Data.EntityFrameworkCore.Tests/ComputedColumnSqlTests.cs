@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
+using DescriptorValidationException = MMLib.Alvo.Descriptor.DescriptorValidationException;
 
 namespace MMLib.Alvo.Data.EntityFrameworkCore.Tests;
 
@@ -68,15 +69,15 @@ public sealed class ComputedColumnSqlTests : IDisposable
     }
 
     /// <summary>
-    /// The descriptor mapper does not compile <c>computed</c>, so this is the first and only place an
-    /// unresolvable one is caught — it must refuse rather than fall through to a column of its own.
+    /// The validator refuses an unresolvable <c>computed</c> first; this is the backstop for a model built from a
+    /// schema no validator saw, and it must refuse rather than fall through to a column of its own.
     /// </summary>
     [Fact]
     public void A_computed_that_does_not_compile_is_refused()
     {
         var entity = Orders("unit_price * no_such_field");
 
-        Should.Throw<InvalidOperationException>(() => Sut().For(entity, Total(entity)));
+        Should.Throw<DescriptorValidationException>(() => Sut().For(entity, Total(entity)));
     }
 
     /// <summary>
@@ -88,9 +89,10 @@ public sealed class ComputedColumnSqlTests : IDisposable
     {
         var entity = Orders("unit_price * no_such_field");
 
-        var refusal = Should.Throw<InvalidOperationException>(() => Sut().For(entity, Total(entity)));
+        var refusal = Should.Throw<DescriptorValidationException>(() => Sut().For(entity, Total(entity)));
 
         refusal.Message.ShouldContain("orders.total");
+        refusal.Result.Errors.ShouldAllBe(error => error.Path == "/entities/orders/fields/total/computed");
     }
 
     /// <summary>
@@ -130,7 +132,7 @@ public sealed class ComputedColumnSqlTests : IDisposable
     {
         var entity = Orders("unit_price * 1.2");
 
-        Should.Throw<InvalidOperationException>(() => Sut().For(entity, Total(entity)));
+        Should.Throw<DescriptorValidationException>(() => Sut().For(entity, Total(entity)));
     }
 
     /// <summary>The refusal echoes the expression its author wrote, so the fix is visible without the descriptor.</summary>
@@ -139,7 +141,7 @@ public sealed class ComputedColumnSqlTests : IDisposable
     {
         var entity = Orders("unit_price * 1.2");
 
-        var refusal = Should.Throw<InvalidOperationException>(() => Sut().For(entity, Total(entity)));
+        var refusal = Should.Throw<DescriptorValidationException>(() => Sut().For(entity, Total(entity)));
 
         refusal.Message.ShouldContain("orders.total");
         refusal.Message.ShouldContain("unit_price * 1.2");
@@ -155,9 +157,26 @@ public sealed class ComputedColumnSqlTests : IDisposable
     {
         var entity = Orders("unit_price * 1.2");
 
-        var refusal = Should.Throw<InvalidOperationException>(() => Sut().For(entity, Total(entity)));
+        var refusal = Should.Throw<DescriptorValidationException>(() => Sut().For(entity, Total(entity)));
 
         refusal.Message.ShouldContain("'1.2'");
+    }
+
+    /// <summary>
+    /// A shape with no scalar rendering — a comparison over an arithmetic result — is the same documented
+    /// refusal at the field, not the renderer's <see cref="NotSupportedException"/>. The type checker now refuses
+    /// it at compile time (a comparison operand must be a field, a literal or a context value), so every error
+    /// the field carries is that compile refusal, at the field's own path.
+    /// </summary>
+    [Fact]
+    public void A_computed_with_no_scalar_rendering_is_refused_at_the_field()
+    {
+        var entity = Orders("unit_price + amount > amount ? unit_price : amount");
+
+        var refusal = Should.Throw<DescriptorValidationException>(() => Sut().For(entity, Total(entity)));
+
+        refusal.Result.Errors.ShouldNotBeEmpty();
+        refusal.Result.Errors.ShouldAllBe(error => error.Path == "/entities/orders/fields/total/computed");
     }
 
     /// <inheritdoc />
@@ -169,12 +188,12 @@ public sealed class ComputedColumnSqlTests : IDisposable
 
     private ComputedColumnSql Sut() => new(Compiler, Predicates, new TestFieldSqlRenderer());
 
-    private InvalidOperationException RefuseWith(params CelCompilationError[] errors)
+    private DescriptorValidationException RefuseWith(params CelCompilationError[] errors)
     {
         var entity = Orders("unit_price * amount");
         var sut = new ComputedColumnSql(new StubCompiler(errors), Predicates, new TestFieldSqlRenderer());
 
-        return Should.Throw<InvalidOperationException>(() => sut.For(entity, Total(entity)));
+        return Should.Throw<DescriptorValidationException>(() => sut.For(entity, Total(entity)));
     }
 
     private static EntitySchema Orders(string? computed) => new()

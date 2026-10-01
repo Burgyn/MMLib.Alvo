@@ -415,7 +415,7 @@ public class DescriptorModelBuilderTests
     {
         var model = ComputedVehicles("unit_price * 1.2");
 
-        var refusal = Should.Throw<InvalidOperationException>(
+        var refusal = Should.Throw<MMLib.Alvo.Descriptor.DescriptorValidationException>(
             () => DescriptorModelBuilder.Build(model, NewSqliteBuilder, Computed()));
 
         refusal.Message.ShouldContain("1.2");

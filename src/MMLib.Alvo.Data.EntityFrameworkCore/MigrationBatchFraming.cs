@@ -33,4 +33,32 @@ public sealed record MigrationBatchFraming
 
     /// <summary>Statements run after it commits, restoring whatever <see cref="Before"/> suspended.</summary>
     public IReadOnlyList<string> After { get; init; } = [];
+
+    /// <summary>
+    /// A query run <b>inside</b> the migration transaction, after the plan's SQL and before the commit, answering one
+    /// row for every reference the suspension let through — or <see langword="null"/> for an engine that suspends
+    /// nothing, and so has nothing to verify.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The third half of the same decision.</b> Suspending enforcement is what lets a table rebuild keep its
+    /// children, and it is also what would let a migration commit a reference nothing satisfies: a rebuild that adds
+    /// or retargets a foreign key over values that name no parent row. SQLite's own procedure for a rebuild closes
+    /// that with <c>PRAGMA foreign_key_check</c> before the commit (step 10 of its twelve-step <c>ALTER TABLE</c>);
+    /// any row it answers fails the migration and rolls the whole transaction back, the version row included.
+    /// </para>
+    /// <para>
+    /// <b>Return grammar.</b> Four columns, in this order: the referencing table, the offending row's identifier
+    /// (<c>rowid</c> on SQLite), the referenced table, and the referencing column. No rows means the batch may commit.
+    /// </para>
+    /// <para>
+    /// <b>Scoped to what the migration touched.</b> The query is handed one parameter, <c>@touched</c>: a JSON array
+    /// of the table names the plan's steps change. It must check those tables and every table whose reference points
+    /// at one of them, and nothing else — so an orphan that already sat in an untouched table never refuses an
+    /// unrelated migration, and the check costs the tables the migration rewrote rather than the whole database.
+    /// <b>It fails closed:</b> a plan that carries SQL but whose steps name no table passes <c>@touched</c> as
+    /// <c>NULL</c>, and the query must then check every table. Only a plan with no SQL at all is not verified.
+    /// </para>
+    /// </remarks>
+    public string? Verify { get; init; }
 }

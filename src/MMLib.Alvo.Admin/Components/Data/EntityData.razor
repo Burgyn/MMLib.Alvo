@@ -1,0 +1,150 @@
+﻿@page "/admin/data/{EntityName}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject DataGateway Records
+@inject NavigationManager Navigation
+@inject ILogger<EntityData> Logger
+@inject ISnackbar Snackbar
+@inject AdminInterop Interop
+
+<PageTitle>@EntityName · Data · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Eyebrow="Data" EyebrowHref="@AdminPaths.Data" Title="@EntityName" Mono="true">
+        <Secondary>
+            <AlvoButton Small="true" Href="@AdminPaths.Entity(EntityName)">Schema</AlvoButton>
+        </Secondary>
+        <Primary>
+            @if (_entity is not null && !OutOfScope)
+            {
+                <AlvoButton @ref="_newRecord" Tone="AlvoButton.ButtonTone.Primary" Small="true" data-testid="record-new"
+                            OnClick="_ => NewRecord()">New record</AlvoButton>
+            }
+        </Primary>
+    </PageHeader>
+
+    @RefusalPanel.Of(_problem, LostWrite ? ReloadAction : null)
+
+    @if (_entity is null)
+    {
+        @if (_loading)
+        {
+            <Skeleton Size="Skeleton.SkeletonSize.Lg" />
+        }
+        else if (!_problem.Shown)
+        {
+            <EmptyState Title="@($"There is no entity called {EntityName}")"
+                        Body="The schema this project serves does not declare it." />
+        }
+    }
+    else
+    {
+        @*
+            Provenance, not a headline. It answers "whose rows am I looking at" — which matters, and
+            matters once — so it is set as the fine print it is rather than as the first paragraph of
+            the page competing with the data underneath it.
+        *@
+        <p class="a-note">
+            Reading as <strong>@_who</strong>@(_context?.Tenant is { } tenant
+                ? $", tenant {tenant.Value}" : ", with no tenant").
+            These are exactly the rows this credential sees through <code class="a-mono">/api/@EntityName</code>.
+        </p>
+
+        @if (OutOfScope)
+        {
+            <EmptyState Title="You hold no tenant, and this entity is scoped to one"
+                        Body="@EmptyExplanation" />
+        }
+        else
+        {
+            @*
+                Outside every branch below, so a search that narrows the page to nothing, or back, never
+                unmounts the box being typed into — which would drop its focus mid-word.
+            *@
+            @if (_searchable.Count > 0)
+            {
+                <div class="a-grid-search">
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true"
+                                  InputType="InputType.Search" data-testid="grid-search" data-alvo-search
+                                  Placeholder="@($"Search {EntityName}…")" aria-label="@($"Search {EntityName}")"
+                                  title="@($"Looks in {string.Join(", ", _searchable)}")"
+                                  MaxLength="GridQuery.MaxPatternLength" Value="_search" ValueChanged="SearchTyped" />
+                </div>
+            }
+
+            @*
+                The reveal replaced whatever the operator had searched for, or the page they were on, so it says so,
+                with the way back (spec §3.5, amended 27 Sep; the Access list's "Showing the person you created").
+            *@
+            @if (_revealing is not null)
+            {
+                <div class="a-row a-row--gap-2 a-row--inset" data-testid="grid-revealing">
+                    <span class="a-note">Showing the record you created.</span>
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="grid-reveal-clear"
+                                OnClick="_ => ClearRevealAsync()">Clear</AlvoButton>
+                </div>
+            }
+
+            @if (_revealLost)
+            {
+                <p class="a-note" data-testid="grid-reveal-lost">
+                    The record you created is no longer there to show: it was deleted, or the read rule no longer
+                    admits it. The grid is back to what it showed before.
+                </p>
+            }
+
+            @if (_unreachable)
+            {
+                <p class="a-note" data-testid="record-unreachable">
+                    The linked record is not one this credential can read: it does not exist, or the read
+                    rule excludes it.
+                </p>
+            }
+
+            @RefreshBar.While(_refreshing)
+            @if (_loading)
+            {
+                <Skeleton Size="Skeleton.SkeletonSize.Lg" />
+            }
+            else if (_page is null)
+            {
+                @* The refusal above is the whole answer; a skeleton that never resolves is not. *@
+            }
+            else if (_page.Items.Count == 0)
+            {
+                <EmptyState Title="@(Searching ? $"Nothing matches “{_search.Trim()}”" : "No rows came back")"
+                            Body="@(Searching ? $"The search looks in {string.Join(", ", _searchable)}." : EmptyExplanation)" />
+            }
+            else
+            {
+                <CascadingValue Value="GridScope">
+                    <RecordGrid OnOpen="Open" OnSort="SortBy" OnNext="Next" OnPrevious="Previous" />
+                </CascadingValue>
+                @* After the grid, so the pager it names is drawn when this runs (FocusFirstOnRender). *@
+                @if (_focusAfterRender is { } focus)
+                {
+                    @FocusFirstOnRender.On(focus, _focusMoves, () => _focusAfterRender = null)
+                }
+            }
+        }
+    }
+</div>
+
+@if (_form is not null && _entity is not null && _scope is not null)
+{
+    <CascadingValue Value="_scope">
+        <RecordForm Entity="_entity" Values="_form" RecordId="_editing"
+                    OnCancel="CloseForm" OnSaved="Saved" OnDeleteRequested="AskToDelete" />
+    </CascadingValue>
+}
+
+<AlvoConfirm Open="_deleting is not null" TestId="delete-record" ConfirmTestId="delete-record-run"
+             CancelTestId="delete-record-cancel" Title="@($"Delete {_deleting?.Label}?")"
+             Consequence="@($"The record is deleted from {EntityName} for everyone who can read it. There is no undo.")"
+             Verb="Delete record" OnConfirm="DeleteAsync" OnCancel="CancelDelete" />
+
+@code {
+    /// <summary>The way out of a delete that lost to another writer: the page read again, as it is now.</summary>
+    private RenderFragment ReloadAction => @<AlvoButton Small="true" data-testid="grid-reload"
+                                                       OnClick="_ => ReloadPageAsync()">Reload</AlvoButton>;
+}

@@ -1,0 +1,33 @@
+﻿@*
+    JSON, readable.
+
+    The highlighting is two regular expressions over already-escaped text, deliberately: a
+    descriptor is somebody's input, and a highlighter that built markup from it would be an
+    injection with extra steps. `HtmlEncode` runs first and the spans are wrapped around the
+    encoded output, so nothing in the document can produce an element.
+*@
+<pre class="a-code"><code>@((MarkupString)Highlighted)</code></pre>
+
+@code {
+    private static readonly System.Text.RegularExpressions.Regex _key =
+        new("&quot;([^&]+?)&quot;(\\s*:)", System.Text.RegularExpressions.RegexOptions.Compiled,
+            TimeSpan.FromSeconds(1));
+
+    private static readonly System.Text.RegularExpressions.Regex _value =
+        new("(:\\s)&quot;([^&]*?)&quot;", System.Text.RegularExpressions.RegexOptions.Compiled,
+            TimeSpan.FromSeconds(1));
+
+    /// <summary>The JSON to render.</summary>
+    [Parameter, EditorRequired]
+    public string Json { get; set; } = string.Empty;
+
+    private string Highlighted
+    {
+        get
+        {
+            var encoded = System.Net.WebUtility.HtmlEncode(Json);
+            encoded = _key.Replace(encoded, "<span class=\"a-code-key\">&quot;$1&quot;</span>$2");
+            return _value.Replace(encoded, "$1<span class=\"a-code-str\">&quot;$2&quot;</span>");
+        }
+    }
+}

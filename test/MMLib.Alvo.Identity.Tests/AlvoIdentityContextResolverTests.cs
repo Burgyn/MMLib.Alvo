@@ -93,14 +93,76 @@ public class AlvoIdentityContextResolverTests
     }
 
     [Fact]
-    public async Task A_session_may_not_ask_to_act_in_a_tenant()
+    public async Task An_operator_with_no_tenant_may_not_ask_for_one()
     {
         var resolver = Resolver(stored: User(_eva, "editor"), declared: RoleCatalog.Create(["editor"]));
 
         (await resolver.ResolveAsync(_eva.ToString(), TenantId.New().ToString(), TestContext.Current.CancellationToken))
             .ShouldBeNull(
-                "a cookie session carries no tenant grant of its own, so honouring a requested tenant "
-                + "would let the caller choose the tenant it acts in");
+                "an operator holding no grant asking to act in a tenant is choosing one, which is the "
+                + "capability a confirmation rule exists to refuse");
+    }
+
+    [Fact]
+    public async Task An_operators_granted_tenant_is_what_they_act_in()
+    {
+        var granted = TenantId.New();
+        var resolver = Resolver(
+            stored: User(_eva, "editor") with { Tenant = granted },
+            declared: RoleCatalog.Create(["editor"]));
+
+        var principal = await resolver.ResolveAsync(
+            _eva.ToString(), null, TestContext.Current.CancellationToken);
+
+        principal.ShouldNotBeNull().Context.Tenant.ShouldBe(
+            granted,
+            "the session's tenant comes from the stored grant, and a screen that reaches a scoped "
+            + "entity has nothing else to reach it with");
+    }
+
+    [Fact]
+    public async Task A_requested_tenant_that_matches_the_grant_is_honoured()
+    {
+        var granted = TenantId.New();
+        var resolver = Resolver(
+            stored: User(_eva, "editor") with { Tenant = granted },
+            declared: RoleCatalog.Create(["editor"]));
+
+        var principal = await resolver.ResolveAsync(
+            _eva.ToString(), granted.ToString(), TestContext.Current.CancellationToken);
+
+        principal.ShouldNotBeNull().Context.Tenant.ShouldBe(
+            granted, "naming the tenant you already hold is a confirmation, and a confirmation passes");
+    }
+
+    [Fact]
+    public async Task A_requested_tenant_other_than_the_grant_refuses_the_whole_principal()
+    {
+        var resolver = Resolver(
+            stored: User(_eva, "editor") with { Tenant = TenantId.New() },
+            declared: RoleCatalog.Create(["editor"]));
+
+        (await resolver.ResolveAsync(
+                _eva.ToString(), TenantId.New().ToString(), TestContext.Current.CancellationToken))
+            .ShouldBeNull(
+                "acting in a second tenant is a cross-tenant capability nobody has been granted; and "
+                + "the refusal is the whole principal, because a principal with a null tenant would "
+                + "reach every global entity instead of being refused");
+    }
+
+    [Theory]
+    [InlineData("not-a-uuid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task A_requested_tenant_this_resolver_cannot_read_refuses(string requested)
+    {
+        var resolver = Resolver(
+            stored: User(_eva, "editor") with { Tenant = TenantId.New() },
+            declared: RoleCatalog.Create(["editor"]));
+
+        (await resolver.ResolveAsync(_eva.ToString(), requested, TestContext.Current.CancellationToken))
+            .ShouldBeNull(
+                "a value the resolver cannot evaluate is not a value it may drop — and the all-zero "
+                + "uuid is reserved to mean 'no tenant', so it is never a tenant to confirm");
     }
 
     [Fact]

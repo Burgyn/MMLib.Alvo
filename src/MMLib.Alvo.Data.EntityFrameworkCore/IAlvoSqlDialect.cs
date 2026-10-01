@@ -296,7 +296,9 @@ public interface IAlvoSqlDialect
     /// <paramref name="renderedExpression"/> reaches the SQL text unparameterized because DDL has no
     /// bind-parameter form at all. That is safe only because it comes from
     /// <see cref="MMLib.Alvo.Expressions.IPredicateRenderer"/>'s scalar entry point over a <b>compiled</b> CEL
-    /// AST, so it can contain nothing but this entity's own field references, arithmetic and
+    /// AST, so it can contain nothing but this entity's own field references, arithmetic, text constants the
+    /// field renderer quoted (<see cref="MMLib.Alvo.Expressions.IFieldSqlRenderer.RenderStringLiteral"/>) and
+    /// joined, and
     /// <c>CASE WHEN</c> — never a descriptor string spliced in, which is what #20 removed as an
     /// arbitrary-DDL-injection vector. A dialect must never be handed one assembled from caller input.
     /// </para>
@@ -327,6 +329,26 @@ public interface IAlvoSqlDialect
     /// </para>
     /// </remarks>
     MigrationBatchFraming MigrationFraming => MigrationBatchFraming.None;
+
+    /// <summary>
+    /// Whether this engine refuses to <c>ADD</c> a stored generated column to a table that holds rows, so the migrator
+    /// must have the table rebuilt instead — <see langword="false"/> for an engine that adds one in place.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The hop count is per engine, measured.</b> PostgreSQL adds a <c>STORED</c> column to a populated table and
+    /// backfills it; SQLite refuses with <c>cannot add a STORED column</c>, and refuses only once the table holds a
+    /// row, so a fact over an empty fixture passes on both. Answering <see langword="true"/> makes the migrator plan
+    /// the column as added plain and then altered into the generated one, which EF Core's SQLite generator answers
+    /// with its create-new / copy / drop / rename rebuild — so the DDL stays EF's, and this member only decides
+    /// which operations it is handed.
+    /// </para>
+    /// <para>
+    /// A <b>default interface member</b>, like <see cref="MigrationFraming"/>, answering "nothing special" so no
+    /// existing implementation breaks and no engine is assumed to have a peculiarity it does not have.
+    /// </para>
+    /// </remarks>
+    bool GeneratedColumnAddRequiresTableRebuild => false;
 
     /// <summary>
     /// Decides whether <paramref name="failure"/> is this engine refusing a write on a constraint a

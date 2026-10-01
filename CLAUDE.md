@@ -73,10 +73,23 @@ compresses out. Violating one of these is a bug, not a style nit.
   measurement, produced by `scripts/test-load --tier calibration`.
 - `docs/superpowers/specs/` — per-issue specs (the what/why for one issue).
 - `docs/superpowers/plans/` — per-issue Superpowers implementation plans (the how, for one PR).
-- `.claude/skills/` — the `alvo-*` skills (see below).
+- `.claude/skills/` — the `alvo-*` skills, and the `alvo-descriptor-*` skills the admin assistant embeds (see below).
 - `.claude/agents/` — subagents, e.g. `alvo-plan-guard`.
+- `docs/design/f5-admin/` — the F5 admin **design prototype** (HTML/CSS/vanilla ES, no build) plus
+  its scenario suite and the two adversarial reviews it was built against. A design artifact:
+  nothing in `src/` may depend on it.
+- `src/MMLib.Alvo.Admin/` — the **admin dashboard**: a Blazor Web App (server-interactive) over
+  `IAlvoManagement` and `IAlvoData`, plus the design system it ships as static web assets. It
+  holds **no** reference to `MMLib.Alvo` — an architecture test keeps it that way.
 - `scripts/` — `test-ring0`/`test-ring1`/`test-ring2` plus `check-brief-freshness`,
-  and `test-load` (the load harness — in no ring, see below).
+  `test-load` (the load harness), `test-prototype` (the design prototype's scenarios),
+  `test-admin-e2e` (the dashboard's scenarios, a real browser over a real host) and
+  `eval-assistant` (the schema assistant against a real model) — all four in no ring, see
+  below — and `demo-admin`, which boots the dashboard over the seeded `examples/bike-workshop`
+  backend for demos and UX reviews.
+- `eval/` — `MMLib.Alvo.Ai.Eval`, the schema assistant's real-model eval, driven by
+  `scripts/eval-assistant`; in no ring — built on the PR, never run there. Its graders' own suite,
+  `test/MMLib.Alvo.Ai.Eval.Tests`, is an ordinary ring0 module.
 - `.husky/` — Husky.Net git hooks (`pre-commit`, `commit-msg`) + `task-runner.json`; auto-installed on build.
 - `.github/` — CI workflows; the PR run (everything but mutation) plus
   `mutation.yml`, which runs post-merge on `main`.
@@ -96,6 +109,9 @@ compresses out. Violating one of these is a bug, not a style nit.
 | full (+ e2e) | CI on the PR | never run locally |
 | mutation | CI post-merge on `main` | never run locally |
 | load | `scripts/test-load` | in no ring — see below |
+| prototype | `scripts/test-prototype` | in no ring — see below |
+| admin e2e | `scripts/test-admin-e2e` | in no ring — see below |
+| assistant eval | `scripts/eval-assistant` | in no ring — see below |
 
 Each ring wraps the previous one and adds a layer: ring1 adds architecture
 tests (already inside `dotnet test`) and, once it lands, public-API
@@ -116,6 +132,28 @@ per PR, A/B against the merge base — **advisory**, not a required check) and
 The gate is judged on `min`, never p95, and the reason is measured — see
 `test/load/README.md`. Design:
 `docs/superpowers/specs/2026-09-02-f4-pr-e-load-test-foundations-design.md`.
+
+**The dashboard's end-to-end suite is in no ring, and runs whole on the PR.**
+`scripts/test-admin-e2e` starts the real `MMLib.Alvo.Host` over a temporary SQLite file and drives
+it with `Microsoft.Playwright` — sign in, add an entity, give it rules, apply, write a record, roll
+back. Not affected-scoped: the F5 design's §6.2 asks for it whole because its flows cross every
+screen, and every defect it has caught so far left a page that still rendered. It is folded into the
+required **Build & test** check the same way the compose e2e is.
+
+**The prototype suite is in no ring for the same reason.** `scripts/test-prototype` drives the F5
+admin design prototype (`docs/design/f5-admin`) with Node + `@playwright/test` over a static server;
+it is a gate on the *drawing*, not on the library, and it contains no .NET. Run it after touching
+anything under `docs/design/f5-admin/`. When the Razor dashboard lands, its own suite is the
+Microsoft.Playwright + xUnit one the F5 design §6.2 commits to, and this one retires with the
+prototype it drives. `scripts/gen-prototype-fixtures --check` proves the prototype's generated
+content still matches the repository it was derived from.
+
+**The assistant eval is in no ring, like load.** `scripts/eval-assistant` asks a real model
+the seventeen cases of `docs/superpowers/specs/2026-09-28-f5-assistant-reliability-design.md` §4.2 and
+`docs/superpowers/specs/2026-09-29-f5-assistant-first-try-design.md` §3, §7.5 and §9 over the real host and grades outcomes,
+plus the reply's wording, its language, and whether it loaded the skills its proposal needed; it costs tokens and measures a model, so it is run on demand and its table is to be published per
+model in `docs/assistant-evals.md` (created by the first real run). Every graded turn, passes included, is traced to `artifacts/eval-assistant/traces/`.
+The graders themselves are pure and tested in ring0 (`test/MMLib.Alvo.Ai.Eval.Tests`).
 
 ## Hard rules
 
@@ -169,7 +207,11 @@ and only descend when the layer above does not answer your question.
 ## Skills & guard
 
 Domain discipline lives in `.claude/skills/alvo-*` (skills) and the read-only
-`alvo-plan-guard` subagent (`.claude/agents/`). You don't invoke skills by
+`alvo-plan-guard` subagent (`.claude/agents/`). The `alvo-descriptor-*` skills are different in kind: they
+teach the descriptor itself (entities, rules, hooks, rollups, indexes, access, capabilities), and they are
+**shared with the admin assistant**, which embeds these same directories (`MMLib.Alvo.Ai`, D33 of
+`docs/superpowers/specs/2026-09-29-f5-assistant-first-try-design.md`). Edit them as product text: their regions
+are drift-tested, and their size is capped. You don't invoke skills by
 name and this file deliberately doesn't re-list them — the harness surfaces
 each skill's `description` and it activates when a task touches its area. Two
 things those descriptions won't tell you: packaging / licensing / test-stack /

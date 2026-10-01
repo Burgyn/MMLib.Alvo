@@ -29,6 +29,7 @@ proposes it** — see *`Mutate`, the fourth profile* below for where the two dif
 | `in` (role membership) | ✓ | ✗ | ✓ | ✗ | ✓ |
 | `has(field)` | ✓ | ✓ | ✓ | ✗ | ✗ |
 | Arithmetic (`+ - * /`, unary `-`) | ✗ | ✓ | ✗ | ✗ | ✗ |
+| String concatenation (`+` over two strings) | ✗ | ✓ | ✗ | ✗ | ✗ |
 | Ternary conditional | ✗ | ✓ | ✗ | ✗ | ✗ |
 | `changed(field)` | ✗ | ✗ | ✓ | ✗ | ✗ |
 | Allow-listed function call (`lowerAscii`, `now`) | ✗ | ✗ | ✗ | ✓ | ✗ |
@@ -55,7 +56,14 @@ is legal.
   hold a boolean-as-value distinction the way a predicate can. Never sees `@user`/`@tenant`
   (`ComputedNoContextMessage`: "a computed column is evaluated by the database with no caller
   context") and never role membership, since both are caller-dependent and a computed column has
-  no caller. The only profile that allows arithmetic and the ternary.
+  no caller. The only profile that allows arithmetic, string concatenation and the ternary.
+  **String `+`** is CEL's `(string, string) → string` overload, left-associative, with no implicit
+  conversion (a mixed pair is a type error; there is no `string()` here), and an operand that can be
+  null is **refused** — CEL's `+` has no null overload and SQL's `||` yields `NULL` — unless it is read
+  inside the branch its own presence test guards (`has(f) ? f : ''`, `has(f) ? a + ' ' + f : a`). A text constant
+  in a value position is written inline into the generated column's DDL through the dialect's
+  `IFieldSqlRenderer.RenderStringLiteral` (so it may not hold a control character, a line or paragraph
+  separator — U+2028, U+2029 — or an unpaired surrogate); every other constant is still a bind parameter, which a computed field refuses.
 - **Condition** — a hook's `condition` (`hooks.beforeUpdate[].condition`, etc.). Must evaluate to
   `Bool`. The only profile that allows `changed(field)`, and one of the two — with `Mutate` — that
   sees `old.`/`new.` field references, since a hook is the one place a "before" row exists to
@@ -84,6 +92,12 @@ is legal.
   table. Both the member and the comparison operator stay admitted deliberately: widening `@user`
   is additive, so a level written against a future typed claim compiles without this table
   changing, and admitting the operator today expresses nothing a role membership could not.
+
+**A result-type refusal quotes what it refused (D42).** A predicate wrapped whole in a string literal
+(`'owner_id == @user.id'` under `Rule`, `Condition` or `Access`) is refused with a fix that names the outer quotes
+and gives the unwrapped content, and every result-type refusal echoes its source in backticks (at most 120 characters;
+control, line- and paragraph-separator and format characters, bidi overrides among them, as spaces). Only the refusal's text changes: the check runs on a source already refused, its one inner
+compile has the check off, and `CelAcceptanceCorpusTests` holds the accepted set to its pre-D42 baseline.
 
 ## `Mutate`, the fourth profile
 
