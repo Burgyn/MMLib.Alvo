@@ -29,14 +29,24 @@ public class ExpressionSlotsTests
     }
 
     [Fact]
-    public void The_working_json_is_untouched()
+    public void Two_candidates_from_the_same_working_text_are_independent()
     {
-        var before = Working;
+        var (first, _) = ExpressionSlots.ForRule(Working, "bare", "create", "first")!.Value;
+        var (second, _) = ExpressionSlots.ForRule(Working, "bare", "create", "second")!.Value;
 
-        _ = ExpressionSlots.ForRule(Working, "bare", "create", "false");
+        first.ShouldContain("first");
+        first.ShouldNotContain("second");
+        second.ShouldNotContain("first");
+    }
 
-        Working.ShouldBe(before);
-        Working.ShouldNotContain("create");
+    [Fact]
+    public void A_candidate_for_one_slot_does_not_carry_another_drafts_slot()
+    {
+        var (json, _) = ExpressionSlots.ForRule(Working, "bare", "create", "false")!.Value;
+        var (other, _) = ExpressionSlots.ForRule(Working, "orders", "list", "true")!.Value;
+
+        json.ShouldNotContain("\"list\"");
+        other.ShouldNotContain("\"create\"");
     }
 
     [Fact]

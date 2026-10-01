@@ -86,7 +86,7 @@ else
                                       Value="@Drafts.Text(operation, declared)" ValueChanged="text => Typed(operation, text ?? string.Empty)"
                                       OnKeyDown="args => RevertOnEscape(operation, args)" />
                         @{ var id = $"rule-{operation}"; }
-                        @foreach (var (finding, index) in Check.Findings(id).Select((finding, index) => (finding, index)))
+                        @foreach (var (finding, index) in _check.Findings(id).Select((finding, index) => (finding, index)))
                         {
                             <p class="a-field__problem" id="@(index == 0 ? $"{id}-check" : $"{id}-check-{index}")" role="status"
                                data-testid="@($"check-{id}")" data-severity="@finding.Severity">
@@ -155,8 +155,6 @@ else
     private readonly ExpressionCheck _check = new();
     private readonly ComponentLifetime _lifetime = new();
 
-    private ExpressionCheck Check => _check;
-
     /// <summary>Redraws the box whenever a check has something new to show.</summary>
     public RulesTab() => _check.Changed += Redraw;
 
@@ -214,6 +212,8 @@ else
         if (args.Key == "Escape")
         {
             Drafts.Revert(operation);
+            /* What the box shows is the saved rule again, so it is that text the check must now speak for. */
+            _ = CheckAsync(operation, Drafts.Text(operation, Declared(operation)));
         }
     }
 
@@ -224,7 +224,7 @@ else
     private string DescribedBy(string operation, string? declared)
     {
         var described = Drafts.IsDirty(operation, declared) ? $"rule-{operation}-hint rule-{operation}-dirty" : $"rule-{operation}-hint";
-        return Check.DescribedBy($"rule-{operation}") is { } check ? $"{described} {check}" : described;
+        return _check.DescribedBy($"rule-{operation}") is { } check ? $"{described} {check}" : described;
     }
 
     /// <summary>Stages what was typed, only when it differs from what the descriptor says.</summary>

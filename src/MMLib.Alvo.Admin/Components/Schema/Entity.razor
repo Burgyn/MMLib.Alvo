@@ -254,7 +254,7 @@
                                AppliedJson="@(Copy.Loaded ? Copy.AppliedJson : null)" />
                 break;
             case EntityTabs.Rules:
-                <RulesTab Rules="_working" Entity="@EntityName" Editable="DeclaredHere" OnChanged="SetRule" />
+                <RulesTab @key="EntityName" Rules="_working" Entity="@EntityName" Editable="DeclaredHere" OnChanged="SetRule" />
                 break;
             case EntityTabs.OnWrite:
                 <HooksTab Hooks="@_hooks" Editable="DeclaredHere" Refused="_refused"
