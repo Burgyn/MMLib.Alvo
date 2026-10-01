@@ -179,6 +179,19 @@ public sealed class ExpressionSlotCheckTests
     }
 
     [Fact]
+    public void A_not_judged_finding_with_no_place_to_name_does_not_end_in_empty_parentheses()
+    {
+        var descriptor = Descriptor();
+        descriptor["formats"] = JsonNode.Parse("{\"f\":{\"pattern\":\"(\"}}");
+
+        var finding = Check(descriptor, ListRule, "true").Where(IsError).ShouldHaveSingleItem();
+
+        finding.Message.ShouldStartWith(ExpressionSlotCheck.NotJudgedPrefix);
+        finding.Message.ShouldNotContain("()");
+        finding.Message.ShouldBe("Not checked yet — another part of this draft is not valid. This box is checked once that is fixed.");
+    }
+
+    [Fact]
     public void A_descriptor_without_a_schema_error_gets_no_not_judged_finding() =>
         Check(ListRule, "'amdin' in @user.roles").ShouldAllBe(f => !f.Message.StartsWith(ExpressionSlotCheck.NotJudgedPrefix, StringComparison.Ordinal));
 

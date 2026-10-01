@@ -116,10 +116,11 @@ internal static class ExpressionSlotCheck
     /// builds it, so a slot's own errors are not reported while either fails. A pass here would be a pass for
     /// something nobody looked at.
     /// </summary>
-    private static DescriptorValidationError NotJudged(IReadOnlyList<string> elsewhere, string pointer) => new(
+    private static DescriptorValidationError NotJudged(List<string> elsewhere, string pointer) => new(
         pointer,
-        $"{NotJudgedPrefix} — another part of this draft is not valid ({string.Join(", ", elsewhere)}). "
-        + "This box is checked once that is fixed.",
+        $"{NotJudgedPrefix} — another part of this draft is not valid"
+        + (elsewhere.Count > 0 ? $" ({string.Join(", ", elsewhere)})" : string.Empty)
+        + ". This box is checked once that is fixed.",
         "Fix the part named; Apply lists every problem.",
         DescriptorValidationSeverity.Error);
 
