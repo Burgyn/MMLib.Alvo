@@ -182,7 +182,7 @@ internal static class ExpressionSlotCheck
     /// <summary>
     /// Refuses an array longer than <see cref="MaxArrayLength"/>. The schema is frozen and a descriptor of 2,000
     /// <c>enum</c> values takes the validator about 0.1 s while 90,000 take minutes, all under the size cap: a check runs
-    /// on every keystroke for a Viewer, so the bound is the check's own and walks the tree once, iteratively.
+    /// on every keystroke, so the bound is the check's own and walks the tree once, iteratively.
     /// </summary>
     private static void EnsureArraysBounded(JsonNode root)
     {
