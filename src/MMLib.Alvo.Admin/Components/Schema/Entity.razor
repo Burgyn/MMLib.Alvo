@@ -198,7 +198,10 @@
                             <CascadingValue Value="_ruleDrafts">
                                 <CascadingValue Value="_arrived">
                                     <CascadingValue Value="_declarations">
-                                        <Panel data-testid="entity-tabpanel">@TabContent(tab)</Panel>
+                                        @* The working copy reaches the inputs that are checked as a cascade too: the model stays internal. *@
+                                        <CascadingValue Value="Copy">
+                                            <Panel data-testid="entity-tabpanel">@TabContent(tab)</Panel>
+                                        </CascadingValue>
                                     </CascadingValue>
                                 </CascadingValue>
                             </CascadingValue>

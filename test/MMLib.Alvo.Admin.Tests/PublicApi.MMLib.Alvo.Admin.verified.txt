@@ -631,7 +631,7 @@ namespace MMLib.Alvo.Admin.Components.Rules
         public void Dispose() { }
         protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
     }
-    public class RulesTab : Microsoft.AspNetCore.Components.ComponentBase
+    public class RulesTab : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public RulesTab() { }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -648,6 +648,7 @@ namespace MMLib.Alvo.Admin.Components.Rules
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, string>> Rules { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
     }
 }
 namespace MMLib.Alvo.Admin.Components.Schema
