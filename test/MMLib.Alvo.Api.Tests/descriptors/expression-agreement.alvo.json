@@ -1,0 +1,74 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "expression-agreement",
+  "description": "The project the expression check is held to apply over. It carries one of every expression slot kind the check serves — a rule per operation, a before-hook condition, an after-hook condition, a mutate value and a computed field — each already valid, so a case replaces exactly one slot and every other finding the validator could raise is held constant.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["dispatcher", "owner"]
+  },
+  "access": {
+    "developer": "'dispatcher' in @user.roles",
+    "admin": "'owner' in @user.roles"
+  },
+  "webhooks": {
+    "endpoints": {
+      "desk": {
+        "url": "http://127.0.0.1:5081/hooks/desk",
+        "secretRef": "desk-signing-key"
+      }
+    }
+  },
+  "entities": {
+    "orders": {
+      "description": "A work order.",
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 80 },
+        "note": { "type": "string", "maxLength": 200 },
+        "status": { "type": "enum", "values": ["open", "closed"] },
+        "quantity": { "type": "integer" },
+        "price": { "type": "decimal", "precision": 10, "scale": 2 },
+        "closed_at": { "type": "datetime" },
+        "line_total": {
+          "type": "decimal",
+          "precision": 10,
+          "scale": 2,
+          "computed": "quantity * price"
+        }
+      },
+      "rules": {
+        "list": "'dispatcher' in @user.roles",
+        "get": "'dispatcher' in @user.roles",
+        "create": "'dispatcher' in @user.roles",
+        "update": "'dispatcher' in @user.roles",
+        "delete": "'owner' in @user.roles"
+      },
+      "hooks": {
+        "beforeCreate": [
+          {
+            "condition": "new.quantity > 0",
+            "action": { "reject": "A work order needs a positive quantity." }
+          }
+        ],
+        "beforeUpdate": [
+          {
+            "condition": "new.status == 'closed' && old.status != 'closed'",
+            "action": {
+              "mutate": {
+                "closed_at": { "$cel": "now()" },
+                "note": { "$cel": "'closed'" },
+                "quantity": { "$cel": "1" }
+              }
+            }
+          }
+        ],
+        "afterCreate": [
+          {
+            "condition": "new.quantity > 100",
+            "action": { "type": "webhook", "endpoint": "desk" }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # The Management API
 
-The configuration surface: ten HTTP routes over one service, `IAlvoManagement`, that read and change what a
+The configuration surface: twelve HTTP routes over one service, `IAlvoManagement`, that read and change what a
 project **is** — its descriptor, its revision history, its resolved schema, what this build honours, and who
 a policy would admit. It never reads or writes a row of application data. That is not an omission; it is
 deviation **D4**, and the whole shape of this document follows from it.
@@ -22,6 +22,7 @@ because it is infrastructure configuration rather than a block a locked-out proj
 | `GET {m}/projects/{project}/schema` | `GetSchemaAsync` | `viewer` |
 | `GET {m}/projects/{project}/capabilities` | `GetCapabilitiesAsync` | `viewer` |
 | `POST {m}/projects/{project}/policy/simulate` | `SimulatePolicyAsync` | `viewer` |
+| `POST {m}/projects/{project}/cel/check` | `CheckExpressionAsync` | `developer` |
 | `PUT {m}/projects/{project}/descriptor` | `ApplyDescriptorAsync` | `developer` |
 | `POST {m}/projects/{project}/revisions/{revision:int}/rollback` | `RollbackAsync` | `developer` |
 | `PUT {m}/ai/connection` | `SetAiConnectionAsync` | `admin` |
@@ -48,7 +49,7 @@ the code is right.
 
 **The level is not on the route.** A route carries a `ManagementOperation`; `ManagementOperations` is the
 one table mapping an operation to the level it needs, and an operation it does not list requires `admin` —
-the most restrictive answer, not the most convenient one. Two of the thirteen operations
+the most restrictive answer, not the most convenient one. Two of the fifteen operations
 (`ManageApiKeys`, `DeleteProject`) have no route at all; see *What is deliberately absent*.
 `ManageUsers` gained seven in F5 — see *Administering people*.
 
@@ -65,6 +66,84 @@ itself by editing three lines of JSON, because every accepted apply re-primes th
 The rollback arm is the subtler half: a restore carries a **stored** descriptor the caller never had to
 write, so any project whose history ever held a looser block would otherwise be a standing escalation at a
 `developer`-gated route.
+
+## Why `cel/check` is not the dry run, and why it is Developer
+
+`POST {m}/projects/{project}/cel/check` answers one question for the dashboard's expression inputs (a rule, a
+hook condition, a mutate value, a computed field): *what would apply say about this expression, in this
+descriptor?* The request is `{descriptorJson, path, source}` — the working copy the caller holds, the RFC 6901
+pointer of the slot, the candidate as typed — and the answer is a list of `DescriptorValidationError`, the
+type apply already speaks. There is no second diagnostic type and no second code path.
+
+**It is not the dry-run apply.** `?dryRun=true` is `PreviewAsync`: all-or-nothing over the whole descriptor,
+bound to a revision (`If-Match`) and to a migration plan it computes. It cannot answer per keystroke, and one
+bad expression elsewhere in the document would turn the preview red and mask the verdict on the slot being
+edited. The check reads no store, no revision and no runtime, so it has none of those couplings.
+
+**The mechanism is splice and validate.** `ExpressionSlotCheck` parses the supplied descriptor, replaces the
+node at `path` with the candidate (a `{"$cel": source}` object under `/action/mutate/<field>`, the documented
+form; a bare string elsewhere), runs the **same** `IDescriptorValidator` that apply runs, and keeps the
+findings whose `Path` is the slot or sits under it. Compiling alone would pass an undeclared role literal
+(`'amdin' in @user.roles`), `old.` inside a `beforeCreate` hook, and a computed constant that would become a
+bind parameter — each is a refusal at apply, so each is a finding here. `ExpressionCheckAgreementTests` holds
+the two to the same answer for every slot kind, including over a working copy with other slots broken.
+
+**Errors are data; an unanswerable request is a 422.** An expression that does not compile is a `200` with
+findings: that is the answer, not a failure. A request that cannot be answered — no body, a missing part, a
+`path` that is not a pointer into the descriptor, a descriptor that is not a JSON object or repeats a key, one
+over the size cap — is a `ManagementRequestException`, `422` through the same ladder as every other route. The
+body binds nullable so the gate answers first (the `policy/simulate` reason), and an unauthorised caller meets
+`403` before a missing project.
+
+**Developer, because it runs the validator over untrusted input exactly as apply does.** The check reads nothing
+stored — every finding derives from the descriptor the caller sent (the role catalog, the entities and the fields
+are the SENT ones; `A_finding_never_carries_stored_state_the_caller_did_not_send` pins it) — so there is no
+disclosure at any level. The exposure is cost and robustness: it parses and validates a caller's text on every
+keystroke, so it inherits apply's exposure and takes apply's level, the principal who edits descriptors in the
+dashboard and can already post the same payload to `PUT descriptor`. (The first design said Viewer, "like
+`policy/simulate`": right about disclosure, wrong about cost.) A Viewer gets no live check; the dashboard shows
+nothing for them, no sentence and no error.
+
+The validator's own weaknesses are apply's too, and are follow-ups, not part of this change: a long `enum`
+`values` with **duplicate** items is slow (the schema's `uniqueItems` reports every duplicate pair, so 2,000
+identical values take seconds); a non-object value under `entities` or `fields` (`"fields":{"zz":1}`) throws
+from `IsUnknownRef` and answers 500; and the same shapes reach every route that validates.
+
+**The size cap.** A developer can post a whole descriptor on every keystroke, so `descriptorJson` is capped at
+1,000,000 characters (`MaxCheckedDescriptorChars`) and refused with `422` before it is parsed. The bike-workshop
+descriptor is 24 KB; the cap is a ceiling, not a target. `source` is capped at 8,000 characters and `path` at 1,024, each refused `422` with a detail that names the cap and
+says what to send instead (otherwise a long `path` or `source` would void the descriptor cap through the ~30 MB
+body limit). A refusal that must quote the pointer quotes at most 120 characters of it.
+
+**The check bounds array length.** A JSON array of more than 2,000 elements anywhere in `descriptorJson` is refused
+`422`, naming the limit and the array's pointer: the validator is roughly quadratic in a long `enum` `values`
+(2,000 **distinct** values about 0.1 s, 90,000 minutes, all under the size cap) and the check runs per keystroke.
+Duplicate items are slower than that, because the validator reports every duplicate pair (apply behaves the same;
+a follow-up). The frozen schema is untouched; the bound is the check's own.
+
+**A descriptor refused elsewhere is "not checked yet", not green.** The validator runs its rule, computed and owner
+pass only when the schema accepts the descriptor AND the mapper builds it, so one such refusal anywhere hides the
+slot's own errors. The check then answers one `Error` at the slot — "Not checked yet — another part of this draft is
+not valid (up to three places). This box is checked once that is fixed." (the dashboard shows it muted) — rather
+than a green verdict nobody earned; the signal is the validator's own record that the pass ran. **Limitation:** that
+record exists only on the shipped `DescriptorValidator`. When the registered `IDescriptorValidator` is a decorator or
+another implementation, the check cannot tell whether the rule pass ran and falls back to the schema pass's `#/…`
+paths as the signal, so a refusal only the mapper makes can then read as green. A bad *expression* elsewhere does not do this (a good slot stays green). Schema findings use the URI
+fragment form `#/entities/…`, which the filter reads as the pointer `/entities/…`; a refusal the schema reports
+on a node above the slot (a mutate value is a `oneOf`) is reported at the slot when the descriptor is
+schema-valid with a placeholder in it.
+
+**The slot must already exist.** A pointer to a rule, hook or field the descriptor lacks is a `422`: the check
+splices, it does not create. The dashboard materialises a draft hook or field on a clone of the working copy
+before it asks, so the working copy itself is never dirtied by a check.
+
+**What it deliberately does not do.**
+
+* No `cel/scope`: its only consumer is completion or a field dropdown, which is a later slice.
+* No `cel/evaluate`: running caller-supplied CEL on a hot path is a denial-of-service and an oracle risk, and
+  `policy/simulate` already covers rules.
+* No `Position`: the validator folds `CelCompilationError.Position` into the message; an underline needs a
+  caret, and the property is additive when an editor needs it.
 
 ## One path, two transports
 

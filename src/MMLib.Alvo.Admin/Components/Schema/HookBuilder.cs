@@ -142,6 +142,26 @@ internal sealed class HookBuilder
         return refusal is null ? Action() : null;
     }
 
+    /// <summary>
+    /// The action the form would add, or — while it cannot be built yet — the same kind with the smallest valid stand-in
+    /// for each facet still blank.
+    /// </summary>
+    /// <remarks>
+    /// For the live expression check, which asks about one box before the rest of the form is filled in: the answer is
+    /// filtered to that box's own slot, so the stand-ins are never judged. Never staged; <see cref="Build"/> is the way in.
+    /// </remarks>
+    /// <returns>The action in the schema's shape.</returns>
+    public JsonObject Draft() => Build(out _) ?? new HookBuilder
+    {
+        Kind = Kind,
+        RejectMessage = Stand(RejectMessage),
+        MutateField = Stand(MutateField),
+        MutateValue = Stand(MutateValue),
+        Endpoint = Stand(Endpoint),
+        Template = Stand(Template),
+        To = Stand(To),
+    }.Action();
+
     /// <summary>Empties what was typed, and keeps the point and the kind for the next hook.</summary>
     public void Clear()
     {
@@ -179,6 +199,8 @@ internal sealed class HookBuilder
         Webhook => new JsonObject { ["type"] = Webhook, ["endpoint"] = Endpoint },
         _ => new JsonObject { ["type"] = Email, ["template"] = Template, ["to"] = To },
     };
+
+    private static string Stand(string value) => Blank(value) ? "x" : value;
 
     private static bool Blank(string value) => string.IsNullOrWhiteSpace(value);
 }

@@ -57,6 +57,11 @@ public abstract class ManagementDecorator(IAlvoManagement inner) : IAlvoManageme
         => inner.SimulatePolicyAsync(project, simulation, ct);
 
     /// <inheritdoc/>
+    public virtual Task<ManagementExpressionVerdict> CheckExpressionAsync(
+        string project, ManagementExpressionCheck request, CancellationToken ct = default)
+        => inner.CheckExpressionAsync(project, request, ct);
+
+    /// <inheritdoc/>
     public virtual Task<ManagementApplyResult> ApplyDescriptorAsync(
         string project, ManagementApplyRequest request, CancellationToken ct = default)
         => inner.ApplyDescriptorAsync(project, request, ct);

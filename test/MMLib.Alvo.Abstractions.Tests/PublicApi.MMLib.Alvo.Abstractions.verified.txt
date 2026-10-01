@@ -1263,6 +1263,7 @@ namespace MMLib.Alvo.Management
     public interface IAlvoManagement
     {
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementApplyResult> ApplyDescriptorAsync(string project, MMLib.Alvo.Management.ManagementApplyRequest request, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementExpressionVerdict> CheckExpressionAsync(string project, MMLib.Alvo.Management.ManagementExpressionCheck request, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementCapabilities> GetCapabilitiesAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDescriptor> GetDescriptorAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementInfo> GetInfoAsync(System.Threading.CancellationToken ct = default);
@@ -1326,6 +1327,19 @@ namespace MMLib.Alvo.Management
         public ManagementEscalationException() { }
         public ManagementEscalationException(string message) { }
         public ManagementEscalationException(string message, System.Exception innerException) { }
+    }
+    public sealed class ManagementExpressionCheck : System.IEquatable<MMLib.Alvo.Management.ManagementExpressionCheck>
+    {
+        public ManagementExpressionCheck(string DescriptorJson, string Path, string Source) { }
+        public string DescriptorJson { get; init; }
+        public string Path { get; init; }
+        public string Source { get; init; }
+    }
+    public sealed class ManagementExpressionVerdict : System.IEquatable<MMLib.Alvo.Management.ManagementExpressionVerdict>
+    {
+        public ManagementExpressionVerdict(System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.DescriptorValidationError> Findings) { }
+        public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Descriptor.DescriptorValidationError> Findings { get; init; }
+        public bool IsValid { get; }
     }
     public sealed class ManagementForbiddenException : System.Exception
     {

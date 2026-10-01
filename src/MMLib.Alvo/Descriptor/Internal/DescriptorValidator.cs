@@ -93,56 +93,161 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             AlvoFrameworkTables.NamesFor(options.Value.SchemaPrefix).ToHashSet(StringComparer.Ordinal);
     }
 
-    public DescriptorValidationResult Validate(string descriptorJson)
+    public DescriptorValidationResult Validate(string descriptorJson) => ValidateWithOutcome(descriptorJson).Result;
+
+    /// <summary>
+    /// <see cref="Validate"/> plus whether the rule, computed and owner pass <b>ran</b>: it needs a descriptor the
+    /// schema accepts and the mapper can build, so while it did not, nothing about an expression has been judged.
+    /// </summary>
+    /// <param name="descriptorJson">The raw descriptor JSON.</param>
+    /// <returns>The findings and whether the expression passes ran.</returns>
+    internal (DescriptorValidationResult Result, bool ExpressionsJudged) ValidateWithOutcome(string descriptorJson)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(descriptorJson);
 
-        JsonDocument document;
-        try
+        if (!TryParse(descriptorJson, out var document, out var malformed))
         {
-            document = JsonDocument.Parse(descriptorJson);
-        }
-        catch (JsonException ex)
-        {
-            return new DescriptorValidationResult([Malformed(ex)]);
+            return (new DescriptorValidationResult([malformed!]), false);
         }
 
         using (document)
         {
-            var schemaErrors = SchemaErrors(document.RootElement);
-            var errors = new List<DescriptorValidationError>(schemaErrors);
-            errors.AddRange(SemanticErrors(document.RootElement));
-            errors.AddRange(WildcardSubscriptionErrors(document.RootElement));
-            if (schemaErrors.Count == 0)
-            {
-                errors.AddRange(RuleErrors(descriptorJson));
-            }
-
-            return new DescriptorValidationResult(errors);
+            return UnicodeError(document!.RootElement) is { } unicode
+                ? (new DescriptorValidationResult([unicode]), false)
+                : Passes(document.RootElement, descriptorJson);
         }
     }
 
-    private List<DescriptorValidationError> RuleErrors(string descriptorJson)
+    private static bool TryParse(string descriptorJson, out JsonDocument? document, out DescriptorValidationError? malformed)
     {
-        AlvoDescriptor descriptor;
-        SchemaModel schema;
+        try
+        {
+            (document, malformed) = (JsonDocument.Parse(descriptorJson), null);
+
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            (document, malformed) = (null, Malformed(ex));
+
+            return false;
+        }
+    }
+
+    /// <summary>The schema, semantic, wildcard and — when the document can be read into the model — rule passes.</summary>
+    private (DescriptorValidationResult Result, bool ExpressionsJudged) Passes(JsonElement root, string descriptorJson)
+    {
+        var schemaErrors = SchemaErrors(root);
+        var errors = new List<DescriptorValidationError>(schemaErrors);
+        errors.AddRange(SemanticErrors(root));
+        errors.AddRange(WildcardSubscriptionErrors(root));
+        var judged = schemaErrors.Count == 0 && RuleErrors(descriptorJson, errors);
+
+        return (new DescriptorValidationResult(errors), judged);
+    }
+
+    /// <summary>
+    /// The refusal for text no UTF-8 document can carry: a JSON escape for half a surrogate pair parses, then throws
+    /// from Corvus or <see cref="JsonElement.GetString"/> deep inside every pass (a 500 on every management route).
+    /// </summary>
+    /// <param name="root">The parsed descriptor.</param>
+    /// <returns>The finding, or <see langword="null"/> when every key and string reads as text.</returns>
+    private static DescriptorValidationError? UnicodeError(JsonElement root)
+    {
+        try
+        {
+            var pending = new Stack<JsonElement>([root]);
+            while (pending.Count > 0)
+            {
+                ReadText(pending.Pop(), pending);
+            }
+
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            return new DescriptorValidationError(
+                "/",
+                "The descriptor contains text that is not valid Unicode (a lone surrogate: half of a \\uD800-\\uDFFF pair).",
+                "Write the character itself, or complete the pair, in the key or value that holds the unpaired \\uD800-\\uDFFF escape.",
+                DescriptorValidationSeverity.Error);
+        }
+    }
+
+    private static void ReadText(JsonElement element, Stack<JsonElement> pending)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.String:
+                _ = element.GetString();
+                break;
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    _ = property.Name;
+                    pending.Push(property.Value);
+                }
+
+                break;
+            case JsonValueKind.Array:
+                foreach (var item in element.EnumerateArray())
+                {
+                    pending.Push(item);
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>Adds the rule-pass findings to <paramref name="into"/>; <see langword="false"/> when the pass could not run.</summary>
+    private bool RuleErrors(string descriptorJson, List<DescriptorValidationError> into)
+    {
+        if (!TryReadModel(descriptorJson, into, out var descriptor, out var schema))
+        {
+            return false;
+        }
+
+        into.AddRange(CompiledErrors(descriptor!, schema!));
+
+        return true;
+    }
+
+    /// <summary>Reads the document into the model; <see langword="false"/> (with a finding when there is one to give) when it cannot be.</summary>
+    private static bool TryReadModel(
+        string descriptorJson, List<DescriptorValidationError> into, out AlvoDescriptor? descriptor, out SchemaModel? schema)
+    {
+        (descriptor, schema) = (null, null);
         try
         {
             descriptor = AlvoDescriptor.Parse(descriptorJson);
             schema = DescriptorToSchemaMapper.Map(descriptor);
+
+            return true;
         }
         catch (InvalidDataException)
         {
             // Already reported by the semantic pass above (today's 'computed' rejection) — do not
             // double-report the same field, and a mapping failure leaves nothing to compile rules against.
-            return [];
+            return false;
         }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            // The schema accepted a value the typed model cannot hold (a maxLength beyond int, say): a finding the
+            // caller can fix, never an exception — every management route would render it as a 500.
+            into.Add(Unrepresentable(ex));
 
+            return false;
+        }
+    }
+
+    private List<DescriptorValidationError> CompiledErrors(AlvoDescriptor descriptor, SchemaModel schema)
+    {
         var errors = PolicyCatalog.TryBuild(descriptor, schema, _compiler, out _, out var ruleErrors)
             ? []
             : ruleErrors.ToList();
         errors.AddRange(ComputedFieldCheck.Errors(schema, _compiler));
         errors.AddRange(OwnerWarnings(descriptor, schema, errors));
+
         return errors;
     }
 
@@ -158,6 +263,41 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             .Select(error => error.Path)
             .ToHashSet(StringComparer.Ordinal);
         return OwnerComparisonCheck.Warnings(descriptor, schema, _compiler).Where(warning => !refused.Contains(warning.Path));
+    }
+
+    private const string UnreadableOverflow = "A value in the descriptor is outside what Alvo can hold";
+    private const string UnreadableModel = "The descriptor could not be read into Alvo's model";
+
+    /// <summary>Whether <paramref name="finding"/> is the refusal of a value the schema accepted and the model cannot hold.</summary>
+    /// <param name="finding">A finding from this validator.</param>
+    internal static bool IsUnreadable(DescriptorValidationError finding) =>
+        finding.Message.StartsWith(UnreadableOverflow, StringComparison.Ordinal)
+        || finding.Message.StartsWith(UnreadableModel, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The refusal for a value the schema accepts and the typed model cannot hold. Its path is written in the schema
+    /// pass's own fragment form (<c>#/…</c>): it is a refusal of the same kind (the document is not a descriptor Alvo
+    /// can read) and, like a schema error, it stops the rule pass from judging anything.
+    /// </summary>
+    internal static DescriptorValidationError Unrepresentable(Exception ex)
+    {
+        var path = ex is JsonException { Path: string jsonPath } && jsonPath.StartsWith("$.", StringComparison.Ordinal)
+            ? "#/" + jsonPath[2..].Replace('.', '/')
+            : "#/";
+
+        var where = path == "#/" ? "." : $" (at '{path}').";
+
+        return ex is JsonException
+            ? new DescriptorValidationError(
+                path,
+                UnreadableOverflow + where,
+                "Use a smaller number or a shorter value there; integer facets such as maxLength, precision and scale must fit a 32-bit integer.",
+                DescriptorValidationSeverity.Error)
+            : new DescriptorValidationError(
+                path,
+                UnreadableModel + where,
+                "Check the value named above; an apply reports every other problem it finds.",
+                DescriptorValidationSeverity.Error);
     }
 
     private static DescriptorValidationError Malformed(JsonException ex) =>

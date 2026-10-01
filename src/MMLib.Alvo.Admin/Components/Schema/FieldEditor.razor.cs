@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Admin.Components.DesignSystem;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Management;
@@ -11,6 +12,8 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /// <summary>The editor that adds a field to an entity, or edits one it declares.</summary>
 public partial class FieldEditor
 {
+    private const string ComputedBox = "new-field-computed";
+
     private const int NoteValueLimit = 40;
 
     /// <summary>The build's slot for a rollup's refused <c>where</c> filter (<c>UnhonouredFeatures.RollupWhere</c>).</summary>
@@ -119,6 +122,86 @@ public partial class FieldEditor
         [.. RefusalPlaces.On(RefusalScreen.FieldEditor, Refused)
             .Where(refusal => !(_facets.Kind == FieldKind.Rollup && refusal.Slot == RollupWhereSlot))];
 
+    /// <summary>
+    /// The working copy a typed expression is checked against, on a clone — cascaded by the entity screen only, so its
+    /// model stays internal.
+    /// </summary>
+    [CascadingParameter]
+    private WorkingCopy? Copy { get; set; }
+
+    private readonly ExpressionCheck _check = new();
+    private readonly ComponentLifetime _lifetime = new();
+
+    /// <summary>Redraws the box whenever a check has something new to show.</summary>
+    public FieldEditor() => _check.Changed += Redraw;
+
+    private void Redraw() => _ = InvokeAsync(StateHasChanged);
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _check.Changed -= Redraw;
+        _lifetime.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>The expression box is described by its hint, and by the sentence under it while it has one.</summary>
+    private string ComputedDescribedBy
+        => _check.DescribedBy(ComputedBox) is { } check ? $"{ComputedBox}-hint {check}" : $"{ComputedBox}-hint";
+
+    private void TypeComputed(string? text)
+    {
+        _facets.Computed = text ?? string.Empty;
+        _ = CheckComputedAsync();
+    }
+
+    /// <summary>The name is the slot's address, so a name typed after the expression asks again.</summary>
+    private void TypeName(string? name)
+    {
+        _facets.Name = name ?? string.Empty;
+        _ = CheckComputedAsync();
+    }
+
+    private void ChooseType(FieldType type)
+    {
+        _facets.Type = type;
+        _ = CheckComputedAsync();
+    }
+
+    /// <summary>
+    /// Runs the check to its end and observes its fault: it is fire-and-forget, so an unobserved exception would
+    /// otherwise vanish, and a helper that fails must never be the reason the form misbehaves.
+    /// </summary>
+    private async Task CheckComputedAsync()
+    {
+        try
+        {
+            var text = _facets.Kind == FieldKind.Computed ? _facets.Computed : string.Empty;
+            await _check.SubmitAsync(ComputedBox, text, AskAsync);
+        }
+        catch (Exception ex)
+        {
+            CheckFailed(Logger, Entity, ex);
+        }
+    }
+
+    [LoggerMessage(EventId = 21, Level = LogLevel.Warning, Message = "The expression check on the new computed field of {Entity} failed")]
+    private static partial void CheckFailed(ILogger logger, string entity, Exception exception);
+
+    /// <summary>
+    /// The field exactly as <see cref="FieldFacets.Build"/> would stage it, with the typed expression, or nothing while
+    /// the form cannot build one yet.
+    /// </summary>
+    private Task<ManagementExpressionVerdict?> AskAsync(string source, CancellationToken ct)
+        => !_lifetime.Ended && Copy is { } copy && Candidate(copy, source) is { } slot
+            ? Gateway.CheckExpressionAsync(slot.Json, slot.Path, source, ct)
+            : Task.FromResult<ManagementExpressionVerdict?>(null);
+
+    private (string Json, string Path)? Candidate(WorkingCopy copy, string source)
+        => _facets.Build(Editing, EditingJson, Siblings, out _) is { } facets
+            ? ExpressionSlots.ForComputed(copy.Json, Entity, _facets.Name, facets, source)
+            : null;
+
     private bool IsEditing => Editing is { Length: > 0 };
 
     /// <summary>Whether the form differs from how it opened, which is what Escape must not throw away.</summary>
@@ -191,6 +274,7 @@ public partial class FieldEditor
     private void ChooseKind(FieldKind kind)
     {
         _facets.Kind = kind;
+        _ = CheckComputedAsync();
         if (kind == FieldKind.Computed && !_facets.ComputedTypesOffered.Contains(_facets.Type))
         {
             _facets.Type = FieldType.Decimal;
@@ -291,6 +375,7 @@ public partial class FieldEditor
             if (await StageAsync(keepOpen: true))
             {
                 _facets = new FieldFacets { Type = _facets.Type, Kind = _facets.Kind, Sources = _facets.Sources };
+                _ = CheckComputedAsync();
                 ForgetNumbers();
                 _opened = Fingerprint();
                 if (_nameField is not null)

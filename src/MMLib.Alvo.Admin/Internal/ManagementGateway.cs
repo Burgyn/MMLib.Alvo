@@ -170,6 +170,31 @@ internal sealed class ManagementGateway(
             () => management.SimulatePolicyAsync(project, simulation, ct), ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Asks what apply would say about one expression, or <see langword="null"/> when the check itself could not be
+    /// asked — a helper must never be the reason an operator cannot edit.
+    /// </summary>
+    /// <remarks>
+    /// Never cached: the verdict depends on the working copy, which changes with every keystroke. Only the failures
+    /// of asking are swallowed; any other exception is a bug and propagates.
+    /// </remarks>
+    public async Task<ManagementExpressionVerdict?> CheckExpressionAsync(
+        string descriptorJson, string path, string source, CancellationToken ct)
+    {
+        try
+        {
+            var project = await ProjectAsync(ct).ConfigureAwait(false);
+            var check = new ManagementExpressionCheck(descriptorJson, path, source);
+            return await AsOperatorAsync(
+                () => management.CheckExpressionAsync(project, check, ct), ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is ManagementRequestException or ManagementForbiddenException
+            or OperationCanceledException or HttpRequestException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Applies a descriptor, or plans one when <paramref name="dryRun"/> is set.</summary>
     /// <remarks>
     /// A real apply invalidates every cached read, because every one of them can have moved. A dry

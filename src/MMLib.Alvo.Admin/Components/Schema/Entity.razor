@@ -198,7 +198,10 @@
                             <CascadingValue Value="_ruleDrafts">
                                 <CascadingValue Value="_arrived">
                                     <CascadingValue Value="_declarations">
-                                        <Panel data-testid="entity-tabpanel">@TabContent(tab)</Panel>
+                                        @* The working copy reaches the inputs that are checked as a cascade too: the model stays internal. *@
+                                        <CascadingValue Value="Copy">
+                                            <Panel data-testid="entity-tabpanel">@TabContent(tab)</Panel>
+                                        </CascadingValue>
                                     </CascadingValue>
                                 </CascadingValue>
                             </CascadingValue>
@@ -217,9 +220,11 @@
         @if (_tab == EntityTabs.First && _editorOpen)
         {
             <CascadingValue Value="_rollupSources">
-                <FieldEditor Entity="@EntityName" Targets="_entities" OnAdd="AddFieldAsync"
-                             Editing="@_editing" EditingJson="@EditedJson" OnClose="CloseEditor"
-                             Siblings="_fieldNames" Refused="_refused" />
+                <CascadingValue Value="Copy">
+                    <FieldEditor Entity="@EntityName" Targets="_entities" OnAdd="AddFieldAsync"
+                                 Editing="@_editing" EditingJson="@EditedJson" OnClose="CloseEditor"
+                                 Siblings="_fieldNames" Refused="_refused" />
+                </CascadingValue>
             </CascadingValue>
         }
     }
@@ -251,10 +256,10 @@
                                AppliedJson="@(Copy.Loaded ? Copy.AppliedJson : null)" />
                 break;
             case EntityTabs.Rules:
-                <RulesTab Rules="_working" Entity="@EntityName" Editable="DeclaredHere" OnChanged="SetRule" />
+                <RulesTab @key="EntityName" Rules="_working" Entity="@EntityName" Editable="DeclaredHere" OnChanged="SetRule" />
                 break;
             case EntityTabs.OnWrite:
-                <HooksTab Hooks="@_hooks" Editable="DeclaredHere" Refused="_refused"
+                <HooksTab Hooks="@_hooks" Entity="@EntityName" Editable="DeclaredHere" Refused="_refused"
                           OnAdd="AddHook" OnRemove="RemoveHook" />
                 break;
             case EntityTabs.Indexes:

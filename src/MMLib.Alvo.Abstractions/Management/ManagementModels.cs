@@ -166,6 +166,29 @@ public sealed record ManagementPolicyVerdict(
     IReadOnlyList<string> HiddenFields,
     IReadOnlyList<string> ReadOnlyFields);
 
+/// <summary>One expression to check, in the descriptor it will live in.</summary>
+/// <param name="DescriptorJson">
+/// The descriptor JSON the editor holds — typically the unapplied working copy. It is the only input the answer
+/// depends on: nothing stored is read.
+/// </param>
+/// <param name="Path">
+/// The RFC 6901 pointer of the slot being edited, for example <c>/entities/orders/rules/list</c>. The slot must
+/// already exist in <paramref name="DescriptorJson"/>.
+/// </param>
+/// <param name="Source">The candidate expression, as typed.</param>
+public sealed record ManagementExpressionCheck(string DescriptorJson, string Path, string Source);
+
+/// <summary>What applying would say about one expression.</summary>
+/// <param name="Findings">
+/// The validator's findings at or under the slot, errors and warnings alike, each with a path and a fix. A
+/// warning never makes the expression invalid, as it never blocks an apply.
+/// </param>
+public sealed record ManagementExpressionVerdict(IReadOnlyList<DescriptorValidationError> Findings)
+{
+    /// <summary>Gets a value indicating whether the slot carries no error.</summary>
+    public bool IsValid => Findings.All(f => f.Severity != DescriptorValidationSeverity.Error);
+}
+
 /// <summary>One apply.</summary>
 /// <param name="DescriptorJson">The descriptor to apply, exactly as it should be stored.</param>
 /// <param name="ExpectedRevision">

@@ -136,6 +136,29 @@ public interface IAlvoManagement
         string project, ManagementPolicySimulation simulation, CancellationToken ct = default);
 
     /// <summary>
+    /// Answers what applying would say about <b>one</b> expression — by running the validator apply runs on the
+    /// descriptor with the candidate spliced in, never a second opinion.
+    /// </summary>
+    /// <remarks>
+    /// It is not a dry-run apply: that is all-or-nothing, tied to a revision and plans a migration, so it cannot
+    /// answer per keystroke and one bad expression elsewhere would mask this one. It reads no store, no revision
+    /// and no runtime — only the descriptor the caller sends. A candidate that does not compile is an answer
+    /// (a finding), not an exception.
+    /// </remarks>
+    /// <param name="project">The project name.</param>
+    /// <param name="request">The descriptor, the slot's pointer and the candidate expression.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The findings at or under the slot.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
+    /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
+    /// <exception cref="ManagementRequestException">
+    /// The request cannot be answered as sent: no body, a descriptor over the size cap or not JSON, or a pointer
+    /// to a slot the descriptor does not contain.
+    /// </exception>
+    Task<ManagementExpressionVerdict> CheckExpressionAsync(
+        string project, ManagementExpressionCheck request, CancellationToken ct = default);
+
+    /// <summary>
     /// Applies a descriptor — <b>the one write path to a project's configuration.</b>
     /// </summary>
     /// <remarks>

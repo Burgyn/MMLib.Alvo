@@ -107,6 +107,10 @@ public sealed class HeldApplyWorld : AdminWorld
             string project, ManagementPolicySimulation simulation, CancellationToken ct = default)
             => inner.SimulatePolicyAsync(project, simulation, ct);
 
+        public Task<ManagementExpressionVerdict> CheckExpressionAsync(
+            string project, ManagementExpressionCheck request, CancellationToken ct = default)
+            => inner.CheckExpressionAsync(project, request, ct);
+
         public Task<ManagementApplyResult> RollbackAsync(
             string project, int targetRevision, ManagementRollbackRequest request, CancellationToken ct = default)
             => inner.RollbackAsync(project, targetRevision, request, ct);

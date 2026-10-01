@@ -5,6 +5,10 @@
     question "would this caller get rows" is answered on the Rules screen, by the engine, and even
     there only as a predicate — never as a verdict about a stored row (§2.2.1).
 *@
+@inject ManagementGateway Gateway
+@inject ILogger<RulesTab> Logger
+@implements IDisposable
+
 <SectionHead Title="Who may do what">
     <Subtitle>
         Checked inside the same transaction as the query, against the caller's id, roles and tenant
@@ -79,8 +83,20 @@ else
                         <MudTextField T="string" Variant="Variant.Outlined" Lines="2" Immediate="true" id="@($"rule-{operation}")"
                                       Class="a-mono" spellcheck="false" Placeholder="@EmptyHint"
                                       aria-describedby="@DescribedBy(operation, declared)"
-                                      Value="@Drafts.Text(operation, declared)" ValueChanged="text => Drafts.Set(operation, text ?? string.Empty)"
+                                      Value="@Drafts.Text(operation, declared)" ValueChanged="text => Typed(operation, text ?? string.Empty)"
                                       OnKeyDown="args => RevertOnEscape(operation, args)" />
+                        @{ var id = $"rule-{operation}"; }
+                        @foreach (var (finding, index) in _check.Findings(id).Select((finding, index) => (finding, index)))
+                        {
+                            <p class="@ExpressionCheck.ProblemClass(finding)" id="@(index == 0 ? $"{id}-check" : $"{id}-check-{index}")" role="status"
+                               data-testid="@($"check-{id}")" data-severity="@finding.Severity">
+                                @finding.Message
+                                @if (finding.FixSuggestion is { } fix)
+                                {
+                                    <span class="a-field__fix">@fix</span>
+                                }
+                            </p>
+                        }
                     </ChildContent>
                     <Hint>@RuleHint</Hint>
                 </Field>
@@ -130,6 +146,56 @@ else
     private readonly RuleDrafts _own = new();
 
     /// <summary>
+    /// The working copy the typed rule is checked against, on a clone — cascaded by the entity screen only, so its
+    /// model stays internal; the Rules screen shows its rules read-only and has nothing to check.
+    /// </summary>
+    [CascadingParameter]
+    private WorkingCopy? Copy { get; set; }
+
+    private readonly ExpressionCheck _check = new();
+    private readonly ComponentLifetime _lifetime = new();
+
+    /// <summary>Redraws the box whenever a check has something new to show.</summary>
+    public RulesTab() => _check.Changed += Redraw;
+
+    private void Redraw() => _ = InvokeAsync(StateHasChanged);
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _check.Changed -= Redraw;
+        _lifetime.Dispose();
+    }
+
+    /// <summary>Keeps what was typed and asks, without waiting, what apply would say about it.</summary>
+    private void Typed(string operation, string text)
+    {
+        Drafts.Set(operation, text);
+        _ = CheckAsync(operation, text);
+    }
+
+    /// <summary>
+    /// Runs the check to its end and observes its fault: it is fire-and-forget, so an unobserved exception would
+    /// otherwise vanish, and a helper that fails must never be the reason the box misbehaves.
+    /// </summary>
+    private async Task CheckAsync(string operation, string text)
+    {
+        try
+        {
+            await _check.SubmitAsync($"rule-{operation}", text, (source, ct) => AskAsync(operation, source, ct));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "The expression check on the {Operation} rule of {Entity} failed", operation, Entity);
+        }
+    }
+
+    private Task<ManagementExpressionVerdict?> AskAsync(string operation, string source, CancellationToken ct)
+        => !_lifetime.Ended && Copy is { } copy && ExpressionSlots.ForRule(copy.Json, Entity, operation, source) is { } slot
+            ? Gateway.CheckExpressionAsync(slot.Json, slot.Path, source, ct)
+            : Task.FromResult<ManagementExpressionVerdict?>(null);
+
+    /// <summary>
     /// The entity screen's drafts, cascaded so they outlive this tab's body; a tab of its own otherwise.
     /// </summary>
     [CascadingParameter]
@@ -146,6 +212,8 @@ else
         if (args.Key == "Escape")
         {
             Drafts.Revert(operation);
+            /* What the box shows is the saved rule again, so it is that text the check must now speak for. */
+            _ = CheckAsync(operation, Drafts.Text(operation, Declared(operation)));
         }
     }
 
@@ -154,7 +222,10 @@ else
 
     /// <summary>The box is described by its hint, and by its unsaved mark while it has one.</summary>
     private string DescribedBy(string operation, string? declared)
-        => Drafts.IsDirty(operation, declared) ? $"rule-{operation}-hint rule-{operation}-dirty" : $"rule-{operation}-hint";
+    {
+        var described = Drafts.IsDirty(operation, declared) ? $"rule-{operation}-hint rule-{operation}-dirty" : $"rule-{operation}-hint";
+        return _check.DescribedBy($"rule-{operation}") is { } check ? $"{described} {check}" : described;
+    }
 
     /// <summary>Stages what was typed, only when it differs from what the descriptor says.</summary>
     private Task SaveAsync(string operation)

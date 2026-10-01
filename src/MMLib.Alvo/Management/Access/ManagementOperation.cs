@@ -47,6 +47,9 @@ internal enum ManagementOperation
     /// <summary>Evaluate a policy for a simulated caller. Writes nothing.</summary>
     SimulatePolicy,
 
+    /// <summary>Check one expression against the validator apply uses. Reads nothing stored.</summary>
+    CheckExpression,
+
     /// <summary>Apply a descriptor — including a <c>?dryRun=true</c> plan, which discloses the same thing.</summary>
     ApplyDescriptor,
 
