@@ -127,6 +127,41 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         verdict.Findings.ShouldAllBe(f => IsAtOrUnder(f.Path, slot), $"{kind} {slot}: a finding outside the slot");
         Errors(verdict.Findings).ShouldBe(applied, $"{kind} {slot} = {source}");
         verdict.IsValid.ShouldBe(applied.Count == 0, $"{kind} {slot} = {source}");
+        if (verdict.IsValid)
+        {
+            await ShouldIntroduceNoErrorAnywhereAsync(management, current, slot, source, $"{kind} {slot} = {source}");
+        }
+    }
+
+    /// <summary>
+    /// A valid verdict is only worth something if the candidate breaks nothing <b>outside</b> the slot either: apply's
+    /// whole error set for the spliced document must add no error to apply's set for the working copy as it stands.
+    /// </summary>
+    private static async Task ShouldIntroduceNoErrorAnywhereAsync(
+        IAlvoManagement management, ManagementDescriptor current, string slot, string source, string because)
+    {
+        var baseline = await ApplyAllErrorsAsync(management, current, current.DescriptorJson);
+        var spliced = Splice(JsonNode.Parse(current.DescriptorJson)!, slot, source).ToJsonString();
+        var candidate = await ApplyAllErrorsAsync(management, current, spliced);
+
+        candidate.Except(baseline).ShouldBeEmpty($"a valid verdict, yet the candidate adds an error elsewhere: {because}");
+    }
+
+    /// <summary>Apply's dry run over <paramref name="descriptorJson"/>: every error it refuses with, or none.</summary>
+    private static async Task<List<string>> ApplyAllErrorsAsync(
+        IAlvoManagement management, ManagementDescriptor current, string descriptorJson)
+    {
+        try
+        {
+            await management.ApplyDescriptorAsync(
+                Project, new ManagementApplyRequest(descriptorJson, current.Revision, DryRun: true), Ct);
+
+            return [];
+        }
+        catch (DescriptorValidationException refused)
+        {
+            return Errors(refused.Result.Errors);
+        }
     }
 
     /// <summary>
