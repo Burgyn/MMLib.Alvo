@@ -93,7 +93,15 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             AlvoFrameworkTables.NamesFor(options.Value.SchemaPrefix).ToHashSet(StringComparer.Ordinal);
     }
 
-    public DescriptorValidationResult Validate(string descriptorJson)
+    public DescriptorValidationResult Validate(string descriptorJson) => ValidateWithOutcome(descriptorJson).Result;
+
+    /// <summary>
+    /// <see cref="Validate"/> plus whether the rule, computed and owner pass <b>ran</b>: it needs a descriptor the
+    /// schema accepts and the mapper can build, so while it did not, nothing about an expression has been judged.
+    /// </summary>
+    /// <param name="descriptorJson">The raw descriptor JSON.</param>
+    /// <returns>The findings and whether the expression passes ran.</returns>
+    internal (DescriptorValidationResult Result, bool ExpressionsJudged) ValidateWithOutcome(string descriptorJson)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(descriptorJson);
 
@@ -104,7 +112,7 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         }
         catch (JsonException ex)
         {
-            return new DescriptorValidationResult([Malformed(ex)]);
+            return (new DescriptorValidationResult([Malformed(ex)]), false);
         }
 
         using (document)
@@ -113,16 +121,18 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             var errors = new List<DescriptorValidationError>(schemaErrors);
             errors.AddRange(SemanticErrors(document.RootElement));
             errors.AddRange(WildcardSubscriptionErrors(document.RootElement));
+            var judged = false;
             if (schemaErrors.Count == 0)
             {
-                errors.AddRange(RuleErrors(descriptorJson));
+                judged = RuleErrors(descriptorJson, errors);
             }
 
-            return new DescriptorValidationResult(errors);
+            return (new DescriptorValidationResult(errors), judged);
         }
     }
 
-    private List<DescriptorValidationError> RuleErrors(string descriptorJson)
+    /// <summary>Adds the rule-pass findings to <paramref name="into"/>; <see langword="false"/> when the pass could not run.</summary>
+    private bool RuleErrors(string descriptorJson, List<DescriptorValidationError> into)
     {
         AlvoDescriptor descriptor;
         SchemaModel schema;
@@ -135,13 +145,14 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         {
             // Already reported by the semantic pass above (today's 'computed' rejection) — do not
             // double-report the same field, and a mapping failure leaves nothing to compile rules against.
-            return [];
+            return false;
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
             // The schema accepted a value the typed model cannot hold (a maxLength beyond int, say): a finding the
             // caller can fix, never an exception — every management route would render it as a 500.
-            return [Unrepresentable(ex)];
+            into.Add(Unrepresentable(ex));
+            return false;
         }
 
         var errors = PolicyCatalog.TryBuild(descriptor, schema, _compiler, out _, out var ruleErrors)
@@ -149,7 +160,8 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             : ruleErrors.ToList();
         errors.AddRange(ComputedFieldCheck.Errors(schema, _compiler));
         errors.AddRange(OwnerWarnings(descriptor, schema, errors));
-        return errors;
+        into.AddRange(errors);
+        return true;
     }
 
     /// <summary>

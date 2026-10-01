@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Descriptor.Internal;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -33,46 +34,81 @@ internal static class ExpressionSlotCheck
         IDescriptorValidator validator, string descriptorJson, string pointer, string source)
     {
         var segments = JsonPointerPath.Segments(pointer);
-        var findings = Judge(validator, descriptorJson, segments, pointer, source);
-        var atSlot = findings.Where(f => JsonPointerPath.IsAtOrUnder(f.Path, pointer)).ToList();
-        if (atSlot.Any(IsError) || SchemaPlaces(findings).Count == 0)
+        var candidate = Judge(validator, descriptorJson, segments, pointer, source);
+        var atSlot = candidate.Findings.Where(f => JsonPointerPath.IsAtOrUnder(f.Path, pointer)).ToList();
+        if (atSlot.Any(IsError) || candidate.ExpressionsJudged)
         {
             return atSlot;
         }
 
-        var baseline = SchemaPlaces(Judge(validator, descriptorJson, segments, pointer, Placeholder));
+        var baseline = Judge(validator, descriptorJson, segments, pointer, Placeholder);
 
-        return [.. atSlot, baseline.Count == 0 ? CandidateRefused(findings, pointer) : NotJudged(baseline, pointer)];
+        return [.. atSlot, Explain(candidate.Findings, baseline.Findings, pointer)];
     }
 
+    /// <summary>What a validator said, and whether its expression passes ran at all.</summary>
+    private readonly record struct Outcome(IReadOnlyList<DescriptorValidationError> Findings, bool ExpressionsJudged);
+
     /// <summary>Splices <paramref name="source"/> into the descriptor and runs the validator apply runs.</summary>
-    private static IReadOnlyList<DescriptorValidationError> Judge(
+    /// <remarks>
+    /// The real <see cref="DescriptorValidator"/> says whether its rule pass ran. Any other
+    /// <see cref="IDescriptorValidator"/> (a decorator, a fake) cannot say, so the schema pass's own mark stands in:
+    /// its findings are the only ones written <c>#/…</c>, and none of them means the passes ran.
+    /// </remarks>
+    private static Outcome Judge(
         IDescriptorValidator validator, string descriptorJson, IReadOnlyList<string> segments, string pointer, string source)
     {
         var root = Parse(descriptorJson);
         Splice(root, segments, pointer, source);
+        var json = root.ToJsonString();
+        if (validator is DescriptorValidator real)
+        {
+            var (result, judged) = real.ValidateWithOutcome(json);
 
-        return validator.Validate(root.ToJsonString()).Errors;
+            return new Outcome(result.Errors, judged);
+        }
+
+        var findings = validator.Validate(json).Errors;
+
+        return new Outcome(findings, !findings.Any(f => JsonPointerPath.IsSchemaPath(f.Path)));
     }
 
     private static bool IsError(DescriptorValidationError finding) => finding.Severity == DescriptorValidationSeverity.Error;
 
+    /// <summary>The finding that stands in for the slot's own verdict, which the validator could not give.</summary>
+    private static DescriptorValidationError Explain(
+        IReadOnlyList<DescriptorValidationError> candidate, IReadOnlyList<DescriptorValidationError> baseline, string pointer)
+    {
+        if (HasSchemaError(candidate) && !HasSchemaError(baseline))
+        {
+            return CandidateRefused(candidate, pointer);
+        }
+
+        var elsewhere = ErrorPlaces(baseline, pointer);
+
+        return NotJudged(elsewhere.Count > 0 ? elsewhere : ErrorPlaces(candidate, pointer), pointer);
+    }
+
+    private static bool HasSchemaError(IReadOnlyList<DescriptorValidationError> findings) =>
+        findings.Any(f => JsonPointerPath.IsSchemaPath(f.Path));
+
     /// <summary>
-    /// The one error that says nothing was judged, when the schema fails somewhere <b>else</b>: the validator runs
-    /// its rule, computed and owner passes only over a descriptor the schema accepts, so a slot's own errors are not
-    /// reported while any schema error stands. A pass here would be a pass for something nobody looked at.
+    /// The one error that says nothing was judged, when the descriptor is refused somewhere <b>else</b>: the
+    /// validator runs its rule, computed and owner passes only when the schema accepts the descriptor and the mapper
+    /// builds it, so a slot's own errors are not reported while either fails. A pass here would be a pass for
+    /// something nobody looked at.
     /// </summary>
     private static DescriptorValidationError NotJudged(IReadOnlyList<string> elsewhere, string pointer) => new(
         pointer,
-        $"This expression was not judged: the descriptor fails the schema elsewhere ({string.Join(", ", elsewhere)}). "
+        $"This expression was not judged: the descriptor is refused elsewhere ({string.Join(", ", elsewhere)}). "
         + "Fix those first, then it is checked.",
-        "Fix the schema errors named above in the working copy (an apply reports every one of them); "
-        + "the expression is checked as soon as the descriptor passes the schema.",
+        "Fix the errors named above in the working copy (an apply reports every one of them); "
+        + "the expression is checked as soon as the descriptor is accepted.",
         DescriptorValidationSeverity.Error);
 
     /// <summary>
     /// A schema refusal the validator reports on a node <b>above</b> the slot (a mutate target is a <c>oneOf</c>, so
-    /// its value fails on the action), caused by the candidate: the descriptor is schema-valid with a placeholder.
+    /// its value fails on the action), caused by the candidate: the descriptor is schema-valid with a placeholder in it.
     /// </summary>
     private static DescriptorValidationError CandidateRefused(IReadOnlyList<DescriptorValidationError> findings, string pointer)
     {
@@ -85,11 +121,11 @@ internal static class ExpressionSlotCheck
             DescriptorValidationSeverity.Error);
     }
 
-    /// <summary>Up to three places the schema fails, deepest first-come: an ancestor of another failing place is only its echo.</summary>
-    private static List<string> SchemaPlaces(IReadOnlyList<DescriptorValidationError> findings)
+    /// <summary>Up to three places outside the slot where the descriptor is refused; an ancestor of another is only its echo.</summary>
+    private static List<string> ErrorPlaces(IReadOnlyList<DescriptorValidationError> findings, string pointer)
     {
         var places = findings
-            .Where(f => JsonPointerPath.IsSchemaPath(f.Path))
+            .Where(f => IsError(f) && !JsonPointerPath.IsAtOrUnder(f.Path, pointer))
             .Select(f => JsonPointerPath.Normalise(f.Path))
             .Distinct(StringComparer.Ordinal)
             .ToList();

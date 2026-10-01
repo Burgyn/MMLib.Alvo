@@ -51,6 +51,54 @@ public sealed class ExpressionSlotCheckTests
         findings.Where(IsError).ShouldHaveSingleItem().Message.ShouldContain("not judged");
     }
 
+    /// <summary>
+    /// Descriptors the schema accepts and the mapper refuses: the semantic pass reports them, and the rule pass never
+    /// runs, so the slot is not judged just as with a schema error.
+    /// </summary>
+    /// <returns>The edit that breaks the descriptor elsewhere.</returns>
+    public static TheoryData<string, string> MapperRefusals() => new()
+    {
+        { "an integer default beyond range", "zz-int" },
+        { "an enum default outside its values", "zz-enum" },
+        { "an audit entity declaring a managed column", "zz-audit" },
+    };
+
+    [Theory]
+    [MemberData(nameof(MapperRefusals))]
+    public void A_refusal_by_the_mapper_elsewhere_makes_a_bad_slot_not_judged(string reason, string breakage)
+    {
+        var findings = Check(Broken(breakage), ListRule, "'amdin' in @user.roles");
+
+        findings.Where(IsError).ShouldHaveSingleItem().Message.ShouldContain("not judged", Case.Insensitive, reason);
+    }
+
+    [Theory]
+    [MemberData(nameof(MapperRefusals))]
+    public void A_refusal_by_the_mapper_elsewhere_makes_a_good_slot_not_judged_too(string reason, string breakage)
+    {
+        var findings = Check(Broken(breakage), ListRule, "'clerk' in @user.roles");
+
+        findings.Where(IsError).ShouldHaveSingleItem().Message.ShouldContain("not judged", Case.Insensitive, reason);
+    }
+
+    private static JsonObject Broken(string breakage)
+    {
+        var descriptor = Descriptor();
+        var entities = descriptor["entities"]!;
+        var fields = entities["orders"]!["fields"]!;
+        switch (breakage)
+        {
+            case "zz-int": fields["zz"] = JsonNode.Parse("{\"type\":\"integer\",\"default\":1e30}"); break;
+            case "zz-enum": fields["zz"] = JsonNode.Parse("{\"type\":\"enum\",\"values\":[\"a\"],\"default\":\"b\"}"); break;
+            default:
+                entities["audited"] = JsonNode.Parse(
+                    "{\"audit\":true,\"fields\":{\"created_at\":{\"type\":\"string\"}}}");
+                break;
+        }
+
+        return descriptor;
+    }
+
     [Fact]
     public void A_descriptor_without_a_schema_error_gets_no_not_judged_finding() =>
         Check(ListRule, "'amdin' in @user.roles").ShouldAllBe(f => !f.Message.Contains("not judged", StringComparison.Ordinal));

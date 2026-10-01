@@ -133,17 +133,24 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
     /// A schema error elsewhere hides the slot's own verdict from apply (its rule pass runs only over a descriptor the
     /// schema accepts), so the check says "not judged" rather than a pass nobody earned.
     /// </summary>
-    /// <param name="source">A source apply would accept or refuse were the schema not failing elsewhere.</param>
+    /// <param name="breakage">What is wrong elsewhere: a schema error, or a descriptor only the mapper refuses.</param>
+    /// <param name="source">A source apply would accept or refuse were the descriptor not refused elsewhere.</param>
     /// <returns>A task that completes when both sides have answered.</returns>
     [Theory]
-    [InlineData("'dispatcher' in @user.roles")]
-    [InlineData("'amdin' in @user.roles")]
-    public async Task A_schema_error_elsewhere_is_refused_by_apply_and_not_judged_by_the_check(string source)
+    [InlineData("title", "'dispatcher' in @user.roles")]
+    [InlineData("title", "'amdin' in @user.roles")]
+    [InlineData("integer-default", "'dispatcher' in @user.roles")]
+    [InlineData("integer-default", "'amdin' in @user.roles")]
+    [InlineData("enum-default", "'dispatcher' in @user.roles")]
+    [InlineData("enum-default", "'amdin' in @user.roles")]
+    [InlineData("audit-column", "'dispatcher' in @user.roles")]
+    [InlineData("audit-column", "'amdin' in @user.roles")]
+    public async Task A_refusal_elsewhere_is_refused_by_apply_and_not_judged_by_the_check(string breakage, string source)
     {
         var management = fixture.Management();
         var current = await WorkingCopyAsync(management);
         var root = JsonNode.Parse(current.DescriptorJson)!;
-        root["title"] = new string('x', 61);
+        BreakElsewhere(root, breakage);
         var broken = current with { DescriptorJson = root.ToJsonString() };
 
         var verdict = await management.CheckExpressionAsync(
@@ -153,9 +160,23 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
             new ManagementApplyRequest(Splice(root, Orders + "/rules/list", source).ToJsonString(), current.Revision, DryRun: true),
             Ct));
 
-        refused.Result.Errors.ShouldContain(f => f.Path == "#/title", "apply refuses the whole descriptor on the schema error");
+        refused.Result.Errors.ShouldNotBeEmpty("apply refuses the whole descriptor");
         verdict.IsValid.ShouldBeFalse();
         verdict.Findings.Single().Message.ShouldContain("not judged");
+    }
+
+    private static void BreakElsewhere(JsonNode root, string breakage)
+    {
+        var fields = root["entities"]![Orders.Split('/')[^1]]!["fields"]!;
+        switch (breakage)
+        {
+            case "title": root["title"] = new string('x', 61); break;
+            case "integer-default": fields["zz"] = JsonNode.Parse("{\"type\":\"integer\",\"default\":1e30}"); break;
+            case "enum-default": fields["zz"] = JsonNode.Parse("{\"type\":\"enum\",\"values\":[\"a\"],\"default\":\"b\"}"); break;
+            default:
+                root["entities"]!["audited"] = JsonNode.Parse("{\"audit\":true,\"fields\":{\"created_at\":{\"type\":\"string\"}}}");
+                break;
+        }
     }
 
     /// <summary>The corpus reaches every kind and both outcomes in each, or the agreement above is vacuous.</summary>
