@@ -414,7 +414,7 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
         CelLiteral literal => RenderScalarValueLiteral(literal, fields, bag),
         CelFieldRef fieldRef => RenderField(fieldRef, entity, fields),
         CelUnary { Operator: CelUnaryOperator.Negate } unary => $"(-{RenderScalar(unary.Operand, entity, fields, bag)})",
-        CelBinary { Operator: CelBinaryOperator.Add } join when ValueTypeOf(join) == CelValueType.String =>
+        CelBinary { Operator: CelBinaryOperator.Add } join when IsStringJoin(join) =>
             RenderConcatenation(join, entity, fields, bag),
         CelBinary { Operator: CelBinaryOperator.Add or CelBinaryOperator.Subtract or CelBinaryOperator.Multiply or CelBinaryOperator.Divide } arithmetic =>
             RenderArithmeticScalar(arithmetic, entity, fields, bag),
@@ -437,6 +437,20 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
         literal is { Type: CelValueType.String, Value: string text } && fields.RenderStringLiteral(text) is { } inline
             ? inline
             : RenderLiteralOperand(literal, fields, bag);
+
+    /// <summary>
+    /// Whether a <c>+</c> in a value position joins strings. The checker types both operands alike, so one
+    /// string-valued operand decides it; an operand that is itself a join or a conditional is followed down.
+    /// <see cref="ValueTypeOf"/> names only the comparison-operand leaves, so it cannot answer for a nested join.
+    /// </summary>
+    private static bool IsStringJoin(CelBinary join) => IsStringValued(join.Left) || IsStringValued(join.Right);
+
+    private static bool IsStringValued(CelNode node) => node switch
+    {
+        CelBinary { Operator: CelBinaryOperator.Add } join => IsStringJoin(join),
+        CelConditional conditional => IsStringValued(conditional.WhenTrue) || IsStringValued(conditional.WhenFalse),
+        _ => ValueTypeOf(node) == CelValueType.String,
+    };
 
     /// <summary>CEL's <c>+</c> over two strings, joined by the dialect's own operator.</summary>
     private string RenderConcatenation(CelBinary binary, EntitySchema entity, IFieldSqlRenderer fields, ParameterBag bag) =>

@@ -163,8 +163,10 @@ public sealed class ComputedColumnSqlTests : IDisposable
     }
 
     /// <summary>
-    /// A shape that compiles but has no scalar rendering — a comparison over an arithmetic result — is the same
-    /// documented refusal at the field, not the renderer's <see cref="NotSupportedException"/>.
+    /// A shape with no scalar rendering — a comparison over an arithmetic result — is the same documented
+    /// refusal at the field, not the renderer's <see cref="NotSupportedException"/>. The type checker now refuses
+    /// it at compile time (a comparison operand must be a field, a literal or a context value), so every error
+    /// the field carries is that compile refusal, at the field's own path.
     /// </summary>
     [Fact]
     public void A_computed_with_no_scalar_rendering_is_refused_at_the_field()
@@ -173,7 +175,8 @@ public sealed class ComputedColumnSqlTests : IDisposable
 
         var refusal = Should.Throw<DescriptorValidationException>(() => Sut().For(entity, Total(entity)));
 
-        refusal.Result.Errors.ShouldHaveSingleItem().Path.ShouldBe("/entities/orders/fields/total/computed");
+        refusal.Result.Errors.ShouldNotBeEmpty();
+        refusal.Result.Errors.ShouldAllBe(error => error.Path == "/entities/orders/fields/total/computed");
     }
 
     /// <inheritdoc />
