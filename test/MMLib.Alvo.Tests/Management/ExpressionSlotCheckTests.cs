@@ -123,7 +123,8 @@ public sealed class ExpressionSlotCheckTests
 
         var refusal = Should.Throw<ManagementRequestException>(() => ExpressionSlotCheck.Check(Validator(), json, ListRule, "true"));
 
-        refusal.Message.ShouldContain("not valid Unicode");
+        refusal.Message.ShouldContain("cannot be processed");
+        refusal.Message.ShouldContain("lone surrogate");
     }
 
     [Fact]
@@ -189,6 +190,24 @@ public sealed class ExpressionSlotCheckTests
         finding.Message.ShouldStartWith(ExpressionSlotCheck.NotJudgedPrefix);
         finding.Message.ShouldNotContain("()");
         finding.Message.ShouldBe("Not checked yet — another part of this draft is not valid. This box is checked once that is fixed.");
+    }
+
+    /// <summary>
+    /// Recognising the refusal must not depend on the runtime's message language: any InvalidOperationException out of
+    /// the passes is the one "text that cannot be processed" refusal.
+    /// </summary>
+    [Fact]
+    public void An_invalid_operation_out_of_the_passes_is_a_refusal_whatever_its_message_says()
+    {
+        var throwing = new ThrowingValidator(new InvalidOperationException("Operation is not valid due to the current state."));
+
+        Should.Throw<ManagementRequestException>(() => ExpressionSlotCheck.Check(throwing, Descriptor().ToJsonString(), ListRule, "true"))
+            .Message.ShouldContain("cannot be processed");
+    }
+
+    private sealed class ThrowingValidator(Exception failure) : IDescriptorValidator
+    {
+        public DescriptorValidationResult Validate(string descriptorJson) => throw failure;
     }
 
     [Fact]

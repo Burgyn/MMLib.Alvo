@@ -97,7 +97,7 @@ public class ManagementExpressionCheckTests
             HttpMethod.Post, $"{ManagedFleet.Routes}/cel/check", _dev,
             body: new JsonObject { ["descriptorJson"] = text, ["path"] = ListRule, ["source"] = "true" });
 
-        (await Refusal(response)).ShouldContain("not valid Unicode");
+        (await Refusal(response)).ShouldContain("cannot be processed");
     }
 
     [Fact]

@@ -69,27 +69,34 @@ internal static class ExpressionSlotCheck
         {
             var root = Parse(descriptorJson);
             Splice(root, segments, pointer, source);
-            var json = root.ToJsonString();
-            if (validator is DescriptorValidator real)
-            {
-                var (result, judged) = real.ValidateWithOutcome(json);
 
-                return new Outcome(result.Errors, judged);
-            }
-
-            var findings = validator.Validate(json).Errors;
-
-            return new Outcome(findings, !findings.Any(f => JsonPointerPath.IsSchemaPath(f.Path)));
+            return Run(validator, root.ToJsonString());
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("UTF-16", StringComparison.Ordinal))
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
         {
-            // Parse, serialise and the validator all throw this for half a surrogate pair: a request that cannot be
-            // answered (422), never a 500.
-            throw new ManagementRequestException(
-                "The 'descriptorJson' contains text that is not valid Unicode (a lone surrogate: half of a \\uD800-\\uDFFF pair). "
-                + "Send the working-copy descriptor exactly as the dashboard holds it, with each such escape completed or written as the character.");
+            // Parse, serialise and the passes throw these for text they cannot hold, most often half a surrogate
+            // pair. Recognised by type, not by message: the runtime's wording depends on its language.
+            throw Unprocessable();
         }
     }
+
+    private static Outcome Run(IDescriptorValidator validator, string json)
+    {
+        if (validator is DescriptorValidator real)
+        {
+            var (result, judged) = real.ValidateWithOutcome(json);
+
+            return new Outcome(result.Errors, judged);
+        }
+
+        var findings = validator.Validate(json).Errors;
+
+        return new Outcome(findings, !findings.Any(f => JsonPointerPath.IsSchemaPath(f.Path)));
+    }
+
+    private static ManagementRequestException Unprocessable() => new(
+        "The 'descriptorJson' contains text that cannot be processed (most often a lone surrogate: half of a \\uD800-\\uDFFF pair). "
+        + "Send the working-copy descriptor exactly as the dashboard holds it, with each such escape completed or written as the character.");
 
     private static bool IsError(DescriptorValidationError finding) => finding.Severity == DescriptorValidationSeverity.Error;
 
@@ -183,25 +190,30 @@ internal static class ExpressionSlotCheck
         while (pending.Count > 0)
         {
             var (node, pointer) = pending.Pop();
-            switch (node)
-            {
-                case JsonArray array when array.Count > MaxArrayLength:
-                    throw TooLong(pointer);
-                case JsonArray array:
-                    for (var i = 0; i < array.Count; i++)
-                    {
-                        PushChild(pending, array[i], $"{pointer}/{i}");
-                    }
+            Visit(node, pointer, pending);
+        }
+    }
 
-                    break;
-                case JsonObject obj:
-                    foreach (var (key, child) in obj)
-                    {
-                        PushChild(pending, child, $"{pointer}/{key.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal)}");
-                    }
+    private static void Visit(JsonNode node, string pointer, Stack<(JsonNode Node, string Pointer)> pending)
+    {
+        switch (node)
+        {
+            case JsonArray array when array.Count > MaxArrayLength:
+                throw TooLong(pointer);
+            case JsonArray array:
+                for (var i = 0; i < array.Count; i++)
+                {
+                    PushChild(pending, array[i], $"{pointer}/{i}");
+                }
 
-                    break;
-            }
+                break;
+            case JsonObject obj:
+                foreach (var (key, child) in obj)
+                {
+                    PushChild(pending, child, $"{pointer}/{key.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal)}");
+                }
+
+                break;
         }
     }
 
