@@ -119,9 +119,23 @@ can call the same operation instead of guessing.
 3. A candidate with one bad expression elsewhere in the descriptor still returns a green verdict for a good slot.
 4. The dashboard shows the finding under rule, hook condition, mutate value and computed inputs within one debounce
    interval of the last keystroke, and never a stale one (an e2e scenario each, in the existing Playwright suite).
-5. **Cost is measured and recorded**, not assumed: the plan adds a measurement of check latency on the
-   `bike-workshop` descriptor and records p50/p95 in the PR; the debounce is set from it. If p95 is too slow for
-   per-keystroke use the fallback is check-on-blur, which changes the dashboard only.
+5. **Cost is measured and recorded**, not assumed. `ExpressionCheckCostTests` (opt-in, `ALVO_MEASURE=1`, in
+   `MMLib.Alvo.Api.Tests`) calls `CheckExpressionAsync` in-process, as the dashboard does, on a rule slot of the
+   `bike-workshop` descriptor (24.0 KB): 20 warm-up calls, then 200 alternating a valid and an invalid source.
+   Measured on the maintainer's Apple-silicon (arm64) dev machine, .NET 10.0.0 runtime, three runs each:
+
+   | Build | Descriptor | p50 (ms) | p95 (ms) | max (ms) |
+   |---|---|---|---|---|
+   | Release | bike-workshop, 24.0 KB | 1.9 - 2.5 | 2.4 - 3.0 | 2.8 - 3.5 |
+   | Debug | bike-workshop, 24.0 KB | 5.0 - 5.6 | 6.3 - 6.8 | 11.1 - 12.0 |
+   | Release | 4x synthetic, 89.6 KB | 12.1 - 19.0 | 22.0 - 22.6 | 24.9 - 60.2 |
+   | Debug | 4x synthetic, 89.6 KB | 9.1 - 12.3 | 18.8 - 21.6 | 21.4 - 25.0 |
+
+   **Decision (by the rule: p95 at most 100 ms means check-as-you-type):** p95 is about 3 ms (Release) to 7 ms
+   (Debug) on the real descriptor and at most 23 ms on one four times larger, so the dashboard checks as the
+   operator types, with `ExpressionCheck.Debounce` = 300 ms. Check-on-blur stays the fallback if a future
+   measurement on a slower host exceeds 100 ms; it changes the dashboard only. The measurement is in-process; an
+   HTTP caller adds the transport and the 1 MB body parse on top.
 6. `PublicApi.MMLib.Alvo.Abstractions.verified.txt` grows by exactly the one interface member and two records; each is
    justified in the PR per `alvo-architecture-rules` ("public is the contract").
 7. `docs/architecture/management-api.md` states the operation, why it is not the dry run, and why it is `Viewer`.
