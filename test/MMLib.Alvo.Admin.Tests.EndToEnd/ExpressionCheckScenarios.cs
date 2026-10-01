@@ -82,6 +82,28 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
         await ShouldKeepFocusAsync(session, "hook-condition");
     }
 
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_mutate_value_naming_an_undeclared_field_is_flagged_and_the_flag_clears_when_it_is_fixed()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/regions");
+        await session.OpenTabAsync("On write");
+        await session.Page.GetByTestId("hook-new").ClickAsync();
+        await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "mutate", Exact = true }).ClickAsync();
+        await session.Page.FillAsync("#hook-mutate-field", "name");
+
+        await session.Page.FillAsync("#hook-mutate-value", "new.no_such_field");
+        var finding = session.Page.GetByTestId("check-hook-mutate-value").First;
+        await finding.WaitForAsync(new() { Timeout = 3_000 });
+        (await finding.InnerTextAsync()).ShouldContain("no_such_field");
+        await ShouldKeepFocusAsync(session, "hook-mutate-value");
+
+        await session.Page.FillAsync("#hook-mutate-value", "new.code");
+        await finding.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 3_000 });
+        (await session.Page.GetByTestId("check-hook-mutate-value").CountAsync()).ShouldBe(0, "every sentence goes, not only the first");
+        await ShouldKeepFocusAsync(session, "hook-mutate-value");
+    }
+
     /// <summary>What the pending bar says; a check stages nothing, so it must not move.</summary>
     private static async Task<string> PendingTextAsync(AdminSession session)
     {
