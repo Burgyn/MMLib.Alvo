@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Admin.Components.DesignSystem;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Management;
@@ -39,6 +40,10 @@ public partial class HooksTab
     /// <summary>The hooks, as the descriptor declares them: point to the raw JSON of its list.</summary>
     [Parameter, EditorRequired]
     public IReadOnlyList<KeyValuePair<string, string>> Hooks { get; set; } = [];
+
+    /// <summary>The entity the hooks are on, for the expression check.</summary>
+    [Parameter]
+    public string Entity { get; set; } = string.Empty;
 
     /// <summary>Whether this operator has a working copy to edit at all.</summary>
     [Parameter]
@@ -91,12 +96,101 @@ public partial class HooksTab
     /// </remarks>
     private IReadOnlyList<ManagementRefusedFeature> HookRefusals => RefusalPlaces.On(RefusalScreen.OnWrite, Refused);
 
+    /// <summary>
+    /// The working copy a typed expression is checked against, on a clone — cascaded by the entity screen only, so its
+    /// model stays internal.
+    /// </summary>
+    [CascadingParameter]
+    private WorkingCopy? Copy { get; set; }
+
+    private readonly ExpressionCheck _check = new();
+    private readonly ComponentLifetime _lifetime = new();
+
+    /// <summary>Redraws the boxes whenever a check has something new to show.</summary>
+    public HooksTab() => _check.Changed += Redraw;
+
+    private void Redraw() => _ = InvokeAsync(StateHasChanged);
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _check.Changed -= Redraw;
+        _lifetime.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
     /// <summary>Switches the point, which may switch the kind (<see cref="HookBuilder.Choose"/>).</summary>
     private void Choose(string point)
     {
         _hook.Choose(point);
         _refusal.Clear();
+        CheckBoth();
     }
+
+    private void ChooseKind(string kind)
+    {
+        _hook.Kind = kind;
+        CheckBoth();
+    }
+
+    private void TypeCondition(string? text)
+    {
+        _hook.Condition = text ?? string.Empty;
+        _ = CheckConditionAsync();
+    }
+
+    private void TypeMutateValue(string? text)
+    {
+        _hook.MutateValue = text ?? string.Empty;
+        _ = CheckMutateValueAsync();
+    }
+
+    /// <summary>The patched field names the slot the value is checked in, so it is asked again.</summary>
+    private void TypeMutateField(string? text)
+    {
+        _hook.MutateField = text ?? string.Empty;
+        _ = CheckMutateValueAsync();
+    }
+
+    /// <summary>The point and the kind decide the slot's path, so every box on the form is asked again.</summary>
+    private void CheckBoth()
+    {
+        _ = CheckConditionAsync();
+        _ = CheckMutateValueAsync();
+    }
+
+    private Task CheckConditionAsync() => CheckAsync("hook-condition", _hook.Condition, (copy, source)
+        => ExpressionSlots.ForHookCondition(copy.Json, Entity, _hook.Point, _hook.Draft(), source));
+
+    private Task CheckMutateValueAsync() => CheckAsync(
+        "hook-mutate-value", _hook.Kind == HookBuilder.Mutate ? _hook.MutateValue : string.Empty, (copy, source)
+        => ExpressionSlots.ForMutateValue(
+            copy.Json, Entity, _hook.Point, _hook.Condition, _hook.Draft(), _hook.MutateField.Trim(), source));
+
+    /// <summary>
+    /// Runs the check to its end and observes its fault: it is fire-and-forget, so an unobserved exception would
+    /// otherwise vanish, and a helper that fails must never be the reason the form misbehaves.
+    /// </summary>
+    private async Task CheckAsync(string id, string text, Func<WorkingCopy, string, (string Json, string Path)?> place)
+    {
+        try
+        {
+            await _check.SubmitAsync(id, text, (source, ct) => AskAsync(place, source, ct));
+        }
+        catch (Exception ex)
+        {
+            CheckFailed(Logger, id, Entity, ex);
+        }
+    }
+
+    [LoggerMessage(EventId = 20, Level = LogLevel.Warning, Message = "The expression check on {Input} of {Entity} failed")]
+    private static partial void CheckFailed(ILogger logger, string input, string entity, Exception exception);
+
+    private Task<ManagementExpressionVerdict?> AskAsync(
+        Func<WorkingCopy, string, (string Json, string Path)?> place, string source, CancellationToken ct)
+        => !_lifetime.Ended && Copy is { } copy && place(copy, source) is { } slot
+            ? Gateway.CheckExpressionAsync(slot.Json, slot.Path, source, ct)
+            : Task.FromResult<ManagementExpressionVerdict?>(null);
 
     /// <summary>
     /// The hooks declared at one point, each as its own JSON.
@@ -144,6 +238,7 @@ public partial class HooksTab
     private void CloseAdding()
     {
         _hook.Clear();
+        CheckBoth();
         _refusal.Clear();
         _adding = false;
     }

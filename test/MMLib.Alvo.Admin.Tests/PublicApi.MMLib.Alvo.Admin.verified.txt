@@ -744,11 +744,13 @@ namespace MMLib.Alvo.Admin.Components.Schema
         public Microsoft.AspNetCore.Components.EventCallback<string> OnRemove { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
-    public class HooksTab : Microsoft.AspNetCore.Components.ComponentBase
+    public class HooksTab : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public HooksTab() { }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool Editable { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Entity { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, string>> Hooks { get; set; }
@@ -759,6 +761,7 @@ namespace MMLib.Alvo.Admin.Components.Schema
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRefusedFeature> Refused { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
         public sealed class HookAt : System.IEquatable<MMLib.Alvo.Admin.Components.Schema.HooksTab.HookAt>
         {
             public HookAt(string Point, int Position) { }
