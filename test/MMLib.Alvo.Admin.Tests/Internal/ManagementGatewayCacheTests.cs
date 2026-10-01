@@ -99,6 +99,36 @@ public class ManagementGatewayCacheTests
         verdict.ShouldBeNull();
     }
 
+    [Theory]
+    [MemberData(nameof(ExpectedCheckFailures))]
+    public async Task An_expression_check_that_fails_in_an_expected_way_answers_null(Exception failure)
+    {
+        using var gateway = Gateway(new TestNavigation(), out var management);
+        management.CheckExpressionAsync(
+                Arg.Any<string>(), Arg.Any<ManagementExpressionCheck>(), Arg.Any<CancellationToken>())
+            .Returns<Task<ManagementExpressionVerdict>>(_ => throw failure);
+
+        (await gateway.CheckExpressionAsync("{}", "/p", "x", Ct)).ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task An_expression_check_that_hits_a_bug_propagates()
+    {
+        using var gateway = Gateway(new TestNavigation(), out var management);
+        management.CheckExpressionAsync(
+                Arg.Any<string>(), Arg.Any<ManagementExpressionCheck>(), Arg.Any<CancellationToken>())
+            .Returns<Task<ManagementExpressionVerdict>>(_ => throw new InvalidOperationException("bug"));
+
+        await Should.ThrowAsync<InvalidOperationException>(() => gateway.CheckExpressionAsync("{}", "/p", "x", Ct));
+    }
+
+    public static TheoryData<Exception> ExpectedCheckFailures() =>
+    [
+        new ManagementForbiddenException(),
+        new HttpRequestException("down"),
+        new OperationCanceledException(),
+    ];
+
     [Fact]
     public async Task A_disposed_gateway_no_longer_follows_the_circuit()
     {

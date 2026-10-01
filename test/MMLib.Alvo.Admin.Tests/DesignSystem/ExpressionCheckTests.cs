@@ -71,6 +71,57 @@ public sealed class ExpressionCheckTests
         changes.ShouldBe(1);
     }
 
+    [Fact]
+    public async Task A_check_superseded_while_in_flight_has_its_token_cancelled_and_throws_nothing()
+    {
+        var sut = new ExpressionCheck { DebounceOverride = TimeSpan.Zero };
+        var slow = new TaskCompletionSource<ManagementExpressionVerdict?>();
+        CancellationToken seen = default;
+
+        var first = sut.SubmitAsync("k", "a", (_, ct) =>
+        {
+            seen = ct;
+            return slow.Task;
+        });
+        seen.IsCancellationRequested.ShouldBeFalse();
+        await sut.SubmitAsync("k", "b", (_, _) => Task.FromResult<ManagementExpressionVerdict?>(Refusal("b is wrong")));
+
+        seen.IsCancellationRequested.ShouldBeTrue();
+        slow.SetCanceled(seen);
+        await first;
+        sut.Findings("k").Single().Message.ShouldBe("b is wrong");
+    }
+
+    [Fact]
+    public async Task A_submit_superseded_during_the_debounce_never_asks()
+    {
+        var sut = new ExpressionCheck { DebounceOverride = TimeSpan.FromHours(1) };
+        var asked = false;
+
+        var first = sut.SubmitAsync("k", "a", (_, _) =>
+        {
+            asked = true;
+            return Task.FromResult<ManagementExpressionVerdict?>(null);
+        });
+        await sut.SubmitAsync("k", "", (_, _) => throw new InvalidOperationException("no call for an empty source"));
+        await first;
+
+        asked.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task A_warning_is_kept_with_its_severity_and_describes_the_input()
+    {
+        var sut = new ExpressionCheck { DebounceOverride = TimeSpan.Zero };
+        var warning = new ManagementExpressionVerdict(
+            [new DescriptorValidationError("/p", "careful", null, DescriptorValidationSeverity.Warning)]);
+
+        await sut.SubmitAsync("k", "x", (_, _) => Task.FromResult<ManagementExpressionVerdict?>(warning));
+
+        sut.Findings("k").Single().Severity.ShouldBe(DescriptorValidationSeverity.Warning);
+        sut.DescribedBy("k").ShouldBe("k-check");
+    }
+
     private static ManagementExpressionVerdict Refusal(string message) => new(
         [new DescriptorValidationError("/p", message, "fix", DescriptorValidationSeverity.Error)]);
 }

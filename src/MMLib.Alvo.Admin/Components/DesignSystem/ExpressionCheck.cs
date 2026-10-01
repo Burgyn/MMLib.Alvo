@@ -10,12 +10,19 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem;
 /// <para>
 /// <b>Latest wins.</b> Every submit takes a new generation for its input; an answer is kept only while its
 /// generation is still the newest, so a slow answer to an older source can never overwrite the verdict on what is
-/// in the box now. A submit that is already stale when its debounce ends never asks at all.
+/// in the box now. A newer submit also cancels the token of the older one — whether it is still in its debounce
+/// (so it never asks) or already in flight — and an older submit so cancelled ends quietly.
 /// </para>
 /// <para>
 /// <b>Focus-free by construction.</b> There is no JS interop here, and this deliberately does not use
 /// <see cref="FieldRefusals"/>: that takes focus on every refusal, which a check that runs while the operator
 /// types must never do. The component draws the findings as <c>.a-field__problem</c> markup.
+/// </para>
+/// <para>
+/// <b>Threading.</b> Continuations are not moved off the caller's synchronization context (no
+/// <c>ConfigureAwait(false)</c>), so state is mutated and <see cref="Changed"/> raised on the context
+/// <see cref="SubmitAsync"/> was awaited on — a circuit's, in the dashboard. A component marshals with
+/// <c>InvokeAsync(StateHasChanged)</c> and unsubscribes in its own <c>Dispose</c>.
 /// </para>
 /// <para>
 /// A check that could not be asked (a <see langword="null"/> verdict) stores nothing: a helper is never the
@@ -26,9 +33,10 @@ internal sealed class ExpressionCheck
 {
     private static readonly IReadOnlyList<DescriptorValidationError> _noFindings = [];
 
-    private readonly Dictionary<string, (int Generation, IReadOnlyList<DescriptorValidationError> Findings)> _inputs = [];
+    private readonly Dictionary<string, Input> _inputs = [];
 
-    /// <summary>Raised when the findings of any input changed.</summary>
+    /// <summary>Raised when the findings of any input changed, on the context <see cref="SubmitAsync"/> was awaited on.</summary>
+    /// <remarks>A subscriber marshals with <c>InvokeAsync(StateHasChanged)</c> and unsubscribes in its own <c>Dispose</c>.</remarks>
     public event Action? Changed;
 
     /// <summary>Gets the default quiet time before a check is asked: the measured 300 ms (p95 of a check is about 3 ms).</summary>
@@ -49,47 +57,63 @@ internal sealed class ExpressionCheck
     public string? DescribedBy(string key) => Findings(key).Count > 0 ? $"{key}-check" : null;
 
     /// <summary>Checks the source of one input once the operator pauses, unless a newer source arrived since.</summary>
+    /// <remarks>
+    /// A newer submit for the same key cancels this one's token; the cancellation is swallowed (superseded, nothing
+    /// stored). A <paramref name="check"/> that throws anything else faults the returned task and leaves the state
+    /// consistent — the generation is bumped, the findings untouched — so a fire-and-forget caller must observe the
+    /// task. The gateway never throws for the expected failures, so this only concerns bugs.
+    /// </remarks>
     /// <param name="key">The input's key.</param>
     /// <param name="source">The expression as it stands.</param>
-    /// <param name="check">Asks the check; <see langword="null"/> when it could not be asked.</param>
+    /// <param name="check">Asks the check with the submit's token; <see langword="null"/> when it could not be asked.</param>
     /// <returns>A task that ends when this submit is settled, answered or abandoned.</returns>
     public async Task SubmitAsync(
         string key, string source, Func<string, CancellationToken, Task<ManagementExpressionVerdict?>> check)
     {
-        var generation = NextGeneration(key);
+        var input = Supersede(key);
+        var token = input.Token.Token;
 
         if (string.IsNullOrWhiteSpace(source))
         {
-            Store(key, generation, _noFindings);
+            Store(input, _noFindings);
             return;
         }
 
-        await Task.Delay(DebounceOverride ?? Debounce).ConfigureAwait(false);
-        if (!IsCurrent(key, generation))
+        try
         {
-            return;
+            await Task.Delay(DebounceOverride ?? Debounce, token);
+            var verdict = await check(source, token);
+            if (verdict is not null && !input.Token.IsCancellationRequested)
+            {
+                Store(input, verdict.Findings);
+            }
         }
-
-        var verdict = await check(source, CancellationToken.None).ConfigureAwait(false);
-        if (verdict is not null && IsCurrent(key, generation))
+        catch (OperationCanceledException) when (input.Token.IsCancellationRequested)
         {
-            Store(key, generation, verdict.Findings);
+            // Superseded by a newer submit: its answer is the one that counts.
         }
     }
 
-    private int NextGeneration(string key)
+    private Input Supersede(string key)
     {
-        _inputs.TryGetValue(key, out var input);
-        var generation = input.Generation + 1;
-        _inputs[key] = (generation, input.Findings ?? _noFindings);
-        return generation;
+        _inputs.TryGetValue(key, out var previous);
+        previous?.Token.Cancel();
+        previous?.Token.Dispose();
+
+        return _inputs[key] = new Input(previous?.Findings ?? _noFindings);
     }
 
-    private bool IsCurrent(string key, int generation) => _inputs[key].Generation == generation;
-
-    private void Store(string key, int generation, IReadOnlyList<DescriptorValidationError> findings)
+    private void Store(Input input, IReadOnlyList<DescriptorValidationError> findings)
     {
-        _inputs[key] = (generation, findings);
+        input.Findings = findings;
         Changed?.Invoke();
+    }
+
+    /// <summary>One input's findings and the token of the submit that currently owns it.</summary>
+    private sealed class Input(IReadOnlyList<DescriptorValidationError> findings)
+    {
+        public IReadOnlyList<DescriptorValidationError> Findings { get; set; } = findings;
+
+        public CancellationTokenSource Token { get; } = new();
     }
 }
