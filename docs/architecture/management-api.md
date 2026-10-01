@@ -71,7 +71,7 @@ write, so any project whose history ever held a looser block would otherwise be 
 
 `POST {m}/projects/{project}/cel/check` answers one question for the dashboard's expression inputs (a rule, a
 hook condition, a mutate value, a computed field): *what would apply say about this expression, in this
-descriptor?* The request is `{descriptor, path, source}` — the working copy the caller holds, the RFC 6901
+descriptor?* The request is `{descriptorJson, path, source}` — the working copy the caller holds, the RFC 6901
 pointer of the slot, the candidate as typed — and the answer is a list of `DescriptorValidationError`, the
 type apply already speaks. There is no second diagnostic type and no second code path.
 
@@ -102,7 +102,7 @@ refused. A viewer can already read the descriptor (`GetDescriptor`); this adds n
 That is also the line that keeps it from growing: the day a finding needs stored state, it is no longer
 `viewer`.
 
-**The size cap.** A viewer can post a whole descriptor on every keystroke, so `descriptor` is capped at
+**The size cap.** A viewer can post a whole descriptor on every keystroke, so `descriptorJson` is capped at
 1,000,000 characters (`MaxCheckedDescriptorChars`) and refused with `422` before it is parsed. The bike-workshop
 descriptor is 24 KB; the cap is a ceiling, not a target. `source` is capped at 8,000 characters and `path` at 1,024, each refused `422` with a detail that names the cap and
 says what to send instead (otherwise a long `path` or `source` would void the descriptor cap through the ~30 MB

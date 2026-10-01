@@ -160,11 +160,11 @@ internal static class ExpressionSlotCheck
         && segments[5] == "action" && segments[6] == MutateSegment;
 
     private static ManagementRequestException NotADescriptor() => new(
-        "The 'descriptor' is not a JSON object. Send the working-copy descriptor exactly as the dashboard holds it.");
+        "The 'descriptorJson' is not a JSON object. Send the working-copy descriptor exactly as the dashboard holds it.");
 
     /// <summary>The parser's own text names the property and its position; the client needs both to find it.</summary>
     private static ManagementRequestException DuplicateProperty(Exception parserError) => new(
-        $"The 'descriptor' has a duplicate property ({parserError.Message}). JSON objects must not repeat a key; "
+        $"The 'descriptorJson' has a duplicate property ({parserError.Message}). JSON objects must not repeat a key; "
         + "send the working-copy descriptor exactly as the dashboard holds it.");
 
     private static ManagementRequestException Absent(string pointer) => new(

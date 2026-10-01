@@ -173,7 +173,7 @@ public class ManagementExpressionCheckTests
 
     private static JsonObject Body(JsonObject descriptor, string pointer, string source) => new()
     {
-        ["descriptor"] = descriptor.ToJsonString(),
+        ["descriptorJson"] = descriptor.ToJsonString(),
         ["path"] = pointer,
         ["source"] = source,
     };

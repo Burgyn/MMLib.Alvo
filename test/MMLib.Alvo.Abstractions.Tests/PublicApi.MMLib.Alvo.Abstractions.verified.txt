@@ -1330,8 +1330,8 @@ namespace MMLib.Alvo.Management
     }
     public sealed class ManagementExpressionCheck : System.IEquatable<MMLib.Alvo.Management.ManagementExpressionCheck>
     {
-        public ManagementExpressionCheck(string Descriptor, string Path, string Source) { }
-        public string Descriptor { get; init; }
+        public ManagementExpressionCheck(string DescriptorJson, string Path, string Source) { }
+        public string DescriptorJson { get; init; }
         public string Path { get; init; }
         public string Source { get; init; }
     }

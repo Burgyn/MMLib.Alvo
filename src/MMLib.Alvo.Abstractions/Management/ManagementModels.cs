@@ -167,16 +167,16 @@ public sealed record ManagementPolicyVerdict(
     IReadOnlyList<string> ReadOnlyFields);
 
 /// <summary>One expression to check, in the descriptor it will live in.</summary>
-/// <param name="Descriptor">
+/// <param name="DescriptorJson">
 /// The descriptor JSON the editor holds — typically the unapplied working copy. It is the only input the answer
 /// depends on: nothing stored is read.
 /// </param>
 /// <param name="Path">
 /// The RFC 6901 pointer of the slot being edited, for example <c>/entities/orders/rules/list</c>. The slot must
-/// already exist in <paramref name="Descriptor"/>.
+/// already exist in <paramref name="DescriptorJson"/>.
 /// </param>
 /// <param name="Source">The candidate expression, as typed.</param>
-public sealed record ManagementExpressionCheck(string Descriptor, string Path, string Source);
+public sealed record ManagementExpressionCheck(string DescriptorJson, string Path, string Source);
 
 /// <summary>What applying would say about one expression.</summary>
 /// <param name="Findings">

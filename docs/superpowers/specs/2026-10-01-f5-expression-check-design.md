@@ -53,7 +53,7 @@ others. An operator learns what is wrong with a rule after typing the whole chan
 
 `IAlvoManagement.CheckExpressionAsync(project, ManagementExpressionCheck request, ct)`.
 
-* **Request** `ManagementExpressionCheck(string Descriptor, string Path, string Source)`: the working-copy
+* **Request** `ManagementExpressionCheck(string DescriptorJson, string Path, string Source)`: the working-copy
   descriptor JSON the dashboard already holds (`WorkingCopy.Json`), the RFC 6901 pointer of the slot being edited
   (`/entities/orders/rules/list`, `/entities/orders/hooks/beforeCreate/0/condition`,
   `/entities/orders/hooks/beforeCreate/0/action/mutate/status`, `/entities/orders/fields/total/computed`), and
@@ -81,7 +81,7 @@ others. An operator learns what is wrong with a rule after typing the whole chan
   messages are derived from the descriptor the caller supplied. `A_finding_never_carries_stored_state_the_caller_did_not_send` pins that the role catalog is the sent one.
 * **Body binds nullable** (`T? body`) and the service refuses null with 422, or the gate sweep
   (`Every_mapped_management_route_refuses_…`) gets a framework 400 ahead of the 403.
-* **Size.** A viewer can POST a whole descriptor on a hot path. `Descriptor` is capped at 1,000,000 characters
+* **Size.** A viewer can POST a whole descriptor on a hot path. `DescriptorJson` is capped at 1,000,000 characters
   (`MaxCheckedDescriptorChars`, refused 422 before it is parsed). The package ships no rate limiter (throttling is a
   host decision, see `AlvoManagementEndpointRouteBuilderExtensions`), so the cap and the measured cost are the whole
   defence. `Source` is capped at 8,000 characters and `Path` at 1,024 (`EnsureCheckable`; the detail names the cap and

@@ -221,7 +221,7 @@ internal sealed partial class AlvoManagementService(
         EnsureCheckable(request);
 
         return Task.FromResult(new ManagementExpressionVerdict(
-            ExpressionSlotCheck.Check(validator, request.Descriptor, request.Path, request.Source)));
+            ExpressionSlotCheck.Check(validator, request.DescriptorJson, request.Path, request.Source)));
     }
 
     /// <summary>The most descriptor text a check will parse: a viewer can call this on every keystroke.</summary>
@@ -235,14 +235,14 @@ internal sealed partial class AlvoManagementService(
 
     private static void EnsureCheckable(ManagementExpressionCheck? request)
     {
-        if (request is null || request.Descriptor is null || request.Path is null || request.Source is null)
+        if (request is null || request.DescriptorJson is null || request.Path is null || request.Source is null)
         {
             throw new ManagementRequestException(
-                "A check needs a 'descriptor', a 'path' and a 'source'. Send all three: the answer is about one "
+                "A check needs a 'descriptorJson', a 'path' and a 'source'. Send all three: the answer is about one "
                 + "expression in one descriptor, and a missing part would be answered as a pass.");
         }
 
-        EnsureWithin("descriptor", request.Descriptor, MaxCheckedDescriptorChars,
+        EnsureWithin("descriptorJson", request.DescriptorJson, MaxCheckedDescriptorChars,
             "Send the project's own descriptor; a check is not an apply and takes no more than one.");
         EnsureWithin("source", request.Source, MaxCheckedSourceChars,
             "Send the one expression being edited; the schema refuses a rule source over 2,000 characters anyway.");

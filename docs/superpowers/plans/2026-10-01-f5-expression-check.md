@@ -1,4 +1,4 @@
-# F5 expression check (`cel/check`) Implementation Plan
+﻿# F5 expression check (`cel/check`) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -368,7 +368,7 @@ git commit -m "feat(management): judge one expression slot with the validator ap
 **Interfaces:**
 - Consumes: `ExpressionSlotCheck.Check` (Task 1).
 - Produces (public, Abstractions):
-  - `public sealed record ManagementExpressionCheck(string Descriptor, string Path, string Source);`
+  - `public sealed record ManagementExpressionCheck(string DescriptorJson, string Path, string Source);`
   - `public sealed record ManagementExpressionVerdict(IReadOnlyList<DescriptorValidationError> Findings) { public bool IsValid => ... }`
   - `Task<ManagementExpressionVerdict> IAlvoManagement.CheckExpressionAsync(string project, ManagementExpressionCheck request, CancellationToken ct = default);`
   - route `POST /management/projects/{project}/cel/check`.
@@ -475,7 +475,7 @@ public class ManagementExpressionCheckTests
 }
 ```
 
-Note: the wire shape carries `descriptor` as a **JSON string** (the working copy's own serialised text), exactly `ManagementExpressionCheck.Descriptor`. Check how `SendAsync` treats a null body (`body: null`) in `AlvoApiWorld`; if it cannot send an empty POST, send `Content-Length: 0` through the underlying client the way `ManagementAccessTests` does for the gate sweep.
+Note: the wire shape carries `descriptorJson` as a **JSON string** (the working copy's own serialised text), exactly `ManagementExpressionCheck.DescriptorJson`. Check how `SendAsync` treats a null body (`body: null`) in `AlvoApiWorld`; if it cannot send an empty POST, send `Content-Length: 0` through the underlying client the way `ManagementAccessTests` does for the gate sweep.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -497,7 +497,7 @@ In `ManagementModels.cs` (after `ManagementPolicyVerdict`), BOM+CRLF preserved:
 /// already exist in <paramref name="Descriptor"/>.
 /// </param>
 /// <param name="Source">The candidate expression, as typed.</param>
-public sealed record ManagementExpressionCheck(string Descriptor, string Path, string Source);
+public sealed record ManagementExpressionCheck(string DescriptorJson, string Path, string Source);
 
 /// <summary>What applying would say about one expression.</summary>
 /// <param name="Findings">
@@ -562,7 +562,7 @@ Add `IDescriptorValidator validator,` to the primary constructor (after `IPolicy
         EnsureCheckable(request);
 
         return Task.FromResult(new ManagementExpressionVerdict(
-            ExpressionSlotCheck.Check(validator, request.Descriptor, request.Path, request.Source)));
+            ExpressionSlotCheck.Check(validator, request.DescriptorJson, request.Path, request.Source)));
     }
 
     /// <summary>The most descriptor text a check will parse: a viewer can call this on every keystroke.</summary>
@@ -846,5 +846,5 @@ Copy the surrounding methods' exact `AsOperatorAsync` overload usage (it has `Ta
 
 1. **Spec coverage:** §4.1 mechanism → Task 1; request/result/route/level/422 → Task 2; size cap → Task 2 Step 5; parity (§5.2) → Task 3; one-bad-elsewhere (§5.3) → Tasks 1 and 3; dashboard (§4.3, §5.4) → Tasks 5–6; cost (§5.5) → Task 4; API growth (§5.6) → Task 2 Step 9; docs (§5.7) → Task 7; field default excluded (§4.2) → Task 6 Step 6; `Position` and `cel/scope` deferred, nothing to build.
 2. **Placeholders:** the three test-helper builders in Task 1 Step 5 and the e2e world helpers in Task 6 are named as "copy the neighbouring construction" with the exact source to copy — they depend on repo fixtures the plan author read only at the signature level; the executor must write them out in full. This is the one place the plan defers to the code, deliberately, so the production validator and the suite's own world are used rather than a re-invention.
-3. **Type consistency:** `ManagementExpressionCheck(Descriptor, Path, Source)`, `ManagementExpressionVerdict(Findings)`, `CheckExpressionAsync`, `ManagementOperation.CheckExpression`, `ExpressionSlotCheck.Check`, `JsonPointerPath.Segments/IsAtOrUnder`, `ExpressionCheck.SubmitAsync/Findings/DescribedBy/Debounce/DebounceOverride`, `ManagementGateway.CheckExpressionAsync` — used identically across tasks.
+3. **Type consistency:** `ManagementExpressionCheck(DescriptorJson, Path, Source)`, `ManagementExpressionVerdict(Findings)`, `CheckExpressionAsync`, `ManagementOperation.CheckExpression`, `ExpressionSlotCheck.Check`, `JsonPointerPath.Segments/IsAtOrUnder`, `ExpressionCheck.SubmitAsync/Findings/DescribedBy/Debounce/DebounceOverride`, `ManagementGateway.CheckExpressionAsync` — used identically across tasks.
 4. **Review Focus:** items 1–5 → Task 1 tests; 6–7 → Task 2 tests; 8–9 → Task 5 tests and Task 6 e2e (focus assertion).
