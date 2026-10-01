@@ -265,7 +265,7 @@ internal static class ExpressionSlotCheck
 
     /// <summary>The parser's own text names the property and its position; the client needs both to find it.</summary>
     private static ManagementRequestException DuplicateProperty(Exception parserError) => new(
-        $"The 'descriptorJson' has a duplicate property ({parserError.Message}). JSON objects must not repeat a key; "
+        $"The 'descriptorJson' has a duplicate property ({JsonPointerPath.Shorten(parserError.Message)}). JSON objects must not repeat a key; "
         + "send the working-copy descriptor exactly as the dashboard holds it.");
 
     private static ManagementRequestException Absent(string pointer) => new(

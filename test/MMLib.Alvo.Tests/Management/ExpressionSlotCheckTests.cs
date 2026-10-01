@@ -281,6 +281,18 @@ public sealed class ExpressionSlotCheckTests
         refusal.Message.ShouldContain("duplicate property");
     }
 
+    [Fact]
+    public void A_duplicate_key_is_not_echoed_whole()
+    {
+        var key = new string('k', 600);
+        var json = $$"""{"{{key}}":1,"{{key}}":2}""";
+
+        var refusal = Should.Throw<ManagementRequestException>(() => ExpressionSlotCheck.Check(Validator(), json, ListRule, "true"));
+
+        refusal.Message.ShouldContain("duplicate property");
+        refusal.Message.Length.ShouldBeLessThan(500);
+    }
+
     [Theory]
     [InlineData("[1]")]
     [InlineData("{not json")]

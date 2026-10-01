@@ -113,11 +113,11 @@ body limit). A refusal that must quote the pointer quotes at most 120 characters
 (2,000 values about 0.1 s, 90,000 minutes, all under the size cap) and a Viewer calls the check per keystroke. The
 frozen schema is untouched; the bound is the check's own.
 
-**A schema failure elsewhere is "not judged", not green.** The validator runs its rule, computed and owner passes
-only over a descriptor the schema accepts, so one schema error anywhere hides the slot's own errors. The check
-then answers one `Error` at the slot — "This expression was not judged: the descriptor fails the schema
-elsewhere (up to three places). Fix those first, then it is checked." — rather than a green verdict nobody
-earned. A bad *expression* elsewhere does not do this (a good slot stays green). Schema findings use the URI
+**A descriptor refused elsewhere is "not checked yet", not green.** The validator runs its rule, computed and owner
+pass only when the schema accepts the descriptor AND the mapper builds it, so one such refusal anywhere hides the
+slot's own errors. The check then answers one `Error` at the slot — "Not checked yet — another part of this draft is
+not valid (up to three places). This box is checked once that is fixed." (the dashboard shows it muted) — rather
+than a green verdict nobody earned; the signal is the validator's own record that the pass ran. A bad *expression* elsewhere does not do this (a good slot stays green). Schema findings use the URI
 fragment form `#/entities/…`, which the filter reads as the pointer `/entities/…`; a refusal the schema reports
 on a node above the slot (a mutate value is a `oneOf`) is reported at the slot when the descriptor is
 schema-valid with a placeholder in it.

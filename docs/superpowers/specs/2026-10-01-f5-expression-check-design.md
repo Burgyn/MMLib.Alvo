@@ -123,10 +123,12 @@ can call the same operation instead of guessing.
    set equals the apply refusal restricted to that slot (a property test, the `PolicySimulatorAgreementTests`
    pattern). No slot where check is green and apply refuses, or the reverse.
 3. A candidate with one bad *expression* elsewhere in the descriptor (a rule or hook that compiles badly) still
-   returns a green verdict for a good slot. A *schema* failure elsewhere is different: the validator runs its rule,
-   computed and owner passes only over a descriptor the schema accepts, so nothing at the slot was judged — the
-   verdict is one error at the slot, "This expression was not judged: the descriptor fails the schema elsewhere
-   (…)", never a green one. (A schema refusal at, or reported just above, the slot is returned as the slot's own.)
+   returns a green verdict for a good slot. A descriptor *refused* elsewhere is different: the rule, computed and owner
+   pass runs only when the schema accepts the descriptor AND the mapper builds it, so otherwise nothing at the slot
+   was judged — the verdict is one error at the slot, "Not checked yet — another part of this draft is not valid
+   (…). This box is checked once that is fixed.", never a green one. The signal is real, not a path shape:
+   `DescriptorValidator.ValidateWithOutcome` says whether the pass ran. (A schema refusal at, or reported just above,
+   the slot is returned as the slot's own.)
 4. The dashboard shows the finding under rule, hook condition, mutate value and computed inputs within one debounce
    interval of the last keystroke, and never a stale one. As built: an e2e scenario per input in `ExpressionCheckScenarios`
    (Playwright; rule, hook condition, mutate value, computed, plus Escape, save-while-flagged and the unchecked
@@ -194,19 +196,23 @@ Deferred (not in this slice): `Position`, `cel/scope`, `cel/evaluate`.
   now reads both as one pointer (`JsonPointerPath.IsAtOrUnder`), so a source over 2,000 characters or an empty one
   is refused at the slot as apply refuses it. The agreement oracle was fixed the same way and the corpus gained
   schema-error cases (2,001 characters for a rule, a mutate value and a computed expression; an empty source).
-* **C2 — "not judged".** The validator runs its rule, computed and owner passes only over a schema-valid
-  descriptor, so a schema error elsewhere hid the slot's real errors. The check now answers one `Error` at the slot,
-  "This expression was not judged: the descriptor fails the schema elsewhere (up to three places)…", never a green
-  verdict (criterion 3 reworded). A schema refusal reported on a node *above* the slot (a mutate value is a `oneOf`,
+* **C2 — "not judged".** The validator runs its rule, computed and owner passes only when the schema accepts the
+  descriptor and the mapper builds it, so a refusal elsewhere (a schema error, an integer default out of range, an
+  enum default outside its values, an audit entity declaring a managed column) hid the slot's real errors. The check
+  now answers one `Error` at the slot, "Not checked yet — another part of this draft is not valid (up to three
+  places)…" (shown muted in the dashboard), never a green verdict (criterion 3 reworded). A schema refusal reported on a node *above* the slot (a mutate value is a `oneOf`,
   so it fails on the action) is reported at the slot when the descriptor is schema-valid with a placeholder in it.
 * **I1 — a facet beyond `int`.** `"maxLength": 3000000000` passed the schema and then threw `JsonException` out of
   `DescriptorValidator.RuleErrors` (a 500 on apply and on the check). It is now a structured error with a fix, in
-  the schema pass's `#/…` path form, so the check answers "not judged" for it.
+  the schema pass's `#/…` path form, so the check answers "not checked yet" for it.
 * **I2 — caps.** `source` is capped at 8,000 characters and `path` at 1,024 (the detail names the cap); an echoed
   pointer is cut to 120 characters.
 * **I3 — tests that can fail.** The over-cap test sends valid JSON of that length and asserts the cap in the
   detail (with a just-under control); the absent-slot test asserts the pointer; an unknown project with no body is
   404, not 422.
+* **Second wave.** "Not judged" is driven by whether the rule pass ran (a refusal by the mapper counts, not only a
+  schema error); a lone UTF-16 surrogate is a refusal (apply and check), never a 500; the check bounds arrays at
+  2,000 elements; the sentence is calm and muted in the dashboard.
 * **I4 — naming.** `ManagementExpressionCheck.Descriptor` is now `DescriptorJson` (wire `descriptorJson`), as
   `ManagementApplyRequest` has it. The debounce-supersede test is bounded at 5 s so it fails instead of hanging.
 
