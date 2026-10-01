@@ -39,7 +39,18 @@ public class ManagementExpressionCheckTests
 
         using var response = await Ask(world, "/entities/nope/rules/list", "true");
 
-        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await Refusal(response)).ShouldContain("/entities/nope/rules/list");
+    }
+
+    [Fact]
+    public async Task An_unknown_project_is_404_before_a_missing_body_is_422()
+    {
+        await using var world = await ManagedFleet.StartAsync([_ops]);
+
+        using var response = await world.SendAsync(
+            HttpMethod.Post, "/management/projects/not-mine/cel/check", _ops, body: null);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -72,12 +83,31 @@ public class ManagementExpressionCheckTests
     public async Task A_descriptor_over_the_cap_is_refused_before_it_is_parsed()
     {
         await using var world = await ManagedFleet.StartAsync([_ops]);
-        var body = Body(ListRule, "true");
-        body["descriptor"] = new string(' ', 1_000_001);
+        var body = Body(PaddedFleetDescriptor(1_000_001), ListRule, "true");
 
         using var response = await world.SendAsync(HttpMethod.Post, $"{ManagedFleet.Routes}/cel/check", _ops, body: body);
 
-        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await Refusal(response)).ShouldContain("1,000,000");
+    }
+
+    [Fact]
+    public async Task A_valid_descriptor_just_under_the_cap_is_parsed_and_judged_not_refused_for_size()
+    {
+        await using var world = await ManagedFleet.StartAsync([_ops]);
+        var body = Body(PaddedFleetDescriptor(900_000), ListRule, "true");
+
+        using var response = await world.SendAsync(HttpMethod.Post, $"{ManagedFleet.Routes}/cel/check", _ops, body: body);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, "the padding is valid JSON, so only the cap can refuse the larger one");
+    }
+
+    /// <summary>The fleet descriptor, valid JSON, its text at least <paramref name="chars"/> long through one long string value.</summary>
+    private static JsonObject PaddedFleetDescriptor(int chars)
+    {
+        var descriptor = ReadFleetDescriptor();
+        descriptor["description"] = new string('x', chars);
+
+        return descriptor;
     }
 
     [Fact]
