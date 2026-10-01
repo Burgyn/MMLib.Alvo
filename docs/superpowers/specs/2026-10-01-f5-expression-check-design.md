@@ -95,8 +95,10 @@ others. An operator learns what is wrong with a rule after typing the whole chan
 * `ManagementGateway.CheckExpressionAsync(path, source)` — uncached (the answer depends on the working copy), through
   `AsOperatorAsync` like the rest.
 * A small `ExpressionCheck` behaviour on the four inputs, **debounced** (the inputs are `Immediate`), cancelling the
-  previous in-flight check, showing findings through the existing `FieldRefusals` (keyed by input id, with
-  `aria-describedby`) — no new visual component. A check that is slower than the debounce never shows a stale
+  previous in-flight check. Findings are shown by a focus-free `ExpressionCheck` state rendered as
+  `.a-field__problem` markup (keyed by input id, with `aria-describedby`), **not** through `FieldRefusals`, because
+  `FieldRefusals` takes focus on every refusal and would steal focus from the input the operator is typing in
+  (recorded deviation). A check that is slower than the debounce never shows a stale
   verdict: the latest source wins.
 * Behaviour when the check itself fails (network, 403): the input shows nothing extra and apply still decides — a
   broken helper must never block editing.
