@@ -108,6 +108,23 @@ public class PolicyCatalogBuilderTests
         PolicyCatalogBuilder.ReferencesRowField(new CelContextRef(CelContextValue.TenantId, CelValueType.Uuid)).ShouldBeFalse();
     }
 
+    /// <summary>
+    /// A rule that type-checks but has no SQL form is refused when the descriptor is applied — before this
+    /// it built a catalog, and every list and get on the entity then threw at render time.
+    /// </summary>
+    [Fact]
+    public void A_rule_comparing_a_predicate_is_refused_at_apply_with_the_rules_path_and_a_fix()
+    {
+        var descriptor = Descriptor("orders", Entity(rules: new AccessRules { List = "(total > 5) == true" }));
+
+        PolicyCatalog.TryBuild(descriptor, Schema(), CelFixtures.Compiler, out var catalog, out var errors).ShouldBeFalse();
+
+        catalog.ShouldBeNull();
+        var error = errors.ShouldHaveSingleItem();
+        error.Path.ShouldBe("/entities/orders/rules/list");
+        error.FixSuggestion.ShouldNotBeNull().ShouldContain("total > 5");
+    }
+
     [Fact]
     public void At_user_role_singular_fails_with_the_plural_fix()
     {

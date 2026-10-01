@@ -152,4 +152,17 @@ internal sealed class AlvoContextFilterFactory(
     /// <param name="operation">The operation the endpoint performs.</param>
     internal AlvoContextFilter For(string entity, DataOperation operation) =>
         new(entity, operation, resolver, accessor, scopeGate, authOptions);
+
+    /// <summary>
+    /// Whether <paramref name="principal"/>'s key may <b>read</b> <paramref name="entity"/> — the question a
+    /// write endpoint's own filter never asks, because it gates the write.
+    /// </summary>
+    /// <remarks>
+    /// An anonymous caller (<see langword="null"/>) has no key and so no scopes to narrow, which is the same
+    /// reason <see cref="AlvoContextFilter"/> skips the gate for one: the policy is the whole answer.
+    /// </remarks>
+    /// <param name="principal">The resolved caller, or <see langword="null"/> for an anonymous one.</param>
+    /// <param name="entity">The entity written.</param>
+    internal bool MayRead(AlvoPrincipal? principal, string entity) =>
+        principal is null || scopeGate.Allows(principal, entity, DataOperation.Get);
 }

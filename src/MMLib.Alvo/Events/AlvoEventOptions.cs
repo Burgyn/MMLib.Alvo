@@ -77,4 +77,24 @@ public sealed class AlvoEventOptions
     /// very next tick — a duplicate delivery per tick rather than at-least-once delivery.
     /// </remarks>
     public TimeSpan ClaimLease { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Gets the non-public networks, in CIDR notation, a webhook may be delivered to. Empty by default, which
+    /// allows only globally reachable addresses — and loopback, when the endpoint names it literally.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Webhook delivery is default-deny for private, loopback, link-local (cloud instance metadata), CGNAT,
+    /// multicast and reserved destinations, judged on the address the name <em>resolves</em> to at connect
+    /// time, so a public-looking name that points inside the network is refused like the address itself. An
+    /// embedded host that delivers to its own internal services lists their networks here, such as
+    /// <c>10.20.0.0/16</c> or <c>fd00:20::/32</c>; an entry that is not CIDR notation is refused at startup.
+    /// In an environment variable each entry is indexed: <c>Alvo__Events__WebhookAllowedNetworks__0</c>.
+    /// </para>
+    /// <para>
+    /// A list of networks rather than an on/off switch, so admitting one internal service does not also admit
+    /// the metadata endpoint. A listed network overrides every deny, so list the narrowest one that works.
+    /// </para>
+    /// </remarks>
+    public IList<string> WebhookAllowedNetworks { get; } = new List<string>();
 }

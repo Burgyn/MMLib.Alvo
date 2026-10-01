@@ -416,6 +416,82 @@ public sealed class DataApiAuthTests
     }
 
     /// <summary>
+    /// A key scoped <c>owners:write</c> alone cannot read a row out of a write's answer: every write verb
+    /// answers with the row's id and nothing else, while its status and <c>Location</c> stay what they were.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The policy admits every field here — the key's roles may <c>get</c> — so the only thing withholding the
+    /// row is the missing <c>read</c> scope. <c>ScopeGate</c> gates each endpoint by its own operation,
+    /// and a write endpoint's is a <c>write</c>; without this, a write-only key read any row it could write by
+    /// PATCHing it with a no-op, and an <c>id</c>-less <c>GET</c> 403 meant nothing.
+    /// </para>
+    /// <para>
+    /// The row is still written — the admin's own read proves it — because an id-only answer from a write
+    /// that never happened would satisfy every body assertion above it.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_write_scoped_key_without_read_scope_gets_the_id_alone_from_every_write()
+    {
+        var writer = new TestApiKey("writer-key", ["admin", "authenticated"], ["owners:write"]);
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([_admin, writer]);
+        var fresh = Guid.NewGuid();
+
+        using var created = await world.SendAsync(HttpMethod.Post, "/api/owners", writer, body: Owner("Acme Ltd"));
+        var id = (await created.ReadJsonObjectAsync())["id"]!.GetValue<Guid>();
+        using var patched = await world.SendAsync(HttpMethod.Patch, $"/api/owners/{id}", writer, body: Owner("Renamed"));
+        using var replaced = await world.SendAsync(HttpMethod.Put, $"/api/owners/{fresh}", writer, body: Owner("Put"));
+        using var batch = await world.SendAsync(
+            HttpMethod.Post, "/api/owners/batch", writer, body: new JsonObject { ["rows"] = new JsonArray(Owner("B")) });
+
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
+        created.Headers.Location!.ToString().ShouldEndWith($"/api/owners/{id}");
+        await ShouldCarryTheIdAloneAsync(created);
+        patched.StatusCode.ShouldBe(HttpStatusCode.OK, await patched.ReadTextAsync());
+        await ShouldCarryTheIdAloneAsync(patched);
+        replaced.StatusCode.ShouldBe(HttpStatusCode.Created, await replaced.ReadTextAsync());
+        await ShouldCarryTheIdAloneAsync(replaced);
+        batch.StatusCode.ShouldBe(HttpStatusCode.OK, await batch.ReadTextAsync());
+        (await batch.ReadJsonObjectAsync())["items"]!.AsArray().Single()!.AsObject()
+            .Select(field => field.Key).ShouldBe(["id"]);
+        (await ReadOwnerNameAsync(world, id)).ShouldBe("Renamed", "the write itself must still land");
+    }
+
+    /// <summary>
+    /// The positive half of the scope fact: the same roles holding <c>owners:read</c> as well get the whole
+    /// row back, so the id-only answer above is the missing scope's doing and not a blanket change.
+    /// </summary>
+    [Fact]
+    public async Task A_key_that_may_also_read_gets_the_written_row_back()
+    {
+        var both = new TestApiKey("both-key", ["admin", "authenticated"], ["owners:read", "owners:write"]);
+        await using var world = await AlvoApiWorld.VehicleRegistryAsync([both]);
+
+        using var created = await world.SendAsync(HttpMethod.Post, "/api/owners", both, body: Owner("Acme Ltd"));
+        var id = (await created.ReadJsonObjectAsync())["id"]!.GetValue<Guid>();
+        using var patched = await world.SendAsync(HttpMethod.Patch, $"/api/owners/{id}", both, body: Owner("Renamed"));
+
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
+        created.Headers.ETag.ShouldNotBeNull("a readable row keeps its entity tag");
+        (await patched.ReadJsonObjectAsync())["name"]!.GetValue<string>().ShouldBe("Renamed");
+    }
+
+    private static async Task ShouldCarryTheIdAloneAsync(HttpResponseMessage response)
+    {
+        (await response.ReadJsonObjectAsync()).Select(field => field.Key).ShouldBe(
+            ["id"], "a key that may not read must not be handed the row by a write");
+        response.Headers.ETag.ShouldBeNull("an id-only answer carries no version to tag");
+    }
+
+    private static async Task<string> ReadOwnerNameAsync(AlvoApiWorld world, Guid id)
+    {
+        using var response = await world.SendAsync(HttpMethod.Get, $"/api/owners/{id}", _admin);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.ReadTextAsync());
+        return (await response.ReadJsonObjectAsync())["name"]!.GetValue<string>();
+    }
+
+    /// <summary>
     /// <c>[15a]</c>'s definition of done, made true over HTTP: a caller with no tenant sees no tenant's
     /// rows, and a caller cannot acquire a tenant by asking for one in a header.
     /// </summary>

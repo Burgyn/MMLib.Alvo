@@ -141,7 +141,7 @@ internal static class DataApiEndpoints
                         IAlvoContextAccessor caller,
                         CancellationToken ct) =>
                     ProblemResultFactory.GuardAsync(() =>
-                        BatchAsync(http, entity, kind, options, formats, data, policies, caller, ct)))
+                        BatchAsync(http, entity, kind, options, formats, data, policies, caller, filters, ct)))
                 .Protect(entity, kind, filters, conventions);
     }
 
@@ -167,6 +167,7 @@ internal static class DataApiEndpoints
     /// <param name="data">The store.</param>
     /// <param name="policies">The policy engine.</param>
     /// <param name="caller">The caller accessor.</param>
+    /// <param name="filters">Answers whether the caller's key may read what the batch wrote.</param>
     /// <param name="ct">A token to cancel the operation.</param>
     private static async Task<IResult> BatchAsync(
         HttpContext http,
@@ -177,6 +178,7 @@ internal static class DataApiEndpoints
         IAlvoData data,
         IPolicyEngine policies,
         IAlvoContextAccessor caller,
+        AlvoContextFilterFactory filters,
         CancellationToken ct)
     {
         var context = Caller(caller);
@@ -202,7 +204,7 @@ internal static class DataApiEndpoints
         var result = await PerformAsync(data, entity, kind, batch, context, token, ct).ConfigureAwait(false);
 
         return result.Succeeded
-            ? Rows(result)
+            ? Rows(Echoed(result, caller, entity, filters))
             : ProblemResultFactory.RowsForbidden([.. result.Refusals.Select(BatchViolations.FromPort)]);
     }
 
@@ -521,7 +523,7 @@ internal static class DataApiEndpoints
                         key, http.Request.Method, entity, id: null, precondition: null, body.Document);
                     var record = await data.CreateAsync(entity.Name, body.Values, context, token, ct)
                         .ConfigureAwait(false);
-                    return Created(pattern, record, entity);
+                    return Created(pattern, Echoed(record, caller, entity, filters), entity);
                 }))
             .Protect(entity, DataApiEndpointKind.Create, filters, conventions);
 
@@ -585,9 +587,8 @@ internal static class DataApiEndpoints
                         .ReplaceAsync(entity.Name, id, body.Values, context, precondition, token, ct)
                         .ConfigureAwait(false);
 
-                    return result.Created
-                        ? Created(collection, result.Row, entity)
-                        : Row(result.Row, entity);
+                    var echoed = Echoed(result.Row, caller, entity, filters);
+                    return result.Created ? Created(collection, echoed, entity) : Row(echoed, entity);
                 }))
             .Protect(entity, DataApiEndpointKind.Replace, filters, conventions);
 
@@ -633,7 +634,7 @@ internal static class DataApiEndpoints
                     var record = await data
                         .UpdateAsync(entity.Name, id, body.Values, context, precondition, token, ct)
                         .ConfigureAwait(false);
-                    return Row(record, entity);
+                    return Row(Echoed(record, caller, entity, filters), entity);
                 }))
             .Protect(entity, DataApiEndpointKind.Update, filters, conventions);
 
@@ -1369,6 +1370,51 @@ internal static class DataApiEndpoints
                 .Union(second.ReadOnlyFields, StringComparer.Ordinal)
                 .ToFrozenSet(StringComparer.Ordinal)
             : decision.ReadOnlyFields;
+
+    /// <summary>
+    /// The row a write answers with, as this caller's <b>key</b> may see it: whole when its scopes include a
+    /// read of the entity, its id alone when they do not.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The port already narrows the row to what the caller's <c>get</c> policy returns</b> — see
+    /// <c>EfAlvoData.EchoedAsync</c> — but scopes are this tier's, not the port's: <see cref="AlvoContextFilter"/>
+    /// gates each endpoint by its own operation, and a write endpoint's is a write. Without this, a key scoped
+    /// <c>owners:write</c> alone was refused every <c>GET</c> and read any row it could write by sending a
+    /// no-op <c>PATCH</c>.
+    /// </para>
+    /// <para>
+    /// Id-only, not a 403: the write passed its gate and has committed, so refusing it now would report a
+    /// failure for a change that happened. It is the port's own id-only answer — the same shape, the same
+    /// missing <c>ETag</c> — and the status and <c>Location</c> are unchanged.
+    /// </para>
+    /// </remarks>
+    /// <param name="written">The row the port returned.</param>
+    /// <param name="caller">The caller accessor.</param>
+    /// <param name="entity">The entity written.</param>
+    /// <param name="filters">Answers whether the caller's key may read <paramref name="entity"/>.</param>
+    private static AlvoRecord Echoed(
+        AlvoRecord written, IAlvoContextAccessor caller, EntitySchema entity, AlvoContextFilterFactory filters) =>
+        filters.MayRead(caller.Principal, entity.Name) ? written : IdOnly(written);
+
+    /// <inheritdoc cref="Echoed(AlvoRecord, IAlvoContextAccessor, EntitySchema, AlvoContextFilterFactory)"/>
+    /// <param name="written">The rows the port returned.</param>
+    /// <param name="caller">The caller accessor.</param>
+    /// <param name="entity">The entity written.</param>
+    /// <param name="filters">Answers whether the caller's key may read <paramref name="entity"/>.</param>
+    private static AlvoBatchResult Echoed(
+        AlvoBatchResult written, IAlvoContextAccessor caller, EntitySchema entity, AlvoContextFilterFactory filters) =>
+        filters.MayRead(caller.Principal, entity.Name)
+            ? written
+            : AlvoBatchResult.Wrote([.. written.Rows.Select(IdOnly)], written.Affected);
+
+    /// <summary>The written row narrowed to its id.</summary>
+    /// <param name="written">The row the port returned.</param>
+    private static AlvoRecord IdOnly(AlvoRecord written) =>
+        new(new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [AlvoManagedColumns.Id] = written[AlvoManagedColumns.Id],
+        });
 
     /// <summary>The <c>200</c> for one row: its values plus the entity tag a later <c>If-Match</c> can carry.</summary>
     /// <param name="record">The row the port returned.</param>

@@ -751,11 +751,26 @@ original `201` already gave them, in the body and in `Location`, and nothing mor
 field of the row is ever read. Note that an id-only record carries no version, so this one response has no
 `ETag`.
 
-**The sibling case is deliberately out of scope.** When `get` *is* configured but its own predicate
-excludes the row — `USING (status == 'published')`, say — or the row has since been deleted, the replay
-answers **404**, exactly as any other read of an unreachable row does. Telling "invisible to me" from
-"genuinely gone since" would need a second, policy-free existence probe, and refusing to add one is the
-more conservative of the two errors. Tracked in **#101**.
+**The sibling case answers the id too.** When `get` *is* configured but its own predicate excludes the
+row — `USING (status == 'published')`, say — or the row has since been deleted, the replay answers the
+original status with an id-only body, exactly as the fresh write answers when its `get` excludes the row
+(see the next section). It used to answer **404** (#101); once a fresh write could answer id-only, a 404 on
+the retry told the caller a committed write had failed and invited a duplicate under a fresh key. Telling
+"invisible to me" from "genuinely gone since" would still need a policy-free existence probe, which is still
+refused, so both answer the id. A batch replay answers one entry per recorded row on the same rule.
+
+### A write answers with what a `GET` would, and a write-only key gets the id alone
+
+Every write that answers with a row — `POST`, `PATCH`, `PUT` (both branches) and the batch create and
+update — answers with it exactly as a `GET` by the same caller would, and otherwise with a body carrying only
+`id` (no `ETag`), keeping its status and `Location`. Two layers decide it, because two different things can
+withhold a read. The **port** re-reads the written row under the caller's `get` policy (see
+[data-path.md](data-path.md)): a row the `get` rule excludes, or an entity no policy lets them `get`, answers
+id-only. The **HTTP tier** narrows by **scope**: `ScopeGate` gates each endpoint by its own operation, so a key
+scoped `owners:write` alone passes every write filter and is refused every `GET` — without the narrowing it
+read any row it could write through a no-op `PATCH`. Id-only rather than 403, in both layers, because the
+write passed its gate and has committed. This is the deliberate deviation from PostgreSQL RLS's `RETURNING`,
+which fails the statement instead.
 
 ### `Idempotency-Key` is *ignored* on `PATCH` and `DELETE` — and that label must not overstate
 

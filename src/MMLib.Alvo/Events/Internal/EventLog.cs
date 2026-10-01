@@ -37,11 +37,12 @@ namespace MMLib.Alvo.Events.Internal;
 /// <c>EventActionExecutorTests.No_log_line_carries_a_webhook_url_that_could_be_a_secret</c>.
 /// </para>
 /// <para>
-/// <b><see cref="EmailSentToConsole"/> is the one deliberate exception, and it is not an exception to the
-/// rule.</b> It writes the recipient, subject and body because for the console provider the log <em>is</em>
-/// the mailbox — suppressing them would leave a mail provider that delivers nowhere and reports nothing. That
-/// is exactly why the line has to name itself a development provider: an operator who sees message bodies in
-/// production logs is looking at mail that was never sent.
+/// <b><see cref="EmailSentToConsole"/> and <see cref="EmailBodyToConsole"/> are the one deliberate exception,
+/// and it is not an exception to the rule.</b> For the console provider the log <em>is</em> the mailbox —
+/// suppressing the message would leave a mail provider that delivers nowhere and reports nothing. That is
+/// exactly why the line has to name itself a development provider. It is still bounded twice: the body, the
+/// part most likely to carry a <c>hidden</c> field, is written only at Debug, and every value is escaped by
+/// <c>ConsoleEmailSender</c> first, so a line break in row text cannot forge a log line of its own.
 /// </para>
 /// </remarks>
 internal static partial class EventLog
@@ -173,20 +174,34 @@ internal static partial class EventLog
             + "the event records no actor, so the comparison has no caller to resolve against.")]
     internal static partial void ConditionHasNoActorToRead(ILogger logger, string hook, Guid eventId);
 
-    /// <summary>The development mail provider's one line, which is the whole message.</summary>
+    /// <summary>The development mail provider's envelope line: the recipient, the subject and the body's size.</summary>
     /// <remarks>
     /// The word <em>development</em> is load-bearing and pinned by a fact: the failure mode this provider has
     /// is an operator believing mail is going out. Nothing in this build sends mail — there is no SMTP sender
     /// and no mail service in the compose file — so the line has to say so where it is read.
     /// </remarks>
     /// <param name="logger">The logger the console sender writes through.</param>
-    /// <param name="to">The rendered recipient.</param>
-    /// <param name="subject">The rendered subject.</param>
-    /// <param name="body">The rendered body.</param>
+    /// <param name="to">The rendered recipient, escaped.</param>
+    /// <param name="subject">The rendered subject, escaped.</param>
+    /// <param name="bodyLength">The rendered body's length in characters.</param>
     [LoggerMessage(
         Level = LogLevel.Information,
         Message = "Alvo's development email provider did not send this message — it has no SMTP sender and "
-            + "writes mail to the log instead. To: {To} | Subject: {Subject} | Body: {Body}")]
+            + "writes mail to the log instead. To: {To} | Subject: {Subject} | Body: {BodyLength} characters, "
+            + "written at Debug")]
     internal static partial void EmailSentToConsole(
-        ILogger logger, string to, string subject, string body);
+        ILogger logger, string to, string subject, int bodyLength);
+
+    /// <summary>The development mail provider's body line, at Debug.</summary>
+    /// <remarks>
+    /// Debug rather than Information because a body is the part of a message most likely to carry a
+    /// <c>hidden</c> field, and a production log pipeline commonly ships Information — a developer reading the
+    /// console mailbox turns Debug on for it.
+    /// </remarks>
+    /// <param name="logger">The logger the console sender writes through.</param>
+    /// <param name="body">The rendered body, escaped.</param>
+    [LoggerMessage(
+        Level = LogLevel.Debug,
+        Message = "Alvo's development email provider did not send this message body: {Body}")]
+    internal static partial void EmailBodyToConsole(ILogger logger, string body);
 }

@@ -66,7 +66,7 @@ internal sealed class EventActionExecutor(
     private async Task DeliverAsync(CompiledAfterHook hook, AlvoEvent @event, CancellationToken cancellationToken)
     {
         await webhooks
-            .PostAsync(EndpointOf(hook), BodyOf(hook.Action, @event), cancellationToken)
+            .PostAsync(EndpointOf(hook), BodyOf(hook, @event), cancellationToken)
             .ConfigureAwait(false);
 
         Executed(hook, @event);
@@ -74,7 +74,7 @@ internal sealed class EventActionExecutor(
 
     private async Task SendAsync(CompiledAfterHook hook, AlvoEvent @event, CancellationToken cancellationToken)
     {
-        await email.SendAsync(MessageOf(hook.Action, @event), cancellationToken).ConfigureAwait(false);
+        await email.SendAsync(Checked(hook, MessageOf(hook.Action, @event)), cancellationToken).ConfigureAwait(false);
 
         Executed(hook, @event);
     }
@@ -84,14 +84,28 @@ internal sealed class EventActionExecutor(
     /// canonical envelope exactly as the outbox stored it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The canonical envelope goes through <see cref="AlvoEventJson.Write"/> rather than being forwarded as
     /// the stored payload text, because the stored text is not in scope here and a second serializer for the
     /// same shape is how a delivered body and a stored one come to differ.
+    /// </para>
+    /// <para>
+    /// A payload renders through <see cref="JsonPayload"/>, never <see cref="AlvoTemplate.Render"/>: the body
+    /// goes out as <c>application/json</c>, so every value is encoded for its position, and a body that still
+    /// does not parse is refused here rather than sent.
+    /// </para>
     /// </remarks>
-    private static string BodyOf(CompiledAction action, AlvoEvent @event) =>
-        action.Templates.TryGetValue(ActionSlot.Payload, out var payload)
-            ? payload.Render(@event)
-            : AlvoEventJson.Write(@event);
+    private static string BodyOf(CompiledAfterHook hook, AlvoEvent @event) =>
+        !hook.Action.Templates.TryGetValue(ActionSlot.Payload, out var payload) ? AlvoEventJson.Write(@event)
+        : JsonPayload.TryRender(payload, @event, out var body) ? body
+        : throw NotJson(hook);
+
+    /// <summary>
+    /// The message, refused before it reaches the port when a rendered header is not one — a recipient that is
+    /// not exactly one mailbox, or a line break in the recipient or the subject.
+    /// </summary>
+    private static AlvoMailMessage Checked(CompiledAfterHook hook, AlvoMailMessage message) =>
+        MailHeaders.RefusedSlot(message) is { } slot ? throw UnsafeHeader(hook, slot) : message;
 
     /// <summary>
     /// The message, entirely from compiled templates — a literal recipient is a template with no placeholder,
@@ -120,6 +134,26 @@ internal sealed class EventActionExecutor(
         + $"'{ActionType.NameOf(hook.Action.Action)}' action, which this build refuses when a "
         + "descriptor is applied and therefore never runs. Reaching this point means the policy catalog was "
         + "built by hand rather than from a descriptor.");
+
+    /// <summary>
+    /// A payload that rendered to something other than JSON. The body is not quoted: it carries row data,
+    /// and this exception is attached to the dispatcher's Warning line.
+    /// </summary>
+    private static InvalidOperationException NotJson(CompiledAfterHook hook) => new(
+        $"After-hook '{hook.Path}' rendered a webhook payload that is not a JSON document, so it was not sent. "
+        + "Its template is checked when the descriptor is applied and every value is encoded for its position, "
+        + "so reaching this point is a defect in the renderer rather than an authoring mistake. The body is not "
+        + "repeated here because it carries row data.");
+
+    /// <summary>
+    /// A rendered recipient or subject that is not a safe mail header. The value is not quoted, for the same
+    /// reason as <see cref="NotJson"/> and one more: a line break in it would forge a log line of its own.
+    /// </summary>
+    private static InvalidOperationException UnsafeHeader(CompiledAfterHook hook, string slot) => new(
+        $"After-hook '{hook.Path}' rendered an email '{slot}' that is not a safe mail header, so the message was "
+        + "not sent: a recipient must be exactly one mailbox address with no display name and no list, and "
+        + "neither the recipient nor the subject may carry a line break or another control character. The "
+        + "value came from the event's record and is not repeated here.");
 
     private static InvalidOperationException UnresolvedEndpoint(CompiledAfterHook hook) => new(
         $"After-hook '{hook.Path}' is a webhook action with no resolved endpoint. An endpoint is resolved "

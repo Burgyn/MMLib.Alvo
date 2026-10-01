@@ -148,6 +148,15 @@ internal static class CelTypeChecker
             [CelConstructKind.Call] = _mutateOnly,
         };
 
+    /// <summary>
+    /// The profiles <see cref="SqlPredicateRenderer"/> turns into SQL — a rule becomes a <c>WHERE</c> clause, a
+    /// computed field a generated column. Only these two are held to the operand-shape rules below; the
+    /// interpreter-only profiles evaluate any well-typed tree, so narrowing them would refuse a working hook for
+    /// a backend it never meets.
+    /// </summary>
+    private static readonly IReadOnlySet<CelProfile> _sqlRenderedProfiles =
+        new HashSet<CelProfile> { CelProfile.Rule, CelProfile.Computed };
+
     private static bool IsAllowed(CelProfile profile, CelConstructKind kind) =>
         _allowedProfiles.TryGetValue(kind, out var profiles) && profiles.Contains(profile);
 
@@ -585,7 +594,8 @@ internal static class CelTypeChecker
             }
 
             var error = ValidateComparisonTypes(op, leftType, rightType, position)
-                ?? ValidateEnumLiteral(op, binary.Left, binary.Right, position);
+                ?? ValidateEnumLiteral(op, binary.Left, binary.Right, position)
+                ?? ValidateSqlOperandShape(binary.Left, binary.Right, position);
             if (error is not null)
             {
                 Errors.Add(error);
@@ -650,6 +660,54 @@ internal static class CelTypeChecker
                     position)
                 : null;
         }
+
+        /// <summary>
+        /// Refuses, in a SQL-rendered profile, a comparison whose operand is itself an expression —
+        /// <c>(amount &gt; 5) == true</c>, <c>has(x) == flag</c>, <c>(price + 1) &gt; 100</c>. The renderer
+        /// composes a comparison over a field, a literal or a context value only, so such a tree type-checked,
+        /// was saved, and then threw on every read of the entity; refusing it here is what keeps the save the
+        /// point of failure (the fail-fast compile invariant).
+        /// </summary>
+        /// <remarks>
+        /// <b>Refused rather than rendered, deliberately.</b> Rendering a predicate as an operand
+        /// (<c>(&lt;pred&gt;) = TRUE</c>) needs a boolean <em>value</em> where the renderer produces a
+        /// <em>predicate</em>: a dialect with no boolean type (T-SQL, which §0 principle 3 requires) cannot
+        /// compare one, and it reopens the three-valued fold every comparison already collapses once. Nothing is
+        /// lost in expressiveness — every refused shape has a direct spelling the fix names — and widening this
+        /// later is additive, whereas an engine-divergent render would be a silent disagreement between backends.
+        /// </remarks>
+        private CelCompilationError? ValidateSqlOperandShape(CelNode left, CelNode right, int position)
+        {
+            if (!_sqlRenderedProfiles.Contains(profile) || (IsSqlOperand(left) && IsSqlOperand(right)))
+            {
+                return null;
+            }
+
+            var offender = IsSqlOperand(left) ? right : left;
+            return new CelCompilationError(
+                $"A comparison operand in the {profile} profile must be a field, a literal or a context value; "
+                + $"this one is {DescribeOperand(offender)}, which cannot be rendered to SQL as an operand.",
+                SqlOperandShapeFix(offender),
+                position);
+        }
+
+        private static bool IsSqlOperand(CelNode node) => node is CelLiteral or CelFieldRef or CelContextRef;
+
+        private static string DescribeOperand(CelNode node) => node switch
+        {
+            CelBinary { Operator: CelBinaryOperator.And or CelBinaryOperator.Or } => "a logical expression ('&&'/'||')",
+            CelUnary { Operator: CelUnaryOperator.Not } => "a negation ('!')",
+            CelHas => "has(...)",
+            CelConditional => "a ternary",
+            _ when IsArithmetic(node) => "arithmetic",
+            _ => "another comparison",
+        };
+
+        private static string SqlOperandShapeFix(CelNode offender) =>
+            IsArithmetic(offender) || offender is CelConditional
+                ? "Compare a field or a literal directly, moving the constant to the other side — e.g. 'price > 99' rather than '(price + 1) > 100'."
+                : "Use the condition itself rather than comparing it — e.g. 'total > 5' rather than '(total > 5) == true', "
+                    + "'!(total > 5)' rather than '(total > 5) == false' — and combine conditions with &&, || and !.";
 
         private static bool IsEqualityAgainstNullLiteral(CelBinaryOperator op, CelValueType left, CelValueType right) =>
             (op is CelBinaryOperator.Equal or CelBinaryOperator.NotEqual) && (left == CelValueType.Null || right == CelValueType.Null);
@@ -723,7 +781,8 @@ internal static class CelTypeChecker
                 "Split this into separate computed fields, or move the branching into a hook.",
                 conditionPosition);
             var conditionBad = RequireBool(conditionType, conditionError, "The ternary condition", conditionPosition);
-            var branchesBad = RequireMatchingBranches(trueType, falseType, trueError, falseError, falsePosition);
+            var branchesBad = RequireMatchingBranches(trueType, falseType, trueError, falseError, falsePosition)
+                || RequireValueBranches(whenTrue, whenFalse, falsePosition);
 
             return (rewritten, trueError ? falseType : trueType, profileBad || conditionBad || branchesBad, conditionPosition);
         }
@@ -777,6 +836,37 @@ internal static class CelTypeChecker
                 position));
             return true;
         }
+
+        /// <summary>
+        /// Refuses, in a SQL-rendered profile, a ternary branch that is a predicate — <c>c ? total &gt; 5 : false</c>.
+        /// A branch renders as a <c>CASE</c> result, which is a value slot: a comparison, <c>has</c>, <c>!</c>
+        /// or <c>&amp;&amp;</c>/<c>||</c> there has no SQL form (and none at all on an engine without a
+        /// boolean type), so it is refused for the same fail-fast reason as
+        /// <see cref="ValidateSqlOperandShape"/>. A boolean field, a boolean literal and a nested ternary stay
+        /// legal: each renders as a value.
+        /// </summary>
+        private bool RequireValueBranches(CelNode whenTrue, CelNode whenFalse, int position)
+        {
+            var predicate = new[] { whenTrue, whenFalse }.FirstOrDefault(IsPredicateBranch);
+            if (!_sqlRenderedProfiles.Contains(profile) || predicate is null)
+            {
+                return false;
+            }
+
+            Errors.Add(new CelCompilationError(
+                $"A ternary branch in the {profile} profile must be a value; {DescribeOperand(predicate)} is a condition, "
+                + "which cannot be rendered to SQL as a branch result.",
+                "Fold the branch into the condition with && and || instead — e.g. 'is_public && total > 5' rather "
+                + "than 'is_public ? total > 5 : false'.",
+                position));
+            return true;
+        }
+
+        private static bool IsPredicateBranch(CelNode branch) =>
+            branch is CelHas or CelUnary { Operator: CelUnaryOperator.Not } || (branch is CelBinary && !IsArithmetic(branch));
+
+        private static bool IsArithmetic(CelNode node) =>
+            node is CelUnary { Operator: CelUnaryOperator.Negate } or CelBinary { Operator: CelBinaryOperator.Add or CelBinaryOperator.Subtract or CelBinaryOperator.Multiply or CelBinaryOperator.Divide };
 
         private (CelNode, CelValueType, bool, int) CheckChanged(CelChanged changed)
         {

@@ -212,13 +212,18 @@ generated route a CSRF target and is refused at startup.
   Capability detection is for a *better* path, never for a correctness guarantee.
 - **A network-egress collaborator takes its `HttpClient` by name, never by
   construction.** `WebhookDelivery` resolves `IHttpClientFactory.CreateClient(
-  WebhookDelivery.HttpClientName)`, and the core registers only
-  `AddHttpClient(name)` with no configuration of its own. So a host owns the handler,
-  the timeout and any resilience policy for Alvo's outbound deliveries by configuring
-  that one name — `services.AddHttpClient("MMLib.Alvo.Events.Webhook").Add…` — without
-  the framework owning any of them, and without a second seam being invented for it.
-  Same reasoning as the options pattern: the extension point is a name a host already
-  knows how to configure.
+  WebhookDelivery.HttpClientName)`. So a host owns the handler, the timeout and any
+  resilience policy for Alvo's outbound deliveries by configuring that one name —
+  `services.AddHttpClient("MMLib.Alvo.Events.Webhook").Add…` — without a second seam
+  being invented for it. Same reasoning as the options pattern: the extension point is
+  a name a host already knows how to configure. **What the name carries unless a host
+  says otherwise is secure by default:** a primary handler that refuses non-public
+  destinations at connect time and follows no redirect (`WebhookEgressGuard`), and a
+  10-second per-attempt timeout. Both are inserted *first* in the name's configuration,
+  so a host's own handler or timeout wins whether it is registered before or after
+  `AddAlvo` — and a host that replaces the primary handler (to route through an
+  egress proxy, say) owns the egress policy from then on. Internal destinations are
+  opened by network, not by switch: `Alvo:Events:WebhookAllowedNetworks`.
 
 ## Pitfalls (banned)
 

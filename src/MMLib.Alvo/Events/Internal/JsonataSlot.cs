@@ -26,18 +26,16 @@ namespace MMLib.Alvo.Events.Internal;
 /// opposite directions, which is why the rule is a conjunction rather than one clause with decoration.
 /// </para>
 /// <para>
-/// <b>The no-bare-brace clause is load-bearing for <em>injection</em>, not only for classification — whoever
-/// implements #149 must not lose it.</b> A <c>payload</c> template renders row text straight into
-/// author-written text and <see cref="AlvoTemplate"/> escapes nothing, so this clause is the only reason a row
-/// value cannot forge a sibling member: a payload containing <c>{</c> outside a placeholder is refused, so a
-/// payload template can never be a JSON <em>object</em> at all. Two things it does not cover, named here rather
-/// than assumed away: <c>[</c> and <c>]</c> are not braces, so <c>["{{new.a}}", "{{new.b}}"]</c> is a legal
-/// template and a value carrying <c>", "</c> forges array <em>elements</em>; and a bare or quoted string
-/// payload becomes <b>invalid</b> JSON — not restructured JSON — when a value carries a quote, a backslash or a
-/// newline. Both are malformed-body defects rather than disclosure ones (the receiver is the declared endpoint
-/// either way), which is why they are recorded and left to the PR that gives the slot a real evaluator. That
-/// PR must produce JSON <em>by construction</em> — serialize a value — and never by interpolating rendered text
-/// into author-written text; if it renders text at all, this clause has to survive with it.
+/// <b>The no-bare-brace clause is classification, not the injection defence.</b> It used to be both: a
+/// payload rendered row text straight into author-written text, so refusing <c>{</c> outside a placeholder
+/// was the only reason a row value could not forge a sibling member — and it left <c>[</c> open, so
+/// <c>["{{new.a}}", "{{new.b}}"]</c> let a value carrying <c>", "</c> forge an array element. A payload now
+/// renders through <see cref="JsonPayload"/>, which encodes each value for its position and refuses at apply a
+/// payload that is not JSON around its placeholders, so the defence holds for an object as much as for an
+/// array. The clause stays because it is still what tells a template from raw JSONata; a PR that relaxes it
+/// to admit object templates needs no second injection argument, only a classification one. A #149 evaluator
+/// must keep the same property: JSON <em>by construction</em> — serialize a value — never by interpolating
+/// rendered text into author-written text.
 /// </para>
 /// <para>
 /// <b>The asymmetry with the plain-string sugar slots is deliberate</b> and comes from the schema's own
