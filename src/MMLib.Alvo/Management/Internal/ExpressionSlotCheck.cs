@@ -44,7 +44,7 @@ internal static class ExpressionSlotCheck
         }
         catch (Exception ex) when (ex is JsonException or ArgumentException)
         {
-            throw NotADescriptor();
+            throw ex.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) ? DuplicateProperty(ex) : NotADescriptor();
         }
     }
 
@@ -94,6 +94,11 @@ internal static class ExpressionSlotCheck
 
     private static ManagementRequestException NotADescriptor() => new(
         "The 'descriptor' is not a JSON object. Send the working-copy descriptor exactly as the dashboard holds it.");
+
+    /// <summary>The parser's own text names the property and its position; the client needs both to find it.</summary>
+    private static ManagementRequestException DuplicateProperty(Exception parserError) => new(
+        $"The 'descriptor' has a duplicate property ({parserError.Message}). JSON objects must not repeat a key; "
+        + "send the working-copy descriptor exactly as the dashboard holds it.");
 
     private static ManagementRequestException Absent(string pointer) => new(
         $"'{pointer}' does not exist in the descriptor sent. The slot must already be in the descriptor — add the "

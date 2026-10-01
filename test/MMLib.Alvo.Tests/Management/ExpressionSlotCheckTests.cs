@@ -77,6 +77,27 @@ public sealed class ExpressionSlotCheckTests
         Should.Throw<ManagementRequestException>(() => ExpressionSlotCheck.Check(Validator(), descriptorJson, ListRule, "true"));
 
     [Fact]
+    public void A_duplicate_key_on_the_path_to_a_valid_slot_is_refused_as_a_request_error_naming_the_duplicate()
+    {
+        var json = Descriptor().ToJsonString().Replace("\"list\":\"true\"", "\"list\":\"true\",\"list\":\"false\"", StringComparison.Ordinal);
+        json.ShouldContain("\"list\":\"false\"", Case.Sensitive, "the fixture really carries a duplicate key");
+
+        var refusal = Should.Throw<ManagementRequestException>(() => ExpressionSlotCheck.Check(Validator(), json, ListRule, "true"));
+
+        refusal.Message.ShouldContain("duplicate property");
+    }
+
+    [Theory]
+    [InlineData("[1]")]
+    [InlineData("{not json")]
+    public void A_descriptor_that_is_not_an_object_is_refused_with_the_not_an_object_message(string descriptorJson)
+    {
+        var refusal = Should.Throw<ManagementRequestException>(() => ExpressionSlotCheck.Check(Validator(), descriptorJson, ListRule, "true"));
+
+        refusal.Message.ShouldContain("not a JSON object");
+    }
+
+    [Fact]
     public void A_field_named_mutate_still_gets_a_string_splice()
     {
         var descriptor = Descriptor();
