@@ -54,6 +54,7 @@ public class ManagementOperationsTests
             ManagementOperation.GetCapabilities,
             ManagementOperation.GetInfo,
             ManagementOperation.SimulatePolicy,
+            ManagementOperation.CheckExpression,
         ]);
 
     /// <summary>
@@ -85,12 +86,12 @@ public class ManagementOperationsTests
         ]);
 
     /// <summary>
-    /// The surface is fourteen operations. A count rather than a comment, so adding a fifteenth fails
+    /// The surface is fifteen operations. A count rather than a comment, so adding a sixteenth fails
     /// here until somebody decides its level — which is the decision this table exists to force.
     /// </summary>
     [Fact]
-    public void The_management_surface_is_fourteen_operations()
-        => Enum.GetValues<ManagementOperation>().Length.ShouldBe(14);
+    public void The_management_surface_is_fifteen_operations()
+        => Enum.GetValues<ManagementOperation>().Length.ShouldBe(15);
 
     [Fact]
     public void The_levels_are_ordered_so_the_highest_match_is_the_greatest_value()

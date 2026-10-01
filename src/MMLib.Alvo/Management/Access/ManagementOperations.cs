@@ -23,6 +23,7 @@ internal static class ManagementOperations
         [ManagementOperation.GetCapabilities] = ManagementLevel.Viewer,
         [ManagementOperation.GetInfo] = ManagementLevel.Viewer,
         [ManagementOperation.SimulatePolicy] = ManagementLevel.Viewer,
+        [ManagementOperation.CheckExpression] = ManagementLevel.Viewer,
         [ManagementOperation.ApplyDescriptor] = ManagementLevel.Developer,
         [ManagementOperation.RollbackRevision] = ManagementLevel.Developer,
         [ManagementOperation.SetAiConnection] = ManagementLevel.Admin,

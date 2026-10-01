@@ -4,6 +4,7 @@ using MMLib.Alvo.Ai;
 using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
@@ -37,6 +38,10 @@ namespace MMLib.Alvo.Management.Internal;
 /// <b>The engine the request path calls, resolved from DI rather than re-implemented.</b> It is what makes
 /// the simulator's answer identical to production's by construction; a second evaluator would agree until
 /// the day one of them was edited.
+/// </param>
+/// <param name="validator">
+/// The validator apply runs, resolved from DI so a check's answer is the apply's own verdict on the same
+/// descriptor rather than a second opinion that could drift from it.
 /// </param>
 /// <param name="roles">The declared role catalog a simulated caller's role names are resolved through.</param>
 /// <param name="data">The registered data port, or <see langword="null"/> when the host registered none.</param>
@@ -85,6 +90,7 @@ internal sealed partial class AlvoManagementService(
     AlvoBootState boot,
     ISchemaRegistry schemaRegistry,
     IPolicyEngine policies,
+    IDescriptorValidator validator,
     IRoleCatalogProvider roles,
     IAlvoData? data,
     IDescriptorVersionStore? versions,
@@ -204,6 +210,38 @@ internal sealed partial class AlvoManagementService(
             simulation.Entity, Operation(simulation.Operation), Caller(simulation.Caller));
 
         return Task.FromResult(Verdict(decision));
+    }
+
+    /// <inheritdoc/>
+    public Task<ManagementExpressionVerdict> CheckExpressionAsync(
+        string project, ManagementExpressionCheck request, CancellationToken ct = default)
+    {
+        EnsureMayPerform(ManagementOperation.CheckExpression);
+        EnsureServed(project);
+        EnsureCheckable(request);
+
+        return Task.FromResult(new ManagementExpressionVerdict(
+            ExpressionSlotCheck.Check(validator, request.Descriptor, request.Path, request.Source)));
+    }
+
+    /// <summary>The most descriptor text a check will parse: a viewer can call this on every keystroke.</summary>
+    private const int MaxCheckedDescriptorChars = 1_000_000;
+
+    private static void EnsureCheckable(ManagementExpressionCheck? request)
+    {
+        if (request is null || request.Descriptor is null || request.Path is null || request.Source is null)
+        {
+            throw new ManagementRequestException(
+                "A check needs a 'descriptor', a 'path' and a 'source'. Send all three: the answer is about one "
+                + "expression in one descriptor, and a missing part would be answered as a pass.");
+        }
+
+        if (request.Descriptor.Length > MaxCheckedDescriptorChars)
+        {
+            throw new ManagementRequestException(
+                $"The 'descriptor' is over {MaxCheckedDescriptorChars:N0} characters. Send the project's own descriptor; "
+                + "a check is not an apply and takes no more than one.");
+        }
     }
 
     /// <inheritdoc/>

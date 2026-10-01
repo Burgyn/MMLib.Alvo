@@ -318,6 +318,11 @@ internal sealed class RefusingManagement : IAlvoManagement
         throw new ManagementForbiddenException();
 
     /// <inheritdoc/>
+    public Task<ManagementExpressionVerdict> CheckExpressionAsync(
+        string project, ManagementExpressionCheck request, CancellationToken ct = default) =>
+        throw new ManagementForbiddenException();
+
+    /// <inheritdoc/>
     public Task<ManagementApplyResult> ApplyDescriptorAsync(
         string project, ManagementApplyRequest request, CancellationToken ct = default) =>
         throw new ManagementForbiddenException();
