@@ -87,6 +87,19 @@ public class ManagementGatewayCacheTests
     }
 
     [Fact]
+    public async Task An_expression_check_that_cannot_be_asked_answers_null_and_throws_nothing()
+    {
+        using var gateway = Gateway(new TestNavigation(), out var management);
+        management.CheckExpressionAsync(
+                Arg.Any<string>(), Arg.Any<ManagementExpressionCheck>(), Arg.Any<CancellationToken>())
+            .Returns<Task<ManagementExpressionVerdict>>(_ => throw new ManagementRequestException("refused"));
+
+        var verdict = await gateway.CheckExpressionAsync("{}", "/p", "x", Ct);
+
+        verdict.ShouldBeNull();
+    }
+
+    [Fact]
     public async Task A_disposed_gateway_no_longer_follows_the_circuit()
     {
         var navigation = new TestNavigation();
