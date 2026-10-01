@@ -12,17 +12,20 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema/customers");
         await session.OpenTabAsync("Rules");
+        var pending = await PendingTextAsync(session);
 
         await session.Page.FillAsync("#rule-list", "'amdin' in @user.roles");
         var finding = session.Page.GetByTestId("check-rule-list");
         await finding.WaitForAsync(new() { Timeout = 3_000 });
         (await finding.InnerTextAsync()).ShouldContain("amdin");
         await ShouldKeepFocusAsync(session, "rule-list");
+        (await PendingTextAsync(session)).ShouldBe(pending, "a check never dirties the working copy");
 
         await session.Page.FillAsync("#rule-list", "'admin' in @user.roles");
         await finding.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 3_000 });
         await ShouldKeepFocusAsync(session, "rule-list");
         await session.Page.GetByTestId("rule-dirty-list").WaitForAsync();
+        (await PendingTextAsync(session)).ShouldBe(pending, "nor does clearing one");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -58,6 +61,13 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
 
         await session.SnackbarAsync("Rule saved to the working copy");
         await session.Page.GetByTestId("pending-bar").WaitForAsync();
+    }
+
+    /// <summary>What the pending bar says; a check stages nothing, so it must not move.</summary>
+    private static async Task<string> PendingTextAsync(AdminSession session)
+    {
+        var bar = session.Page.GetByTestId("pending-bar");
+        return await bar.CountAsync() == 0 ? string.Empty : await bar.InnerTextAsync();
     }
 
     private static async Task ShouldKeepFocusAsync(AdminSession session, string id)
