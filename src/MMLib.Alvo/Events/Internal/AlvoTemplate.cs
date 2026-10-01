@@ -28,6 +28,13 @@ namespace MMLib.Alvo.Events.Internal;
 /// re-parses its own output, or a row whose own text contained <c>{{…}}</c> would inject a placeholder that
 /// no author wrote and no apply-time validation saw.
 /// </para>
+/// <para>
+/// <b><see cref="Render"/> is plain text and encodes nothing</b>, so it is right only for a sink that is plain
+/// text. A <c>webhook.payload</c> is posted as <c>application/json</c> and renders through
+/// <see cref="JsonPayload"/> instead, which encodes each value for its position in the JSON; an email's
+/// <c>to</c> and <c>subject</c> are header values and are checked by <see cref="MailHeaders"/> before the
+/// message reaches the port.
+/// </para>
 /// </remarks>
 /// <param name="Segments">The template's segments, in source order.</param>
 internal sealed record AlvoTemplate(IReadOnlyList<AlvoTemplateSegment> Segments)
@@ -159,9 +166,9 @@ internal sealed record AlvoTemplate(IReadOnlyList<AlvoTemplateSegment> Segments)
     /// <summary>
     /// One value's text form. A timestamp is the framework's own round-trip form and a boolean is the JSON
     /// spelling, so a template can never introduce a second spelling of a value the rest of the framework
-    /// already writes one way.
+    /// already writes one way. <see cref="JsonPayload"/> reads it too, for a placeholder inside a JSON string.
     /// </summary>
-    private static string Format(object? value) => value switch
+    internal static string Format(object? value) => value switch
     {
         null => string.Empty,
         bool flag => flag ? "true" : "false",
@@ -353,7 +360,7 @@ internal static class TemplatePlaceholder
             + $"that acted, so '{UserRoot}{RootSeparator}{IdMember}' is the one '{UserRoot}' member a "
             + "template can read. For a recipient, use a field on the record such as "
             + $"{Quoted($"{NewRoot}{RootSeparator}owner_email")} — which makes the recipient "
-            + "caller-controlled, so a real mail provider has to validate it (see AlvoMailMessage.To); an "
+            + "caller-controlled; Alvo refuses a rendered value that is not exactly one mailbox (see MailHeaders); an "
             + "identity claim Alvo does not yet carry is tracked in issue #37.",
     };
 

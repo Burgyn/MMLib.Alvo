@@ -593,11 +593,13 @@ nothing else in the action set. It is *not* true of `email.to`: that slot takes 
 `AlvoTemplate`'s own remarks suggest `{{new.owner_email}}`, so **anyone who can write a record chooses the
 recipient of framework-sent mail carrying that record's data**. It is inert today only because
 `ConsoleEmailSender` sends nothing, which is exactly why it is written down here rather than met by the SMTP
-PR: the person adding a real sender inherits a caller-controlled recipient and needs to know it. Two
-adjacent consequences of the same fact, recorded and not fixed: `To: ""` is still reachable through a
-template that renders empty or a NULL column, and `AlvoMailMessage.To` is unvalidated rendered row text
-reaching a host's SMTP implementation, which is CRLF header injection in any sender that does not validate
-it — named in `IEmailSender`'s own remarks while the port is new.
+PR: the person adding a real sender inherits a caller-controlled recipient and needs to know it. The two
+adjacent consequences are now closed on Alvo's side of the port (`MailHeaders`): a rendered `to` that is not
+exactly one mailbox — a list, a display name, surrounding whitespace, the empty string — and a `to` or
+`subject` carrying a line break or another control character (CWE-93 header injection) are refused before
+the message reaches `IEmailSender`, by a throw that takes the ordinary release-and-retry path. A literal
+recipient and the author's own header text are checked at apply. What is *not* closed is the premise:
+a well-formed address can still be anyone's.
 
 It is pinned by a **named** fact rather than a paragraph
 (`A_webhook_receives_the_unmasked_record_and_that_is_documented`, plus
@@ -682,23 +684,18 @@ Both plausible naive rules fail open, in opposite directions, and the shipped ex
   **at-least-one-placeholder** clause catches that. There is no reason to declare a *transform* that is a
   constant.
 
-**The no-bare-brace clause is load-bearing for *injection*, not only for classification — do not lose it in
-#149.** A `payload` template renders row text straight into author-written text and nothing escapes it, so
-the only thing standing between a row value and a restructured JSON body is that clause: it refuses any
-payload containing `{` outside a placeholder, so a payload template **cannot be a JSON object** and a row
-value cannot forge a sibling member. What remains reachable, and is named rather than fixed:
-
-- `[` and `]` are not braces, so `["{{new.a}}", "{{new.b}}"]` *is* a legal template, and a value containing
-  `", "` forges **array elements**.
-- A bare or quoted string payload posted under `application/json` becomes **invalid** JSON, not restructured
-  JSON, when a value carries a `"`, a `\` or a newline. `WebhookDelivery`'s own remarks already name the
-  bare-string case; the quoted case is the same defect one character further on.
-
-Neither is a `hidden`-field disclosure — the receiver is the declared endpoint either way — so both are
-malformed-body bugs rather than authorization ones, which is why they are recorded here and left to the PR
-that gives the payload slot a real evaluator. **A #149 implementation that evaluates JSONata must produce
-JSON by construction (serialize a value), never by interpolating rendered text into author-written text.**
-If it renders text at all, the no-bare-brace clause has to survive with it.
+**A payload renders JSON by construction, so the no-bare-brace clause is classification only.** It used to
+carry injection too: a `payload` template rendered row text straight into author-written text, the clause
+was the only thing keeping a value from forging an object member, and it left `[` open — so
+`["{{new.a}}", "{{new.b}}"]` let a value carrying `", "` forge an **array element**, and a quote, backslash
+or newline made the body invalid JSON. A payload now renders through `JsonPayload` (OWASP: encode for the
+sink): a placeholder inside a JSON string is that string's content escaped by `JsonEncodedText`, one outside
+every string is exactly one JSON value written by the envelope's own value writer — a text value as a quoted
+string, so `1, 2` stays one string. The author's text alone therefore fixes the document's shape, and apply
+refuses a payload that is not JSON around its placeholders (and a placeholder straight after a backslash
+inside a string). Delivery parses the body once more and refuses to send one that does not parse. **A #149
+implementation that evaluates JSONata must keep this property: serialize a value, never interpolate rendered
+text into author-written text.**
 
 **The asymmetry with the plain-string sugar slots is deliberate** and comes from the schema's own typing.
 In `email.to`, `entity.update.recordId`, `templates.subject`/`body` and string values inside
@@ -1054,7 +1051,7 @@ Each line with the issue or the PR that owns it.
 | **Per-endpoint field projection** on a delivery | **#152** |
 | **`dataref`** for an envelope over 64 KB | **#151** |
 | **Retention / pruning of `alvo_outbox`** — rows are never deleted, and the payload holds every entity's and tenant's unmasked images forever | **#154** |
-| **Validation of a rendered `email.to`** — the recipient is caller-controlled row text, unchecked; inert only because the shipped sender delivers nowhere | **#155** |
+| ~~**Validation of a rendered `email.to`**~~ — closed: `MailHeaders` refuses anything but one mailbox, and a line break in `to`/`subject`. Still open: *whom* a caller-chosen recipient may be | **#155** |
 | **`email.data`** — refused at apply, because nothing rendered it | the PR that gives `email` a `data.*` placeholder root |
 | **Bulk coalescing** (`entity.orders.created.batch`) | unscheduled; the base design places it with automation, and `baas-analyza.md:682` is its criterion. Every write emits its own event today |
 
@@ -1158,11 +1155,10 @@ these live.
     the field, one who may not, over one row) rather than a second engine.
   - **Envelope size × batch is unbounded in process memory.** **#151** covers only the 64 KB *wire* rule and
     `dataref`; a batch of 100 large envelopes is a separate, in-process question.
-  - **`To: ""` is still reachable** — an empty template render, or a NULL column — and reads as a broken mail
-    server. Named in `AlvoMailMessage`'s remarks.
-  - **`AlvoMailMessage.To` is unvalidated rendered row text** reaching a host's SMTP implementation: CRLF
-    header injection in any sender that concatenates it into a header. One paragraph on the port's own
-    remarks, written while the port is new; filed with the `To: ""` half as **#155**.
+  - ~~**`To: ""` is still reachable**~~ and ~~**`AlvoMailMessage.To` is unvalidated rendered row text**~~
+    (CRLF header injection) — **closed**: `MailHeaders` refuses an empty or non-single-mailbox recipient and a
+    line break in `to` or `subject` before the port, and the console sender escapes what it logs and writes
+    the body only at Debug. Filed as **#155**.
   - ~~**Framework table names are excluded from introspection but not *reserved* against an entity
     declaration.**~~ **Closed by #156.** The names now come from `AlvoFrameworkTables.NamesFor` in
     `MMLib.Alvo.Abstractions` — one authority the provider names its tables from *and* the core reserves

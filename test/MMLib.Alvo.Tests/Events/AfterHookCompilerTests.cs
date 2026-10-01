@@ -199,6 +199,41 @@ public class AfterHookCompilerTests
         error.Message.ShouldContain("well-formed");
     }
 
+    /// <summary>
+    /// A payload is posted as <c>application/json</c>, and what <see cref="JsonPayload"/> renders has a shape
+    /// only the author's text decides — so a payload that is not JSON around its placeholders is refused here,
+    /// where it is an authoring error, and not at delivery, where it would be a poison event.
+    /// </summary>
+    [Fact]
+    public void A_payload_template_that_is_not_json_around_its_placeholders_is_refused_at_apply()
+    {
+        var error = CompileErrors(AfterUpdate(Webhook(payload: "Deal won: {{new.title}}"))).ShouldHaveSingleItem();
+
+        error.Path.ShouldBe("/entities/deals/hooks/afterUpdate/0/action/payload");
+        error.Message.ShouldContain("not a JSON document");
+        error.FixSuggestion.ShouldNotBeNull().ShouldContain("{{new.title}}");
+    }
+
+    [Theory]
+    [InlineData("{{new.title}}")]
+    [InlineData("[\"{{new.title}}\", \"{{new.stage}}\"]")]
+    public void A_payload_template_that_is_json_around_its_placeholders_applies(string payload)
+        => Compile(AfterUpdate(Webhook(payload: payload))).AfterUpdate.ShouldHaveSingleItem()
+            .Action.Templates.ShouldContainKey("payload");
+
+    [Theory]
+    [InlineData("ops@firma.sk, boss@firma.sk")]
+    [InlineData("Ops <ops@firma.sk>")]
+    [InlineData("ops@firma.sk\r\nBcc: x@y.z")]
+    public void A_literal_recipient_that_is_not_exactly_one_mailbox_is_refused_at_apply(string to)
+        => CompileErrors(AfterUpdate(Email(to: to)))
+            .ShouldHaveSingleItem().Path.ShouldBe("/entities/deals/hooks/afterUpdate/0/action/to");
+
+    [Fact]
+    public void A_line_break_in_a_templates_own_subject_text_is_refused_on_the_templates_pointer()
+        => CompileErrors(AfterUpdate(Email()), subject: "Deal won\r\nBcc: x@y.z {{new.title}}")
+            .ShouldHaveSingleItem().Path.ShouldBe("/templates/deal-won/subject");
+
     [Fact]
     public void An_email_action_naming_an_undeclared_template_is_refused_at_apply()
     {
@@ -375,10 +410,10 @@ public class AfterHookCompilerTests
     }
 
     private static IReadOnlyList<DescriptorValidationError> CompileErrors(
-        EntityHooks hooks, string? body = null, string endpointUrl = DeclaredEndpointUrl)
+        EntityHooks hooks, string? body = null, string endpointUrl = DeclaredEndpointUrl, string? subject = null)
     {
         PolicyCatalog.TryBuild(
-            Descriptor(hooks, body, endpointUrl), Schema, CelFixtures.Compiler, out _, out var errors)
+            Descriptor(hooks, body, endpointUrl, subject), Schema, CelFixtures.Compiler, out _, out var errors)
             .ShouldBeFalse("this fixture is written to be refused");
 
         return errors;
@@ -425,7 +460,7 @@ public class AfterHookCompilerTests
         new() { Template = template, To = to, Data = data };
 
     private static AlvoDescriptor Descriptor(
-        EntityHooks? hooks, string? body = null, string endpointUrl = DeclaredEndpointUrl) => new()
+        EntityHooks? hooks, string? body = null, string endpointUrl = DeclaredEndpointUrl, string? subject = null) => new()
         {
             ApiVersion = "alvo.dev/v1",
             Name = "test",
@@ -439,7 +474,7 @@ public class AfterHookCompilerTests
             },
             Templates = new Dictionary<string, MessageTemplate>(StringComparer.Ordinal)
             {
-                ["deal-won"] = new() { Subject = "Deal won: {{new.title}}", Body = body ?? "{{new.title}} closed." },
+                ["deal-won"] = new() { Subject = subject ?? "Deal won: {{new.title}}", Body = body ?? "{{new.title}} closed." },
             },
             Webhooks = new Webhooks
             {

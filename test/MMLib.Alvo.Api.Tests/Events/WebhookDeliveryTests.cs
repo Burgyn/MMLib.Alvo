@@ -66,15 +66,89 @@ public class WebhookDeliveryTests
         failure.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
     }
 
+    /// <summary>
+    /// <b>A redirect is a failed delivery, not a second destination.</b> Following it would hand the request to
+    /// wherever a public endpoint's <c>Location</c> points — an internal host, or the same host over cleartext —
+    /// without that destination ever passing the check the first one did.
+    /// </summary>
+    [Fact]
+    public async Task A_redirect_is_not_followed_and_fails_the_delivery()
+    {
+        await using var elsewhere = await LoopbackReceiver.StartAsync(HttpStatusCode.NoContent);
+        await using var redirecting = await LoopbackReceiver.StartAsync(
+            HttpStatusCode.Found, location: elsewhere.Endpoint.Url);
+
+        var failure = await Should.ThrowAsync<HttpRequestException>(
+            () => Delivery().PostAsync(redirecting.Endpoint, AlvoEventJson.Write(SampleEvent()), Cancellation));
+
+        failure.StatusCode.ShouldBe(HttpStatusCode.Found);
+        redirecting.Method.ShouldBe(HttpMethods.Post);
+        elsewhere.Method.ShouldBeNull("the redirect target must never have been contacted");
+    }
+
+    /// <summary>
+    /// <b>A name that resolves to loopback is refused before a socket opens</b>, even though a real receiver is
+    /// listening there — the rebinding case, which the apply-time URL check cannot see.
+    /// </summary>
+    [Fact]
+    public async Task A_name_resolving_to_loopback_is_refused_at_connect_time()
+    {
+        await using var receiver = await LoopbackReceiver.StartAsync(HttpStatusCode.NoContent);
+
+        var failure = await Should.ThrowAsync<HttpRequestException>(
+            () => Delivery(RebindingToLoopback).PostAsync(
+                Rebound(receiver.Endpoint), AlvoEventJson.Write(SampleEvent()), Cancellation));
+
+        failure.ToString().ShouldContain(AlvoEventOptionsConfiguration.WebhookAllowedNetworksKey);
+        failure.ToString().ShouldNotContain("/hook", Case.Sensitive, "the refusal must not name the URL's path");
+        receiver.Method.ShouldBeNull("the refused destination must never have been contacted");
+    }
+
+    /// <summary>
+    /// The host's opt-in is what lets a name reach a non-public network — here loopback, standing in for the
+    /// private network an embedded host's internal service lives on.
+    /// </summary>
+    [Fact]
+    public async Task An_allowed_network_lets_a_name_reach_a_non_public_receiver()
+    {
+        await using var receiver = await LoopbackReceiver.StartAsync(HttpStatusCode.NoContent);
+
+        await Delivery(RebindingToLoopback, allowedNetwork: "127.0.0.0/8")
+            .PostAsync(Rebound(receiver.Endpoint), AlvoEventJson.Write(SampleEvent()), Cancellation);
+
+        receiver.Method.ShouldBe(HttpMethods.Post);
+    }
+
     private static CancellationToken Cancellation => TestContext.Current.CancellationToken;
 
-    private static WebhookDelivery Delivery()
+    /// <summary>
+    /// The delivery exactly as <c>AddAlvo</c> wires it — the guarded handler and the timeout — so every fact
+    /// here, the loopback carve-out included, is about the production client rather than a bare one.
+    /// </summary>
+    private static WebhookDelivery Delivery(WebhookHostResolver? resolver = null, string? allowedNetwork = null)
     {
         var services = new ServiceCollection();
-        services.AddHttpClient(WebhookDelivery.HttpClientName);
+        services.AddAlvoEvents();
+        if (resolver is not null)
+        {
+            services.AddSingleton(resolver);
+        }
 
-        return new WebhookDelivery(services.BuildServiceProvider().GetRequiredService<IHttpClientFactory>());
+        if (allowedNetwork is not null)
+        {
+            services.Configure<AlvoEventOptions>(options => options.WebhookAllowedNetworks.Add(allowedNetwork));
+        }
+
+        return services.BuildServiceProvider().GetRequiredService<WebhookDelivery>();
     }
+
+    private const string ReboundHost = "hooks.rebind.example";
+
+    private static Task<IPAddress[]> RebindingToLoopback(string host, CancellationToken cancellationToken) =>
+        Task.FromResult(host == ReboundHost ? [IPAddress.Loopback] : Array.Empty<IPAddress>());
+
+    private static WebhookTarget Rebound(WebhookTarget target) =>
+        target with { Url = new UriBuilder(target.Url) { Host = ReboundHost }.Uri };
 
     private static AlvoEvent SampleEvent() => new()
     {
@@ -125,7 +199,7 @@ public class WebhookDeliveryTests
         /// <summary>The body of the request that arrived.</summary>
         internal string? Body { get; private set; }
 
-        internal static async Task<LoopbackReceiver> StartAsync(HttpStatusCode answer)
+        internal static async Task<LoopbackReceiver> StartAsync(HttpStatusCode answer, Uri? location = null)
         {
             var builder = WebApplication.CreateSlimBuilder();
             builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -139,6 +213,10 @@ public class WebhookDeliveryTests
                 receiver.ContentType = context.Request.ContentType;
                 receiver.Body = await new StreamReader(context.Request.Body).ReadToEndAsync(context.RequestAborted);
                 context.Response.StatusCode = (int)answer;
+                if (location is not null)
+                {
+                    context.Response.Headers.Location = location.ToString();
+                }
             });
 
             await app.StartAsync();

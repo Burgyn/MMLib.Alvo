@@ -145,31 +145,53 @@ public static class AlvoEventJson
 
     private static void WriteValue(Utf8JsonWriter writer, string field, object? value)
     {
+        writer.WritePropertyName(field);
+        if (!TryWriteValue(writer, value))
+        {
+            throw UnwritableValue(field, value!);
+        }
+    }
+
+    /// <summary>
+    /// Writes one field value as a single JSON value, in the one spelling the envelope uses for it.
+    /// </summary>
+    /// <remarks>
+    /// <see langword="internal"/> because a <c>webhook.payload</c> template renders a bare placeholder through
+    /// it: a second value serializer for the same row is how a delivered body and the stored envelope come to
+    /// spell one value two ways.
+    /// </remarks>
+    /// <param name="writer">The writer, positioned where a value may be written.</param>
+    /// <param name="value">The value, as a row carries it.</param>
+    /// <returns><see langword="false"/>, having written nothing, when no field type maps to the value's CLR type.</returns>
+    internal static bool TryWriteValue(Utf8JsonWriter writer, object? value)
+    {
         switch (value)
         {
-            case null: writer.WriteNull(field); break;
-            case string text: writer.WriteString(field, text); break;
-            case bool flag: writer.WriteBoolean(field, flag); break;
-            case Guid id: writer.WriteString(field, id); break;
+            case null: writer.WriteNullValue(); break;
+            case string text: writer.WriteStringValue(text); break;
+            case bool flag: writer.WriteBooleanValue(flag); break;
+            case Guid id: writer.WriteStringValue(id); break;
             case DateTimeOffset moment:
-                writer.WriteString(field, moment.ToString(RoundTripFormat, CultureInfo.InvariantCulture));
+                writer.WriteStringValue(moment.ToString(RoundTripFormat, CultureInfo.InvariantCulture));
                 break;
             case DateTime moment:
-                writer.WriteString(field, moment.ToString(RoundTripFormat, CultureInfo.InvariantCulture));
+                writer.WriteStringValue(moment.ToString(RoundTripFormat, CultureInfo.InvariantCulture));
                 break;
             case DateOnly day:
-                writer.WriteString(field, day.ToString(DateFormat, CultureInfo.InvariantCulture));
+                writer.WriteStringValue(day.ToString(DateFormat, CultureInfo.InvariantCulture));
                 break;
-            case decimal amount: writer.WriteNumber(field, amount); break;
-            case ulong count: writer.WriteNumber(field, count); break;
+            case decimal amount: writer.WriteNumberValue(amount); break;
+            case ulong count: writer.WriteNumberValue(count); break;
             case byte or sbyte or short or ushort or int or uint or long:
-                writer.WriteNumber(field, Convert.ToInt64(value, CultureInfo.InvariantCulture));
+                writer.WriteNumberValue(Convert.ToInt64(value, CultureInfo.InvariantCulture));
                 break;
             case float or double:
-                writer.WriteNumber(field, Convert.ToDouble(value, CultureInfo.InvariantCulture));
+                writer.WriteNumberValue(Convert.ToDouble(value, CultureInfo.InvariantCulture));
                 break;
-            default: throw UnwritableValue(field, value);
+            default: return false;
         }
+
+        return true;
     }
 
     private static NotSupportedException UnwritableValue(string field, object value) =>

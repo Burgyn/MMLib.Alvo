@@ -32,19 +32,26 @@ public sealed class SqliteAlvoDataCreateTests : IAsyncDisposable
     }
 
     /// <summary>
-    /// A create emits exactly two statements: the <c>INSERT</c>, and the re-read that produces what the port
-    /// returns. The re-read goes through the same composed root every other read here does — a third statement,
-    /// or a read composed some other way, would mean a row reached a caller through a path this data path does
-    /// not control.
+    /// A create emits exactly three statements: the <c>INSERT</c>, the re-read of the stored row its event and
+    /// rollups are built from, and the <c>get</c>-policed read that produces what the port returns. Both reads
+    /// go through the same composed root every other read here does — a fourth statement, or a read composed
+    /// some other way, would mean a row reached a caller through a path this data path does not control.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <c>create</c> carries no <c>USING</c> predicate — there is no stored row to filter when the decision is
-    /// made — so what the re-read is constrained by is the synthesized tenant scope and the row id, which is
-    /// what this asserts. Both are load-bearing: the id is the row this insert just wrote, and the tenant scope
-    /// is the same term the candidate's post-image was already checked against.
+    /// made — so the first re-read is constrained by the synthesized tenant scope and the row id alone. Both
+    /// are load-bearing: the id is the row this insert just wrote, and the tenant scope is the same term the
+    /// candidate's post-image was already checked against.
+    /// </para>
+    /// <para>
+    /// <b>That is exactly why it cannot also be the answer.</b> Returned to the caller, a read with no
+    /// <c>USING</c> hands back any row its author could place, including one their own <c>get</c> rule
+    /// excludes. So the last statement is the echo, and it carries the <c>get</c> rule's owner predicate.
+    /// </para>
     /// </remarks>
     [Fact]
-    public async Task An_allowed_create_is_one_insert_and_one_re_read_through_the_composed_root()
+    public async Task An_allowed_create_is_one_insert_and_two_re_reads_through_the_composed_root()
     {
         var world = await AlvoDataWorlds.NotesAsync(_fixture);
 
@@ -59,12 +66,45 @@ public sealed class SqliteAlvoDataCreateTests : IAsyncDisposable
             },
             world.Alice);
 
-        world.Statements.Count.ShouldBe(2);
+        world.Statements.Count.ShouldBe(3);
         world.Statements[0].ShouldStartWith("INSERT INTO \"notes\"");
+        world.Statements[1].ShouldStartWith("SELECT");
+        world.Statements[1].ShouldContain("\"tenant_id\" = @alvo_t0");
+        world.Statements[1].ShouldContain("\"id\" = @alvo_id");
         world.LastStatement.ShouldStartWith("SELECT");
-        world.LastStatement.ShouldContain("\"tenant_id\" = @alvo_t0");
+        world.LastStatement.ShouldContain("\"owner_id\" = @alvo_u0", customMessage: "the echo is read under get");
         world.LastStatement.ShouldContain("\"id\" = @alvo_id");
     }
+
+    /// <summary>
+    /// A batch create echoes every row it wrote through <b>one</b> <c>get</c>-policed read — an
+    /// <c>id IN (…)</c> carrying the owner predicate in its <c>WHERE</c> — rather than one primary-key read per
+    /// row inside the write transaction.
+    /// </summary>
+    [Fact]
+    public async Task A_batch_create_echoes_every_row_in_one_get_policed_read()
+    {
+        var world = await AlvoDataWorlds.NotesAsync(_fixture);
+        world.ClearStatements();
+
+        var created = await world.Data.CreateManyAsync(
+            "notes", [Note(world, "a"), Note(world, "b"), Note(world, "c")], world.Alice,
+            cancellationToken: TestContext.Current.CancellationToken);
+
+        created.Rows.Select(row => row["title"]).ShouldBe(["a", "b", "c"], "in request order, one entry per row");
+        world.Statements.Count(statement => statement.Contains("\"owner_id\" = @alvo_u0", StringComparison.Ordinal))
+            .ShouldBe(1, "the echo is one read, not one per row");
+        world.LastStatement.ShouldContain("\"owner_id\" = @alvo_u0", customMessage: "the echo is read under get");
+        world.LastStatement.ShouldContain("\"id\" IN (");
+    }
+
+    private static Dictionary<string, object?> Note(DataWorld world, string title) => new()
+    {
+        ["owner_id"] = world.Alice.User.Value,
+        ["tenant_id"] = world.Tenant.Value,
+        ["title"] = title,
+        ["label"] = title,
+    };
 
     /// <summary>
     /// The record a create returns is the row the database holds, not the payload the caller sent — so a

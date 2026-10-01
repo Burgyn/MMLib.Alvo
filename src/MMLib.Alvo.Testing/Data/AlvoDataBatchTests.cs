@@ -361,11 +361,12 @@ public abstract class AlvoDataBatchTests : AlvoDataFixture
     /// caller wrote those rows. The ids are exactly what their own first response gave them.
     /// </para>
     /// <para>
-    /// <b>The replay is narrower than the answer it replays, and that asymmetry is the fact.</b> A create
-    /// returns the row it wrote, under the <c>create</c> decision — so the first answer here carries every
-    /// field. The replay cannot do that: it is a <em>read</em>, and this caller has none, so it answers the
-    /// ids alone. Both halves are asserted, or "the replay is id-only" would also pass on a path that
-    /// answered id-only throughout.
+    /// <b>The replay answers exactly what the first attempt did, and that symmetry is the fact.</b> The first
+    /// answer used to carry every field — the rows echoed under the <c>create</c> decision — which handed a
+    /// caller with no <c>get</c> the very values this replay withholds. A fresh write now echoes under
+    /// <c>get</c> too, so both answers are the ids alone; the contrast that proves the id-only answer is a
+    /// policy's doing rather than a path that never returns fields is
+    /// <c>AlvoDataAdversarialTests.A_write_the_caller_may_read_back_answers_with_the_row_masked_as_a_get_would</c>.
     /// </para>
     /// <para>
     /// <b>Pinned because the branch had no driver.</b> The HTTP replay fact used to reach it by accident, on
@@ -385,21 +386,15 @@ public abstract class AlvoDataBatchTests : AlvoDataFixture
         var replay = await world.Data.CreateManyAsync(
             Dropbox, [Payload("a"), Payload("b")], world.Caller, token, Ct);
 
-        first.Rows.ShouldAllBe(
-            row => row.Values.Count > 1,
-            "the FIRST answer carries the rows as written — a create returns what you wrote, under the "
-            + "create decision. That is the contrast the replay below is measured against: the replay is "
-            + "NARROWER than the answer it replays, and without this it could be narrow because the whole "
-            + "path is.");
-
         replay.Rows.Select(IdOf).ShouldBe(
             first.Rows.Select(IdOf), ignoreOrder: false,
             customMessage: "the ids the caller's own first answer already gave them");
-        foreach (var row in replay.Rows)
+        foreach (var row in first.Rows.Concat(replay.Rows))
         {
             row.Values.Keys.ShouldBe(
                 [AlvoManagedColumns.Id],
-                customMessage: "a caller who may not read is told no field value, not even one they wrote");
+                customMessage: "a caller who may not read is told no field value, not even one they wrote — "
+                + "on the first attempt as on the retry");
         }
     }
 

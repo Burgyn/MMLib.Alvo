@@ -292,17 +292,16 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     }
 
     /// <summary>
-    /// A node's own value type. An operator node carries none, so it takes its operands' promoted type —
-    /// which is what makes <c>(price + 1) &gt; 100</c> a decimal comparison rather than an untyped one.
+    /// A comparison operand's own value type. Only the three leaf kinds are named: the type checker refuses a
+    /// non-leaf comparison operand in every profile this renderer serves (see
+    /// <c>CelTypeChecker.ValidateSqlOperandShape</c>), so an operator node never reaches here — and
+    /// <see cref="RenderOperand"/> would refuse it first if one did.
     /// </summary>
     private static CelValueType ValueTypeOf(CelNode node) => node switch
     {
         CelLiteral literal => literal.Type,
         CelFieldRef fieldRef => fieldRef.Type,
         CelContextRef contextRef => contextRef.Type,
-        CelUnary unary => ValueTypeOf(unary.Operand),
-        CelBinary binary => PromotedType(binary.Left, binary.Right),
-        CelConditional conditional => PromotedType(conditional.WhenTrue, conditional.WhenFalse),
         _ => CelValueType.Null,
     };
 
@@ -365,6 +364,11 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
         _ => throw new NotSupportedException($"'{op}' is not a comparison operator."),
     };
 
+    /// <summary>
+    /// Renders a comparison or <c>in</c> operand. Only a leaf has an operand form; the type checker refuses any
+    /// other shape for the profiles rendered here, so the fall-through is defence-in-depth, never a path
+    /// authored CEL can reach through the compiler.
+    /// </summary>
     private static string RenderOperand(
         CelNode node, EntitySchema entity, AlvoContext context, IFieldSqlRenderer fields, ParameterBag bag) => node switch
         {
