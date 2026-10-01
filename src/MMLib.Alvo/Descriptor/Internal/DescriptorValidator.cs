@@ -105,35 +105,45 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(descriptorJson);
 
-        JsonDocument document;
-        try
+        if (!TryParse(descriptorJson, out var document, out var malformed))
         {
-            document = JsonDocument.Parse(descriptorJson);
-        }
-        catch (JsonException ex)
-        {
-            return (new DescriptorValidationResult([Malformed(ex)]), false);
+            return (new DescriptorValidationResult([malformed!]), false);
         }
 
         using (document)
         {
-            if (UnicodeError(document.RootElement) is { } unicode)
-            {
-                return (new DescriptorValidationResult([unicode]), false);
-            }
-
-            var schemaErrors = SchemaErrors(document.RootElement);
-            var errors = new List<DescriptorValidationError>(schemaErrors);
-            errors.AddRange(SemanticErrors(document.RootElement));
-            errors.AddRange(WildcardSubscriptionErrors(document.RootElement));
-            var judged = false;
-            if (schemaErrors.Count == 0)
-            {
-                judged = RuleErrors(descriptorJson, errors);
-            }
-
-            return (new DescriptorValidationResult(errors), judged);
+            return UnicodeError(document!.RootElement) is { } unicode
+                ? (new DescriptorValidationResult([unicode]), false)
+                : Passes(document.RootElement, descriptorJson);
         }
+    }
+
+    private static bool TryParse(string descriptorJson, out JsonDocument? document, out DescriptorValidationError? malformed)
+    {
+        try
+        {
+            (document, malformed) = (JsonDocument.Parse(descriptorJson), null);
+
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            (document, malformed) = (null, Malformed(ex));
+
+            return false;
+        }
+    }
+
+    /// <summary>The schema, semantic, wildcard and — when the document can be read into the model — rule passes.</summary>
+    private (DescriptorValidationResult Result, bool ExpressionsJudged) Passes(JsonElement root, string descriptorJson)
+    {
+        var schemaErrors = SchemaErrors(root);
+        var errors = new List<DescriptorValidationError>(schemaErrors);
+        errors.AddRange(SemanticErrors(root));
+        errors.AddRange(WildcardSubscriptionErrors(root));
+        var judged = schemaErrors.Count == 0 && RuleErrors(descriptorJson, errors);
+
+        return (new DescriptorValidationResult(errors), judged);
     }
 
     /// <summary>
@@ -192,12 +202,27 @@ internal sealed class DescriptorValidator : IDescriptorValidator
     /// <summary>Adds the rule-pass findings to <paramref name="into"/>; <see langword="false"/> when the pass could not run.</summary>
     private bool RuleErrors(string descriptorJson, List<DescriptorValidationError> into)
     {
-        AlvoDescriptor descriptor;
-        SchemaModel schema;
+        if (!TryReadModel(descriptorJson, into, out var descriptor, out var schema))
+        {
+            return false;
+        }
+
+        into.AddRange(CompiledErrors(descriptor!, schema!));
+
+        return true;
+    }
+
+    /// <summary>Reads the document into the model; <see langword="false"/> (with a finding when there is one to give) when it cannot be.</summary>
+    private static bool TryReadModel(
+        string descriptorJson, List<DescriptorValidationError> into, out AlvoDescriptor? descriptor, out SchemaModel? schema)
+    {
+        (descriptor, schema) = (null, null);
         try
         {
             descriptor = AlvoDescriptor.Parse(descriptorJson);
             schema = DescriptorToSchemaMapper.Map(descriptor);
+
+            return true;
         }
         catch (InvalidDataException)
         {
@@ -210,16 +235,20 @@ internal sealed class DescriptorValidator : IDescriptorValidator
             // The schema accepted a value the typed model cannot hold (a maxLength beyond int, say): a finding the
             // caller can fix, never an exception — every management route would render it as a 500.
             into.Add(Unrepresentable(ex));
+
             return false;
         }
+    }
 
+    private List<DescriptorValidationError> CompiledErrors(AlvoDescriptor descriptor, SchemaModel schema)
+    {
         var errors = PolicyCatalog.TryBuild(descriptor, schema, _compiler, out _, out var ruleErrors)
             ? []
             : ruleErrors.ToList();
         errors.AddRange(ComputedFieldCheck.Errors(schema, _compiler));
         errors.AddRange(OwnerWarnings(descriptor, schema, errors));
-        into.AddRange(errors);
-        return true;
+
+        return errors;
     }
 
     /// <summary>
