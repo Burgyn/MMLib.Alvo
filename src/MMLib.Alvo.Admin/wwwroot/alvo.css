@@ -1,4 +1,4 @@
-/* ===========================================================================
+﻿/* ===========================================================================
    Alvo Admin — the design system.
 
    This file is the source of truth. docs/design/gallery.html references it
@@ -1440,6 +1440,11 @@
   /* An expression check's warning is not the engine's refusal: the warning tone, not the danger one. */
   .a-field__problem[data-severity="Warning"] {
     color: var(--warn-fg);
+  }
+
+  /* "Not checked yet" is not a problem with this box, so it is quiet: the dim text tier, not the danger one. */
+  .a-field__problem--muted {
+    color: var(--dim);
   }
 
   /* The suggested fix follows the message, set off from it. */

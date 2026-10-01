@@ -88,7 +88,7 @@ else
                         @{ var id = $"rule-{operation}"; }
                         @foreach (var (finding, index) in _check.Findings(id).Select((finding, index) => (finding, index)))
                         {
-                            <p class="a-field__problem" id="@(index == 0 ? $"{id}-check" : $"{id}-check-{index}")" role="status"
+                            <p class="@ExpressionCheck.ProblemClass(finding)" id="@(index == 0 ? $"{id}-check" : $"{id}-check-{index}")" role="status"
                                data-testid="@($"check-{id}")" data-severity="@finding.Severity">
                                 @finding.Message
                                 @if (finding.FixSuggestion is { } fix)

@@ -150,6 +150,26 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
         (await session.Page.Locator("[data-testid^='check-']").CountAsync()).ShouldBe(0, "no input of the form shows a check sentence, the default included");
     }
 
+    /// <summary>"Not checked yet" is calm: a box whose draft is refused elsewhere is muted, not flagged red.</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_box_checked_while_the_draft_is_refused_elsewhere_says_not_checked_yet_muted()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/customers");
+        await session.OpenTabAsync("On write");
+        await session.Page.GetByTestId("hook-new").ClickAsync();
+        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "afterCreate", Exact = true }).ClickAsync();
+        await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "webhook", Exact = true }).ClickAsync();
+        await session.Page.FillAsync("#hook-endpoint", "Not A Name!");
+
+        await session.Page.FillAsync("#hook-condition", "new.tier == 'priority'");
+
+        var finding = session.Page.GetByTestId("check-hook-condition").First;
+        await finding.WaitForAsync(new() { Timeout = 3_000 });
+        (await finding.InnerTextAsync()).ShouldStartWith("Not checked yet");
+        (await finding.GetAttributeAsync("class"))!.ShouldContain("a-field__problem--muted");
+    }
+
     /// <summary>What the pending bar says; a check stages nothing, so it must not move.</summary>
     private static async Task<string> PendingTextAsync(AdminSession session)
     {

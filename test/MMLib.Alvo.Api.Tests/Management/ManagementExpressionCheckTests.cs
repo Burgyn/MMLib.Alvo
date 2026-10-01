@@ -66,7 +66,7 @@ public class ManagementExpressionCheckTests
         response.StatusCode.ShouldBe(HttpStatusCode.OK);
         var verdict = await response.ReadJsonObjectAsync();
         verdict["isValid"]!.GetValue<bool>().ShouldBeFalse("nothing was judged, so nothing may pass");
-        verdict["findings"]!.AsArray().Single()!["message"]!.GetValue<string>().ShouldContain("not judged");
+        verdict["findings"]!.AsArray().Single()!["message"]!.GetValue<string>().ShouldStartWith("Not checked yet");
     }
 
     [Theory]

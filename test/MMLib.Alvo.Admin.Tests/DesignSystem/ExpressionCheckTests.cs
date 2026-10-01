@@ -111,6 +111,21 @@ public sealed class ExpressionCheckTests
         sut.Findings("k").ShouldBeEmpty();
     }
 
+    /// <summary>The core's own prefix is pinned to the same literal in <c>ExpressionSlotCheckTests</c>.</summary>
+    [Fact]
+    public void The_not_judged_prefix_is_the_literal_the_core_writes() =>
+        ExpressionCheck.NotJudgedPrefix.ShouldBe("Not checked yet");
+
+    [Fact]
+    public void A_not_checked_yet_sentence_is_muted_and_a_problem_is_not()
+    {
+        var notJudged = new DescriptorValidationError("/p", "Not checked yet — another part of this draft is not valid ('/x').", "fix", DescriptorValidationSeverity.Error);
+        var problem = new DescriptorValidationError("/p", "Unknown role 'amdin'.", "fix", DescriptorValidationSeverity.Error);
+
+        ExpressionCheck.ProblemClass(notJudged).ShouldBe("a-field__problem a-field__problem--muted");
+        ExpressionCheck.ProblemClass(problem).ShouldBe("a-field__problem");
+    }
+
     [Fact]
     public async Task A_warning_is_kept_with_its_severity_and_describes_the_input()
     {

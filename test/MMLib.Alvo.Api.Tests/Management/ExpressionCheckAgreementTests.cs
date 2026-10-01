@@ -162,7 +162,7 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
 
         refused.Result.Errors.ShouldNotBeEmpty("apply refuses the whole descriptor");
         verdict.IsValid.ShouldBeFalse();
-        verdict.Findings.Single().Message.ShouldContain("not judged");
+        verdict.Findings.Single().Message.ShouldStartWith("Not checked yet");
     }
 
     private static void BreakElsewhere(JsonNode root, string breakage)

@@ -22,6 +22,12 @@ internal static class ExpressionSlotCheck
     private const int MaxArrayLength = 2_000;
     private const string Placeholder = "true";
 
+    /// <summary>
+    /// The start of the message that says nothing was judged. The dashboard shows such a finding muted and keys on this
+    /// text (a copy lives in the Admin project, which cannot reference this assembly; both are pinned by tests).
+    /// </summary>
+    internal const string NotJudgedPrefix = "Not checked yet";
+
     /// <summary>The start of the message a candidate-caused schema refusal carries.</summary>
     internal const string SchemaRefusalPrefix = "The schema refuses this value";
 
@@ -112,10 +118,9 @@ internal static class ExpressionSlotCheck
     /// </summary>
     private static DescriptorValidationError NotJudged(IReadOnlyList<string> elsewhere, string pointer) => new(
         pointer,
-        $"This expression was not judged: the descriptor is refused elsewhere ({string.Join(", ", elsewhere)}). "
-        + "Fix those first, then it is checked.",
-        "Fix the errors named above in the working copy (an apply reports every one of them); "
-        + "the expression is checked as soon as the descriptor is accepted.",
+        $"{NotJudgedPrefix} — another part of this draft is not valid ({string.Join(", ", elsewhere)}). "
+        + "This box is checked once that is fixed.",
+        "Fix the part named; Apply lists every problem.",
         DescriptorValidationSeverity.Error);
 
     /// <summary>

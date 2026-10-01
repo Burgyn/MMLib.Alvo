@@ -38,7 +38,7 @@ public sealed class ExpressionSlotCheckTests
 
         var finding = findings.Where(IsError).ShouldHaveSingleItem();
         finding.Path.ShouldBe(ListRule);
-        finding.Message.ShouldContain("not judged");
+        finding.Message.ShouldStartWith(ExpressionSlotCheck.NotJudgedPrefix);
         finding.Message.ShouldContain("'/title'", Case.Sensitive, "it names where the schema fails");
         finding.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
     }
@@ -48,7 +48,7 @@ public sealed class ExpressionSlotCheckTests
     {
         var findings = CheckWithSchemaErrorElsewhere(ListRule, "'clerk' in @user.roles");
 
-        findings.Where(IsError).ShouldHaveSingleItem().Message.ShouldContain("not judged");
+        findings.Where(IsError).ShouldHaveSingleItem().Message.ShouldStartWith(ExpressionSlotCheck.NotJudgedPrefix);
     }
 
     /// <summary>
@@ -69,7 +69,7 @@ public sealed class ExpressionSlotCheckTests
     {
         var findings = Check(Broken(breakage), ListRule, "'amdin' in @user.roles");
 
-        findings.Where(IsError).ShouldHaveSingleItem().Message.ShouldContain("not judged", Case.Insensitive, reason);
+        findings.Where(IsError).ShouldHaveSingleItem().Message.ShouldStartWith(ExpressionSlotCheck.NotJudgedPrefix, Case.Sensitive, reason);
     }
 
     [Theory]
@@ -78,7 +78,7 @@ public sealed class ExpressionSlotCheckTests
     {
         var findings = Check(Broken(breakage), ListRule, "'clerk' in @user.roles");
 
-        findings.Where(IsError).ShouldHaveSingleItem().Message.ShouldContain("not judged", Case.Insensitive, reason);
+        findings.Where(IsError).ShouldHaveSingleItem().Message.ShouldStartWith(ExpressionSlotCheck.NotJudgedPrefix, Case.Sensitive, reason);
     }
 
     private static JsonObject Broken(string breakage)
@@ -160,9 +160,27 @@ public sealed class ExpressionSlotCheckTests
         return descriptor;
     }
 
+    /// <summary>
+    /// The dashboard keys its muted rendering on this exact start (it cannot reference this assembly); its own copy is
+    /// pinned to the same literal in the Admin tests.
+    /// </summary>
+    [Fact]
+    public void The_not_judged_prefix_is_the_literal_the_dashboard_keys_on() =>
+        ExpressionSlotCheck.NotJudgedPrefix.ShouldBe("Not checked yet");
+
+    [Fact]
+    public void The_not_judged_message_is_calm_and_names_the_places()
+    {
+        var finding = CheckWithSchemaErrorElsewhere(ListRule, "true").Single(IsError);
+
+        finding.Message.ShouldBe(
+            "Not checked yet — another part of this draft is not valid ('/title'). This box is checked once that is fixed.");
+        finding.FixSuggestion.ShouldBe("Fix the part named; Apply lists every problem.");
+    }
+
     [Fact]
     public void A_descriptor_without_a_schema_error_gets_no_not_judged_finding() =>
-        Check(ListRule, "'amdin' in @user.roles").ShouldAllBe(f => !f.Message.Contains("not judged", StringComparison.Ordinal));
+        Check(ListRule, "'amdin' in @user.roles").ShouldAllBe(f => !f.Message.StartsWith(ExpressionSlotCheck.NotJudgedPrefix, StringComparison.Ordinal));
 
     [Fact]
     public void A_schema_error_at_the_slot_is_returned_as_is_without_a_not_judged_finding()
@@ -170,7 +188,7 @@ public sealed class ExpressionSlotCheckTests
         var findings = CheckWithSchemaErrorElsewhere(ListRule, new string('a', 2001));
 
         findings.Where(IsError).ShouldNotBeEmpty();
-        findings.ShouldAllBe(f => !f.Message.Contains("not judged", StringComparison.Ordinal));
+        findings.ShouldAllBe(f => !f.Message.StartsWith(ExpressionSlotCheck.NotJudgedPrefix, StringComparison.Ordinal));
     }
 
     [Fact]

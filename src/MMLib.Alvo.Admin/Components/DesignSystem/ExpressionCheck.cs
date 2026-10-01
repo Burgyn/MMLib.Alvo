@@ -45,6 +45,20 @@ internal sealed class ExpressionCheck
     /// <summary>Gets the quiet time to use instead of <see cref="Debounce"/>, for tests.</summary>
     public TimeSpan? DebounceOverride { get; init; }
 
+    /// <summary>
+    /// The start of the sentence that says an input has not been checked because another part of the draft is invalid.
+    /// A copy of the core's own prefix (this project cannot reference it); a test pins both to the same text.
+    /// </summary>
+    internal const string NotJudgedPrefix = "Not checked yet";
+
+    /// <summary>The class of one finding's sentence: red for a problem, muted for "not checked yet", which is not one.</summary>
+    /// <param name="finding">The finding on show.</param>
+    /// <returns>The class attribute value.</returns>
+    public static string ProblemClass(DescriptorValidationError finding) =>
+        finding.Message.StartsWith(NotJudgedPrefix, StringComparison.Ordinal)
+            ? "a-field__problem a-field__problem--muted"
+            : "a-field__problem";
+
     /// <summary>The findings on show for one input, or none.</summary>
     /// <param name="key">The input's key.</param>
     /// <returns>The findings, errors and warnings alike; the component styles by severity.</returns>

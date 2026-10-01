@@ -252,7 +252,7 @@
                                   Value="_facets.Computed" ValueChanged="TypeComputed" />
                     @foreach (var (finding, index) in _check.Findings(ComputedBox).Select((finding, index) => (finding, index)))
                     {
-                        <p class="a-field__problem" id="@(index == 0 ? $"{ComputedBox}-check" : $"{ComputedBox}-check-{index}")" role="status"
+                        <p class="@ExpressionCheck.ProblemClass(finding)" id="@(index == 0 ? $"{ComputedBox}-check" : $"{ComputedBox}-check-{index}")" role="status"
                            data-testid="@($"check-{ComputedBox}")" data-severity="@finding.Severity">
                             @finding.Message
                             @if (finding.FixSuggestion is { } fix)
