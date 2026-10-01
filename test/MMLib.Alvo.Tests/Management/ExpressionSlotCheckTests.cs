@@ -211,6 +211,37 @@ public sealed class ExpressionSlotCheckTests
     }
 
     [Fact]
+    public void An_unreadable_value_refusal_carries_no_exception_text_in_its_fix()
+    {
+        var ex = new InvalidOperationException("System.Foo.Bar failed in MMLib.Alvo.Descriptor.Internal.Mapper, Microsoft.Extensions.X");
+
+        var fix = DescriptorValidator.Unrepresentable(ex).FixSuggestion!;
+
+        fix.ShouldNotContain("System.");
+        fix.ShouldNotContain("Microsoft.");
+        fix.ShouldNotContain("Alvo.");
+    }
+
+    [Fact]
+    public void A_candidate_caused_unreadable_refusal_is_not_labelled_a_schema_refusal()
+    {
+        var unreadable = DescriptorValidator.Unrepresentable(new InvalidOperationException("x"));
+        var fake = new CandidateOnlyValidator(new DescriptorValidationError(
+            "#/entities/orders/rules", unreadable.Message, unreadable.FixSuggestion, DescriptorValidationSeverity.Error));
+
+        var finding = ExpressionSlotCheck.Check(fake, Descriptor().ToJsonString(), ListRule, "BAD").Single(IsError);
+
+        finding.Message.ShouldStartWith("The descriptor cannot be read here");
+        finding.Message.ShouldNotStartWith(ExpressionSlotCheck.SchemaRefusalPrefix);
+    }
+
+    private sealed class CandidateOnlyValidator(DescriptorValidationError refusal) : IDescriptorValidator
+    {
+        public DescriptorValidationResult Validate(string descriptorJson) =>
+            new(descriptorJson.Contains("BAD", StringComparison.Ordinal) ? [refusal] : []);
+    }
+
+    [Fact]
     public void A_descriptor_without_a_schema_error_gets_no_not_judged_finding() =>
         Check(ListRule, "'amdin' in @user.roles").ShouldAllBe(f => !f.Message.StartsWith(ExpressionSlotCheck.NotJudgedPrefix, StringComparison.Ordinal));
 

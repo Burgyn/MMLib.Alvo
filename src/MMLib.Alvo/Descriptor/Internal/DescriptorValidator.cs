@@ -265,12 +265,21 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         return OwnerComparisonCheck.Warnings(descriptor, schema, _compiler).Where(warning => !refused.Contains(warning.Path));
     }
 
+    private const string UnreadableOverflow = "A value in the descriptor is outside what Alvo can hold";
+    private const string UnreadableModel = "The descriptor could not be read into Alvo's model";
+
+    /// <summary>Whether <paramref name="finding"/> is the refusal of a value the schema accepted and the model cannot hold.</summary>
+    /// <param name="finding">A finding from this validator.</param>
+    internal static bool IsUnreadable(DescriptorValidationError finding) =>
+        finding.Message.StartsWith(UnreadableOverflow, StringComparison.Ordinal)
+        || finding.Message.StartsWith(UnreadableModel, StringComparison.Ordinal);
+
     /// <summary>
     /// The refusal for a value the schema accepts and the typed model cannot hold. Its path is written in the schema
     /// pass's own fragment form (<c>#/…</c>): it is a refusal of the same kind (the document is not a descriptor Alvo
     /// can read) and, like a schema error, it stops the rule pass from judging anything.
     /// </summary>
-    private static DescriptorValidationError Unrepresentable(Exception ex)
+    internal static DescriptorValidationError Unrepresentable(Exception ex)
     {
         var path = ex is JsonException { Path: string jsonPath } && jsonPath.StartsWith("$.", StringComparison.Ordinal)
             ? "#/" + jsonPath[2..].Replace('.', '/')
@@ -281,13 +290,13 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         return ex is JsonException
             ? new DescriptorValidationError(
                 path,
-                "A value in the descriptor is outside what Alvo can hold" + where,
+                UnreadableOverflow + where,
                 "Use a smaller number or a shorter value there; integer facets such as maxLength, precision and scale must fit a 32-bit integer.",
                 DescriptorValidationSeverity.Error)
             : new DescriptorValidationError(
                 path,
-                "The descriptor could not be read into Alvo's model" + where,
-                $"Check the value named above ({ex.Message}); an apply reports every other problem it finds.",
+                UnreadableModel + where,
+                "Check the value named above; an apply reports every other problem it finds.",
                 DescriptorValidationSeverity.Error);
     }
 

@@ -31,6 +31,9 @@ internal static class ExpressionSlotCheck
     /// <summary>The start of the message a candidate-caused schema refusal carries.</summary>
     internal const string SchemaRefusalPrefix = "The schema refuses this value";
 
+    /// <summary>The start of the message for a value the schema accepted but the model cannot hold.</summary>
+    internal const string UnreadablePrefix = "The descriptor cannot be read here";
+
     /// <summary>The validator's findings at or under <paramref name="pointer"/> with <paramref name="source"/> in place.</summary>
     /// <param name="validator">The validator apply uses.</param>
     /// <param name="descriptorJson">The working-copy descriptor.</param>
@@ -141,7 +144,7 @@ internal static class ExpressionSlotCheck
 
         return new DescriptorValidationError(
             pointer,
-            $"{SchemaRefusalPrefix} (at '{JsonPointerPath.Shorten(JsonPointerPath.Normalise(refusal.Path))}'): {refusal.Message}",
+            $"{(DescriptorValidator.IsUnreadable(refusal) ? UnreadablePrefix : SchemaRefusalPrefix)} (at '{JsonPointerPath.Shorten(JsonPointerPath.Normalise(refusal.Path))}'): {refusal.Message}",
             refusal.FixSuggestion,
             DescriptorValidationSeverity.Error);
     }
