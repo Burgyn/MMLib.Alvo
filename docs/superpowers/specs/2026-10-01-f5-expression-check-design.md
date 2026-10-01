@@ -188,5 +188,28 @@ Deviations from the plan, ruled:
 
 Deferred (not in this slice): `Position`, `cel/scope`, `cel/evaluate`.
 
-Follow-ups: cap `Path` and `Source`; a guided form for conditions; a shared `ExpressionFindings` fragment for the
-four inputs' markup.
+### Hardening after final review
+
+* **C1 — schema-pass paths.** The schema pass writes `#/entities/…`, every other pass `/entities/…`; the slot filter
+  now reads both as one pointer (`JsonPointerPath.IsAtOrUnder`), so a source over 2,000 characters or an empty one
+  is refused at the slot as apply refuses it. The agreement oracle was fixed the same way and the corpus gained
+  schema-error cases (2,001 characters for a rule, a mutate value and a computed expression; an empty source).
+* **C2 — "not judged".** The validator runs its rule, computed and owner passes only over a schema-valid
+  descriptor, so a schema error elsewhere hid the slot's real errors. The check now answers one `Error` at the slot,
+  "This expression was not judged: the descriptor fails the schema elsewhere (up to three places)…", never a green
+  verdict (criterion 3 reworded). A schema refusal reported on a node *above* the slot (a mutate value is a `oneOf`,
+  so it fails on the action) is reported at the slot when the descriptor is schema-valid with a placeholder in it.
+* **I1 — a facet beyond `int`.** `"maxLength": 3000000000` passed the schema and then threw `JsonException` out of
+  `DescriptorValidator.RuleErrors` (a 500 on apply and on the check). It is now a structured error with a fix, in
+  the schema pass's `#/…` path form, so the check answers "not judged" for it.
+* **I2 — caps.** `source` is capped at 8,000 characters and `path` at 1,024 (the detail names the cap); an echoed
+  pointer is cut to 120 characters.
+* **I3 — tests that can fail.** The over-cap test sends valid JSON of that length and asserts the cap in the
+  detail (with a just-under control); the absent-slot test asserts the pointer; an unknown project with no body is
+  404, not 422.
+* **I4 — naming.** `ManagementExpressionCheck.Descriptor` is now `DescriptorJson` (wire `descriptorJson`), as
+  `ManagementApplyRequest` has it. The debounce-supersede test is bounded at 5 s so it fails instead of hanging.
+
+Follow-ups: a guided form for conditions; a shared `ExpressionFindings` fragment for the four inputs' markup; a
+stale verdict when the working copy moves under an unchanged source; accessibility polish; `hooks[point]` that is
+not an array should read as null; a better pin for the unchecked field default.
