@@ -60,4 +60,26 @@ public sealed class TSqlFieldSqlRenderer : IFieldSqlRenderer
         ArgumentNullException.ThrowIfNull(right);
         return $"{left} LIKE {right}";
     }
+
+    /// <summary>
+    /// T-SQL spells concatenation as a function (<c>||</c> exists only on the newest engines), which is the case the
+    /// port member exists for. <c>CONCAT</c> reads a <c>NULL</c> as empty where <c>||</c> propagates it; the
+    /// compiler refuses an operand that can be null, so the two agree on everything this is handed.
+    /// </summary>
+    string IFieldSqlRenderer.RenderStringConcatenation(string left, string right)
+    {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+        return $"CONCAT({left}, {right})";
+    }
+
+    /// <summary>
+    /// A Unicode literal, <c>N'…'</c>: without the prefix T-SQL reads the constant in the database's code page and a
+    /// diacritic outside it is silently replaced — the second way a third engine's literal differs from the standard.
+    /// </summary>
+    string? IFieldSqlRenderer.RenderStringLiteral(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return TextLiteralRule.IsCarried(value) ? $"N'{value.Replace("'", "''", StringComparison.Ordinal)}'" : null;
+    }
 }

@@ -1,0 +1,212 @@
+﻿@page "/admin"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject ILogger<Overview> Logger
+
+<PageTitle>Overview · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Title="@(_descriptor is null ? "Overview" : Gateway.Project)" />
+
+    @if (_problem is not null)
+    {
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
+    }
+    else if (_schema is null)
+    {
+        <div class="a-cards">
+            <Skeleton Size="Skeleton.SkeletonSize.Sm" />
+            <Skeleton Size="Skeleton.SkeletonSize.Sm" />
+            <Skeleton Size="Skeleton.SkeletonSize.Sm" />
+        </div>
+    }
+    else
+    {
+        @if (_schema.Entities.Count == 0 || _revisions.Count == 0)
+        {
+            <AlvoAlert Tone="AlvoAlert.AlertTone.Info" Title="This project is new" TestId="overview-new">
+                <ChildContent>
+                    The first run walks through the three things a backend needs: entities, the rules that
+                    guard them, and a tenant if the data is per-customer.
+                </ChildContent>
+                <Actions>
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" Href="@AdminPaths.Welcome">
+                        Open the first run
+                    </AlvoButton>
+                </Actions>
+            </AlvoAlert>
+        }
+
+        @*
+            One badge for the fact an operator acts on, and one quiet line for how this instance runs.
+            The registered data provider's type name was a third chip here; it is an implementation
+            name, and Settings is where it is shown with the sentence that explains it.
+        *@
+        <div class="a-row a-row--wrap">
+            <span class="a-badge a-badge--ok" data-testid="overview-revision">Revision @_descriptor!.Revision applied</span>
+            <span class="a-note" data-testid="overview-runtime">@Runtime(_info!)</span>
+        </div>
+
+        <div class="a-cards">
+            <Stat Label="Entities" Value="@_schema.Entities.Count.ToString(CultureInfo.InvariantCulture)"
+                  Note="tables Alvo created and keeps in step" />
+            <Stat Label="Revisions" Value="@_revisions.Count.ToString(CultureInfo.InvariantCulture)"
+                  Note="appended, never rewritten" />
+            <Stat Label="Honoured blocks" Value="@_capabilities!.Honoured.Count.ToString(CultureInfo.InvariantCulture)"
+                  Note="of the descriptor, running today" />
+        </div>
+
+        @*
+            A normal panel under the stats rather than the centred dashed callout it was: it lists
+            facts about what this project declared, and the callout's shape — kept for empty states —
+            made a list of consequences read as one. Every key the project declares and the build ignores is said
+            here (§8d item 27), in the build's own words. The metadata this dashboard does not show is honoured by
+            the build, so it is the quiet line after the panel, not a row in it. DeclaredLimits says why the rows
+            are not split into "not running" and "partly running".
+        *@
+        @if (Declared.Count > 0)
+        {
+            <Panel Title="Declared, not honoured by this build" data-testid="overview-limits">
+                <Subtitle>Each row says what does not happen. Some of these blocks run in part, and their row says which.</Subtitle>
+                <ChildContent>
+                    @foreach (var block in Declared)
+                    {
+                        <ListRow data-testid="@($"overview-limit-{block.Block}")">
+                            <span class="a-listrow__type"><span class="a-badge a-badge--warn a-mono">@block.Block</span></span>
+                            <p class="a-note">@block.Consequence</p>
+                        </ListRow>
+                    }
+                </ChildContent>
+            </Panel>
+        }
+        @if (Unshown is { } unshown)
+        {
+            <p class="a-note" data-testid="overview-unshown">@unshown</p>
+        }
+
+        @* A refusal no screen shows yet is a refusal nobody reads. RefusalPlaces explains why this is the fallback. *@
+        @if (RefusalPlaces.Unplaced(_capabilities!.Refused) is { Count: > 0 } unplaced)
+        {
+            <Panel Title="Refused by this build, shown on no screen yet" data-testid="overview-unplaced">
+                <ChildContent>
+                    @foreach (var refusal in unplaced)
+                    {
+                        <ListRow>
+                            <span class="a-listrow__type"><span class="a-badge a-badge--danger a-mono">@refusal.Slot</span></span>
+                            <p class="a-note">@refusal.Consequence @refusal.Fix</p>
+                        </ListRow>
+                    }
+                </ChildContent>
+            </Panel>
+        }
+
+        @*
+            The four places an operator goes next, each with the one number that says what is there.
+            Only counts this screen already holds or reads from the descriptor it already has: a count
+            that cost its own round trip would make the landing page the slowest screen to open.
+        *@
+        <nav class="a-cards" aria-label="Sections" data-testid="overview-links">
+            <a class="a-card a-card--action" href="@AdminPaths.Schema" data-testid="overview-link-schema">
+                <span class="a-section__title">Schema</span>
+                <span class="a-section__sub">@Count(_schema.Entities.Count, "entity", "entities")</span>
+            </a>
+            <a class="a-card a-card--action" href="@AdminPaths.Data" data-testid="overview-link-data">
+                <span class="a-section__title">Data</span>
+                <span class="a-section__sub">Browse the records of @Count(_schema.Entities.Count, "entity", "entities")</span>
+            </a>
+            <a class="a-card a-card--action" href="@AdminPaths.Rules()" data-testid="overview-link-rules">
+                <span class="a-section__title">Rules</span>
+                <span class="a-section__sub">@Count(_rules, "rule", "rules") declared</span>
+            </a>
+            <a class="a-card a-card--action" href="@AdminPaths.Access" data-testid="overview-link-access">
+                <span class="a-section__title">Access</span>
+                <span class="a-section__sub">@Count(_roles, "role", "roles") declared</span>
+            </a>
+        </nav>
+
+        <Panel Title="Latest configuration change">
+            <Subtitle>The whole history is under Configuration history.</Subtitle>
+            <ChildContent>
+                @if (_revisions.Count == 0)
+                {
+                    <EmptyState Title="Nothing has been applied yet"
+                                Body="The descriptor this host booted from has not been through an apply.">
+                        <div class="a-actions">
+                            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" Href="@AdminPaths.Schema"
+                                        data-testid="overview-empty-schema">Make the first change in Schema</AlvoButton>
+                        </div>
+                    </EmptyState>
+                }
+                else
+                {
+                    <RevisionRow Revision="@_revisions[0]" />
+                }
+            </ChildContent>
+        </Panel>
+    }
+</div>
+
+@code {
+    private ManagementDescriptor? _descriptor;
+    private SchemaModel? _schema;
+    private ManagementCapabilities? _capabilities;
+    private ManagementInfo? _info;
+    private IReadOnlyList<ManagementRevision> _revisions = [];
+    private int _rules;
+    private int _roles;
+    private AdminProblem? _problem;
+
+    /// <summary>The warned blocks this descriptor declares (§4.2) — see <see cref="DeclaredLimits"/>.</summary>
+    private IReadOnlyList<ManagementWarnedBlock> Declared { get; set; } = [];
+
+    /// <summary>The one line on the metadata this descriptor declares and this dashboard does not show — see <see cref="DeclaredLimits"/>.</summary>
+    private string? Unshown { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _descriptor = await Gateway.DescriptorAsync(CancellationToken.None);
+            _schema = await Gateway.SchemaAsync(CancellationToken.None);
+            _capabilities = await Gateway.CapabilitiesAsync(CancellationToken.None);
+            _info = await Gateway.InfoAsync(CancellationToken.None);
+            _revisions = await Gateway.RevisionsAsync(CancellationToken.None);
+            Declared = DeclaredLimits.Of(_descriptor.DescriptorJson, _capabilities);
+            Unshown = DeclaredLimits.UnshownLine(_descriptor.DescriptorJson);
+            _rules = DescriptorLens.RuleCount(_descriptor.DescriptorJson);
+            _roles = DescriptorLens.DeclaredRoles(_descriptor.DescriptorJson).Count;
+        }
+        catch (Exception exception)
+        {
+            _problem = AdminProblem.From(exception, Logger);
+        }
+    }
+
+    /// <summary>How this instance runs, as one line an operator reads rather than three raw values.</summary>
+    /// <remarks>
+    /// A mode this build does not name is shown as reported rather than hidden, so a future value
+    /// reads as itself instead of as the nearest one this switch happens to know.
+    /// </remarks>
+    private static string Runtime(ManagementInfo info)
+    {
+        var mode = info.Mode.Length > 0
+            ? string.Concat(info.Mode[..1].ToUpperInvariant(), info.Mode[1..])
+            : info.Mode;
+
+        var startup = info.StartupMode switch
+        {
+            "apply" => "applies on start",
+            "verify" => "verifies on start",
+            "skip" => "leaves the schema alone on start",
+            var other => $"starts in {other} mode",
+        };
+
+        return $"{mode} · {startup}";
+    }
+
+    /// <summary>A count with its noun, singular or plural.</summary>
+    private static string Count(int count, string one, string many)
+        => $"{count.ToString(CultureInfo.InvariantCulture)} {(count == 1 ? one : many)}";
+}

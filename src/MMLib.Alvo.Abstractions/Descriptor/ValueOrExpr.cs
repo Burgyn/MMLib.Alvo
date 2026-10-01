@@ -28,20 +28,52 @@ public sealed record ValueOrExpr
     /// <summary>Creates a value that carries a tagged CEL expression.</summary>
     /// <param name="expression">The CEL source (without the <c>$cel</c> tag).</param>
     public static ValueOrExpr FromExpression(string expression) => new() { Expression = expression };
+
+    /// <summary>
+    /// Whether raw JSON in a value position is a tagged CEL expression rather than a literal.
+    /// </summary>
+    /// <remarks>
+    /// <b>The same question the converter answers, asked by the pass that has only the JSON.</b> A feature
+    /// that is honoured as a literal and refused as an expression has to be told apart identically by both —
+    /// and a second spelling of <c>{"$cel": …}</c> gets the corners wrong: <c>{"$cel": 42}</c> is not an
+    /// expression to the converter, because the tag's value must be a string, and a hand-written check that
+    /// missed that would refuse what the typed pass then stored as a literal.
+    /// </remarks>
+    /// <param name="value">The raw value.</param>
+    /// <returns><see langword="true"/> when it carries a <c>$cel</c> tag the converter would read.</returns>
+    internal static bool IsTaggedExpression(JsonElement value) => TryReadCel(value, out _);
+
+    /// <summary>Reads the <c>$cel</c> tag, when the value carries one.</summary>
+    /// <param name="element">The raw value.</param>
+    /// <param name="expression">The CEL source, when there is one.</param>
+    internal static bool TryReadCel(JsonElement element, out string? expression)
+    {
+        expression = null;
+        if (element.ValueKind != JsonValueKind.Object
+            || !element.TryGetProperty(CelTag, out JsonElement cel)
+            || cel.ValueKind != JsonValueKind.String)
+        {
+            return false;
+        }
+
+        expression = cel.GetString();
+        return true;
+    }
+
+    /// <summary>The property name a tagged expression is carried under.</summary>
+    internal const string CelTag = "$cel";
 }
 
 /// <summary>Serializes <see cref="ValueOrExpr"/> as a bare literal or a <c>{"$cel": "..."}</c> object.</summary>
 internal sealed class ValueOrExprConverter : JsonConverter<ValueOrExpr>
 {
-    private const string CelProperty = "$cel";
-
     /// <inheritdoc />
     public override ValueOrExpr Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         using JsonDocument document = JsonDocument.ParseValue(ref reader);
         JsonElement element = document.RootElement;
 
-        return TryReadCel(element, out string? expression)
+        return ValueOrExpr.TryReadCel(element, out string? expression)
             ? ValueOrExpr.FromExpression(expression!)
             : ValueOrExpr.FromLiteral(element);
     }
@@ -58,24 +90,10 @@ internal sealed class ValueOrExprConverter : JsonConverter<ValueOrExpr>
         value.Literal!.Value.WriteTo(writer);
     }
 
-    private static bool TryReadCel(JsonElement element, out string? expression)
-    {
-        expression = null;
-        if (element.ValueKind != JsonValueKind.Object
-            || !element.TryGetProperty(CelProperty, out JsonElement cel)
-            || cel.ValueKind != JsonValueKind.String)
-        {
-            return false;
-        }
-
-        expression = cel.GetString();
-        return true;
-    }
-
     private static void WriteCel(Utf8JsonWriter writer, string expression)
     {
         writer.WriteStartObject();
-        writer.WriteString(CelProperty, expression);
+        writer.WriteString(ValueOrExpr.CelTag, expression);
         writer.WriteEndObject();
     }
 }

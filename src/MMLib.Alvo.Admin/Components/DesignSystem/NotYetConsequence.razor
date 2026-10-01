@@ -1,0 +1,24 @@
+﻿@*
+    What a warned subsystem does not do, in the framework's own sentence (design §4.1) — the body of a
+    NotYetPanel, and on its own under the head of a panel that also shows what is declared.
+
+    Served verbatim from capabilities and never reworded: a second wording is a third spelling of one
+    truth.
+*@
+<div class="a-notyet-panel__body">
+    @if (Badge is { Length: > 0 })
+    {
+        <span class="a-badge a-badge--warn">@Badge</span>
+    }
+    <span class="a-notyet-panel__consequence">@Consequence</span>
+</div>
+
+@code {
+    /// <summary>The framework's own sentence about what does not happen, shown verbatim.</summary>
+    [Parameter, EditorRequired]
+    public string Consequence { get; set; } = string.Empty;
+
+    /// <summary>A word in the warning tone before it, where the panel's head does not already say "not yet".</summary>
+    [Parameter]
+    public string? Badge { get; set; }
+}

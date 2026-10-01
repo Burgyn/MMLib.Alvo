@@ -1,0 +1,61 @@
+﻿@*
+    Who is signed in, and the way out: the app bar's account menu (spec §3.7).
+
+    The tenant is shown because §2.7 makes it the reason half the Data screen works or does not: an
+    operator with no tenant reads a tenant-scoped entity as a 403 before any rule is consulted, and
+    an operator who cannot see which tenant they hold has no way to understand that refusal.
+
+    Signing out is a form post, not a link. A sign-out reachable by GET is triggered by any page
+    that embeds an image pointing at it.
+*@
+<AuthorizeView Context="auth">
+    <Authorized>
+        <MudMenu Label="@Initial(auth.User.Identity?.Name)" AriaLabel="Account" Variant="Variant.Text" Size="Size.Small"
+                 Ripple="false" DropShadow="false" Dense="true" AnchorOrigin="Origin.BottomRight"
+                 TransformOrigin="Origin.TopRight" Class="a-account-menu" PopoverClass="a-account"
+                 data-testid="account-menu">
+            <div class="a-account__who" role="none">
+                <span class="a-switcher-name">@auth.User.Identity?.Name</span>
+                <span class="a-meta">@Roles(auth) · @Tenant(auth)</span>
+            </div>
+            @* data-enhance="false", for the reason the sign-in form carries: the answer to this post
+               is a cleared cookie and a redirect, and an enhanced post would patch the DOM instead of
+               navigating — leaving the operator on a dashboard they are no longer signed into. *@
+            <form method="post" action="@AlvoAdmin.SignOutEndpoint" data-enhance="false" role="none">
+                <AntiforgeryToken />
+                <MudMenuItem data-alvo-submits="true">Sign out</MudMenuItem>
+            </form>
+        </MudMenu>
+    </Authorized>
+    <NotAuthorized>
+        <AlvoButton Small="true" Href="@AdminPaths.SignIn">Sign in</AlvoButton>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private static string Initial(string? name)
+        => (name is { Length: > 0 } ? name[..1] : "?").ToUpperInvariant();
+
+    private static string Roles(AuthenticationState state)
+    {
+        var roles = state.User.Claims
+            .Where(claim => claim.Type == System.Security.Claims.ClaimTypes.Role)
+            .Select(claim => claim.Value)
+            .ToArray();
+
+        return roles.Length > 0 ? string.Join(", ", roles) : "no role";
+    }
+
+    /// <summary>
+    /// An operator carries one tenant (§2.7). "No tenant" is stated rather than left blank,
+    /// because it is the whole explanation for a 403 the Data screen is about to show.
+    /// </summary>
+    private static string Tenant(AuthenticationState state)
+    {
+        var tenant = state.User.FindFirst(AlvoAdminClaims.Tenant)?.Value;
+        return tenant is { Length: > 0 } ? $"tenant {Shorten(tenant)}" : "no tenant";
+    }
+
+    private static string Shorten(string tenant)
+        => tenant.Length > 13 ? $"{tenant[..4]}…{tenant[^4..]}" : tenant;
+}

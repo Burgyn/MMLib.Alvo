@@ -1,0 +1,409 @@
+﻿@*
+    The schema assistant, as the pane beside the page (spec §3.1): the layout mounts it in its end drawer and opens
+    it from the app bar, so this draws only what is inside: the head, the thread, the proposal and the question.
+
+    It is mounted only when a connection resolves, so a deployment with no AI has no launcher, no
+    badge and no explanation to read — spec §3.3. What it can do is ask and propose; the one control
+    it offers on a proposal opens the existing preview, where the operator applies with the same
+    button they use for their own edits. There is deliberately no apply here.
+*@
+@inject AssistantGateway Assistant
+@inject ManagementGateway Gateway
+@inject AdminSession Session
+@inject NavigationManager Navigation
+@inject AdminInterop Interop
+@inject ISnackbar Snackbar
+@implements IDisposable
+
+<div class="a-assistant" data-testid="assistant-drawer" @onkeydown="OnKeyDownAsync">
+    <SectionHead Title="Ask Alvo">
+        <Subtitle>It reads this project and proposes a descriptor. You apply it, from Preview.</Subtitle>
+        <Actions>
+            <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" aria-label="Close the assistant"
+                        data-testid="assistant-close" OnClick="_ => Pane.Close.InvokeAsync()">
+                <Icon Path="@Icons.Close" />
+            </AlvoButton>
+        </Actions>
+    </SectionHead>
+
+    @* Polite, so a screen reader hears each turn as it lands without being cut off mid-sentence. *@
+    <div class="a-assistant__thread" data-testid="assistant-thread" aria-live="polite" @ref="_thread">
+        @foreach (var turn in _turns)
+        {
+            <div class="a-assistant__turn" data-testid="assistant-turn">
+                <span class="a-assistant__who">@(turn.Role is AssistantRole.Operator ? "You" : "Alvo")</span>
+                <span class="a-assistant__text">@turn.Text</span>
+            </div>
+        }
+
+        @if (_tools.Count > 0)
+        {
+            <div class="a-assistant__tools" data-testid="assistant-tools">
+                @foreach (var tool in _tools)
+                {
+                    <span class="a-badge a-mono">@tool</span>
+                }
+            </div>
+        }
+
+        @* The answer still arriving counts as the turn it becomes. *@
+        @if (_streaming is { Length: > 0 })
+        {
+            <div class="a-assistant__turn" data-testid="assistant-turn">
+                <span class="a-assistant__who">Alvo</span>
+                <span class="a-assistant__text">@_streaming</span>
+            </div>
+        }
+    </div>
+
+    @*
+        Under the thread rather than in it: an alert announces itself, and inside the polite region it would be
+        read twice. Keyed per question, so every failed turn draws a new panel and takes focus again (spec §3.3).
+    *@
+    @RefusalPanel.Of(_failure, "That turn could not be answered")
+
+    @if (_proposal is { } proposal)
+    {
+        <div class="a-assistant__proposal" data-testid="assistant-proposal">
+            <SectionHead Title="A proposed change">
+                <Subtitle>Written against revision @proposal.ExpectedRevision. Nothing has been applied.</Subtitle>
+            </SectionHead>
+
+            @if (proposal.Refusals.Count > 0)
+            {
+                <div class="a-refused" data-testid="assistant-refusals">
+                    <span class="a-refused__reason">Alvo refused this draft:</span>
+                    @foreach (var refusal in proposal.Refusals)
+                    {
+                        <span class="a-refused__reason a-mono">@refusal</span>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="a-row a-row--gap-2">
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Primary" data-testid="assistant-review"
+                                OnClick="_ => Review(proposal)">Review it in Preview</AlvoButton>
+                </div>
+            }
+        </div>
+    }
+
+    @*
+        What the turn did, for the operator who asked it (D46): the calls it made and what each was told — never a word
+        of the conversation. Closed by default, so it costs the thread nothing until somebody opens it.
+    *@
+    @if (_trace is { } trace && !_busy)
+    {
+        <details class="a-disclosure" data-testid="assistant-turn-details">
+            <summary>Turn details</summary>
+            <pre class="a-mono a-assistant__trace" data-testid="assistant-trace">@trace</pre>
+            <AlvoButton Small="true" data-testid="assistant-trace-copy" OnClick="_ => CopyTraceAsync(trace)">Copy JSON</AlvoButton>
+        </details>
+    }
+
+    @*
+        Taking a proposal to Preview replaces the working copy, and the proposal is written against the applied
+        revision, not the copy: a copy with edits in it is asked about first (spec §3.2). Cancel keeps both.
+    *@
+    <AlvoConfirm Open="@(_reviewing is not null)" TestId="assistant-replace-confirm" ConfirmTestId="assistant-replace-run"
+                 CancelTestId="assistant-replace-cancel" Title="@CopyReplacement.Title(_pendingAtAsk)"
+                 Consequence="@CopyReplacement.Consequence("The proposed descriptor")" Verb="Discard and review it"
+                 OnConfirm="ReviewConfirmedAsync" OnCancel="() => _reviewing = null" />
+
+    @*
+        Not disabled while a turn runs: the operator may type the next question. Only Ask is busy, so it cannot
+        be asked twice.
+    *@
+    @* A form, so Ctrl/Cmd+Enter is alvo.js's one chord (data-alvo-chord-submit), as in every other multi-line box. *@
+    <form class="a-assistant__ask" data-alvo-chord-submit novalidate @onsubmit="AskAsync">
+        <Field Label="Your question" For="assistant-message">
+            <ChildContent>
+                <MudTextField @ref="_question" T="string" Variant="Variant.Outlined" Lines="3" Immediate="true"
+                              id="assistant-message" aria-describedby="assistant-message-hint"
+                              Placeholder="Add a nullable note column to work orders"
+                              Value="_message" ValueChanged="text => _message = text ?? string.Empty" />
+            </ChildContent>
+            <Hint>@ChordHint.Of("sends")</Hint>
+        </Field>
+        <div class="a-row a-row--gap-2">
+            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" data-testid="assistant-send" Busy="_busy"
+                        Disabled="@(_message.Trim().Length == 0)">
+                @(_busy ? "Thinking…" : "Ask")
+            </AlvoButton>
+        </div>
+    </form>
+</div>
+
+@code {
+    /* A turn runs for seconds across several tool calls and a streaming answer. Without a token tied to
+       this component, an operator who navigates away leaves an outbound call to somebody else's endpoint
+       running and StateHasChanged firing at a disposed component. */
+    private readonly ComponentLifetime _lifetime = new();
+    private readonly List<AssistantTurn> _turns = [];
+    private readonly List<string> _tools = [];
+    private string _message = string.Empty;
+    private string _streaming = string.Empty;
+    private readonly RefusalState<string> _failure = new();
+    private bool _busy;
+    private bool _wasOpen;
+    private ElementReference _thread;
+    private MudTextField<string>? _question;
+    private AssistantUpdate.Proposal? _proposal;
+
+    /// <summary>The last turn's trace, indented for reading, when the assistant sent one.</summary>
+    private string? _trace;
+
+    private static readonly JsonSerializerOptions _indented = new()
+    {
+        WriteIndented = true,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    /// <summary>The proposal waiting on the question about the copy's unapplied edits, while it is asked.</summary>
+    private AssistantUpdate.Proposal? _reviewing;
+
+    /// <summary>How many changes the copy held when the question was asked, which it names.</summary>
+    private int _pendingAtAsk;
+
+    /// <summary>Whether the pane is open and how it closes, from the layout that owns both.</summary>
+    [CascadingParameter]
+    private AssistantPane Pane { get; set; } = AssistantPane.None;
+
+    /// <summary>The thread as it was last followed: its turns, the answer streamed so far, and the tools it ran.</summary>
+    private (int Turns, int Streamed, int Tools) _followed;
+
+    /// <summary>The pane whose open and close this redraws on; one per layout, cascaded as fixed.</summary>
+    private AssistantPane? _heard;
+
+    /// <summary>
+    /// Hears the pane open and close, which is the only time the layout needs this redrawn. From the after-render this
+    /// already has, not an override of its own, which would be one more member of the package's contract.
+    /// </summary>
+    private void Hear()
+    {
+        if (!ReferenceEquals(_heard, Pane))
+        {
+            if (_heard is not null)
+            {
+                _heard.Changed -= Redraw;
+            }
+
+            _heard = Pane;
+            _heard.Changed += Redraw;
+        }
+    }
+
+    private void Redraw() => _ = InvokeAsync(StateHasChanged);
+
+    /// <summary>
+    /// Moves focus into the question box of a pane that has just been drawn open (spec §3.4; the layout returns it
+    /// on close), then keeps the thread on its newest turn unless the operator scrolled up (spec §3.5), only when the
+    /// thread grew since it last did: a render for anything else asks the browser nothing.
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        Hear();
+        var opened = Pane.Open && !_wasOpen;
+        _wasOpen = Pane.Open;
+        if (opened && _question is not null)
+        {
+            await _question.FocusAsync();
+        }
+
+        var thread = (_turns.Count, _streaming.Length, _tools.Count);
+        if (Pane.Open && (opened || thread != _followed))
+        {
+            _followed = thread;
+            await Interop.FollowNewestAsync(_thread);
+        }
+    }
+
+    /// <summary>
+    /// Escape from anywhere in the pane closes it. Only from inside it: the pane sits beside the page, and an
+    /// Escape pressed in the page belongs to whatever is open there.
+    /// </summary>
+    private Task OnKeyDownAsync(KeyboardEventArgs args)
+        => args.Key == "Escape" ? Pane.Close.InvokeAsync() : Task.CompletedTask;
+
+    /// <summary>Cancels a turn still in flight when the operator leaves, and stops hearing the pane.</summary>
+    public void Dispose()
+    {
+        if (_heard is not null)
+        {
+            _heard.Changed -= Redraw;
+        }
+
+        _lifetime.Dispose();
+    }
+
+    /// <summary>
+    /// Asks one turn, redrawing as the answer arrives.
+    /// </summary>
+    /// <remarks>
+    /// The whole conversation is sent every time: the assistant holds no session, so this screen is the one
+    /// authority on what the conversation was — which is also why a reload starts a new one rather than
+    /// resurrecting a thread nobody can see.
+    /// </remarks>
+    private async Task AskAsync()
+    {
+        var asked = _message.Trim();
+        if (asked.Length == 0 || _busy)
+        {
+            return;
+        }
+
+        Begin(asked);
+
+        try
+        {
+            var request = new AssistantRequest(await ProjectAsync(), asked, [.. _turns]) { IncludeTrace = true };
+            await foreach (var update in Assistant.AskAsync(request, _lifetime.Token))
+            {
+                Apply(update);
+                StateHasChanged();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            /* The operator left. There is nothing to draw and nobody to draw it for. */
+            return;
+        }
+
+        End();
+    }
+
+    /// <summary>Puts the question in the thread and clears what the last turn left behind.</summary>
+    private void Begin(string asked)
+    {
+        _busy = true;
+        _failure.Clear();
+        _proposal = null;
+        _trace = null;
+        _streaming = string.Empty;
+        _tools.Clear();
+        _message = string.Empty;
+        _turns.Add(new AssistantTurn(AssistantRole.Operator, asked));
+    }
+
+    /// <summary>Files the answer as a turn, so the next question carries it.</summary>
+    private void End()
+    {
+        if (_streaming.Length > 0)
+        {
+            _turns.Add(new AssistantTurn(AssistantRole.Assistant, _streaming));
+            _streaming = string.Empty;
+        }
+
+        _busy = false;
+    }
+
+    private void Apply(AssistantUpdate update)
+    {
+        switch (update)
+        {
+            case AssistantUpdate.Text text:
+                _streaming += text.Delta;
+                break;
+            case AssistantUpdate.ToolInvoked tool:
+                _tools.Add(tool.Tool);
+                break;
+            case AssistantUpdate.Proposal proposal:
+                _proposal = proposal;
+                break;
+            case AssistantUpdate.Failed failed:
+                _failure.Show(failed.Reason);
+                break;
+            case AssistantUpdate.TurnTraced traced:
+                _trace = Indented(traced.Json);
+                break;
+        }
+    }
+
+    /// <summary>The trace, indented and with <c>č</c> kept as <c>č</c>; Razor encodes it where it is drawn.</summary>
+    private static string Indented(string json) => System.Text.Json.Nodes.JsonNode.Parse(json)!.ToJsonString(_indented);
+
+    /// <summary>
+    /// Copies the turn's details; a clipboard the browser withholds is said in place, with how to copy by hand — never
+    /// a snackbar alone (Access's pattern).
+    /// </summary>
+    private async Task CopyTraceAsync(string trace)
+    {
+        try
+        {
+            await Interop.CopyAsync(trace);
+            Snackbar.Confirm("Turn details copied");
+        }
+        catch (JSException)
+        {
+            _failure.Show("The browser did not let this page use the clipboard. Select the turn details above and copy them by hand.",
+                title: "The turn details could not be copied");
+        }
+    }
+
+    /// <summary>
+    /// Puts the proposal in the working copy and opens the diff — after asking, when the copy holds unapplied edits
+    /// the proposal would replace (<see cref="CopyReplacement"/>).
+    /// </summary>
+    /// <remarks>
+    /// <b>This is the whole path from a draft to the database, and it goes through the operator.</b> The
+    /// drawer writes a candidate and navigates; Preview shows the diff, runs the dry run, and applies with
+    /// the same button and the same confirmation an operator's own edit gets.
+    /// </remarks>
+    private async Task Review(AssistantUpdate.Proposal proposal)
+    {
+        var copy = await Session.CopyAsync(_lifetime.Token);
+        if (copy.IsDirty)
+        {
+            _pendingAtAsk = copy.PendingCount;
+            _reviewing = proposal;
+            return;
+        }
+
+        TakeToPreview(copy, proposal);
+    }
+
+    /// <summary>The operator chose to lose the staged edits for the proposal.</summary>
+    private async Task ReviewConfirmedAsync()
+    {
+        if (_reviewing is not { } proposal)
+        {
+            return;
+        }
+
+        _reviewing = null;
+        TakeToPreview(await Session.CopyAsync(_lifetime.Token), proposal);
+    }
+
+    /// <summary>Takes the proposal to Preview, or says in place why the copy would not hold it (never a snackbar).</summary>
+    private void TakeToPreview(WorkingCopy copy, AssistantUpdate.Proposal proposal)
+    {
+        if (ProposalTake.Into(copy, proposal.DescriptorJson, ReasonFor()) is { } refused)
+        {
+            _failure.Show(refused, title: ProposalTake.RefusedTitle);
+            return;
+        }
+
+        Navigation.NavigateTo(AdminPaths.Changes);
+    }
+
+    /// <summary>
+    /// The reason an apply carries when it came from the assistant.
+    /// </summary>
+    /// <remarks>
+    /// The operator's own request rather than the agent's summary, and prefixed rather than parsed: the
+    /// history renders it verbatim, so what a later reader sees is what somebody actually asked for.
+    /// </remarks>
+    private string ReasonFor()
+    {
+        var asked = _turns.LastOrDefault(turn => turn.Role is AssistantRole.Operator)?.Text ?? string.Empty;
+
+        return "assistant: " + (asked.Length <= ReasonLimit ? asked : asked[..ReasonLimit]);
+    }
+
+    /// <summary>How much of the request the reason carries.</summary>
+    private const int ReasonLimit = 200;
+
+    private async Task<string> ProjectAsync() =>
+        (await Gateway.ProjectsAsync(_lifetime.Token)).FirstOrDefault()?.Name ?? string.Empty;
+}

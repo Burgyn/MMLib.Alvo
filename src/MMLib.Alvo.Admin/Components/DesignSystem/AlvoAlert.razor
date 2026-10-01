@@ -1,0 +1,77 @@
+﻿@*
+    A persistent message in place: state, or an error with the fix as its action (spec §3.3).
+
+    MudAlert renders no role (study §4.1), so the role is on this frame, which is also what takes focus after a
+    failed submit. Focus is sent to the frame rather than into the alert, so a screen reader reads the whole message
+    from its first word.
+*@
+<div class="a-alert" role="@AlertLook.RoleOf(Tone)" tabindex="-1" data-testid="@TestId" @ref="_frame">
+    <MudAlert Severity="@AlertLook.SeverityOf(Tone)" Variant="Variant.Outlined" Dense="true" Elevation="0" Class="a-alert__body">
+        @if (Title is { Length: > 0 })
+        {
+            <div class="a-alert__title" data-testid="@TitleTestId">@Title</div>
+        }
+        @ChildContent
+        @if (Actions is not null)
+        {
+            <div class="a-row a-row--gap-2 a-alert__actions">@Actions</div>
+        }
+    </MudAlert>
+</div>
+
+@code {
+    private ElementReference _frame;
+
+    /// <summary>What kind of message it is.</summary>
+    public enum AlertTone
+    {
+        /// <summary>A fact about the state of things.</summary>
+        Info,
+
+        /// <summary>Something that worked and stays worth reading, such as "Applied as revision 12".</summary>
+        Success,
+
+        /// <summary>Something that will go wrong if nothing changes.</summary>
+        Warning,
+
+        /// <summary>A refusal or a failure.</summary>
+        Error,
+    }
+
+    /// <summary>What kind of message it is.</summary>
+    [Parameter]
+    public AlertTone Tone { get; set; } = AlertTone.Info;
+
+    /// <summary>The headline.</summary>
+    [Parameter]
+    public string? Title { get; set; }
+
+    /// <summary>Whether the message takes focus when it appears, which a failed submit asks for (spec §3.3).</summary>
+    [Parameter]
+    public bool TakeFocus { get; set; }
+
+    /// <summary>The frame's test id.</summary>
+    [Parameter]
+    public string? TestId { get; set; }
+
+    /// <summary>The headline's test id.</summary>
+    [Parameter]
+    public string? TitleTestId { get; set; }
+
+    /// <summary>The message.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>What the operator can do about it: the structured fix, a retry, a way onward.</summary>
+    [Parameter]
+    public RenderFragment? Actions { get; set; }
+
+    /// <inheritdoc />
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && TakeFocus)
+        {
+            await _frame.FocusAsync();
+        }
+    }
+}

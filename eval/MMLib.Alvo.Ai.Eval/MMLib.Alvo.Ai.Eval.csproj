@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The schema assistant against a real model: the real standalone host over a temporary SQLite database seeded
+    from examples/bike-workshop, the real AlvoAssistant, and a recording chat client under it. Not a test project
+    and in no ring — it makes network calls to a model provider and costs tokens, so it is a measurement like
+    scripts/test-load's calibration, never a gate. It reaches the assistant's internal constructor through the
+    grant in MMLib.Alvo.Ai's AssemblyInfo (the chat-client seam is how it counts tool rounds and tokens).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>MMLib.Alvo.Ai.Eval</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj" />
+  </ItemGroup>
+
+</Project>

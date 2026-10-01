@@ -4,10 +4,12 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
+using MMLib.Alvo.Admin;
 using MMLib.Alvo.Api;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Host.Internal;
 using MMLib.Alvo.Identity;
+using System.Reflection;
 
 namespace MMLib.Alvo.Host;
 
@@ -94,6 +96,33 @@ public static class AlvoHost
         {
             builder.Services.Configure<ForwardedHeadersOptions>(ConfigureForwardedHeaders);
         }
+
+        /* The dashboard, and the cookie scheme it signs people in with. Both are hosting
+           decisions: MMLib.Alvo.Admin adds no authentication of its own (an embedded host already
+           has one), and the standalone image is the deployment that needs one. */
+        builder.Services.AddAlvoIdentityCookieSignIn(AlvoAdmin.SignInPath);
+        AlvoAdminCredentialLimit.AddAlvoAdminCredentialLimit(builder.Services, builder.Configuration);
+        builder.Services.AddAlvoAdmin(admin =>
+        {
+            builder.Configuration.GetSection(AlvoAdmin.ConfigurationSection).Bind(admin);
+
+            /* The docs routes are the host's to state, not configuration's, and they are assigned after the
+               bind for that reason: this is the one place that knows both whether the documentation is
+               mapped and where. Written unconditionally — null when it is off — so a value left in
+               configuration cannot outlive the switch and point the dashboard at a 404. */
+            admin.DocsPath = options.Docs.Enabled ? ScalarPath : null;
+            admin.OpenApiPath = options.Docs.Enabled ? OpenApiDocumentPath : null;
+        });
+
+        /* The schema assistant. Registering it does not configure it: an image with no AI connection
+           has an assistant that answers "not configured", and the dashboard renders no launcher at
+           all — spec §3.3. */
+        builder.Services.AddAlvoAi();
+
+        /* The port that turns a signed-in operator into the caller Alvo authorizes. The dashboard
+           declares it and cannot fill it — it references neither the identity package nor the core
+           — so the host, which references both, is where the two halves meet. */
+        builder.Services.AddScoped<IAlvoAdminCallerResolver, AlvoAdminCallerResolver>();
 
         builder.Services.AddAlvoProblemDetails();
 
@@ -277,7 +306,25 @@ public static class AlvoHost
             app.UsePathBase(pathBase);
         }
 
+        /* Order is the whole of this block's correctness.
+
+           Static files before authentication: the design system is a static web asset of
+           MMLib.Alvo.Admin, and a stylesheet behind a sign-in wall leaves the sign-in screen
+           unstyled. Authentication before antiforgery, and antiforgery before any endpoint,
+           because Blazor's form handling requires the token to have been validated by the time a
+           component renders.
+
+           No rate-limiter middleware: the two credential posts charge their limit themselves, after the
+           antiforgery check, so a cross-site page cannot spend a victim's budget (AlvoAdminCredentialLimit,
+           design §8.7 as amended). */
+        MapAssets(app);
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.UseAntiforgery();
+
         app.MapAlvo();
+        app.MapAlvoAdminSignIn();
+        app.MapAlvoAdmin();
 
         if (options.Docs.Enabled)
         {
@@ -285,6 +332,42 @@ public static class AlvoHost
         }
 
         return app;
+    }
+
+    /// <summary>
+    /// Serves the dashboard's design system, whichever way this process was started.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>MapStaticAssets</c> is the right mechanism for the shipped container: it serves from a
+    /// manifest the build produces, with fingerprinted URLs, precompressed bodies and immutable
+    /// caching. What it does <em>not</em> do is degrade — it throws when the manifest is absent,
+    /// and the manifest is named after the <b>entry assembly</b>.
+    /// </para>
+    /// <para>
+    /// <b>So an in-process test host has no manifest and never can have one</b>: its entry
+    /// assembly is the test assembly, which has no static web assets of its own. The fallback is
+    /// <c>UseStaticFiles</c>, which resolves the same assets through the static-web-asset file
+    /// provider without the manifest. The branch is on the manifest's presence rather than on an
+    /// environment name, because "is this a test" is not a question the shipped host should be
+    /// asking.
+    /// </para>
+    /// </remarks>
+    /// <param name="app">The application to map into.</param>
+    private static void MapAssets(WebApplication app)
+    {
+        var manifest = Path.Combine(
+            AppContext.BaseDirectory,
+            $"{Assembly.GetEntryAssembly()?.GetName().Name}.staticwebassets.endpoints.json");
+
+        if (File.Exists(manifest))
+        {
+            app.MapStaticAssets();
+        }
+        else
+        {
+            app.UseStaticFiles();
+        }
     }
 
     /// <summary>

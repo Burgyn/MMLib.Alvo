@@ -1,0 +1,543 @@
+#!/usr/bin/env bash
+# The admin dashboard's demo: the real MMLib.Alvo.Host over a fresh SQLite file, driven by the
+# examples/bike-workshop descriptor and seeded with a realistic workshop's data through the public
+# REST API — then left running in the foreground for a UX review or a local demo.
+#
+# IN NO RING, like scripts/test-admin-e2e: it binds a port and keeps a process alive, and it is a
+# demo rather than a gate. Nothing in CI runs it.
+#
+# Usage:
+#   scripts/demo-admin                 build, start on :5080 over a new database, seed, stay up
+#   scripts/demo-admin --port 5090     another port
+#   scripts/demo-admin --keep          reuse the previous run's database (skips seeding if it has data);
+#                                      refused when that database's bootstrap.pwd is gone, since the
+#                                      password that signs in to it is then unknown
+#   scripts/demo-admin --no-build      skip `dotnet build` (the previous build is used as it stands)
+#   scripts/demo-admin --no-ai         start without the schema assistant, and ask nothing about it
+#   scripts/demo-admin --ai-setup      ask for the assistant's connection again, ignoring what was remembered
+#
+# The schema assistant needs a model. Each part of the connection is taken from the first place that has
+# it — ALVO_DEMO_AI_*, the host's own Alvo__Ai__*, then what an earlier run was told (ai.env in the demo
+# directory) — and only what none of them has is asked for, with a default Enter accepts. The key comes
+# from ALVO_DEMO_AI_KEY, OPENAI_API_KEY (api.openai.com) or AZURE_OPENAI_API_KEY (azure-openai), or from
+# ai.key if you let an earlier run remember it (mode 600, delete it to forget) — reused only for the endpoint it
+# was remembered for (ai.key.endpoint), and asked again for any other; it is read without echo, never printed in
+# full (the summary shows its prefix and last four characters), and reaches the host through its secret store. With nothing missing nothing is asked;
+# without a terminal to ask on (CI, a pipe) an incomplete connection starts the demo without the assistant.
+#
+# Environment:
+#   ALVO_DEMO_AI_KIND      openai-compatible (default) or azure-openai
+#   ALVO_DEMO_AI_ENDPOINT  the base address (default https://api.openai.com/v1; e.g. http://localhost:11434/v1
+#                          for Ollama, https://<resource>.openai.azure.com for Azure OpenAI)
+#   ALVO_DEMO_AI_MODEL     the model, or the Azure deployment name (default gpt-4.1-mini)
+#   ALVO_DEMO_AI_KEY       the API key (none for a local endpoint that needs none)
+#   ALVO_DEMO_DIR        where the database, password file and logs live
+#                        (default: ${TMPDIR:-/tmp}/alvo-demo-admin; its database is recreated unless --keep)
+#   ALVO_DEMO_ARTIFACTS  the build's --artifacts-path (default: <repo>/artifacts/demo-admin, gitignored).
+#                        Its own path so a demo never shares bin/ or obj/ with a build or a test run
+#                        going on in the same tree.
+#
+# Seeding goes through the Data API and the Management API exactly as an agent would, with a dev API
+# key minted for this run (Development only, never committed). The key is printed so the same
+# credential can drive /scalar while the demo is up.
+#
+# The rental after-hook posts to a webhook receiver on 127.0.0.1:5081. If python3 is available and
+# the port is free, a tiny receiver is started and every delivery is appended to webhooks.log in the
+# demo directory; otherwise deliveries fail and are retried, which the dashboard shows as such.
+#
+# Requires: dotnet (the SDK in global.json), curl, jq.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+example="$root/examples/bike-workshop"
+descriptor="$example/bike-workshop.alvo.json"
+seed="$example/seed/bike-workshop.seed.json"
+project="$root/src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj"
+artifacts="${ALVO_DEMO_ARTIFACTS:-$root/artifacts/demo-admin}"
+
+port=5080
+keep=0
+build=1
+ai=1
+ai_setup=0
+webhook_port=5081
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --port) port="${2:?--port needs a value}"; shift 2 ;;
+    --port=*) port="${1#--port=}"; shift ;;
+    --keep) keep=1; shift ;;
+    --no-build) build=0; shift ;;
+    --no-ai) ai=0; shift ;;
+    --ai-setup) ai_setup=1; shift ;;
+    -h|--help) sed -n '2,/^# Requires:/p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "[demo-admin] unknown argument: $1 (try --help)" >&2; exit 2 ;;
+  esac
+done
+
+for tool in dotnet curl jq; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "[demo-admin] '$tool' is required but not on PATH" >&2; exit 1; }
+done
+
+say() { printf '[demo-admin] %s\n' "$*"; }
+
+port_in_use() {
+  # bash's /dev/tcp is the portable probe: lsof is absent from minimal Linux images, ss from macOS.
+  (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+}
+
+if port_in_use "$port"; then
+  echo "[demo-admin] port $port is already in use — pass --port <free port>" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------------------------------
+# The demo directory: database, bootstrap password, logs.
+# ---------------------------------------------------------------------------------------------------
+tmp="${TMPDIR:-/tmp}"
+dir="${ALVO_DEMO_DIR:-${tmp%/}/alvo-demo-admin}"
+mkdir -p "$dir"
+if [ "$keep" -eq 0 ]; then
+  rm -f "$dir/alvo.db" "$dir/alvo.db-wal" "$dir/alvo.db-shm" "$dir/host.log" "$dir/webhooks.log"
+fi
+
+# od rather than `tr </dev/urandom | head`: under pipefail, tr's SIGPIPE fails the whole assignment.
+random_hex() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
+
+admin_email="admin@alvo.demo"
+password_file="$dir/bootstrap.pwd"
+if [ "$keep" -eq 1 ] && [ -f "$dir/alvo.db" ] && [ ! -s "$password_file" ]; then
+  # The bootstrap administrator exists in the kept database with whatever password it was created
+  # from, and that file is gone. A new one would be printed as the sign-in and would not sign in.
+  echo "[demo-admin] --keep: $dir/alvo.db exists but $password_file is missing or empty," >&2
+  echo "[demo-admin] so the bootstrap password of the kept database's $admin_email is unknown." >&2
+  echo "[demo-admin] Rerun without --keep to start over with a new database and a password that signs in." >&2
+  exit 1
+fi
+if [ ! -s "$password_file" ]; then
+  # Kept across runs, because the bootstrap administrator is created from it only on a new database:
+  # a password regenerated under --keep would no longer be the one that signs in.
+  printf 'Velo-%s-Demo!' "$(random_hex 5)" >"$password_file"
+fi
+admin_password="$(cat "$password_file")"
+
+key_id="demo-seed"
+key_secret="$(random_hex 16)"
+key_user="5eed0000-0000-4000-8000-000000000001"
+api_key="$key_id.$key_secret"
+
+base="http://127.0.0.1:$port"
+host_log="$dir/host.log"
+
+# ---------------------------------------------------------------------------------------------------
+# The schema assistant's model: from ALVO_DEMO_AI_*, else asked for, else off.
+# ---------------------------------------------------------------------------------------------------
+ai_env="$dir/ai.env"
+ai_secret_name="demo_ai_key"
+ai_key_file="$dir/ai.key"
+ai_key_endpoint_file="$dir/ai.key.endpoint"
+ai_key_source=""
+
+# Reads one line from the terminal, offering a default that Enter accepts. /dev/tty rather than stdin,
+# so the answer comes from the person even when the script's input is redirected.
+ask() {
+  local label="$1" default="$2" answer
+  if [ -n "$default" ]; then printf '[demo-admin] %s [%s]: ' "$label" "$default" >/dev/tty
+  else printf '[demo-admin] %s: ' "$label" >/dev/tty; fi
+  IFS= read -r answer </dev/tty || answer=""
+  printf '%s' "${answer:-$default}"
+}
+
+ask_secret() {
+  local answer
+  printf '[demo-admin] %s (input hidden, Enter for none): ' "$1" >/dev/tty
+  IFS= read -rs answer </dev/tty || answer=""
+  printf '\n' >/dev/tty
+  printf '%s' "$answer"
+}
+
+saved() { if [ -f "$ai_env" ]; then sed -n "s/^$1=//p" "$ai_env" | head -n 1; fi; }
+
+# The key the connection would send, from the first place that has one: ALVO_DEMO_AI_KEY, the
+# provider's usual variable, then the key this demo was told to remember (ai.key, readable by you only) —
+# only when it was remembered for this same endpoint, so a key never goes to a host it was not typed for.
+known_key() {
+  ai_key="" ai_key_source=""
+  if [ -n "${ALVO_DEMO_AI_KEY:-}" ]; then ai_key="$ALVO_DEMO_AI_KEY" ai_key_source=ALVO_DEMO_AI_KEY; return; fi
+  case "$ai_kind" in
+    azure-openai) if [ -n "${AZURE_OPENAI_API_KEY:-}" ]; then ai_key="$AZURE_OPENAI_API_KEY" ai_key_source=AZURE_OPENAI_API_KEY; return; fi ;;
+    *) case "$ai_endpoint" in
+         https://api.openai.com/*) if [ -n "${OPENAI_API_KEY:-}" ]; then ai_key="$OPENAI_API_KEY" ai_key_source=OPENAI_API_KEY; return; fi ;;
+       esac ;;
+  esac
+  if [ -s "$ai_key_file" ] && [ -s "$ai_key_endpoint_file" ] && [ "$(cat "$ai_key_endpoint_file")" = "$ai_endpoint" ]; then
+    ai_key="$(tr -d '[:space:]' <"$ai_key_file")" ai_key_source="$ai_key_file"
+  fi
+}
+
+# A key as the summary shows it: its provider prefix up to the first '-' after a known one (sk-proj-, sk-ant-, sk-)
+# and its last four characters — and nothing of a key of twelve characters or fewer, which that would give away.
+masked_key() {
+  local key="$1" prefix=""
+  if [ "${#key}" -le 12 ]; then printf '(set, %s characters)' "${#key}"; return; fi
+  case "$key" in
+    sk-proj-*) prefix="sk-proj-" ;;
+    sk-ant-*) prefix="sk-ant-" ;;
+    sk-*) prefix="sk-" ;;
+  esac
+  printf '%s…%s' "$prefix" "${key: -4}"
+}
+
+# A key is needed when the provider always refuses without one; a local endpoint may run keyless.
+key_needed() {
+  [ "$ai_kind" = "azure-openai" ] && return 0
+  case "$ai_endpoint" in https://api.openai.com/*) return 0 ;; esac
+  [ "$(saved keyless)" != "1" ]
+}
+
+# OpenAI's own keys start with sk-; one that does not was mistyped or mis-pasted (a stray first
+# character is the usual case), and the provider would refuse it on the first turn.
+plausible_key() {
+  case "$ai_endpoint" in https://api.openai.com/*) case "$1" in sk-*) ;; *) return 1 ;; esac ;; esac
+  return 0
+}
+
+configure_ai() {
+  # Each value from the first place that has it: ALVO_DEMO_AI_*, the host's own Alvo__Ai__*, then
+  # what the previous run was told. Only what none of them has is asked for.
+  ai_kind="${ALVO_DEMO_AI_KIND:-${Alvo__Ai__Kind:-$( [ "$ai_setup" -eq 1 ] || saved kind )}}"
+  ai_endpoint="${ALVO_DEMO_AI_ENDPOINT:-${Alvo__Ai__Endpoint:-$( [ "$ai_setup" -eq 1 ] || saved endpoint )}}"
+  ai_model="${ALVO_DEMO_AI_MODEL:-${Alvo__Ai__Model:-$( [ "$ai_setup" -eq 1 ] || saved model )}}"
+  ai_key=""
+
+  if [ "$ai_setup" -eq 0 ] && [ "$(saved enabled)" = "0" ] && [ -z "${ALVO_DEMO_AI_KIND:-}${ALVO_DEMO_AI_ENDPOINT:-}${ALVO_DEMO_AI_MODEL:-}" ]; then
+    say "the schema assistant is off, as chosen before (--ai-setup asks again)"
+    ai=0
+    return
+  fi
+
+  if [ -n "$ai_kind" ] && [ -n "$ai_endpoint" ] && [ -n "$ai_model" ]; then
+    known_key
+    if [ -n "$ai_key" ] || ! key_needed; then return; fi
+  fi
+
+  if ! (: </dev/tty) 2>/dev/null; then
+    say "no terminal to ask on and the AI connection is incomplete — starting without the schema assistant"
+    ai=0
+    return
+  fi
+
+  local asked_anything=0
+  if [ -z "$ai_kind" ] && [ -z "$ai_endpoint" ] && [ -z "$ai_model" ]; then
+    say "the schema assistant needs a model (--no-ai skips this; Enter accepts the [default])"
+    case "$(ask 'Use the schema assistant? (y/n)' y)" in
+      y|Y|yes|a|A|ano|áno) ;;
+      *) ai=0; printf 'enabled=0\n' >"$ai_env"; say "starting without the schema assistant"; return ;;
+    esac
+    asked_anything=1
+  fi
+
+  while [ -z "$ai_kind" ]; do
+    ai_kind="$(ask 'Kind: openai-compatible or azure-openai' openai-compatible)"
+    case "$ai_kind" in
+      openai-compatible|azure-openai) ;;
+      *) say "'$ai_kind' is neither — type openai-compatible or azure-openai"; ai_kind="" ;;
+    esac
+  done
+  local endpoint_default="https://api.openai.com/v1"
+  if [ "$ai_kind" = "azure-openai" ]; then endpoint_default=""; fi
+  while [ -z "$ai_endpoint" ]; do
+    ai_endpoint="$(ask 'Endpoint' "$endpoint_default")"
+    case "$ai_endpoint" in
+      http://*|https://*) ;;
+      *) say "the endpoint must start with http:// or https://"; ai_endpoint="" ;;
+    esac
+  done
+  local model_label='Model'
+  if [ "$ai_kind" = "azure-openai" ]; then model_label='Deployment name'; fi
+  while [ -z "$ai_model" ]; do
+    ai_model="$(ask "$model_label" gpt-4.1-mini)"
+  done
+
+  local keyless=0
+  known_key
+  while [ -z "$ai_key" ]; do
+    ai_key="$(ask_secret 'API key')"
+    # A pasted key carries stray whitespace often enough to strip it; its value is never echoed.
+    ai_key="$(printf '%s' "$ai_key" | tr -d '[:space:]')"
+    if [ -z "$ai_key" ]; then
+      case "$ai_kind:$ai_endpoint" in
+        azure-openai:*|*:https://api.openai.com/*)
+          say "$ai_endpoint needs a key — starting without the schema assistant"; ai=0; return ;;
+      esac
+      keyless=1
+      break
+    fi
+    ai_key_source="typed in"
+    if ! plausible_key "$ai_key"; then
+      say "an OpenAI key starts with 'sk-' — this one does not (${#ai_key} characters); enter it again"
+      ai_key=""
+      continue
+    fi
+    case "$(ask "Remember the key in $ai_key_file, readable by you only? (y/n)" y)" in
+      y|Y|yes|a|A|ano|áno)
+        (umask 077; printf '%s' "$ai_key" >"$ai_key_file"; printf '%s' "$ai_endpoint" >"$ai_key_endpoint_file")
+        say "key remembered for $ai_endpoint — delete $ai_key_file to forget it" ;;
+      *) rm -f "$ai_key_file" "$ai_key_endpoint_file" ;;
+    esac
+  done
+
+  printf 'enabled=1\nkind=%s\nendpoint=%s\nmodel=%s\nkeyless=%s\n' "$ai_kind" "$ai_endpoint" "$ai_model" "$keyless" >"$ai_env"
+}
+
+if [ "$ai" -eq 1 ]; then configure_ai; fi
+
+# ---------------------------------------------------------------------------------------------------
+# Build.
+# ---------------------------------------------------------------------------------------------------
+if [ "$build" -eq 1 ]; then
+  say "dotnet build (artifacts: $artifacts)"
+  # -nodeReuse:false, so no idle MSBuild node outlives the demo.
+  HUSKY=0 dotnet build "$project" -c Debug --nologo -v q -nodeReuse:false --artifacts-path "$artifacts"
+fi
+host_dir="$artifacts/bin/MMLib.Alvo.Host/debug"
+if [ ! -f "$host_dir/MMLib.Alvo.Host.dll" ]; then
+  echo "[demo-admin] no build at $host_dir — run without --no-build" >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------------------------------
+# Processes, and the trap that stops them — whichever way this script ends.
+# ---------------------------------------------------------------------------------------------------
+host_pid=""
+receiver_pid=""
+stop() {
+  trap - EXIT INT TERM
+  # Each kill is followed by a wait, which reaps the job and keeps bash's "Terminated" notice quiet.
+  if [ -n "$receiver_pid" ]; then kill "$receiver_pid" 2>/dev/null || true; wait "$receiver_pid" 2>/dev/null || true; fi
+  if [ -n "$host_pid" ] && kill -0 "$host_pid" 2>/dev/null; then
+    say "stopping the host (pid $host_pid)"
+    kill "$host_pid" 2>/dev/null || true
+    # Graceful first: the host flushes the outbox and closes SQLite. Then no second chance.
+    for _ in $(seq 1 20); do kill -0 "$host_pid" 2>/dev/null || break; sleep 0.25; done
+    kill -9 "$host_pid" 2>/dev/null || true
+    wait "$host_pid" 2>/dev/null || true
+  fi
+}
+trap stop EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+start_receiver() {
+  if ! command -v python3 >/dev/null 2>&1; then
+    say "python3 not found — no webhook receiver; rental deliveries will be retried and fail"
+    return
+  fi
+  if port_in_use "$webhook_port"; then
+    say "port $webhook_port is in use — no webhook receiver started"
+    return
+  fi
+  cat >"$dir/webhook-receiver.py" <<'PY'
+import sys, datetime
+from http.server import BaseHTTPRequestHandler, HTTPServer
+port, log = int(sys.argv[1]), sys.argv[2]
+class Receiver(BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode("utf-8", "replace")
+        with open(log, "a", encoding="utf-8") as out:
+            out.write(f"{datetime.datetime.now().isoformat(timespec='seconds')} POST {self.path} {body}\n")
+        self.send_response(204)
+        self.end_headers()
+    def log_message(self, *args):
+        pass
+HTTPServer(("127.0.0.1", port), Receiver).serve_forever()
+PY
+  python3 "$dir/webhook-receiver.py" "$webhook_port" "$dir/webhooks.log" >/dev/null 2>&1 &
+  receiver_pid=$!
+  say "webhook receiver on 127.0.0.1:$webhook_port → $dir/webhooks.log"
+}
+
+start_host() {
+  say "starting the host on $base (log: $host_log)"
+  (
+    # The content root is the build output, where the static-web-asset manifest the dashboard's
+    # design system is served from lives.
+    cd "$host_dir"
+    export Alvo__Auth__DevKeys__0__KeyId="$key_id"
+    export Alvo__Auth__DevKeys__0__Secret="$key_secret"
+    export Alvo__Auth__DevKeys__0__User="$key_user"
+    export Alvo__Auth__DevKeys__0__Roles__0=authenticated
+    export Alvo__Auth__DevKeys__0__Roles__1=admin
+    export Alvo__Auth__DevKeys__0__Scopes__0='*:read'
+    export Alvo__Auth__DevKeys__0__Scopes__1='*:write'
+    if [ "$ai" -eq 1 ]; then
+      export Alvo__Ai__Kind="$ai_kind"
+      export Alvo__Ai__Endpoint="$ai_endpoint"
+      export Alvo__Ai__Model="$ai_model"
+      if [ -n "$ai_key" ]; then
+        # Through the secret store, as a deployment would: the connection names the secret, the
+        # environment of this one process holds its value.
+        export "Alvo__Secrets__Values__$ai_secret_name=$ai_key"
+        export Alvo__Ai__ApiKeySecretRef="$ai_secret_name"
+      fi
+    fi
+    exec dotnet MMLib.Alvo.Host.dll \
+      --environment Development \
+      --Logging:LogLevel:Microsoft.EntityFrameworkCore=Warning \
+      --Logging:LogLevel:System.Net.Http.HttpClient=Warning \
+      --urls "$base" \
+      --Alvo:DescriptorPath="$boot_descriptor" \
+      --Alvo:Database:Provider=Sqlite \
+      "--Alvo:Database:SqliteConnectionString=Data Source=$dir/alvo.db" \
+      --Alvo:Admin:BootstrapEmail="$admin_email" \
+      --Alvo:Admin:BootstrapPasswordFile="$password_file"
+  ) >>"$host_log" 2>&1 &
+  host_pid=$!
+}
+
+wait_until_ready() {
+  # /health/ready rather than /health/live: readiness is 503 until the descriptor has applied.
+  for _ in $(seq 1 120); do
+    if ! kill -0 "$host_pid" 2>/dev/null; then
+      echo "[demo-admin] the host exited during start-up — last lines of $host_log:" >&2
+      tail -n 40 "$host_log" >&2
+      exit 1
+    fi
+    if [ "$(curl -s -o /dev/null -w '%{http_code}' "$base/health/ready" || true)" = "200" ]; then
+      return
+    fi
+    sleep 0.5
+  done
+  echo "[demo-admin] the host did not become ready within 60 s — see $host_log" >&2
+  exit 1
+}
+
+# ---------------------------------------------------------------------------------------------------
+# Seeding, through the public API.
+# ---------------------------------------------------------------------------------------------------
+
+# Answers the body, or fails the script naming the request and Alvo's problem document.
+api() {
+  local method="$1" path="$2" out status
+  local -a data=()
+  if [ $# -ge 3 ]; then data=(--data-binary "$3"); fi
+  out="$dir/.response"
+  status="$(curl -sS -o "$out" -w '%{http_code}' -X "$method" "$base$path" \
+    -H "X-Alvo-Api-Key: $api_key" -H 'Content-Type: application/json' \
+    ${data[@]+"${data[@]}"})"
+  if [ "${status:0:1}" != "2" ]; then
+    echo "[demo-admin] $method $path answered $status:" >&2
+    jq . "$out" >&2 2>/dev/null || cat "$out" >&2
+    rm -f "$out"
+    exit 1
+  fi
+  cat "$out"
+  rm -f "$out"
+}
+
+# Replaces the seed file's placeholders — see its $comment — and strips '$key'.
+resolve='
+  def day($offset): (now + ($offset | tonumber) * 86400) | strftime("%Y-%m-%d");
+  walk(
+    if type == "string" then
+      if startswith("@ref:") then ($ids[.[5:]] // error("unknown @ref " + .))
+      elif startswith("@user:") then ($users[.[6:]] // error("unknown @user " + .))
+      elif test("^@date:-?[0-9]+$") then day(.[6:])
+      elif test("^@datetime:-?[0-9]+T[0-9]{2}:[0-9]{2}$") then
+        (capture("^@datetime:(?<d>-?[0-9]+)T(?<t>.+)$") as $m | day($m.d) + "T" + $m.t + ":00Z")
+      else . end
+    elif type == "object" then del(.["$key"])
+    else . end)'
+
+seed_data() {
+  local project_name users="{}" ids="{}" count i entity keys rows answer
+  project_name="$(jq -r .name "$descriptor")"
+
+  count="$(jq '.users | length' "$seed")"
+  for i in $(seq 0 $((count - 1))); do
+    local user email id
+    user="$(jq -c ".users[$i]" "$seed")"
+    email="$(jq -r .email <<<"$user")"
+    id="$(api POST "/management/projects/$project_name/users" "$user" | jq -r .id)"
+    users="$(jq -c --arg e "$email" --arg id "$id" '. + {($e): $id}' <<<"$users")"
+  done
+  say "users: $count staff accounts"
+
+  count="$(jq '.entities | length' "$seed")"
+  for i in $(seq 0 $((count - 1))); do
+    entity="$(jq -r ".entities[$i].entity" "$seed")"
+    keys="$(jq -c ".entities[$i].rows | map(.[\"\$key\"])" "$seed")"
+    rows="$(jq -c --argjson ids "$ids" --argjson users "$users" ".entities[$i].rows | $resolve" "$seed")"
+    # One batch per entity: one transaction, so a bad row leaves nothing half-seeded.
+    answer="$(api POST "/api/$entity/batch" "{\"rows\":$rows}")"
+    ids="$(jq -c --argjson keys "$keys" --argjson ids "$ids" \
+      '[$keys, (.items | map(.id))] | transpose
+       | map(select(.[0] != null) | {(.[0]): .[1]}) | add // {} | $ids + .' <<<"$answer")"
+    say "$entity: $(jq '.items | length' <<<"$answer") rows"
+  done
+}
+
+already_seeded() {
+  [ "$(api GET "/api/customers?limit=1" | jq '.items | length')" -gt 0 ]
+}
+
+# ---------------------------------------------------------------------------------------------------
+# A kept database may be ahead of the example file: every apply from the dashboard or the assistant writes a
+# new revision there. Booting the file's older descriptor over it is refused (the host stands down as not ready,
+# since the way back would drop what the newer revision added), so under --keep the host boots the database's
+# own latest descriptor instead — the demo resumes where it was left, and the example file is not touched.
+boot_descriptor="$descriptor"
+if [ "$keep" -eq 1 ] && [ -f "$dir/alvo.db" ]; then
+  if command -v sqlite3 >/dev/null 2>&1; then
+    latest="$dir/descriptor.latest.alvo.json"
+    # The table is keyed (project, revision): read this project's rows only. The name is a SQL literal, so a quote
+    # in it is doubled. -init /dev/null keeps a ~/.sqliterc (".headers on", ".mode box") out of the export.
+    project="$(jq -r '.name' "$descriptor")"
+    quote="'"
+    project_sql="${project//$quote/$quote$quote}"
+    demo_sql() { sqlite3 -batch -init /dev/null -noheader -list "$dir/alvo.db" "$1" 2>/dev/null; }
+    if demo_sql "select descriptor_json from alvo_descriptor_versions where project = '$project_sql' order by revision desc limit 1" \
+        >"$latest" && [ -s "$latest" ]; then
+      if ! jq -e . "$latest" >/dev/null 2>&1; then
+        say "--keep: the database's latest revision did not parse as JSON, so the host boots $(basename "$descriptor"); if the database moved on, it will stand down"
+      elif [ "$(jq -S . "$latest")" != "$(jq -S . "$descriptor")" ]; then
+        revision="$(demo_sql "select max(revision) from alvo_descriptor_versions where project = '$project_sql'")"
+        say "--keep: the database is at revision $revision, which differs from $(basename "$descriptor") — booting that revision"
+        boot_descriptor="$latest"
+      fi
+    fi
+  else
+    say "--keep: sqlite3 not found, so the host boots $(basename "$descriptor"); if the database moved on, it will stand down"
+  fi
+fi
+
+start_receiver
+start_host
+wait_until_ready
+
+if [ "$keep" -eq 1 ] && already_seeded; then
+  say "the kept database already has data — not seeding again"
+else
+  seed_data
+fi
+
+cat <<EOF
+
+  Velo Dielňa — the Alvo admin dashboard demo is up.
+
+    Dashboard   $base/admin
+    Sign in     $admin_email
+    Password    $admin_password
+
+    Assistant   $( if [ "$ai" -eq 1 ]; then printf '%s at %s (%s%s)' "$ai_model" "$ai_endpoint" "$ai_kind" "$( [ -n "$ai_key" ] && printf ', key %s from %s' "$(masked_key "$ai_key")" "$ai_key_source" || printf ', no key' )"; else printf 'off'; fi )
+
+    API docs    $base/scalar
+    API key     X-Alvo-Api-Key: $api_key   (admin, for this run only)
+
+    Demo dir    $dir   (database, host.log$( [ -n "$receiver_pid" ] && printf ', webhooks.log'))
+
+  Ctrl+C stops it. Re-run with --keep to come back to the same data.
+
+EOF
+
+wait "$host_pid"

@@ -1286,7 +1286,7 @@ consequence and the fix named in the error:
 | `field.computed` | the expression is never evaluated, so the column stays null |
 | `field.rollup` | nothing maintains the aggregate, so it reads as permanently null while looking like data |
 | `field.validation` | the expression is not evaluated, so a value it forbids is accepted — the field is not constrained at all |
-| `field.default` (**#113**) | no column default is emitted and the value is dropped, so the field is null — and on a `required` field that is an INSERT of NULL into a NOT NULL column |
+| `field.default` as `{"$cel": …}` (**#113**) | a CEL default is evaluated against the caller's context at insert time, which is the `computed` machinery rather than a column default — so the value would be dropped and the field left null. **A literal default is honoured**: it is emitted as a column `DEFAULT` and filled into any write that composes a whole row |
 | `entity.softDelete` | a delete would remove the row outright and reads would not exclude it — irrecoverable data loss where the schema promises recoverability |
 | the three `before*` `entity.hooks.*` points, refused **one per point** (**#114**) | a `before*` hook may reject or mutate in the write transaction, so a write the author believes is vetted is neither |
 | a raw **JSONata** expression in any `$defs/jsonata` action slot (**#149**) | the action still runs, with Alvo's canonical envelope instead of the declared transform — a delivery that succeeded carrying data the author did not declare |
@@ -1331,7 +1331,13 @@ never warned — which is what ties it to #146's ordering.
 `entity.realtime` is unhonoured too and is **deliberately not in that warning**: the schema declares it per
 entity with a default of `true`, so it is unhonoured for *every* entity of *every* descriptor. Warning only
 on an explicit `realtime: true` would stay silent for the entities equally affected; warning on all of them
-would fire on every descriptor ever applied. Recorded on **#38**.
+would fire on every descriptor ever applied. Recorded on **#38**. It is, however, **reported**: since
+§8d item 27 of `docs/todo-admin.md`, `GET …/capabilities` lists `entity.realtime` under `warned` (from
+`UnhonouredSubsystems.ReportedOnly`), so the dashboard prints the build's own sentence while the apply stays
+quiet — the one deliberate split between the capability report and the apply warning, recorded in
+`CapabilityReport`. Beside it, two keys inside honoured blocks are warned at apply as qualified slots
+(`UnhonouredSubsystems.WithinBlocks`): `entity.storage` for any `storage: dynamic` entity, which the mapper
+drops (F7, #41), and `auth.providers` for any provider other than `local` (#36).
 
 ### Declaring a framework-managed column is refused, and it costs one capability
 
@@ -1379,8 +1385,10 @@ answer it per caller.
 ## Create-or-replace: `PUT {prefix}/{entity}/{id}` (#105)
 
 `PATCH` on this path merges; `PUT` replaces. A field the body does not mention is written `null` rather than
-left at its stored value, which is why a body omitting a `required` field is **422 naming the field** rather
-than a partial write. A field that is both `required` and `hidden` cannot be restated by a caller who cannot
+left at its stored value — **unless it declares a literal `default`, which both branches of this route fill
+in**, so the same `PUT` twice produces the same row (#113). A body omitting a `required` field with no default
+is **422 naming the field** rather than a partial write; a `required` field *with* a default is supplied by
+the default and is not refused. A field that is both `required` and `hidden` cannot be restated by a caller who cannot
 read it, so for that caller the entity is reachable only through `PATCH` — the refusal says so, because the
 fix is different from "add the field".
 

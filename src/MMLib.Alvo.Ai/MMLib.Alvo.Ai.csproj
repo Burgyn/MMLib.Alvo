@@ -1,0 +1,51 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The AI agent: the Microsoft Agent Framework loop, the tool set it may call, and the chat client
+    each connection kind is dialled through. Its own package by package-boundary.md rule (a) — an
+    embedded host that wants only the Data API must not acquire an agent runtime and an OpenAI client
+    — and rule (b): the assistant is a real swap point, reached through IAlvoAssistant in
+    Abstractions, which is what lets the dashboard call it without seeing this package at all.
+
+    It references Abstractions and never MMLib.Alvo: everything it needs from the core arrives as
+    IAlvoManagement and IAiConnectionResolver (§0 principle 2), and an architecture test in
+    MMLib.Alvo.Ai.Tests holds that line.
+
+    Both dependency families are MIT and first-party Microsoft, so neither touches the licensing
+    bans in alvo-dotnet-conventions.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Agents.AI" />
+    <PackageReference Include="Microsoft.Extensions.AI" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
+  </ItemGroup>
+
+  <!-- The agent's instructions, embedded so they ship with the package and cannot be edited by a deployment
+       (#29 §5). The logical name is spelled out so the loader does not depend on MSBuild's folder mangling. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Instructions/schema-assistant.md" LogicalName="MMLib.Alvo.Ai.Instructions.schema-assistant.md" />
+  </ItemGroup>
+
+  <!-- The descriptor skills (D33): one source, .claude/skills/alvo-descriptor-*, which Claude Code discovers in this
+       repository and this package embeds; never a copy. The schema is linked for the slices the skills cite (D26):
+       a linked file, not an assembly reference, so the boundary test still holds. %(RecursiveDir) starts at the skill
+       directory and is backslashed on Windows, so the logical name is spelled with forward slashes here, and
+       EmbeddedSkills normalises it again. -->
+  <ItemGroup>
+    <AlvoDescriptorSkill Include="$(MSBuildThisFileDirectory)../../.claude/skills/alvo-descriptor-*/**/*.md" />
+    <EmbeddedResource Include="@(AlvoDescriptorSkill)" LogicalName="MMLib.Alvo.Ai.Skills/$([System.String]::Copy('%(RecursiveDir)').Replace('\', '/'))%(Filename)%(Extension)" />
+    <EmbeddedResource Include="$(MSBuildThisFileDirectory)../../schema/project.schema.json" LogicalName="MMLib.Alvo.Ai.Schema/project.schema.json" />
+  </ItemGroup>
+
+  <!-- A context without the skills (a Docker context that forgot them, a sparse checkout) would build an assistant that
+       silently knows nothing; this makes it a build error instead. -->
+  <Target Name="AlvoRequireDescriptorSkills" BeforeTargets="BeforeBuild">
+    <Error Condition="'@(AlvoDescriptorSkill)' == ''"
+           Text="No .claude/skills/alvo-descriptor-*/SKILL.md was found next to the repository root. MMLib.Alvo.Ai embeds them (D33); a Docker build must copy .claude/skills/ into its context." />
+  </Target>
+
+</Project>

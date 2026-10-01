@@ -59,7 +59,7 @@ public class ManagementCapabilitiesHttpTests
         var refusal = body["refused"]!.AsArray()
             .Single(feature => feature!["slot"]!.GetValue<string>() == "field.default")!;
 
-        refusal["consequence"]!.GetValue<string>().ShouldStartWith("Field 'default' is not honoured yet");
-        refusal["fix"]!.GetValue<string>().ShouldStartWith("Remove 'default'");
+        refusal["consequence"]!.GetValue<string>().ShouldStartWith("Field 'default' is honoured as a literal");
+        refusal["fix"]!.GetValue<string>().ShouldStartWith("Declare a literal default");
     }
 }

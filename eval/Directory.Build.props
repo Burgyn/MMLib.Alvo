@@ -1,0 +1,13 @@
+<Project>
+
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))"
+          Condition="'' != $([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <!-- An eval is run, never referenced or packed: a measurement of a model, in no ring (scripts/eval-assistant).
+         Not packable also keeps SolutionConventionTests' "every packable src project has a tests project" rule out
+         of a directory it was never written for, as samples/ does. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

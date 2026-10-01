@@ -48,3 +48,42 @@ public class TestSqlDialectContractTests : AlvoSqlDialectContractTests
         dialect.GeneratedColumnDefinition("line_total", "numeric(18,2)", "(1 + 1)").ShouldBeNull();
     }
 }
+
+/// <summary>
+/// A leg whose field renderer implements only the port's required members, so it inherits
+/// <see cref="IFieldSqlRenderer"/>'s deny-by-default for text: <see cref="IFieldSqlRenderer.RenderStringLiteral"/>
+/// answers <see langword="null"/> and <see cref="IFieldSqlRenderer.RenderStringConcatenation"/> throws
+/// <see cref="NotSupportedException"/>. It proves the public contract suite reads both as a decline, so an
+/// out-of-repo dialect that never opts into text can still inherit it and pass.
+/// </summary>
+public class DecliningTextSqlDialectContractTests : AlvoSqlDialectContractTests
+{
+    protected override IAlvoSqlDialect CreateDialect() => new TestSqlDialect();
+
+    protected override IFieldSqlRenderer CreateFieldRenderer() => new RequiredMembersOnly();
+
+    [Fact]
+    public void The_renderer_under_test_really_declines_text()
+    {
+        var fields = CreateFieldRenderer();
+
+        fields.RenderStringLiteral("a").ShouldBeNull();
+        Should.Throw<NotSupportedException>(() => fields.RenderStringConcatenation("a", "b"));
+    }
+
+    /// <summary><see cref="TestFieldSqlRenderer"/>'s required members, and none of the defaulted ones.</summary>
+    private sealed class RequiredMembersOnly : IFieldSqlRenderer
+    {
+        private readonly TestFieldSqlRenderer _inner = new();
+
+        public string TrueLiteral => _inner.TrueLiteral;
+
+        public string FalseLiteral => _inner.FalseLiteral;
+
+        public string RenderField(MMLib.Alvo.Schema.EntitySchema entity, string fieldName) => _inner.RenderField(entity, fieldName);
+
+        public string RenderParameter(string parameterName) => _inner.RenderParameter(parameterName);
+
+        public string RenderCaseInsensitiveLike(string left, string right) => _inner.RenderCaseInsensitiveLike(left, right);
+    }
+}

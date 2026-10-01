@@ -62,12 +62,15 @@ internal static class UnhonouredFeatures
             + "the API does validate — 'maxLength', 'precision'/'scale', enum 'values' or a 'format'."),
         new(
             "default",
-            field => field.Default is not null,
-            "Field 'default' is not honoured yet: no column default is emitted and the value is dropped "
-            + "before any writer sees it, so the field is simply null — and on a 'required' field that is an "
-            + "INSERT of NULL into a NOT NULL column.",
-            "Remove 'default' and send the value explicitly on create. Refused rather than ignored because a "
-            + "silently absent default is a wrong stored value, which costs more than sending the field."),
+            field => field.Default is { IsExpression: true },
+            "Field 'default' is honoured as a literal, but not as a '$cel' expression: a CEL default is "
+            + "evaluated against the caller's context at insert time, which is the 'computed' machinery "
+            + "rather than a column default — so the value would be dropped and the field left null.",
+            "Declare a literal default, which this build emits as a column DEFAULT, or remove 'default' and "
+            + "send the value explicitly on create (#113).")
+        {
+            IsRefusedValue = ValueOrExpr.IsTaggedExpression,
+        },
     ];
 
     /// <summary>
@@ -410,4 +413,24 @@ internal sealed record UnhonouredFeature<T>(
     string Path,
     Func<T, bool> IsDeclaredBy,
     string Consequence,
-    string Fix);
+    string Fix)
+{
+    /// <summary>
+    /// Whether the raw value found at <see cref="Path"/> is one this entry refuses, for the pass that has
+    /// only the JSON.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see langword="null"/> — the usual case — means the key's presence is the declaration, which is what
+    /// the JSON pass assumes on its own.
+    /// </para>
+    /// <para>
+    /// <b>It exists for a feature that is honoured in part.</b> <c>default</c> is honoured as a literal and
+    /// refused as a <c>$cel</c> expression, so "the key is present" is no longer the question either pass is
+    /// asking — and with the two passes answering it differently, one of them refuses descriptors the other
+    /// applies. That is not a hypothetical: it is what happened the moment the literal half landed and the
+    /// examples that regained their defaults stopped booting.
+    /// </para>
+    /// </remarks>
+    public Func<System.Text.Json.JsonElement, bool>? IsRefusedValue { get; init; }
+}

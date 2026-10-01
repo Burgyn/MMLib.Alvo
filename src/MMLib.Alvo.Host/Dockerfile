@@ -26,6 +26,9 @@ COPY global.json Directory.Build.props Directory.Packages.props .editorconfig MM
 # schema/ is not documentation here: MMLib.Alvo compiles project.schema.json as an AdditionalFile
 # and the descriptor validator's types are generated from it, so a context without it does not build.
 COPY schema/ schema/
+# .claude/skills/alvo-descriptor-* is not tooling here: MMLib.Alvo.Ai embeds those skills (D33) and its build fails
+# without them. .dockerignore admits only those directories of .claude/.
+COPY .claude/skills/ .claude/skills/
 COPY src/ src/
 
 RUN dotnet restore src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj

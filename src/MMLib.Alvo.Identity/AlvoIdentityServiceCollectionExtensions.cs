@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -19,10 +20,20 @@ public static class AlvoIdentityServiceCollectionExtensions
     /// bootstrap administrator.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <b>The cookie resolver is registered keyed, deliberately.</b> The unkeyed
     /// <see cref="IAlvoContextResolver"/> is the one the Data API hands the raw API-key header to, and
     /// this one's "presented key" is a subject ASP.NET Core already authenticated — so replacing the
     /// unkeyed registration would make a user's uuid a working API key. A fact holds that line.
+    /// </para>
+    /// <para>
+    /// <b>The identity store's database must exist before any hosted service starts.</b> The bootstrap creates the
+    /// identity tables and seeds the administrator in <c>IHostedLifecycleService.StartingAsync</c>, which every hosted
+    /// service finishes before any <c>StartAsync</c> begins, so that the web server, which is one, never answers a
+    /// request before the users table is there. A host that provisions the database itself (a migration runner in a
+    /// plain <c>StartAsync</c>, say) must do it before the host starts, or in a <c>StartingAsync</c> registered before
+    /// this call; otherwise the start fails, naming what the read of the tables said.
+    /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into.</param>
     /// <param name="configureStore">Configures the identity store's database — the provider and its connection.</param>
@@ -37,15 +48,33 @@ public static class AlvoIdentityServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(configureStore);
 
         AddStore(services, configureStore);
+
+        /* Data protection, because the credential token is a protected payload and the provider it
+           needs is not in a bare container. A web host usually has one already and this call is
+           idempotent — it returns a builder over the same registrations — so a deployment that
+           configures its own key ring keeps it. Registering it here rather than leaving it to the
+           host is what makes `IssueCredentialTokenAsync` work in every composition that has the
+           member, instead of in the ones that happen to be web hosts. */
+        services.AddDataProtection();
+
         AddIdentityCore(services);
 
         AddValidatedOptions(services, configure);
 
         services.TryAddScoped<IAlvoUserStore, AlvoIdentityUserStore>();
         services.TryAddSingleton<AlvoBootstrapAdmin>();
+        services.TryAddSingleton<AlvoTimingParity>();
         services.Replace(ServiceDescriptor.Singleton<IAlvoBootstrapAdmin>(
             provider => provider.GetRequiredService<AlvoBootstrapAdmin>()));
         services.AddKeyedScoped<IAlvoContextResolver, AlvoIdentityContextResolver>(AlvoIdentity.ResolverKey);
+
+        /* Keyed, and the key is the guard. The core registers a guarded decorator under the plain
+           IAlvoUserAdministration and resolves this one through the key — so there is no
+           registration anywhere that hands an in-process caller the unguarded implementation. A
+           guard living inside this adapter would be optional by construction: the next
+           implementation simply would not have it. */
+        services.AddKeyedScoped<IAlvoUserAdministration, AlvoIdentityUserAdministration>(
+            AlvoUserAdministration.UnguardedKey);
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, AlvoIdentityBootstrap>());
 
         return services;
@@ -94,10 +123,58 @@ public static class AlvoIdentityServiceCollectionExtensions
             ServiceDescriptor.Singleton<IValidateOptions<AlvoIdentityOptions>, AlvoIdentityOptionsValidation>());
     }
 
-    /// <summary>Adds ASP.NET Core Identity's user and role managers over the Alvo identity store.</summary>
+    /// <summary>
+    /// Adds ASP.NET Core Identity's user and role managers over the Alvo identity store, with the package's
+    /// password policy.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The password policy is NIST SP 800-63B-4's, not Identity's.</b> A password that is the only factor is
+    /// at least fifteen characters, at most 128, and has no composition rules: Identity's defaults (six
+    /// characters, one of each class) are the rules NIST withdrew because they produce <c>Passw0rd!</c>. The
+    /// ceiling and the address blocklist are <see cref="AlvoPasswordValidator"/>'s. It is one policy for
+    /// everyone, so it also governs the bootstrap seed; an account an earlier start seeded is never rewritten.
+    /// </para>
+    /// <para>
+    /// <b>The credential token's lifetime is Identity's own, and the host's to change.</b> Identity's default for a
+    /// data-protector token is one day; the administration reports the exact expiry by reading
+    /// <c>DataProtectionTokenProviderOptions.TokenLifespan</c>, whatever set it. The package does not configure it:
+    /// restating the default here overrode, in registration order, a host that had called
+    /// <c>Configure&lt;DataProtectionTokenProviderOptions&gt;</c> before this method (final branch review, item 16).
+    /// A host's <c>Configure</c>, before or after, is the lifetime, and the reported expiry follows.
+    /// </para>
+    /// </remarks>
     /// <param name="services">The service collection to register into.</param>
-    private static void AddIdentityCore(IServiceCollection services) =>
-        services.AddIdentityCore<AlvoIdentityUser>()
+    private static void AddIdentityCore(IServiceCollection services)
+    {
+        services.AddIdentityCore<AlvoIdentityUser>(ApplyPasswordPolicy)
             .AddRoles<AlvoIdentityRole>()
-            .AddEntityFrameworkStores<AlvoIdentityDbContext>();
+            .AddEntityFrameworkStores<AlvoIdentityDbContext>()
+            .AddPasswordValidator<AlvoPasswordValidator>()
+            /* One token provider, named, rather than AddDefaultTokenProviders().
+
+               It is what `IAlvoUserAdministration.IssueCredentialTokenAsync` stands on: without it
+               Identity throws "no IUserTwoFactorTokenProvider named 'Default' is registered" the
+               first time an administrator lets a colleague set a password. AddIdentityCore
+               deliberately registers none — it is the minimal composition.
+
+               The default set would also add the email, phone and authenticator providers, which
+               are three capabilities this package does not have: no mail transport, no SMS, no
+               second factor. Registering them would make `TokenOptions` advertise providers that
+               cannot deliver anything. One provider, for the one operation that exists. */
+            .AddTokenProvider<DataProtectorTokenProvider<AlvoIdentityUser>>(
+                TokenOptions.DefaultProvider);
+    }
+
+    /// <summary>Sets Identity's own validator to the policy's floor and switches every composition rule off.</summary>
+    /// <param name="identity">Identity's options.</param>
+    private static void ApplyPasswordPolicy(IdentityOptions identity)
+    {
+        identity.Password.RequiredLength = AlvoPasswordValidator.MinimumLength;
+        identity.Password.RequiredUniqueChars = 1;
+        identity.Password.RequireDigit = false;
+        identity.Password.RequireLowercase = false;
+        identity.Password.RequireUppercase = false;
+        identity.Password.RequireNonAlphanumeric = false;
+    }
 }

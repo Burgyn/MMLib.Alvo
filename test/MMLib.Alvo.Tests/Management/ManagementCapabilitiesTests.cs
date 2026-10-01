@@ -30,14 +30,34 @@ public class ManagementCapabilitiesTests
     {
         var warned = CapabilityReport.Project().Warned;
 
-        warned.Select(block => block.Block).ShouldBe(UnhonouredSubsystems.All.Select(block => block.Block));
+        warned.Select(block => block.Block).ShouldBe(Reported().Select(block => block.Block));
     }
+
+    /// <summary>
+    /// <b><c>entity.realtime</c> is in the report and in no apply warning</b> — the one deliberate split
+    /// between the two lists, recorded in <c>CapabilityReport</c>'s remarks (§8d item 27).
+    /// </summary>
+    [Fact]
+    public void Realtime_is_reported_while_the_apply_stays_quiet()
+    {
+        CapabilityReport.Project().Warned.Select(block => block.Block).ShouldContain("entity.realtime");
+        UnhonouredSubsystems.All.Concat(UnhonouredSubsystems.WithinBlocks)
+            .Select(block => block.Block)
+            .ShouldNotContain("entity.realtime", "a line at apply would fire on every descriptor ever applied");
+    }
+
+    /// <summary>What the report serves as warned: the top-level blocks, the keys inside honoured blocks, then
+    /// the reported-only rows.</summary>
+    private static IEnumerable<UnhonouredSubsystem> Reported()
+        => UnhonouredSubsystems.All
+            .Concat(UnhonouredSubsystems.WithinBlocks)
+            .Concat(UnhonouredSubsystems.ReportedOnly);
 
     /// <summary>The projection copies every consequence verbatim rather than restating it.</summary>
     [Fact]
     public void The_warned_projection_copies_every_consequence_character_for_character()
     {
-        foreach (var (served, declared) in CapabilityReport.Project().Warned.Zip(UnhonouredSubsystems.All))
+        foreach (var (served, declared) in CapabilityReport.Project().Warned.Zip(Reported()))
         {
             served.Consequence.ShouldBe(
                 declared.Consequence,

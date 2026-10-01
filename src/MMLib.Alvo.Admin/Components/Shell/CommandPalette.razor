@@ -1,0 +1,263 @@
+﻿@*
+    ⌘K.
+
+    It is the keyboard's front door, so it is held to the keyboard's standard: focus moves into the
+    input when it opens and returns to where it came from when it closes, the arrow keys and Enter
+    work without a pointer, and Escape always dismisses. The list is the navigation plus every
+    entity in the schema, because "go to the customers entity" is the query an operator actually
+    has — and a palette that only listed sections would send them to Schema to look for it.
+
+    Each section carries its `g` shortcut beside it, which is how the shortcuts are learned: the
+    palette is where somebody who does not know them yet already is.
+*@
+@implements IAsyncDisposable
+@inject ManagementGateway Gateway
+@inject NavigationManager Navigation
+@inject AdminInterop Interop
+
+@*
+    An inline dialog, so the focus trap, aria-modal, Escape and the return of focus to where it came from are the
+    library's, as every other dialog's are (inventory defect #11: the palette used to draw its own scrim and keep its
+    own rules). Opened near the top, where a query is typed, rather than centred.
+*@
+<MudDialog Visible="_open" VisibleChanged="OnVisibleChanged" Options="_options" Class="a-palette-dialog"
+           AriaLabel="Search" data-testid="palette">
+    <DialogContent>
+        @* The arrows and Enter are the list's, heard here as they bubble from the input: the dialog's own key
+           handler is its key interceptor's, which is wired for Escape and never saw an ArrowDown (measured). *@
+        <div @onkeydown="OnKeyDown">
+            @*
+                The WAI-ARIA combobox pattern: focus stays in the box, the arrows move the list's active option, and
+                aria-activedescendant names it, so a screen reader reads each option as the arrows reach it.
+            *@
+            <input class="a-palette__input" placeholder="Go to a section or an entity, or run an action…"
+                   @ref="_input" @bind="_query" @bind:event="oninput" aria-label="Search" data-testid="palette-input"
+                   role="combobox" aria-expanded="true" aria-controls="palette-results" aria-autocomplete="list"
+                   aria-activedescendant="@(Matches.Count > 0 ? OptionId(Math.Min(_active, Matches.Count - 1)) : null)" autocomplete="off" />
+            @FocusOnRender.On(() => _input)
+            <div role="listbox" class="a-palette__list" id="palette-results" aria-label="Results">
+                @if (Matches.Count == 0)
+                {
+                    <div class="a-palette__item a-palette__item--empty">
+                        Nothing matches “@_query”. Sections, entities and actions are what this searches.
+                    </div>
+                }
+                @foreach (var (match, index) in Matches.Select((match, index) => (match, index)))
+                {
+                    @* Blazor renders a bool attribute the HTML way — present-and-empty for true, absent
+                       for false — and ARIA wants the literal strings. `aria-selected=""` is what a
+                       screen reader was being handed for the highlighted row, on the one control the
+                       keyboard-only flow runs through. *@
+                    <button type="button" role="option" id="@OptionId(index)" tabindex="-1"
+                            aria-selected="@((index == _active) ? "true" : "false")"
+                            class="@($"a-palette__item{(index == _active ? " a-palette__item--active" : string.Empty)}")"
+                            @onclick="() => Go(match)">
+                        <Icon Path="@match.Icon" />
+                        <span>@match.Title</span>
+                        <span class="a-palette__kind">@match.Kind</span>
+                        @if (match.Shortcut is { } shortcut)
+                        {
+                            <kbd class="a-kbd">@shortcut</kbd>
+                        }
+                    </button>
+                }
+            </div>
+        </div>
+    </DialogContent>
+</MudDialog>
+
+@code {
+    private readonly List<Entry> _entries = [];
+    private readonly List<IAsyncDisposable> _subscriptions = [];
+    private readonly DialogOptions _options = new()
+    {
+        Position = DialogPosition.TopCenter,
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true,
+        NoHeader = true,
+        CloseOnEscapeKey = true,
+        BackdropClick = true,
+        CloseButton = false,
+        DefaultFocus = DefaultFocus.FirstChild,
+    };
+
+    private ElementReference _input;
+    private ScrollLock? _scrollLock;
+    private bool _open;
+    private string _query = string.Empty;
+    private int _active;
+
+    /// <summary>An option's id, which the box's <c>aria-activedescendant</c> names while it is the active one.</summary>
+    private static string OptionId(int index) => $"palette-option-{index}";
+
+    private List<Entry> Matches => _entries
+        .Where(entry => _query.Length == 0
+            || entry.Title.Contains(_query, StringComparison.OrdinalIgnoreCase))
+        .Take(12)
+        .ToList();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await ListenAsync();
+        }
+
+        /* The pane behind the dialog is what scrolls, and the library locks only the document. */
+        await (_open ? Lock.HoldAsync() : Lock.ReleaseAsync());
+    }
+
+    private ScrollLock Lock => _scrollLock ??= new ScrollLock(Interop);
+
+    /// <summary>
+    /// Takes ⌘K and <c>g</c> from alvo.js's map, then says the keyboard is live — only now, because a keystroke
+    /// before these subscriptions reaches nobody. Escape is the dialog's own.
+    /// </summary>
+    private async Task ListenAsync()
+    {
+        _subscriptions.Add(await Interop.SubscribeAsync("palette", _ => OpenAsync()));
+        _subscriptions.Add(await Interop.SubscribeAsync("goto", OnGoto));
+        await Interop.MarkKeyboardReadyAsync();
+    }
+
+    /// <summary>Opens the palette, empty, from the app bar's Search or from ⌘K.</summary>
+    /// <remarks>
+    /// Already open, it stays as it is: a second ⌘K must not throw away what the operator has typed. alvo.js does
+    /// not send ⌘K at all while another dialog is open, so the palette never stacks on one (spec §3.1).
+    /// </remarks>
+    public async Task OpenAsync()
+    {
+        if (_open)
+        {
+            return;
+        }
+
+        await LoadEntriesAsync();
+        _query = string.Empty;
+        _open = true;
+        _active = 0;
+        StateHasChanged();
+    }
+
+    /// <summary>Escape or a click on the scrim closed it: the same close a choice makes, so the query goes too.</summary>
+    private void OnVisibleChanged(bool visible)
+    {
+        if (!visible)
+        {
+            Close();
+        }
+    }
+
+    /// <summary>
+    /// <c>g</c> then a letter. The letters are the navigation's own (§5.5), so the shortcut and the
+    /// sidebar cannot disagree about where <c>g s</c> goes.
+    /// </summary>
+    private Task OnGoto(string? key)
+    {
+        if (AdminNavigation.GoTo(key) is { } target)
+        {
+            Navigation.NavigateTo(target.Path);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task LoadEntriesAsync()
+    {
+        _entries.Clear();
+        foreach (var entry in AdminNavigation.All)
+        {
+            _entries.Add(new Entry(entry.Title, entry.Path, entry.Icon,
+                entry.NotYet ? "not yet" : "section", AdminNavigation.Hint(entry)));
+        }
+
+        /* The two things an operator reaches for that are not a place. Listed after the sections so
+           an empty query still opens on where to go, which is what the palette is mostly for. */
+        _entries.Add(new Entry("New entity", AdminNavigation.NewEntity, Icons.Schema, "action"));
+        _entries.Add(new Entry("Toggle theme", null, Icons.Moon, "action"));
+
+        await LoadEntitiesAsync();
+    }
+
+    /// <summary>Every entity in the schema, as a place to go.</summary>
+    private async Task LoadEntitiesAsync()
+    {
+        try
+        {
+            var schema = await Gateway.SchemaAsync(CancellationToken.None);
+            foreach (var entity in schema.Entities)
+            {
+                _entries.Add(new Entry(entity.Name, AdminPaths.Entity(entity.Name),
+                    Icons.Schema, "entity"));
+            }
+        }
+        catch (ManagementForbiddenException)
+        {
+            /* A viewer who may not read the schema still gets a working palette over the sections
+               they can reach. Refusing to open it would be a second, worse way to say "forbidden". */
+        }
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs args)
+    {
+        switch (args.Key)
+        {
+            case "ArrowDown":
+                _active = Math.Min(_active + 1, Math.Max(Matches.Count - 1, 0));
+                break;
+            case "ArrowUp":
+                _active = Math.Max(_active - 1, 0);
+                break;
+            case "Enter" when Matches.Count > 0:
+                await Go(Matches[Math.Min(_active, Matches.Count - 1)]);
+                break;
+            default:
+                _active = 0;
+                break;
+        }
+    }
+
+    private async Task Go(Entry entry)
+    {
+        Close();
+
+        if (entry.Path is { } path)
+        {
+            Navigation.NavigateTo(path);
+        }
+        else
+        {
+            /* The only entry without an address. alvo.js announces the flip, so the header's toggle
+               redraws its icon without the palette knowing it exists. */
+            await Interop.ToggleThemeAsync();
+        }
+    }
+
+    private void Close()
+    {
+        if (!_open)
+        {
+            return;
+        }
+
+        _open = false;
+        _query = string.Empty;
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_scrollLock is not null)
+        {
+            await _scrollLock.ReleaseAsync();
+        }
+
+        foreach (var subscription in _subscriptions)
+        {
+            await subscription.DisposeAsync();
+        }
+    }
+
+    /// <summary>One row. <c>Path</c> is <see langword="null"/> for the one action that goes nowhere.</summary>
+    private sealed record Entry(string Title, string? Path, string Icon, string Kind, string? Shortcut = null);
+}

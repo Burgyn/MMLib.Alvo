@@ -10,10 +10,11 @@ Today it declares three such features, each refused at apply by
 | Feature | Where | Why it is refused |
 |---|---|---|
 | `rollup.where` | `companies.open_deals` | the *filter* is not evaluated, so the aggregate is maintained over **every** child instead of the declared subset — a stored number that looks like data. `rollup` itself is honoured now (#21); only its `where` is not |
-| `default` | `companies.owner_id`, `deals.stage`, `deals.owner_id` | no column default is emitted and the value is dropped, so the field is simply null |
+| `default` (`$cel` half only) | `companies.owner_id`, `deals.owner_id` | a CEL default is evaluated against the caller's context at insert time, which is the `computed` machinery rather than a column default — so the value would be dropped and the field left null. **The literal half is honoured now (#113)**, and `deals.stage`'s `"lead"` therefore applies |
 | `hooks/before*` | `contacts.beforeCreate`, `deals.beforeUpdate` | the hooks never run, so a write the author believes is vetted or patched is neither. The three `after*` points **are** honoured now, and this example declares none of them |
 
-**`computed` and `rollup` are no longer on that list — #21 honours both.**
+**`computed`, `rollup` and a literal `default` are no longer on that list** — #21 honours the first two and
+#113's literal half honours the third.
 `invoice_items.line_total` is a stored generated column the database maintains and refuses every write to,
 `invoices.net_total` is a rollup Alvo recomputes inside the child write's own transaction, and
 `invoices.gross_total` is a computed column *over* that rollup. What is left of the pair is
@@ -23,7 +24,8 @@ Today it declares three such features, each refused at apply by
 
 The distinction is the rule, not a per-case judgement: **a feature is refused when ignoring it silently
 produces wrong data, and warned about when its absence is observable.** An ignored `default` stores NULL where
-a value was expected and nobody can see it from outside; a webhook that never fires is a webhook that never
+a value was expected and nobody can see it from outside — which is why the half that is still unhonoured is
+still refused; a webhook that never fires is a webhook that never
 fires. So these five apply cleanly and earn one warning at apply naming each of them
 (`Descriptor.Internal.UnhonouredSubsystems`):
 

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The real-model eval's graders, proven without a model. The eval itself is in no ring (it calls a provider and
+    costs tokens); what it grades with is pure — the case graders, the descriptor diff, the suite bar and the
+    recorder's bookkeeping — so it is tested here over hand-built turns, in ring0 like any other ".Tests" module.
+    It maps to no shipped assembly, so it opts out of the shared architecture + public-API gate.
+  -->
+  <PropertyGroup>
+    <AlvoSharedArchTests>false</AlvoSharedArchTests>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../eval/MMLib.Alvo.Ai.Eval/MMLib.Alvo.Ai.Eval.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NSubstitute" />
+  </ItemGroup>
+
+  <!-- The skill cases' right answers, shared with MMLib.Alvo.Host.Tests: that suite dry-runs them through the real
+       validator, this one grades the turns built from them, and one source keeps the two on the same answers. -->
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/SkillCaseAnswers.cs" Link="_shared/SkillCaseAnswers.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/ai/InstructionExamples.cs" Link="_shared/InstructionExamples.cs" />
+  </ItemGroup>
+
+</Project>

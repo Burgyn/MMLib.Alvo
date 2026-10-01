@@ -230,4 +230,35 @@ public interface IAlvoManagement
     /// </exception>
     Task<ManagementApplyResult> RollbackAsync(
         string project, int targetRevision, ManagementRollbackRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Writes the instance's AI connection, replacing whatever was there.
+    /// </summary>
+    /// <param name="connection">The endpoint, the model and the credential, as one record.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// <para>
+    /// <b>On the management surface, and at administrator level, because it is a credential.</b> Repointing
+    /// the endpoint sends the descriptor, the resolved schema and the operator's own prompts wherever it
+    /// points — so this is the same category as issuing an API key, not the same category as editing a
+    /// field. A dashboard that wrote the secret store directly would be the one write in the product with
+    /// no policy behind it (§0 principle 5).
+    /// </para>
+    /// <para>
+    /// <b>One secret, replaced whole.</b> The endpoint, the model and the key change together; writing them
+    /// under three names would leave a window in which a screen reports one and the agent dials another.
+    /// </para>
+    /// <para>
+    /// It is not part of the descriptor and never will be: a model name and an endpoint belong to the
+    /// deployment (PLAN §4), and a descriptor carrying them would stop applying the day the operator
+    /// changed providers.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ManagementForbiddenException">The caller is not an administrator.</exception>
+    /// <exception cref="Secrets.SecretShadowedException">
+    /// This deployment pins the connection in its own configuration, which the store reads and never
+    /// writes — so a saved value would be one nobody reads.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">This deployment has no writable secret store.</exception>
+    Task SetAiConnectionAsync(Ai.StoredAiConnection connection, CancellationToken ct = default);
 }

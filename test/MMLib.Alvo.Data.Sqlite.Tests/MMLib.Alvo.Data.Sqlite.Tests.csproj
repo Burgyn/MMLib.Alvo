@@ -13,6 +13,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Configuration" />
     <PackageReference Include="Microsoft.Extensions.Options" />
+    <PackageReference Include="CsCheck" />
   </ItemGroup>
 
   <!-- The SQLite fixture and the dialect it records locks through, shared with
@@ -69,6 +70,10 @@
        thing. It uses Alvo's public surface only, because that project is not granted the core's internals. -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/boot/ConcurrentColdStart.cs" Link="_shared/ConcurrentColdStart.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/literals/LiteralText.cs" Link="_shared/LiteralText.cs" />
   </ItemGroup>
 
 </Project>

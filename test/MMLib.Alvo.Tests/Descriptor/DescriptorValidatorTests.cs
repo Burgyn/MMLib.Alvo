@@ -19,6 +19,47 @@ public class DescriptorValidatorTests
         _validator.Validate(json).IsValid.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// A ref to an entity the descriptor does not declare is pointed at the ones it does, first: a model that named
+    /// the target by the operator's word ("products") is steered to the existing entity ("parts") before it is told it
+    /// could add one — which would otherwise duplicate what the project already has (RCA, spec §8.2).
+    /// </summary>
+    [Fact]
+    public void An_unknown_ref_target_is_pointed_at_the_declared_entities_first()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "parts": { "fields": { "name": { "type": "string" } } },
+                        "bikes": { "fields": { "product_id": { "type": "ref", "entity": "products" } } } } }
+        """;
+
+        var refusal = _validator.Validate(json).Errors.ShouldHaveSingleItem();
+
+        refusal.Message.ShouldBe("Field references unknown entity 'products'.");
+        refusal.FixSuggestion.ShouldBe("Point 'entity' at one the descriptor declares (bikes, parts) or at 'users', or add an entity named 'products'.");
+    }
+
+    /// <summary>The list of declared entities in that fix is capped, so a large project cannot flood the refusal.</summary>
+    [Fact]
+    public void The_declared_entities_an_unknown_ref_lists_are_capped()
+    {
+        var entities = string.Join(", ", Enumerable.Range(0, 12).Select(index => $"\"e{index:D2}\": {{ \"fields\": {{ \"name\": {{ \"type\": \"string\" }} }} }}"));
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { {{entities}}, "bikes": { "fields": { "product_id": { "type": "ref", "entity": "products" } } } } }
+        """;
+
+        var fix = _validator.Validate(json).Errors.ShouldHaveSingleItem().FixSuggestion;
+
+        fix.ShouldBe("Point 'entity' at one the descriptor declares (bikes, e00, e01, e02, e03, e04, e05, e06, …) or at 'users', "
+            + "or add an entity named 'products'.");
+    }
+
+    /// <summary>With no declared entity to offer, the fix names only <c>users</c>, never an empty list.</summary>
+    [Fact]
+    public void An_unknown_ref_fix_with_no_declared_entity_offers_users_and_no_empty_list() =>
+        DescriptorValidator.UnknownRefFix("products", []).ShouldBe("Point 'entity' at 'users', or add an entity named 'products'.");
+
     [Fact]
     public void Schema_violation_is_a_structured_error()
     {
@@ -73,7 +114,51 @@ public class DescriptorValidatorTests
     /// phrase, so the wording can improve without the fact needing an edit.
     /// </para>
     /// </remarks>
-    /// <param name="path">The table entry's path.</param>
+    /// <summary>
+    /// A literal default this build refuses is a <b>structured error</b>, not an exception out of apply.
+    /// </summary>
+    /// <remarks>
+    /// Raised by CodeRabbit on #262 and correct: this pass knew only about the <c>$cel</c> half, so a
+    /// descriptor whose literal the field cannot hold validated clean and then failed at apply with an
+    /// untyped <see cref="InvalidDataException"/> — the two passes disagreeing in the one direction that
+    /// costs an author a debugging session, and the opposite of what §0 principle 4 asks of a refusal.
+    /// </remarks>
+    /// <param name="facets">The field's declaration.</param>
+    /// <param name="named">What the message must name.</param>
+    [Theory]
+    [InlineData(@"""type"": ""boolean"", ""default"": ""yes""", "boolean")]
+    [InlineData(@"""type"": ""string"", ""maxLength"": 3, ""default"": ""toolong""", "maxLength")]
+    [InlineData(@"""type"": ""enum"", ""values"": [""a""], ""default"": ""b""", "values")]
+    [InlineData(@"""type"": ""decimal"", ""precision"": 5, ""scale"": 2, ""default"": 12345.678", "precision")]
+    public void A_literal_default_this_build_refuses_is_a_structured_error(string facets, string named)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "invoices": { "fields": {
+            "flag": { {{facets}} } } } } }
+        """;
+
+        var errors = Validate(json).Errors;
+
+        var refusal = errors.ShouldHaveSingleItem();
+        refusal.Path.ShouldBe("/entities/invoices/fields/flag/default");
+        refusal.Message.ShouldContain(named);
+        refusal.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    /// <summary>A literal the field accepts is not reported, or the check would refuse the feature.</summary>
+    [Fact]
+    public void A_literal_default_the_field_accepts_is_not_reported()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "invoices": { "fields": {
+            "flag": { "type": "string", "maxLength": 20, "default": "normal" } } } } }
+        """;
+
+        Validate(json).Errors.ShouldBeEmpty();
+    }
+
     [Theory]
     [MemberData(nameof(EveryUnhonouredFieldFeature))]
     public void Every_unhonoured_field_feature_is_a_structured_error(string path)
@@ -132,7 +217,7 @@ public class DescriptorValidatorTests
         "computed" => @"""computed"": ""net * 1.2""",
         "rollup" => @"""rollup"": { ""from"": ""lines"", ""op"": ""count"" }",
         "validation" => @"""validation"": ""value >= 0""",
-        "default" => @"""default"": 1",
+        "default" => @"""default"": { ""$cel"": ""now()"" }",
         "softDelete" => @"""softDelete"": true",
         _ when path.StartsWith("hooks/before", StringComparison.Ordinal) =>
             $@"""hooks"": {{ ""{path["hooks/".Length..]}"": [ {{ ""action"": {{ ""reject"": ""no"" }} }} ] }}",
@@ -167,7 +252,7 @@ public class DescriptorValidatorTests
           "entities": { "invoices": { "fields": {
             "amount": {
               "type": "decimal", "precision": 18, "scale": 2,
-              "validation": "value >= 0", "default": 1 } } } } }
+              "validation": "value >= 0", "default": { "$cel": "now()" } } } } } }
         """;
 
         var reported = _validator.Validate(json).Errors.Select(error => error.Path).ToList();
@@ -632,6 +717,38 @@ public class DescriptorValidatorTests
         error.Message.ShouldContain($"'{column}' is a framework-managed column and cannot be declared");
         error.Message.ShouldContain(mentions, Case.Sensitive, "the reason must be this column's, not a catch-all");
         error.FixSuggestion.ShouldNotBeNull().ShouldContain("declare it under a different name", Case.Sensitive);
+    }
+
+    /// <summary>
+    /// A managed column's fix leads with the one edit that fixes it; the alternative, dropping the trait, is a later
+    /// sentence, so a model cannot read the pair as "the fix changes what was asked" (spec §9, D49).
+    /// </summary>
+    /// <param name="traits">The entity traits that make the column managed.</param>
+    /// <param name="column">The managed column the entity declares.</param>
+    [Theory]
+    [InlineData(@"""audit"": true", "created_at")]
+    [InlineData(@"""audit"": true", "created_by")]
+    [InlineData(@"""audit"": true", "updated_at")]
+    [InlineData(@"""audit"": true", "updated_by")]
+    [InlineData(@"""tenancy"": ""scoped""", "tenant_id")]
+    [InlineData(@"""softDelete"": true", "deleted_at")]
+    [InlineData(@"""audit"": true", "id")]
+    public void A_managed_columns_fix_leads_with_the_single_edit(string traits, string column)
+    {
+        var json = $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "orders": { {{traits}}, "fields": {
+            "title": { "type": "string" },
+            "{{column}}": { "type": "datetime" } } } } }
+        """;
+
+        var fix = Validate(json).Errors.Single(error => error.Path == $"/entities/orders/fields/{column}").FixSuggestion.ShouldNotBeNull();
+        fix.IndexOf(". ", StringComparison.Ordinal).ShouldBeGreaterThan(0, "a fix with no second sentence would make the checks below vacuous");
+        var first = fix[..(fix.IndexOf(". ", StringComparison.Ordinal) + 1)];
+
+        fix.ShouldStartWith($"Remove '{column}' from the fields: ");
+        first.ShouldNotContain("drop", Case.Sensitive);
+        first.ShouldNotContain(" or ", Case.Sensitive);
     }
 
     /// <summary>

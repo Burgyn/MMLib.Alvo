@@ -41,9 +41,10 @@
         "notes": { "type": "text" },
         "priority": {
           "type": "enum",
-          "values": ["low", "normal", "high"]
+          "values": ["low", "normal", "high"],
+          "default": "normal"
         },
-        "done": { "type": "boolean" },
+        "done": { "type": "boolean", "default": false },
         "due_on": { "type": "date" }
       },
       "rules": {

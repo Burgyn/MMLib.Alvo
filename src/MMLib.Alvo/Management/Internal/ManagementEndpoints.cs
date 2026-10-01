@@ -1,7 +1,9 @@
 ﻿using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Net.Http.Headers;
+using MMLib.Alvo.Ai;
 using MMLib.Alvo.Api.Internal;
 using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Migrations;
@@ -59,7 +61,115 @@ internal static class ManagementEndpoints
         MapApply(group);
         MapRollback(group);
 
+        MapAiConnection(group);
+        MapUsers(endpoints, group);
+
         return group;
+    }
+
+    /// <summary>
+    /// The seven user-administration routes, mapped only when an implementation is registered.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Mapped only when the service exists.</b> <c>IAlvoUserAdministration</c> is filled by the
+    /// package that holds a membership store, and a deployment without one has nobody to
+    /// administer — so the routes are absent rather than present and answering 500. The same shape
+    /// the management surface already uses for a missing driver.
+    /// </para>
+    /// <para>
+    /// <b>All seven are management routes at <c>admin</c>.</b> <c>ManageUsers</c> is already a
+    /// management operation at that level, and <i>everything the dashboard can do, the API can
+    /// do</i> binds this surface as much as it binds the descriptor. The read is at <c>admin</c>
+    /// too, deliberately: the people list is the one place a project's administrators are
+    /// enumerated, and that is reconnaissance a default-deny posture has no reason to hand to every
+    /// viewer. A viewer's real question — <i>what can this person do</i> — is
+    /// <c>policy/simulate</c>, which they already have.
+    /// </para>
+    /// </remarks>
+    /// <param name="endpoints">The route builder, for resolving whether an implementation exists.</param>
+    /// <param name="group">The group to map into.</param>
+    private static void MapUsers(IEndpointRouteBuilder endpoints, RouteGroupBuilder group)
+    {
+        /* Asked of the container's *registrations*, not resolved: the implementation is scoped and
+           mapping runs on the root provider, where resolving a scoped service throws. This is the
+           question actually being asked anyway — does a deployment have a membership store — and it
+           is answerable without constructing one. */
+        if (endpoints.ServiceProvider.GetService<IServiceProviderIsKeyedService>()
+            is not { } registrations
+            || !registrations.IsKeyedService(
+                typeof(IAlvoUserAdministration), AlvoUserAdministration.UnguardedKey))
+        {
+            return;
+        }
+
+        Gate(
+            group.MapGet(
+                "/projects/{project}/users",
+                (string project, string? search, int? limit, string? after,
+                    IAlvoUserAdministration users, CancellationToken ct) =>
+                        Answer(() => users.ListAsync(
+                            new AlvoUserQuery(search, limit ?? 50, after), ct))),
+            new ManagementRoute(nameof(IAlvoUserAdministration.ListAsync), ManagementOperation.ManageUsers));
+
+        Gate(
+            group.MapPost(
+                "/projects/{project}/users",
+                (string project, AlvoUserCreation creation,
+                    IAlvoUserAdministration users, CancellationToken ct) =>
+                        Answer(() => users.CreateAsync(creation, ct))),
+            new ManagementRoute(nameof(IAlvoUserAdministration.CreateAsync), ManagementOperation.ManageUsers));
+
+        Gate(
+            group.MapPut(
+                "/projects/{project}/users/{user:guid}/roles",
+                (string project, Guid user, ManagementRoleAssignment body,
+                    IAlvoUserAdministration users, CancellationToken ct) =>
+                        Answer(() => users.SetRolesAsync(new UserId(user), body.RoleNames, ct))),
+            new ManagementRoute(nameof(IAlvoUserAdministration.SetRolesAsync), ManagementOperation.ManageUsers));
+
+        Gate(
+            group.MapPut(
+                "/projects/{project}/users/{user:guid}/tenant",
+                (string project, Guid user, ManagementTenantGrant body,
+                    IAlvoUserAdministration users, CancellationToken ct) =>
+                        Answer(() => users.SetTenantAsync(
+                            new UserId(user), body.Tenant is { } tenant ? new TenantId(tenant) : null, ct))),
+            new ManagementRoute(nameof(IAlvoUserAdministration.SetTenantAsync), ManagementOperation.ManageUsers));
+
+        MapSignInRoutes(group);
+    }
+
+    /// <summary>
+    /// The three user routes about whether a person can sign in: disable, a credential token, and ending a lockout.
+    /// </summary>
+    /// <param name="group">The group to map into.</param>
+    private static void MapSignInRoutes(RouteGroupBuilder group)
+    {
+        Gate(
+            group.MapPut(
+                "/projects/{project}/users/{user:guid}/disabled",
+                (string project, Guid user, ManagementDisabledFlag body,
+                    IAlvoUserAdministration users, CancellationToken ct) =>
+                        Answer(() => users.SetDisabledAsync(new UserId(user), body.Disabled, ct))),
+            new ManagementRoute(nameof(IAlvoUserAdministration.SetDisabledAsync), ManagementOperation.ManageUsers));
+
+        Gate(
+            group.MapPost(
+                "/projects/{project}/users/{user:guid}/credential-reset",
+                (string project, Guid user, IAlvoUserAdministration users, CancellationToken ct) =>
+                    Answer(() => users.IssueCredentialTokenAsync(new UserId(user), ct))),
+            new ManagementRoute(
+                nameof(IAlvoUserAdministration.IssueCredentialTokenAsync), ManagementOperation.ManageUsers));
+
+        /* DELETE on the lockout, not a POST of a verb: ending it is removing a resource the person has, and
+           DELETE says the call is safe to repeat, which it is. */
+        Gate(
+            group.MapDelete(
+                "/projects/{project}/users/{user:guid}/lockout",
+                (string project, Guid user, IAlvoUserAdministration users, CancellationToken ct) =>
+                    Answer(() => users.ClearLockoutAsync(new UserId(user), ct))),
+            new ManagementRoute(nameof(IAlvoUserAdministration.ClearLockoutAsync), ManagementOperation.ManageUsers));
     }
 
     /// <summary><c>GET {prefix}/info</c> — <see cref="IAlvoManagement.GetInfoAsync"/>.</summary>
@@ -236,6 +346,43 @@ internal static class ManagementEndpoints
                     RollbackAsync(project, revision, body, request, management, ct)),
             new ManagementRoute(
                 nameof(IAlvoManagement.RollbackAsync), ManagementOperation.RollbackRevision));
+
+    /// <summary>
+    /// <c>PUT {m}/ai/connection</c> — the instance's AI connection, replaced whole.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A route, because the dashboard is a client of this API and not a second path into the
+    /// product.</b> Every other thing the dashboard can do is reachable here too; a screen that could save
+    /// a credential no CLI could would be the first exception, and the contract test refuses one.
+    /// </para>
+    /// <para>
+    /// It answers with what <c>GET {m}/info</c> would now report — configured, kind, model, source, and no
+    /// endpoint — so a caller learns the state it produced without sending the credential back.
+    /// </para>
+    /// </remarks>
+    /// <param name="group">The management route group.</param>
+    private static void MapAiConnection(RouteGroupBuilder group) =>
+        Gate(
+            group.MapPut(
+                "/ai/connection",
+                (StoredAiConnection? body, IAlvoManagement management, CancellationToken ct) =>
+                    Answer(async () =>
+                    {
+                        await management.SetAiConnectionAsync(
+                            body ?? throw new ManagementRequestException(NoConnectionBody), ct)
+                            .ConfigureAwait(false);
+
+                        return (await management.GetInfoAsync(ct).ConfigureAwait(false)).Ai;
+                    })),
+            new ManagementRoute(
+                nameof(IAlvoManagement.SetAiConnectionAsync), ManagementOperation.SetAiConnection));
+
+    /// <summary>What a caller who sent no body is told.</summary>
+    private const string NoConnectionBody =
+        "Send the connection as the request body: {\"kind\", \"endpoint\", \"model\", \"apiKey\"}. "
+        + "'kind' is 'openai-compatible' or 'azure-openai'; 'apiKey' may be omitted for an endpoint that "
+        + "needs none.";
 
     /// <summary>
     /// Reads the precondition and the dry-run flag, and refuses before anything is applied when either is
@@ -518,12 +665,26 @@ internal static class ManagementEndpoints
         {
             return ProblemResultFactory.ManagementForbidden();
         }
+        catch (Secrets.SecretShadowedException refusal)
+        {
+            return ProblemResultFactory.ManagementValidation(refusal.Message);
+        }
+        catch (Secrets.SecretStoreReadOnlyException refusal)
+        {
+            return ProblemResultFactory.ManagementValidation(refusal.Message);
+        }
         catch (DescriptorValidationException refusal)
         {
             return ProblemResultFactory.ManagementDescriptorRefused(refusal);
         }
         catch (DescriptorConcurrencyException refusal)
         {
+            return ProblemResultFactory.PreconditionFailed(refusal.Message);
+        }
+        catch (Data.AlvoPreconditionFailedException refusal)
+        {
+            /* A user write that lost a race to another administrator's. The same exception the Data API
+               answers 412 for, minted the same way: one exception type, one classification. */
             return ProblemResultFactory.PreconditionFailed(refusal.Message);
         }
         catch (DestructiveChangeNotAllowedException refusal)

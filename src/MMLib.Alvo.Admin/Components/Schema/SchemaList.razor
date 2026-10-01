@@ -1,0 +1,487 @@
+﻿@page "/admin/schema"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject AdminSession Session
+@inject NavigationManager Navigation
+@inject ILogger<SchemaList> Logger
+@inject ISnackbar Snackbar
+@implements IDisposable
+@using MMLib.Alvo.Admin.Components.Schema.Map
+@using Microsoft.AspNetCore.WebUtilities
+
+<PageTitle>Schema · Alvo</PageTitle>
+
+<div class="a-stack">
+    @* The screen's create action is its header's primary one (spec §3.7), as New record is on Data. *@
+    <PageHeader Title="Schema">
+        <Secondary>
+            <ChipGroup TValue="string" Items="_views" Selected="@(new[] { _map ? MapView : ListView })"
+                       SelectedChanged="ChooseView" aria-label="View" />
+            <AlvoButton Small="true" Href="@AdminPaths.Transfer">Import / export</AlvoButton>
+        </Secondary>
+        <Primary>
+            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" data-testid="entity-new"
+                        OnClick="_ => OpenAdding()">New entity</AlvoButton>
+        </Primary>
+    </PageHeader>
+
+    @if (_problem is not null)
+    {
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
+    }
+
+    @*
+        An editor over the list rather than a strip above it (spec §3.1): the names already there stay in sight
+        beside the sheet on a desktop, and the guard keeps a half-typed name from an Escape.
+    *@
+    @if (_adding)
+    {
+        <AlvoEditor TestId="new-entity" Title="New entity" SubmitText="Add to the working copy"
+                    Subtitle="It arrives with one required name field and opens on its Fields tab. Nothing reaches the database until you preview and apply."
+                    Dirty="@(_name.Trim().Length > 0 || _scoped || !_audited)" OnSubmit="AddEntity" OnClose="CancelAdding">
+            @RefusalPanel.Of(_refusal, "That entity cannot be added")
+            <Field Label="Name" For="new-entity-name">
+                <ChildContent>
+                    <MudTextField T="string" Value="_name" ValueChanged="name => _name = name ?? string.Empty" Immediate="true"
+                                  Variant="Variant.Outlined" id="new-entity-name" autocomplete="off" Class="a-mono"
+                                  Placeholder="e.g. invoices" aria-describedby="new-entity-name-hint" />
+                </ChildContent>
+                <Hint>@DescriptorNames.Hint</Hint>
+            </Field>
+            <Field Label="Constraints" LabelId="new-entity-constraints">
+                <ChildContent>
+                    <div class="a-row a-row--wrap" role="group" aria-labelledby="new-entity-constraints">
+                        <MudCheckBox T="bool" Value="_scoped" ValueChanged="on => _scoped = on" Label="tenant-scoped" />
+                        <MudCheckBox T="bool" Value="_audited" ValueChanged="on => _audited = on" Label="audited" />
+                    </div>
+                </ChildContent>
+                <Hint>
+                    Scoped means every row belongs to a tenant and a caller with none is refused with 403.
+                    Audited adds the four stamp columns and a version, which is what makes a conditional write possible.
+                </Hint>
+            </Field>
+        </AlvoEditor>
+    }
+
+    @if (_map)
+    {
+        @MapPanel
+    }
+    else if (_schema is null)
+    {
+        <Skeleton Size="Skeleton.SkeletonSize.Lg" />
+    }
+    else if (_schema.Entities.Count == 0)
+    {
+        <EmptyState Title="This project has no entities yet"
+                    Body="An entity is a table Alvo creates and keeps in step with the descriptor. Import a descriptor, or add the first entity in the editor.">
+            <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" Href="@AdminPaths.Transfer">Import a descriptor</AlvoButton>
+        </EmptyState>
+    }
+    else
+    {
+        @* A search over the list, so it is named by its placeholder and aria-label, not a label above it (spec §3.8),
+           and drawn like the Data screen's search. *@
+        <MudTextField T="string" Value="_filter" ValueChanged="term => _filter = term ?? string.Empty" Immediate="true"
+                      Variant="Variant.Outlined" Placeholder="Filter entities" aria-label="Filter entities"
+                      Clearable="true" id="entity-filter" data-testid="entity-filter" autocomplete="off" Class="a-filter" />
+
+        var pending = EntityFilter.Apply(Pending, _filter);
+        var applied = EntityFilter.Apply(_schema.Entities.Select(entity => entity.Name), _filter);
+        @* A dynamic entity is never applied by this build, so it is not "not applied yet" (§8d item 21). *@
+        var unbuilt = Copy.Loaded ? PendingSchema.Dynamic(Copy.Json) : new HashSet<string>();
+        <Panel Title="@ListTitle(pending.Count + applied.Count)" data-testid="entity-list">
+            <Subtitle>
+                What the Data API actually serves — the descriptor after everything that did not
+                survive it. Where the two differ is where <em>declared but not honoured</em> lives.
+            </Subtitle>
+            <ChildContent>
+                @if (pending.Count == 0 && applied.Count == 0)
+                {
+                    <EmptyState Title="@($"Nothing matches “{_filter.Trim()}”")" Body="The filter looks at entity names.">
+                        <AlvoButton Small="true" data-testid="entity-filter-clear" OnClick="_ => _filter = string.Empty">
+                            Clear filter
+                        </AlvoButton>
+                    </EmptyState>
+                }
+
+                @foreach (var name in pending)
+                {
+                    <ListRow class="a-listrow--accent a-listrow--inline" data-testid="@($"entity-row-{name}")"
+                             data-alvo-new="@(name == _arrived ? "true" : null)" OnClick="() => Open(name)">
+                        <Icon Path="@Icons.Schema" />
+                        <span class="a-grow">
+                            <span class="a-mono a-name">@name</span>
+                            <span class="a-meta">@(unbuilt.Contains(name) ? DynamicStorageWords.ListNote : "In the working copy. It does not exist in the database until you apply.")</span>
+                        </span>
+                        @if (unbuilt.Contains(name))
+                        {
+                            <span class="a-badge a-badge--warn a-listrow__aside" data-testid="@($"entity-dynamic-{name}")">@DynamicStorageWords.Badge</span>
+                        }
+                        else
+                        {
+                            <span class="a-badge a-badge--warn a-listrow__aside">not applied yet</span>
+                        }
+                    </ListRow>
+                }
+
+                @foreach (var name in applied)
+                {
+                    @EntityRow(_byName[name])
+                }
+
+                @if (_arrived is { } arrived && pending.Contains(arrived))
+                {
+                    @RevealOnRender.On($"[data-testid='entity-row-{arrived}']", 0)
+                }
+            </ChildContent>
+        </Panel>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// This operator's working copy, resolved from the store rather than injected.
+    /// </summary>
+    /// <remarks>
+    /// Empty until the first render has resolved who is signed in — the markup therefore reads it
+    /// through <c>Copy.Loaded</c> rather than assuming a document is there.
+    /// </remarks>
+    private WorkingCopy Copy { get; set; } = new();
+
+    private const string ListView = "List";
+    private const string MapView = "Map";
+
+    private const string FitZoom = "Fit";
+    private const string ActualZoom = "Actual size";
+
+    private static readonly IReadOnlyList<string> _views = [ListView, MapView];
+    private static readonly IReadOnlyList<string> _zooms = [FitZoom, ActualZoom];
+
+    private SchemaModel? _schema;
+    private AdminProblem? _problem;
+    private bool _map;
+    private bool _reactions;
+    private bool _actual;
+    private string? _centre;
+    private (string Json, SystemGraph Graph)? _parsed;
+    private string _name = string.Empty;
+    private string _filter = string.Empty;
+    private readonly RefusalState<string> _refusal = new();
+    private bool _adding;
+    private bool _scoped;
+    private bool _audited = true;
+    private IReadOnlyDictionary<string, EntitySchema> _byName = new Dictionary<string, EntitySchema>();
+    private string? _arrived;
+
+    /// <summary>What a back step to this list carries, to say which entity was just created from it.</summary>
+    private const string ArrivedPrefix = "alvo-new:";
+    private readonly ComponentLifetime _lifetime = new();
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+        _lifetime.Dispose();
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+        ReadView(Navigation.Uri);
+        ReadArrival();
+        OpenIfAsked(Navigation.Uri);
+
+        var ct = _lifetime.Token;
+        try
+        {
+            /* The pending rows are drawn from the copy, which the shell's Discard and the operator's other
+               tabs also change — so it is followed, and taken only once the schema has been read. */
+            Copy = await Session.CopyAsync(ct);
+            Session.Follow(Copy, InvokeAsync, StateHasChanged, ct);
+
+            _schema = await Gateway.SchemaAsync(ct);
+            _byName = _schema.Entities.ToDictionary(entity => entity.Name, StringComparer.Ordinal);
+            await Session.EnsureLoadedAsync(Copy, ct);
+        }
+        catch (Exception exception)
+        {
+            _problem = AdminProblem.From(exception, Logger);
+        }
+    }
+
+    /// <summary>
+    /// The entities the working copy declares and the applied schema does not.
+    /// </summary>
+    /// <remarks>
+    /// Shown first and tinted, because the whole point of the list is "what is this backend", and
+    /// an entity somebody added ten seconds ago that is nowhere on the screen reads as a control
+    /// that did nothing.
+    /// </remarks>
+    private IEnumerable<string> Pending => Copy.Loaded && _schema is not null
+        ? Copy.Entities.Where(name => !_schema.Entities.Any(
+            entity => string.Equals(entity.Name, name, StringComparison.Ordinal)))
+        : [];
+
+    private void Open(string entity) => Navigation.NavigateTo(AdminPaths.Entity(entity));
+
+    /// <summary>
+    /// One applied entity's row: its name, its description and the facets that decide how it is served — and, once the
+    /// working copy removed it, a badge saying so, because a row drawn as served after its removal reads as a removal
+    /// that did nothing (docs/todo-admin.md §8d item 24).
+    /// </summary>
+    private RenderFragment EntityRow(EntitySchema entity) => @<ListRow class="a-listrow--inline"
+                                                                      data-testid="@($"entity-row-{entity.Name}")"
+                                                                      OnClick="() => Open(entity.Name)">
+        <Icon Path="@Icons.Schema" />
+        <span class="a-grow">
+            <span class="a-mono a-name">@entity.Name</span>
+            <span class="a-meta">@(entity.Description ?? "No description in the descriptor")</span>
+        </span>
+        <span class="a-row a-row--gap-2 a-listrow__aside">
+            @if (Copy.Loaded && Copy.RemovedEntities.Contains(entity.Name, StringComparer.Ordinal))
+            {
+                <span class="a-badge a-badge--danger">removed — not applied yet</span>
+            }
+            <span class="a-badge">@entity.Fields.Count fields</span>
+            @if (entity.Tenancy == TenancyMode.Scoped)
+            {
+                <span class="a-badge a-badge--accent">scoped</span>
+            }
+            @if (entity.Audit)
+            {
+                <span class="a-badge">audited</span>
+            }
+            @if (entity.SoftDelete)
+            {
+                <span class="a-badge">soft delete</span>
+            }
+        </span>
+    </ListRow>;
+
+    /// <summary>Puts a new entity in the working copy and opens it, to add its fields.</summary>
+    /// <remarks>
+    /// The name is checked against the frozen schema's own pattern before anything else, because a
+    /// control must never produce a descriptor the apply would reject — and because an entity name
+    /// is rendered into markup on six screens.
+    /// </remarks>
+    private void AddEntity()
+    {
+
+        if (Refusal(_name) is { } refusal)
+        {
+            _refusal.Show(refusal);
+            return;
+        }
+
+        var name = _name;
+        Copy.AddEntity(name, _scoped, _audited);
+        Snackbar.Confirm(StagedWords.Added("Entity", name));
+        RememberCreated(name);
+        Navigation.NavigateTo(AdminPaths.Entity(name));
+    }
+
+    /// <summary>
+    /// Writes the new entity's name into this list's own history entry, so Back to it lights and shows the row
+    /// (spec §3.5) — and only a Back to this entry, not every later visit to the list.
+    /// </summary>
+    /// <remarks>The palette's <c>?new=entity</c> is dropped on the way, for <see cref="CancelAdding"/>'s reason.</remarks>
+    private void RememberCreated(string name)
+        => Navigation.NavigateTo(
+            Navigation.GetUriWithQueryParameter(AdminNavigation.NewEntityParameter, (string?)null),
+            new NavigationOptions { ReplaceHistoryEntry = true, HistoryEntryState = ArrivedPrefix + name });
+
+    /// <summary>The entity a Back to this list arrived from creating, when the history entry says so.</summary>
+    private void ReadArrival()
+        => _arrived = Navigation.HistoryEntryState is { } state && state.StartsWith(ArrivedPrefix, StringComparison.Ordinal)
+            ? state[ArrivedPrefix.Length..]
+            : null;
+
+    /// <summary>The list's title: every entity, or how many of them the filter keeps.</summary>
+    private string ListTitle(int shown)
+    {
+        var total = _schema!.Entities.Count + Pending.Count();
+        return _filter.Trim().Length == 0 ? $"{_schema.Entities.Count} entities" : $"{shown} of {total} entities";
+    }
+
+    /// <summary>Why <paramref name="name"/> cannot be added, or <see langword="null"/> when it can.</summary>
+    private string? Refusal(string name) => !DescriptorNames.IsMember(name)
+        ? $"An entity name must match {DescriptorNames.Member}."
+        : Copy.Entities.Contains(name, StringComparer.Ordinal)
+            ? $"This project already declares an entity called {name}."
+            : null;
+
+    /// <summary>Closes the form without touching the working copy, and forgets what was typed.</summary>
+    /// <remarks>
+    /// And drops the palette's <c>?new=entity</c> from the address, without a history step, so a reload
+    /// does not open the form the operator has just closed.
+    /// </remarks>
+    private void CancelAdding()
+    {
+        _adding = false;
+        _name = string.Empty;
+        _scoped = false;
+        _audited = true;
+        _refusal.Clear();
+
+        if (IsNewEntityRequest(Navigation.Uri))
+        {
+            Navigation.NavigateTo(
+                Navigation.GetUriWithQueryParameter(AdminNavigation.NewEntityParameter, (string?)null), replace: true);
+        }
+    }
+
+    /// <summary>
+    /// The palette's New entity, and the view the switch and the map's controls choose — each arrives as an
+    /// address, from another screen or from this one, which the router answers with this same instance.
+    /// </summary>
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        if (AdminPaths.IsAt(args.Location, AdminPaths.Schema))
+        {
+            _ = InvokeAsync(() =>
+            {
+                ReadView(args.Location);
+                OpenIfAsked(args.Location);
+                StateHasChanged();
+            });
+        }
+    }
+
+    /// <summary>Which view, which layers and which centre the address asks for.</summary>
+    /// <remarks>
+    /// In the address rather than in the component, for the entity tabs' reason: "look at the map" is a link
+    /// somebody sends, and a reload must draw what was on the screen.
+    /// </remarks>
+    private void ReadView(string uri)
+    {
+        var query = QueryHelpers.ParseQuery(new Uri(uri).Query);
+
+        _map = query.TryGetValue(AdminPaths.ViewParameter, out var view)
+            && string.Equals(view.ToString(), "map", StringComparison.OrdinalIgnoreCase);
+        _reactions = query.TryGetValue(AdminPaths.LayersParameter, out var layers)
+            && string.Equals(layers.ToString(), "reactions", StringComparison.OrdinalIgnoreCase);
+        _actual = query.TryGetValue(AdminPaths.ZoomParameter, out var zoom)
+            && string.Equals(zoom.ToString(), "actual", StringComparison.OrdinalIgnoreCase);
+        _centre = query.TryGetValue(AdminPaths.CentreParameter, out var centre) && centre.ToString() is { Length: > 0 } name
+            ? name
+            : null;
+    }
+
+    /// <summary>The switch between the list and the map: a history step, so Back returns to the other view.</summary>
+    /// <remarks>
+    /// The chosen chip is pressed too (ChipGroup raises every press), and pressing what is already shown must
+    /// not add a history step that Back then has to undo for nothing — so each chooser below returns early.
+    /// </remarks>
+    private void ChooseView(IReadOnlyList<string> chosen)
+    {
+        var map = chosen is [MapView];
+        if (map != _map)
+        {
+            Navigation.NavigateTo(map ? AdminPaths.SchemaMap(_reactions, _centre, _actual) : AdminPaths.Schema);
+        }
+    }
+
+    private void ToggleReactions() => Navigation.NavigateTo(AdminPaths.SchemaMap(!_reactions, _centre, _actual));
+
+    private void ChooseZoom(IReadOnlyList<string> chosen)
+    {
+        var actual = chosen is [ActualZoom];
+        if (actual != _actual)
+        {
+            Navigation.NavigateTo(AdminPaths.SchemaMap(_reactions, _centre, actual));
+        }
+    }
+
+    private void ChooseCentre(IReadOnlyList<string> chosen)
+    {
+        if (chosen is [var centre] && !string.Equals(centre, Centre, StringComparison.Ordinal))
+        {
+            Navigation.NavigateTo(AdminPaths.SchemaMap(_reactions, centre, _actual));
+        }
+    }
+
+    /// <summary>
+    /// The entity the Schema map is focused on — the address's, or the first — or null while it draws whole.
+    /// </summary>
+    private string? Centre => MapCentre.Choose(Copy.Entities, _centre);
+
+    /// <summary>The working copy read as the map reads it, parsed again only when the copy moved.</summary>
+    /// <remarks>
+    /// The panel needs two facts from it the drawing does not hand back — how many entities a focus keeps, and
+    /// how many rules draw no wire — and the screen re-renders on every edit anywhere in the copy.
+    /// </remarks>
+    private SystemGraph Graph
+    {
+        get
+        {
+            var json = Copy.Json;
+            if (_parsed is not { } known || !string.Equals(known.Json, json, StringComparison.Ordinal))
+            {
+                _parsed = (json, SystemGraph.From(json));
+            }
+
+            return _parsed.Value.Graph;
+        }
+    }
+
+    /// <summary>The map view: its controls over the drawing, drawn from the working copy once it is loaded.</summary>
+    private RenderFragment MapPanel => @<Panel Title="Map">
+        <Subtitle>
+            Every relation is many-to-one and starts at the ref field that makes it; the row it starts at says
+            what a delete on the other side does (<code class="a-mono">→ customers · restrict</code>). Read only — a
+            relation is added as a ref field in the entity's own editor.
+        </Subtitle>
+        <ChildContent>
+            @if (!Copy.Loaded)
+            {
+                <div class="a-panel__body"><Skeleton Size="Skeleton.SkeletonSize.Lg" /></div>
+            }
+            else
+            {
+                <div class="a-row a-row--wrap a-row--inset">
+                    <MudCheckBox T="bool" Value="_reactions" ValueChanged="_ => ToggleReactions()" Label="Show reactions" />
+                    <ChipGroup TValue="string" Items="_zooms" Selected="@(new[] { _actual ? ActualZoom : FitZoom })"
+                               SelectedChanged="ChooseZoom" aria-label="Zoom" />
+                    <span class="a-hint">✉ template · ↗ webhook · dashed: automation, declared and not run by this build</span>
+                </div>
+                @if (Centre is { } centre)
+                {
+                    @CentrePicker(centre)
+                }
+                <SystemMap DescriptorJson="@Copy.Json" AppliedJson="@Copy.AppliedJson" Reactions="_reactions" Centre="@Centre"
+                           ActualSize="_actual" />
+                @if (_reactions && MapWords.Undrawn(Graph.Undrawn) is { } undrawn)
+                {
+                    <p class="a-hint a-hint--inset" data-testid="map-undrawn">@undrawn</p>
+                }
+            }
+        </ChildContent>
+    </Panel>;
+
+    /// <summary>Past <see cref="MapCentre.WholeGraphLimit"/> entities: the picker of the centre, and what it leaves out.</summary>
+    private RenderFragment CentrePicker(string centre) => @<div>
+        <div class="a-row a-row--wrap a-row--inset">
+            <span class="a-hint" id="map-centre">Centre on</span>
+            <ChipGroup TValue="string" Items="Copy.Entities" Selected="@(new[] { centre })"
+                       SelectedChanged="ChooseCentre" aria-labelledby="map-centre" />
+        </div>
+        <span class="a-hint a-hint--inset">
+            Showing @Graph.Focus(centre).Entities.Count of @Copy.Entities.Count — @centre and one hop in each direction.
+        </span>
+    </div>;
+
+    private void OpenIfAsked(string uri)
+    {
+        if (IsNewEntityRequest(uri))
+        {
+            _adding = true;
+        }
+    }
+
+    /// <summary>The header button: opens the editor. It is modal, so nothing can press the button again while it is open.</summary>
+    private void OpenAdding() => _adding = true;
+
+    private static bool IsNewEntityRequest(string uri) => AdminNavigation.IsNewEntity(uri);
+}

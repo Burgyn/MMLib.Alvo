@@ -86,12 +86,26 @@ namespace MMLib.Alvo.Descriptor.Internal;
 /// <b><c>realtime</c> is absent for a different and sharper reason: it is not a top-level block at all.</b>
 /// The schema declares it per entity (<c>$defs/entity/properties/realtime</c>) as a boolean whose
 /// <b>default is <c>true</c></b> — so realtime is unhonoured for <em>every</em> entity of <em>every</em>
-/// descriptor, declared or not. Neither available shape is worth emitting: warning only on an explicit
-/// <c>realtime: true</c> would stay silent for the overwhelming majority of entities that are equally
-/// affected, and warning on all of them would fire on every descriptor ever applied, which is the
+/// descriptor, declared or not. Neither available shape is worth emitting <em>at apply</em>: warning only on
+/// an explicit <c>realtime: true</c> would stay silent for the overwhelming majority of entities that are
+/// equally affected, and warning on all of them would fire on every descriptor ever applied, which is the
 /// unconditional line every operator learns to filter out. It is recorded in
-/// <c>docs/architecture/data-api.md</c> and tracked as its own issue instead, where it can say the true
-/// thing this table's shape cannot.
+/// <c>docs/architecture/data-api.md</c> and tracked on #38 — and, since §8d item 27, it is the one row of
+/// <see cref="ReportedOnly"/>: the capability report says it, so a dashboard can print the build's own
+/// sentence, while the apply stays quiet. That split is the deviation <c>CapabilityReport</c> records. Its
+/// predicate is the <em>explicit</em> <c>realtime: true</c> — the one case that is a declaration of the project's —
+/// and a client says the default-true case once, where it describes the build, never per project.
+/// </para>
+/// <para>
+/// <b>Keys inside an honoured block are their own table, <see cref="WithinBlocks"/>.</b> <c>auth</c> is honoured
+/// for its <c>roles</c>, and <c>entities</c> for everything but a <c>storage: dynamic</c> entity, so a row naming
+/// either block here would contradict <c>CapabilityReport.Honoured</c>. A qualified slot — <c>auth.providers</c>,
+/// <c>entity.storage</c>, spelled as <see cref="UnhonouredFeatures"/>' slots are — says exactly which key is not
+/// honoured and keeps the two lists disjoint. Both rows are limb one: a <c>storage: dynamic</c> entity is dropped
+/// by the mapper (<c>DescriptorToSchemaMapper.IsPhysical</c>) and looks like an apply that did not take, and a
+/// declared <c>google</c> sign-in that is not there looks like a misconfigured provider. <b>Warned, not refused</b>:
+/// nothing is wrongly <em>permitted</em> by either absence — a dropped entity serves nothing, a missing provider
+/// admits nobody — which is the line between this table and <see cref="UnhonouredFeatures"/>.
 /// </para>
 /// <para>
 /// <b>Two entries are now <em>partially</em> honoured, and the wording carries that rather than the entry
@@ -148,14 +162,48 @@ internal static partial class UnhonouredSubsystems
     ];
 
     /// <summary>
-    /// The blocks <paramref name="descriptor"/> declares that this build honours nowhere, in
-    /// <see cref="All"/>'s order.
+    /// Keys inside a block this build honours that it does not honour themselves, as qualified slots — warned at
+    /// apply exactly as <see cref="All"/>'s blocks are, after them.
     /// </summary>
+    internal static IReadOnlyList<UnhonouredSubsystem> WithinBlocks { get; } =
+    [
+        new(
+            "auth.providers",
+            descriptor => descriptor.Auth?.Providers?.Any(provider => provider != AuthProvider.Local) == true,
+            "only local credentials exist in this build — a person signs in with an address and a password Alvo "
+            + "holds; google, microsoft, github, apple and oidc sign-in are #36 (F7), so a declared provider other "
+            + "than local offers no way in"),
+        new(
+            "entity.storage",
+            descriptor => descriptor.Entities?.Values.Any(entity => entity.Storage == StorageMode.Dynamic) == true,
+            "an entity declared with 'storage: dynamic' is not created: this build has no dynamic schema-registry "
+            + "driver (F7, #41), so the entity gets no table, no Data API route and no records, and the apply "
+            + "drops it without refusing it"),
+    ];
+
+    /// <summary>
+    /// What the capability report says is not honoured and the apply never warns about — today only
+    /// <c>entity.realtime</c>, whose schema default is <c>true</c> (see the remarks).
+    /// </summary>
+    internal static IReadOnlyList<UnhonouredSubsystem> ReportedOnly { get; } =
+    [
+        new(
+            "entity.realtime",
+            descriptor => descriptor.Entities?.Values.Any(entity => entity.Realtime == true) == true,
+            "no change is published over a realtime channel, because this build has none (#38, F7) — whatever "
+            + "an entity's 'realtime' says, and its default is true, nothing is sent and nothing can subscribe"),
+    ];
+
+    /// <summary>
+    /// The blocks and keys <paramref name="descriptor"/> declares that this build honours nowhere and warns about
+    /// at apply, in <see cref="All"/>'s order and then <see cref="WithinBlocks"/>'.
+    /// </summary>
+    /// <remarks><see cref="ReportedOnly"/> is left out on purpose: it is what the apply does not warn about.</remarks>
     /// <param name="descriptor">The descriptor just accepted as authoritative.</param>
     internal static IReadOnlyList<UnhonouredSubsystem> DeclaredBy(AlvoDescriptor descriptor)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
-        return [.. All.Where(subsystem => subsystem.IsDeclaredBy(descriptor))];
+        return [.. All.Concat(WithinBlocks).Where(subsystem => subsystem.IsDeclaredBy(descriptor))];
     }
 
     /// <summary>
@@ -217,7 +265,7 @@ internal static partial class UnhonouredSubsystems
     /// </remarks>
     [LoggerMessage(
         Level = LogLevel.Warning,
-        Message = "This descriptor declares {UnhonouredBlockCount} block(s) this build does not honour: "
+        Message = "This descriptor declares {UnhonouredBlockCount} block(s) or key(s) this build does not honour: "
             + "{UnhonouredBlocks}. They are accepted rather than refused, because a warning can carry what "
             + "is missing, but nothing runs for them — {UnhonouredConsequences}.")]
     private static partial void DeclaresUnhonouredBlocks(
@@ -228,12 +276,14 @@ internal static partial class UnhonouredSubsystems
 }
 
 /// <summary>
-/// One top-level descriptor block this build parses and honours nowhere.
+/// One top-level descriptor block, or one qualified key inside an honoured block, that this build parses and
+/// honours nowhere.
 /// </summary>
 /// <param name="Block">
 /// The block's key at the descriptor root, spelled exactly as <c>schema/project.schema.json</c> declares
-/// it — which a fact asserts against the schema itself, because an entry naming a key no descriptor can
-/// carry warns about nothing.
+/// it — or, for a row of <see cref="UnhonouredSubsystems.WithinBlocks"/> or
+/// <see cref="UnhonouredSubsystems.ReportedOnly"/>, a qualified slot such as <c>auth.providers</c>. Facts assert
+/// both against the schema itself, because an entry naming a key no descriptor can carry warns about nothing.
 /// </param>
 /// <param name="IsDeclaredBy">
 /// Whether a parsed descriptor really declares it. A block present but declined by value — an empty

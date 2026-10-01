@@ -127,10 +127,15 @@ public class ChangeTrackerReachTests
     /// precisely so the row-statement file does not also become the place framework bookkeeping SQL is written;
     /// <c>PredicateParameterBinder</c> creates a command only to reach the provider's parameter factory;
     /// <c>EfCoreSchemaMigrator</c> executes the migrator's generated statements;
+    /// <c>MigrationFramingScope</c> runs the dialect's constant integrity query (<c>PRAGMA foreign_key_check</c>) inside
+    /// a migration's transaction, binding and composing nothing;
     /// <c>SqliteCaseSensitiveLike</c> runs one connection pragma and can carry no row predicate at all;
     /// <c>RollupRecompute</c> writes the parent's own aggregate columns from a subquery over the child table
     /// and narrows by the row id it read off the child row this caller was already authorised to write, so it
     /// composes no caller-influenced predicate and every identifier in it comes from the dialect;
+    /// <c>SecretsTable</c> and <c>EfCoreSecretStore</c> read and write only the framework's secrets table,
+    /// binding the secret's name — a value already validated against <c>SecretName</c>'s grammar — and never
+    /// an entity table, so there is no row a policy predicate could be missing from;
     /// <c>RelationalReachability</c> executes one <c>const</c> of its own (<c>SELECT 1</c>) that names no
     /// table, carries no <c>WHERE</c> and binds no parameter, so there is nothing in it a caller could
     /// influence and nothing for a policy predicate to be missing from; and
@@ -222,12 +227,15 @@ public class ChangeTrackerReachTests
         "EfCoreOutboxStore.cs",
         "EfCoreRuntimeSchemaWriter.cs",
         "EfCoreSchemaMigrator.cs",
+        "EfCoreSecretStore.cs",
         "IdempotencyTable.cs",
+        "MigrationFramingScope.cs",
         "OutboxTable.cs",
         "PredicateParameterBinder.cs",
         "RelationalReachability.cs",
         "RelationalSqlBatch.cs",
         "RollupRecompute.cs",
+        "SecretsTable.cs",
         "SqliteCaseSensitiveLike.cs",
         "SystemSchemaInitializer.cs",
         "VersionRowWriter.cs",

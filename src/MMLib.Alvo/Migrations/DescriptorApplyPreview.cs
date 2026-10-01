@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Migrations;
+﻿using MMLib.Alvo.Descriptor;
+
+namespace MMLib.Alvo.Migrations;
 
 /// <summary>
 /// What an apply <em>would</em> do — the migration plan, the base it was planned against, and the
@@ -17,4 +19,8 @@
 /// Whether <see cref="RuntimeSchemaService.ApplyAsync"/> would proceed: <see langword="false"/> exactly when
 /// the plan is destructive and <see cref="MigrationOptions.AllowDestructive"/> is not set.
 /// </param>
-internal sealed record DescriptorApplyPreview(MigrationPlan Plan, int CurrentRevision, bool AllowedByGuardrail);
+internal sealed record DescriptorApplyPreview(MigrationPlan Plan, int CurrentRevision, bool AllowedByGuardrail)
+{
+    /// <summary>The validator's warnings on the descriptor: advisory, never blocking (D52).</summary>
+    internal IReadOnlyList<DescriptorValidationError> Warnings { get; init; } = [];
+}

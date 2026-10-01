@@ -52,4 +52,34 @@ public class IdentityPrimitiveTests
     {
         Should.Throw<JsonException>(() => JsonSerializer.Deserialize<TenantId>("42"));
     }
+
+    /// <summary>
+    /// The all-zero uuid is reserved to mean "no tenant", and a tenant that is present but
+    /// all-zero is worse than no tenant at all: the predicate is attached and matches every row
+    /// whose tenant was defaulted rather than assigned.
+    /// </summary>
+    [Fact]
+    public void TenantId_refuses_the_reserved_all_zero_value()
+    {
+        TenantId.TryParse(Guid.Empty.ToString(), provider: null, out _).ShouldBeFalse(
+            "all-zero means \"no tenant\", which is expressed as null and never as a TenantId");
+
+        Should.Throw<FormatException>(() => TenantId.Parse(Guid.Empty.ToString(), provider: null));
+
+        Should.Throw<JsonException>(
+            () => JsonSerializer.Deserialize<TenantId>($"\"{Guid.Empty}\""));
+    }
+
+    /// <summary>
+    /// <see cref="UserId"/> keeps parsing the reserved value, deliberately: it is what
+    /// <see cref="AlvoContext.Anonymous"/> carries, so refusing it here would refuse the anonymous
+    /// caller's own identifier. The reservation is enforced where a subject is read instead.
+    /// </summary>
+    [Fact]
+    public void UserId_still_parses_the_reserved_value_because_Anonymous_carries_it()
+    {
+        UserId.TryParse(Guid.Empty.ToString(), provider: null, out var parsed).ShouldBeTrue();
+
+        parsed.ShouldBe(AlvoContext.Anonymous.User);
+    }
 }

@@ -110,7 +110,7 @@ public sealed class RuntimeSchemaService
         ArgumentNullException.ThrowIfNull(options);
         RejectDryRun(options);
 
-        Validate(descriptorJson);
+        _ = Validate(descriptorJson);
         var descriptor = AlvoDescriptor.Parse(descriptorJson);
         var desired = DescriptorToSchemaMapper.Map(descriptor);
         var current = await CurrentAtAsync(project, expectedRevision, ct).ConfigureAwait(false);
@@ -174,14 +174,17 @@ public sealed class RuntimeSchemaService
         ArgumentException.ThrowIfNullOrWhiteSpace(project);
         ArgumentNullException.ThrowIfNull(options);
 
-        Validate(descriptorJson);
+        var validation = Validate(descriptorJson);
         var desired = DescriptorToSchemaMapper.Map(AlvoDescriptor.Parse(descriptorJson));
         var current = await CurrentAtAsync(project, expectedRevision, ct).ConfigureAwait(false);
         var plan = await _migrator.PlanAsync(
             current?.Schema ?? new SchemaModel([]), desired, options, ct).ConfigureAwait(false);
 
         return new DescriptorApplyPreview(
-            plan, current?.Revision ?? 0, !plan.HasDestructiveChanges || options.AllowDestructive);
+            plan, current?.Revision ?? 0, !plan.HasDestructiveChanges || options.AllowDestructive)
+        {
+            Warnings = [.. validation.Errors.Where(error => error.Severity == DescriptorValidationSeverity.Warning)],
+        };
     }
 
     /// <summary>
@@ -248,13 +251,16 @@ public sealed class RuntimeSchemaService
         return reverted;
     }
 
-    private void Validate(string descriptorJson)
+    /// <summary>Validates the descriptor, throwing on any error, and returns what it checked — warnings included (D52).</summary>
+    private DescriptorValidationResult Validate(string descriptorJson)
     {
         var result = _validator.Validate(descriptorJson);
         if (!result.IsValid)
         {
             throw new DescriptorValidationException(result);
         }
+
+        return result;
     }
 
     private static void Guard(string project, MigrationPlan plan, MigrationOptions options)

@@ -112,6 +112,13 @@ internal static class ManagedColumnNames
         + "an entity whose traits carry it, and a declaration cannot narrow or retype it.";
 
     /// <summary>
+    /// The alternative to removing an audit column, as a sentence of its own after the one edit that fixes it (D49):
+    /// joined to that edit, a model read the pair as a choice that changes what was asked for.
+    /// </summary>
+    private const string AuditAlternative =
+        "Only if the entity should keep no audit trail at all, drop 'audit' instead; that removes all four audit columns.";
+
+    /// <summary>
     /// The one place a caller-visible narrowing was lost by this rule, named where an author will hit it.
     /// </summary>
     /// <remarks>
@@ -134,28 +141,25 @@ internal static class ManagedColumnNames
                 + "nullability makes the key unusable — and because every response and every following request "
                 + "identifies the row by it, a create that cannot read back a 'id' fails with no caller error to "
                 + "report.",
-                $"Remove 'id' from the entity's fields; the store assigns it. {DeclareYourOwn}"),
+                $"Remove 'id' from the fields: the store assigns it. {DeclareYourOwn}"),
 
             [AlvoManagedColumns.TenantId] = (
                 "'tenant_id' is the discriminator the synthesized tenant scope compares, and no other response "
                 + "reports which tenant a row belongs to. A declaration that retypes it breaks the comparison "
                 + "every scoped read and write is filtered by.",
-                $"Remove 'tenant_id' from the entity's fields; 'tenancy' puts it there. {TenantNarrowing} "
-                + DeclareYourOwn),
+                $"Remove 'tenant_id' from the fields: 'tenancy' already adds it. {TenantNarrowing} " + DeclareYourOwn),
 
             [AlvoManagedColumns.CreatedAt] = (
                 "'created_at' is a required instant the framework stamps on every create. A declaration that "
                 + "retypes it — to 'string', say — is accepted at apply and then fails every single create, "
                 + "because the stamp writes a timestamp into a column the schema says is something else.",
-                "Remove 'created_at' from the entity's fields; 'audit: true' puts it there, and dropping "
-                + $"'audit' removes it. {DeclareYourOwn}"),
+                $"Remove 'created_at' from the fields: 'audit: true' already adds it. {AuditAlternative} {DeclareYourOwn}"),
 
             [AlvoManagedColumns.CreatedBy] = (
                 "'created_by' records which caller created the row, and it is half of the audit trail this "
                 + "entity asked for by declaring 'audit'. A declaration retypes or masks a column the framework "
                 + "writes on every create regardless.",
-                "Remove 'created_by' from the entity's fields; 'audit: true' puts it there, and dropping "
-                + $"'audit' removes it. {DeclareYourOwn}"),
+                $"Remove 'created_by' from the fields: 'audit: true' already adds it. {AuditAlternative} {DeclareYourOwn}"),
 
             [AlvoManagedColumns.UpdatedAt] = (
                 "'updated_at' is the column that versions a row, so a declaration costs more than the others. "
@@ -163,21 +167,19 @@ internal static class ManagedColumnNames
                 + "schema says is something else. Masked with 'hidden', it leaves the API with no 'ETag' to hand "
                 + "out and the caller with no 'If-Match' to send — optimistic concurrency off for this entity, "
                 + "silently, with concurrent writers overwriting each other.",
-                "Remove 'updated_at' from the entity's fields; 'audit: true' puts it there, and dropping "
-                + "'audit' removes it — along with the row versioning that 'ETag' and 'If-Match' need. "
-                + DeclareYourOwn),
+                "Remove 'updated_at' from the fields: 'audit: true' already adds it. Only if the entity should keep "
+                + "no audit trail at all, drop 'audit' instead; that removes all four audit columns and the row "
+                + "versioning that 'ETag' and 'If-Match' need. " + DeclareYourOwn),
 
             [AlvoManagedColumns.UpdatedBy] = (
                 "'updated_by' records which caller last wrote the row, and it is half of the audit trail this "
                 + "entity asked for by declaring 'audit'. A declaration retypes or masks a column the framework "
                 + "writes on every write regardless.",
-                "Remove 'updated_by' from the entity's fields; 'audit: true' puts it there, and dropping "
-                + $"'audit' removes it. {DeclareYourOwn}"),
+                $"Remove 'updated_by' from the fields: 'audit: true' already adds it. {AuditAlternative} {DeclareYourOwn}"),
 
             [AlvoManagedColumns.DeletedAt] = (
                 "'deleted_at' is the marker a soft delete sets and every read excludes on, so it is the whole of "
                 + "whether a deleted row is recoverable. A declaration hands that to the caller's own schema.",
-                "Remove 'deleted_at' from the entity's fields; 'softDelete' is what puts it there. "
-                + DeclareYourOwn),
+                $"Remove 'deleted_at' from the fields: 'softDelete' already adds it. {DeclareYourOwn}"),
         }.ToFrozenDictionary(StringComparer.Ordinal);
 }

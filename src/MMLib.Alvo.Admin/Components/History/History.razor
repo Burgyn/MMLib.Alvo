@@ -1,0 +1,387 @@
+﻿@page "/admin/history"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject AdminSession Session
+@inject ILogger<History> Logger
+@inject ISnackbar Snackbar
+@inject AdminInterop Interop
+
+<PageTitle>Configuration history · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Title="Configuration history"
+                Subtitle="Every apply appends a revision and none is ever rewritten. This is the audit trail of configuration — who changed what the backend is, when, and why. An audit trail of the data is a different thing and does not exist yet." />
+
+    @*
+        The whole page is the panel only while there is no list to keep: the first read failed. Anything that fails
+        after that — a revision that would not open, a refused rollback — is drawn in the detail pane, and the list
+        and the selection stay where they were (spec §3.3, §3.6).
+    *@
+    @if (_revisions is null && _problem.Shown)
+    {
+        @Refusal()
+    }
+    else if (_revisions is null)
+    {
+        <Skeleton Size="Skeleton.SkeletonSize.Lg" />
+    }
+    else if (_revisions.Count == 0)
+    {
+        @*
+            A host records the descriptor it boots from as revision 1, so an empty history is the one start that
+            records nothing: startup mode Skip over a database whose schema a migration job already made.
+        *@
+        <EmptyState Title="No revision has been recorded yet"
+                    Body="This host started without recording its descriptor, because a migration job owns its schema. The first change you apply here becomes revision 1." />
+    }
+    else
+    {
+        <div class="a-split">
+            <Panel class="a-split__main a-grow">
+                @RefreshBar.While(_reloading)
+                @foreach (var revision in _revisions)
+                {
+                    @* Flush: the revision draws its own inset, the one it has on Overview. *@
+                    <ListRow class="@($"a-listrow--stacked a-listrow--flush{(revision.Revision == _selected?.Version.Revision ? " a-listrow--accent" : string.Empty)}")"
+                             OnClick="() => OpenAsync(revision.Revision)">
+                        <RevisionRow Revision="revision" />
+                    </ListRow>
+                }
+            </Panel>
+
+            <SplitHandle Controls="history-revision" />
+
+            <div class="a-split__aside a-stack" id="history-revision">
+                @RefreshBar.While(_opening)
+                @if (_problem.Shown)
+                {
+                    @Refusal()
+                }
+
+                @if (_selected is null)
+                {
+                    <div class="a-card">
+                        <span class="a-section__title">Pick a revision</span>
+                        <span class="a-section__sub">What it changed is shown here, and its descriptor exactly as it was applied.</span>
+                    </div>
+                }
+                else
+                {
+                    <div class="a-card a-card--roomy">
+                        <div class="a-row">
+                            <span class="a-badge a-badge--accent a-badge--rev">r@(_selected.Version.Revision)</span>
+                            <span class="a-section__sub">@RevisionHistory.Title(_selected.Version)</span>
+                        </div>
+
+                        @if (_selected.Version.Revision != _current)
+                        {
+                            <div class="a-stack">
+                                <p class="a-section__sub">
+                                    Rolling back does not rewrite history — it appends the reverse migration as a
+                                    new revision at the top of the list, and this one stays where it is.
+                                </p>
+
+                                @if (_rollback is null)
+                                {
+                                    <AlvoButton class="a-actions" data-testid="rollback-plan" Busy="_busy"
+                                                OnClick="_ => PlanRollbackAsync()">
+                                        Plan the rollback to r@(_selected.Version.Revision)
+                                    </AlvoButton>
+                                }
+                                else
+                                {
+                                    <div data-testid="rollback-plan-steps">
+                                        <span class="a-section__title">@RollbackTitle(_rollback)</span>
+                                        <PlanSteps Steps="_rollback.Steps" />
+                                    </div>
+
+                                    @if (_rollback.HasDestructiveChanges)
+                                    {
+                                        <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" Title="This rollback destroys data"
+                                                   TestId="rollback-destroys">
+                                            A reverse migration can discard data that was added after this revision.
+                                            Permission to lose data is never implied: rolling back asks you to type the
+                                            project's name.
+                                        </AlvoAlert>
+                                    }
+
+                                    <AlvoButton Tone="AlvoButton.ButtonTone.Danger" class="a-actions" data-testid="rollback-run"
+                                                Busy="_busy" OnClick="_ => _confirmingRollback = true">
+                                        Roll back to r@(_selected.Version.Revision)
+                                    </AlvoButton>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <span class="a-badge a-badge--ok">this is the current revision</span>
+                        }
+
+                        @RevisionContent(_selected)
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@*
+    Every rollback asks for the project's name, destructive or not: it replaces the whole configuration the backend
+    runs on, which is the wide blast radius spec §3.2 reserves the typed name for.
+*@
+<AlvoConfirm Open="_confirmingRollback" TestId="rollback-confirm" ConfirmTestId="rollback-confirm-run"
+             CancelTestId="rollback-confirm-cancel" Title="@($"Roll back to r{_selected?.Version.Revision}?")"
+             Consequence="@RollbackConsequence" Verb="@RollbackVerb" TypeToConfirm="@Gateway.Project" Busy="_busy"
+             OnConfirm="RollbackConfirmedAsync" OnCancel="() => _confirmingRollback = false">
+    @if (_rollback is not null)
+    {
+        <PlanSteps Steps="_rollback.Steps" />
+    }
+</AlvoConfirm>
+
+@code {
+    private IReadOnlyList<ManagementRevision>? _revisions;
+    private ManagementRevisionDetail? _selected;
+
+    /// <summary>The revision listed just before the selected one, which its change is read against.</summary>
+    private ManagementRevisionDetail? _previous;
+    private ManagementPlanSummary? _rollback;
+    private readonly RefusalState<AdminProblem> _problem = new();
+    private int _current;
+
+    /// <summary>The applied descriptor as last read, which a clean working copy follows after a rollback.</summary>
+    private ManagementDescriptor? _head;
+    private bool _allowed;
+    private bool _busy;
+    private bool _confirmingRollback;
+
+    /// <summary>The revision the operator last asked to open, which Reload opens again.</summary>
+    private int? _asked;
+
+    /// <summary>Whether the list is being read again, which its pane shows at its top (spec §3.6).</summary>
+    private bool _reloading;
+
+    /// <summary>Whether a revision is being read into the detail pane.</summary>
+    private bool _opening;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            /* Both read before either is kept: a list drawn beside no head would offer every revision a Rollback
+               against r0, and take the panel's focus on the page's own load. */
+            var revisions = await Gateway.RevisionsAsync(CancellationToken.None);
+            var head = await Gateway.DescriptorAsync(CancellationToken.None);
+            (_revisions, _head, _current) = (revisions, head, head.Revision);
+        }
+        catch (Exception exception)
+        {
+            Refused(AdminProblem.From(exception, Logger), fromPress: _revisions is not null);
+        }
+    }
+
+    /// <summary>
+    /// Reads the history and the head again, then reopens the revision the operator last asked for when it is still
+    /// listed. A refused rollback is usually somebody else's apply in between; its plan is dropped, because it was
+    /// asked against a head that has moved.
+    /// </summary>
+    private async Task ReloadAsync()
+    {
+        _problem.Clear();
+        _rollback = null;
+        _allowed = false;
+        await ReadAgainAsync();
+        if (!_problem.Shown && _asked is { } asked && _revisions!.Any(listed => listed.Revision == asked))
+        {
+            await OpenAsync(asked);
+        }
+    }
+
+    /// <summary>Reads the list and the head again, with the list's pane showing that it is (spec §3.6).</summary>
+    private async Task ReadAgainAsync()
+    {
+        _reloading = true;
+        try
+        {
+            await LoadAsync();
+        }
+        finally
+        {
+            _reloading = false;
+        }
+    }
+
+    /// <summary>
+    /// Puts a refusal on screen, keyed so it is a new panel that takes focus when a press caused it; a dropped one (the
+    /// circuit going away) draws nothing.
+    /// </summary>
+    private void Refused(AdminProblem? problem, bool fromPress) => _problem.Show(problem, fromPress);
+
+    private async Task OpenAsync(int revision)
+    {
+        _allowed = false;
+        _rollback = null;
+        _problem.Clear();
+        _asked = revision;
+        _opening = true;
+        try
+        {
+            /* Both read before either is shown: drawn between the two reads, the last revision would stand beside
+               no predecessor and say it was the first. */
+            var selected = await Gateway.RevisionAsync(revision, CancellationToken.None);
+            var previous = await LoadPreviousAsync(revision);
+            (_selected, _previous) = (selected, previous);
+        }
+        catch (Exception exception)
+        {
+            Refused(AdminProblem.From(exception, Logger), fromPress: true);
+        }
+        finally
+        {
+            _opening = false;
+        }
+    }
+
+    /// <summary>The revision before <paramref name="revision"/>, or <see langword="null"/> for the first.</summary>
+    private async Task<ManagementRevisionDetail?> LoadPreviousAsync(int revision)
+        => RevisionHistory.Previous(_revisions!, revision) is { } before
+            ? await Gateway.RevisionAsync(before, CancellationToken.None)
+            : null;
+
+    /// <summary>The name was typed: that is the permission a destructive reverse migration needs.</summary>
+    /// <remarks>
+    /// Closed first, as Preview's apply confirm is, so a refusal's panel is what takes focus. The snackbar waits for the
+    /// history to be read again, so it never reports a revision the list lacks.
+    /// </remarks>
+    private async Task RollbackConfirmedAsync()
+    {
+        _allowed = true;
+        _confirmingRollback = false;
+        var target = _selected!.Version.Revision;
+        await RollbackAsync();
+        _allowed = false;
+        if (!_problem.Shown)
+        {
+            Snackbar.Confirm($"Rolled back to r{target} as revision {_current}");
+
+            /* The revision that asked is no longer selected; the newest row, the one the rollback appended, is where
+               the operator goes on from (spec §3.2). */
+            await Interop.FocusFirstOnceClosedAsync(["button:has([data-testid='revision-row'])", "#a-content"]);
+        }
+    }
+
+    /// <summary>Asks the plan of the rollback as a dry run — Preview's rule: describing a drop destroys nothing.</summary>
+    private async Task PlanRollbackAsync()
+        => _rollback = (await SendRollbackAsync(dryRun: true, allowDestructive: true))?.Plan;
+
+    /// <summary>Runs the rollback the plan on screen describes, with the permission the operator gave.</summary>
+    private async Task RollbackAsync()
+    {
+        if (_rollback is null || await SendRollbackAsync(dryRun: false, RollbackGate.AllowDestructive(_rollback, _allowed)) is null)
+        {
+            return;
+        }
+
+        _selected = null;
+        _previous = null;
+        _rollback = null;
+        _allowed = false;
+        await ReadAgainAsync();
+        await FollowWithTheWorkingCopyAsync();
+    }
+
+    /// <summary>
+    /// Moves this operator's working copy to the revision the rollback appended, when it holds no edits of theirs.
+    /// </summary>
+    /// <remarks>
+    /// Preview's rule after an apply. Left at the revision it was taken from, an unedited copy made the operator's next
+    /// change look like it was staged over somebody else's apply, and Preview refused it as a conflict. A copy with
+    /// edits stays as it is: those edits were made against the old revision, and Preview's refusal is then right.
+    /// </remarks>
+    private async Task FollowWithTheWorkingCopyAsync()
+    {
+        if (_problem.Shown || _head is null)
+        {
+            return;
+        }
+
+        var copy = await Session.CopyAsync(CancellationToken.None);
+        copy.TakeIfUnedited(_head.DescriptorJson, _head.Revision);
+    }
+
+    private async Task<ManagementApplyResult?> SendRollbackAsync(bool dryRun, bool allowDestructive)
+    {
+        _busy = true;
+        _problem.Clear();
+        try
+        {
+            return await Gateway.RollbackAsync(
+                _selected!.Version.Revision, _current, allowDestructive, dryRun,
+                author: await Gateway.AuthorAsync(), reason: $"Restored r{_selected.Version.Revision}",
+                CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            Refused(AdminProblem.From(exception, Logger, ProblemSite.Rollback), fromPress: true);
+            return null;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>
+    /// The refusal on screen, keyed per refusal so every one draws a new panel and takes focus again (spec §3.3), with
+    /// the way back: the history and the head read again.
+    /// </summary>
+    private RenderFragment Refusal() => RefusalPanel.Of(_problem, ReloadAction);
+
+    private RenderFragment ReloadAction => @<AlvoButton Small="true" data-testid="history-reload"
+                                                       OnClick="ReloadAsync">Reload history</AlvoButton>;
+
+    /// <summary>
+    /// The selected revision's change from the one before it, first, and its whole descriptor a tab away; the first
+    /// revision has nothing to compare with, so it shows only the descriptor and says why.
+    /// </summary>
+    private RenderFragment RevisionContent(ManagementRevisionDetail selected) => @<text>
+        @if (_previous is { } before)
+        {
+            @* Keyed by the revision, so every revision opens on its change, whichever tab the last one was left on. *@
+            <MudTabs @key="selected.Version.Revision" Elevation="0" Ripple="false" KeepPanelsAlive="false" Class="a-revtabs" id="revision-tabs">
+                <MudTabPanel Text="@($"Changes from r{before.Version.Revision}")">
+                    <div data-testid="revision-diff">
+                        <DescriptorDiff Before="@before.DescriptorJson" After="@selected.DescriptorJson"
+                                        Revision="before.Version.Revision"
+                                        Identical="@($"The descriptor is the same as r{before.Version.Revision}'s.")" />
+                    </div>
+                </MudTabPanel>
+                <MudTabPanel Text="Descriptor">
+                    <div data-testid="revision-descriptor"><CodeBlock Json="@selected.DescriptorJson" /></div>
+                </MudTabPanel>
+            </MudTabs>
+            @TablistName.On("#revision-tabs", $"Revision {selected.Version.Revision}")
+        }
+        else
+        {
+            <p class="a-section__sub" data-testid="revision-first">
+                This is the descriptor the project started from: there is no earlier revision to compare it with.
+            </p>
+            <div data-testid="revision-descriptor"><CodeBlock Json="@selected.DescriptorJson" /></div>
+        }
+    </text>;
+
+    /// <summary>What the rollback loses, first: the plan on screen decides whether it destroys data.</summary>
+    private string RollbackConsequence => _rollback?.HasDestructiveChanges == true
+        ? "The reverse migration is appended as a new revision, and the steps marked as destructive drop data that nothing brings back."
+        : "The reverse migration is appended as a new revision. It destroys no data, and this revision stays in the list.";
+
+    /// <summary>The confirm's verb, naming the loss when there is one, as Preview's does.</summary>
+    private string RollbackVerb => _rollback?.HasDestructiveChanges == true ? "Roll back and destroy data" : "Roll back";
+
+    private static string RollbackTitle(ManagementPlanSummary plan) => plan.IsEmpty
+        ? "No migration — the schema is the same"
+        : $"{plan.Steps.Count} step{(plan.Steps.Count == 1 ? string.Empty : "s")} against the database";
+}

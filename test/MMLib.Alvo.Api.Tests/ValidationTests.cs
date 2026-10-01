@@ -1058,6 +1058,61 @@ public sealed class ValidationTests
         (await created.ReadJsonObjectAsync())["doubled"]!.GetValue<decimal>().ShouldBe(3.00m);
     }
 
+    /// <summary>
+    /// A <c>required</c> field with a literal <c>default</c> is not a missing value.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// PR-I recorded this as a forward commitment for #113 — <em>"a <c>required</c> field with a default
+    /// stops being a 422"</em> — and until the literal half landed it was one: the descriptor applied, the
+    /// column carried a <c>DEFAULT</c>, and every create that relied on it was refused. The feature and its
+    /// own validation disagreeing about the same field.
+    /// </para>
+    /// <para>
+    /// Asserted through HTTP because that is the layer whose refusal changed; the port's own suite runs
+    /// beneath the validator and would pass either way.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task A_required_field_with_a_default_is_not_a_missing_value()
+    {
+        await using var world = await WorldAsync();
+
+        using var created = await world.SendAsync(
+            HttpMethod.Post, "/api/stamped", _admin, body: new JsonObject { ["memo"] = "opened" });
+
+        created.StatusCode.ShouldBe(HttpStatusCode.Created);
+        var row = await created.ReadJsonObjectAsync();
+        row["state"]!.GetValue<string>().ShouldBe("new");
+        row["sealed_by"]!.GetValue<string>().ShouldBe("the-framework");
+    }
+
+    /// <summary>
+    /// A field that is <c>required</c>, unconditionally <c>readOnly</c> <b>and</b> defaulted applies, and
+    /// the create it describes works.
+    /// </summary>
+    /// <remarks>
+    /// That combination used to be refused at apply as a create no caller could ever satisfy — by a message
+    /// whose own fix text recommends giving the field <em>"a value the caller does not send — a 'computed'
+    /// expression, or a 'default'"</em>. It is the feature's headline shape, and the descriptor above would
+    /// not have booted at all if the refusal still stood.
+    /// </remarks>
+    [Fact]
+    public async Task A_required_read_only_field_with_a_default_is_written_by_the_framework()
+    {
+        await using var world = await WorldAsync();
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Post,
+            "/api/stamped",
+            _admin,
+            body: new JsonObject { ["memo"] = "mine", ["sealed_by"] = "me" });
+
+        refused.StatusCode.ShouldBe(
+            HttpStatusCode.UnprocessableEntity, "a default does not make a read-only field writable");
+        (await refused.ReadViolationsAsync()).ShouldBe([("/sealed_by", "read-only-field")]);
+    }
+
     private static Task<AlvoApiWorld> WorldAsync(IReadOnlyList<TestApiKey>? keys = null) =>
         AlvoApiWorld.FromDescriptorAsync("validated-records.alvo.json", keys ?? [_admin]);
 

@@ -35,8 +35,9 @@ Two constraints worth knowing before you write a descriptor:
 
 - **Exactly one `*.alvo.json`** per folder. That is what makes the glob unambiguous.
 - **Several schema keys are refused at apply**, deliberately, because ignoring them would produce
-  silently wrong data: `field.default`, `field.validation`, `field.computed`, `field.rollup`,
-  `entity.softDelete` and the three `before*` hooks. The refusal names the consequence and the fix.
+  silently wrong data: `field.validation`, `entity.softDelete`, the three `before*` hooks, and a
+  `field.default` written as `{"$cel": …}` — a **literal** `field.default` is honoured (#113), as are
+  `field.computed` and `field.rollup` (#21). The refusal names the consequence and the fix.
   `examples/README.md` keeps the current table.
 
 ## How it is wired

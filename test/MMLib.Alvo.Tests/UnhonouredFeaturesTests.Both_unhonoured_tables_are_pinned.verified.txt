@@ -3,19 +3,22 @@
     {
       Path: validation,
       Consequence: Field 'validation' is not evaluated yet, so a value the expression forbids is accepted — the field is not constrained at all.,
-      Fix: Remove 'validation'. Enforce the rule in a before-hook once #22 lands, or express it with a facet the API does validate — 'maxLength', 'precision'/'scale', enum 'values' or a 'format'.
+      Fix: Remove 'validation'. Enforce the rule in a before-hook once #22 lands, or express it with a facet the API does validate — 'maxLength', 'precision'/'scale', enum 'values' or a 'format'.,
+      Conditional: false
     },
     {
       Path: default,
-      Consequence: Field 'default' is not honoured yet: no column default is emitted and the value is dropped before any writer sees it, so the field is simply null — and on a 'required' field that is an INSERT of NULL into a NOT NULL column.,
-      Fix: Remove 'default' and send the value explicitly on create. Refused rather than ignored because a silently absent default is a wrong stored value, which costs more than sending the field.
+      Consequence: Field 'default' is honoured as a literal, but not as a '$cel' expression: a CEL default is evaluated against the caller's context at insert time, which is the 'computed' machinery rather than a column default — so the value would be dropped and the field left null.,
+      Fix: Declare a literal default, which this build emits as a column DEFAULT, or remove 'default' and send the value explicitly on create (#113).,
+      Conditional: true
     }
   ],
   OnAnEntity: [
     {
       Path: softDelete,
       Consequence: Soft delete is not supported yet: a delete would remove the row outright and reads would not exclude it, which is irrecoverable data loss where the schema promises recoverability.,
-      Fix: Remove 'softDelete' or track the soft-delete implementation issue. A flag written as false is not a declaration and maps normally.
+      Fix: Remove 'softDelete' or track the soft-delete implementation issue. A flag written as false is not a declaration and maps normally.,
+      Conditional: false
     }
   ]
 }

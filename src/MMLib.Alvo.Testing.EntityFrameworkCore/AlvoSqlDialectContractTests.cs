@@ -498,6 +498,142 @@ public abstract class AlvoSqlDialectContractTests
     }
 
     /// <summary>
+    /// Text chosen to break a literal that concatenates its own quotes instead of escaping: each carries the closing
+    /// delimiter of a standard literal, a backslash (an escape on an engine that honours one), the prefixes and
+    /// dollar quotes some engines give literals, a comment opener, a terminator, and text outside ASCII.
+    /// </summary>
+    public static TheoryData<string> HostileText() =>
+    [
+        "",
+        "Jana Nováková",
+        "'",
+        "''",
+        "a'b",
+        "\\",
+        "a\\",
+        "\\'",
+        "a\\'); DROP TABLE customers; --",
+        "'; DROP TABLE customers; --",
+        "x' || (SELECT 1) || '",
+        "\"quoted\"",
+        "-- ; /* */",
+        "E'",
+        "N'",
+        "$$",
+        "$tag$ $tag$",
+        "🚲 ž ť ô ä",
+        "\u2028",
+        "a\u2029b",
+        "a\u0000b",
+        "a\nb",
+        "\u0085",
+        "\uD800",
+        "a\uDC00b",
+    ];
+
+    /// <summary>
+    /// <b>The no-breakout contract of <see cref="IFieldSqlRenderer.RenderStringLiteral"/>.</b> A dialect may decline
+    /// a value; when it answers, the answer is one quoted token — an optional letter prefix, an opening quote, a
+    /// body in which every quote is doubled, a closing quote, and nothing after it — so no text can end the literal
+    /// early and reach the DDL it is written into as SQL.
+    /// </summary>
+    /// <remarks>
+    /// Structural, deliberately, like every other fact here: which escapes the body may carry (a PostgreSQL escape
+    /// string doubles its backslashes too) is the engine's to decode, so the exact round-trip is proved per driver
+    /// against its engine. What is generic is that the token cannot be closed from inside.
+    /// </remarks>
+    [Theory]
+    [MemberData(nameof(HostileText))]
+    public void A_text_literal_is_one_token_nothing_inside_it_can_close(string value)
+    {
+        var literal = CreateFieldRenderer().RenderStringLiteral(value);
+        if (MustBeDeclined(value))
+        {
+            literal.ShouldBeNull("a control character, a line or paragraph separator or an unpaired surrogate is text no literal carries");
+            return;
+        }
+
+        if (literal is null)
+        {
+            return;
+        }
+
+        IsOneQuotedToken(literal).ShouldBeTrue($"<{literal}> is not one quoted token whose inner quotes are all doubled.");
+    }
+
+    /// <summary>A literal is a function of its input alone: a generated column's DDL is compared across renders.</summary>
+    [Theory]
+    [MemberData(nameof(HostileText))]
+    public void A_text_literal_is_a_function_of_its_input_alone(string value)
+    {
+        var fields = CreateFieldRenderer();
+
+        fields.RenderStringLiteral(value).ShouldBe(fields.RenderStringLiteral(value));
+    }
+
+    /// <summary>
+    /// A join keeps both operands, in order — <c>first_name + ' ' + last_name</c> reversed is a different name — and
+    /// carries no separator of its own, since it is composed inside another join.
+    /// </summary>
+    /// <remarks>
+    /// A dialect that does not join text keeps the port's deny-by-default and throws
+    /// <see cref="NotSupportedException"/>: that is a decline, not a failure, the way a <see langword="null"/> is for
+    /// <see cref="IFieldSqlRenderer.RenderStringLiteral"/>. The order is asserted only for a dialect that answers.
+    /// </remarks>
+    [Fact]
+    public void A_concatenation_keeps_both_operands_in_their_order()
+    {
+        string joined;
+        try
+        {
+            joined = CreateFieldRenderer().RenderStringConcatenation(Column, "\"last_name\"");
+        }
+        catch (NotSupportedException)
+        {
+            return;
+        }
+
+        joined.ShouldBe(joined.Trim());
+        joined.IndexOf(Column, StringComparison.Ordinal).ShouldBeGreaterThanOrEqualTo(0);
+        joined.IndexOf(Column, StringComparison.Ordinal)
+            .ShouldBeLessThan(joined.IndexOf("\"last_name\"", StringComparison.Ordinal));
+        joined.ShouldNotContain(";");
+    }
+
+    /// <summary>
+    /// The port's own rule, restated here as this suite's oracle: a control character (C0, DEL, C1), a line or
+    /// paragraph separator (U+2028, U+2029), or an unpaired
+    /// UTF-16 surrogate.
+    /// </summary>
+    private static bool MustBeDeclined(string value)
+    {
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (char.IsControl(value[index]) || value[index] is '\u2028' or '\u2029'
+                || (char.IsSurrogate(value[index]) && !char.IsSurrogatePair(value, index)))
+            {
+                return true;
+            }
+
+            index += char.IsHighSurrogate(value[index]) ? 1 : 0;
+        }
+
+        return false;
+    }
+
+    private static bool IsOneQuotedToken(string literal)
+    {
+        var open = literal.IndexOf('\'', StringComparison.Ordinal);
+        if (open < 0 || open > 1 || (open == 1 && !char.IsAsciiLetter(literal[0])) || !literal.EndsWith('\'') || literal.Length < open + 2)
+        {
+            return false;
+        }
+
+        var body = literal[(open + 1)..^1];
+        return body.Replace("''", string.Empty, StringComparison.Ordinal).IndexOf('\'', StringComparison.Ordinal) < 0;
+    }
+
+    /// <summary>
     /// A <see cref="DbException"/> from no provider at all, for the fact above. It carries a message shaped
     /// like the ones the engines really use, so a decoder that reads prose instead of a numeric code fails
     /// rather than passing on the absence of a match.

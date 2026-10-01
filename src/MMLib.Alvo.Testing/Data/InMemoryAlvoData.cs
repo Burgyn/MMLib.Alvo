@@ -159,7 +159,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         EnsureNoManagedColumnWrite(values, schema, isUpdate: false);
         EnsureNoReadOnlyWrite(values, decision.ReadOnlyFields);
 
-        var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: false);
+        var stamped = AlvoAuditStamp.Applied(schema, WholeRowValues(schema, values), context, _time, isUpdate: false);
         var candidate = new Dictionary<string, object?>(stamped, StringComparer.Ordinal) { [IdField] = Guid.NewGuid() };
         var postImage = new AlvoRecord(candidate);
         EnsureWriteAllowed(decision, postImage, previous: null, context);
@@ -380,7 +380,7 @@ public sealed class InMemoryAlvoData : IAlvoData
         EnsureNoManagedColumnWrite(values, schema, isUpdate: true);
         EnsureNoReadOnlyWrite(values, create.ReadOnlyFields);
         EnsureNoReadOnlyWrite(values, update.ReadOnlyFields);
-        EnsureWholeRow(values, schema);
+        EnsureWholeRow(WholeRowValues(schema, values), schema);
         AlvoPrecondition.EnsureSupported(precondition, schema);
 
         lock (_gate)
@@ -413,7 +413,8 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         AlvoPrecondition.EnsureMatches(precondition, StoredVersion(schema, stored));
 
-        var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: true);
+        var stamped = AlvoAuditStamp.Applied(
+            schema, WholeRowValues(schema, values, decision), context, _time, isUpdate: true);
         var merged = Merge(stored, WholeRow(stamped, schema, decision));
         EnsureWriteAllowed(decision, merged, stored, context);
 
@@ -450,7 +451,7 @@ public sealed class InMemoryAlvoData : IAlvoData
 
         AlvoPrecondition.EnsureMatches(precondition, storedVersion: null);
 
-        var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: false);
+        var stamped = AlvoAuditStamp.Applied(schema, WholeRowValues(schema, values), context, _time, isUpdate: false);
         var candidate = new Dictionary<string, object?>(WholeRow(stamped, schema, decision), StringComparer.Ordinal)
         {
             [IdField] = id,
@@ -502,6 +503,65 @@ public sealed class InMemoryAlvoData : IAlvoData
     }
 
     /// <summary>Refuses a payload that cannot express the whole row, naming the field it left out.</summary>
+    /// <summary>
+    /// The payload of a write that composes a whole row, with the declared default of every field it does not
+    /// carry — the reference implementation's half of <c>field.default</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The two shipped ports must answer the same descriptor the same way</b>, and this one is what the
+    /// adversarial and differential suites compare the relational driver against. Without it a create that
+    /// omits a defaulted field stores <see langword="null"/> here and the default there, on one descriptor.
+    /// </para>
+    /// <para>
+    /// <paramref name="frozen"/> is the caller's own mask, and only on a replacement: filling a default into
+    /// a field this caller may not write would write it for them. There is no stored value to destroy on a
+    /// create, so the mask does not apply there.
+    /// </para>
+    /// </remarks>
+    /// <param name="schema">The entity being written.</param>
+    /// <param name="values">The caller's payload.</param>
+    /// <param name="frozen">The fields this caller may not write, when a stored row is being replaced.</param>
+    private static IReadOnlyDictionary<string, object?> WholeRowValues(
+        EntitySchema schema, IReadOnlyDictionary<string, object?> values, PolicyDecision? frozen = null)
+    {
+        var masked = frozen is null
+            ? null
+            : new HashSet<string>([.. frozen.ReadOnlyFields, .. frozen.HiddenFields], StringComparer.Ordinal);
+
+        var missing = schema.Fields
+            .Where(field => field.Default is not null
+                && !values.ContainsKey(field.Name)
+                && masked?.Contains(field.Name) != true)
+            .ToList();
+
+        if (missing.Count == 0)
+        {
+            return values;
+        }
+
+        var filled = new Dictionary<string, object?>(values, StringComparer.Ordinal);
+        foreach (var field in missing)
+        {
+            filled[field.Name] = DefaultValue(field);
+        }
+
+        return filled;
+    }
+
+    /// <summary>The declared literal as the CLR value its JSON kind denotes.</summary>
+    private static object? DefaultValue(FieldSchema field) => field.Default!.Value.ValueKind switch
+    {
+        System.Text.Json.JsonValueKind.True => true,
+        System.Text.Json.JsonValueKind.False => false,
+        System.Text.Json.JsonValueKind.String => field.Default!.Value.GetString(),
+        System.Text.Json.JsonValueKind.Number => field.Default!.Value.GetDecimal(),
+        _ => field.Default!.Value.GetRawText(),
+    };
+
+    /// <summary>
+    /// Refuses a whole-row write that leaves a field the store will not accept as absent unsaid.
+    /// </summary>
     /// <remarks>
     /// <b>Refused rather than merged</b>, and on both branches: a body missing a mandatory field is a caller
     /// error, and accepting it by keeping the stored value would reintroduce the merge
@@ -1256,7 +1316,7 @@ public sealed class InMemoryAlvoData : IAlvoData
             }
 
             var schema = FindEntity(entity)!;
-            var stamped = AlvoAuditStamp.Applied(schema, values, context, _time, isUpdate: false);
+            var stamped = AlvoAuditStamp.Applied(schema, WholeRowValues(schema, values), context, _time, isUpdate: false);
             var postImage = new AlvoRecord(
                 new Dictionary<string, object?>(stamped, StringComparer.Ordinal) { [IdField] = Guid.NewGuid() });
 

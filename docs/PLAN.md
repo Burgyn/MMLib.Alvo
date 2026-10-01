@@ -165,7 +165,7 @@ it is now sorted by one question, applied on 2026-09-06:
   `#131`, `#134`, `#139`, `#145`, `#154`, `#155`, `#183`, `#184`), and
   the mutation/CI gate health (`#98`, `#99`, `#129`, `#142`, `#143`, `#181`).
 - **A capability that has to be earned → F7.** Relation embedding, aggregations,
-  rate limiting, `field.default`, tenant-resolution strategies, the outbox
+  rate limiting, `field.default` (CEL half; the literal half landed early with #113), tenant-resolution strategies, the outbox
   extensions, JSONata, and the create-or-replace follow-ups (`#198`–`#201`).
 
 **Two in F6 deserve naming**, because a milestone label makes them look

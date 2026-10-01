@@ -1,0 +1,461 @@
+﻿@page "/admin/settings"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ManagementGateway Gateway
+@inject AssistantGateway Assistant
+@inject Microsoft.Extensions.Options.IOptions<AlvoAdminOptions> Admin
+@inject ILogger<Settings> Logger
+@inject ISnackbar Snackbar
+@rendermode InteractiveServer
+
+<PageTitle>Settings · Alvo</PageTitle>
+
+<div class="a-stack">
+    <PageHeader Title="Settings" />
+
+    @if (_info is null)
+    {
+        <Skeleton />
+    }
+    else
+    {
+        <Panel Title="This build">
+            <Subtitle>What is running, and how it starts.</Subtitle>
+            <ChildContent>
+                <Detail Label="Version" Value="@_info.Version" />
+                <Detail Label="Mode" Value="@_info.Mode"
+                        Note="Standalone is the container; embedded is Alvo inside your own host." />
+                <Detail Label="Data provider" Value="@_info.DataProvider"
+                        Note="The data layer this host registered. It is not the database engine, which Alvo does not report." />
+                <Detail Label="Startup mode" Value="@_info.StartupMode" />
+                @*
+                    Said once, here, because it is a fact about the build rather than a project's declaration: every
+                    entity's realtime defaults to true (§8d item 27, B2 review finding 2). The sentence is the build's.
+                *@
+                @if (_realtime is { } realtime)
+                {
+                    <div data-testid="settings-realtime">
+                        <Detail Label="Realtime" Value="not in this build" Note="@realtime.Consequence" />
+                    </div>
+                }
+                else if (_capabilitiesUnread)
+                {
+                    <p class="a-note" data-testid="settings-realtime-unread">
+                        What this build does not honour could not be read just now, so it is not listed here. Reload
+                        to try again.
+                    </p>
+                }
+            </ChildContent>
+        </Panel>
+
+        @*
+            The generated contract, where an operator who has just changed a schema looks for what changed.
+            Rendered only when the host says it maps one: an embedded host may mount it elsewhere or serve
+            none, and a link on the assumption is a 404 reached from the screen that promised it.
+        *@
+        @if (Admin.Value.DocsPath is { Length: > 0 } || Admin.Value.OpenApiPath is { Length: > 0 })
+        {
+            <Panel Title="API documentation">
+                <Subtitle>
+                    Generated from the applied descriptor, not hand-written — so it changes when the
+                    schema does.
+                </Subtitle>
+                <ChildContent>
+                    <div class="a-row a-row--inset">
+                        @if (Admin.Value.DocsPath is { Length: > 0 } docs)
+                        {
+                            <AlvoButton Small="true" Href="@docs" target="_blank" rel="noopener"
+                                        data-testid="settings-docs">Open the documentation</AlvoButton>
+                        }
+                        @if (Admin.Value.OpenApiPath is { Length: > 0 } document)
+                        {
+                            <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" Href="@document" target="_blank"
+                                        rel="noopener" data-testid="settings-document">
+                                <code class="a-mono">@document</code>
+                            </AlvoButton>
+                        }
+                    </div>
+                </ChildContent>
+            </Panel>
+        }
+
+        <Panel Title="AI assistant">
+            <Subtitle>The model the schema assistant talks to. It proposes changes; you apply them.</Subtitle>
+            <ChildContent>
+                <Detail Label="Status" Value="@AiStatus(_info.Ai)" />
+                @*
+                    The key's state beside the status, because "connected" alone was the live defect: a reference to a
+                    secret nobody saved, and every turn a 401 (§8d item 31). Only the state is drawn, never the key; a
+                    present key is the ordinary case and adds nothing.
+                *@
+                @if (_info.Ai.KeyState == AiKeyState.Missing)
+                {
+                    <div class="a-stack a-row--inset">
+                        @*
+                            The fix is the alert's action (spec §3.3) when it is this screen's: a saved connection is
+                            changed here. When the deployment's configuration pinned it, no control here can change it,
+                            so the fix stays prose naming the setting.
+                        *@
+                        <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" TestId="ai-key-missing"
+                                   Title="Key missing — every request will be refused"
+                                   Actions="@(FixedHere(_info.Ai) ? ChangeConnection : null)">
+                            @if (FromConfiguration(_info.Ai))
+                            {
+                                @:This deployment's <code class="a-mono">Alvo:Ai:ApiKeySecretRef</code> names a secret
+                                @:this instance does not have, or names none for an endpoint that always needs a key.
+                                @:Save the key as a secret under the name it gives, or point it at one that exists;
+                                @:this host's log names the secret it looked for.
+                            }
+                            else
+                            {
+                                @:The saved connection has no API key, and its endpoint always needs one. Change the
+                                @:connection and type the key.
+                            }
+                        </AlvoAlert>
+                    </div>
+                }
+                else if (_info.Ai.KeyState == AiKeyState.NotNeeded)
+                {
+                    <Detail Label="Key" Value="no key needed"
+                            Note="The endpoint is dialled without a key, as a local model such as Ollama usually is." />
+                }
+                @if (_info.Ai.Configured)
+                {
+                    <Detail Label="Model" Value="@_info.Ai.Model" />
+                    <Detail Label="Kind" Value="@_info.Ai.Kind" />
+                    <Detail Label="From" Value="@_info.Ai.Source"
+                            Note="“configuration” means this deployment pinned it and a save here cannot change it; “store” means somebody saved it from this screen." />
+                }
+
+                @if (!Assistant.IsInstalled)
+                {
+                    <p class="a-note">
+                        No assistant is installed on this instance. The standalone image includes one; an
+                        embedded host adds the <code class="a-mono">MMLib.Alvo.Ai</code> package.
+                    </p>
+                }
+                else if (!Assistant.CanWriteConnection)
+                {
+                    <p class="a-note">
+                        This deployment sets the connection in its own configuration, under
+                        <code class="a-mono">Alvo:Ai</code>, and the dashboard cannot change it. To save one from
+                        here instead, give the host an encryption key file
+                        (<code class="a-mono">Alvo:Secrets:EncryptionKeyFile</code>).
+                    </p>
+                }
+                else
+                {
+                    @*
+                        Read here, changed in an editor (spec §3.1: the AI connection is one item with more than one
+                        value). Its own row under the status, because the status lists the same names as values.
+                    *@
+                    <div class="a-row a-row--inset">
+                        <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true" data-testid="ai-change"
+                                    OnClick="_ => OpenEditor()">Edit the connection</AlvoButton>
+                    </div>
+                }
+            </ChildContent>
+        </Panel>
+
+        <Panel Title="API keys">
+            <Subtitle>Not managed from this dashboard.</Subtitle>
+            <ChildContent>
+                <p class="a-note">
+                    Keys are issued and revoked where they were created — in this host's configuration, or by a
+                    key store the host registered. The dashboard has no way to issue or revoke one, so it offers
+                    no control for it.
+                </p>
+            </ChildContent>
+        </Panel>
+    }
+</div>
+
+@if (_editing)
+{
+    <AlvoEditor TestId="ai-editor" Title="Edit the AI connection" Eyebrow="Settings"
+                Subtitle="A save writes the whole connection to this host's secret store, encrypted."
+                SubmitText="Save changes" SubmitTestId="ai-save" Dirty="Dirty" Busy="_saving"
+                OnSubmit="SaveAsync" OnClose="CloseEditor">
+        @RefusalPanel.Of(_problem)
+
+        <Field Label="Kind" LabelId="ai-kind">
+            <ChipGroup TValue="string" Items="_kinds" Selected="[_kind]" aria-labelledby="ai-kind"
+                       SelectedChanged="ChooseKind" />
+        </Field>
+
+        <Field Label="Endpoint" For="ai-endpoint">
+            <ChildContent>
+                <MudTextField @ref="_endpointField" T="string" Variant="Variant.Outlined" Immediate="true"
+                              id="ai-endpoint" autocomplete="off"
+                              aria-describedby="@_fields.DescribedBy(EndpointField, "ai-endpoint-hint")"
+                              Error="@_fields.Has(EndpointField)" Placeholder="e.g. http://localhost:11434/v1"
+                              Value="_endpoint" ValueChanged="TypeEndpoint" />
+                @_fields.Under(EndpointField, () => _endpointField!.FocusAsync())
+            </ChildContent>
+            <Hint>The base address. It is never shown back, on this page or anywhere else.</Hint>
+        </Field>
+
+        <Field Label="Model" For="ai-model">
+            <MudTextField @ref="_modelField" T="string" Variant="Variant.Outlined" Immediate="true"
+                          id="ai-model" autocomplete="off" Placeholder="e.g. qwen3:8b"
+                          aria-describedby="@_fields.DescribedBy(ModelField)" Error="@_fields.Has(ModelField)"
+                          Value="_model" ValueChanged="TypeModel" />
+            @_fields.Under(ModelField, () => _modelField!.FocusAsync())
+        </Field>
+
+        <Field Label="API key" For="ai-key">
+            <ChildContent>
+                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="ai-key"
+                              InputType="InputType.Password" autocomplete="off"
+                              aria-describedby="ai-key-hint" Placeholder="leave empty for a local model"
+                              Value="_apiKey" ValueChanged="TypeKey" />
+            </ChildContent>
+            <Hint>
+                Stored encrypted and never read back into this page. Saving replaces the whole
+                connection, so type the key again if you change anything else.
+            </Hint>
+        </Field>
+    </AlvoEditor>
+}
+
+@code {
+    private const string EndpointField = "ai-endpoint";
+    private const string ModelField = "ai-model";
+    private const string NotSaved = "That connection could not be saved";
+    private const string NotReadBack = "The connection was saved, and this screen could not read it back";
+
+    private static readonly string[] _kinds = [StoredAiConnection.OpenAiCompatibleKind, StoredAiConnection.AzureOpenAiKind];
+
+    private readonly FieldRefusals _fields = new();
+    private ManagementInfo? _info;
+    private string _kind = StoredAiConnection.OpenAiCompatibleKind;
+    private string _endpoint = string.Empty;
+    private string _model = string.Empty;
+    private string _apiKey = string.Empty;
+    private readonly RefusalState<AdminProblem> _problem = new();
+    private bool _saving;
+    private bool _editing;
+
+    /// <summary>Whether what the editor holds is what was last saved, so closing it loses nothing.</summary>
+    private bool _savedAsTyped;
+    private MudTextField<string>? _endpointField;
+    private MudTextField<string>? _modelField;
+
+    /// <summary>
+    /// The connection's status in one word or two: never "connected" for a connection whose key is missing, which is
+    /// configured and refused on every call.
+    /// </summary>
+    private static string AiStatus(ManagementAi ai) => ai switch
+    {
+        { Configured: false } => "not configured",
+        { KeyState: AiKeyState.Missing } => "key missing",
+        _ => "connected",
+    };
+
+    /// <summary>Whether this screen can fix a missing key: the connection is a saved one, and the store takes a save.</summary>
+    private bool FixedHere(ManagementAi ai) => !FromConfiguration(ai) && Assistant.IsInstalled && Assistant.CanWriteConnection;
+
+    /// <summary>The missing-key alert's action: the connection editor, where the key is typed.</summary>
+    private RenderFragment ChangeConnection => @<AlvoButton Tone="AlvoButton.ButtonTone.Primary" Small="true"
+                                                            data-testid="ai-key-fix" OnClick="_ => OpenEditor()">Change the connection</AlvoButton>;
+
+    /// <summary>Whether the deployment's own configuration pinned the connection, so the fix is there and not here.</summary>
+    private static bool FromConfiguration(ManagementAi ai) => string.Equals(ai.Source, "configuration", StringComparison.Ordinal);
+
+    /// <summary>The build's sentence on realtime, from <c>capabilities.warned</c>, when it reports one.</summary>
+    private ManagementWarnedBlock? _realtime;
+
+    /// <summary>Whether the capabilities read failed, so the realtime row is replaced by one quiet line.</summary>
+    private bool _capabilitiesUnread;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _info = await Gateway.InfoAsync(CancellationToken.None);
+        await ReadRealtimeAsync();
+    }
+
+    /// <summary>
+    /// Reads the build's realtime sentence; a failure costs only that row (final branch review, item 8).
+    /// </summary>
+    /// <remarks>
+    /// The row is decoration on a page whose job is the build's facts and the AI connection, so a capabilities read
+    /// that fails is absorbed — logged as a fault when it is one — and said in one line, rather than taking every
+    /// other panel to the error boundary with it. The info read above is the page's own, and still fails the page.
+    /// </remarks>
+    private async Task ReadRealtimeAsync()
+    {
+        try
+        {
+            _realtime = (await Gateway.CapabilitiesAsync(CancellationToken.None)).Warned.FirstOrDefault(
+                block => string.Equals(block.Block, DeclaredSlots.EntityRealtime, StringComparison.Ordinal));
+        }
+        catch (Exception exception)
+        {
+            AdminProblem.Absorb(exception, Logger);
+            _capabilitiesUnread = true;
+        }
+    }
+
+    /// <summary>
+    /// Whether the editor holds anything closing it would lose: a kind picked, or any text typed, since the last save.
+    /// A save whose read-back failed still happened, so what it wrote is not lost by closing.
+    /// </summary>
+    private bool Dirty => !_savedAsTyped && (_kind != StoredAiConnection.OpenAiCompatibleKind
+        || _endpoint.Length > 0 || _model.Length > 0 || _apiKey.Length > 0);
+
+    /// <summary>
+    /// Opens the editor empty: nothing stored is read back into it, so the endpoint and the key are never shown back.
+    /// </summary>
+    private void OpenEditor()
+    {
+        ClearForm();
+        _editing = true;
+    }
+
+    private void CloseEditor()
+    {
+        _editing = false;
+        ClearForm();
+    }
+
+    private void ClearForm()
+    {
+        (_kind, _endpoint, _model, _apiKey) = (StoredAiConnection.OpenAiCompatibleKind, string.Empty, string.Empty, string.Empty);
+        _savedAsTyped = false;
+        _problem.Clear();
+        _fields.ClearAll();
+    }
+
+    private void TypeEndpoint(string? text)
+    {
+        _endpoint = text ?? string.Empty;
+        _savedAsTyped = false;
+        _fields.Clear(EndpointField);
+    }
+
+    private void ChooseKind(IReadOnlyList<string> kinds)
+    {
+        _kind = kinds[0];
+        _savedAsTyped = false;
+    }
+
+    private void TypeKey(string? text)
+    {
+        _apiKey = text ?? string.Empty;
+        _savedAsTyped = false;
+    }
+
+    private void TypeModel(string? text)
+    {
+        _model = text ?? string.Empty;
+        _savedAsTyped = false;
+        _fields.Clear(ModelField);
+    }
+
+    /// <summary>
+    /// Saves the connection and says so once the screen has read it back, or shows why it could not be saved, in the
+    /// editor. Pressed, Enter in a single-line field or Ctrl/Cmd+Enter: the editor is the one submit path (spec §3.4).
+    /// </summary>
+    /// <remarks>
+    /// The refusal a shadowing configuration raises must reach the screen, because it is the one failure whose
+    /// silent version is the worst kind: the operator saves a key, the screen says saved, and every request
+    /// keeps using the one the deployment pinned. Its sentence, and a read-only store's, are the framework's
+    /// and are shown as they are; any other exception is a fault, logged, and shown as the generic sentence
+    /// rather than a message written for a log.
+    /// </remarks>
+    private async Task SaveAsync()
+    {
+        _problem.Clear();
+        if (!Admissible())
+        {
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            if (await SavedAsync())
+            {
+                await ReadBackAsync();
+            }
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    /// <summary>Writes the connection, or draws the refusal; whether it was written.</summary>
+    private async Task<bool> SavedAsync()
+    {
+        try
+        {
+            await Assistant.SaveConnectionAsync(
+                new AiConnectionForm(_kind, _endpoint, _model, _apiKey), CancellationToken.None);
+            _apiKey = string.Empty;
+            _savedAsTyped = true;
+            return true;
+        }
+        catch (Exception exception)
+        {
+            Show(NotSaved, exception);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads the status the save changed, closes the editor and only then says it saved; a failed read says the save
+    /// stands, in the editor, since "could not be saved" would send the operator to redo a write that happened.
+    /// </summary>
+    private async Task ReadBackAsync()
+    {
+        try
+        {
+            _info = await Gateway.InfoAsync(CancellationToken.None);
+            CloseEditor();
+            Snackbar.Confirm("Saved the AI connection");
+        }
+        catch (Exception exception)
+        {
+            Show(NotReadBack, exception);
+        }
+    }
+
+    /// <summary>Draws <paramref name="exception"/> as a new panel under <paramref name="title"/>, which takes focus.</summary>
+    private void Show(string title, Exception exception)
+    {
+        _problem.Show(AdminProblem.From(exception, Logger), title: title);
+    }
+
+    /// <summary>
+    /// Refuses, under its field, a value the connection resolver would read as no connection at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The store takes any text, and the resolver builds a connection only from an absolute endpoint and a model
+    /// name; anything else it reads as none. Saved unchecked, the screen would say saved while the status stayed
+    /// "not configured", with nothing saying why.
+    /// </para>
+    /// <para>
+    /// <b>A twin of <c>AiConnectionResolver.Build</c></b> (MMLib.Alvo), which this package cannot call; keep the two
+    /// in step. It is stricter by one condition: the endpoint's scheme is http or https, because the resolver's
+    /// "absolute" also admits <c>localhost:11434/v1</c> (scheme <c>localhost</c>) and, on Unix, <c>/v1</c> as a file
+    /// path, neither of which an adapter can dial. One shared validator is docs/todo-admin.md §8d item 40.
+    /// </para>
+    /// </remarks>
+    private bool Admissible()
+    {
+        _fields.ClearAll();
+        if (string.IsNullOrWhiteSpace(_model))
+        {
+            _fields.Refuse(ModelField, "Type the model or deployment name, such as qwen3:8b.");
+        }
+
+        if (!Uri.TryCreate(_endpoint, UriKind.Absolute, out var address)
+            || (address.Scheme != Uri.UriSchemeHttp && address.Scheme != Uri.UriSchemeHttps))
+        {
+            _fields.Refuse(EndpointField, "Type the whole base address, starting with http:// or https://, such as http://localhost:11434/v1.");
+        }
+
+        return !_fields.Any;
+    }
+}

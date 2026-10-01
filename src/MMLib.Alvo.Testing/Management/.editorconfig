@@ -4,5 +4,5 @@
 # the folder, so any helper code added beside it still gets the normal naming rule — the
 # arrangement src/MMLib.Alvo.Testing/Migrations/.editorconfig already established.
 
-[{ManagementIdempotencyStoreContractTests.cs}]
+[{ManagementIdempotencyStoreContractTests.cs,UserAdministrationContractTests.cs}]
 dotnet_diagnostic.CA1707.severity = none

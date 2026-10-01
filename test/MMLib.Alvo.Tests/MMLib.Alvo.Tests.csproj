@@ -12,4 +12,9 @@
     <PackageReference Include="CloudNative.CloudEvents" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The CEL acceptance corpus D42 is held to: see CelAcceptanceCorpusTests. -->
+    <EmbeddedResource Include="Expressions/CelAcceptanceBaseline.jsonl" LogicalName="MMLib.Alvo.Tests.Expressions.CelAcceptanceBaseline.jsonl" />
+  </ItemGroup>
+
 </Project>

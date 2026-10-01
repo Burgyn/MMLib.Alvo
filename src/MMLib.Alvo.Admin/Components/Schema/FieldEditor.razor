@@ -1,0 +1,345 @@
+﻿@*
+    Adding a field.
+
+    The controls change with the type, because the frozen schema's if/then rules decide which
+    facets a type may carry — `decimal` needs precision and scale, `enum` needs values, `ref` needs
+    an entity, and `string` may have a maxLength that `boolean` may not. Offering every facet for
+    every type would be offering a descriptor the apply refuses.
+
+    Nothing here writes to the database. The field lands in the working copy and goes through the
+    same dry run as every other change.
+*@
+@*
+    The chrome belongs to <AlvoEditor>: the right-hand modal side sheet every multi-value edit uses (spec §3.1),
+    which guards what was typed, submits on Enter and Ctrl/Cmd+Enter, and cannot submit twice. A field editor that
+    sat permanently under the list was a panel the operator scrolled past on every visit.
+*@
+<AlvoEditor TestId="field-sheet" Title="@(IsEditing ? $"Edit {Editing}" : "New field")"
+            Subtitle="@(IsEditing
+                ? "The change joins the working copy. Preview shows what it does to the table before anything runs."
+                : "It joins the working copy. Preview shows what it does to the table before anything runs.")"
+            SubmitText="@(IsEditing ? "Save to the working copy" : "Add to the working copy")" SubmitTestId="field-save" Dirty="Dirty"
+            OnSubmit="Add" OnClose="Cancel">
+    <ExtraActions>
+        @* An entity is rarely one field short: the second action stages this one and leaves the sheet open for
+           the next, instead of a reopen per field. *@
+        @if (!IsEditing)
+        {
+            <AlvoButton data-testid="field-save-another" Busy="_another.Busy" OnClick="_ => AddAnother()">
+                Save and add another
+            </AlvoButton>
+        }
+    </ExtraActions>
+    <ChildContent>
+    <div class="a-stack">
+        @RefusalPanel.Of(_refusal, IsEditing ? "That change cannot be saved" : "That field cannot be added")
+
+        <Field Label="Name" For="new-field-name">
+            <ChildContent>
+                @* The hint carries markup, so the Field keeps it and names the box; the sheet's first field takes
+                   focus when it opens (DefaultFocus), so it is typed into straight away. *@
+                <MudTextField T="string" @ref="_nameField" Variant="Variant.Outlined" Immediate="true" id="new-field-name"
+                              aria-describedby="new-field-name-hint" Placeholder="e.g. scheduled_for" autocomplete="off"
+                              Class="a-mono"
+                              Value="_facets.Name" ValueChanged="name => _facets.Name = name ?? string.Empty" />
+            </ChildContent>
+            <Hint>
+                @if (IsEditing && !string.Equals(_facets.Name, Editing, StringComparison.Ordinal))
+                {
+                    <text>
+                        Renaming <code class="a-mono">@Editing</code>. The change is carried by
+                        <code class="a-mono">renamedFrom</code>, so the apply moves the column instead of
+                        dropping it and creating a new one — the rows come with it.
+                    </text>
+                }
+                else
+                {
+                    <span title="@DescriptorNames.Member">@DescriptorNames.Hint</span>
+                }
+            </Hint>
+        </Field>
+
+        <Field Label="Value" LabelId="new-field-kind">
+            <ChildContent>
+                <ChipGroup TValue="FieldKind" Items="_kinds" Selected="[_facets.Kind]" aria-labelledby="new-field-kind"
+                           Label="KindWord" SelectedChanged="kinds => ChooseKind(kinds[0])" />
+            </ChildContent>
+            <Hint>@KindHint</Hint>
+        </Field>
+
+        @if (_facets.Kind == FieldKind.Rollup)
+        {
+            <Field Label="Type" LabelId="new-field-type">
+                <span class="a-hint" data-testid="rollup-type">
+                    Stored as <code class="a-mono">@FieldFacets.Word(_facets.RollupType)</code> —
+                    @(_facets.KeepsDeclaredType ? "as declared, which holds this rollup's value."
+                        : _facets.RollupOp == "count" ? "a count is a whole number." : "the type of the field it aggregates.")
+                </span>
+            </Field>
+        }
+        else
+        {
+            <Field Label="Type" LabelId="new-field-type">
+                <ChipGroup TValue="FieldType" Items="@(_facets.Kind == FieldKind.Computed ? _facets.ComputedTypesOffered : _types)"
+                           Selected="[_facets.Type]" aria-labelledby="new-field-type"
+                           Label="Word" SelectedChanged="types => _facets.Type = types[0]" />
+            </Field>
+        }
+
+        <div class="a-field">
+            <span class="a-label" id="new-field-constraints">Constraints</span>
+            <div class="a-row a-row--wrap" role="group" aria-labelledby="new-field-constraints">
+                @if (_facets.RequiredOffered)
+                {
+                    <MudCheckBox T="bool" Value="_facets.Required" ValueChanged="on => _facets.Required = on" Label="required" />
+                }
+                @if (_facets.UniqueOffered)
+                {
+                    <MudCheckBox T="bool" Value="_facets.Unique" ValueChanged="on => _facets.Unique = on" Label="unique" />
+                }
+
+                @*
+                    Offered only while the field is not unique, because a unique field already carries
+                    an index — declaring a second one over the same column is a second B-tree the
+                    database maintains on every write and no query can use. The Indexes tab makes the
+                    same point in prose; this is the half that stops it being declarable.
+                *@
+                @if (!(_facets.UniqueOffered && _facets.Unique))
+                {
+                    <MudCheckBox T="bool" Value="_facets.Indexed" ValueChanged="on => _facets.Indexed = on" Label="indexed"
+                                 data-testid="field-index" />
+                }
+            </div>
+            @if (_facets.UniqueOffered && _facets.Unique && _facets.Indexed)
+            {
+                <span class="a-hint">
+                    <code class="a-mono">index</code> is kept as declared and is redundant beside
+                    <code class="a-mono">unique</code>, which already carries one. Clear
+                    <code class="a-mono">unique</code> to change it.
+                </span>
+            }
+        </div>
+
+        @if (_facets.Kind != FieldKind.Rollup)
+        {
+            @switch (_facets.Type)
+            {
+                case FieldType.String:
+                    <Field Label="Max length" For="new-field-max">
+                        <ChildContent>
+                            @* Text with the numeric keypad, read by FacetNumber: a number box reports what it cannot parse as empty. *@
+                            <MudTextField T="string" @ref="_maxField" Variant="Variant.Outlined" Immediate="true" id="new-field-max"
+                                          InputMode="InputMode.numeric" Placeholder="no limit"
+                                          aria-describedby="@_numbers.DescribedBy(MaxBox, "new-field-max-hint")"
+                                          Error="@_numbers.Has(MaxBox)"
+                                          Value="@NumberText(MaxBox, _facets.MaxLength)" ValueChanged="TypeMaxLength" />
+                            @_numbers.Under(MaxBox, () => _maxField!.FocusAsync())
+                        </ChildContent>
+                        <Hint>Leave it empty for no limit — the schema's own default.</Hint>
+                    </Field>
+                    break;
+                case FieldType.Decimal:
+                    <div class="a-field-row">
+                        <Field Label="Precision" For="new-field-precision">
+                            <ChildContent>
+                                <MudTextField T="string" @ref="_precisionField" Variant="Variant.Outlined" Immediate="true"
+                                              id="new-field-precision" InputMode="InputMode.numeric"
+                                              aria-describedby="@_numbers.DescribedBy(PrecisionBox, "new-field-precision-hint")"
+                                              Error="@_numbers.Has(PrecisionBox)"
+                                              Value="@NumberText(PrecisionBox, _facets.Precision)" ValueChanged="TypePrecision" />
+                                @_numbers.Under(PrecisionBox, () => _precisionField!.FocusAsync())
+                            </ChildContent>
+                            <Hint>Total digits, not the ones before the point.</Hint>
+                        </Field>
+                        <Field Label="Scale" For="new-field-scale">
+                            <ChildContent>
+                                <MudTextField T="string" @ref="_scaleField" Variant="Variant.Outlined" Immediate="true"
+                                              id="new-field-scale" InputMode="InputMode.numeric"
+                                              aria-describedby="@_numbers.DescribedBy(ScaleBox, "new-field-scale-hint")"
+                                              Error="@_numbers.Has(ScaleBox)"
+                                              Value="@NumberText(ScaleBox, _facets.Scale)" ValueChanged="TypeScale" />
+                                @_numbers.Under(ScaleBox, () => _scaleField!.FocusAsync())
+                            </ChildContent>
+                            <Hint>Digits after the point.</Hint>
+                        </Field>
+                    </div>
+                    break;
+                case FieldType.Enum:
+                    <Field Label="Values" For="new-field-values">
+                        <ChildContent>
+                            <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-values"
+                                          Placeholder="e.g. scheduled, in_progress, completed"
+                                          aria-describedby="new-field-values-hint"
+                                          Value="_facets.Values" ValueChanged="text => _facets.Values = text ?? string.Empty" />
+                        </ChildContent>
+                        <Hint>Comma separated. An enum with no values is refused by the schema.</Hint>
+                    </Field>
+                    break;
+                case FieldType.Ref:
+                    <Field Label="Points at" LabelId="new-field-target">
+                        <ChipGroup TValue="string" Items="Targets" Selected="[_facets.Target]" aria-labelledby="new-field-target"
+                                   SelectedChanged="targets => _facets.Target = targets[0]" />
+                    </Field>
+                    break;
+            }
+        }
+
+        @if (_facets.Kind == FieldKind.Rollup)
+        {
+            @if (_facets.Sources.Count == 0)
+            {
+                <Refusal data-testid="rollup-no-source">
+                    Nothing points at <code class="a-mono">@Entity</code>. A rollup aggregates the rows of an entity with a
+                    ref field here — add one on the child first.
+                </Refusal>
+            }
+            else
+            {
+                <Field Label="Rolls up" LabelId="rollup-from">
+                    <ChipGroup TValue="string" Items="RollupFroms" Selected="[_facets.RollupFrom]" aria-labelledby="rollup-from"
+                               SelectedChanged="picked => _facets.RollupFrom = picked[0]" />
+                </Field>
+                @foreach (var refused in _facets.Sources.Where(source => source.Refusal is not null))
+                {
+                    <span class="a-hint" data-testid="@($"rollup-refused-{refused.Entity}")">
+                        <code class="a-mono">@refused.Entity</code> — @refused.Refusal
+                    </span>
+                }
+
+                <Field Label="Operation" LabelId="rollup-op">
+                    <ChipGroup TValue="string" Items="FieldFacets.RollupOps" Selected="[_facets.RollupOp]" aria-labelledby="rollup-op"
+                               SelectedChanged="ops => _facets.RollupOp = ops[0]" />
+                </Field>
+
+                @if (_facets.RollupOp != "count" && _facets.Source is not null)
+                {
+                    <Field Label="Of the field" LabelId="rollup-field">
+                        <ChipGroup TValue="string" Items="AggregatableNames" Selected="[_facets.RollupField]" aria-labelledby="rollup-field"
+                                   SelectedChanged="fields => _facets.RollupField = fields[0]" />
+                    </Field>
+                }
+
+                @if (_facets.Source is { Via.Count: > 1 } source)
+                {
+                    <Field Label="Through" LabelId="rollup-via">
+                        <ChipGroup TValue="string" Items="source.Via" Selected="[_facets.RollupVia]" aria-labelledby="rollup-via"
+                                   SelectedChanged="refs => _facets.RollupVia = refs[0]" />
+                    </Field>
+                }
+            }
+
+            @* `where` is in the frozen schema and refused by this build, so it gets the build's sentence and no box. *@
+            <Refusal data-testid="rollup-where-refused">
+                <code class="a-mono">where</code> — @(WhereRefusal is { } where ? $"{where.Consequence} {where.Fix}" : "a filter on the child rows is not offered here.")
+            </Refusal>
+            @if (_facets.DeclaresRollupFilter)
+            {
+                <MudCheckBox T="bool" Value="_facets.RemoveRollupFilter" ValueChanged="on => _facets.RemoveRollupFilter = on"
+                             Label="Remove the declared filter" data-testid="rollup-remove-where" />
+            }
+        }
+
+        @if (_facets.Kind == FieldKind.Computed)
+        {
+            <Field Label="Expression" For="new-field-computed">
+                <ChildContent>
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" Lines="2" id="new-field-computed"
+                                  Class="a-mono" spellcheck="false" Placeholder="e.g. unit_price * amount"
+                                  aria-describedby="new-field-computed-hint"
+                                  Value="_facets.Computed" ValueChanged="text => _facets.Computed = text ?? string.Empty" />
+                </ChildContent>
+                <Hint>
+                    CEL over this row's own fields — and its rollups. No constants: the column is DDL, which carries no
+                    bound value. The apply compiles it, and Preview shows its refusal in the framework's own words.
+                    @ChordHint.Of("saves")
+                </Hint>
+            </Field>
+        }
+
+        @if (_facets.DrawsDefault)
+        {
+            @* A boolean's default is a group of chips, which a <label for> cannot name; the group names the
+               label by its id instead. *@
+            <Field Label="Default value" For="@(_facets.Type is FieldType.Boolean ? null : "new-field-default")"
+                   LabelId="new-field-default-label">
+                <ChildContent>
+                    @if (_facets.Type is FieldType.Boolean)
+                    {
+                        <ChipGroup TValue="string" Items="_flags" Selected="[_facets.Default]"
+                                   aria-labelledby="new-field-default-label"
+                                   Label="@(option => option.Length == 0 ? "none" : option)"
+                                   SelectedChanged="options => _facets.Default = options[0]" />
+                    }
+                    else
+                    {
+                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="new-field-default"
+                                      aria-describedby="new-field-default-hint" Placeholder="@_facets.DefaultPlaceholder"
+                                      autocomplete="off"
+                                      Value="_facets.Default" ValueChanged="text => _facets.Default = text ?? string.Empty" />
+                    }
+                </ChildContent>
+                <Hint>
+                    What a create stores when the caller omits the field. It becomes a column
+                    <code class="a-mono">DEFAULT</code> and is filled in on every write that composes a whole
+                    row. Leave it empty for no default.
+                </Hint>
+            </Field>
+        }
+
+        @if (_facets.KeepsUndrawnDefault)
+        {
+            <MudCheckBox T="bool" Value="_facets.RemoveUndrawnDefault" ValueChanged="on => _facets.RemoveUndrawnDefault = on"
+                         Label="Remove the declared default" data-testid="field-remove-default" />
+        }
+
+        @* Every facet this editor draws no control for, and what the save does to it. Before this, such a facet was
+           either rewritten from a stale prefill or carried without a word (docs/todo-admin.md §8d item 17). *@
+        @if (_facets.Notes() is { Count: > 0 } notes)
+        {
+            <div class="a-field" data-testid="field-notes">
+                <span class="a-label">Not drawn here</span>
+                @foreach (var note in notes)
+                {
+                    <span class="a-hint" data-testid="@($"field-note-{note.Facet}")">
+                        <code class="a-mono">@note.Facet</code> <code class="a-mono">@Short(note.Value)</code> — @note.Reason
+                    </span>
+                }
+            </div>
+        }
+
+    @* The facets the frozen schema declares and this build refuses. Without this the editor's
+       silence about `default` and `validation` is indistinguishable from an oversight — the
+       question every reader of this panel asks is "where is the default value", and the answer
+       exists, in the framework's own words. Served verbatim (§2.3): a second wording of a refusal
+       is a third spelling of one truth. *@
+    @*
+        Collapsed and last: the answer is there for the operator who asks where the default or the
+        validation box went, and out of the way of the one adding a field — open, it took more than
+        half of the dialog.
+    *@
+    @if (FieldRefusals.Count > 0)
+    {
+        <details class="a-disclosure" data-testid="refused-facets">
+            <summary>@FieldRefusals.Count facet@(FieldRefusals.Count == 1 ? " is" : "s are") not supported yet</summary>
+            <p class="a-section__sub">
+                Declared by the schema, refused at apply — a whole facet, or the one form of it named
+                here. A refused facet has no control above; a refused <em>form</em> of one does, and this
+                says which value it will not take.
+            </p>
+
+            @foreach (var refusal in FieldRefusals)
+            {
+                <ListRow data-testid="@($"refused-{refusal.Slot}")">
+                    <code class="a-mono a-listrow__key">@refusal.Slot</code>
+                    <span class="a-listrow__rest a-listrow__rest--stacked">
+                        <span class="a-section__sub">@refusal.Consequence</span>
+                        <span class="a-section__sub">@refusal.Fix</span>
+                    </span>
+                </ListRow>
+            }
+        </details>
+    }
+    </div>
+
+    </ChildContent>
+</AlvoEditor>

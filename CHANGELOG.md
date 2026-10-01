@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A literal `field.default` is honoured** (#113's literal half). A field declaring
+  `"default": false` / `"normal"` / `1` now emits a column `DEFAULT` in the generated DDL on both
+  engines, and any write that composes a whole row — a create, and both branches of `PUT` — fills in
+  the value for a field the payload does not carry. A `required` field with a default therefore stops
+  being a `422`, which is the forward commitment PR-I recorded. `FieldSchema` gains `Default`
+  (`JsonElement?`, the literal as declared). The examples that had lost theirs have them back:
+  `simple-tasks` (`done`, `priority`) and `vehicle-registry` (`passed`).
+
+  **Refused, and named at apply:** a `{"$cel": …}` default, which needs the caller's context at write
+  time and stays with #113; a literal the field's type cannot hold; a literal its own facets exclude
+  (`maxLength`, an enum's `values`, a malformed `uuid` or date); and a default on a `computed` or
+  `rollup` field, whose value is maintained for it. `GET {m}/capabilities` no longer reports
+  `field.default` as wholly refused — only its `$cel` half.
+
 ### Changed (breaking)
 
 - **`MapAlvoDataApi()` now returns `IEndpointConventionBuilder` instead of `IEndpointRouteBuilder`**

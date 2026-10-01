@@ -69,8 +69,10 @@ public class ManagementOperationsTests
 
     /// <summary>
     /// "Settings" is named rather than left to reading: it is the set <c>developer</c> is excluded from
-    /// — API keys, user and role administration, and the danger zone. A developer edits <em>what the
-    /// backend is</em>; an admin also decides <em>who may reach it</em>.
+    /// — the AI connection, API keys, user and role administration, and the danger zone. A developer edits
+    /// <em>what the backend is</em>; an admin also decides <em>who may reach it</em>. The AI connection is
+    /// in that second set because it is a credential: repointing the endpoint sends the descriptor, the
+    /// schema and every operator's prompts wherever it now points.
     /// </summary>
     [Fact]
     public void Only_an_admin_may_reach_settings()
@@ -78,16 +80,17 @@ public class ManagementOperationsTests
         [
             ManagementOperation.ManageApiKeys,
             ManagementOperation.ManageUsers,
+            ManagementOperation.SetAiConnection,
             ManagementOperation.DeleteProject,
         ]);
 
     /// <summary>
-    /// The surface is thirteen operations. A count rather than a comment, so adding a fourteenth fails
+    /// The surface is fourteen operations. A count rather than a comment, so adding a fifteenth fails
     /// here until somebody decides its level — which is the decision this table exists to force.
     /// </summary>
     [Fact]
-    public void The_management_surface_is_thirteen_operations()
-        => Enum.GetValues<ManagementOperation>().Length.ShouldBe(13);
+    public void The_management_surface_is_fourteen_operations()
+        => Enum.GetValues<ManagementOperation>().Length.ShouldBe(14);
 
     [Fact]
     public void The_levels_are_ordered_so_the_highest_match_is_the_greatest_value()

@@ -104,6 +104,21 @@
         "update": "true",
         "delete": "true"
       }
+    },
+    "stamped": {
+      "description": "A required field that declares a literal default — the shape PR-I's forward commitment names: the caller never sends it, the framework supplies it, so it is not a missing value.",
+      "fields": {
+        "memo": { "type": "string", "maxLength": 40 },
+        "state": { "type": "enum", "values": ["new", "closed"], "required": true, "default": "new" },
+        "sealed_by": { "type": "string", "maxLength": 40, "required": true, "readOnly": true, "default": "the-framework" }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
     }
   }
 }
