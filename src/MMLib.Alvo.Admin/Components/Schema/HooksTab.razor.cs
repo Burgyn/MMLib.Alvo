@@ -146,15 +146,34 @@ public partial class HooksTab
 
     private void TypeMutateValue(string? text)
     {
-        _hook.MutateValue = text ?? string.Empty;
+        FirstRow.Text = text ?? string.Empty;
+        FirstRow.Mode = MutateMode.Expression;
         _ = CheckMutateValueAsync();
     }
 
     /// <summary>The patched field names the slot the value is checked in, so it is asked again.</summary>
     private void TypeMutateField(string? text)
     {
-        _hook.MutateField = text ?? string.Empty;
+        FirstRow.Field = text ?? string.Empty;
         _ = CheckMutateValueAsync();
+    }
+
+    /// <summary>The one field-and-value pair the form draws until it draws rows (plan Task 9 replaces it).</summary>
+    /// <remarks>
+    /// Interim, and a getter with a side effect: it adds the row the first time the form is drawn. Accepted for the two
+    /// tasks it lives (pre-flight D7).
+    /// </remarks>
+    private MutateRow FirstRow
+    {
+        get
+        {
+            if (_hook.MutateRows.Count == 0)
+            {
+                _hook.MutateRows.Add(new MutateRow { Mode = MutateMode.Expression });
+            }
+
+            return _hook.MutateRows[0];
+        }
     }
 
     /// <summary>The point and the kind decide the slot's path, so every box on the form is asked again.</summary>
@@ -168,8 +187,8 @@ public partial class HooksTab
         => ExpressionSlots.ForHookCondition(copy.Json, Entity, _hook.Point, _hook.Draft(), source));
 
     private Task CheckMutateValueAsync() => CheckAsync(
-        "hook-mutate-value", _hook.Kind == HookBuilder.Mutate ? _hook.MutateValue : string.Empty, (copy, source)
-        => ExpressionSlots.ForMutateValue(copy.Json, Entity, _hook, source));
+        "hook-mutate-value", _hook.Kind == HookBuilder.Mutate ? FirstRow.Text : string.Empty, (copy, source)
+        => ExpressionSlots.ForMutateValue(copy.Json, Entity, _hook.Point, _hook.Draft(), FirstRow.Field.Trim(), source));
 
     /// <summary>
     /// Runs the check to its end and observes its fault: it is fire-and-forget, so an unobserved exception would
@@ -224,6 +243,7 @@ public partial class HooksTab
     /// <summary>Declares the hook <see cref="HookBuilder.Build"/> makes, or shows why it cannot be made.</summary>
     private async Task AddAsync()
     {
+        _hook.Fields = Copy is { } copy ? HookFields.Declared(copy.Json, Entity) : _hook.Fields;
         if (_hook.Build(out var refusal) is not { } action)
         {
             _refusal.Show(refusal);
@@ -255,8 +275,7 @@ public partial class HooksTab
     /// of an editor the operator has not touched since it opened. A stated deviation from the brief's
     /// <c>Point is not null || Kind is not null</c>, which is always true.
     /// </remarks>
-    private bool Dirty => _hook.Condition.Length > 0 || _hook.RejectMessage.Length > 0 || _hook.MutateField.Length > 0
-        || _hook.MutateValue.Length > 0 || _hook.Endpoint.Length > 0 || _hook.Template.Length > 0 || _hook.To.Length > 0;
+    private bool Dirty => _hook.HasInput;
 
     /// <summary>
     /// The confirm's verb: asks the entity screen to drop the hook that was asked about, found again where it is now.

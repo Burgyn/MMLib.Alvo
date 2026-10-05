@@ -4,6 +4,7 @@ using MMLib.Alvo.Admin.Components.Schema;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Management;
+using MMLib.Alvo.Schema;
 using NSubstitute;
 using System.Security.Claims;
 using System.Text.Json.Nodes;
@@ -178,19 +179,30 @@ public class ExpressionSlotsTests
     }
 
     /// <summary>
-    /// Add keys the mutate by the field's text as typed, so the check must too: a trimmed <c>status</c> found no
-    /// <c>mutate["status "]</c>, so the check stayed silent while Apply refused <c>'status ' is not a field</c>.
+    /// The check must key the mutate exactly as Add stages it: when the two disagreed (Add kept <c>status </c> as typed,
+    /// the check trimmed it), the check found no such key and stayed silent while Apply refused the hook. Add now
+    /// stages the trimmed name, so the check places the trimmed name too.
     /// </summary>
     [Fact]
-    public void The_form_s_mutate_value_is_placed_under_the_field_as_add_keys_it_untrimmed()
+    public void The_form_s_mutate_value_is_placed_under_the_key_add_stages()
     {
-        var hook = new HookBuilder { Kind = HookBuilder.Mutate, MutateField = "total ", MutateValue = "1" };
+        var hook = new HookBuilder
+        {
+            Kind = HookBuilder.Mutate,
+            Fields = new Dictionary<string, FieldSchema>(StringComparer.Ordinal)
+            {
+                ["total"] = new() { Name = "total", Type = FieldType.Decimal },
+            },
+            MutateRows = { new MutateRow("total ", MutateMode.Expression, "1") },
+        };
 
-        var (json, path) = ExpressionSlots.ForMutateValue(WithHooks, "orders", hook, "1")!.Value;
+        var (json, path) = ExpressionSlots.ForMutateValue(
+            WithHooks, "orders", hook.Point, hook.Draft(), hook.MutateRows[0].Field.Trim(), "1")!.Value;
 
-        path.ShouldEndWith("/action/mutate/total ");
-        hook.Build(out _)!["mutate"]!.AsObject().ContainsKey("total ").ShouldBeTrue("what Add would stage");
-        JsonNode.Parse(json)!["entities"]!["orders"]!["hooks"]![hook.Point]!.AsArray()[^1]!["action"]!["mutate"]!["total "].ShouldNotBeNull();
+        hook.Build(out var refusal).ShouldNotBeNull(refusal)["mutate"]!.AsObject().Select(pair => pair.Key)
+            .ShouldBe(["total"], "what Add would stage");
+        path.ShouldEndWith("/action/mutate/total");
+        JsonNode.Parse(json)!["entities"]!["orders"]!["hooks"]![hook.Point]!.AsArray()[^1]!["action"]!["mutate"]!["total"].ShouldNotBeNull();
     }
 
     [Fact]
@@ -267,7 +279,7 @@ public class ExpressionSlotsTests
     [InlineData(HookBuilder.Mutate)]
     public void The_hook_draft_of_an_unfinished_form_is_the_same_kind_with_stand_ins(string kind)
     {
-        var hook = new HookBuilder { Kind = kind, MutateField = "total" };
+        var hook = new HookBuilder { Kind = kind, MutateRows = { new MutateRow("total", MutateMode.Expression, string.Empty) } };
 
         hook.Draft().ContainsKey(kind).ShouldBeTrue();
         if (kind == HookBuilder.Mutate)
@@ -300,7 +312,7 @@ public class ExpressionSlotsTests
             management, people: null, Substitute.For<IAlvoAdminCallerResolver>(), authentication,
             Substitute.For<IAlvoContextAccessor>());
         var check = new ExpressionCheck { DebounceOverride = TimeSpan.Zero };
-        var hook = new HookBuilder { Kind = HookBuilder.Mutate, MutateField = "total" };
+        var hook = new HookBuilder { Kind = HookBuilder.Mutate, MutateRows = { new MutateRow("total", MutateMode.Expression, string.Empty) } };
 
         await check.SubmitAsync("hook-condition", "new.total > 1", async (source, ct) =>
         {

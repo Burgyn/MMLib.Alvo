@@ -197,13 +197,13 @@ else
                     <Field Label="Field" For="hook-mutate-field">
                         <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-mutate-field"
                                       Class="a-mono" autocomplete="off" Placeholder="completed_on"
-                                      Value="_hook.MutateField" ValueChanged="TypeMutateField" />
+                                      Value="FirstRow.Field" ValueChanged="TypeMutateField" />
                     </Field>
                     <Field Label="Set to" For="hook-mutate-value">
                         <ChildContent>
                             <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-mutate-value"
                                           aria-describedby="@Described("hook-mutate-value")" Class="a-mono" autocomplete="off" Placeholder="now()"
-                                          Value="_hook.MutateValue" ValueChanged="TypeMutateValue" />
+                                          Value="FirstRow.Text" ValueChanged="TypeMutateValue" />
                             @Findings("hook-mutate-value")
                         </ChildContent>
                         <Hint>
