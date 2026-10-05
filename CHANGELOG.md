@@ -574,6 +574,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A `date` field now compares in memory** (#317). The CEL interpreter did not normalise a `DateOnly`, so every
+  in-memory comparison involving a `date` field answered `false`. A `date` now compares as **midnight UTC**, the same
+  rule the database uses. Guards that were silently dead start working on upgrade, in both directions:
+  - a before-hook `reject` over a date (`new.d != old.d`, date vs date, date vs datetime) now fires;
+  - `changed(<date>)` no longer reports every update as a change;
+  - a rule's in-memory WITH CHECK over a date now agrees with SQL, so a row the rule's USING refuses is also refused
+    on write.
+
+  A descriptor that relied, knowingly or not, on such a guard never firing will now see writes refused. SQLite still
+  differs from PostgreSQL for a date compared with a datetime at exactly midnight UTC of the same day (#318).
+
 - **The OpenAPI document's advertised origin carries the request's path base** (#130) — and it always
   did. `Microsoft.AspNetCore.OpenApi` builds `servers[0].url` from the request's scheme, host **and
   `PathBase`**, per request rather than once per document name, so a client resolving a path key
