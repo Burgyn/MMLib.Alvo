@@ -51,6 +51,19 @@ public class HookFieldsTests
         => HookFields.Writable("""{"entities":{"orders":{"fields":{"price":{"type":"decimal"},"price":{"type":"integer"}}}}}""", "orders")
             .ShouldBe(["price"]);
 
+    /// <summary>
+    /// The two readers take the same declaration of a doubled key — the first — so the form never offers a field whose
+    /// facets <see cref="HookFields.Declared"/> reads from a different declaration than the one it was offered for.
+    /// </summary>
+    [Fact]
+    public void A_field_key_written_twice_is_judged_by_its_first_declaration_in_both_readers()
+    {
+        const string doubled = """{"entities":{"orders":{"fields":{"price":{"type":"decimal","computed":"1"},"price":{"type":"integer"}}}}}""";
+
+        HookFields.Declared(doubled, "orders")["price"].ComputedExpression.ShouldNotBeNull();
+        HookFields.Writable(doubled, "orders").ShouldBeEmpty();
+    }
+
     [Fact]
     public void Text_that_is_not_a_descriptor_has_no_fields()
         => HookFields.Writable("not json", "orders").ShouldBeEmpty();

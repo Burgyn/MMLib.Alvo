@@ -29,7 +29,8 @@ internal static class HookFields
     /// <remarks>
     /// Not a column the framework manages (apply refuses those, <c>BeforeHookCompiler.Target</c>), and not a computed or
     /// rollup field, which the database or the framework maintains — apply does not refuse a mutate of one (unverified what
-    /// the write then does), so the form simply does not offer it.
+    /// the write then does), so the form simply does not offer it. A key written twice is judged by its first declaration,
+    /// the one <see cref="Declared"/> keeps, so the two never disagree about the same field.
     /// </remarks>
     /// <param name="workingJson">The working copy's text.</param>
     /// <param name="entity">The entity.</param>
@@ -42,8 +43,8 @@ internal static class HookFields
 
         var managed = AlvoManagedColumns.For(schema);
         return [.. schema.Fields
+            .DistinctBy(field => field.Name, StringComparer.Ordinal)
             .Where(field => !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null)
-            .Select(field => field.Name)
-            .Distinct(StringComparer.Ordinal)];
+            .Select(field => field.Name)];
     }
 }

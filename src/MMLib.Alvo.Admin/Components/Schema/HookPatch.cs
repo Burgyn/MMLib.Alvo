@@ -70,6 +70,7 @@ internal static class HookPatch
         }
     }
 
+    /// <summary>The action's kind; assumes an action <see cref="HookShape"/> can draw, so a mixed or type-less one never reaches it.</summary>
     private static string? KindOf(JsonObject action)
         => action.ContainsKey(HookBuilder.Reject) ? HookBuilder.Reject
             : action.ContainsKey(HookBuilder.Mutate) ? HookBuilder.Mutate

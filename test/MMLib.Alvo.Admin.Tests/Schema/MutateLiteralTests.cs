@@ -78,6 +78,38 @@ public class MutateLiteralTests
         (row.Field, row.Mode, row.Text, row.Empty).ShouldBe(("f", MutateMode.Literal, text, empty));
     }
 
+    [Theory]
+    [InlineData(FieldType.String, "Text, written as typed.")]
+    [InlineData(FieldType.Text, "Text, written as typed.")]
+    [InlineData(FieldType.Enum, "Text, written as typed.")]
+    [InlineData(FieldType.Integer, "A whole number such as 3 or -2.")]
+    [InlineData(FieldType.Decimal, "A number such as 12.5.")]
+    [InlineData(FieldType.Boolean, "true or false.")]
+    [InlineData(FieldType.Date, "A date and time such as 2026-10-05T12:00:00Z.")]
+    [InlineData(FieldType.DateTime, "A date and time such as 2026-10-05T12:00:00Z.")]
+    [InlineData(FieldType.Uuid, "An id such as 3f2c1a9e-6b7d-4c8e-9f10-2a3b4c5d6e7f.")]
+    [InlineData(FieldType.Ref, "An id such as 3f2c1a9e-6b7d-4c8e-9f10-2a3b4c5d6e7f.")]
+    [InlineData(FieldType.Json, "A json field takes no literal value here.")]
+    public void Every_field_type_s_hint_says_what_its_literal_box_takes(FieldType type, string hint)
+        => MutateLiteral.Hint(Field(type)).ShouldBe(hint);
+
+    /// <summary>What <c>HookBuilder.From</c> loads is what Save writes: a declared literal survives the row it becomes.</summary>
+    [Theory]
+    [InlineData(FieldType.String, "\"it's\"")]
+    [InlineData(FieldType.String, "\"3\"")]
+    [InlineData(FieldType.Integer, "3")]
+    [InlineData(FieldType.Decimal, "12.50")]
+    [InlineData(FieldType.Boolean, "false")]
+    [InlineData(FieldType.DateTime, "\"2026-10-05T12:00:00Z\"")]
+    [InlineData(FieldType.Uuid, "\"3f2c1a9e-6b7d-4c8e-9f10-2a3b4c5d6e7f\"")]
+    public void A_declared_literal_round_trips_through_its_row(FieldType type, string json)
+    {
+        var row = MutateLiteral.Row("f", JsonNode.Parse(json));
+
+        MutateLiteral.TryValue(row, Field(type), out var value, out var refusal).ShouldBeTrue(refusal);
+        value!.ToJsonString(Relaxed.Options).ShouldBe(json);
+    }
+
     private static MutateRow Row(string text) => new("f", MutateMode.Literal, text);
 
     private static FieldSchema Field(FieldType type) => new() { Name = "f", Type = type };
