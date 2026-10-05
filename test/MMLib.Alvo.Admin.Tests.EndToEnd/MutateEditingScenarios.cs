@@ -233,7 +233,7 @@ public sealed class MutateOpenScenarios(BikeWorkshopWorld world) : IClassFixture
     public async Task A_literal_declared_as_another_json_kind_is_refused_as_soon_as_its_hook_opens()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        var descriptor = HookShapeScenarios.Importable();
+        var descriptor = JsonNode.Parse(Descriptors.BikeWorkshop)!.AsObject();
         descriptor["entities"]!["rentals"]!["hooks"]!["beforeUpdate"] = JsonNode.Parse(
             """[ { "action": { "mutate": { "days": "3" } } } ]""");
         await session.GoAsync("/transfer");

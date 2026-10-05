@@ -837,11 +837,12 @@ namespace MMLib.Alvo.Admin.Components.Schema
     }
     [Microsoft.AspNetCore.Authorization.Authorize]
     [Microsoft.AspNetCore.Components.Route("/admin/transfer")]
-    public class Transfer : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    public class Transfer : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
     {
         public Transfer() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public void Dispose() { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
 }

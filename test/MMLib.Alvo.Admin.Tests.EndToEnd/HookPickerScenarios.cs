@@ -1,4 +1,5 @@
 ﻿using Microsoft.Playwright;
+using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
@@ -114,8 +115,7 @@ public sealed class UndeclaredReferenceScenarios(BikeWorkshopWorld world) : ICla
     public async Task A_hook_naming_an_undeclared_endpoint_keeps_it_and_says_so()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        /* Cut down: the whole example is larger than one import the circuit carries (#316). */
-        var descriptor = HookShapeScenarios.Importable();
+        var descriptor = JsonNode.Parse(Descriptors.BikeWorkshop)!.AsObject();
         descriptor["entities"]!["rentals"]!["hooks"]!["afterCreate"]![0]!["action"]!["endpoint"] = "gone-desk";
         await session.GoAsync("/transfer");
         await session.Page.FillAsync("#import-json", descriptor.ToJsonString());

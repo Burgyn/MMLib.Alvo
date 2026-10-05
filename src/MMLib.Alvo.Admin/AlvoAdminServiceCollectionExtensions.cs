@@ -72,7 +72,16 @@ public static class AlvoAdminServiceCollectionExtensions
             options.Configure(configure);
         }
 
-        services.AddRazorComponents().AddInteractiveServerComponents();
+        /* SignalR's default 32 KB receive limit is under a realistic descriptor, and a box over it closed the circuit
+           without a word (#316). ImportLimit says why 2 MiB. Raised only: a host that already allows more, or set
+           no limit at all, keeps what it chose. */
+        services.AddRazorComponents().AddInteractiveServerComponents().AddHubOptions(hub =>
+        {
+            if (hub.MaximumReceiveMessageSize is { } current && current < ImportLimit.CircuitReceiveBytes)
+            {
+                hub.MaximumReceiveMessageSize = ImportLimit.CircuitReceiveBytes;
+            }
+        });
         services.AddCascadingAuthenticationState();
 
         /* AuthorizeRouteView asks IAuthorizationService on every in-circuit navigation, and a

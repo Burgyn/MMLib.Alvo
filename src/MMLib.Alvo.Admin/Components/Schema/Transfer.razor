@@ -5,7 +5,7 @@
 @inject NavigationManager Navigation
 @inject AdminInterop Interop
 @inject ILogger<Transfer> Logger
-@implements IDisposable
+@implements IAsyncDisposable
 
 <PageTitle>Import and export · Alvo</PageTitle>
 
@@ -43,12 +43,15 @@
         <ChildContent>
             @RefusalPanel.Of(_refusal, "The apply would refuse this descriptor", "descriptor-invalid")
 
+            @* No browser maxlength: the library's default (524,288) cut a longer paste short without a word. alvo.js measures
+               the box against ImportLimit instead, and refuses what is over it in place (#316). *@
             @* A form, so Ctrl/Cmd+Enter is alvo.js's one chord (data-alvo-chord-submit), as in every multi-line box. *@
             <form class="a-stack" data-alvo-chord-submit novalidate @onsubmit="Import">
                 <Field Label="Descriptor JSON" For="import-json">
                     <ChildContent>
                         <MudTextField T="string" Variant="Variant.Outlined" Lines="12" Immediate="true" id="import-json"
                                       Class="a-mono" spellcheck="false" aria-describedby="import-json-hint"
+                                      data-alvo-max-chars="@ImportLimit.MaxChars" data-alvo-max-bytes="@ImportLimit.MaxSentBytes" MaxLength="int.MaxValue"
                                       Value="_pasted" ValueChanged="text => _pasted = text ?? string.Empty" />
                     </ChildContent>
                     <Hint>@ImportHint</Hint>
@@ -84,6 +87,7 @@
     private AdminProblem? _problem;
     private string _pasted = string.Empty;
     private readonly RefusalState<string> _refusal = new();
+    private IAsyncDisposable? _oversized;
 
     /// <summary>Whether the question before an import over unapplied edits is on screen.</summary>
     private bool _replacing;
@@ -102,6 +106,26 @@
             _problem = AdminProblem.From(exception, Logger);
         }
     }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _oversized = await Interop.SubscribeAsync("oversized", OnOversized);
+        }
+    }
+
+    /// <summary>
+    /// A paste alvo.js stopped at the box, over what one circuit message may carry: refused in place, naming the limit,
+    /// where the circuit would otherwise have closed without a word (<see cref="ImportLimit"/>, #316).
+    /// </summary>
+    /// <remarks>Focus stays in the box, which holds the text the circuit last heard, so the paste can be tried again at once.</remarks>
+    /// <param name="measured">What alvo.js measured: characters, then bytes as sent.</param>
+    private Task OnOversized(string? measured) => InvokeAsync(() =>
+    {
+        _refusal.Show(ImportLimit.Refusal(measured), fromPress: false, title: "That paste is too large to import here");
+        StateHasChanged();
+    });
 
     private async Task DownloadAsync()
     {
@@ -184,9 +208,16 @@
         {
             var lines = _pasted.Length == 0 ? 0 : _pasted.Count(c => c == '\n') + 1;
             var size = lines == 1 ? "1 line" : $"{lines.ToString(CultureInfo.InvariantCulture)} lines";
-            return $"{ChordHint.Of("loads it")} {size}.";
+            return $"{ChordHint.Of("loads it")} {size}, of at most {ImportLimit.MaxChars.ToString("N0", CultureInfo.InvariantCulture)} characters.";
         }
     }
 
-    public void Dispose() => _lifetime.Dispose();
+    public async ValueTask DisposeAsync()
+    {
+        _lifetime.Dispose();
+        if (_oversized is not null)
+        {
+            await _oversized.DisposeAsync();
+        }
+    }
 }

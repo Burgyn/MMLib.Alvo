@@ -213,7 +213,7 @@ public sealed class HookShapeScenarios(BikeWorkshopWorld world) : IClassFixture<
     public async Task A_hook_the_editor_cannot_draw_is_read_only_and_survives_an_edit_beside_it()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        var descriptor = Importable();
+        var descriptor = JsonNode.Parse(Descriptors.BikeWorkshop)!.AsObject();
         /* Not an empty payload: the schema gives entity.update's payload minProperties: 1, so {} fails the import. */
         descriptor["entities"]!["rentals"]!["hooks"]!["afterUpdate"] = JsonNode.Parse(
             """[ { "action": { "type": "entity.update", "entity": "rental_fleet", "payload": { "in_service": false } } } ]""");
@@ -235,45 +235,5 @@ public sealed class HookShapeScenarios(BikeWorkshopWorld world) : IClassFixture<
 
         (await session.Page.Locator("#hook-afterUpdate-0").InnerTextAsync()).ShouldContain("entity.update");
         await readOnly.WaitForAsync();
-    }
-
-    /// <summary>
-    /// The bike-workshop descriptor cut down to the rentals and what they reference, without its prose.
-    /// </summary>
-    /// <remarks>
-    /// Typed into the import box whole, the text is one input event larger than a circuit message may be: the circuit
-    /// closes with an error, the box comes back empty and the form posts natively. Measured: without descriptions alone
-    /// (14 KB) it still closed; cut to these three entities it imports. Nothing here reads a dropped entity. Issue #316
-    /// tracks the import limit; once it is fixed, this cut-down can go and the scenario can import the whole example.
-    /// </remarks>
-    internal static JsonObject Importable()
-    {
-        var descriptor = JsonNode.Parse(Descriptors.BikeWorkshop)!.AsObject();
-        var entities = descriptor["entities"]!.AsObject();
-        foreach (var name in entities.Select(pair => pair.Key).Where(name => name is not ("rentals" or "rental_fleet" or "customers")).ToList())
-        {
-            entities.Remove(name);
-        }
-
-        /* Its rollup counts bikes, which are gone. */
-        entities["customers"]!["fields"]!.AsObject().Remove("bikes_count");
-        WithoutDescriptions(descriptor);
-        return descriptor;
-    }
-
-    private static void WithoutDescriptions(JsonNode node)
-    {
-        if (node is JsonObject declared)
-        {
-            declared.Remove("description");
-        }
-
-        foreach (var child in node is JsonObject map ? map.Select(pair => pair.Value) : node as JsonArray ?? [])
-        {
-            if (child is not null)
-            {
-                WithoutDescriptions(child);
-            }
-        }
     }
 }
