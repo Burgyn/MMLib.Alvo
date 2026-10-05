@@ -119,11 +119,60 @@ internal static class ExpressionSlots
         return (scratch.Json, Pointer("entities", entity, "fields", field, "computed"));
     }
 
+    /// <summary>Places a whole hook — the one the editor would write, with the typed text already in its slot — on a clone.</summary>
+    /// <remarks>
+    /// Position-aware: an edited hook is checked where it sits, so a value is judged in the place Save would put it; a
+    /// new one is appended, as Add would append it. The hook is the editor's own candidate, so what is checked is what
+    /// Add or Save would stage; whether it carries the condition is the caller's choice (slice B design D4: payload, to
+    /// and mutate values are checked without it).
+    /// </remarks>
+    /// <param name="workingJson">The working copy's text; not modified.</param>
+    /// <param name="entity">The entity the hook is on.</param>
+    /// <param name="point">The hook point.</param>
+    /// <param name="position">The edited hook's position, or <see langword="null"/> to append.</param>
+    /// <param name="hook">The hook; not modified.</param>
+    /// <param name="slot">The slot inside the hook, outermost first: <c>condition</c>, or <c>action</c>, <c>payload</c>.</param>
+    /// <returns>The clone's text and the slot's pointer, or <see langword="null"/> when there is no such entity or position.</returns>
+    public static (string Json, string Path)? ForHook(
+        string workingJson, string entity, string point, int? position, JsonObject hook, params string[] slot)
+    {
+        ArgumentNullException.ThrowIfNull(hook);
+        if (Clone(workingJson) is not { } root || Entity(root, entity) is not { } declared)
+        {
+            return null;
+        }
+
+        var hooks = declared["hooks"] as JsonObject ?? (JsonObject)(declared["hooks"] = new JsonObject());
+        var list = hooks[point] as JsonArray ?? (JsonArray)(hooks[point] = new JsonArray());
+        var at = Place(list, position, (JsonObject)hook.DeepClone());
+        return at < 0
+            ? null
+            : (root.ToJsonString(), Pointer([.. new[] { "entities", entity, "hooks", point, at.ToString(CultureInfo.InvariantCulture) }, .. slot]));
+    }
+
     /// <summary>An RFC 6901 JSON Pointer to <paramref name="segments"/>.</summary>
     /// <param name="segments">The unescaped property names, outermost first.</param>
     /// <returns>The pointer, with <c>~</c> written <c>~0</c> and <c>/</c> written <c>~1</c>.</returns>
     public static string Pointer(params string[] segments)
         => string.Concat(segments.Select(segment => "/" + segment.Replace("~", "~0").Replace("/", "~1")));
+
+    /// <summary>Appends the hook, or puts it at its position; the index it landed at, or -1 when nothing is there.</summary>
+    private static int Place(JsonArray list, int? position, JsonObject hook)
+    {
+        if (position is not { } at)
+        {
+            list.Add(hook);
+            return list.Count - 1;
+        }
+
+        if (at < 0 || at >= list.Count)
+        {
+            return -1;
+        }
+
+        list[at] = hook;
+        return at;
+    }
 
     private static (string Json, string Position)? WithHook(
         string workingJson, string entity, string point, string? condition, JsonObject action)
