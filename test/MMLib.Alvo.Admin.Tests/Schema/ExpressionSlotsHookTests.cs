@@ -14,7 +14,9 @@ public class ExpressionSlotsHookTests
         var (json, path) = ExpressionSlots.ForHook(Working, "orders", "beforeUpdate", null, Hook("third"), "action", "reject")!.Value;
 
         path.ShouldBe("/entities/orders/hooks/beforeUpdate/2/action/reject");
-        List(json, "orders", "beforeUpdate").Count.ShouldBe(3);
+        var list = List(json, "orders", "beforeUpdate");
+        list.Count.ShouldBe(3);
+        list[2]!["action"]!["reject"]!.GetValue<string>().ShouldBe("third", "the appended entry is the hook passed");
     }
 
     [Fact]

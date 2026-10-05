@@ -122,10 +122,13 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
 
         await session.Page.FillAsync("#hook-mutate-value", "nope(");
 
-        await session.Page.GetByTestId("check-hook-mutate-value").First.WaitForAsync(new() { Timeout = 3_000 });
+        var value = session.Page.GetByTestId("check-hook-mutate-value").First;
+        await value.WaitForAsync(new() { Timeout = 3_000 });
+        var flagged = await value.InnerTextAsync();
         await session.Page.FillAsync("#hook-condition", "new.code == 'a'");
         await session.Page.GetByTestId("check-hook-condition").First.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 3_000 });
         (await session.Page.GetByTestId("check-hook-mutate-value").CountAsync()).ShouldBeGreaterThan(0, "the value is still broken");
+        (await value.InnerTextAsync()).ShouldBe(flagged, "a condition edit leaves the value's flag shown as it was (pre-flight C4)");
     }
 
     /// <summary>

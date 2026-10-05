@@ -462,3 +462,14 @@ functions in the guided table once Condition admits calls (slice C).
 ## 17. As built
 
 (To be written when the slice lands: commits, deviations from the plan, measured numbers.)
+
+Deviations recorded as they were made:
+
+- **Task 8, a condition edit asks the condition box only** (pre-flight C4). The merged slice-A code re-asked every box on
+  a condition edit (`CheckBoth()`), so no answer was shown against an older form. Under D4 no action slot's candidate
+  carries the condition, so that reason no longer holds; and the guided condition (§7) calls the same handler on every row
+  change, where re-asking every box would cost 3 + N checks per click. An e2e assertion pins that the mutate value's flag
+  stays as it was across a condition edit.
+- **Task 8, the row text and the §5.1 guard come from one writer.** The tab draws each hook with `WorkingCopy.Readable`
+  rather than options of its own, because two separately written option sets that drifted would refuse every in-place
+  edit, silently.

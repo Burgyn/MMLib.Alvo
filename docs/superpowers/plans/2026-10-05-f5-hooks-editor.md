@@ -2595,6 +2595,15 @@ named fragments; a reviewer diffs against `HEAD` and expects only this):
   `ExpressionSlots.ForHook` at `CurrentPosition`; `PositionOf` became `PositionIn(hooks, point, json)`; `Dirty` compares
   fingerprints in Edit. `HooksTab.Edit.cs` is new: `OpenEdit`, `SaveEdit`, `CurrentPosition`, `ConditionDescribedBy`,
   the `Editing` record.
+- Deviation (pre-flight C4): `TypeCondition` asks the condition box only, narrowing the merged `CheckBoth()`. No action
+  slot's candidate carries the condition (D4), so a condition edit cannot change their answer, and the guided condition
+  (Task 19) would otherwise fire 3 + N checks per click. `ExpressionCheckScenarios.A_broken_mutate_value…` pins that the
+  value's flag stays as it was.
+- Deviation (Task 3 review carry-over): `HooksTab._readable` is gone; `Declared` writes each entry with
+  `WorkingCopy.Readable` (now `internal`), so the text a row draws and the text `ReplaceHook` guards with cannot drift.
+  `WorkingCopyHookReplaceTests` draws through `HooksTab.Declared`.
+- Deviation (pre-flight C5): `ExpressionSlots.ForHookCondition`, `ForMutateValue` and `WithHook` are deleted; the
+  `ExpressionSlotsTests` facts that still said something new moved to `ForHook`.
 
 - [ ] **Step 1: Write the failing e2e scenarios** (`HookEditInPlaceScenarios.cs`):
 

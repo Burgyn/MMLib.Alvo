@@ -1,6 +1,4 @@
 ﻿using MMLib.Alvo.Admin.Components.Schema;
-using System.Text.Encodings.Web;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Tests.Schema;
@@ -8,13 +6,6 @@ namespace MMLib.Alvo.Admin.Tests.Schema;
 /// <summary>Editing a hook in place: what <c>ReplaceHook</c> writes, and what it refuses (spec §5.1).</summary>
 public class WorkingCopyHookReplaceTests
 {
-    /// <summary>How the On write tab draws one hook — <c>HooksTab._readable</c>'s options.</summary>
-    private static readonly JsonSerializerOptions _drawn = new()
-    {
-        WriteIndented = true,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
-
     [Fact]
     public void The_hook_at_its_position_is_replaced_and_the_others_keep_their_places()
     {
@@ -106,11 +97,51 @@ public class WorkingCopyHookReplaceTests
         copy.ReplaceHook("work_orders", "beforeUpdate", 0, drawn, Hook("Again.")).ShouldBeTrue();
     }
 
+    /// <summary>
+    /// The text a row draws is the text the guard compares (Task 3 review carry-over): were the tab to write a hook with
+    /// options of its own that drifted from the copy's — the default encoder, or no indentation — every in-place edit
+    /// would be refused as "changed elsewhere", silently. Each hook here carries what an encoder or an indenter treats
+    /// differently: apostrophes, ampersands, markup, non-ASCII letters, a decimal, a nested <c>$cel</c>, a placeholder.
+    /// </summary>
+    [Fact]
+    public void Every_hook_the_tab_draws_is_the_text_the_guard_accepts()
+    {
+        var copy = Copy(
+            """
+            {
+              "apiVersion": "alvo.dev/v1",
+              "name": "field-service",
+              "entities": {
+                "work_orders": {
+                  "fields": { "status": { "type": "string" }, "total": { "type": "decimal" } },
+                  "hooks": {
+                    "beforeUpdate": [
+                      { "condition": "old.status == 'done' && new.total > 1.50", "action": { "reject": "Zákazka <b>uzavretá</b> — ✓" } },
+                      { "action": { "mutate": { "total": { "$cel": "new.total * 1.20" }, "status": "näh" } } }
+                    ],
+                    "afterUpdate": [
+                      { "action": { "type": "webhook", "endpoint": "desk", "payload": "{{new.status}} & 'x'" } }
+                    ]
+                  }
+                }
+              }
+            }
+            """);
+
+        foreach (var (point, at) in new[] { ("beforeUpdate", 0), ("beforeUpdate", 1), ("afterUpdate", 0) })
+        {
+            var drawn = Drawn(copy, at, point);
+            var same = JsonNode.Parse(drawn)!.AsObject();
+
+            copy.ReplaceHook("work_orders", point, at, drawn, same).ShouldBeTrue($"{point} {at} as the tab drew it:\n{drawn}");
+        }
+    }
+
     private static JsonObject Hook(string message) => new() { ["action"] = new JsonObject { ["reject"] = message } };
 
-    private static string Drawn(WorkingCopy copy, int at)
-        => ((JsonArray)JsonNode.Parse(copy.HooksOf("work_orders").Single(point => point.Key == "beforeUpdate").Value)!)[at]!
-            .ToJsonString(_drawn);
+    /// <summary>How the On write tab draws one hook: its own reader, so the guard is tested against what a row shows.</summary>
+    private static string Drawn(WorkingCopy copy, int at, string point = "beforeUpdate")
+        => HooksTab.Declared(copy.HooksOf("work_orders").Single(declared => declared.Key == point).Value)[at];
 
     private static List<string> Messages(WorkingCopy copy)
         => [.. ((JsonArray)JsonNode.Parse(copy.Json)!["entities"]!["work_orders"]!["hooks"]!["beforeUpdate"]!)

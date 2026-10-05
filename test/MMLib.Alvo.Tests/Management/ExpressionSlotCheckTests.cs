@@ -322,7 +322,8 @@ public sealed class ExpressionSlotCheckTests
 
         ExpressionSlotCheck.Check(Validator(), descriptor, pointer, "[{{new.total}}]").Where(IsError).ShouldBeEmpty();
         ExpressionSlotCheck.Check(Validator(), descriptor, pointer, "{\"id\": \"{{new.id}}\"}").Where(IsError)
-            .ShouldNotBeEmpty("a brace outside a placeholder is raw JSONata to this build (JsonataSlot), refused at apply");
+            .ShouldHaveSingleItem("a brace outside a placeholder is raw JSONata to this build (JsonataSlot), refused at apply")
+            .Message.ShouldContain(UnhonouredFeatures.RawJsonata.Consequence);
     }
 
     [Fact]
@@ -332,7 +333,8 @@ public sealed class ExpressionSlotCheckTests
         const string pointer = "/entities/orders/hooks/afterCreate/1/action/to";
 
         ExpressionSlotCheck.Check(Validator(), descriptor, pointer, "ops@example.com").Where(IsError).ShouldBeEmpty();
-        ExpressionSlotCheck.Check(Validator(), descriptor, pointer, "ops@example.com, sales@example.com").Where(IsError).ShouldNotBeEmpty();
+        ExpressionSlotCheck.Check(Validator(), descriptor, pointer, "ops@example.com, sales@example.com").Where(IsError)
+            .ShouldHaveSingleItem().Message.ShouldContain("mailbox");
     }
 
     [Fact]
@@ -470,7 +472,7 @@ public sealed class ExpressionSlotCheckTests
         descriptor["entities"]!["orders"]!["hooks"] = JsonNode.Parse(
             """
             {"afterCreate":[
-              {"action":{"type":"webhook","endpoint":"desk","payload":"[1]"}},
+              {"action":{"type":"webhook","endpoint":"desk","payload":"[{{new.total}}]"}},
               {"action":{"type":"email","template":"done","to":"ops@example.com"}}]}
             """);
         return descriptor;

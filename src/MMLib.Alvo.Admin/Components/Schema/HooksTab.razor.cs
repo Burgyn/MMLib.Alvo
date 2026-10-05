@@ -3,34 +3,16 @@ using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Admin.Components.DesignSystem;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Management;
-using System.Text.Encodings.Web;
+using MMLib.Alvo.Schema;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
-/// <summary>The entity's On write tab: the hooks it declares, and the editor that adds one.</summary>
+/// <summary>The entity's On write tab: the hooks it declares, and the one sheet that adds or edits one.</summary>
 public partial class HooksTab
 {
-    /// <summary>
-    /// How one hook is written for a person to read.
-    /// </summary>
-    /// <remarks>
-    /// <b>Both options earn their place, and the encoder is the one that was missing.</b> A bare
-    /// <c>ToJsonString()</c> takes the default encoder, which escapes anything that could be dangerous in
-    /// HTML — so a CEL condition reached this tab as
-    /// <c>old.status == &#92;u0027completed&#92;u0027 &#92;u0026&#92;u0026 …</c> and was rendered exactly like that.
-    /// It is the defect <c>WorkingCopy</c> documents at length for the document as a whole, arriving one
-    /// re-serialisation later. Safe because <c>CodeBlock</c> HTML-encodes before it highlights.
-    /// Indented because one long line is what pushed this row wider than a phone.
-    /// </remarks>
-    private static readonly JsonSerializerOptions _readable = new()
-    {
-        WriteIndented = true,
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
-
-    private readonly HookBuilder _hook = new();
+    private readonly HookBuilder _new = new();
     private readonly RefusalState<string> _refusal = new();
     private bool _adding;
     private PendingRemoval? _removing;
@@ -97,8 +79,8 @@ public partial class HooksTab
     private IReadOnlyList<ManagementRefusedFeature> HookRefusals => RefusalPlaces.On(RefusalScreen.OnWrite, Refused);
 
     /// <summary>
-    /// The working copy a typed expression is checked against, on a clone — cascaded by the entity screen only, so its
-    /// model stays internal.
+    /// The working copy a typed expression is checked against, on a clone — and the one an edit is saved into (spec D3) —
+    /// cascaded by the entity screen only, so its model stays internal.
     /// </summary>
     [CascadingParameter]
     private WorkingCopy? Copy { get; set; }
@@ -108,6 +90,9 @@ public partial class HooksTab
 
     /// <summary>Redraws the boxes whenever a check has something new to show.</summary>
     public HooksTab() => _check.Changed += Redraw;
+
+    /// <summary>The builder on screen: the hook being edited, or the next new one.</summary>
+    private HookBuilder Current => _editing?.Builder ?? _new;
 
     private void Redraw() => _ = InvokeAsync(StateHasChanged);
 
@@ -119,29 +104,39 @@ public partial class HooksTab
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>Opens the sheet for a new hook, with the point and the kind the last one had.</summary>
+    private void OpenNew()
+    {
+        _new.Fields = DeclaredFields();
+        _editing = null;
+        _refusal.Clear();
+        _adding = true;
+    }
+
     /// <summary>Switches the point, which may switch the kind (<see cref="HookBuilder.Choose"/>).</summary>
     private void Choose(string point)
     {
-        _hook.Choose(point);
+        Current.Choose(point);
         _refusal.Clear();
-        CheckBoth();
+        CheckAll();
     }
 
     private void ChooseKind(string kind)
     {
-        _hook.Kind = kind;
-        CheckBoth();
+        Current.Kind = kind;
+        CheckAll();
     }
 
-    /// <summary>
-    /// Both boxes are asked again: the condition box for its own text, and the value box so no answer it shows was
-    /// given against an older form (the value's candidate leaves the condition out, see
-    /// <see cref="ExpressionSlots.ForMutateValue(string, string, string, System.Text.Json.Nodes.JsonObject, string, string)"/>, so it can no longer be masked by a broken one).
-    /// </summary>
+    /// <summary>The condition box is asked again, and only it.</summary>
+    /// <remarks>
+    /// A stated narrowing of the merged <c>CheckBoth()</c> (pre-flight C4): no action slot's candidate carries the condition
+    /// (<see cref="HookBuilder.CandidateHook"/>, spec D4), so a condition edit cannot change their answer — and the guided
+    /// condition (plan Task 19) calls this on every row change, where asking every box would be 3 + N checks per click.
+    /// </remarks>
     private void TypeCondition(string? text)
     {
-        _hook.Condition = text ?? string.Empty;
-        CheckBoth();
+        Current.Condition = text ?? string.Empty;
+        _ = CheckConditionAsync();
     }
 
     private void TypeMutateValue(string? text)
@@ -167,28 +162,35 @@ public partial class HooksTab
     {
         get
         {
-            if (_hook.MutateRows.Count == 0)
+            if (Current.MutateRows.Count == 0)
             {
-                _hook.MutateRows.Add(new MutateRow { Mode = MutateMode.Expression });
+                Current.MutateRows.Add(new MutateRow { Mode = MutateMode.Expression });
             }
 
-            return _hook.MutateRows[0];
+            return Current.MutateRows[0];
         }
     }
 
-    /// <summary>The point and the kind decide the slot's path, so every box on the form is asked again.</summary>
-    private void CheckBoth()
+    /// <summary>The point and the kind decide every slot's path, so every box on the form is asked again.</summary>
+    private void CheckAll()
     {
         _ = CheckConditionAsync();
         _ = CheckMutateValueAsync();
     }
 
-    private Task CheckConditionAsync() => CheckAsync("hook-condition", _hook.Condition, (copy, source)
-        => ExpressionSlots.ForHookCondition(copy.Json, Entity, _hook.Point, _hook.Draft(), source));
+    /// <summary>The condition, checked in a hook that carries the draft's action (stand-ins for blanks).</summary>
+    private Task CheckConditionAsync() => CheckAsync("hook-condition", Current.Condition, (copy, source)
+        => ExpressionSlots.ForHook(
+            copy.Json, Entity, Current.Point, CurrentPosition(copy), HookPatch.Apply(_editing?.Original, source, Current.Draft()), "condition"));
 
+    /// <summary>The mutate value, checked in a hook without the condition (spec D4).</summary>
     private Task CheckMutateValueAsync() => CheckAsync(
-        "hook-mutate-value", _hook.Kind == HookBuilder.Mutate ? FirstRow.Text : string.Empty, (copy, source)
-        => ExpressionSlots.ForMutateValue(copy.Json, Entity, _hook.Point, _hook.Draft(), FirstRow.Field.Trim(), source));
+        "hook-mutate-value", Current.Kind == HookBuilder.Mutate ? FirstRow.Text : string.Empty, (copy, _)
+        => string.IsNullOrWhiteSpace(FirstRow.Field)
+            ? null
+            : ExpressionSlots.ForHook(
+                copy.Json, Entity, Current.Point, CurrentPosition(copy),
+                Current.CandidateHook(_editing?.Original), "action", "mutate", FirstRow.Field.Trim()));
 
     /// <summary>
     /// Runs the check to its end and observes its fault: it is fire-and-forget, so an unobserved exception would
@@ -224,14 +226,21 @@ public partial class HooksTab
     /// and the working copy are already read in. A point whose value is not an array renders as nothing
     /// rather than throwing: the descriptor reaching this screen has been applied, but the working copy may
     /// have been imported a moment ago and this tab is not the authority that refuses it.
+    /// <para>
+    /// <b>Each entry is written by <see cref="WorkingCopy.Readable"/>, never by options of the tab's own.</b> The text a row
+    /// draws is what <see cref="WorkingCopy.ReplaceHook"/> compares against to refuse an edit made on a stale screen
+    /// (spec §5.1): two separately written option sets that drifted apart would refuse every edit, silently.
+    /// </para>
     /// </remarks>
-    private static List<string> Declared(string listJson)
+    /// <param name="listJson">One point's list, as <see cref="WorkingCopy.HooksOf"/> reads it.</param>
+    /// <returns>Each hook as its row draws it.</returns>
+    internal static List<string> Declared(string listJson)
     {
         try
         {
             var parsed = JsonNode.Parse(listJson);
             return parsed is JsonArray list
-                ? [.. list.Select(hook => hook?.ToJsonString(_readable) ?? "{}")]
+                ? [.. list.Select(hook => WorkingCopy.Readable(hook, "{}"))]
                 : [];
         }
         catch (JsonException)
@@ -240,42 +249,80 @@ public partial class HooksTab
         }
     }
 
+    /// <summary>Why the editor cannot draw this hook, or <see langword="null"/> when its row offers Edit.</summary>
+    private static string? Undrawable(string point, string hookJson)
+    {
+        try
+        {
+            return HookShape.Undrawable(JsonNode.Parse(hookJson), point);
+        }
+        catch (JsonException)
+        {
+            return "It is not JSON the editor can read.";
+        }
+    }
+
+    /// <summary>How many hooks a point declares now, for the edit sheet's subtitle.</summary>
+    private int CountAt(string point) => Declared(Hooks.FirstOrDefault(declared => declared.Key == point).Value ?? "[]").Count;
+
+    /// <summary>The primary action: adds the new hook, or saves the edited one.</summary>
+    private async Task SubmitAsync()
+    {
+        if (_editing is { } editing)
+        {
+            SaveEdit(editing);
+            return;
+        }
+
+        await AddAsync();
+    }
+
     /// <summary>Declares the hook <see cref="HookBuilder.Build"/> makes, or shows why it cannot be made.</summary>
     private async Task AddAsync()
     {
-        _hook.Fields = Copy is { } copy ? HookFields.Declared(copy.Json, Entity) : _hook.Fields;
-        if (_hook.Build(out var refusal) is not { } action)
+        _new.Fields = DeclaredFields();
+        if (_new.Build(out var refusal) is not { } action)
         {
             _refusal.Show(refusal);
             return;
         }
 
         /* The working copy appends to the point's list, so the new hook lands after the ones drawn there now. */
-        var point = _hook.Point;
-        var position = Declared(Hooks.FirstOrDefault(declared => declared.Key == point).Value ?? "[]").Count;
-        await OnAdd.InvokeAsync(new NewHook(point, _hook.Condition, action));
+        var point = _new.Point;
+        var position = CountAt(point);
+        await OnAdd.InvokeAsync(new NewHook(point, _new.Condition, action));
+        Reveal(point, position);
+        CloseEditor();
+    }
+
+    /// <summary>Closes the sheet and forgets what was typed; a new hook's point and kind stay for the next one.</summary>
+    private void CloseEditor()
+    {
+        _new.Clear();
+        _editing = null;
+        _adding = false;
+        _refusal.Clear();
+        CheckAll();
+    }
+
+    /// <summary>Lights the row at a place, and scrolls to it (spec §3.5).</summary>
+    private void Reveal(string point, int position)
+    {
         _reveal = RowId(point, position);
         _reveals++;
-        CloseAdding();
     }
 
-    /// <summary>Closes the editor and forgets what was typed; the point and the kind stay for the next hook.</summary>
-    private void CloseAdding()
-    {
-        _hook.Clear();
-        CheckBoth();
-        _refusal.Clear();
-        _adding = false;
-    }
-
-    /// <summary>Whether the editor holds anything typed, which closing would lose.</summary>
+    /// <summary>Whether the sheet holds anything closing would lose.</summary>
     /// <remarks>
-    /// The point and the kind are not counted. They are two clicks to choose again, and the builder keeps them from
-    /// the last hook on purpose (<see cref="HookBuilder.Clear"/>), so counting them would ask "Discard your changes?"
-    /// of an editor the operator has not touched since it opened. A stated deviation from the brief's
-    /// <c>Point is not null || Kind is not null</c>, which is always true.
+    /// A new hook: anything typed — the point and the kind are not counted, because the builder keeps them from the last
+    /// hook on purpose (<see cref="HookBuilder.Clear"/>), so counting them would ask "Discard your changes?" of a sheet the
+    /// operator has not touched. An edit: anything that differs from what it opened with, the kind included.
     /// </remarks>
-    private bool Dirty => _hook.HasInput;
+    private bool Dirty => _editing is { } editing ? Current.Fingerprint() != editing.Opened : _new.HasInput;
+
+    /// <summary>The entity's fields as the working copy declares them now.</summary>
+    private IReadOnlyDictionary<string, FieldSchema> DeclaredFields()
+        => Copy is { } copy ? HookFields.Declared(copy.Json, Entity) : new Dictionary<string, FieldSchema>(StringComparer.Ordinal);
 
     /// <summary>
     /// The confirm's verb: asks the entity screen to drop the hook that was asked about, found again where it is now.
@@ -293,7 +340,7 @@ public partial class HooksTab
         }
 
         _removing = null;
-        var position = PositionOf(removing);
+        var position = PositionIn(Hooks, removing.Point, removing.Json);
         if (position >= 0)
         {
             /* The rows after it move up, so the lit one would be a different hook. */
@@ -312,13 +359,13 @@ public partial class HooksTab
         _removing = null;
         return removing is null
             ? Task.CompletedTask
-            : Interop.FocusFirstOnceClosedAsync([RemoveButton(removing.Point, PositionOf(removing)), "[data-testid='hook-new']"]);
+            : Interop.FocusFirstOnceClosedAsync(
+                [RemoveButton(removing.Point, PositionIn(Hooks, removing.Point, removing.Json)), "[data-testid='hook-new']"]);
     }
 
-    /// <summary>Where the hook is declared at its point now, or -1 when it no longer is.</summary>
-    private int PositionOf(PendingRemoval removing)
-        => Declared(Hooks.FirstOrDefault(declared => declared.Key == removing.Point).Value ?? "[]")
-            .IndexOf(removing.Json);
+    /// <summary>Where a hook, as drawn, is declared at its point in <paramref name="hooks"/>, or -1 when it no longer is.</summary>
+    private static int PositionIn(IReadOnlyList<KeyValuePair<string, string>> hooks, string point, string json)
+        => Declared(hooks.FirstOrDefault(declared => declared.Key == point).Value ?? "[]").IndexOf(json);
 
     private static string RemoveButton(string point, int position) => $"#{RowId(point, position)} [data-testid='hook-remove']";
 

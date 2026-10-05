@@ -102,6 +102,11 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
         await Page.GetByRole(AriaRole.Option, new() { Name = option, Exact = true }).ClickAsync().ConfigureAwait(false);
     }
 
+    /// <summary>Types a hook condition as CEL into the open hook sheet.</summary>
+    /// <remarks>One place for every scenario: the guided form (plan Task 19) puts a mode switch in front of the box.</remarks>
+    /// <param name="condition">The CEL.</param>
+    public Task TypeConditionAsync(string condition) => Page.FillAsync("#hook-condition", condition);
+
     /// <summary>Waits for the snackbar that says <paramref name="text"/>.</summary>
     /// <remarks>
     /// The library's own class is the handle: a snackbar is a <c>role=status</c> (admin.js turns the library's alert

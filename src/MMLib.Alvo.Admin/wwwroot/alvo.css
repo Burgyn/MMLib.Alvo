@@ -1762,7 +1762,7 @@
 
     /* Trailing rather than full-width: a destructive control stretched across the row reads as the
        thing the screen is for. */
-    .a-hookrow__remove {
+    .a-hookrow__actions {
       align-self: flex-end;
     }
   }
