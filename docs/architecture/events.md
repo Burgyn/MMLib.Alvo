@@ -464,8 +464,9 @@ There is no wall-clock budget and no cancellation token to carry one, and that i
 than an omission. **The bound is structural.** A hook is a fixed number of compiled CEL expressions —
 the count fixed by the descriptor at apply, never by the request — and the profiles they compile in
 (`Condition` for the gate, `Mutate` for the values) have no loop, no comprehension macro, no
-recursion, no user-defined function and no I/O. `Mutate`'s entire function allow-list is an ASCII fold
-over one string and a read of an instant the caller already bound. Each expression's tree is walked
+recursion, no user-defined function and no I/O. The built-in functions are pure and bounded (an ASCII fold, a trim, a bounded replace, a read of an instant the caller
+already bound). A function a *host* registers with `AddCelFunction` is host code and is not bounded by this grammar: the
+descriptor author still cannot express a loop or I/O, the host developer can, by contract (spec 2026-10-05 §5.8). Each expression's tree is walked
 once and its node count is bounded by its source length, which the frozen schema caps at 2000
 characters.
 

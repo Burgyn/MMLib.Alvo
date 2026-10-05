@@ -520,8 +520,10 @@ overturn in the PR.**
   for it — conservative, not pinned by a test.
 * **Test and text adapted in this task:** `SkillCoreClaimsTests` derives the Mutate-functions list from the catalog
   instead of a constant; `ManagementToolsTests` and `EmbeddedSkillsTests` count seven management tools; and the
-  assistant instructions' always-in-context budget (22,758 bytes) held only after trimming three sentences that
-  repeated what the Skills paragraph and the skills themselves already say (the budget was not touched).
+  assistant instructions' always-in-context budget (22,758 bytes, the v3 base prompt, untouched) held only after
+  trimming three phrases from the Skills paragraph ("so it costs no extra round", "(without `rules` nobody reaches
+  it)", "The rules skill shows a whole new entity."); the tool's summary is host-authored text the model reads, trusted as
+  the host is.
   `docs/architecture/cel.md` now carries deviations 17–24 (the §11 F-series, with the `Int`→`Decimal` widening as 22 and
   the reserved-names narrowing X3 as 24).
 

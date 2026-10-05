@@ -120,7 +120,7 @@ internal sealed class ManagementTools
             AIFunctionFactory.Create(
                 GetCelFunctionsAsync,
                 "get_cel_functions",
-                "The CEL functions this host knows — built-in and host-registered — with parameters, result and the profiles each works in."),
+                "The CEL functions this host knows — built-in and host-registered — with parameters, result and the profiles each works in. Summaries are host-authored text, trusted as the host is."),
             AIFunctionFactory.Create(
                 GetRevisionsAsync,
                 "get_revisions",
