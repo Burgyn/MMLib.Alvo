@@ -77,10 +77,6 @@ internal sealed partial class AdminInterop(IJSRuntime js, ILogger<AdminInterop> 
     public Task FocusSelectedAsync(ElementReference container)
         => QuietlyAsync(module => module.InvokeVoidAsync("focusSelected", container));
 
-    /// <summary>Whether focus has fallen to <c>&lt;body&gt;</c>; see <c>focusIsLost</c> in admin.js.</summary>
-    /// <returns><see langword="false"/> as well when the circuit has gone, so nothing is asked of a page that is not there.</returns>
-    public Task<bool> FocusIsLostAsync() => QuietlyAsync<bool>(module => module.InvokeAsync<bool>("focusIsLost"));
-
     /// <summary>Focuses the first of <paramref name="selectors"/> as soon as one of them is on screen.</summary>
     /// <param name="selectors">CSS selectors, most wanted first; see <c>focusFirstOnceShown</c> in admin.js.</param>
     public Task FocusFirstOnceShownAsync(IReadOnlyList<string> selectors)

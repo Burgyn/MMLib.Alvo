@@ -17,52 +17,32 @@ public partial class HooksTab
     /// <remarks>
     /// Through the select's own <c>FocusAsync</c>, not a selector over the library's markup. Not awaited: the library
     /// awaits this handler before it draws the value, so focus is asked for once the handler has returned and the
-    /// current work has run (<see cref="Task.Yield"/>). Measured to hold on a first choice, a re-choice and the enum select.
+    /// current work has run (<see cref="Task.Yield"/>). A re-choice of the value shown raises no value change and so never
+    /// runs this; focus stays on the select without it, which <c>AdminSession.ChooseAgainAsync</c> pins (ruling O).
     /// </remarks>
     /// <param name="id">The select's id in <see cref="_selects"/>.</param>
     private Task RefocusSelectAsync(string id)
     {
         if (_selects.TryGetValue(id, out var select))
         {
-            _ = FocusWhenDrawnAsync(select, onlyWhenLost: false);
+            _ = FocusWhenDrawnAsync(select);
         }
 
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// A select's list opened or closed. A close that chose nothing new — a re-choice of the value it shows, or Escape —
-    /// raises no value change, so <see cref="RefocusSelectAsync"/> never runs for it; focus is handed back here instead,
-    /// but only when it fell to <c>&lt;body&gt;</c>, so a close by a click on another control leaves focus on that control.
-    /// </summary>
-    /// <param name="id">The select's id in <see cref="_selects"/>.</param>
-    /// <param name="open">Whether the list is open now.</param>
-    private void SelectOpenChanged(string id, bool open)
-    {
-        if (!open && _selects.TryGetValue(id, out var select))
-        {
-            _ = FocusWhenDrawnAsync(select, onlyWhenLost: true);
-        }
-    }
-
-    /// <summary>
-    /// Focuses the select after the current render — when <paramref name="onlyWhenLost"/>, only if focus is on
-    /// <c>&lt;body&gt;</c> by then. Never throws: focus is a courtesy, and this runs unobserved.
-    /// </summary>
+    /// <summary>Focuses the select after the current render. Never throws: focus is a courtesy, and this runs unobserved.</summary>
     /// <remarks>
     /// Everything is caught and logged at Debug rather than filtered: the library's <c>FocusAsync</c> already swallows a
     /// select or circuit that went away in between, so what is left to arrive here is not foreseeable by type, and an
     /// unobserved fault of a fire-and-forget call would otherwise vanish.
     /// </remarks>
-    private async Task FocusWhenDrawnAsync(MudSelect<string> select, bool onlyWhenLost)
+    private async Task FocusWhenDrawnAsync(MudSelect<string> select)
     {
         await Task.Yield();
         try
         {
-            if (!onlyWhenLost || await Interop.FocusIsLostAsync())
-            {
-                await select.FocusAsync();
-            }
+            await select.FocusAsync();
         }
         catch (Exception ex)
         {

@@ -121,7 +121,8 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     /// </summary>
     /// <remarks>
     /// A re-choice of the same value is its own case: the library closes the list without raising a value change, so
-    /// nothing a choice runs runs, and focus, left on the option it removed, falls to the page (measured in MudBlazor 9.10).
+    /// nothing a choice runs runs. This pins that focus stays inside the select all the same. A loss to the page was
+    /// suspected here, and did not reproduce in headless Chromium (MudBlazor 9.10); the pin is what would catch one.
     /// </remarks>
     /// <param name="combobox">The select, found by role and name, already showing <paramref name="option"/>.</param>
     /// <param name="option">The option's name, exactly.</param>

@@ -272,7 +272,6 @@ else
                 <div class="a-field-row">
                     <Field Label="@($"Field {i + 1}")" LabelId="@($"hook-mutate-field-{i}-label")">
                         <MudSelect @ref="_selects[FieldSelectId(i)]" T="string" Variant="Variant.Outlined" Value="row.Field" ValueChanged="chosen => ChooseMutateFieldAsync(i, chosen)"
-                                   OpenChanged="open => SelectOpenChanged(FieldSelectId(i), open)"
                                    aria-labelledby="@($"hook-mutate-field-{i}-label")" Class="a-mono"
                                    data-testid="@($"hook-mutate-field-{i}")">
                             @foreach (var target in MutateTargets(row))
@@ -321,7 +320,6 @@ else
             <Field Label="@($"Set field {i + 1} to")" LabelId="@($"{MutateValueId(i)}-label")">
                 <MudSelect @ref="_selects[MutateValueId(i)]" T="string" Variant="Variant.Outlined" Value="row.Text"
                            ValueChanged="text => ChooseMutateValueAsync(i, text)"
-                           OpenChanged="open => SelectOpenChanged(MutateValueId(i), open)"
                            aria-labelledby="@($"{MutateValueId(i)}-label")" aria-describedby="@LiteralDescribedBy(i, fit)"
                            Class="a-mono" Disabled="row.Empty" data-testid="@MutateValueId(i)">
                     @foreach (var value in choice.EnumValues ?? Array.Empty<string>())
@@ -382,7 +380,7 @@ else
         <Field Label="Endpoint" LabelId="hook-endpoint-label">
             <ChildContent>
                 <MudSelect @ref="_selects[EndpointSelectId]" T="string" Variant="Variant.Outlined" Value="Current.Endpoint"
-                           ValueChanged="ChooseEndpointAsync" OpenChanged="open => SelectOpenChanged(EndpointSelectId, open)"
+                           ValueChanged="ChooseEndpointAsync"
                            aria-labelledby="hook-endpoint-label" aria-describedby="hook-endpoint-hint" Class="a-mono"
                            data-testid="hook-endpoint" Disabled="@(_endpoints.Count == 0)">
                     @foreach (var choice in _endpoints)
@@ -433,7 +431,7 @@ else
         <Field Label="Template" LabelId="hook-template-label">
             <ChildContent>
                 <MudSelect @ref="_selects[TemplateSelectId]" T="string" Variant="Variant.Outlined" Value="Current.Template"
-                           ValueChanged="ChooseTemplateAsync" OpenChanged="open => SelectOpenChanged(TemplateSelectId, open)"
+                           ValueChanged="ChooseTemplateAsync"
                            aria-labelledby="hook-template-label" aria-describedby="hook-template-hint" Class="a-mono"
                            data-testid="hook-template" Disabled="@(_templates.Count == 0)">
                     @foreach (var choice in _templates)

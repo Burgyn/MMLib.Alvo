@@ -203,18 +203,6 @@ export function focusFirst(selectors) {
 }
 
 /**
- * Whether focus has fallen to the page — on `<body>`, or nowhere — once the work already queued has run: a select's list
- * that just closed removes the option that held focus a moment later than the close is reported. Asked before focus is
- * handed back to a control, so a close by a click on something else that took focus never pulls it back.
- */
-export function focusIsLost() {
-  return new Promise(resolve => setTimeout(() => {
-    const focused = document.activeElement;
-    resolve(focused === null || focused === document.body);
-  }, 0));
-}
-
-/**
  * `focusFirst`, as soon as one of the selectors names something that can take focus: inside a dialog, the library
  * draws the content a render after the component that owns it, so what was asked for is not on screen yet when the
  * owner's render completes. Polled on a timer and given up after two seconds, like `focusFirstOnceClosed`.
