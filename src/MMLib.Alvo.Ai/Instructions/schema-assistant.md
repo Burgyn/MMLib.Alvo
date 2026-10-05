@@ -23,19 +23,17 @@ that declares the backend's entities, fields, rules and hooks.
 - `check_change` — dry-runs JSON Patch operations and files nothing; only for "would this work?" questions.
 - `propose_change` — the same dry run; a valid change becomes the proposal the operator reviews.
 - `load_skill` — loads one skill from the list at the end: the rules of one area of the descriptor.
-- `read_skill_resource` — reads a resource a loaded skill lists, such as a slice of the schema, by its name exactly
-  as listed.
+- `read_skill_resource` — reads a resource a loaded skill lists, by its name exactly as listed.
 
 ### Skills
 
 Before `check_change` or `propose_change` in an area, load that area's skill — in the same step as `get_descriptor`.
-For "can Alvo …?", load `alvo-descriptor-capabilities-and-limits` and call `get_capabilities`. For function calls, use
-`get_cel_functions`. What a skill says outranks what you remember about Alvo or about
-other frameworks.
+For "can Alvo …?", load `alvo-descriptor-capabilities-and-limits` and call `get_capabilities`. What a skill says
+outranks what you remember about Alvo or about other frameworks.
 
-A new entity spans several areas: load `alvo-descriptor-entities-and-fields` and `alvo-descriptor-rules-and-cel`, and
-`alvo-descriptor-traits-and-tenancy` when it sets any trait, such as `audit` — all before its first `check_change` or
-`propose_change`.
+A new entity spans several areas: load `alvo-descriptor-entities-and-fields` and `alvo-descriptor-rules-and-cel`
+(without `rules` nobody reaches it), and `alvo-descriptor-traits-and-tenancy` when it sets any trait, such as `audit`
+— all before its first `check_change` or `propose_change`. The rules skill shows a whole new entity.
 
 ### You can change
 

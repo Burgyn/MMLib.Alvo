@@ -581,7 +581,7 @@ overturn in the PR.**
 * A timestamp text without an offset parses in the machine's zone (pre-existing; relevant when `Date` arrives).
 * **Not run: `scripts/eval-assistant`** (the real-model eval; it needs a live model). The always-in-context trim removed
   three phrases from the assistant's Skills paragraph, including "(without `rules` nobody reaches it)" — run the eval
-  before merge.
+  before merge. *(Superseded by the pre-PR fix wave below: both steering phrases are restored verbatim.)*
 
 **Pre-PR fix wave (Opus) — after plan-guard and the security review.**
 
@@ -604,3 +604,12 @@ overturn in the PR.**
   pointer, the field and the facet (`max-length`, `enum-value`, `format`, `precision`, `scale`, `required`), never
   the value. Proved over HTTP on SQLite **and** PostgreSQL by the shared `DataApiEngineTests` facts (RED before the
   fix: SQLite 201, PostgreSQL `internal` 500).
+* **The assistant's steering phrases are restored (plan-guard).** "(without `rules` nobody reaches it)" and "The rules
+  skill shows a whole new entity." are back in the always-in-context new-entity rule, verbatim, inside the unchanged
+  22,758-byte budget (spec §7.4 AC 3; 22,790 with the phrases back before the room was made, within the budget after). Room came from two places that carry no rule: the Skills
+  paragraph's "For function calls, use `get_cel_functions`" (the tool stays listed and discoverable — its own
+  description travels with the tool — and `alvo-descriptor-hooks`, the only skill whose slots admit a call, already says
+  to call it before writing one), and `read_skill_resource`'s example "such as a slice of the schema". Kept: "Never
+  describe from memory what a hook or a hook action does." The always-in-context text now differs from the pre-slice
+  text only by the `get_cel_functions` tool bullet, "so it costs no extra round" and that example, so the real-model
+  eval is less load-bearing than it was — still worth a run before merge.
