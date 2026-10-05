@@ -206,7 +206,13 @@ argument is non-nullable, so a null argument makes the call null; nothing is cul
 
 **Trust.** A host function is host code. The descriptor author — an operator or an agent — can call only what the host
 exposed and still cannot express a network call; the host developer who registered the code can, and already owns the
-process. Purity, speed and thread-safety are by contract, not enforced (spec §5.8).
+process. Purity, speed and thread-safety are by contract, not enforced (spec §5.8). **This narrows a product-spec
+guarantee, deliberately:** `alvo-specifikacia.md` §1.2 promises before-hooks a time budget and a network ban enforced
+by an analyzer or structurally for both faces, C# included, and `baas-analyza.md` §2.7 a `CancellationToken` the
+framework enforces. For a host function there is **no time budget, no `CancellationToken` and no analyzer** — host
+code is trusted code (the embedded host's own process, §2.7's in-process trust model) — while the descriptor author's
+face keeps all three. The open mitigations — an analyzer over registered delegates, and a token-aware delegate shape
+with a framework budget — are follow-ups (spec §5.8, X14).
 
 #### Resolution, null and failure
 

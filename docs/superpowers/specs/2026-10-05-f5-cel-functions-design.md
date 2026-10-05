@@ -247,6 +247,28 @@ delegate travels in the compiled tree, not as a dependency). The checklist item,
 test's remarks are amended to say exactly the sentence above. **This is a trust-boundary decision the maintainer must
 accept in the PR** (Q1); the change is labelled `needs-deep-review`.
 
+**Recorded against its real source (X14).** The guarantee this narrows is not only the checklist's. The product spec
+(`alvo-specifikacia.md` §1.2 "Lifecycle hooks") makes *before = in-transaction, a time budget, and a network ban
+enforced by an analyzer or structurally* a **hard** guarantee for **both faces** — the declarative one and C# in the
+embedded host — and `baas-analyza.md` §2.7 asks that before-hooks have a budget in milliseconds and call no network,
+and that a function receive a `CancellationToken` the framework enforces. For a **host function** C1 narrows all
+three:
+
+* **no time budget** — the call runs to completion inside the write's transaction;
+* **no `CancellationToken`** — the registered delegate shape carries none, and nothing cancels it;
+* **no analyzer** — nothing inspects a registered delegate for I/O; the network ban holds for the descriptor author
+  (structurally: they can call only what the host exposed) and not for the host developer.
+
+The declarative face keeps all three (no I/O, O(descriptor) work — `IBeforeHookRunner`'s remarks). **Why:** host code
+is trusted code. Spec §0.5's embedded mode runs the host's own code in the host's own process, and `baas-analyza.md`
+§2.7 states the same trust model for in-process C#/csx — it runs with full trust; isolation is for untrusted code, out
+of process. A budget or a ban the host can bypass by replacing `IBeforeHookRunner` would be a promise, not a guarantee.
+**Mitigations, kept open as follow-ups (nothing in C1's public surface forecloses them):** (a) an analyzer over the
+delegates passed to `AddCelFunction`, flagging I/O types (`HttpClient`, sockets, `DbConnection`, file APIs) — additive,
+an analyzer package; (b) a `CancellationToken`-aware delegate shape (an additive `AddCelFunction` overload whose last
+parameter is a token) with a framework-enforced budget — the runner would mint the budgeted token itself, so
+`IBeforeHookRunner.Run` stays token-free.
+
 ### 5.9 `cel/functions`
 
 Decision: **a new `IAlvoManagement.GetCelFunctionsAsync(string project, CancellationToken)` → `IReadOnlyList<CelFunctionInfo>`,
@@ -399,6 +421,12 @@ init-only DTOs (§5.10), **X10** `lowerAscii` narrower than `trim` (§7), **X11*
 cap = 1,048,576 characters, **derived** from `AlvoApiOptions.MaxRequestBodyBytes`' default (1 MiB, the largest value a
 client can send in one default request) — no source gives a number, **X13** project-scoped route (§5.9).
 
+From the product spec: **X14** a host function narrows the before-hook hard guarantees of `alvo-specifikacia.md`
+§1.2 ("before = in-transaction, time budget, network ban enforced by an analyzer/structurally", both faces) and
+`baas-analyza.md` §2.7 (a budget in ms; a `CancellationToken` the framework enforces): **no time budget, no
+`CancellationToken`, no analyzer** for host code — host code is trusted (§0.5 embedded mode; §2.7's in-process trust
+model); the descriptor author's face keeps all three. Reason, scope and the two follow-up mitigations: §5.8.
+
 ## 12. Forecloses / keeps open
 
 | Later | How it lands without breaking |
@@ -457,7 +485,8 @@ Condition).
 `lowerAscii` in Condition (X10); DI singleton-factory registration; `[CelFunction]` attribute; `AlvoTest.Cel`; macro
 functions; `DateOnly`; reword `UnhonouredSubsystems`' "functions" warning so it is not read as host CEL functions;
 `mutate` of a possibly-null function result into a `required` field refused at apply (since Ruling V such a null is
-refused at write time as the hook's 403; an apply-time refusal would be earlier still); the dashboard offering
+refused at write time as the hook's 403; an apply-time refusal would be earlier still); X14's two mitigations — an
+analyzer over `AddCelFunction` delegates and a `CancellationToken`-aware delegate shape with a framework budget; the dashboard offering
 functions (slice B); #85.
 
 ## 17. As built
