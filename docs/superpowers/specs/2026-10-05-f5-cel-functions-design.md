@@ -291,7 +291,7 @@ the assistant gets a `get_cel_functions` tool and its instructions say to call i
 | `CelFunctionInfo` (Name, Parameters, Result, ResultMayBeNull, Summary, Provenance, Profiles) | Abstractions | returned by the public `IAlvoManagement`; Admin and Ai reach it only there |
 | `CelFunctionParameter` (Name, Type, AcceptsNull) | Abstractions | element of the above |
 | `CelFunctionProvenance { BuiltIn, Host }` | Abstractions | tells an operator which calls run host code (X7) |
-| `[JsonConverter(JsonStringEnumConverter<…>)]` on `CelValueType`, `CelProfile` | Abstractions | the HTTP and tool JSON show `"String"`, not `3`; no Management model carries either enum today (verified: outside `Expressions/` only `Rules/PolicyDecision.cs` reaches them, through `CompiledExpression`; that it is never serialized is *(unverified)* — Task 7 checks) |
+| `[JsonConverter(JsonStringEnumConverter<…>)]` on `CelValueType`, `CelProfile` | Abstractions | the HTTP and tool JSON show `"String"`, not `3`; no Management model carries either enum today (verified: outside `Expressions/` only `Rules/PolicyDecision.cs` reaches them, through `CompiledExpression`; that it is never serialized is **verified** by the pre-PR security review: before this slice no DTO, persisted schema, Admin or CLI consumer serialised `PolicyDecision`, `CompiledExpression` or either enum, and no `JsonSerializer` call in `src/` takes either type — so the converter changes no existing payload) |
 | `IAlvoManagement.GetCelFunctionsAsync` | Abstractions | R5 |
 | `AlvoBuilderExtensions.AddCelFunction` | core | the registration API |
 | `AlvoProblemTypes.FunctionFailed` | core | the distinct problem `type` (R4) an agent branches on |
