@@ -41,7 +41,7 @@ internal sealed partial class WorkingCopy
         var endpoint = current as JsonObject ?? new JsonObject();
         endpoint["url"] = url;
         endpoint["secretRef"] = secretRef;
-        SetOrRemove(endpoint, "description", description);
+        SetOrRemoveBlank(endpoint, "description", description);
         if (!editing)
         {
             Ensure(Ensure(root, "webhooks"), "endpoints")[name] = endpoint;
@@ -53,8 +53,19 @@ internal sealed partial class WorkingCopy
     /// <summary>Whether a block may be written into: absent, or an object.</summary>
     private static bool Settable(JsonNode? node) => node is null or JsonObject;
 
-    /// <summary>Sets a text key, or removes it when the text is blank.</summary>
-    private static void SetOrRemove(JsonObject owner, string key, string? value)
+    /// <summary>Sets a text key, or removes it when the text is blank — empty or whitespace only.</summary>
+    /// <remarks>
+    /// <para>
+    /// Blank, not merely empty: a key holding only whitespace says nothing a reader can use, so it is not written. This
+    /// differs on purpose from <c>FieldFacets.SetOrRemove</c>, which removes only a null or empty value — its callers pass
+    /// a chosen option or <see langword="null"/>, never typed text — which is why the two are not one helper.
+    /// </para>
+    /// <para>
+    /// The value is written as given; the callers trim first. <c>EndpointEditor.SaveAsync</c> trims the description, and
+    /// the template sheet must trim the subject the same way, so a kept value never carries the padding it was typed with.
+    /// </para>
+    /// </remarks>
+    private static void SetOrRemoveBlank(JsonObject owner, string key, string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
         {

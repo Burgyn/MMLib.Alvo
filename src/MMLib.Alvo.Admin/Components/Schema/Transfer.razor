@@ -106,8 +106,9 @@
         try
         {
             Copy = await Session.CopyAsync(ct);
-            _descriptor = await Gateway.DescriptorAsync(ct);
+            var descriptor = await Gateway.DescriptorAsync(ct);
             await Session.EnsureLoadedAsync(Copy, ct);
+            _descriptor = descriptor;
         }
         catch (Exception exception)
         {

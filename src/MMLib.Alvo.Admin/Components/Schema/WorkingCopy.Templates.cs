@@ -33,7 +33,7 @@ internal sealed partial class WorkingCopy
         }
 
         var template = current as JsonObject ?? new JsonObject();
-        SetOrRemove(template, "subject", subject);
+        SetOrRemoveBlank(template, "subject", subject);
         template["body"] = body;
         if (!editing)
         {

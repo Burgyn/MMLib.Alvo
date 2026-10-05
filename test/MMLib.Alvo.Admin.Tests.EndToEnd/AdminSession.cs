@@ -428,7 +428,9 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     /// The circuit being up is not enough: the page reads the applied descriptor and the copy after its first render, and
     /// it refuses an import until both are there (<c>ImportGate</c>). A chord sent in between is refused without a word —
     /// a disabled button is waited on by a click, a key press is not. The form draws the gate's condition, so this waits on
-    /// exactly what the submit checks.
+    /// exactly what the submit checks. It relies on <see cref="GoAsync"/> settling first: the page is prerendered, so the
+    /// HTML that arrives before the circuit can already read <c>data-copy-loaded='true'</c>, and only the circuit being up
+    /// makes that attribute the interactive page's own.
     /// </remarks>
     public async Task GoToImportAsync()
     {

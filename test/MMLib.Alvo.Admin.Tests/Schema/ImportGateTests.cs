@@ -27,6 +27,8 @@ public sealed class ImportGateTests
     {
         ImportGate.Loaded(_loaded, problem: null).ShouldBeTrue();
         ImportGate.Loaded(descriptor: null, problem: null).ShouldBeFalse();
+        ImportGate.Loaded(_loaded, new AdminProblem("t", "d", null, new InvalidOperationException(), IsFault: true))
+            .ShouldBeFalse("a problem shown means the copy may not be loaded, whatever descriptor was read");
     }
 
     [Theory]

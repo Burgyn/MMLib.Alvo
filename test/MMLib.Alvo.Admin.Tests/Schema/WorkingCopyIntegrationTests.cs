@@ -90,10 +90,11 @@ public class WorkingCopyIntegrationTests
     public void A_declaration_is_a_pending_edit()
     {
         var copy = Copy(WithEndpoint);
+        copy.PendingCount.ShouldBe(0);
 
         copy.DeclareTemplate("ready", null, "Hello", editing: false).ShouldBeTrue();
 
-        copy.PendingCount.ShouldBeGreaterThan(0);
+        copy.PendingCount.ShouldBe(1);
     }
 
     private const string WithEndpoint = """
