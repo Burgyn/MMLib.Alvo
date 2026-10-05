@@ -69,7 +69,9 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// making <c>!(owner_id == null)</c> always <see langword="true"/>.
 /// </para>
 /// <para>
-/// No exception ever escapes <see cref="EvaluatePredicate"/> or <see cref="EvaluateScalar"/> for
+/// A <see cref="CelFunctionException"/> escapes <see cref="EvaluatePredicate"/> and <see cref="EvaluateMutation"/>
+/// on purpose — a function failure fails closed; every other surprise still collapses as before: no other exception
+/// escapes <see cref="EvaluatePredicate"/> or <see cref="EvaluateScalar"/> for
 /// any well-typed <see cref="CompiledExpression"/> and any <see cref="AlvoRecord"/>, including one
 /// whose values are of an unexpected CLR type (a nested dictionary, an array, a
 /// <c>System.Text.Json.JsonElement</c>) — such a value simply fails every type pattern below and
@@ -109,7 +111,7 @@ internal static class CelInterpreter
             return AsBoolean(Evaluate(expression.Root, state));
         }
 #pragma warning disable CA1031
-        catch (Exception)
+        catch (Exception failure) when (failure is not CelFunctionException)
 #pragma warning restore CA1031
         {
             return false;
@@ -201,17 +203,14 @@ internal static class CelInterpreter
     /// the caller's business whether writing it is allowed.
     /// </returns>
     /// <remarks>
-    /// <b>The <c>catch</c> collapses to the same <see langword="null"/> a legitimate missing value produces,
-    /// and that conflation is safe only because no input reaches it.</b> Written down because the two are
-    /// otherwise indistinguishable to a caller, and the create path turns a <see langword="null"/> patch value
-    /// into an <em>absent</em> key — so a reachable failure here would silently store a column default instead
-    /// of refusing the write, which is the class of outcome this framework refuses <c>default</c> and
-    /// <c>rollup</c> for. Nothing in a <see cref="CelProfile.Mutate"/> tree can throw: the profile admits only
-    /// literals, field references and the two allow-listed calls; <see cref="Evaluate"/>'s node switch ends in
-    /// <c>_ =&gt; null</c>; <c>lowerAscii</c> of a non-string is <see langword="null"/> rather than an error;
-    /// and <c>now()</c> reads a value the caller already bound. The <c>catch</c> is therefore the same
-    /// defence-in-depth as <see cref="EvaluatePredicate"/>'s, and admitting a construct that can throw into
-    /// this profile is what would make it a live decision.
+    /// <b>A <see cref="CelFunctionException"/> escapes on purpose — a function failure fails closed; every other
+    /// surprise still collapses to <see langword="null"/> as before.</b> The two are otherwise indistinguishable to a
+    /// caller, and the create path turns a <see langword="null"/> patch value into an <em>absent</em> key, so a
+    /// reachable failure swallowed here would silently store a column default instead of refusing the write. Apart
+    /// from a catalogued function, nothing in a <see cref="CelProfile.Mutate"/> tree can throw: the profile admits
+    /// literals, field references and calls; <see cref="Evaluate"/>'s node switch ends in <c>_ =&gt; null</c>;
+    /// <c>lowerAscii</c> of a non-string is <see langword="null"/>; and <c>now()</c> reads a value the caller already
+    /// bound. The remaining <c>catch</c> is defence-in-depth, as <see cref="EvaluatePredicate"/>'s is.
     /// </remarks>
     public static object? EvaluateMutation(
         CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, DateTimeOffset now)
@@ -225,7 +224,7 @@ internal static class CelInterpreter
             return Evaluate(expression.Root, state);
         }
 #pragma warning disable CA1031
-        catch (Exception)
+        catch (Exception failure) when (failure is not CelFunctionException)
 #pragma warning restore CA1031
         {
             return null;
@@ -253,10 +252,23 @@ internal static class CelInterpreter
     /// </summary>
     private static object? EvaluateCall(CelCall call, in EvalState state) => call switch
     {
+        { Function: { IsLegacy: false } function } => function.Invoke(EvaluateArguments(call.Arguments, state)),
         { Name: CelCall.LowerAscii, Arguments: [var argument] } => LowerAscii(Evaluate(argument, state)),
         { Name: CelCall.Now, Arguments: [] } => state.Now,
         _ => null,
     };
+
+    /// <summary>Evaluates every argument eagerly, left to right — CEL functions are strict.</summary>
+    private static object?[] EvaluateArguments(IReadOnlyList<CelNode> arguments, in EvalState state)
+    {
+        var values = new object?[arguments.Count];
+        for (var index = 0; index < values.Length; index++)
+        {
+            values[index] = Evaluate(arguments[index], state);
+        }
+
+        return values;
+    }
 
     /// <summary>
     /// Applies <c>lowerAscii</c>. A value that is not a string is <see langword="null"/> rather than an
@@ -530,7 +542,7 @@ internal static class CelInterpreter
 
     private static bool IsTimestampCandidate(object value) => value is DateTimeOffset or DateTime or string;
 
-    private static bool TryToDateTimeOffset(object value, out DateTimeOffset result)
+    internal static bool TryToDateTimeOffset(object value, out DateTimeOffset result)
     {
         switch (value)
         {
@@ -553,7 +565,7 @@ internal static class CelInterpreter
     private static bool IsNumericValue(object value) => value is
         int or long or short or byte or sbyte or ushort or uint or ulong or float or double or decimal;
 
-    private static bool TryToDecimal(object value, out decimal result)
+    internal static bool TryToDecimal(object value, out decimal result)
     {
         switch (value)
         {

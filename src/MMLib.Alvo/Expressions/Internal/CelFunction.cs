@@ -40,10 +40,52 @@ internal sealed record CelFunction(
     /// <summary>Gets a value indicating whether this is one of the two calls with their own grammar, evaluated by name.</summary>
     public bool IsLegacy => Body is null;
 
+    /// <summary>
+    /// Calls the body with <paramref name="arguments"/> converted to each parameter's CLR type. A null (or
+    /// unconvertible) argument for a parameter that takes none makes the call null without invoking the body (spec R3).
+    /// </summary>
+    /// <param name="arguments">The evaluated arguments, one per parameter.</param>
+    /// <returns>The normalised result, or <see langword="null"/>.</returns>
+    /// <exception cref="CelFunctionException">The body failed; whatever it threw is the inner exception.</exception>
+    public object? Invoke(IReadOnlyList<object?> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        var values = new object?[Parameters.Count];
+        for (var index = 0; index < values.Length; index++)
+        {
+            values[index] = CelArgumentMarshaller.Convert(arguments[index], Parameters[index].ClrType);
+            if (values[index] is null && !Parameters[index].Nullable)
+            {
+                return null;
+            }
+        }
+
+        return Run(values);
+    }
+
     /// <summary>The overload as one line, e.g. <c>replace(text: String, search: String, replacement: String) -> String</c>.</summary>
     /// <returns>The signature text refusals and fixes quote.</returns>
     public string Signature() =>
         $"{Name}({string.Join(", ", Parameters.Select(DescribeParameter))}) -> {ResultType}{(ResultNullable ? "?" : string.Empty)}";
+
+    private object? Run(object?[] values)
+    {
+        var body = Body ?? throw new InvalidOperationException($"'{Name}' has its own grammar and is evaluated by name, never invoked.");
+        try
+        {
+            return CelArgumentMarshaller.Normalize(body(values));
+        }
+        catch (CelFunctionException)
+        {
+            throw;
+        }
+#pragma warning disable CA1031 // A body may throw anything; every failure becomes the one fail-closed type.
+        catch (Exception failure)
+#pragma warning restore CA1031
+        {
+            throw new CelFunctionException(Name, IsHost, failure);
+        }
+    }
 
     private static string DescribeParameter(CelFunctionArgument parameter) =>
         $"{parameter.Name}: {parameter.Type}{(parameter.Nullable ? "?" : string.Empty)}";
