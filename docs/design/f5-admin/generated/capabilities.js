@@ -191,6 +191,12 @@ export const CAPABILITIES = {
       "level": "viewer"
     },
     {
+      "verb": "GET",
+      "path": "/projects/{project}/cel/functions",
+      "operation": "GetCelFunctions",
+      "level": "viewer"
+    },
+    {
       "verb": "POST",
       "path": "/projects/{project}/policy/simulate",
       "operation": "SimulatePolicy",
