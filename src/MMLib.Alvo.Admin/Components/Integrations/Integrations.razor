@@ -1,50 +1,72 @@
 ﻿@page "/admin/integrations"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
+@inject AdminSession Session
+@implements IDisposable
 
 <PageTitle>Integrations · Alvo</PageTitle>
 
+@*
+    The webhook endpoints and message templates of the operator's working copy (spec §4.7, ruling B5): a declaration
+    staged a minute ago is listed, and a hook's picker offers it. What the build does with each block is its own
+    sentence, served verbatim from capabilities.warned. Each list's create sits in its panel's head (spec §3.7), and the
+    new or edited row is lit (§3.5).
+*@
 <div class="a-stack">
     <PageHeader Title="Integrations"
-                Subtitle="The webhook endpoints and message templates this descriptor declares. Both blocks parse and apply; whether anything is delivered is a different question, answered below by the build itself rather than by this screen." />
+                Subtitle="The webhook endpoints and message templates your working copy declares. A hook's webhook or email action names them; what the build does with each is said under it, in its own words." />
 
-    @if (_capabilities is null)
+    @if (_capabilities is null || _copy is null)
     {
         <Skeleton />
     }
     else
     {
-        @foreach (var block in new[] { "webhooks", "templates" })
-        {
-            <Panel Title="@block">
-                <Subtitle>
-                    @(Declared(block) is null
-                        ? "Not declared by this descriptor."
-                        : "Declared, and served here exactly as stored.")
-                </Subtitle>
-                <ChildContent>
-                    @if (Warned(block) is { } warning)
-                    {
-                        <NotYetConsequence Consequence="@warning.Consequence" Badge="not yet" />
-                    }
+        <Panel Title="Webhook endpoints" data-testid="integrations-endpoints">
+            <Actions>
+                @if (_copy.Loaded)
+                {
+                    <AlvoButton Small="true" data-testid="endpoint-new" OnClick="NewEndpoint">New endpoint</AlvoButton>
+                }
+            </Actions>
+            <ChildContent>
+                @if (Warned("webhooks") is { } webhooks)
+                {
+                    <NotYetConsequence Consequence="@webhooks" Badge="not yet" />
+                }
+                @if (_endpoints.Count == 0)
+                {
+                    <EmptyState Title="No endpoint declared"
+                                Body="An endpoint is a name and a URL an after-hook's webhook action posts to. Declaring one changes the descriptor, so it joins the working copy like any other edit." />
+                }
+                @foreach (var endpoint in _endpoints)
+                {
+                    @EndpointRowView(endpoint)
+                }
+                @AsHeld("webhooks")
+            </ChildContent>
+        </Panel>
 
-                    @*
-                        Open, because showing what is declared is the page's whole content; the fold is there for
-                        an operator who wants the list shorter.
-                    *@
-                    @if (Declared(block) is { Length: > 0 } json)
-                    {
-                        <MudExpansionPanels Elevation="0" Class="a-integration">
-                            <MudExpansionPanel Text="@($"The {block} block, as stored")" Expanded="true">
-                                <CodeBlock Json="@json" />
-                            </MudExpansionPanel>
-                        </MudExpansionPanels>
-                    }
-                </ChildContent>
-            </Panel>
-        }
+        <Panel Title="Message templates" data-testid="integrations-templates">
+            <ChildContent>
+                @if (Warned("templates") is { } templates)
+                {
+                    <NotYetConsequence Consequence="@templates" Badge="not yet" />
+                }
+                @if (_templates.Count == 0)
+                {
+                    <EmptyState Title="No template declared"
+                                Body="A template is a subject and a body with {{…}} placeholders that an after-hook's email action renders." />
+                }
+                @foreach (var template in _templates)
+                {
+                    @TemplateRowView(template)
+                }
+                @AsHeld("templates")
+            </ChildContent>
+        </Panel>
 
-        <Panel Title="@("Why there is no \"new endpoint\" button")">
+        <Panel Title="What this build refuses in these blocks">
             @if (Refusals.Count == 0)
             {
                 <p class="a-note">This build refuses nothing in these blocks.</p>
@@ -59,12 +81,30 @@
                 }
             }
         </Panel>
+
+        <CascadingValue Value="_copy">
+            @if (_endpointEditor is { } endpointEditor)
+            {
+                <EndpointEditor Editing="@endpointEditor.Name" Warning="@Warned("webhooks")" OnSaved="EndpointSaved" OnClose="CloseEditors" />
+            }
+        </CascadingValue>
+
+        @if (_reveal is { } revealed)
+        {
+            @RevealOnRender.On($"#{revealed}", _reveals)
+        }
     }
 </div>
 
 @code {
+    private readonly ComponentLifetime _lifetime = new();
     private ManagementCapabilities? _capabilities;
-    private string _descriptorJson = "{}";
+    private WorkingCopy? _copy;
+    private IReadOnlyList<EndpointRow> _endpoints = [];
+    private IReadOnlyList<TemplateRow> _templates = [];
+    private Opened? _endpointEditor;
+    private string? _reveal;
+    private int _reveals;
 
     /// <summary>
     /// The refusals that belong to this screen, by <see cref="RefusalPlaces"/>.
@@ -79,14 +119,135 @@
         ? []
         : RefusalPlaces.On(RefusalScreen.Integrations, _capabilities.Refused);
 
+    /// <summary>The build's refusal of a template's <c>bodyFile</c>, shown under a row that reads one.</summary>
+    private ManagementRefusedFeature? BodyFileRefusal => Refusals.FirstOrDefault(refusal => refusal.Slot == "bodyFile");
+
+    /// <inheritdoc />
     protected override async Task OnInitializedAsync()
     {
-        _capabilities = await Gateway.CapabilitiesAsync(CancellationToken.None);
-        _descriptorJson = (await Gateway.DescriptorAsync(CancellationToken.None)).DescriptorJson;
+        _capabilities = await Gateway.CapabilitiesAsync(_lifetime.Token);
+        _copy = await Session.WorkingCopyAsync(_lifetime.Token);
+        Session.Follow(_copy, InvokeAsync, OnCopyChanged, _lifetime.Token);
+        Read();
     }
 
-    private string? Declared(string block) => DescriptorLens.Block(_descriptorJson, block);
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _lifetime.Dispose();
+        GC.SuppressFinalize(this);
+    }
 
-    private ManagementWarnedBlock? Warned(string block) => _capabilities?.Warned
-        .FirstOrDefault(warned => string.Equals(warned.Block, block, StringComparison.Ordinal));
+    /// <summary>Another tab — or the assistant — moved the copy: read it again and redraw.</summary>
+    private void OnCopyChanged()
+    {
+        Read();
+        StateHasChanged();
+    }
+
+    private void Read()
+    {
+        if (_copy is { } copy)
+        {
+            _endpoints = IntegrationRows.Endpoints(copy.Json, copy.AppliedJson);
+            _templates = IntegrationRows.Templates(copy.Json, copy.AppliedJson);
+        }
+    }
+
+    /// <summary>The build's own sentence about a block, or nothing when it reports none.</summary>
+    private string? Warned(string block) => _capabilities?.Warned
+        .FirstOrDefault(warned => string.Equals(warned.Block, block, StringComparison.Ordinal))?.Consequence;
+
+    private void NewEndpoint() => _endpointEditor = new Opened(null);
+
+    private void EditEndpoint(string name) => _endpointEditor = new Opened(name);
+
+    private void CloseEditors() => _endpointEditor = null;
+
+    private void EndpointSaved(string name) => Saved($"endpoint-{name}");
+
+    /// <summary>Closes the sheet, reads the copy, and lights the saved row (spec §3.5).</summary>
+    private void Saved(string row)
+    {
+        CloseEditors();
+        Read();
+        _reveal = row;
+        _reveals++;
+    }
+
+    /// <summary>"posted to by rentals afterCreate and 1 more", or what to say when no hook uses it.</summary>
+    private static string UsesWords(IReadOnlyList<DescriptorLens.IntegrationUse> uses, string some, string none) => uses.Count switch
+    {
+        0 => none,
+        1 => $"{some} {uses[0].Entity} {uses[0].Point}",
+        _ => $"{some} {uses[0].Entity} {uses[0].Point} and {uses.Count - 1} more",
+    };
+
+    /// <summary>One endpoint's row.</summary>
+    private RenderFragment EndpointRowView(EndpointRow row) => @<text>
+        <ListRow class="a-listrow--stacked" id="@($"endpoint-{row.Name}")" data-testid="endpoint-row"
+                 data-alvo-new="@($"endpoint-{row.Name}" == _reveal ? "true" : null)">
+            <div class="a-row a-row--wrap">
+                <code class="a-mono">@row.Name</code>
+                @if (row.Staged)
+                {
+                    <span class="a-badge a-badge--accent" data-testid="endpoint-staged">not applied yet</span>
+                }
+                <span class="@(row.Uses.Count > 0 ? "a-badge a-badge--ok" : "a-badge")" data-testid="endpoint-uses">
+                    @UsesWords(row.Uses, "posted to by", "no hook posts here")
+                </span>
+                <span class="a-badge a-badge--warn">not signed</span>
+                @if (row.Drawable && _copy!.Loaded)
+                {
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="endpoint-edit"
+                                aria-label="@($"Edit endpoint {row.Name}")" OnClick="_ => EditEndpoint(row.Name)">Edit</AlvoButton>
+                }
+            </div>
+            <span class="a-mono">@row.Url</span>
+            <span class="a-hint">secretRef <code class="a-mono">@row.SecretRef</code> — declared, and not read by this build.</span>
+        </ListRow>
+    </text>;
+
+    /// <summary>One template's row.</summary>
+    private RenderFragment TemplateRowView(TemplateRow row) => @<text>
+        <ListRow class="a-listrow--stacked" id="@($"template-{row.Name}")" data-testid="template-row"
+                 data-alvo-new="@($"template-{row.Name}" == _reveal ? "true" : null)">
+            <div class="a-row a-row--wrap">
+                <code class="a-mono">@row.Name</code>
+                @if (row.Staged)
+                {
+                    <span class="a-badge a-badge--accent" data-testid="template-staged">not applied yet</span>
+                }
+                <span class="@(row.Uses.Count > 0 ? "a-badge a-badge--ok" : "a-badge")">@UsesWords(row.Uses, "sent by", "no hook sends it")</span>
+                @if (row.HasBodyFile)
+                {
+                    <span class="a-badge a-badge--warn">bodyFile — not read</span>
+                }
+            </div>
+            @if (row.Subject.Length > 0)
+            {
+                <span class="a-hint">@row.Subject</span>
+            }
+            @if (row.HasBodyFile && BodyFileRefusal is { } refusal)
+            {
+                <span class="a-refused__reason">@refusal.Consequence</span>
+            }
+        </ListRow>
+    </text>;
+
+    /// <summary>The block as the working copy holds it, folded — for a declaration the rows cannot draw.</summary>
+    private RenderFragment AsHeld(string block) => @<text>
+        @if (DescriptorLens.Block(_copy!.Json, block) is { Length: > 0 } json)
+        {
+            <MudExpansionPanels Elevation="0" Class="a-integration">
+                <MudExpansionPanel Text="@($"The {block} block, as the working copy holds it")">
+                    <CodeBlock Json="@json" />
+                </MudExpansionPanel>
+            </MudExpansionPanels>
+        }
+    </text>;
+
+    /// <summary>Which sheet is open: a new declaration (no name) or an edit.</summary>
+    /// <param name="Name">The declaration being edited.</param>
+    private sealed record Opened(string? Name);
 }

@@ -594,12 +594,27 @@ namespace MMLib.Alvo.Admin.Components.Home
 }
 namespace MMLib.Alvo.Admin.Components.Integrations
 {
+    public class EndpointEditor : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public EndpointEditor() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Editing { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnClose { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> OnSaved { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Warning { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnInitialized() { }
+    }
     [Microsoft.AspNetCore.Authorization.Authorize]
     [Microsoft.AspNetCore.Components.Route("/admin/integrations")]
-    public class Integrations : Microsoft.AspNetCore.Components.ComponentBase
+    public class Integrations : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public Integrations() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
 }
