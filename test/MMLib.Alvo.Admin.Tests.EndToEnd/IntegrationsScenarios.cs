@@ -37,7 +37,9 @@ public sealed class IntegrationsScenarios(BikeWorkshopWorld world) : IClassFixtu
         (await editor.GetByTestId("endpoint-statement-build").InnerTextAsync()).ShouldContain("no delivery is signed");
 
         await session.Page.FillAsync("#endpoint-name", "billing-system");
-        (await session.Page.InputValueAsync("#endpoint-secret")).ShouldBe("billing-system-signing-key");
+        /* Waited on, not read: the suggested secret name comes back from the circuit after the fill, and a browser-local
+           read taken at once sees the box before that render (it failed so in a full-suite run). */
+        await session.Page.WaitForFunctionAsync("() => document.querySelector('#endpoint-secret')?.value === 'billing-system-signing-key'");
         await session.Page.FillAsync("#endpoint-url", "https://billing.example/hooks/alvo");
         await editor.GetByTestId("endpoint-save").ClickAsync();
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
