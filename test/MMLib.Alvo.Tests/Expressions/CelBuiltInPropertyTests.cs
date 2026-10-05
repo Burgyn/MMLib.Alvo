@@ -11,15 +11,35 @@ public sealed class CelBuiltInPropertyTests
     private const string AsciiWhitespace = " \t\n\r";
 
     [Fact]
-    public void Trim_leaves_no_ascii_whitespace_at_either_end_and_only_removes_from_the_ends() =>
+    public void Trim_never_leaves_ascii_whitespace_at_an_end_and_is_idempotent() =>
         Gen.String.Sample(text =>
         {
             var trimmed = CelBuiltInFunctions.TrimText(text);
 
             (trimmed.Length == 0 || (!AsciiWhitespace.Contains(trimmed[0]) && !AsciiWhitespace.Contains(trimmed[^1]))).ShouldBeTrue();
             text.Contains(trimmed, StringComparison.Ordinal).ShouldBeTrue();
+            CelBuiltInFunctions.TrimText(trimmed).ShouldBe(trimmed);
         },
         iter: Iterations);
+
+    [Fact]
+    public void Trim_returns_the_input_unchanged_when_neither_end_is_ascii_whitespace() =>
+        Gen.Char[" \t\n\r\u00a0\u2003ab"].Array[1, 6].Select(characters => new string(characters))
+            .Where(text => text.Length > 0 && !AsciiWhitespace.Contains(text[0]) && !AsciiWhitespace.Contains(text[^1]))
+            .Sample(text => CelBuiltInFunctions.TrimText(text).ShouldBe(text), iter: Iterations);
+
+    [Fact]
+    public void Trim_removes_exactly_the_ascii_whitespace_run_at_each_end() =>
+        Gen.Select(Whitespace, Gen.String, Whitespace).Sample(
+            sample =>
+            {
+                var core = sample.Item2.Trim(' ', '\t', '\n', '\r');
+
+                CelBuiltInFunctions.TrimText(sample.Item1 + core + sample.Item3).ShouldBe(core);
+            },
+            iter: Iterations);
+
+    private static Gen<string> Whitespace => Gen.Char[AsciiWhitespace].Array[0, 4].Select(characters => new string(characters));
 
     [Fact]
     public void Size_equals_a_code_point_scan() =>

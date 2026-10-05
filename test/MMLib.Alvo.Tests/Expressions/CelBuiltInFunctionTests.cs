@@ -23,6 +23,19 @@ public sealed class CelBuiltInFunctionTests
         Evaluate($"replace(name, '{search}', '{replacement}')", ("name", text)).ShouldBe(expected);
 
     [Theory]
+    [InlineData("\u00e9", "e\u0301")]
+    [InlineData("e\u0301", "\u00e9")]
+    [InlineData("a\u00adb", "ab")]
+    [InlineData("\u0130", "i")]
+    public void Replace_compares_code_units_and_never_culture_or_normalisation(string text, string search)
+    {
+        text.ShouldNotBe(search);
+
+        CelBuiltInFunctions.ReplaceText(text, search, "X").ShouldBe(text);
+        Evaluate($"replace(name, '{search}', 'X')", ("name", text)).ShouldBe(text);
+    }
+
+    [Theory]
     [InlineData("  a b  ", "a b")]
     [InlineData("\t\n\r a \r\n\t", "a")]
     [InlineData("\u00a0a\u00a0", "\u00a0a\u00a0")]
@@ -97,6 +110,24 @@ public sealed class CelBuiltInFunctionTests
     [Fact]
     public void A_replace_that_shrinks_a_text_longer_than_the_cap_is_not_capped() =>
         Evaluate("replace(name, 'a', '')", ("name", new string('a', CelBuiltInFunctions.MaxTextLength + 1))).ShouldBe(string.Empty);
+
+    [Fact]
+    public void A_replace_growing_to_exactly_the_cap_is_allowed_and_one_over_is_refused()
+    {
+        var half = new string('a', CelBuiltInFunctions.MaxTextLength / 2);
+
+        CelBuiltInFunctions.ReplaceText(half, "a", "aa").Length.ShouldBe(CelBuiltInFunctions.MaxTextLength);
+        Should.Throw<CelFunctionException>(() => CelBuiltInFunctions.ReplaceText(half + "b", "a", "aa")).FunctionName.ShouldBe("replace");
+    }
+
+    [Fact]
+    public void A_replace_over_the_cap_is_judged_by_growth_not_by_the_replacement_alone()
+    {
+        var overCap = new string('a', CelBuiltInFunctions.MaxTextLength + 10);
+
+        CelBuiltInFunctions.ReplaceText(overCap, "aa", "b").Length.ShouldBe((CelBuiltInFunctions.MaxTextLength + 10) / 2);
+        CelBuiltInFunctions.ReplaceText(overCap, "a", "b").Length.ShouldBe(overCap.Length);
+    }
 
     [Fact]
     public void Built_ins_compose_in_a_mutate() =>

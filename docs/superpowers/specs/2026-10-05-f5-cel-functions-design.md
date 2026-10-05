@@ -278,11 +278,22 @@ out); never culture-sensitive.
 
 | Function | Signature(s) | Semantics | Edge cases pinned by tests |
 |---|---|---|---|
-| `replace` | `(text: String, search: String, replacement: String) -> String` | every non-overlapping occurrence, left to right, ordinal | `search == ''` → `text` unchanged (SQL; deviation F6); `replace('aaa','aa','b')` = `'ba'`; a result over **1,048,576** characters fails closed (X12) |
+| `replace` | `(text: String, search: String, replacement: String) -> String` | every non-overlapping occurrence, left to right, ordinal | `search == ''` → `text` unchanged (SQL; deviation F6); `replace('aaa','aa','b')` = `'ba'`; a replacement that would **grow** the text past **1,048,576** characters fails closed (X12); a text already over the cap that does not grow (equal-length or shrinking replace) is returned |
 | `trim` | `(text: String) -> String` | removes U+0020, U+0009, U+000A, U+000D from both ends, nothing else | NBSP (U+00A0) and U+2003 stay (deviation F5); `trim('')` = `''` |
 | `size` | `(text: String) -> Int` | Unicode code points (`EnumerateRunes`, as `ComputedValueShape.Longest` already counts) | `'😀'` = 1; `'é'` = 2; a lone surrogate counts 1 (U+FFFD) |
 | `abs` | `(x: Int) -> Int`, `(x: Decimal) -> Decimal` | magnitude, same type | `abs(-9223372036854775808)` fails closed (CEL: overflow is an error; engines raise) |
 | `round` | `(x: Int) -> Int`, `(x: Decimal) -> Decimal` | nearest whole number, **halves away from zero** (`MidpointRounding.AwayFromZero`; .NET's default is banker's) | 2.5→3, −2.5→−3, 0.5→1, −0.5→−1, 1.4999→1; Int is the identity |
+
+The cap bounds growth, not size: the input already got in (it passed the request-body limit or an earlier write), so
+refusing a replace that does not make it larger would only block shrinking it.
+
+**Notes for C2** (what SQL cannot or must be checked to reproduce):
+
+- `replace` is UTF-16 ordinal in-process; a lone-surrogate search can split a surrogate pair, which SQL cannot
+  reproduce. This affects only lone-surrogate data.
+- `round` returns scale 0 in-process, whereas SQL `round(numeric)` keeps the column's scale.
+- C2 must confirm each driver encodes lone surrogates as U+FFFD, so that `length`/`char_length` = 1 matches `SizeOf`.
+- There is no result cap in SQL (see the §9 divergence for texts over 1 MiB).
 
 Built-in failures (overflow, the replace cap) are `CelFunctionException` with a reason, so the problem detail can say
 *why* ("its result would be N characters…") — text Alvo wrote, never the host's.
