@@ -22,7 +22,7 @@ public sealed record DifferentialRuleCase(string Rule, AlvoRecord Row, string Co
 /// <remarks>
 /// Every case is built against an entity shaped like the test project's <c>CelFixtures.Orders</c>
 /// (<c>owner_id</c>, <c>status</c>, <c>total</c>, <c>title</c>, <c>tenant_id</c>, <c>created_at</c>,
-/// <c>approved_at</c>, <c>is_public</c>) — this class does not carry the <c>EntitySchema</c> itself
+/// <c>approved_at</c>, <c>is_public</c>, <c>due_on</c>) — this class does not carry the <c>EntitySchema</c> itself
 /// (only <see cref="AlvoRecord"/> field/value pairs), so the caller compiles <see cref="DifferentialRuleCase.Rule"/>
 /// against whatever schema its own fixture declares, as long as it declares the same field names.
 /// </remarks>
@@ -131,8 +131,14 @@ public static class DifferentialRuleCases
     /// <c>&amp;&amp;</c>/<c>||</c>, <c>has()</c> on an absent/present-null/present-value field, role
     /// membership present/absent, tenant match/mismatch/absent, a nullable boolean field bare/negated/
     /// in a conjunction, a cross-type numeric comparison, a field-to-field timestamp comparison, a
+    /// <c>date</c> field (a <see cref="DateOnly"/>, midnight UTC) against a <c>datetime</c> one, plain and negated, a
     /// field-backed role-membership match, and a nested <c>(a || b) &amp;&amp; !c</c> tree.
     /// </summary>
+    /// <remarks>
+    /// The <c>date</c> rows stay off the same calendar day as the <c>datetime</c> they meet: at exactly midnight UTC of that
+    /// day SQLite compares the two columns' stored text (<c>2026-10-05</c> sorts before <c>2026-10-05 00:00:00+00:00</c>)
+    /// where PostgreSQL and the interpreter compare instants — an engine disagreement of its own, outside this matrix.
+    /// </remarks>
     public static IReadOnlyList<DifferentialRuleCase> All { get; } = BuildCases();
 
     private static AlvoRecord Row(params (string Field, object? Value)[] fields) =>
@@ -144,6 +150,7 @@ public static class DifferentialRuleCases
         var bobId = _bob.User.Value;
         var earlier = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
         var later = new DateTime(2026, 6, 1, 0, 0, 0, DateTimeKind.Utc);
+        var dueOn = new DateOnly(2026, 10, 5);
 
         return
         [
@@ -174,6 +181,9 @@ public static class DifferentialRuleCases
             new("created_at == approved_at", Row(("created_at", earlier), ("approved_at", earlier)), nameof(Alice)),
             new("created_at < approved_at", Row(("created_at", earlier), ("approved_at", later)), nameof(Alice)),
             new("created_at == approved_at", Row(("created_at", earlier), ("approved_at", null)), nameof(Alice)),
+            new("due_on < approved_at", Row(("due_on", dueOn), ("approved_at", new DateTime(2026, 10, 9, 0, 0, 0, DateTimeKind.Utc))), nameof(Alice)),
+            new("due_on > approved_at", Row(("due_on", dueOn), ("approved_at", new DateTime(2026, 10, 1, 12, 0, 0, DateTimeKind.Utc))), nameof(Alice)),
+            new("!(due_on < approved_at)", Row(("due_on", dueOn), ("approved_at", new DateTime(2026, 10, 9, 0, 0, 0, DateTimeKind.Utc))), nameof(Alice)),
             new("status in @user.roles", Row(("status", "editor")), nameof(Editor)),
             new("status in @user.roles", Row(("status", "draft")), nameof(Editor)),
             new(

@@ -498,14 +498,24 @@ internal static class CelInterpreter
         return true;
     }
 
-    private static bool IsTimestampCandidate(object value) => value is DateTimeOffset or DateTime or string;
+    private static bool IsTimestampCandidate(object value) => value is DateTimeOffset or DateTime or DateOnly or string;
 
+    /// <summary>The instant a timestamp-typed value denotes, whichever CLR shape a record or a function handed over.</summary>
+    /// <remarks>
+    /// A <c>date</c> column arrives as a <see cref="DateOnly"/> on every write path and is the calendar day at midnight
+    /// UTC — the one rule a function argument (<see cref="CelArgumentMarshaller"/>) and a comparison share. Without this
+    /// arm every comparison over a <c>date</c> answered <see langword="false"/>, so a before-hook reject gated on one never
+    /// fired (security risk S-1).
+    /// </remarks>
     internal static bool TryToDateTimeOffset(object value, out DateTimeOffset result)
     {
         switch (value)
         {
             case DateTimeOffset dto:
                 result = dto;
+                return true;
+            case DateOnly date:
+                result = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
                 return true;
             case DateTime dt:
                 result = dt.Kind == DateTimeKind.Unspecified
