@@ -21,7 +21,7 @@ public class DescriptorValidatorTests
 
     /// <summary>
     /// A facet the schema accepts but the typed parse cannot hold (a <c>maxLength</c> beyond <c>int</c>) is a finding
-    /// with a fix, never a thrown parse error — which the management routes would render as a 500 to a viewer.
+    /// with a fix, never a thrown parse error — which the management routes would render as a 500 to the caller.
     /// </summary>
     [Fact]
     public void A_facet_the_typed_parse_cannot_hold_is_a_finding_not_an_exception()

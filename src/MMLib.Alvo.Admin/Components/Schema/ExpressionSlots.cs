@@ -57,11 +57,19 @@ internal static class ExpressionSlots
             ? (slot.Json, Pointer("entities", entity, "hooks", point, slot.Position, "condition"))
             : null;
 
-    /// <summary>Places the hook the add form would declare, with the typed mutate value, on a clone of the working copy.</summary>
+    /// <summary>
+    /// Places the hook the add form would declare, with the typed mutate value and <b>without its condition</b>, on a
+    /// clone of the working copy.
+    /// </summary>
+    /// <remarks>
+    /// The condition is left out on purpose (slice B design D4: payload, to and mutate values are checked in a hook
+    /// without its condition). The before-hook compiler stops at a condition that does not compile and never reaches the
+    /// value, so a broken condition in the candidate would hide every problem in the value; the condition box carries its
+    /// own check. A stated deviation from "exactly what Add would stage", which <see cref="ForHookCondition"/> keeps.
+    /// </remarks>
     /// <param name="workingJson">The working copy's text; not modified.</param>
     /// <param name="entity">The entity the hook is on.</param>
     /// <param name="point">The hook point.</param>
-    /// <param name="condition">The condition box's text, or empty for a hook that always runs.</param>
     /// <param name="action">The mutate action the form would build; not modified.</param>
     /// <param name="field">The field the mutate patches.</param>
     /// <param name="source">The CEL as it stands in the value box.</param>
@@ -70,7 +78,7 @@ internal static class ExpressionSlots
     /// been named yet, or the action is not a mutate of it.
     /// </returns>
     public static (string Json, string Path)? ForMutateValue(
-        string workingJson, string entity, string point, string? condition, JsonObject action, string field, string source)
+        string workingJson, string entity, string point, JsonObject action, string field, string source)
     {
         if (string.IsNullOrWhiteSpace(field) || action.DeepClone() is not JsonObject patched
             || patched["mutate"]?[field] is not JsonObject value)
@@ -79,25 +87,40 @@ internal static class ExpressionSlots
         }
 
         value["$cel"] = source;
-        return WithHook(workingJson, entity, point, condition, patched) is { } slot
+        return WithHook(workingJson, entity, point, condition: null, patched) is { } slot
             ? (slot.Json, Pointer("entities", entity, "hooks", point, slot.Position, "action", "mutate", field))
             : null;
     }
 
+    /// <summary>Places the hook form's mutate value, keyed exactly as Add would stage it, on a clone of the working copy.</summary>
+    /// <remarks>
+    /// The field is the form's text as it stands, untrimmed: <see cref="HookBuilder.Draft"/> and Add key the action by
+    /// it, so a trimmed name would find no such key and the check would stay silent where Apply refuses.
+    /// </remarks>
+    /// <param name="workingJson">The working copy's text; not modified.</param>
+    /// <param name="entity">The entity the hook is on.</param>
+    /// <param name="hook">The add form; its point, draft and field are read, nothing is changed.</param>
+    /// <param name="source">The CEL as it stands in the value box.</param>
+    /// <returns>As <see cref="ForMutateValue(string, string, string, JsonObject, string, string)"/>.</returns>
+    public static (string Json, string Path)? ForMutateValue(string workingJson, string entity, HookBuilder hook, string source)
+        => ForMutateValue(workingJson, entity, hook.Point, hook.Draft(), hook.MutateField, source);
+
     /// <summary>Places the field the add form would declare, with the typed expression, on a clone of the working copy.</summary>
     /// <remarks>
     /// The facets are what <c>FieldFacets.Build</c> made of the form, and the writer is the working copy's own
-    /// <see cref="WorkingCopy.AddField"/>. The form's other refusals are not this check's to repeat: the caller passes
-    /// nothing when the form cannot build a field yet.
+    /// <see cref="WorkingCopy.SaveField"/> — the one Save runs, so an edited field that is renamed loses its old key
+    /// (and the references to it are carried) here exactly as it would there. The form's other refusals are not this
+    /// check's to repeat: the caller passes nothing when the form cannot build a field yet.
     /// </remarks>
     /// <param name="workingJson">The working copy's text; not modified.</param>
     /// <param name="entity">The entity the field is added to.</param>
+    /// <param name="editing">The name of the field being edited, or <see langword="null"/> for a new one.</param>
     /// <param name="field">The field's name.</param>
     /// <param name="facets">The facets the form built; not modified.</param>
     /// <param name="source">The CEL as it stands in the expression box.</param>
     /// <returns>The clone's text and the expression's JSON Pointer, or <see langword="null"/> when there is no such entity.</returns>
     public static (string Json, string Path)? ForComputed(
-        string workingJson, string entity, string field, JsonObject facets, string source)
+        string workingJson, string entity, string? editing, string field, JsonObject facets, string source)
     {
         if (Scratch(workingJson, entity) is not { } scratch || facets.DeepClone() is not JsonObject declared)
         {
@@ -105,7 +128,7 @@ internal static class ExpressionSlots
         }
 
         declared["computed"] = source;
-        scratch.AddField(entity, field, declared);
+        scratch.SaveField(entity, editing, field, declared);
         return (scratch.Json, Pointer("entities", entity, "fields", field, "computed"));
     }
 
