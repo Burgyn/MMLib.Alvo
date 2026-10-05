@@ -1,0 +1,169 @@
+﻿@*
+    Declares or edits one message template in the working copy (spec §4.8, §6.2): a subject and a body, nothing else —
+    `bodyFile` and `email.data` are refused by this build and stay on the refusal panel. The build's own sentence about
+    the templates block comes first. The name is fixed in an edit: an email action names the template by it.
+*@
+@inject ISnackbar Snackbar
+
+<AlvoEditor TestId="template-editor" Title="@(Editing is null ? "New template" : $"Edit template {Editing}")"
+            SubmitText="@(Editing is null ? "Add to the working copy" : "Save to the working copy")" SubmitTestId="template-save"
+            Subtitle="It joins the working copy. An after-hook's email action names it; nothing is sent until you apply."
+            Dirty="Dirty" OnSubmit="SaveAsync" OnClose="OnClose">
+    @if (Warning is { Length: > 0 })
+    {
+        <AlvoAlert Tone="AlvoAlert.AlertTone.Info" Title="What this build does with a template" TestId="template-statement">
+            <p data-testid="template-statement-build">@Warning</p>
+        </AlvoAlert>
+    }
+    @RefusalPanel.Of(_refusal, "That template could not be saved")
+
+    @if (Editing is null)
+    {
+        <Field Label="Name" For="template-name" Required="true">
+            <ChildContent>
+                <MudTextField @ref="_nameBox" T="string" Variant="Variant.Outlined" Immediate="true" id="template-name" Class="a-mono"
+                              autocomplete="off" spellcheck="false" Placeholder="order-ready" aria-required="true"
+                              Error="@_fields.Has(TemplateDraft.NameField)"
+                              aria-describedby="@_fields.DescribedBy(TemplateDraft.NameField, "template-name-hint")"
+                              Value="_draft.Name" ValueChanged="TypeName" />
+                @_fields.Under(TemplateDraft.NameField, () => _nameBox!.FocusAsync())
+            </ChildContent>
+            <Hint>Lower case letters, digits, dashes and underscores, such as <code class="a-mono">order-ready</code>.</Hint>
+        </Field>
+    }
+    else
+    {
+        <Field Label="Name">
+            <ChildContent><span class="a-mono" data-testid="template-name-fixed">@Editing</span></ChildContent>
+            <Hint>An email action names the template by it, so it is not renamed here.</Hint>
+        </Field>
+    }
+
+    <Field Label="Subject (optional)" For="template-subject">
+        <ChildContent>
+            <MudTextField @ref="_subjectBox" T="string" Variant="Variant.Outlined" Immediate="true" id="template-subject"
+                          autocomplete="off" Error="@_fields.Has(TemplateDraft.SubjectField)"
+                          aria-describedby="@_fields.DescribedBy(TemplateDraft.SubjectField, "template-subject-hint")"
+                          Value="_draft.Subject" ValueChanged="TypeSubject" />
+            @_fields.Under(TemplateDraft.SubjectField, () => _subjectBox!.FocusAsync())
+        </ChildContent>
+        <Hint>
+            One line. Placeholders such as <code class="a-mono">{{new.order_number}}</code> over <code class="a-mono">new</code>,
+            <code class="a-mono">old</code>, <code class="a-mono">event</code> and <code class="a-mono">@@user.id</code>.
+        </Hint>
+    </Field>
+
+    <Field Label="Body" For="template-body" Required="true">
+        <ChildContent>
+            <MudTextField @ref="_bodyBox" T="string" Variant="Variant.Outlined" Immediate="true" id="template-body" Lines="6"
+                          autocomplete="off" aria-required="true" Error="@_fields.Has(TemplateDraft.BodyField)"
+                          aria-describedby="@_fields.DescribedBy(TemplateDraft.BodyField, "template-body-hint")"
+                          Value="_draft.Body" ValueChanged="TypeBody" />
+            @_fields.Under(TemplateDraft.BodyField, () => _bodyBox!.FocusAsync())
+        </ChildContent>
+        <Hint>
+            The same placeholders, on as many lines as you like. A placeholder's field is checked against the entity of each
+            email hook that sends this template — on apply.
+            @ChordHint.Of(Editing is null ? "adds it to the working copy" : "saves it to the working copy")
+        </Hint>
+    </Field>
+</AlvoEditor>
+
+@code {
+    private readonly FieldRefusals _fields = new();
+    private readonly RefusalState<string> _refusal = new();
+    private TemplateDraft _draft = new();
+    private string _opened = string.Empty;
+    private MudTextField<string>? _nameBox;
+    private MudTextField<string>? _subjectBox;
+    private MudTextField<string>? _bodyBox;
+
+    /// <summary>The template being edited, or <see langword="null"/> for a new one.</summary>
+    [Parameter]
+    public string? Editing { get; set; }
+
+    /// <summary>The build's own sentence about the <c>templates</c> block, verbatim from <c>capabilities.warned</c>.</summary>
+    [Parameter]
+    public string? Warning { get; set; }
+
+    /// <summary>Raised with the template's name once it is in the working copy.</summary>
+    [Parameter]
+    public EventCallback<string> OnSaved { get; set; }
+
+    /// <summary>Raised when the sheet closes without saving.</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    /// <summary>The working copy the declaration is written into — cascaded, so its model stays internal.</summary>
+    [CascadingParameter]
+    private WorkingCopy? Copy { get; set; }
+
+    /// <inheritdoc />
+    protected override void OnInitialized()
+    {
+        /* The first declaration of the name, as IntegrationRows.ByName reads it — so the sheet opens the row it was opened from. */
+        if (Editing is { } name && Copy is { } copy
+            && DescriptorLens.Templates(copy.Json).FirstOrDefault(pair => pair.Key == name) is { Key: not null } declared)
+        {
+            _draft = TemplateDraft.From(declared.Key, declared.Value);
+        }
+
+        _opened = Snapshot();
+    }
+
+    private bool Dirty => Snapshot() != _opened;
+
+    private string Snapshot() => string.Join('\n', _draft.Name, _draft.Subject, _draft.Body);
+
+    private void TypeName(string? text)
+    {
+        _draft.Name = text ?? string.Empty;
+        _fields.Clear(TemplateDraft.NameField);
+    }
+
+    private void TypeSubject(string? text)
+    {
+        _draft.Subject = text ?? string.Empty;
+        _fields.Clear(TemplateDraft.SubjectField);
+    }
+
+    private void TypeBody(string? text)
+    {
+        _draft.Body = text ?? string.Empty;
+        _fields.Clear(TemplateDraft.BodyField);
+    }
+
+    /// <summary>Refuses at the field what the apply would refuse, then writes the declaration and says so.</summary>
+    /// <remarks>
+    /// The subject is trimmed here, because <c>DeclareTemplate</c> drops only a blank one: a subject of spaces is no subject,
+    /// and a padded one is the header it would send. The body is written as typed — its lines and spacing are the mail.
+    /// </remarks>
+    private async Task SaveAsync()
+    {
+        if (Copy is not { } copy)
+        {
+            return;
+        }
+
+        var refusals = _draft.Refusals([.. DescriptorLens.Templates(copy.Json).Select(pair => pair.Key)], Editing is not null);
+        if (refusals.Count > 0)
+        {
+            _fields.RefuseAll(refusals);
+            return;
+        }
+
+        var name = Editing ?? _draft.Name.Trim();
+        if (!copy.DeclareTemplate(name, _draft.Subject.Trim(), _draft.Body, Editing is not null))
+        {
+            _refusal.Show(Overtaken(name));
+            return;
+        }
+
+        Snackbar.Confirm(Editing is null ? StagedWords.Added("Template", name) : StagedWords.Saved("Template", name));
+        await OnSaved.InvokeAsync(name);
+    }
+
+    private string Overtaken(string name) => Editing is null
+        ? $"A template named '{name}' was declared in the working copy while this sheet was open. Nothing was saved; choose another name."
+        : $"The template '{name}' changed in the working copy while this sheet was open, so it can no longer be edited here. Nothing was saved.";
+}

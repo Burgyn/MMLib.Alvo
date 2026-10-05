@@ -55,6 +55,12 @@
         </Panel>
 
         <Panel Title="Message templates" data-testid="integrations-templates">
+            <Actions>
+                @if (_copy.Loaded)
+                {
+                    <AlvoButton Small="true" data-testid="template-new" OnClick="NewTemplate">New template</AlvoButton>
+                }
+            </Actions>
             <ChildContent>
                 @if (Warned("templates") is { } templates)
                 {
@@ -94,6 +100,10 @@
             {
                 <EndpointEditor Editing="@endpointEditor.Name" Warning="@Warned("webhooks")" OnSaved="EndpointSaved" OnClose="CloseEditors" />
             }
+            @if (_templateEditor is { } templateEditor)
+            {
+                <TemplateEditor Editing="@templateEditor.Name" Warning="@Warned("templates")" OnSaved="TemplateSaved" OnClose="CloseEditors" />
+            }
         </CascadingValue>
 
         @if (_reveal is { } revealed)
@@ -111,6 +121,7 @@
     private IReadOnlyList<EndpointRow> _endpoints = [];
     private IReadOnlyList<TemplateRow> _templates = [];
     private Opened? _endpointEditor;
+    private Opened? _templateEditor;
     private string? _reveal;
     private int _reveals;
 
@@ -174,13 +185,19 @@
     private string? Warned(string block) => _capabilities?.Warned
         .FirstOrDefault(warned => string.Equals(warned.Block, block, StringComparison.Ordinal))?.Consequence;
 
-    private void NewEndpoint() => _endpointEditor = new Opened(null);
+    private void NewEndpoint() => (_templateEditor, _endpointEditor) = (null, new Opened(null));
 
-    private void EditEndpoint(string name) => _endpointEditor = new Opened(name);
+    private void EditEndpoint(string name) => (_templateEditor, _endpointEditor) = (null, new Opened(name));
 
-    private void CloseEditors() => _endpointEditor = null;
+    private void NewTemplate() => (_endpointEditor, _templateEditor) = (null, new Opened(null));
+
+    private void EditTemplate(string name) => (_endpointEditor, _templateEditor) = (null, new Opened(name));
+
+    private void CloseEditors() => (_endpointEditor, _templateEditor) = (null, null);
 
     private void EndpointSaved(string name) => Saved($"endpoint-{name}");
+
+    private void TemplateSaved(string name) => Saved($"template-{name}");
 
     /// <summary>Closes the sheet, reads the copy, and lights the saved row (spec §3.5).</summary>
     private void Saved(string row)
@@ -238,6 +255,11 @@
                 @if (row.HasBodyFile)
                 {
                     <span class="a-badge a-badge--warn">bodyFile — not read</span>
+                }
+                @if (row.Drawable && _copy!.Loaded)
+                {
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="template-edit"
+                                aria-label="@($"Edit template {row.Name}")" OnClick="_ => EditTemplate(row.Name)">Edit</AlvoButton>
                 }
             </div>
             @if (row.Subject.Length > 0)
