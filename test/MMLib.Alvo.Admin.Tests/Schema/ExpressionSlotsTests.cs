@@ -142,22 +142,23 @@ public class ExpressionSlotsTests
     }
 
     [Fact]
-    public void A_mutate_value_lands_under_the_patched_field_with_the_typed_source_and_the_typed_condition()
+    public void A_mutate_value_lands_under_the_patched_field_with_the_typed_source_and_no_condition()
     {
         var (json, path) = ExpressionSlots.ForMutateValue(
-            WithHooks, "orders", "beforeUpdate", "old.total > 0", Mutate("total"), "total", "now()")!.Value;
+            WithHooks, "orders", "beforeUpdate", Mutate("total"), "total", "now()")!.Value;
 
         path.ShouldBe("/entities/orders/hooks/beforeUpdate/0/action/mutate/total");
         var hook = JsonNode.Parse(json)!["entities"]!["orders"]!["hooks"]!["beforeUpdate"]![0]!;
         hook["action"]!["mutate"]!["total"]!["$cel"]!.GetValue<string>().ShouldBe("now()");
-        hook["condition"]!.GetValue<string>().ShouldBe("old.total > 0");
+        hook["condition"].ShouldBeNull(
+            "the before-hook compiler stops at a condition that does not compile, so the value is checked without it");
     }
 
     [Fact]
     public void A_mutate_field_with_a_slash_is_escaped_and_the_action_is_not_modified()
     {
         var action = Mutate("a/b");
-        var (_, path) = ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", null, action, "a/b", "1")!.Value;
+        var (_, path) = ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", action, "a/b", "1")!.Value;
 
         path.ShouldBe("/entities/orders/hooks/beforeUpdate/0/action/mutate/a~1b");
         action["mutate"]!["a/b"]!["$cel"]!.GetValue<string>().ShouldBe("old");
@@ -167,13 +168,13 @@ public class ExpressionSlotsTests
     [InlineData("")]
     [InlineData("  ")]
     public void A_mutate_value_with_no_field_named_yet_has_nothing_to_check(string field)
-        => ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", null, Mutate("x"), field, "1").ShouldBeNull();
+        => ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", Mutate("x"), field, "1").ShouldBeNull();
 
     [Fact]
     public void A_mutate_value_of_an_action_that_is_not_that_mutate_has_nothing_to_check()
     {
-        ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", null, Reject(), "total", "1").ShouldBeNull();
-        ExpressionSlots.ForMutateValue(WithHooks, "missing", "beforeUpdate", null, Mutate("total"), "total", "1").ShouldBeNull();
+        ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", Reject(), "total", "1").ShouldBeNull();
+        ExpressionSlots.ForMutateValue(WithHooks, "missing", "beforeUpdate", Mutate("total"), "total", "1").ShouldBeNull();
     }
 
     [Fact]

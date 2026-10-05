@@ -133,10 +133,15 @@ public partial class HooksTab
         CheckBoth();
     }
 
+    /// <summary>
+    /// Both boxes are asked again: the condition box for its own text, and the value box so no answer it shows was
+    /// given against an older form (the value's candidate leaves the condition out, see
+    /// <see cref="ExpressionSlots.ForMutateValue"/>, so it can no longer be masked by a broken one).
+    /// </summary>
     private void TypeCondition(string? text)
     {
         _hook.Condition = text ?? string.Empty;
-        _ = CheckConditionAsync();
+        CheckBoth();
     }
 
     private void TypeMutateValue(string? text)
@@ -165,7 +170,7 @@ public partial class HooksTab
     private Task CheckMutateValueAsync() => CheckAsync(
         "hook-mutate-value", _hook.Kind == HookBuilder.Mutate ? _hook.MutateValue : string.Empty, (copy, source)
         => ExpressionSlots.ForMutateValue(
-            copy.Json, Entity, _hook.Point, _hook.Condition, _hook.Draft(), _hook.MutateField.Trim(), source));
+            copy.Json, Entity, _hook.Point, _hook.Draft(), _hook.MutateField.Trim(), source));
 
     /// <summary>
     /// Runs the check to its end and observes its fault: it is fire-and-forget, so an unobserved exception would

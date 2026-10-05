@@ -57,11 +57,19 @@ internal static class ExpressionSlots
             ? (slot.Json, Pointer("entities", entity, "hooks", point, slot.Position, "condition"))
             : null;
 
-    /// <summary>Places the hook the add form would declare, with the typed mutate value, on a clone of the working copy.</summary>
+    /// <summary>
+    /// Places the hook the add form would declare, with the typed mutate value and <b>without its condition</b>, on a
+    /// clone of the working copy.
+    /// </summary>
+    /// <remarks>
+    /// The condition is left out on purpose (slice B design D4: payload, to and mutate values are checked in a hook
+    /// without its condition). The before-hook compiler stops at a condition that does not compile and never reaches the
+    /// value, so a broken condition in the candidate would hide every problem in the value; the condition box carries its
+    /// own check. A stated deviation from "exactly what Add would stage", which <see cref="ForHookCondition"/> keeps.
+    /// </remarks>
     /// <param name="workingJson">The working copy's text; not modified.</param>
     /// <param name="entity">The entity the hook is on.</param>
     /// <param name="point">The hook point.</param>
-    /// <param name="condition">The condition box's text, or empty for a hook that always runs.</param>
     /// <param name="action">The mutate action the form would build; not modified.</param>
     /// <param name="field">The field the mutate patches.</param>
     /// <param name="source">The CEL as it stands in the value box.</param>
@@ -70,7 +78,7 @@ internal static class ExpressionSlots
     /// been named yet, or the action is not a mutate of it.
     /// </returns>
     public static (string Json, string Path)? ForMutateValue(
-        string workingJson, string entity, string point, string? condition, JsonObject action, string field, string source)
+        string workingJson, string entity, string point, JsonObject action, string field, string source)
     {
         if (string.IsNullOrWhiteSpace(field) || action.DeepClone() is not JsonObject patched
             || patched["mutate"]?[field] is not JsonObject value)
@@ -79,7 +87,7 @@ internal static class ExpressionSlots
         }
 
         value["$cel"] = source;
-        return WithHook(workingJson, entity, point, condition, patched) is { } slot
+        return WithHook(workingJson, entity, point, condition: null, patched) is { } slot
             ? (slot.Json, Pointer("entities", entity, "hooks", point, slot.Position, "action", "mutate", field))
             : null;
     }
