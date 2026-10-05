@@ -549,6 +549,4 @@ overturn in the PR.**
   Rule and Computed, so a **C2 checklist item** — the catch-alls must let it through before a call is admitted there.
 * `lowerAscii` in a Condition (X10) and the other §16 follow-ups.
 * A timestamp text without an offset parses in the machine's zone (pre-existing; relevant when `Date` arrives).
-* `CelProfile.Mutate`'s XML remarks still say the allow-list is "exactly two entries"; a comment in the public
-  Abstractions assembly, left for the final wave.
 
