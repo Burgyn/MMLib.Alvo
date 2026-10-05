@@ -75,4 +75,11 @@ internal sealed record CelCall(string Name, IReadOnlyList<CelNode> Arguments) : 
     /// from the parser, which knows names but not types.
     /// </summary>
     public CelValueType ResultType { get; init; } = CelValueType.Null;
+
+    /// <summary>
+    /// The overload the type checker bound, which the interpreter invokes; <see langword="null"/> before checking and
+    /// for <see cref="LowerAscii"/>/<see cref="Now"/>, which are evaluated by name. Binding it into the tree is what
+    /// keeps the interpreter and <c>BeforeHookRunner</c> free of any catalog or container dependency.
+    /// </summary>
+    public CelFunction? Function { get; init; }
 }

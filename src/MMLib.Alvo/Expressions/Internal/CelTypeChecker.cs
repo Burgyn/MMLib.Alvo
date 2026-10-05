@@ -12,7 +12,17 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// </summary>
 internal static class CelTypeChecker
 {
-    /// <summary>Checks a parsed tree against an entity's schema and a profile.</summary>
+    /// <summary>Checks a parsed tree against an entity's schema and a profile, knowing only the built-in functions.</summary>
+    /// <param name="root">The parsed, untyped tree.</param>
+    /// <param name="source">The original CEL source, used only to locate positions.</param>
+    /// <param name="entity">The entity to resolve row fields against.</param>
+    /// <param name="profile">Which constructs are legal.</param>
+    /// <returns>The rewritten tree, its result type, the result-type anchor position and every error.</returns>
+    public static (CelNode Root, CelValueType ResultType, int Position, IReadOnlyList<CelCompilationError> Errors) Check(
+        CelNode root, string source, EntitySchema entity, CelProfile profile) =>
+        Check(root, source, entity, profile, CelFunctionCatalog.BuiltIns);
+
+    /// <summary>Checks a parsed tree against an entity's schema, a profile and the functions this compilation knows.</summary>
     /// <param name="root">The parsed, untyped tree.</param>
     /// <param name="source">
     /// The original CEL source. Used only to locate an offending identifier's position for an
@@ -20,15 +30,16 @@ internal static class CelTypeChecker
     /// </param>
     /// <param name="entity">The entity to resolve row fields against.</param>
     /// <param name="profile">Which constructs are legal.</param>
+    /// <param name="catalog">The functions a call may bind.</param>
     /// <returns>
     /// The rewritten tree (every <see cref="CelFieldRef"/> carries its resolved type), the whole
     /// expression's result type, the position its result-type check should be anchored to, and
     /// every error found.
     /// </returns>
     public static (CelNode Root, CelValueType ResultType, int Position, IReadOnlyList<CelCompilationError> Errors) Check(
-        CelNode root, string source, EntitySchema entity, CelProfile profile)
+        CelNode root, string source, EntitySchema entity, CelProfile profile, CelFunctionCatalog catalog)
     {
-        var visitor = new Visitor(source, entity, profile);
+        var visitor = new Visitor(source, entity, profile, catalog);
         var (node, type, _, position) = visitor.CheckNode(root);
         return (node, type, position, visitor.Errors);
     }
@@ -56,6 +67,9 @@ internal static class CelTypeChecker
         Conditional,
         Changed,
         Call,
+
+        /// <summary>A call to a catalogued function; the row is the ceiling, each function's own profiles narrow it.</summary>
+        FunctionCall,
     }
 
     /// <summary>
@@ -121,8 +135,9 @@ internal static class CelTypeChecker
 
     /// <summary>
     /// The one positive table that decides where each construct is legal. <see cref="CelProfile.Mutate"/>
-    /// holds four rows today — literals, current-row and <c>old.</c>/<c>new.</c> field references, and the
-    /// allow-listed function call — which is exactly what its two functions and their arguments need. The
+    /// holds five rows today — literals, current-row and <c>old.</c>/<c>new.</c> field references, the
+    /// allow-listed legacy call and catalogued function calls — which is exactly what its functions and their
+    /// arguments need; <see cref="CelProfile.Condition"/> also holds the catalogued function call. The
     /// remaining rows (logical, comparison, <c>in</c>, <c>has</c>, arithmetic, ternary, <c>changed</c>,
     /// context references) are <b>not</b> a decision that <c>mutate</c> may never use them; they are simply
     /// not admitted yet, and each arrives with the fact that needs it — a before-hook <c>mutate</c> like
@@ -146,6 +161,7 @@ internal static class CelTypeChecker
             [CelConstructKind.Conditional] = _computedOnly,
             [CelConstructKind.Changed] = _conditionOnly,
             [CelConstructKind.Call] = _mutateOnly,
+            [CelConstructKind.FunctionCall] = _conditionAndMutate,
         };
 
     /// <summary>
@@ -160,7 +176,7 @@ internal static class CelTypeChecker
     private static bool IsAllowed(CelProfile profile, CelConstructKind kind) =>
         _allowedProfiles.TryGetValue(kind, out var profiles) && profiles.Contains(profile);
 
-    private sealed class Visitor(string source, EntitySchema entity, CelProfile profile)
+    private sealed class Visitor(string source, EntitySchema entity, CelProfile profile, CelFunctionCatalog catalog)
     {
         private const string RoleMembershipFixSuggestion =
             "A caller holds a set of roles; test membership instead, e.g. 'editor' in @user.roles.";
@@ -895,7 +911,7 @@ internal static class CelTypeChecker
         /// the profile it is in even when its argument is also wrong — one error per independent problem,
         /// which is this checker's whole contract.
         /// </summary>
-        private (CelNode, CelValueType, bool, int) CheckCall(CelCall call)
+        private (CelNode, CelValueType, bool, int) CheckLegacyCall(CelCall call)
         {
             var position = FindPosition(call.Name);
             var profileBad = CheckConstruct(
@@ -921,6 +937,130 @@ internal static class CelTypeChecker
                 argumentType, argumentError, $"{call.Name}(...)'s argument", argumentPosition);
 
             return (call with { Arguments = [checkedArgument], ResultType = CelValueType.String }, CelValueType.String, profileBad || argumentBad, position);
+        }
+
+        private (CelNode, CelValueType, bool, int) CheckCall(CelCall call) =>
+            call.Name is CelCall.LowerAscii or CelCall.Now ? CheckLegacyCall(call) : CheckCatalogCall(call);
+
+        /// <summary>
+        /// Checks a call to a catalogued function: the profile gate first (as the legacy calls do), then every argument,
+        /// then overload resolution. A bad argument stops the call from adding a second, cascading error.
+        /// </summary>
+        private (CelNode, CelValueType, bool, int) CheckCatalogCall(CelCall call)
+        {
+            if (!catalog.Contains(call.Name))
+            {
+                return UnrecognizedNode(call);
+            }
+
+            var position = FindPosition(call.Name);
+            var profileBad = CheckFunctionProfile(call.Name, position);
+            var arguments = call.Arguments.Select(CheckNode).ToList();
+            var rewritten = call with { Arguments = [.. arguments.Select(argument => argument.Node)] };
+
+            return arguments.Any(argument => argument.HasError)
+                ? Unbound(rewritten, position)
+                : Bind(rewritten, ResolveOverload(call.Name, arguments, position), profileBad, position);
+        }
+
+        /// <summary>
+        /// A call that could not be bound still has the type its name promises, so the result-type check does not add
+        /// a second error on top of the one already reported.
+        /// </summary>
+        private (CelNode, CelValueType, bool, int) Unbound(CelCall call, int position) =>
+            (call, catalog.Overloads(call.Name)[0].ResultType, true, position);
+
+        private (CelNode, CelValueType, bool, int) Bind(CelCall call, CelFunction? overload, bool profileBad, int position) =>
+            overload is null
+                ? Unbound(call, position)
+                : (call with { ResultType = overload.ResultType, Function = overload }, overload.ResultType, profileBad, position);
+
+        /// <summary>
+        /// The two deny-by-default gates: the <see cref="CelConstructKind.FunctionCall"/> row is the ceiling, and the
+        /// function's own profiles narrow it. Overloads of one name share profiles, so the first one answers.
+        /// </summary>
+        private bool CheckFunctionProfile(string name, int position)
+        {
+            var function = catalog.Overloads(name)[0];
+            if (IsAllowed(profile, CelConstructKind.FunctionCall) && function.Profiles.Contains(profile))
+            {
+                return false;
+            }
+
+            Errors.Add(new CelCompilationError(
+                $"'{name}(...)' is not available in the {profile} profile; it is available in "
+                + $"{string.Join(" and ", function.Profiles.Order())}. {FunctionProfileReason()}",
+                FunctionProfileFix(),
+                position));
+            return true;
+        }
+
+        private string FunctionProfileReason() => profile switch
+        {
+            CelProfile.Rule => "A rule becomes a SQL filter, and this function runs only in-process; "
+                + "authorization is never a filter applied after the query.",
+            CelProfile.Computed => "A computed field is a column the database computes, and this function runs only in-process.",
+            _ => "An access level is a predicate over the caller alone and calls no function.",
+        };
+
+        private string FunctionProfileFix() => profile switch
+        {
+            CelProfile.Rule => "Store the value in a field with a before-hook mutate (hooks.beforeCreate / beforeUpdate), "
+                + "then compare that field here.",
+            CelProfile.Computed => "Write the value with a before-hook mutate into a regular field instead of computing it.",
+            _ => "Test the caller instead, e.g. 'admin' in @user.roles.",
+        };
+
+        /// <summary>
+        /// Arity, then an exact type match, then a match that lets an Int stand for a Decimal (deviation F7); a null
+        /// literal fits only a parameter that receives null. No match is one error naming every signature.
+        /// </summary>
+        private CelFunction? ResolveOverload(
+            string name, List<(CelNode Node, CelValueType Type, bool HasError, int Position)> arguments, int position)
+        {
+            var overloads = catalog.Overloads(name);
+            var types = arguments.Select(argument => argument.Type).ToList();
+            var chosen = overloads.FirstOrDefault(o => Accepts(o, types, widen: false))
+                ?? overloads.FirstOrDefault(o => Accepts(o, types, widen: true));
+            if (chosen is null)
+            {
+                Errors.Add(SignatureMismatch(name, overloads, types, position));
+            }
+
+            return chosen;
+        }
+
+        private static bool Accepts(CelFunction overload, List<CelValueType> types, bool widen) =>
+            overload.Parameters.Count == types.Count
+            && overload.Parameters.Zip(types).All(pair => Fits(pair.First, pair.Second, widen));
+
+        private static bool Fits(CelFunctionArgument parameter, CelValueType argument, bool widen) =>
+            argument == parameter.Type
+            || (argument == CelValueType.Null && parameter.Nullable)
+            || (widen && argument == CelValueType.Int && parameter.Type == CelValueType.Decimal);
+
+        private static CelCompilationError SignatureMismatch(
+            string name, IReadOnlyList<CelFunction> overloads, List<CelValueType> types, int position)
+        {
+            var signatures = string.Join(" or ", overloads.Select(overload => overload.Signature()));
+            if (overloads.All(overload => overload.Parameters.Count != types.Count))
+            {
+                return new CelCompilationError(
+                    $"'{name}' takes {Arity(overloads)}; this call passes {types.Count}.", $"Call it as {signatures}.", position);
+            }
+
+            return new CelCompilationError(
+                $"'{name}(...)' accepts no ({string.Join(", ", types)}); it accepts {signatures}.",
+                "Pass values of those types: string, text and enum fields are String, date and datetime fields are "
+                + "Timestamp, and an Int may stand where a Decimal is expected.",
+                position);
+        }
+
+        private static string Arity(IReadOnlyList<CelFunction> overloads)
+        {
+            var counts = overloads.Select(overload => overload.Parameters.Count).Distinct().Order().ToList();
+            var noun = counts is [1] ? "argument" : "arguments";
+            return $"{string.Join(" or ", counts)} {noun}";
         }
 
         private bool RequireBool(CelValueType type, bool childError, string subject, int position)

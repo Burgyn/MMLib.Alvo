@@ -96,7 +96,7 @@ internal sealed class CelCompiler : ICelCompiler
     private CelCompilationResult CheckAndAssemble(Authored authored)
     {
         var (root, resultType, position, errors) =
-            CelTypeChecker.Check(authored.Parsed, authored.Source, authored.Entity, authored.Profile);
+            CelTypeChecker.Check(authored.Parsed, authored.Source, authored.Entity, authored.Profile, _catalog);
         var allErrors = AppendResultTypeError(errors, authored, resultType, position);
 
         if (allErrors.Count > 0)
