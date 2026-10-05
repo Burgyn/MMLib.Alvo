@@ -1,4 +1,6 @@
-﻿using System.Globalization;
+﻿using MMLib.Alvo.Internal;
+
+using System.Globalization;
 
 namespace MMLib.Alvo.Expressions.Internal;
 
@@ -11,7 +13,7 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// a stack overflow.
 /// </summary>
 /// <remarks>
-/// <see cref="Parse"/> builds the real <see cref="CelNode"/> records straight off the grammar,
+/// <see cref="Parse(string, CelFunctionCatalog)"/> builds the real <see cref="CelNode"/> records straight off the grammar,
 /// with <see cref="CelValueType.Null"/> placeholders on every <see cref="CelFieldRef"/> — only
 /// the type checker (a later task) knows a row field's real type. The tree this returns is
 /// therefore <b>not</b> a compiled/renderable expression; only a tree that has since been
@@ -24,20 +26,28 @@ internal static class CelParser
 
     /// <summary>
     /// The maximum number of genuine nesting levels — one unit is counted for each level of
-    /// parenthesised grouping, each level of ternary (<c>?:</c>) chaining, and each level of
-    /// unary-operator (<c>!</c>/<c>-</c>) chaining, the three productions whose depth grows with
-    /// adversarial input rather than with the fixed number of precedence levels. <c>MaxDepth =
-    /// 32</c> means exactly 32 such levels are accepted, combined across all three productions;
+    /// parenthesised grouping, each level of ternary (<c>?:</c>) chaining, each level of
+    /// unary-operator (<c>!</c>/<c>-</c>) chaining, and each level of a function call's argument list,
+    /// the productions whose depth grows with adversarial input rather than with the fixed number of
+    /// precedence levels. <c>MaxDepth = 32</c> means exactly 32 such levels are accepted, combined
+    /// across all of them;
     /// this is what stands between a pathological input and a stack overflow.
     /// </summary>
     public const int MaxDepth = 32;
 
-    /// <summary>Parses CEL source into an untyped AST.</summary>
+    /// <summary>Parses CEL source into an untyped AST, knowing the built-in functions only.</summary>
     /// <param name="source">The CEL expression source.</param>
     /// <exception cref="CelSyntaxException">The source is too long, nests too deeply, or violates the grammar.</exception>
-    public static CelNode Parse(string source)
+    public static CelNode Parse(string source) => Parse(source, CelFunctionCatalog.BuiltIns);
+
+    /// <summary>Parses CEL source into an untyped AST; a name <paramref name="catalog"/> knows parses as a call.</summary>
+    /// <param name="source">The CEL expression source.</param>
+    /// <param name="catalog">The functions this compilation knows.</param>
+    /// <exception cref="CelSyntaxException">The source is too long, nests too deeply, or violates the grammar.</exception>
+    public static CelNode Parse(string source, CelFunctionCatalog catalog)
     {
         ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(catalog);
 
         if (source.Length > MaxSourceLength)
         {
@@ -48,10 +58,10 @@ internal static class CelParser
         }
 
         var tokens = CelLexer.Tokenize(source);
-        return new RecursiveDescentParser(tokens).ParseProgram();
+        return new RecursiveDescentParser(tokens, catalog).ParseProgram();
     }
 
-    private sealed class RecursiveDescentParser(IReadOnlyList<CelToken> tokens)
+    private sealed class RecursiveDescentParser(IReadOnlyList<CelToken> tokens, CelFunctionCatalog catalog)
     {
         private const string RolesMembershipSuggestion =
             "A caller holds a set of roles — test membership instead: 'editor' in @user.roles";
@@ -125,7 +135,7 @@ internal static class CelParser
                 throw new CelSyntaxException(
                     $"CEL expression nests {_depth + 1} levels deep, exceeding the maximum of {MaxDepth}.",
                     Current.Position,
-                    "Simplify the expression — reduce parenthesised grouping, ternary chaining, or "
+                    "Simplify the expression — reduce parenthesised grouping, nested function calls, ternary chaining, or "
                     + "repeated negation, or split the condition across multiple rules/hooks.");
             }
 
@@ -410,25 +420,64 @@ internal static class CelParser
         }
 
         /// <summary>
-        /// The closed set of identifiers that may be followed by <c>(</c>. It is a <b>positive</b> list on
-        /// purpose: an identifier missing from it is refused, so a future function is unavailable until
-        /// somebody adds it deliberately, never available because nobody blocked it. Which profiles may use
-        /// each entry is not decided here — the parser is profile-blind and the type checker's own
-        /// per-construct allow-list refuses <see cref="CelCall"/> outside <see cref="CelProfile.Mutate"/>.
+        /// The closed set of identifiers that may be followed by <c>(</c>: the three calls with their own grammar, then
+        /// whatever the catalog knows. A <b>positive</b> list on purpose — a name missing from it is refused, so a
+        /// function is unavailable until somebody catalogues it. Profiles are not decided here: the parser is
+        /// profile-blind and the type checker gates every call.
         /// </summary>
         private CelNode ParseCall(CelToken identifierToken) => identifierToken.Text switch
         {
             "changed" => ParseChangedCall(),
             CelCall.LowerAscii => ParseLowerAsciiCall(),
             CelCall.Now => ParseNowCall(),
+            var name when catalog.Contains(name) => ParseCatalogCall(identifierToken),
             _ => throw UnrecognizedFunction(identifierToken),
         };
 
-        private static CelSyntaxException UnrecognizedFunction(CelToken identifierToken) =>
+        /// <summary>
+        /// Parses <c>name(argument, …)</c> for a catalogued function. Each argument is a whole expression parsed as one
+        /// nested level, so call nesting counts against <see cref="MaxDepth"/>; arity is the type checker's question.
+        /// </summary>
+        private CelCall ParseCatalogCall(CelToken nameToken)
+        {
+            Expect(CelTokenKind.LeftParen);
+            IReadOnlyList<CelNode> arguments = Current.Kind == CelTokenKind.RightParen ? [] : ParseArguments();
+            Expect(CelTokenKind.RightParen);
+            return new CelCall(nameToken.Text, arguments);
+        }
+
+        private List<CelNode> ParseArguments()
+        {
+            var arguments = new List<CelNode> { ParseNestedGroup() };
+            while (Match(CelTokenKind.Comma))
+            {
+                arguments.Add(ParseNestedGroup());
+            }
+
+            return arguments;
+        }
+
+        private CelSyntaxException UnrecognizedFunction(CelToken identifierToken) =>
             new(
                 $"'{identifierToken.Text}' is not a recognized function.",
                 identifierToken.Position,
-                identifierToken.Text == "lower" ? LowerAsciiSuggestion : MacroNotSupportedSuggestion);
+                UnrecognizedFunctionFix(identifierToken.Text));
+
+        private string UnrecognizedFunctionFix(string name) => name switch
+        {
+            "lower" => LowerAsciiSuggestion,
+            "all" or "exists" or "exists_one" or "map" or "filter" => MacroNotSupportedSuggestion,
+            _ => KnownFunctionsSuggestion(name),
+        };
+
+        /// <summary>The closest catalogued name, when one is within two edits, and every known name (review G5).</summary>
+        private string KnownFunctionsSuggestion(string name)
+        {
+            var closest = NameSuggestion.Closest(name, catalog.Names);
+            var lead = closest is null ? string.Empty : $"Did you mean '{closest}'? ";
+            return lead + $"Known functions: {string.Join(", ", catalog.Names)}. A function a host registers with "
+                + "AddCelFunction exists only in that host; the standalone image and the CLI know the built-in ones only.";
+        }
 
         private CelChanged ParseChangedCall()
         {
@@ -485,6 +534,23 @@ internal static class CelParser
             }
         }
 
+        /// <summary>
+        /// The fix for <c>x.trim()</c> or <c>math.abs(x)</c> — CEL's receiver and namespaced spellings (deviation F1):
+        /// when the member after the dot is a catalogued function followed by <c>(</c>, say how Alvo spells the call.
+        /// </summary>
+        private string NestedAccessFix() =>
+            ReceiverCallName() is { } function && catalog.Contains(function)
+                ? $"Write {function}(...) with the value as an argument: Alvo calls a function as {function}(x), never "
+                    + $"as x.{function}() or with a namespace such as math.{function}(x)."
+                : MacroNotSupportedSuggestion;
+
+        private string? ReceiverCallName() =>
+            _index + 2 < tokens.Count
+            && tokens[_index + 1].Kind == CelTokenKind.Identifier
+            && tokens[_index + 2].Kind == CelTokenKind.LeftParen
+                ? tokens[_index + 1].Text
+                : null;
+
         private CelFieldRef ParseFieldPath(CelToken identifierToken)
         {
             if (identifierToken.Text is not ("old" or "new"))
@@ -492,7 +558,7 @@ internal static class CelParser
                 throw new CelSyntaxException(
                     "Alvo has no nested field access; use a single field name.",
                     identifierToken.Position,
-                    MacroNotSupportedSuggestion);
+                    NestedAccessFix());
             }
 
             Expect(CelTokenKind.Dot);

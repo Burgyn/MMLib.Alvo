@@ -137,7 +137,8 @@ public class CelMutateFunctionTests
     /// <summary>
     /// The pressure the allow-list deliberately does not relieve: the next plausible function is refused
     /// like any other identifier, in <see cref="CelProfile.Mutate"/> as everywhere else, so an entry is
-    /// added by a named decision rather than by whoever needed one first.
+    /// added by a named decision rather than by whoever needed one first. An unknown name now gets the known list
+    /// (review G5) rather than the macro advice, which stays for the five macro names.
     /// </summary>
     [Fact]
     public void An_unlisted_function_is_still_refused_inside_the_mutate_profile()
@@ -145,7 +146,7 @@ public class CelMutateFunctionTests
         var refused = Compile("upper(new.title)", CelProfile.Mutate);
 
         refused.IsSuccess.ShouldBeFalse();
-        refused.Errors[0].FixSuggestion.ShouldNotBeNull().ShouldContain("hooks.beforeUpdate");
+        refused.Errors[0].FixSuggestion.ShouldNotBeNull().ShouldContain("Known functions:");
     }
 
     /// <summary>

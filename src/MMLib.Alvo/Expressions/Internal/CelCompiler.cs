@@ -37,6 +37,22 @@ internal sealed class CelCompiler : ICelCompiler
     /// <summary>How the fix for a predicate wrapped whole in quotes begins; the unwrapped content follows (D42).</summary>
     internal const string QuotedFixLead = "Remove the outer quotes; the value is the expression itself: ";
 
+    private readonly CelFunctionCatalog _catalog;
+
+    /// <summary>Initializes a new instance of the <see cref="CelCompiler"/> class that knows the built-in functions only.</summary>
+    public CelCompiler()
+        : this(CelFunctionCatalog.BuiltIns)
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="CelCompiler"/> class.</summary>
+    /// <param name="catalog">The functions every compilation knows: the built-ins plus the host's registrations.</param>
+    public CelCompiler(CelFunctionCatalog catalog)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        _catalog = catalog;
+    }
+
     /// <inheritdoc/>
     public CelCompilationResult Compile(string source, CelProfile profile, EntitySchema entity)
     {
@@ -46,7 +62,7 @@ internal sealed class CelCompiler : ICelCompiler
         return Compile(source, profile, entity, detectQuoted: true);
     }
 
-    private static CelCompilationResult Compile(string source, CelProfile profile, EntitySchema entity, bool detectQuoted)
+    private CelCompilationResult Compile(string source, CelProfile profile, EntitySchema entity, bool detectQuoted)
     {
         var parsed = TryParse(source, out var syntaxError);
         if (parsed is null)
@@ -63,12 +79,12 @@ internal sealed class CelCompiler : ICelCompiler
         return CheckAndAssemble(new Authored(source, profile, entity, parsed, detectQuoted));
     }
 
-    private static CelNode? TryParse(string source, out CelCompilationError? syntaxError)
+    private CelNode? TryParse(string source, out CelCompilationError? syntaxError)
     {
         try
         {
             syntaxError = null;
-            return CelParser.Parse(source);
+            return CelParser.Parse(source, _catalog);
         }
         catch (CelSyntaxException ex)
         {
@@ -77,7 +93,7 @@ internal sealed class CelCompiler : ICelCompiler
         }
     }
 
-    private static CelCompilationResult CheckAndAssemble(Authored authored)
+    private CelCompilationResult CheckAndAssemble(Authored authored)
     {
         var (root, resultType, position, errors) =
             CelTypeChecker.Check(authored.Parsed, authored.Source, authored.Entity, authored.Profile);
@@ -92,14 +108,14 @@ internal sealed class CelCompiler : ICelCompiler
             new CompiledExpression(root, authored.Profile, resultType, authored.Source, authored.Entity));
     }
 
-    private static List<CelCompilationError> AppendResultTypeError(
+    private List<CelCompilationError> AppendResultTypeError(
         IReadOnlyList<CelCompilationError> errors, Authored authored, CelValueType resultType, int position)
     {
         var resultTypeError = ValidateResultType(authored, resultType, position);
         return resultTypeError is null ? [.. errors] : [.. errors, resultTypeError];
     }
 
-    private static CelCompilationError? ValidateResultType(Authored authored, CelValueType resultType, int position) =>
+    private CelCompilationError? ValidateResultType(Authored authored, CelValueType resultType, int position) =>
         ValidateValueResult(authored, resultType, position) ?? ValidatePredicateResult(authored, resultType, position);
 
     /// <summary>The Computed and Mutate refusals: each keeps its first sentence byte for byte, then echoes the source.</summary>
@@ -141,7 +157,7 @@ internal sealed class CelCompiler : ICelCompiler
     /// The predicate refusal. Its first sentence is kept byte for byte; a string literal whose content is itself a
     /// predicate gets a fix that names the outer quotes, and anything else keeps the generic one.
     /// </summary>
-    private static CelCompilationError? ValidatePredicateResult(Authored authored, CelValueType resultType, int position)
+    private CelCompilationError? ValidatePredicateResult(Authored authored, CelValueType resultType, int position)
     {
         if (!IsPredicateProfile(authored.Profile) || resultType == CelValueType.Bool)
         {
@@ -166,7 +182,7 @@ internal sealed class CelCompiler : ICelCompiler
     /// Success under a predicate profile already implies a boolean result, because the branch that calls this refuses
     /// anything else. The inner call is the same no-throw path as <see cref="Compile(string, CelProfile, EntitySchema)"/>.
     /// </remarks>
-    private static string? QuotedPredicate(Authored authored) =>
+    private string? QuotedPredicate(Authored authored) =>
         authored.DetectQuoted
         && authored.Parsed is CelLiteral { Type: CelValueType.String, Value: string content }
         && Compile(content, authored.Profile, authored.Entity, detectQuoted: false).IsSuccess
