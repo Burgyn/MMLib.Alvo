@@ -110,7 +110,7 @@ internal static class CelInterpreter
         try
         {
             var state = new EvalState(current, previous, context, failClosed: FailsClosed(expression));
-            return AsBoolean(Evaluate(expression.Root, state));
+            return Truth(Evaluate(expression.Root, state), "condition", state.FailClosed, "the condition's value is not a Bool");
         }
 #pragma warning disable CA1031
         catch (Exception failure) when (failure is not CelFunctionException)
@@ -354,12 +354,23 @@ internal static class CelInterpreter
         return string.Concat(left, right);
     }
 
+    /// <summary>
+    /// <c>&amp;&amp;</c> and <c>||</c>, left to right with short-circuit: a left Bool that decides the answer never evaluates
+    /// the right side. Each side is read through <see cref="Truth"/>, so on the hook path a present non-Bool on the side
+    /// that is evaluated fails closed (Ruling R).
+    /// </summary>
+    /// <remarks>
+    /// CEL's own <c>&amp;&amp;</c>/<c>||</c> absorb an error commutatively (<c>error || true</c> is <c>true</c>); Alvo keeps
+    /// its left-to-right short-circuit and fails a hook closed on the first non-Bool it reads. That is stricter, never
+    /// looser: where CEL answers a value, this answers the same value or refuses the write.
+    /// </remarks>
     private static bool EvaluateLogical(CelBinary binary, in EvalState state)
     {
-        var left = AsBoolean(Evaluate(binary.Left, state));
+        var name = binary.Operator == CelBinaryOperator.And ? "_&&_" : "_||_";
+        var left = Truth(Evaluate(binary.Left, state), name, state.FailClosed);
         return binary.Operator == CelBinaryOperator.And
-            ? left && AsBoolean(Evaluate(binary.Right, state))
-            : left || AsBoolean(Evaluate(binary.Right, state));
+            ? left && Truth(Evaluate(binary.Right, state), name, state.FailClosed)
+            : left || Truth(Evaluate(binary.Right, state), name, state.FailClosed);
     }
 
     /// <summary>
@@ -394,7 +405,7 @@ internal static class CelInterpreter
         Compare(Evaluate(binary.Left, state), Evaluate(binary.Right, state), binary.Operator, state.FailClosed);
 
     private static object? EvaluateConditional(CelConditional conditional, in EvalState state) =>
-        AsBoolean(Evaluate(conditional.Condition, state))
+        Truth(Evaluate(conditional.Condition, state), "_?_:_", state.FailClosed)
             ? Evaluate(conditional.WhenTrue, state)
             : Evaluate(conditional.WhenFalse, state);
 
@@ -411,15 +422,37 @@ internal static class CelInterpreter
     private static bool AsBoolean(object? value) => value is true;
 
     /// <summary>
+    /// Reads a value in a Boolean position — either side of <c>&amp;&amp;</c> or <c>||</c>, a ternary's condition, a
+    /// predicate's own value. A Bool is itself and a null is <see langword="false"/>, everywhere. A <b>present</b> value
+    /// that is no Bool is <see langword="false"/> for a Rule or an Access expression, as it always was; on the fail-closed
+    /// hook path it throws instead (Ruling R, completing Ruling Q's <c>!</c>), because <see langword="false"/> there is a
+    /// reject that never fires.
+    /// </summary>
+    /// <param name="value">The evaluated operand.</param>
+    /// <param name="name">CEL's overload name for the position (<c>_&amp;&amp;_</c>), or <c>condition</c> for the whole.</param>
+    /// <param name="failClosed">Whether this is the hook path, read once from the profile.</param>
+    /// <param name="reason">Why, for the caller — it names no value.</param>
+    /// <exception cref="CelFunctionException"><paramref name="failClosed"/> is set and the value is present and no Bool.</exception>
+    private static bool Truth(object? value, string name, bool failClosed, string reason = "the operand is not a Bool") => value switch
+    {
+        bool flag => flag,
+        null => false,
+        _ when failClosed => throw new CelFunctionException(name, reason),
+        _ => false,
+    };
+
+    /// <summary>
     /// The single place the null rule is expressed: either operand missing collapses the whole
     /// comparison to <see langword="false"/>, for every relational and equality operator alike.
     /// </summary>
     /// <remarks>
     /// Two <b>present</b> operands it cannot compare — a NaN, infinite or out-of-range double, a string in a numeric
-    /// field, a value of an unexpected CLR type — answer <see langword="false"/> for a Rule or an Access expression, the
-    /// deny direction there; on the fail-closed hook path they throw instead (Ruling Q), because <see langword="false"/>
-    /// there is a reject that never fires. <paramref name="failClosed"/> is read from the profile once, through
-    /// <see cref="CelHookArithmetic.FailsClosed"/>.
+    /// field, a value of an unexpected CLR type — throw on the fail-closed hook path (Ruling Q), because
+    /// <see langword="false"/> there is a reject that never fires. A Rule or an Access expression still answers
+    /// <see langword="false"/>: Ruling Q's scope left them where they were, and that is not a claim the answer is safe —
+    /// a bare comparison's <see langword="false"/> denies, but <c>!</c> over it answers <see langword="true"/>, the grant
+    /// direction, where SQL's three-valued logic would deny. That embedded-only residual is #324.
+    /// <paramref name="failClosed"/> is read from the profile once, through <see cref="CelHookArithmetic.FailsClosed"/>.
     /// </remarks>
     /// <exception cref="CelFunctionException">
     /// <paramref name="failClosed"/> is set and the two present operands cannot be compared.

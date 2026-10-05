@@ -109,6 +109,7 @@ public sealed class CelBuiltInWriteTests
     {
         await using var world = await StartAsync();
         using var created = await world.SendAsync(HttpMethod.Post, "/api/frames", Writer, body: new JsonObject { ["code"] = "A1" });
+        created.StatusCode.ShouldBe(HttpStatusCode.Created);
         var id = (await created.ReadJsonObjectAsync())["id"]!.ToString();
 
         using var refused = await world.SendAsync(HttpMethod.Patch, $"/api/frames/{id}", Writer, body: new JsonObject { ["code"] = "B2" });

@@ -7,8 +7,9 @@ namespace MMLib.Alvo.Tests.Expressions;
 /// <summary>
 /// Ruling Q: on the fail-closed hook path a <b>present</b> operand a comparison or <c>!</c> cannot handle — a NaN,
 /// infinite or out-of-range double, a string in a numeric field, a value of an unexpected CLR type — throws a function
-/// failure instead of answering <see langword="false"/>, so it cannot quietly skip a reject. A null operand still answers
-/// as it always did, and Rule and Access, which take the same comparison, do not move.
+/// failure instead of answering <see langword="false"/>, so it cannot quietly skip a reject. Ruling R extends it to every
+/// other Boolean position: either side of <c>&amp;&amp;</c> and <c>||</c>, a ternary's condition, and the condition's own value.
+/// A null operand still answers as it always did, and Rule and Access, which take the same comparison, do not move.
 /// </summary>
 public sealed class CelHookComparisonTests
 {
@@ -90,17 +91,145 @@ public sealed class CelHookComparisonTests
     public void A_convertible_double_in_arithmetic_answers_a_decimal() =>
         Mutate("qty * 2", ("qty", 2.5d)).ShouldBeOfType<decimal>().ShouldBe(5.0m);
 
-    /// <summary>The gate is the hook path's: a Rule reading the same operand still answers false, as it always did.</summary>
+    /// <summary>
+    /// Every uncomparable operand under each profile that keeps the old answer: Rule, and Access. An Access level has
+    /// no row to read, so its row is the Rule-compiled tree re-labelled — which is exactly the claim: the gate reads
+    /// the profile and nothing else.
+    /// </summary>
+    public static TheoryData<CelProfile, object> UncomparableOffTheHookPath
+    {
+        get
+        {
+            var rows = new TheoryData<CelProfile, object>();
+            foreach (var profile in new[] { CelProfile.Rule, CelProfile.Access })
+            {
+                foreach (var value in Uncomparable)
+                {
+                    rows.Add(profile, value.Data);
+                }
+            }
+
+            return rows;
+        }
+    }
+
+    /// <summary>
+    /// The gate is the hook path's: a Rule or an Access level reading the same operand still answers false, as it
+    /// always did (Ruling Q's scope).
+    /// </summary>
     [Theory]
-    [MemberData(nameof(Uncomparable))]
-    public void A_rule_over_the_same_operand_still_answers_false(object value) =>
-        CelInterpreter.EvaluatePredicate(Compile("price > 100", CelProfile.Rule), CelFixtures.Row(("price", value)), previous: null, AlvoContext.Anonymous)
+    [MemberData(nameof(UncomparableOffTheHookPath))]
+    public void A_rule_or_access_over_the_same_operand_still_answers_false(CelProfile profile, object value) =>
+        CelInterpreter.EvaluatePredicate(Relabel(Compile("price > 100", CelProfile.Rule), profile), CelFixtures.Row(("price", value)), previous: null, AlvoContext.Anonymous)
             .ShouldBeFalse();
 
+    /// <summary>
+    /// Rule's <c>!</c> did not move either — and its <see langword="true"/> is the grant direction, an embedded-only
+    /// residual tracked as #324, not a safe answer.
+    /// </summary>
     [Fact]
     public void A_rule_not_over_a_non_bool_still_answers_true() =>
         CelInterpreter.EvaluatePredicate(Compile("!active", CelProfile.Rule), CelFixtures.Row(("active", "true")), previous: null, AlvoContext.Anonymous)
             .ShouldBeTrue();
+
+    /// <summary>Ruling R: each Boolean position of the hook path, with a present operand that is no Bool.</summary>
+    /// <remarks>
+    /// <c>!</c> was Ruling Q's; these are the remaining places a value is read as a truth value. Without them a reject
+    /// written <c>new.active &amp;&amp; …</c>, <c>new.active ? … : …</c> or plain <c>new.active</c> reads a present
+    /// <c>"true"</c> as <see langword="false"/> and lets the write through.
+    /// </remarks>
+    [Theory]
+    [InlineData("new.active && true", "_&&_")]
+    [InlineData("true && new.active", "_&&_")]
+    [InlineData("new.active || false", "_||_")]
+    [InlineData("false || new.active", "_||_")]
+    public void A_present_non_bool_in_a_boolean_position_fails_a_condition_closed(string source, string name)
+    {
+        ShouldFailClosed(() => Condition(source, ("active", "true")), name, "the operand is not a Bool");
+        ShouldFailClosed(() => Condition(source, ("active", 1L)), name, "the operand is not a Bool");
+    }
+
+    /// <summary>A bare field as the whole condition is the last Boolean position: the condition's own value.</summary>
+    [Theory]
+    [InlineData("true")]
+    [InlineData(1L)]
+    public void A_present_non_bool_as_the_whole_condition_fails_closed(object value) =>
+        ShouldFailClosed(() => Condition("new.active", ("active", value)), "condition", "the condition's value is not a Bool");
+
+    /// <summary>
+    /// A ternary's condition, on either hook profile. Defensive: the ternary compiles in <see cref="CelProfile.Computed"/>
+    /// only today, so the tree is compiled there and re-labelled — the interpreter must not depend on the type checker
+    /// keeping it out of the hook path.
+    /// </summary>
+    [Theory]
+    [InlineData(CelProfile.Condition)]
+    [InlineData(CelProfile.Mutate)]
+    public void A_present_non_bool_ternary_condition_fails_the_hook_path_closed(CelProfile profile) =>
+        ShouldFailClosed(() => Ternary(profile, "true"), "_?_:_", "the operand is not a Bool");
+
+    /// <summary>The ternary off the fail-closed path — Computed, and Rule re-labelled — reads it as false, as before.</summary>
+    [Fact]
+    public void A_ternary_off_the_hook_path_did_not_move()
+    {
+        Ternary(CelProfile.Computed, "true").ShouldBe("off");
+        Ternary(CelProfile.Rule, "true").ShouldBe("off");
+    }
+
+    /// <summary>On the hook path a null or a real Bool still picks its branch as it always did.</summary>
+    [Fact]
+    public void A_ternary_over_a_null_or_a_bool_picks_its_branch_as_before()
+    {
+        Ternary(CelProfile.Mutate, null).ShouldBe("off");
+        Ternary(CelProfile.Mutate, true).ShouldBe("on");
+    }
+
+    /// <summary>Short-circuit stays: a real Bool that decides the answer never evaluates the other side.</summary>
+    [Theory]
+    [InlineData("false && new.active", false)]
+    [InlineData("true || new.active", true)]
+    public void A_deciding_bool_still_short_circuits_past_a_non_bool(string source, bool expected) =>
+        Condition(source, ("active", "true")).ShouldBe(expected);
+
+    /// <summary>Null propagates as before: it reads false in every Boolean position, and never throws.</summary>
+    [Theory]
+    [InlineData("new.active && true", false)]
+    [InlineData("new.active || true", true)]
+    [InlineData("new.active", false)]
+    public void A_null_in_a_boolean_position_reads_false_as_before(string source, bool expected) =>
+        Condition(source, ("active", null)).ShouldBe(expected);
+
+    /// <summary>Real Bools answer as they always did.</summary>
+    [Theory]
+    [InlineData("new.active && true", true)]
+    [InlineData("new.active || false", true)]
+    [InlineData("new.active", true)]
+    public void A_bool_in_a_boolean_position_answers_as_before(string source, bool expected) =>
+        Condition(source, ("active", true)).ShouldBe(expected);
+
+    /// <summary>
+    /// Rule did not move: the same shapes over the same present non-Bool still read it as <see langword="false"/> in a
+    /// Rule — Ruling R, like Ruling Q, is the hook path's alone.
+    /// </summary>
+    [Theory]
+    [InlineData("active && true", false)]
+    [InlineData("active || false", false)]
+    [InlineData("active", false)]
+    public void A_rule_over_a_non_bool_in_a_boolean_position_did_not_move(string source, bool expected) =>
+        CelInterpreter.EvaluatePredicate(Compile(source, CelProfile.Rule), CelFixtures.Row(("active", "true")), previous: null, AlvoContext.Anonymous)
+            .ShouldBe(expected);
+
+    /// <summary><c>active ? 'on' : 'off'</c>, compiled where a ternary compiles and evaluated as <paramref name="profile"/>.</summary>
+    private static object? Ternary(CelProfile profile, object? active)
+    {
+        var expression = Relabel(Compile("active ? 'on' : 'off'", CelProfile.Computed), profile);
+        var row = CelFixtures.Row(("active", active));
+        return profile == CelProfile.Computed
+            ? CelInterpreter.EvaluateScalar(expression, row)
+            : CelInterpreter.EvaluateMutation(expression, row, previous: null, DateTimeOffset.UnixEpoch);
+    }
+
+    private static CompiledExpression Relabel(CompiledExpression expression, CelProfile profile) =>
+        new(expression.Root, profile, expression.ResultType, expression.Source, expression.Entity);
 
     private static CompiledExpression Compile(string source, CelProfile profile)
     {

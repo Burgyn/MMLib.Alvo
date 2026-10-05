@@ -185,13 +185,21 @@ failed: the divisor is zero. Nothing was written." (`AlvoExceptionHandler.Functi
 * **Int vs Decimal at run time** is decided by the operands' CLR values (a record's Integer column arrives as an
   integral type, a literal `2` as `long`): two integral operands take the checked `long` path, anything else the
   `decimal` path. In Computed the `decimal` path stays for every operand pair, as today.
-* **A present operand that is no number, no text or no flag** (controller Rulings P and Q). On the fail-closed path a
+* **A present operand that is no number, no text or no flag** (controller Rulings P, Q and R). On the fail-closed path a
   *present* operand an operator cannot take — a NaN, infinite or out-of-range double, a string in a numeric field, a
   value of an unexpected CLR type — throws (§5.5) instead of answering `null` (arithmetic, `+`) or `false` (a comparison,
-  `!`): `false` there is a reject that never fires. The HTTP binder types every value (`FieldClrType`), so only an
-  embedded caller's own record can hold one. A **null** operand still answers as before (`null`; a comparison `false`;
-  `!null` `true`), and Rule and Access, which take the same comparison and `!`, do not move — `false` is their deny
-  direction. A double a decimal can hold (`2.5`) is a number, not a failure.
+  `!`): `false` there is a reject that never fires. The same holds for every other Boolean position (Ruling R): either
+  operand of `&&` or `||`, a ternary's condition, and a condition's own value (`new.flag` as the whole condition) throw
+  on a present non-Bool, under CEL's overload name (`_&&_`, `_||_`, `_?_:_`) or `condition`. `&&` and `||` keep their
+  left-to-right short-circuit for a real Bool, so `false && x` never reads `x` — stricter than CEL's commutative error
+  absorption, never looser. The HTTP binder types every value (`FieldClrType`), so only an embedded caller's own record
+  can hold one. A **null** operand still answers as before (`null`; a comparison `false`; `!null` `true`; `null` in a
+  Boolean position `false`). Rule and Access, which take the same comparison, `!` and logical operators, do not move —
+  that is the scope of Rulings Q and R, not a claim that their answer is safe: a bare comparison's `false` denies, but
+  their `!` over a present non-Bool, or over a comparison of an uncomparable operand, answers `true`, the grant
+  direction, where SQL's three-valued logic would deny. That is an embedded-only residual (an untyped record through an
+  in-memory `WITH CHECK`), tracked as [#324](https://github.com/Burgyn/MMLib.Alvo/issues/324). A double a decimal can
+  hold (`2.5`) is a number, not a failure.
 * **Not in D:** `%` (Alvo's lexer has no `%`, and adding it grows the public `CelBinaryOperator` enum and needs an SQL
   rendering that differs per engine — SQLite's `%` casts to integer), Double (Alvo has no `double` type), comparison and
   ternary in Mutate, string `+` in Condition (§12).

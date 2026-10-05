@@ -8,10 +8,11 @@ namespace MMLib.Alvo.Api.Tests;
 /// fires on every engine (pre-flight S-1, F9-1 and C-3; #317).
 /// </summary>
 /// <remarks>
-/// Engine-sensitive by construction: a create's <c>new.due</c> comes from the request, but an update's
-/// <c>old.due</c> is the value the engine hands back out of storage — a <c>date</c> column on PostgreSQL, text on
-/// SQLite. Before #317 the interpreter could not compare a date with an instant at all, answered <c>false</c>,
-/// and every such reject was silently switched off. A date compares as midnight UTC of its day.
+/// Run on every engine because the storage differs: a create's <c>new.due</c> comes from the request, while an
+/// update's <c>old.due</c> is read back out of storage — a <c>date</c> column on PostgreSQL, text on SQLite. What the
+/// interpreter receives does not differ: the typed EF model materialises <c>old.due</c> as a <see cref="DateOnly"/> on
+/// both engines. Before #317 the interpreter could not compare a <see cref="DateOnly"/> with an instant at all, answered
+/// <c>false</c>, and every such reject was silently switched off. A date compares as midnight UTC of its day.
 /// </remarks>
 public abstract partial class DataApiEngineTests
 {
