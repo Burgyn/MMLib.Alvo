@@ -23,6 +23,18 @@ public sealed class CelFunctionCatalogTests
     }
 
     [Fact]
+    public void Describe_is_ordinal_by_name_with_overloads_in_declaration_order()
+    {
+        var catalog = CelFunctionCatalog.BuiltIns.With([Host("Zeta"), Host("alpha")]);
+
+        var described = catalog.Describe();
+
+        described.Select(f => f.Name).ShouldBe(["Zeta", "abs", "abs", "alpha", "lowerAscii", "now", "replace", "round", "round", "size", "trim"]);
+        described.Where(f => f.Name == "abs").Select(f => f.Result).ShouldBe(catalog.Overloads("abs").Select(o => o.Describe().Result));
+        described.Where(f => f.Name == "round").Select(f => f.Result).ShouldBe([CelValueType.Int, CelValueType.Decimal]);
+    }
+
+    [Fact]
     public void An_unknown_name_has_no_overloads()
     {
         CelFunctionCatalog.BuiltIns.Contains("normalizePhone").ShouldBeFalse();

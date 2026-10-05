@@ -5,7 +5,6 @@ using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
-using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
@@ -203,12 +202,12 @@ internal sealed partial class AlvoManagementService(
     }
 
     /// <inheritdoc/>
-    public Task<IReadOnlyList<CelFunctionInfo>> GetCelFunctionsAsync(string project, CancellationToken ct = default)
+    public Task<ManagementCelFunctions> GetCelFunctionsAsync(string project, CancellationToken ct = default)
     {
         EnsureMayPerform(ManagementOperation.GetCelFunctions);
         EnsureServed(project);
 
-        return Task.FromResult(functions.Describe());
+        return Task.FromResult(new ManagementCelFunctions { Functions = functions.Describe() });
     }
 
     /// <inheritdoc/>

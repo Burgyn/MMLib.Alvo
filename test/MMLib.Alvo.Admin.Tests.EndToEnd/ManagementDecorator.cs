@@ -1,6 +1,5 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using MMLib.Alvo.Ai;
-using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;
 
@@ -53,7 +52,7 @@ public abstract class ManagementDecorator(IAlvoManagement inner) : IAlvoManageme
         => inner.GetCapabilitiesAsync(project, ct);
 
     /// <inheritdoc/>
-    public virtual Task<IReadOnlyList<CelFunctionInfo>> GetCelFunctionsAsync(string project, CancellationToken ct = default)
+    public virtual Task<ManagementCelFunctions> GetCelFunctionsAsync(string project, CancellationToken ct = default)
         => inner.GetCelFunctionsAsync(project, ct);
 
     /// <inheritdoc/>

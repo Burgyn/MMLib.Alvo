@@ -1,6 +1,4 @@
-﻿using MMLib.Alvo.Expressions;
-
-namespace MMLib.Alvo.Management;
+﻿namespace MMLib.Alvo.Management;
 
 /// <summary>
 /// <b>The one operation surface for administering an Alvo project.</b> The admin dashboard resolves it from
@@ -126,10 +124,10 @@ public interface IAlvoManagement
     /// </remarks>
     /// <param name="project">The project name.</param>
     /// <param name="ct">Cancellation token.</param>
-    /// <returns>The functions, ordered by name.</returns>
+    /// <returns>The functions, ordered by name, in an envelope that can grow additively.</returns>
     /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
     /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
-    Task<IReadOnlyList<CelFunctionInfo>> GetCelFunctionsAsync(string project, CancellationToken ct = default);
+    Task<ManagementCelFunctions> GetCelFunctionsAsync(string project, CancellationToken ct = default);
 
     /// <summary>
     /// Answers what a named caller may do to an entity — <b>by calling the same <c>IPolicyEngine</c>

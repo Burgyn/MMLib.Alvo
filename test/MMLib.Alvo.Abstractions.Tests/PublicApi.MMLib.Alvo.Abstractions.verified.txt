@@ -1291,7 +1291,7 @@ namespace MMLib.Alvo.Management
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementApplyResult> ApplyDescriptorAsync(string project, MMLib.Alvo.Management.ManagementApplyRequest request, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementExpressionVerdict> CheckExpressionAsync(string project, MMLib.Alvo.Management.ManagementExpressionCheck request, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementCapabilities> GetCapabilitiesAsync(string project, System.Threading.CancellationToken ct = default);
-        System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Expressions.CelFunctionInfo>> GetCelFunctionsAsync(string project, System.Threading.CancellationToken ct = default);
+        System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementCelFunctions> GetCelFunctionsAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementDescriptor> GetDescriptorAsync(string project, System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementInfo> GetInfoAsync(System.Threading.CancellationToken ct = default);
         System.Threading.Tasks.Task<MMLib.Alvo.Management.ManagementRevisionDetail> GetRevisionAsync(string project, int revision, System.Threading.CancellationToken ct = default);
@@ -1341,6 +1341,11 @@ namespace MMLib.Alvo.Management
         public System.Collections.Generic.IReadOnlyList<string> Honoured { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRefusedFeature> Refused { get; init; }
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementWarnedBlock> Warned { get; init; }
+    }
+    public sealed class ManagementCelFunctions : System.IEquatable<MMLib.Alvo.Management.ManagementCelFunctions>
+    {
+        public ManagementCelFunctions() { }
+        public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Expressions.CelFunctionInfo> Functions { get; init; }
     }
     public sealed class ManagementDescriptor : System.IEquatable<MMLib.Alvo.Management.ManagementDescriptor>
     {

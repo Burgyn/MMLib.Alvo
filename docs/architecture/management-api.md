@@ -75,7 +75,9 @@ per overload (`abs` over an integer and over a double are two entries), with par
 the profiles each compiles in. It is Viewer because it discloses only the names and summaries a host developer
 chose to register — the same class of information `capabilities` already reveals about the build. The catalog is
 per instance, not per project; the route is project-scoped for symmetry with `cel/check` and so that per-project
-visibility stays possible without a route change.
+visibility stays possible without a route change. The answer is an object, `{ "functions": [ … ] }`, so a catalog
+version or a documentation link can be added later without breaking a client. A registered function's name and
+summary are therefore visible to every Viewer: put no secrets or internal-only wording in them.
 
 ## Why `cel/check` is not the dry run, and why it is Developer
 

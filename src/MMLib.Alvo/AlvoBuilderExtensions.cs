@@ -63,7 +63,10 @@ public static class AlvoBuilderExtensions
     /// <c>contains</c>, <c>matches</c>, …).
     /// </param>
     /// <param name="function">The implementation, e.g. <c>(string phone) =&gt; …</c>.</param>
-    /// <param name="summary">One sentence for discovery (<c>cel/functions</c>, the assistant).</param>
+    /// <param name="summary">
+    /// One sentence for discovery (<c>cel/functions</c>, the assistant). The name and summary are visible to every
+    /// Viewer of the management API: put no secrets or internal-only wording in them.
+    /// </param>
     /// <returns>The same builder, for chaining.</returns>
     /// <exception cref="ArgumentException">The name is invalid, reserved or taken, or the delegate cannot be called from CEL.</exception>
     public static IAlvoBuilder AddCelFunction(this IAlvoBuilder builder, string name, Delegate function, string? summary = null)

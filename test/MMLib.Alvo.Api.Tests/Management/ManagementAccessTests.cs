@@ -1,5 +1,4 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Management;
 using System.Net;
 
@@ -314,7 +313,7 @@ internal sealed class RefusingManagement : IAlvoManagement
         throw new ManagementForbiddenException();
 
     /// <inheritdoc/>
-    public Task<IReadOnlyList<CelFunctionInfo>> GetCelFunctionsAsync(string project, CancellationToken ct = default) =>
+    public Task<ManagementCelFunctions> GetCelFunctionsAsync(string project, CancellationToken ct = default) =>
         throw new ManagementForbiddenException();
 
     /// <inheritdoc/>

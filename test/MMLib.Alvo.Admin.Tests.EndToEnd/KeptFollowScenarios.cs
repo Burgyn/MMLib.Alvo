@@ -1,7 +1,6 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
 using MMLib.Alvo.Ai;
-using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;
 
@@ -105,7 +104,7 @@ public sealed class HeldApplyWorld : AdminWorld
             => inner.GetCapabilitiesAsync(project, ct);
 
         /// <inheritdoc/>
-        public Task<IReadOnlyList<CelFunctionInfo>> GetCelFunctionsAsync(string project, CancellationToken ct = default)
+        public Task<ManagementCelFunctions> GetCelFunctionsAsync(string project, CancellationToken ct = default)
             => inner.GetCelFunctionsAsync(project, ct);
 
         public Task<ManagementPolicyVerdict> SimulatePolicyAsync(
