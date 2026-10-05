@@ -90,13 +90,14 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     /// <param name="fileName">The descriptor file's name under <c>descriptors/</c>.</param>
     /// <param name="keys">The dev API keys the world issues.</param>
     /// <param name="setup">Anything the world's host is configured differently from the default.</param>
+    /// <param name="engine">The engine to run on; SQLite when none is named.</param>
     internal static Task<AlvoApiWorld> FromDescriptorAsync(
-        string fileName, IReadOnlyList<TestApiKey>? keys = null, AlvoApiWorldSetup? setup = null) =>
+        string fileName, IReadOnlyList<TestApiKey>? keys = null, AlvoApiWorldSetup? setup = null, AlvoApiEngine? engine = null) =>
         StartAsync(
             Path.Combine(AppContext.BaseDirectory, "descriptors", fileName),
             keys ?? [],
             setup ?? new AlvoApiWorldSetup(),
-            SqliteApiEngine.Instance);
+            engine ?? SqliteApiEngine.Instance);
 
     /// <summary>Starts a world over a descriptor at an absolute path.</summary>
     /// <param name="descriptorPath">The descriptor file's full path.</param>

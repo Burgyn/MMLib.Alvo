@@ -69,6 +69,7 @@ public abstract class AlvoDataDifferentialTests
             new FieldSchema { Name = "created_at", Type = FieldType.DateTime, Nullable = true },
             new FieldSchema { Name = "approved_at", Type = FieldType.DateTime, Nullable = true },
             new FieldSchema { Name = "is_public", Type = FieldType.Boolean, Nullable = true },
+            new FieldSchema { Name = "due_on", Type = FieldType.Date, Nullable = true },
         ],
     };
 
