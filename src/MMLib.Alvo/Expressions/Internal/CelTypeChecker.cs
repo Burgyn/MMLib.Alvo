@@ -989,10 +989,30 @@ internal static class CelTypeChecker
 
             Errors.Add(new CelCompilationError(
                 $"'{name}(...)' is not available in the {profile} profile; it is available in "
-                + $"{string.Join(" and ", function.Profiles.Order())}. {FunctionProfileReason()}",
+                + $"{AvailableIn(function)}. {FunctionProfileReason()}",
                 FunctionProfileFix(),
                 position));
             return true;
+        }
+
+        /// <summary>
+        /// The profiles a call may actually appear in: the function's own set inside the ceiling, so a refused profile
+        /// is never listed. Joined as "A", "A and B" or "A, B and C"; "no profile" when none remains.
+        /// </summary>
+        private static string AvailableIn(CelFunction function)
+        {
+            var names = function.Profiles
+                .Where(candidate => IsAllowed(candidate, CelConstructKind.FunctionCall))
+                .Order()
+                .Select(candidate => candidate.ToString())
+                .ToList();
+
+            return names switch
+            {
+                [] => "no profile",
+                [var only] => only,
+                _ => $"{string.Join(", ", names[..^1])} and {names[^1]}",
+            };
         }
 
         private string FunctionProfileReason() => profile switch
@@ -1000,7 +1020,8 @@ internal static class CelTypeChecker
             CelProfile.Rule => "A rule becomes a SQL filter, and this function runs only in-process; "
                 + "authorization is never a filter applied after the query.",
             CelProfile.Computed => "A computed field is a column the database computes, and this function runs only in-process.",
-            _ => "An access level is a predicate over the caller alone and calls no function.",
+            CelProfile.Access => "An access level is a predicate over the caller alone and calls no function.",
+            _ => $"This function is not enabled for the {profile} profile.",
         };
 
         private string FunctionProfileFix() => profile switch
@@ -1008,7 +1029,8 @@ internal static class CelTypeChecker
             CelProfile.Rule => "Store the value in a field with a before-hook mutate (hooks.beforeCreate / beforeUpdate), "
                 + "then compare that field here.",
             CelProfile.Computed => "Write the value with a before-hook mutate into a regular field instead of computing it.",
-            _ => "Test the caller instead, e.g. 'admin' in @user.roles.",
+            CelProfile.Access => "Test the caller instead, e.g. 'admin' in @user.roles.",
+            _ => "Call it only in a profile listed above, or write the value without a function call.",
         };
 
         /// <summary>

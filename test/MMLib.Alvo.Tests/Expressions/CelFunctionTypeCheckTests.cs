@@ -14,6 +14,13 @@ public sealed class CelFunctionTypeCheckTests
         "magnitude", [TestCelFunctions.Parameter("x", type)], type, ResultNullable: false, "A test overload.",
         IsHost: false, CelBuiltInFunctions.ConditionAndMutate, arguments => arguments[0]);
 
+    private static CelFunction WithProfiles(params CelProfile[] profiles) => new(
+        "probe", [TestCelFunctions.Parameter("s", CelValueType.String)], CelValueType.String, ResultNullable: false, "A test function.",
+        IsHost: true, new HashSet<CelProfile>(profiles), arguments => arguments[0]);
+
+    private static readonly CelProfile[] _everyProfile =
+        [CelProfile.Rule, CelProfile.Computed, CelProfile.Condition, CelProfile.Mutate, CelProfile.Access];
+
     [Fact]
     public void A_call_in_a_hook_condition_binds_its_overload_and_result_type()
     {
@@ -45,6 +52,45 @@ public sealed class CelFunctionTypeCheckTests
         var error = refused.Errors.ShouldHaveSingleItem();
         error.Message.ShouldStartWith($"'echo(...)' is not available in the {named} profile; it is available in Condition and Mutate.");
         error.FixSuggestion.ShouldNotBeNull().ShouldContain(fix);
+    }
+
+    [Theory]
+    [InlineData(CelProfile.Rule, "probe(name) == 'x'")]
+    [InlineData(CelProfile.Computed, "probe(name)")]
+    [InlineData(CelProfile.Access, "probe('a') == 'a'")]
+    public void The_ceiling_refuses_a_function_whose_own_profiles_include_the_profile(CelProfile profile, string source)
+    {
+        var error = Compile(source, profile, WithProfiles(_everyProfile)).Errors.ShouldHaveSingleItem();
+
+        error.Message.ShouldStartWith($"'probe(...)' is not available in the {profile} profile; it is available in Condition and Mutate.");
+    }
+
+    [Fact]
+    public void A_mutate_only_function_is_refused_in_condition_with_a_neutral_reason()
+    {
+        var error = Compile("probe(name) == 'x'", CelProfile.Condition, WithProfiles(CelProfile.Mutate)).Errors.ShouldHaveSingleItem();
+
+        error.Message.ShouldBe(
+            "'probe(...)' is not available in the Condition profile; it is available in Mutate. "
+            + "This function is not enabled for the Condition profile.");
+        error.FixSuggestion.ShouldNotBeNull().ShouldNotContain("@user.roles");
+    }
+
+    [Fact]
+    public void A_function_with_no_profiles_says_it_is_available_nowhere()
+    {
+        var error = Compile("probe(name)", CelProfile.Mutate, WithProfiles()).Errors.ShouldHaveSingleItem();
+
+        error.Message.ShouldStartWith("'probe(...)' is not available in the Mutate profile; it is available in no profile.");
+    }
+
+    [Fact]
+    public void The_available_list_holds_only_profiles_inside_the_ceiling_and_never_the_refused_one()
+    {
+        var message = Compile("probe(name)", CelProfile.Computed, WithProfiles(_everyProfile)).Errors.ShouldHaveSingleItem().Message;
+
+        message.ShouldContain("it is available in Condition and Mutate.");
+        message.ShouldNotContain("Access");
     }
 
     [Fact]

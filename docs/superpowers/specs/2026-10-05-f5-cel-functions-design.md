@@ -306,11 +306,13 @@ not. Widening `lowerAscii` to Condition is additive and left for a follow-up (it
 | unknown name | `'normalisePhone' is not a recognized function.` (unchanged) | `Did you mean 'normalizePhone'? Known functions: abs, lowerAscii, normalizePhone, now, replace, round, size, trim. A function a host registers with AddCelFunction exists only in that host; the standalone image and the CLI know the built-in ones only.` |
 | arity | `'trim' takes 1 argument; this call passes 2.` | `Call it as trim(text: String) -> String.` |
 | argument type | `'trim(...)' accepts no (Decimal); it accepts trim(text: String) -> String.` | types of fields, and Int-for-Decimal |
-| profile (Rule) | `'trim(...)' is not available in the Rule profile; it is available in Condition and Mutate. A rule becomes a SQL WHERE clause, and this function runs only in-process; authorization is never a filter applied after the query.` | `Store the value in a field with a before-hook mutate (hooks.beforeCreate / beforeUpdate), then compare that field here.` |
+| profile (Rule) | `'trim(...)' is not available in the Rule profile; it is available in Condition and Mutate. A rule becomes a SQL filter, and this function runs only in-process; authorization is never a filter applied after the query.` | `Store the value in a field with a before-hook mutate (hooks.beforeCreate / beforeUpdate), then compare that field here.` |
 | profile (Computed / Access) | same lead, profile-specific reason | `mutate` into a regular field / test the caller |
 | call too deep | `CEL expression nests 33 levels deep, exceeding the maximum of 32.` (unchanged) | now also names "nested function calls" |
 | registration | `ArgumentException`: `The CEL function 'x' takes 5 parameters; a CEL function takes at most 4.` (one sentence per §5.7 case) | — |
 | runtime | 500, `type https://alvo.dev/errors/function-failed`, `The CEL function 'normalizePhone' failed while this write was evaluated, so nothing was written. Its own error is in the server log.` | — |
+
+The Rule reason says "SQL filter", not "SQL WHERE clause": `SqlTextConfinedToRendererArchitectureTests` bans the text `WHERE ` in any source file outside the renderer, and a refusal message is source. The profile-specific reason is chosen per refused profile (Rule, Computed, Access); any other refusal, such as a Mutate-only function in Condition, says plainly that the function is not enabled for that profile. The "available in" list names only the profiles inside the checker's ceiling (Condition and Mutate in C1) that the function also lists, never the profile being refused.
 
 ## 9. Slice C2 — SQL translation (specified, not planned)
 
