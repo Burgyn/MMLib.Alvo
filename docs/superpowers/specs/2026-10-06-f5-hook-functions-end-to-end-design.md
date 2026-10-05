@@ -326,7 +326,7 @@ A CEL expression in the Mutate profile, stored as {"$cel": "…"}.
   │ not a letter or a digit.                            [Insert]  │
   │ math.round(x: Int) -> Int                            built-in │
   │ math.round(x: Decimal) -> Decimal                             │
-  │ x rounded to a whole number, halves away from zero …  [Insert]│
+  │ Rounds x to a whole number, halves away from zero …   [Insert]│
   └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -547,9 +547,17 @@ Continuing C1's F-series (`cel.md` deviations 25–36):
   `time.Parse(time.RFC3339, …)`, which keeps the text's offset, and `Timestamp.ConvertToType(StringType)` is
   `t.Format(time.RFC3339Nano)` with no `UTC()`, so `string(timestamp('2026-10-05T14:00:00+02:00'))` is
   `'2026-10-05T14:00:00+02:00'` there and `'2026-10-05T12:00:00Z'` in Alvo. Carried into cel.md deviation 28 in Task 17.)
+  The cel-spec identity overload `string(string)` is deliberately absent: Alvo's five overloads take every non-text
+  scalar, and text needs no conversion. A call to it fails closed at apply (`'string(...)' accepts no (String); …`).
 * **F13 (29)** — `timestamp(text)` admits upper-case `T`/`Z` only and keeps 100 ns of the fraction (CEL: nanoseconds).
-  .NET's resolution; Go's RFC 3339 parser is case-sensitive too.
+  .NET's resolution; Go's RFC 3339 parser is case-sensitive too. The cel-spec identity overload `timestamp(timestamp)`
+  is deliberately absent (a Timestamp needs no conversion), and so is `timestamp(int)` (Unix seconds); a call to either
+  fails closed at apply (`'timestamp(...)' accepts no (…); …`).
 * **F14 (30)** — `int(String)` admits `[+-]?[0-9]+` only (no whitespace, no other base) = Go's `ParseInt(s, 10, 64)`.
+  `int(timestamp)` (Unix seconds in cel-spec) is deliberately absent — no hook use case in D asks for epoch seconds,
+  and an overload added later is additive; a call to it fails closed at apply (`'int(...)' accepts no (Timestamp); …`). The identity
+  `int(int)` has no overload of its own but still compiles: an Int binds `int(value: Decimal)` (F7 widening) and
+  cutting a whole number toward zero is the number itself, exactly, for every 64-bit value.
 * **F15 (31)** — a built-in call over literals that always fails is refused at apply (E5). An addition, not a change of
   any value: CEL defines no compile-time evaluation; cel-go's constant folding is the precedent.
 * **F16 (32)** — `contains`/`startsWith`/`endsWith` compare UTF-16 code units ordinally (= code points for well-formed

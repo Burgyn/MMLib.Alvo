@@ -30,7 +30,7 @@ internal static partial class CelBuiltInFunctions
 
     private static CelFunction RoundToDigits => InProcess(
         "math.round", CelValueType.Decimal,
-        "x rounded to digits places after the point, halves away from zero (2.345 to 2 places is 2.35); digits is from 0 to 28.",
+        "Rounds x to digits places after the point, halves away from zero (2.345 to 2 places is 2.35); digits is from 0 to 28.",
         arguments => RoundTo((decimal)arguments[0]!, (long)arguments[1]!),
         Parameter("x", CelValueType.Decimal), Parameter("digits", CelValueType.Int)) with
     {

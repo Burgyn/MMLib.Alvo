@@ -60,7 +60,7 @@ internal static partial class CelBuiltInFunctions
         Parameter("x", type));
 
     private static CelFunction Round(CelValueType type) => InProcess(
-        "math.round", type, "x rounded to a whole number, halves away from zero (2.5 is 3, -2.5 is -3), of the same numeric type.",
+        "math.round", type, "Rounds x to a whole number, halves away from zero (2.5 is 3, -2.5 is -3), of the same numeric type.",
         arguments => type == CelValueType.Int ? arguments[0] : Math.Round((decimal)arguments[0]!, MidpointRounding.AwayFromZero),
         Parameter("x", type));
 

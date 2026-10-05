@@ -13,17 +13,17 @@ internal static partial class CelBuiltInFunctions
 
     private static CelFunction String(CelValueType type) => InProcess(
         "string", CelValueType.String,
-        "value as text: digits for a number (no trailing zeros), true or false, a lower-case id, or an RFC 3339 instant in UTC.",
+        "The value as text: digits for a number (no trailing zeros), true or false, a lower-case id, or an RFC 3339 instant in UTC.",
         arguments => StringOf(arguments[0]!), Parameter("value", type));
 
     private static CelFunction Int(CelValueType type) => InProcess(
         "int", CelValueType.Int,
-        "value as a whole number: a decimal cut toward zero (2.9 is 2), or a text of digits with an optional sign; anything else fails the write.",
+        "The value as a whole number: a decimal cut toward zero (2.9 is 2), or a text of digits with an optional sign; anything else fails the write.",
         arguments => type == CelValueType.Decimal ? IntOf((decimal)arguments[0]!) : IntOf((string)arguments[0]!), Parameter("value", type));
 
     private static CelFunction Timestamp => InProcess(
         "timestamp", CelValueType.Timestamp,
-        "text read as an RFC 3339 instant, such as 2026-10-05T12:00:00Z or 2026-10-05T14:00:00+02:00; anything else fails the write.",
+        "The text read as an RFC 3339 instant, such as 2026-10-05T12:00:00Z or 2026-10-05T14:00:00+02:00; anything else fails the write.",
         arguments => TimestampOf((string)arguments[0]!), Parameter("text", CelValueType.String));
 
     /// <summary><c>string</c>: the one text form per type spec §5.3 pins, culture-free.</summary>
@@ -74,9 +74,14 @@ internal static partial class CelBuiltInFunctions
     internal static DateTimeOffset TimestampOf(string text)
     {
         var match = Rfc3339().Match(text);
+        if (!match.Success)
+        {
+            throw new CelFunctionException("timestamp", TimestampFailure);
+        }
+
         var fraction = match.Groups["fraction"].Value;
         var kept = $"{match.Groups["main"].Value}{(fraction.Length > 0 ? "." + fraction[..Math.Min(7, fraction.Length)] : string.Empty)}{match.Groups["zone"].Value}";
-        return match.Success && DateTimeOffset.TryParseExact(kept, Rfc3339Formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var instant)
+        return DateTimeOffset.TryParseExact(kept, Rfc3339Formats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var instant)
             ? instant
             : throw new CelFunctionException("timestamp", TimestampFailure);
     }

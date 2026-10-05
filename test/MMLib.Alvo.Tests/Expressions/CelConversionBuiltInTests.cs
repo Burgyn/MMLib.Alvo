@@ -68,6 +68,33 @@ public sealed class CelConversionBuiltInTests
         TestCelFunctions.Compiler().Compile("string(moment)", CelProfile.Mutate, withMoment).IsSuccess.ShouldBeTrue();
     }
 
+    /// <summary>
+    /// The cel-spec subset Alvo leaves out on purpose (spec §16 F12–F14): <c>string(string)</c>, <c>timestamp(timestamp)</c>,
+    /// <c>timestamp(int)</c> and <c>int(timestamp)</c> have no overload here, so a call to one is refused at apply — never
+    /// coerced, never a run-time surprise.
+    /// </summary>
+    [Theory]
+    [InlineData("string(name)", "string", "String")]
+    [InlineData("timestamp(now())", "timestamp", "Timestamp")]
+    [InlineData("timestamp(qty)", "timestamp", "Int")]
+    [InlineData("int(now())", "int", "Timestamp")]
+    public void A_left_out_conversion_overload_is_refused_at_apply(string source, string function, string argumentType) =>
+        TestCelFunctions.Compiler().Compile(source, CelProfile.Mutate, TestCelFunctions.Items).Errors.ShouldHaveSingleItem()
+            .Message.ShouldStartWith($"'{function}(...)' accepts no ({argumentType}); it accepts {function}(");
+
+    /// <summary>
+    /// <c>int(int)</c> is the one cel-spec identity with no overload of its own that still compiles: an Int argument binds
+    /// <c>int(value: Decimal)</c> (F7 widening), and cutting a whole number toward zero is the number itself — every
+    /// 64-bit value fits a decimal exactly.
+    /// </summary>
+    [Fact]
+    public void Int_of_an_int_binds_the_decimal_overload_and_is_the_identity()
+    {
+        TestCelFunctions.Compiler().Compile("int(qty)", CelProfile.Mutate, TestCelFunctions.Items).IsSuccess.ShouldBeTrue();
+        CelBuiltInFunctions.IntOf((decimal)long.MinValue).ShouldBe(long.MinValue);
+        CelBuiltInFunctions.IntOf((decimal)long.MaxValue).ShouldBe(long.MaxValue);
+    }
+
     [Fact]
     public void String_of_a_bool_is_true_or_false()
     {

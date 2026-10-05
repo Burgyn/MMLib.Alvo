@@ -60,6 +60,11 @@ public sealed class CelFunctionCatalogTests
     public void Every_built_in_summary_ends_with_a_period_and_fits_two_hundred_characters() =>
         CelFunctionCatalog.BuiltIns.Functions.ShouldAllBe(function => function.Summary.EndsWith('.') && function.Summary.Length <= 200);
 
+    /// <summary>Discovery shows a summary as a sentence, so it opens with a capital — a parameter name goes later (<c>Rounds x …</c>).</summary>
+    [Fact]
+    public void Every_built_in_summary_opens_with_a_capital() =>
+        CelFunctionCatalog.BuiltIns.Functions.ShouldAllBe(function => char.IsUpper(function.Summary[0]));
+
     [Fact]
     public void Describe_is_ordinal_by_name_with_overloads_in_declaration_order()
     {
