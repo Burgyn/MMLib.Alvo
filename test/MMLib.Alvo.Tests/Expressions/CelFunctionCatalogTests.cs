@@ -11,13 +11,15 @@ public sealed class CelFunctionCatalogTests
         "A host function.", IsHost: true, CelBuiltInFunctions.ConditionAndMutate, arguments => arguments[0]);
 
     [Fact]
-    public void The_built_ins_are_the_two_legacy_calls_with_their_own_grammar()
+    public void The_built_ins_are_the_legacy_calls_and_the_five_functions()
     {
         var catalog = CelFunctionCatalog.BuiltIns;
 
-        catalog.Names.ShouldBe(["lowerAscii", "now"]);
-        catalog.Functions.ShouldAllBe(function => function.IsLegacy && !function.IsHost);
-        catalog.Functions.ShouldAllBe(function => function.Profiles.SetEquals(new[] { CelProfile.Mutate }));
+        catalog.Names.ShouldBe(["abs", "lowerAscii", "now", "replace", "round", "size", "trim"]);
+        catalog.Overloads("abs").Select(o => o.ResultType).ShouldBe([CelValueType.Int, CelValueType.Decimal]);
+        catalog.Overloads("round").Select(o => o.ResultType).ShouldBe([CelValueType.Int, CelValueType.Decimal]);
+        catalog.Functions.Where(f => f.IsLegacy).Select(f => f.Name).ShouldBe(["lowerAscii", "now"]);
+        catalog.Functions.Where(f => !f.IsLegacy).ShouldAllBe(f => f.Profiles.SetEquals(new[] { CelProfile.Condition, CelProfile.Mutate }));
     }
 
     [Fact]
@@ -32,7 +34,7 @@ public sealed class CelFunctionCatalogTests
     {
         var catalog = CelFunctionCatalog.BuiltIns.With([Host("normalizePhone")]);
 
-        catalog.Names.ShouldBe(["lowerAscii", "normalizePhone", "now"]);
+        catalog.Names.ShouldBe(["abs", "lowerAscii", "normalizePhone", "now", "replace", "round", "size", "trim"]);
         catalog.Overloads("normalizePhone").ShouldHaveSingleItem().IsHost.ShouldBeTrue();
     }
 

@@ -67,7 +67,7 @@ public sealed class CelCatalogCallParsingTests
 
         refused.Message.ShouldBe("'normalisePhone' is not a recognized function.");
         refused.FixSuggestion.ShouldNotBeNull().ShouldContain("Did you mean 'normalizePhone'?");
-        refused.FixSuggestion.ShouldContain("Known functions: echo, lowerAscii, normalizePhone, now, pair.");
+        refused.FixSuggestion.ShouldContain("Known functions: abs, echo, lowerAscii, normalizePhone, now, pair, replace, round, size, trim.");
         refused.FixSuggestion.ShouldContain("AddCelFunction");
     }
 

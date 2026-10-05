@@ -1,0 +1,65 @@
+﻿using CsCheck;
+using MMLib.Alvo.Expressions.Internal;
+using System.Text;
+
+namespace MMLib.Alvo.Tests.Expressions;
+
+/// <summary>The text built-ins never throw for any string — lone surrogates included — and agree with a reference definition.</summary>
+public sealed class CelBuiltInPropertyTests
+{
+    private const int Iterations = 5_000;
+    private const string AsciiWhitespace = " \t\n\r";
+
+    [Fact]
+    public void Trim_leaves_no_ascii_whitespace_at_either_end_and_only_removes_from_the_ends() =>
+        Gen.String.Sample(text =>
+        {
+            var trimmed = CelBuiltInFunctions.TrimText(text);
+
+            (trimmed.Length == 0 || (!AsciiWhitespace.Contains(trimmed[0]) && !AsciiWhitespace.Contains(trimmed[^1]))).ShouldBeTrue();
+            text.Contains(trimmed, StringComparison.Ordinal).ShouldBeTrue();
+        },
+        iter: Iterations);
+
+    [Fact]
+    public void Size_equals_a_code_point_scan() =>
+        Gen.String.Sample(text => CelBuiltInFunctions.SizeOf(text).ShouldBe(CodePoints(text)), iter: Iterations);
+
+    [Fact]
+    public void Replace_agrees_with_a_left_to_right_scan() =>
+        Gen.Select(Text(0, 40), Text(1, 3), Text(0, 3)).Sample(
+            sample => CelBuiltInFunctions.ReplaceText(sample.Item1, sample.Item2, sample.Item3)
+                .ShouldBe(Scan(sample.Item1, sample.Item2, sample.Item3)),
+            iter: Iterations);
+
+    /// <summary>Text over a three-letter alphabet, so searches actually match.</summary>
+    private static Gen<string> Text(int shortest, int longest) =>
+        Gen.Char["abc"].Array[shortest, longest].Select(characters => new string(characters));
+
+    private static long CodePoints(string text)
+    {
+        long count = 0;
+        for (var index = 0; index < text.Length; index++, count++)
+        {
+            if (char.IsSurrogatePair(text, index))
+            {
+                index++;
+            }
+        }
+
+        return count;
+    }
+
+    private static string Scan(string text, string search, string replacement)
+    {
+        var built = new StringBuilder();
+        for (var at = 0; at < text.Length;)
+        {
+            var matches = at + search.Length <= text.Length && string.CompareOrdinal(text, at, search, 0, search.Length) == 0;
+            built.Append(matches ? replacement : text[at].ToString());
+            at += matches ? search.Length : 1;
+        }
+
+        return built.ToString();
+    }
+}
