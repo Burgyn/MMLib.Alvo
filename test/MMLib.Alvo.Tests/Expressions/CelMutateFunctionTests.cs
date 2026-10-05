@@ -6,9 +6,10 @@ using System.Reflection;
 namespace MMLib.Alvo.Tests.Expressions;
 
 /// <summary>
-/// The <see cref="CelProfile.Mutate"/> profile's function allow-list: exactly two entries,
-/// <c>lowerAscii(field)</c> and <c>now()</c>, legal in this profile and in no other, with every other
-/// identifier followed by <c>(</c> still refused everywhere.
+/// The two legacy calls of the <see cref="CelProfile.Mutate"/> profile, <c>lowerAscii(field)</c> and
+/// <c>now()</c>: legal in this profile and in no other, with their own narrow grammar. The catalogued
+/// functions (<c>trim</c>, <c>size</c>, ...) are pinned elsewhere; an identifier followed by <c>(</c> that
+/// is in no catalog is still refused everywhere.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -22,9 +23,9 @@ namespace MMLib.Alvo.Tests.Expressions;
 /// in and write a permanently wrong row.
 /// </para>
 /// <para>
-/// <b>The allow-list is closed on purpose.</b> <c>upper</c>, <c>trim</c>, <c>size</c>, <c>concat</c> and
-/// string indexing are all absent because no shipped descriptor uses them, and every entry is a permanent
-/// grammar addition every future engine, profile and agent expectation has to carry.
+/// <b>The legacy pair stays closed.</b> New functions join through the function catalog (a built-in or
+/// <c>AddCelFunction</c>), not as further special-cased grammar here; <c>upper</c>, <c>concat</c> and string
+/// indexing are still absent from every catalog.
 /// </para>
 /// </remarks>
 public class CelMutateFunctionTests

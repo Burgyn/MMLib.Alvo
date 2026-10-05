@@ -246,7 +246,7 @@ internal static class CelInterpreter
     };
 
     /// <summary>
-    /// Evaluates one of the two allow-listed <see cref="CelProfile.Mutate"/> functions. <c>now()</c> reads the
+    /// Evaluates one of the two legacy <see cref="CelProfile.Mutate"/> calls (<c>lowerAscii</c>, <c>now</c>). <c>now()</c> reads the
     /// instant the caller bound for this write — it is <b>not</b> a clock read, and there is deliberately no
     /// <see cref="TimeProvider"/> in reach of this class to make one from.
     /// </summary>

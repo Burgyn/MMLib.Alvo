@@ -906,7 +906,7 @@ internal static class CelTypeChecker
         }
 
         /// <summary>
-        /// Checks one of the two allow-listed <see cref="CelProfile.Mutate"/> functions. The profile gate
+        /// Checks one of the two legacy <see cref="CelProfile.Mutate"/> calls (<c>lowerAscii</c>, <c>now</c>). The profile gate
         /// runs first and unconditionally, so a call outside <see cref="CelProfile.Mutate"/> is reported for
         /// the profile it is in even when its argument is also wrong — one error per independent problem,
         /// which is this checker's whole contract.
