@@ -459,4 +459,81 @@ functions (slice B); #85.
 
 ## 17. As built
 
-*Placeholder — filled in by Task 11 of the C1 plan after the slice lands: commits, deviations from the plan, ruled.*
+Slice C1 as it landed on `feat/cel-functions` (`git log --oneline 0527bb9..`, oldest first; the docs/skills/assistant
+commit that writes this section follows the last one listed):
+
+- `3c0b88b` docs(f5): the CEL functions design and its C1 plan
+- `1adcb3c` fix(cel): refuse a lexer step that consumes nothing instead of looping
+- `97710b9` refactor(cel): a call node carries every argument and its checked result type
+- `80b718d` feat(cel): an internal function catalog that lists the two built-in calls
+- `39548a1` feat(cel): the parser reads a catalogued function as an N-ary call and names the known ones when it cannot
+- `f36dcef` feat(cel): resolve a function call against its signatures and gate it by its profiles
+- `73d98e8` fix(cel): pin both function-profile gates and say the right thing when one refuses
+- `3cd2ef9` feat(cel): invoke a bound function through a marshaller and let its failure escape, fail closed
+- `ff91c48` feat(cel): replace, trim, size, abs and round in hook conditions and mutate values
+- `ee3cfab` test(cel): pin ordinal replace, the cap boundary and a real trim invariant; spec the cap and C2 notes
+- `98317d5` feat(cel): AddCelFunction registers a host function, validated at the call, discoverable as CelFunctionInfo
+- `166d2c1` fix(cel): host function nullability falls to the safe side for odd delegate shapes; reserve standard CEL names; cap name length
+- `cec38ed` feat(api): a failing CEL function rolls the write back and answers function-failed
+- `d38845b` fix(api): warn when a CEL function drops an after-hook, find wrapped failures, pin update/delete/batch/outbox fail-closed
+- `015675e` test(api): make the refused-write outbox assertion real with an after-create webhook
+- `97d52bc` feat(management): cel/functions lists every function a descriptor may call, for viewers
+- `37b2d7b` fix(management): return cel/functions as an object envelope, pin its wire format and authorization
+- `9a12232` test(management): cel/check and apply agree on host and built-in function calls in every slot
+- `8283ff3` fix(rules): a call reads exactly what its arguments read in the context and row-field walkers
+- `9842cf7` test(rules): pin the context an after-hook call reads, through the gate and the check
+
+**Rulings on the open questions (§14), taken autonomously while the maintainer was away; each is the maintainer's to
+overturn in the PR.**
+
+| Ruling | Decision | Cost if wrong |
+|---|---|---|
+| K | accept X7: a host function is host code, the trust shift is inherent in "define functions from code"; the descriptor author still cannot reach the network; the checklist and the remarks are amended; the PR carries `needs-deep-review` | a stricter reading of "no network in a before-hook" would forbid the feature |
+| L | `function-failed` answers HTTP 500, no exception text | clients treat it as a server error |
+| M | `trim` strips the four ASCII characters only (not form feed or vertical tab) | a form feed survives `trim` |
+| N | the `replace` growth cap stays the constant 1,048,576 characters | a host with a larger body limit cannot replace beyond it |
+| O | no `DateOnly` parameter in C1 (a timestamp is `DateTimeOffset` only) | a `vat_rate(…, date)` function needs a Timestamp until a Date type exists |
+| P | `summary` stays optional | a function can be registered undocumented |
+| Q | `ICelFunctionCatalog` stays internal (`CelFunctionCatalog`); only `CelFunctionInfo`, `CelFunctionParameter` and `CelFunctionProvenance` are public | making it public later is additive |
+| S | `cel/functions` answers an object envelope `ManagementCelFunctions { functions: [...] }`, not the bare list §5.9 first wrote | the one extra public record; a bare array could never grow |
+
+**Deviations from the plan, each ruled.**
+
+* **The envelope (Ruling S)** changed Task 9's contract after review: `IAlvoManagement.GetCelFunctionsAsync` returns
+  `ManagementCelFunctions`, and the wire shape is `{ "functions": [...] }`. §5.9's "`IReadOnlyList<CelFunctionInfo>`" is
+  superseded by this line. Nothing consumed the route yet.
+* **A walker fix** (found while extending the agreement evidence in Task 10): `ReferencesContextValue` and
+  `ReferencesRowField` swallowed a `CelCall` in their `_ => true` wildcard, so a host-function call in an *after-hook*
+  condition was refused with a misleading `@tenant.id`/`@user.roles` reason. An explicit arm now recurses into the
+  call's arguments, so a call reads exactly what its arguments read. A walker audit found no other walker with the
+  gap.
+* **The after-hook failure is logged at Warning, not Debug** (§5.6 said "already caught and logged"): a function that
+  throws in an after-hook condition silently drops, for example, an audit webhook, and its before-hook twin logs at
+  Error. The log carries the function's name and no record data.
+* **§8's Rule refusal says "SQL filter", not "SQL `WHERE` clause"** — `SqlTextConfinedToRendererArchitectureTests` bans
+  the latter text in any source file outside the renderer, and a refusal message is source. The "available in" list
+  names only the profiles inside the checker's ceiling that the function also lists.
+* **`NullabilityInfoContext` on a lambda held** for parameters: names and `string?` annotations are read from
+  `Delegate.Method` when its parameters mirror the delegate type's. A closed extension-method delegate, an
+  open-instance delegate, a compiled expression and a dynamic method read as non-nullable parameters (the safe
+  default), and a lambda's *result* reads as may-be-null because the compiler emits no non-null return annotation
+  for it — conservative, not pinned by a test.
+* **Test and text adapted in this task:** `SkillCoreClaimsTests` derives the Mutate-functions list from the catalog
+  instead of a constant; `ManagementToolsTests` and `EmbeddedSkillsTests` count seven management tools; and the
+  assistant instructions' always-in-context budget (22,758 bytes) held only after trimming three sentences that
+  repeated what the Skills paragraph and the skills themselves already say (the budget was not touched).
+  `docs/architecture/cel.md` now carries deviations 17–24 (the §11 F-series, with the `Int`→`Decimal` widening as 22 and
+  the reserved-names narrowing X3 as 24).
+
+**Deferred (the final fix wave, or later).**
+
+* Defence in depth in `CelFunction.Run`: a runtime arity guard (fewer arguments than parameters is an
+  `IndexOutOfRangeException` today, which `EvaluatePredicate` collapses to `false`) and a check of the result against
+  the declared type (`Normalize` maps only `int` to `long`). Both are unreachable through the type checker.
+* `EvaluateMask` and `EvaluateScalar` still swallow `CelFunctionException`: unreachable while a call is refused in
+  Rule and Computed, so a **C2 checklist item** — the catch-alls must let it through before a call is admitted there.
+* `lowerAscii` in a Condition (X10) and the other §16 follow-ups.
+* A timestamp text without an offset parses in the machine's zone (pre-existing; relevant when `Date` arrives).
+* `CelProfile.Mutate`'s XML remarks still say the allow-list is "exactly two entries"; a comment in the public
+  Abstractions assembly, left for the final wave.
+

@@ -118,6 +118,10 @@ internal sealed class ManagementTools
                 "get_capabilities",
                 "What this build honours and what it refuses, in the framework's own words."),
             AIFunctionFactory.Create(
+                GetCelFunctionsAsync,
+                "get_cel_functions",
+                "The CEL functions this host knows — built-in and host-registered — with parameters, result and the profiles each works in."),
+            AIFunctionFactory.Create(
                 GetRevisionsAsync,
                 "get_revisions",
                 "The revision history: who applied what, when, and why."),
@@ -179,6 +183,10 @@ internal sealed class ManagementTools
     /// <summary>What this build honours and what it refuses, in the framework's own words.</summary>
     private Task<string> GetCapabilitiesAsync(CancellationToken ct) =>
         AnsweredAsync(async () => Json(await _management.GetCapabilitiesAsync(_project, ct).ConfigureAwait(false)));
+
+    /// <summary>The CEL functions a descriptor may call here, so a call is written against the real list.</summary>
+    private Task<string> GetCelFunctionsAsync(CancellationToken ct) =>
+        AnsweredAsync(async () => Json(await _management.GetCelFunctionsAsync(_project, ct).ConfigureAwait(false)));
 
     /// <summary>The revision history, so the agent can say what changed and when.</summary>
     private Task<string> GetRevisionsAsync(CancellationToken ct) =>

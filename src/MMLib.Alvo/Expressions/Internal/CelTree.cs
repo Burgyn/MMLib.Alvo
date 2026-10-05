@@ -40,7 +40,7 @@ internal static class CelTree
 /// <remarks>
 /// <para>
 /// The node is deliberately <see langword="internal"/> while the rest of the <see cref="CelNode"/>
-/// hierarchy is public: the allow-list is closed at two entries, so nothing outside the core has a
+/// hierarchy is public: the function catalog is the core's own, so nothing outside the core has a
 /// reason to pattern-match this kind, and keeping it internal means the published AST does not grow a
 /// case every out-of-repo walker would have to learn. It still derives from the public
 /// <see cref="CelNode"/>, so <c>CompiledExpression.Root</c> can carry one; an external walker sees an
