@@ -3,8 +3,10 @@
 /// <summary>
 /// A catalogued CEL function failed while an expression was evaluated. Deliberately <b>not</b> collapsed into a value
 /// the way every other evaluation surprise is (false, null, masked): a function is the one construct whose failure is
-/// reachable, so it fails closed — the interpreter lets it escape, the write rolls back, and the caller receives
-/// <c>…/errors/function-failed</c> (spec §5.6). Internal: only the core throws it and only the core catches it.
+/// reachable, so it fails closed — the interpreter lets it escape and the write rolls back. A Data API caller receives
+/// <c>…/errors/function-failed</c> (spec §5.6); an in-process <c>IAlvoData</c> caller receives it as a plain
+/// <see cref="Exception"/>; an after-hook condition drops the hook with a Warning. Internal: only the core throws it and
+/// names it — no public signature exposes the type.
 /// </summary>
 #pragma warning disable RCS1194 // Deliberately no standard constructors: a function failure always names its function.
 internal sealed class CelFunctionException : Exception

@@ -52,10 +52,22 @@ public static class AlvoBuilderExtensions
     /// </para>
     /// <para>
     /// <b>The function is host code inside the write's transaction.</b> It must be synchronous, fast, thread-safe and
-    /// free of side effects; it runs once per evaluation with no timeout. If it throws, nothing is written and the caller
-    /// receives <c>…/errors/function-failed</c>. It captures what it closes over for the host's lifetime (no DI scope).
-    /// A changed meaning deserves a new name, so stored descriptors keep theirs. Only this host knows the function: the
-    /// standalone image and the CLI refuse a descriptor that calls it as an unknown function.
+    /// free of side effects; it runs once per evaluation with no timeout. It captures what it closes over for the host's
+    /// lifetime (no DI scope).
+    /// </para>
+    /// <para>
+    /// <b>If it throws (or an argument does not fit), the evaluation fails closed</b>, and what that looks like depends
+    /// on the caller: a Data API write is rolled back and answers HTTP 500 <c>…/errors/function-failed</c> naming the
+    /// function; an in-process <c>IAlvoData</c> caller (a host endpoint, the dashboard) receives an exception and nothing
+    /// is written (the dashboard shows its generic fault); in an after-hook condition the after-hook is dropped and a
+    /// Warning is logged. Return <see langword="null"/> or <see langword="false"/> on input the function cannot handle
+    /// rather than throwing: every throw is a 500 and an Error log entry per request.
+    /// </para>
+    /// <para>
+    /// A changed meaning deserves a new name, so stored descriptors keep theirs. Removing or renaming a registered
+    /// function makes a stored descriptor that calls it fail the apply at boot, refused as calling an unknown function.
+    /// Only this host knows the function: the standalone image and the CLI refuse a descriptor that calls it as an
+    /// unknown function.
     /// </para>
     /// </remarks>
     /// <param name="builder">The Alvo builder.</param>

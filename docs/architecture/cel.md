@@ -218,11 +218,17 @@ process. Purity, speed and thread-safety are by contract, not enforced (spec §5
   null would make a `reject` condition `false` and let the write through — it fails the call closed, the reason naming
   the parameter and its type (`an argument does not fit parameter 'n' (Int32)`), never the value.
 - **Failure fails closed.** A function that throws aborts evaluation as a `CelFunctionException`, which the
-  interpreter's catch-alls let through: a before-hook condition or `mutate` refuses the write (HTTP 500,
-  `function-failed`, the function's name and no exception text; the transaction rolls back); an after-hook condition
-  is already post-commit, so the hook does not fire and the drop is logged at Warning.
+  interpreter's catch-alls let through. In a before-hook condition or `mutate` the write is refused and the
+  transaction rolls back; what the caller sees depends on who wrote: a **Data API** request answers HTTP 500
+  `function-failed`, naming the function and carrying no exception text; an **in-process `IAlvoData` caller** (a host
+  endpoint, the dashboard) receives an exception (the internal type surfaces as a plain `Exception`; the dashboard shows
+  its generic fault). An **after-hook condition** is already post-commit, so the after-hook is dropped and a Warning is
+  logged.
+- **Prefer null to a throw.** A host function should answer `null` (or `false`) on input it cannot handle rather than
+  throw: every throw is a 500 and an Error log entry, once per request.
 - **Versioning.** A function whose meaning changes gets a new name (`vatRate` stays, `vatRate2` is new): a descriptor
-  holds names, not versions.
+  holds names, not versions. Removing or renaming a registered function makes a stored descriptor that calls it fail
+  the apply at boot — refused as calling an unknown function.
 - **Discovery.** `GET …/cel/functions` (`IAlvoManagement.GetCelFunctionsAsync`, Viewer) lists one entry per overload as
   `{ "functions": [...] }`; the assistant reads it through its `get_cel_functions` tool.
 
