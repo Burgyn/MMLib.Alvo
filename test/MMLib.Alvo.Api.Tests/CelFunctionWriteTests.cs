@@ -136,17 +136,24 @@ public sealed class CelFunctionWriteTests
         (await world.CountRowsAsync("contacts")).ShouldBe(0);
     }
 
+    /// <summary>
+    /// The outbox assertion can see a row (a committed create leaves exactly one, via the descriptor's after-create
+    /// webhook), so a refused write that leaves the count where it was is a measurement and not a vacuous zero.
+    /// </summary>
     [Fact]
     public async Task A_refused_write_leaves_no_row_and_no_outbox_entry()
     {
-        await using var world = await CelFunctionsWorld.StartAsync(_ => throw new FormatException("secret-detail-from-the-host"));
-        var outboxBefore = await world.CountRowsAsync("alvo_outbox");
+        var (world, arm) = await StartArmableAsync();
+        await using var _ = world;
+        await CreateAsync(world, "111");
+        (await world.CountRowsAsync("alvo_outbox")).ShouldBe(1, "a committed create must leave one outbox row");
+        arm();
 
         using var refused = await world.SendAsync(HttpMethod.Post, "/api/contacts", CelFunctionsWorld.Writer, body: Contact("x"));
 
         await ShouldBeFunctionFailedAsync(refused);
-        (await world.CountRowsAsync("contacts")).ShouldBe(0);
-        (await world.CountRowsAsync("alvo_outbox")).ShouldBe(outboxBefore);
+        (await world.CountRowsAsync("contacts")).ShouldBe(1);
+        (await world.CountRowsAsync("alvo_outbox")).ShouldBe(1);
     }
 
     [Fact]
