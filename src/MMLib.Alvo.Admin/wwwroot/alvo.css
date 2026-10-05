@@ -887,9 +887,10 @@
     border-radius: var(--radius-sm);
   }
 
-  /* An integration row's URL and its "posted to by …" badge break anywhere: a URL has no spaces, and a badge does not
-     wrap by default, so either would scroll the page sideways at 375 px. */
+  /* An integration row's URL, a template's subject and its "posted to by …" badge break anywhere: a URL or a subject
+     can have no spaces, and a badge does not wrap by default, so any would scroll the page sideways at 375 px. */
   .a-integration-url,
+  .a-integration-subject,
   .a-badge.a-integration-uses {
     min-width: 0;
     overflow-wrap: anywhere;

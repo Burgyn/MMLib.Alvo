@@ -26,6 +26,11 @@ public class TemplateDraftTests
         }
     }
 
+    [Fact]
+    public void A_refused_name_never_echoes_what_was_pasted()
+        => TemplateDraft.NameRefusal("Hi {{new.secret_token}} s3cr3t", ["taken"])
+            .ShouldNotBeNull().ShouldNotContain("s3cr3t", Case.Sensitive, "a subject or a body pasted into the wrong box is not repeated");
+
     [Theory]
     [InlineData("Your bike is ready — order {{new.order_number}}", true)]
     [InlineData("Tabs\tare one line", true)]

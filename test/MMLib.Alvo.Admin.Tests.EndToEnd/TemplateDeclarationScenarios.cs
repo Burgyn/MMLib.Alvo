@@ -42,6 +42,12 @@ public sealed class TemplateDeclarationScenarios(BikeWorkshopWorld world) : ICla
         var row = session.Page.Locator("#template-pickup-reminder");
         (await row.GetAttributeAsync("data-alvo-new")).ShouldBe("true");
         (await row.InnerTextAsync()).ShouldContain("Your bike {{new.order_number}} is waiting");
+        /* The row trims what it draws too, so only the staged subject read back in Edit shows the trim was saved. */
+        await row.GetByTestId("template-edit").ClickAsync();
+        await session.WaitForFocusInsideAsync("template-editor", FocusScope.Dialog);
+        (await session.Page.InputValueAsync("#template-subject")).ShouldBe("Your bike {{new.order_number}} is waiting");
+        await session.Page.Keyboard.PressAsync("Escape");
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
         await HookPickerScenarios.NewAfterHookAsync(session, "service_orders", "afterUpdate", "email");
         await HookPickerScenarios.Combobox(session, "Template").ClickAsync();
@@ -95,8 +101,16 @@ public sealed class TemplateDeclarationScenarios(BikeWorkshopWorld world) : ICla
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
         await session.GoAsync("/integrations");
-        await NewTemplateAsync(session);
+        var editor = await NewTemplateAsync(session);
+        await session.AssertNoHorizontalScrollAsync();
 
+        /* A subject with no spaces to break at: its row must wrap it rather than widen the page. */
+        await session.Page.FillAsync("#template-name", "long-subject");
+        await session.Page.FillAsync("#template-subject", new string('s', 160));
+        await session.Page.FillAsync("#template-body", "Hello.");
+        await editor.GetByTestId("template-save").ClickAsync();
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.Page.Locator("#template-long-subject").WaitForAsync();
         await session.AssertNoHorizontalScrollAsync();
     }
 

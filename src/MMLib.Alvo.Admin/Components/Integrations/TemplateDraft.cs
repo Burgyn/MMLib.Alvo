@@ -61,12 +61,14 @@ internal sealed partial class TemplateDraft
     /// <summary>Why a name cannot be a template's key, or <see langword="null"/>.</summary>
     /// <param name="name">The name.</param>
     /// <param name="declared">The names already declared.</param>
-    /// <returns>The refusal, or <see langword="null"/>.</returns>
+    /// <returns>The refusal, which never repeats a malformed name, or <see langword="null"/>.</returns>
     public static string? NameRefusal(string name, IReadOnlyCollection<string> declared)
     {
         if (!Identifier().IsMatch(name))
         {
-            return $"'{name}' is not a template name. A name is lower case, starts with a letter, and holds letters, digits, "
+            /* Not repeated: a subject or a body pasted into the wrong box would be shown back, as EndpointDraft.NameRefusal
+               never does. */
+            return "That is not a template name. A name is lower case, starts with a letter, and holds letters, digits, "
                 + "dashes and underscores — up to 63 characters, such as 'order-ready'.";
         }
 

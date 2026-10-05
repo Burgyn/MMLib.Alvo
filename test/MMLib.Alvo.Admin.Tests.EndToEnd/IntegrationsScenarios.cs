@@ -136,6 +136,13 @@ public sealed class IntegrationsScenarios(BikeWorkshopWorld world) : IClassFixtu
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
         await session.SnackbarAsync("Endpoint twice-desk added to the working copy");
+        /* One more round trip before counting: a circuit handles events in order, so once New endpoint has opened the
+           sheet again, a second Add queued behind the first has run too — and would show here as an error or a log. */
+        await session.Page.GetByTestId("endpoint-new").ClickAsync();
+        await editor.WaitForAsync();
+        await session.WaitForFocusInsideAsync("endpoint-editor", FocusScope.Dialog);
+        await session.Page.Keyboard.PressAsync("Escape");
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
         (await session.Page.Locator("#endpoint-twice-desk").CountAsync()).ShouldBe(1);
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
         session.AssertConsoleClean();
