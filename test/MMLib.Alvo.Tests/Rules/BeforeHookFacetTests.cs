@@ -118,6 +118,41 @@ public sealed class BeforeHookFacetTests
         refusal.Message.ShouldNotContain("SECRET-VALUE");
     }
 
+    [Fact]
+    public void A_later_hook_may_repair_a_value_an_earlier_hook_overran()
+    {
+        var hooks = BeforeCreate(Mutate("code", Cel("new.note")), Mutate("code", Literal("\"ok\"")));
+
+        Run(hooks, Row(("note", Secret))).ShouldContainKeyAndValue("code", "ok");
+    }
+
+    [Fact]
+    public void An_overrun_by_a_later_hook_names_that_hook_and_not_the_one_whose_value_it_replaced()
+    {
+        var hooks = BeforeCreate(Mutate("code", Literal("\"ok\"")), Mutate("code", Cel("new.note")));
+
+        var refusal = Should.Throw<AlvoAuthorizationException>(() => Run(hooks, Row(("note", Secret))));
+
+        refusal.Message.ShouldContain("/entities/contacts/hooks/beforeCreate/1");
+        refusal.Message.ShouldNotContain(CreatePointer);
+        refusal.Message.ShouldNotContain("SECRET-VALUE");
+    }
+
+    [Theory]
+    [InlineData("secret")]
+    [InlineData("masked")]
+    public void A_refusal_for_a_hidden_target_names_no_field_facet_or_limit(string field)
+    {
+        var refusal = Should.Throw<AlvoAuthorizationException>(
+            () => Run(BeforeCreate(Mutate(field, Cel("new.note"))), Row(("note", Secret))));
+
+        refusal.Message.ShouldContain(CreatePointer);
+        refusal.Message.ShouldNotContain(field);
+        refusal.Message.ShouldNotContain("max-length");
+        refusal.Message.ShouldNotContain("5 characters");
+        refusal.Message.ShouldNotContain("SECRET-VALUE");
+    }
+
     [Theory]
     [InlineData("stage", "\"superadmin\"", "enum")]
     [InlineData("code", "\"far-too-long\"", "5 characters")]
@@ -179,8 +214,8 @@ public sealed class BeforeHookFacetTests
 
     private static ValueOrExpr Literal(string json) => ValueOrExpr.FromLiteral(JsonDocument.Parse(json).RootElement);
 
-    private static EntityHooks BeforeCreate(BeforeHookAction action) =>
-        new() { BeforeCreate = [new BeforeHook { Action = action }] };
+    private static EntityHooks BeforeCreate(params BeforeHookAction[] actions) =>
+        new() { BeforeCreate = [.. actions.Select(action => new BeforeHook { Action = action })] };
 
     private static AlvoDescriptor Descriptor(EntityHooks hooks) => new()
     {
@@ -188,7 +223,24 @@ public sealed class BeforeHookFacetTests
         Name = Contacts,
         Entities = new Dictionary<string, EntityDescriptor>(StringComparer.Ordinal)
         {
-            [Contacts] = new() { Fields = new Dictionary<string, FieldDescriptor>(StringComparer.Ordinal), Hooks = hooks },
+            [Contacts] = new() { Fields = HiddenFlags, Hooks = hooks },
+        },
+    };
+
+    /// <summary>One field hidden statically, one per role — the two shapes a <c>hidden</c> flag takes.</summary>
+    private static Dictionary<string, FieldDescriptor> HiddenFlags => new(StringComparer.Ordinal)
+    {
+        ["secret"] = new()
+        {
+            Type = MMLib.Alvo.Descriptor.FieldType.String,
+            MaxLength = 5,
+            Hidden = BoolOrCel.FromBoolean(true),
+        },
+        ["masked"] = new()
+        {
+            Type = MMLib.Alvo.Descriptor.FieldType.String,
+            MaxLength = 5,
+            Hidden = BoolOrCel.FromExpression("!('admin' in @user.roles)"),
         },
     };
 
@@ -207,6 +259,8 @@ public sealed class BeforeHookFacetTests
                 new FieldSchema { Name = "amount", Type = FieldType.Decimal, Precision = 5, Scale = 2, Nullable = true },
                 new FieldSchema { Name = "big", Type = FieldType.Decimal, Precision = 18, Scale = 4, Nullable = true },
                 new FieldSchema { Name = "qty", Type = FieldType.Integer, Nullable = true },
+                new FieldSchema { Name = "secret", Type = FieldType.String, MaxLength = 5, Nullable = true },
+                new FieldSchema { Name = "masked", Type = FieldType.String, MaxLength = 5, Nullable = true },
             ],
         },
     ]);

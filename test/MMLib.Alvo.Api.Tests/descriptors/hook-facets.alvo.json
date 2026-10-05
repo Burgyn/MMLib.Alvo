@@ -2,7 +2,7 @@
   "$schema": "https://alvo.dev/schema/v1/project.json",
   "apiVersion": "alvo.dev/v1",
   "name": "hook-facets",
-  "description": "One entity whose before-hooks write values into fields with declared facets (maxLength, enum, format, decimal precision and scale), selected by the row's own 'mode'. Every value a hook computes outside its field's facets must be refused the same way on every engine (Ruling V, #308). Every world over this descriptor registers the host function pad, which answers 5,000 characters.",
+  "description": "One entity whose before-hooks write values into fields with declared facets (maxLength, enum, format, decimal precision and scale), selected by the row's own 'mode'. Two modes chain two hooks into one field (an earlier overrun a later hook repairs, Ruling W), and two write fields hidden statically or per role, whose refusal must name no field, facet or limit (Ruling X). Every value a hook computes outside its field's facets must be refused the same way on every engine (Ruling V, #308). Every world over this descriptor registers the host function pad, which answers 5,000 characters.",
   "auth": {
     "providers": ["local"],
     "roles": ["writer"]
@@ -21,7 +21,9 @@
         "status": { "type": "enum", "values": ["draft", "done"] },
         "email": { "type": "string", "format": "email" },
         "amount": { "type": "decimal", "precision": 5, "scale": 2 },
-        "big": { "type": "decimal", "precision": 18, "scale": 4 }
+        "big": { "type": "decimal", "precision": 18, "scale": 4 },
+        "secret_code": { "type": "string", "maxLength": 10, "hidden": true },
+        "role_code": { "type": "string", "maxLength": 10, "hidden": "!('writer' in @user.roles)" }
       },
       "rules": {
         "list": "true",
@@ -37,7 +39,13 @@
           { "condition": "new.mode == 'host'", "action": { "mutate": { "phone_normalized": { "$cel": "pad(new.phone)" } } } },
           { "condition": "new.mode == 'enum'", "action": { "mutate": { "status": { "$cel": "new.note" } } } },
           { "condition": "new.mode == 'format'", "action": { "mutate": { "email": { "$cel": "new.note" } } } },
-          { "condition": "new.mode == 'decimal'", "action": { "mutate": { "amount": { "$cel": "new.big" } } } }
+          { "condition": "new.mode == 'decimal'", "action": { "mutate": { "amount": { "$cel": "new.big" } } } },
+          { "condition": "new.mode == 'repair'", "action": { "mutate": { "phone_normalized": { "$cel": "new.note" } } } },
+          { "condition": "new.mode == 'repair' && size(new.phone_normalized) > 40", "action": { "mutate": { "phone_normalized": { "$cel": "new.phone" } } } },
+          { "condition": "new.mode == 'late'", "action": { "mutate": { "phone_normalized": { "$cel": "new.phone" } } } },
+          { "condition": "new.mode == 'late'", "action": { "mutate": { "phone_normalized": { "$cel": "new.note" } } } },
+          { "condition": "new.mode == 'hidden'", "action": { "mutate": { "secret_code": { "$cel": "new.note" } } } },
+          { "condition": "new.mode == 'role-hidden'", "action": { "mutate": { "role_code": { "$cel": "new.note" } } } }
         ],
         "beforeUpdate": [
           { "condition": "new.mode == 'copy'", "action": { "mutate": { "phone_normalized": { "$cel": "new.note" } } } }

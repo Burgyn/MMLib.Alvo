@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Data;
+﻿using MMLib.Alvo.Api;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 
@@ -95,6 +96,7 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
         DateTimeOffset now)
     {
         var patch = new Dictionary<string, object?>(StringComparer.Ordinal);
+        var writers = new Dictionary<string, (CompiledBeforeHook Hook, CompiledMutation Mutation)>(StringComparer.Ordinal);
         var current = candidate;
 
         foreach (var hook in hooks)
@@ -105,15 +107,48 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
             }
 
             EnsureNotRejected(hook);
-            foreach (var (field, value) in Mutations(hook, current, previous, now))
+            foreach (var mutation in hook.Mutations)
             {
-                patch[field] = value;
+                patch[mutation.Field] = Value(mutation, current, previous, now);
+                writers[mutation.Field] = (hook, mutation);
             }
 
             current = Patched(current, patch);
         }
 
+        EnsureEveryValueFits(patch, writers);
         return patch;
+    }
+
+    /// <summary>
+    /// Refuses the write when a value the chain would store breaks its target field's declared facets — measured once,
+    /// on the final patch, and blamed on the hook whose value that is (Ruling V, #308; Ruling W).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Measured here, in the core, before any driver applies the patch</b>, so every engine answers the same: SQLite
+    /// enforces no length and would store the value, PostgreSQL's <c>varchar(n)</c> would refuse it as an anonymous
+    /// 500. The checks are the payload validator's own (<see cref="MutationTarget.Violation"/>).
+    /// </para>
+    /// <para>
+    /// <b>The final patch, not each hook's output (Ruling W).</b> A later hook may repair what an earlier one wrote —
+    /// shorten it, or replace it — and the list reads as the pipeline an author wrote, so only the value that would
+    /// actually be stored is measured. An intermediate value is never stored, and before Ruling V both engines stored
+    /// the repaired one. The refusal names the hook that last wrote the field, because its value is the one refused.
+    /// </para>
+    /// </remarks>
+    private static void EnsureEveryValueFits(
+        Dictionary<string, object?> patch,
+        Dictionary<string, (CompiledBeforeHook Hook, CompiledMutation Mutation)> writers)
+    {
+        foreach (var (field, value) in patch)
+        {
+            var (hook, mutation) = writers[field];
+            if (mutation.Target.Violation(value) is { } violation)
+            {
+                throw Refusal(hook, mutation, violation);
+            }
+        }
     }
 
     /// <summary>
@@ -175,21 +210,10 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
         }
     }
 
-    private static IEnumerable<KeyValuePair<string, object?>> Mutations(
-        CompiledBeforeHook hook, AlvoRecord candidate, AlvoRecord? previous, DateTimeOffset now) =>
-        hook.Mutations.Select(mutation => new KeyValuePair<string, object?>(
-            mutation.Field, Fitting(hook, mutation, Value(mutation, candidate, previous, now))));
-
     /// <summary>
-    /// The value, once it is known to honour the target field's declared facets — or the write refused, as the hook's
-    /// own refusal (Ruling V, #308).
+    /// The refusal for a value that breaks its target field's facets, in the family a hook's own <c>reject</c> uses.
     /// </summary>
     /// <remarks>
-    /// <para>
-    /// <b>Measured here, in the core, before any driver applies the patch</b>, so every engine answers the same: SQLite
-    /// enforces no length and would store the value, PostgreSQL's <c>varchar(n)</c> would refuse it as an anonymous
-    /// 500. The checks are the payload validator's own (<see cref="MutationTarget.Violation"/>).
-    /// </para>
     /// <para>
     /// <b>One rule, whatever produced the value</b> — a literal (already measured at apply), a field copy, a built-in
     /// such as <c>replace</c>, or a host function: the descriptor's hook would store a value its own field refuses, so
@@ -203,13 +227,21 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
     /// caller's own text grown by <c>replace</c>, or whatever a host function returned. The pointer and the field are
     /// descriptor-authored — the argument <see cref="EnsureNotRejected"/> makes for the <c>reject</c> text.
     /// </para>
+    /// <para>
+    /// <b>Unless the field is hidden (Ruling X).</b> For a target the descriptor carries any <c>hidden</c> flag for,
+    /// the message names no field, no facet and no limit: the data API never publishes a hidden field's name, and a
+    /// refusal naming it — for a field the caller never sent — would disclose that it exists and how wide it is. The
+    /// hook's pointer is still named, as a <c>reject</c>'s refusal names it: it locates the descriptor rule that refused
+    /// and says nothing about the row's shape.
+    /// </para>
     /// </remarks>
-    private static object? Fitting(CompiledBeforeHook hook, CompiledMutation mutation, object? value) =>
-        mutation.Target.Violation(value) is { } violation
-            ? throw new AlvoAuthorizationException(
-                $"The before-hook at '{hook.Path}' computed a value for '{mutation.Field}' that breaks the "
-                + $"'{violation.Code}' facet the field declares: {violation.Message} Nothing was written.")
-            : value;
+    private static AlvoAuthorizationException Refusal(
+        CompiledBeforeHook hook, CompiledMutation mutation, AlvoViolation violation) =>
+        new(mutation.Target.Disclosable
+            ? $"The before-hook at '{hook.Path}' computed a value for '{mutation.Field}' that breaks the "
+                + $"'{violation.Code}' facet the field declares: {violation.Message} Nothing was written."
+            : $"The before-hook at '{hook.Path}' computed a value one of the fields it writes cannot hold. "
+                + "Nothing was written.");
 
     /// <summary>
     /// One mutation's value: the compiled expression evaluated against the candidate, or the literal the

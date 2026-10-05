@@ -511,11 +511,16 @@ internal static class BeforeHookCompiler
 /// <param name="Compiler">The CEL compiler every expression goes through.</param>
 /// <param name="EntityPath">The entity's JSON pointer, such as <c>/entities/deals</c>.</param>
 /// <param name="Errors">The accumulator every problem is appended to — the policy catalog builder's own.</param>
+/// <param name="Hidden">
+/// Every field the descriptor carries a <c>hidden</c> flag for, statically or per role — the keys of the entity's
+/// compiled <c>EntityPolicy.Hidden</c>, the same set the OpenAPI document leaves out (Ruling X).
+/// </param>
 internal sealed record BeforeHookScope(
     EntitySchema Schema,
     ICelCompiler Compiler,
     string EntityPath,
-    List<DescriptorValidationError> Errors)
+    List<DescriptorValidationError> Errors,
+    IReadOnlySet<string> Hidden)
 {
     private FormatCatalog? _formats;
 
@@ -524,5 +529,6 @@ internal sealed record BeforeHookScope(
     /// compiled once, and only when the entity declares a <c>mutate</c> at all.
     /// </summary>
     /// <param name="field">The declared field a mutation writes.</param>
-    internal MutationTarget TargetOf(FieldSchema field) => new(field, _formats ??= FormatCatalog.Build([Schema]));
+    internal MutationTarget TargetOf(FieldSchema field) =>
+        new(field, _formats ??= FormatCatalog.Build([Schema]), !Hidden.Contains(field.Name));
 }

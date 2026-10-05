@@ -22,10 +22,22 @@ namespace MMLib.Alvo.Rules.Internal;
 /// <c>decimal</c> field — the one widening <c>BeforeHookCompiler</c> admits — is measured as the decimal it is
 /// stored as, or its precision would go unchecked.
 /// </para>
+/// <para>
+/// <b>Ruling X: whether a refusal may name the field is decided here, at apply, not per caller.</b> A field the
+/// descriptor carries <em>any</em> <c>hidden</c> flag for — a static <see langword="true"/> or a per-role expression —
+/// is one whose name the data API never publishes (<c>SchemaComponentBuilder</c>'s rule, read from the same compiled
+/// <c>EntityPolicy.Hidden</c> set), so a refusal for it must not publish the name, its facet or its bound either. It
+/// is the descriptor that decides, not the caller's mask, because the runner sits inside the transaction and a name
+/// published to the callers who may read it is published to the callers who may not.
+/// </para>
 /// </remarks>
 /// <param name="Field">The declared field the mutation writes.</param>
 /// <param name="Formats">The compiled formats of the entity the field belongs to.</param>
-internal sealed record MutationTarget(FieldSchema Field, FormatCatalog Formats)
+/// <param name="Disclosable">
+/// <see langword="false"/> when the descriptor carries a <c>hidden</c> flag for <paramref name="Field"/>: a refusal
+/// then names no field, facet or limit.
+/// </param>
+internal sealed record MutationTarget(FieldSchema Field, FormatCatalog Formats, bool Disclosable)
 {
     /// <summary>The first facet <paramref name="value"/> violates, or <see langword="null"/> when it fits.</summary>
     /// <param name="value">The value the mutation would store, in the field's own CLR representation.</param>

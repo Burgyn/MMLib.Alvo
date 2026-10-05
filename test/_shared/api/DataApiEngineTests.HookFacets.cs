@@ -111,6 +111,71 @@ public abstract partial class DataApiEngineTests
         (await world.CountRowsAsync("contacts")).ShouldBe(0, "a batch is all-or-nothing");
     }
 
+    [Fact]
+    public async Task A_later_hook_that_repairs_an_earlier_overrun_stores_the_repaired_value_on_every_engine()
+    {
+        await using var world = await StartHookFacetsAsync();
+        var body = new JsonObject { ["mode"] = "repair", ["phone"] = "+421 900", ["note"] = HookSecret };
+
+        using var created = await world.SendAsync(HttpMethod.Post, "/api/contacts", _hookWriter, body: body);
+
+        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
+        (await created.ReadJsonObjectAsync())["phone_normalized"]!.GetValue<string>().ShouldBe("+421 900");
+    }
+
+    [Fact]
+    public async Task A_later_hook_that_overruns_a_value_an_earlier_one_fitted_is_named_in_the_refusal()
+    {
+        await using var world = await StartHookFacetsAsync();
+        var body = new JsonObject { ["mode"] = "late", ["phone"] = "+421 900", ["note"] = HookSecret };
+
+        using var refused = await world.SendAsync(HttpMethod.Post, "/api/contacts", _hookWriter, body: body);
+
+        await ShouldBeHookFacetRefusalAsync(refused, "phone_normalized", "max-length", "beforeCreate/9");
+        (await refused.ReadTextAsync()).ShouldNotContain("beforeCreate/8");
+        (await world.CountRowsAsync("contacts")).ShouldBe(0);
+    }
+
+    [Theory]
+    [InlineData("hidden", "secret_code", "beforeCreate/10")]
+    [InlineData("role-hidden", "role_code", "beforeCreate/11")]
+    public async Task A_refusal_for_a_hidden_target_names_no_field_facet_or_limit_on_every_engine(
+        string mode, string field, string hook)
+    {
+        await using var world = await StartHookFacetsAsync();
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Post, "/api/contacts", _hookWriter, body: HookContact(mode, HookSecret));
+
+        await ShouldBeHiddenHookRefusalAsync(refused, field, hook);
+        (await world.CountRowsAsync("contacts")).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_batch_row_refused_for_a_hidden_target_names_no_field_facet_or_limit()
+    {
+        await using var world = await StartHookFacetsAsync();
+        var rows = new JsonArray(HookContact("copy", "fits"), HookContact("hidden", HookSecret));
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Post, "/api/contacts/batch", _hookWriter, body: new JsonObject { ["rows"] = rows });
+
+        await ShouldBeHiddenHookRefusalAsync(refused, "secret_code", "beforeCreate/10");
+        (await world.CountRowsAsync("contacts")).ShouldBe(0, "a batch is all-or-nothing");
+    }
+
+    private static async Task ShouldBeHiddenHookRefusalAsync(HttpResponseMessage refused, string field, string hook)
+    {
+        var text = await refused.ReadTextAsync();
+        refused.StatusCode.ShouldBe(HttpStatusCode.Forbidden, text);
+        (await refused.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Forbidden);
+        text.ShouldContain($"/entities/contacts/hooks/{hook}");
+        text.ShouldNotContain(field);
+        text.ShouldNotContain("max-length");
+        text.ShouldNotContain("10 characters");
+        text.ShouldNotContain("SECRET");
+    }
+
     private static JsonObject HookContact(string mode, string text) => new()
     {
         ["mode"] = mode,
