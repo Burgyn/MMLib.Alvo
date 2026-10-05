@@ -57,7 +57,11 @@ public static class AlvoBuilderExtensions
     /// </para>
     /// </remarks>
     /// <param name="builder">The Alvo builder.</param>
-    /// <param name="name">The CEL name: a lower-case ASCII letter, then ASCII letters, digits or <c>_</c>.</param>
+    /// <param name="name">
+    /// The CEL name: a lower-case ASCII letter, then ASCII letters, digits or <c>_</c>, at most 64 characters, and not a
+    /// built-in, a CEL keyword, macro or reserved word, or a standard CEL type or function name (<c>int</c>, <c>string</c>,
+    /// <c>contains</c>, <c>matches</c>, …).
+    /// </param>
     /// <param name="function">The implementation, e.g. <c>(string phone) =&gt; …</c>.</param>
     /// <param name="summary">One sentence for discovery (<c>cel/functions</c>, the assistant).</param>
     /// <returns>The same builder, for chaining.</returns>

@@ -56,8 +56,31 @@ public sealed class CelFunctionRegistrationTests
     [InlineData("new")]
     [InlineData("exists")]
     [InlineData("while")]
+    [InlineData("int")]
+    [InlineData("uint")]
+    [InlineData("double")]
+    [InlineData("bool")]
+    [InlineData("string")]
+    [InlineData("bytes")]
+    [InlineData("list")]
+    [InlineData("map")]
+    [InlineData("timestamp")]
+    [InlineData("duration")]
+    [InlineData("dyn")]
+    [InlineData("type")]
+    [InlineData("contains")]
+    [InlineData("startsWith")]
+    [InlineData("endsWith")]
+    [InlineData("matches")]
     public void A_name_the_catalog_cannot_honour_is_refused_at_registration(string name) =>
         Should.Throw<ArgumentException>(() => Alvo().AddCelFunction(name, (string s) => s)).Message.ShouldContain(name.TrimEnd('\n'));
+
+    [Fact]
+    public void A_name_longer_than_sixty_four_characters_is_refused()
+    {
+        Should.NotThrow(() => Alvo().AddCelFunction(new string('a', 64), (string s) => s));
+        Should.Throw<ArgumentException>(() => Alvo().AddCelFunction(new string('a', 65), (string s) => s)).Message.ShouldContain("64");
+    }
 
     [Theory]
     [InlineData("")]

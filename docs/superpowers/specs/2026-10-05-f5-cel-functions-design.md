@@ -51,7 +51,7 @@ the profile set (deny-by-default: nothing C1 refuses becomes silently legal by a
 
 | # | Decision (controller ruling) | Cost if wrong | Status here |
 |---|---|---|---|
-| R1 | Host name pattern `^[a-z][a-zA-Z0-9_]*$`; may not collide with `has changed now in true false null` or any built-in | a host wanting `NormalizePhone` must rename; loosening later is additive | kept; **extended** (X3) and anchored with `\z` (a `$` admits a trailing newline in .NET) |
+| R1 | Host name pattern `^[a-z][a-zA-Z0-9_]*$`; may not collide with `has changed now in true false null` or any built-in | a host wanting `NormalizePhone` must rename; loosening later is additive | kept; **extended** (X3) and anchored with `\z` (a `$` admits a trailing newline in .NET); **length capped at 64** (a longer name cannot be called inside the 2,000-character expression cap; the schema's `$defs/identifier` allows 63, one fewer, deliberately not mirrored) |
 | R2 | Host functions in-process only: Condition + Mutate; refused in Rule/Computed/Access with why and where. `lowerAscii`/`now()` keep their grammar and Mutate-only profile, catalogued for discovery | persona 1 wants rules/computed first (review §3); the recipe "store with `mutate`, filter by the field" is the answer, stated in the refusal's fix | kept; cost X10 recorded |
 | R3 | `Delegate`, ≤ 4 params of `string long int decimal bool DateTimeOffset Guid` (+ nullable forms), same result set; singleton closure; non-nullable param + null → null without invoking; `T?` receives null; result nullability from the return type | a scoped service cannot be used (G3); DateOnly not accepted (#272's own example uses a date) | kept; DateOnly is open question Q5 |
 | R4 | A throwing host function → `CelFunctionException` (internal), rethrown past the interpreter's catch-alls, surfaced as a rolled-back write with RFC 7807 (distinct type, names the function, no exception text); fail closed; purity by contract | the hook network ban and time bound stop being structural (X7) | kept; X7 needs maintainer sign-off |
@@ -73,8 +73,10 @@ the profile set (deny-by-default: nothing C1 refuses becomes silently legal by a
   `CelFunctionInfo.ResultMayBeNull`.
 * **X3 — R1's reserved set extended** with `old`, `new` (row-image prefixes), CEL's comprehension macros
   (`all exists exists_one map filter`) and the words the CEL spec reserves (`as break const continue else for
-  function if import let loop package namespace return var void while`). An agent trained on CEL reads these as
-  syntax; refusing them at registration costs nothing.
+  function if import let loop package namespace return var void while`) and the standard CEL type and function
+  names (`int uint double bool string bytes list map timestamp duration dyn type contains startsWith endsWith
+  matches`). An agent trained on CEL reads these as syntax; refusing them at registration costs nothing. Case
+  variants of built-ins stay allowed.
 * **X4 — an overload is one entry.** `abs` and `round` are Int→Int and Decimal→Decimal (R6 "same numeric type").
   Rather than a second public "signature" type, discovery lists one `CelFunctionInfo` **per overload** (the name
   repeats), which is CEL's own model flattened. Host functions have exactly one entry (no host overloads).
@@ -206,7 +208,11 @@ name (R1 + X3), multicast delegate, open generic, > 4 parameters, `ref`/`out`, u
 after-hook", G1), duplicate name (scans `builder.Services`, skipping keyed descriptors — reading
 `ImplementationInstance` on one throws). The signature is read from the delegate type's `Invoke`; parameter names and
 `string?` annotations from `Delegate.Method` when its arity matches (a lambda), via `NullabilityInfoContext`; an
-oblivious context reads as non-nullable (the safe default: null-propagation). Invocation is
+oblivious context reads as a non-nullable *parameter* (the safe default: null-propagation). Nullability is read only from
+`Method`'s own `ParameterInfo` and only when its parameters mirror the delegate type's; a closed extension method, an
+open-instance delegate, a compiled expression or a dynamic method reads as non-nullable parameters. A *result* of unknown
+nullability (oblivious, or no readable return parameter) is **may-be-null**; only an annotated non-null reference or a
+non-nullable value type is never-null. Invocation is
 `Invoke.Invoke(delegate, BindingFlags.DoNotWrapExceptions, …)`.
 
 DI: `CelFunctionCatalog` singleton = `BuiltIns.With(GetServices<CelFunctionRegistration>())`; `ICelCompiler` becomes a

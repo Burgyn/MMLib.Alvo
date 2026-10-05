@@ -17,6 +17,9 @@ internal static partial class HostCelFunction
     /// <summary>The most parameters a host function may take (spec R3).</summary>
     internal const int MaxParameters = 4;
 
+    /// <summary>The longest name a host function may have; a longer one could never be called inside the expression cap.</summary>
+    internal const int MaxNameLength = 64;
+
     private const string SupportedTypes =
         "a CEL function's parameters and result are string, long, int, decimal, bool, DateTimeOffset or Guid, or a nullable one of those";
 
@@ -42,6 +45,12 @@ internal static partial class HostCelFunction
     private static void EnsureValidName(string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        if (name.Length > MaxNameLength)
+        {
+            throw new ArgumentException(
+                $"'{name}' is {name.Length} characters; a CEL function name is at most {MaxNameLength}.", nameof(name));
+        }
+
         if (!NamePattern().IsMatch(name))
         {
             throw new ArgumentException(
@@ -64,6 +73,8 @@ internal static partial class HostCelFunction
         "all" or "exists" or "exists_one" or "map" or "filter" => "it is a CEL comprehension macro, which no Alvo profile admits",
         "as" or "break" or "const" or "continue" or "else" or "for" or "function" or "if" or "import" or "let"
             or "loop" or "package" or "namespace" or "return" or "var" or "void" or "while" => "it is a word the CEL specification reserves",
+        "int" or "uint" or "double" or "bool" or "string" or "bytes" or "list" or "timestamp" or "duration" or "dyn"
+            or "type" or "contains" or "startsWith" or "endsWith" or "matches" => "it is a standard CEL type or function name, which an agent reads as CEL syntax",
         _ when CelFunctionCatalog.BuiltIns.Contains(name) => "it is a built-in function",
         _ => null,
     };
@@ -89,20 +100,33 @@ internal static partial class HostCelFunction
             throw Refused(name, $"takes {signature.Length} parameters; a CEL function takes at most {MaxParameters}");
         }
 
-        var declared = function.Method.GetParameters();
-        var annotated = declared.Length == signature.Length ? declared : signature;
-        return [.. signature.Select((parameter, index) => Parameter(parameter, annotated[index], name))];
+        var declared = DeclaredParameters(function, signature);
+        return [.. signature.Select((parameter, index) => Parameter(parameter, declared?[index], name))];
     }
 
-    private static CelFunctionArgument Parameter(ParameterInfo parameter, ParameterInfo annotated, string name)
+    /// <summary>
+    /// The parameters of <see cref="Delegate.Method"/> when they mirror the delegate type's — the only ones whose
+    /// nullable annotations describe what the caller passes; <see langword="null"/> for a closed extension method, an
+    /// open-instance delegate or a compiled expression, whose <c>Method</c> has another shape.
+    /// </summary>
+    private static ParameterInfo[]? DeclaredParameters(Delegate function, ParameterInfo[] signature)
+    {
+        var declared = function.Method.GetParameters();
+        var mirrors = declared.Length == signature.Length
+            && declared.Zip(signature).All(pair => pair.First.ParameterType == pair.Second.ParameterType);
+        return mirrors ? declared : null;
+    }
+
+    private static CelFunctionArgument Parameter(ParameterInfo parameter, ParameterInfo? declared, string name)
     {
         var clr = parameter.ParameterType;
+        var label = declared?.Name ?? parameter.Name ?? $"arg{parameter.Position}";
         if (clr.IsByRef || TypeOf(clr) is not { } type)
         {
-            throw Refused(name, $"has parameter '{annotated.Name}' of type {clr.Name}; {SupportedTypes}");
+            throw Refused(name, $"has parameter '{label}' of type {clr.Name}; {SupportedTypes}");
         }
 
-        return new CelFunctionArgument(annotated.Name ?? $"arg{parameter.Position}", type, IsNullable(clr, annotated), Underlying(clr));
+        return new CelFunctionArgument(label, type, AcceptsNull(clr, declared), Underlying(clr));
     }
 
     private static (CelValueType Type, bool Nullable) Result(Delegate function, MethodInfo invoke, string name)
@@ -119,8 +143,8 @@ internal static partial class HostCelFunction
         }
 
         var type = TypeOf(returned) ?? throw Refused(name, $"returns {returned.Name}; {SupportedTypes}");
-        var annotated = function.Method.ReturnType == returned ? function.Method.ReturnParameter : invoke.ReturnParameter;
-        return (type, IsNullable(returned, annotated));
+        var annotated = function.Method.ReturnType == returned ? function.Method.ReturnParameter : null;
+        return (type, MayBeNull(returned, annotated));
     }
 
     private static bool IsAsynchronous(System.Type type) =>
@@ -140,9 +164,19 @@ internal static partial class HostCelFunction
 
     private static System.Type Underlying(System.Type clr) => Nullable.GetUnderlyingType(clr) ?? clr;
 
-    private static bool IsNullable(System.Type clr, ParameterInfo annotated) =>
+    /// <summary>Whether a parameter receives null: a <c>T?</c> value type, or a <c>string?</c> the method itself declares. Unknown reads as no.</summary>
+    private static bool AcceptsNull(System.Type clr, ParameterInfo? declared) =>
         Nullable.GetUnderlyingType(clr) is not null
-        || (clr == typeof(string) && new NullabilityInfoContext().Create(annotated).ReadState == NullabilityState.Nullable);
+        || (clr == typeof(string) && declared is not null && ReadState(declared) == NullabilityState.Nullable);
+
+    /// <summary>Whether a result may be null: unknown (oblivious, or no return parameter to read) reads as yes.</summary>
+    private static bool MayBeNull(System.Type clr, ParameterInfo? annotated) =>
+        Nullable.GetUnderlyingType(clr) is not null
+        || (!clr.IsValueType && (annotated is null || ReadState(annotated) != NullabilityState.NotNull));
+
+    /// <summary>A dynamic or compiled method has no declaring type, so NullabilityInfoContext cannot read it; there is nothing to read, so the state is unknown.</summary>
+    private static NullabilityState ReadState(ParameterInfo annotated) =>
+        annotated.Member?.DeclaringType is null ? NullabilityState.Unknown : new NullabilityInfoContext().Create(annotated).ReadState;
 
 #pragma warning disable CA2208 // "function" is AddCelFunction's parameter, the one the caller handed in.
     private static ArgumentException Refused(string name, string reason) => new($"The CEL function '{name}' {reason}.", "function");
