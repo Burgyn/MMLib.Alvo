@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Tests.Expressions;
 
@@ -29,9 +30,17 @@ public sealed class CelTextBuiltInTests
     public void Substring_without_an_end_runs_to_the_end(string text, long start, string expected) =>
         Mutate($"substring(name, {start})", ("name", text)).ShouldBe(expected);
 
+    /// <summary>
+    /// A fact, not a theory: xUnit serialises <c>InlineData</c> strings, and a lone surrogate does not survive the round
+    /// trip, so the rows would test U+FFFD instead.
+    /// </summary>
     [Fact]
-    public void Substring_keeps_a_lone_surrogate_as_it_was() =>
+    public void Substring_keeps_a_lone_surrogate_as_it_was()
+    {
         CelBuiltInFunctions.SubstringText("a\ud800b", 1, 2).ShouldBe("\ud800");
+        CelBuiltInFunctions.SubstringText("a\ud800", 1, end: null).ShouldBe("\ud800", "a lone high surrogate at the very end");
+        CelBuiltInFunctions.SubstringText("\udc00b", 0, 1).ShouldBe("\udc00", "a lone low surrogate");
+    }
 
     [Theory]
     [InlineData(-1L, 2L)]
@@ -126,11 +135,27 @@ public sealed class CelTextBuiltInTests
     /// <c>size</c> and <c>substring</c> count code points. A lone surrogate therefore matches half of a pair.
     /// </summary>
     [Theory]
-    [InlineData("contains(new.name, new.round)")]
-    [InlineData("startsWith(new.name, new.round)")]
-    [InlineData("endsWith(new.size, new.round)")]
-    public void A_text_test_compares_utf16_units_so_a_lone_surrogate_matches_half_a_pair(string source) =>
-        Condition(source, ("name", "😀x"), ("size", "x\ud83d"), ("round", "\ud83d")).ShouldBeTrue();
+    [InlineData("contains(new.name, new.high)", "😀x")]
+    [InlineData("startsWith(new.name, new.high)", "😀x")]
+    [InlineData("endsWith(new.name, new.low)", "x😀")]
+    public void A_text_test_compares_utf16_units_so_a_lone_surrogate_matches_half_a_pair(string source, string name)
+    {
+        var halves = new EntitySchema
+        {
+            Name = "halves",
+            Fields =
+            [
+                new FieldSchema { Name = "name", Type = FieldType.String, MaxLength = 20, Nullable = true },
+                new FieldSchema { Name = "high", Type = FieldType.String, MaxLength = 20, Nullable = true },
+                new FieldSchema { Name = "low", Type = FieldType.String, MaxLength = 20, Nullable = true },
+            ],
+        };
+        var compiled = TestCelFunctions.Compiler().Compile(source, CelProfile.Condition, halves).Expression!;
+
+        CelInterpreter.EvaluatePredicate(
+            compiled, CelFixtures.Row(("name", name), ("high", "\ud83d"), ("low", "\ude00")), previous: null, AlvoContext.Anonymous)
+            .ShouldBeTrue();
+    }
 
     [Theory]
     [InlineData("contains(new.name, 'x')", CelProfile.Condition, "Bool")]

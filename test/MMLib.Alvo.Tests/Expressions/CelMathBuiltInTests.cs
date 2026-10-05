@@ -60,6 +60,20 @@ public sealed class CelMathBuiltInTests
     public void An_int_and_a_decimal_bind_the_decimal_overload() =>
         Mutate("math.greatest(qty, 2.5)", ("qty", 1L)).ShouldBe(2.5m);
 
+    /// <summary>When the Int wins, the answer is still the Decimal overload's: a decimal 3, never a long.</summary>
+    [Fact]
+    public void A_winning_int_beside_a_decimal_comes_back_as_a_decimal()
+    {
+        Mutate("math.greatest(qty, 2.5)", ("qty", 3L)).ShouldBeOfType<decimal>().ShouldBe(3m);
+        Mutate("math.least(qty, 3.5)", ("qty", 3L)).ShouldBeOfType<decimal>().ShouldBe(3m);
+    }
+
+    [Theory]
+    [InlineData("math.ceil(price)", "2.0")]
+    [InlineData("math.floor(price)", "1.80")]
+    public void Ceil_and_floor_answer_a_whole_number_with_no_fraction_digits(string source, string value) =>
+        Mutate(source, ("price", Number(value))).ShouldBeOfType<decimal>().Scale.ShouldBe((byte)0);
+
     [Theory]
     [InlineData("math.greatest(price, 1.00)")]
     [InlineData("math.least(price, 1.00)")]
