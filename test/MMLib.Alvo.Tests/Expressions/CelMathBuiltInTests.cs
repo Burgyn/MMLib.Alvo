@@ -32,6 +32,16 @@ public sealed class CelMathBuiltInTests
     [InlineData("math.floor(qty)")]
     public void Ceil_and_floor_of_an_int_are_the_int(string source) => Mutate(source, ("qty", 7L)).ShouldBe(7L);
 
+    /// <summary>A Decimal stays a Decimal: ceil and floor never narrow to Int, so a value past Int's range cannot overflow.</summary>
+    [Theory]
+    [InlineData("math.ceil(price)")]
+    [InlineData("math.floor(price)")]
+    public void Ceil_and_floor_of_a_decimal_past_int_range_stay_decimal(string source)
+    {
+        Mutate(source, ("price", decimal.MaxValue)).ShouldBe(decimal.MaxValue);
+        Mutate(source, ("price", decimal.MinValue)).ShouldBe(decimal.MinValue);
+    }
+
     [Fact]
     public void Greatest_and_least_of_two_ints_are_ints()
     {
