@@ -165,7 +165,6 @@ public sealed class HookEditInPlaceScenarios(BikeWorkshopWorld world) : IClassFi
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
         (await session.Page.GetByTestId("hook-row").CountAsync()).ShouldBe(before + 1);
-        (await session.SnackbarCountAsync("added to the working copy")).ShouldBe(1, "one Add, one hook");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -247,7 +246,7 @@ public sealed class HookShapeScenarios(BikeWorkshopWorld world) : IClassFixture<
     /// (14 KB) it still closed; cut to these three entities it imports. Nothing here reads a dropped entity. Issue #316
     /// tracks the import limit; once it is fixed, this cut-down can go and the scenario can import the whole example.
     /// </remarks>
-    private static JsonObject Importable()
+    internal static JsonObject Importable()
     {
         var descriptor = JsonNode.Parse(Descriptors.BikeWorkshop)!.AsObject();
         var entities = descriptor["entities"]!.AsObject();

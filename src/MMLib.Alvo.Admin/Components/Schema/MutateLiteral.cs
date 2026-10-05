@@ -42,23 +42,26 @@ internal static class MutateLiteral
         }
 
         (value, refusal) = Convert(row.Text, field);
+        refusal ??= KindRefusal(row, field, value);
         return refusal is null;
     }
 
-    /// <summary>A declared literal as the row that writes it back.</summary>
+    /// <summary>A declared literal as the row that writes it back, remembering the JSON kind it was declared with.</summary>
     /// <param name="field">The field it patches.</param>
     /// <param name="value">The declared literal.</param>
     public static MutateRow Row(string field, JsonNode? value) => value switch
     {
         null => new MutateRow(field, MutateMode.Literal, string.Empty) { Empty = true },
-        JsonValue scalar when scalar.GetValueKind() == JsonValueKind.String => new MutateRow(field, MutateMode.Literal, scalar.GetValue<string>()),
-        _ => new MutateRow(field, MutateMode.Literal, value.ToJsonString()),
+        JsonValue scalar when scalar.GetValueKind() == JsonValueKind.String
+            => new MutateRow(field, MutateMode.Literal, scalar.GetValue<string>()) { DeclaredKind = JsonValueKind.String },
+        _ => new MutateRow(field, MutateMode.Literal, value.ToJsonString()) { DeclaredKind = value.GetValueKind() },
     };
 
     /// <summary>What a literal box for this field takes, in one sentence.</summary>
     /// <param name="field">The field.</param>
     public static string Hint(FieldSchema field) => CelFieldType.Of(field.Type) switch
     {
+        CelValueType.String when field.EnumValues is { Count: > 0 } values => $"One of {string.Join(", ", values)}.",
         CelValueType.String => "Text, written as typed.",
         CelValueType.Int => "A whole number such as 3 or -2.",
         CelValueType.Decimal => "A number such as 12.5.",
@@ -127,6 +130,31 @@ internal static class MutateLiteral
         return question(document.RootElement);
     }
 
-    private static string Shape(FieldSchema field, string takes)
-        => $"'{field.Name}' is a {field.Type.ToString().ToLowerInvariant()} field: it takes {takes}.";
+    private static string Shape(FieldSchema field, string takes) => $"'{field.Name}' is {TypeWords(field)} field: it takes {takes}.";
+
+    /// <summary>The field's type with its article: "an integer", "a decimal" ("a uuid" is said with a consonant).</summary>
+    private static string TypeWords(FieldSchema field)
+    {
+        var type = field.Type.ToString().ToLowerInvariant();
+        return type[0] is 'a' or 'e' or 'i' or 'o' ? $"an {type}" : $"a {type}";
+    }
+
+    /// <summary>
+    /// Why a declared literal is not written back: its JSON kind is not the one the field's value is written as, so Save
+    /// would convert it silently (<see cref="MutateRow.DeclaredKind"/>).
+    /// </summary>
+    private static string? KindRefusal(MutateRow row, FieldSchema field, JsonNode? value)
+        => row.DeclaredKind is { } declared && value is not null && KindWords(declared) != KindWords(value.GetValueKind())
+            ? $"'{field.Name}' is declared as {KindWords(declared)}, and {TypeWords(field)} field is written as "
+              + $"{KindWords(value.GetValueKind())}. Type the value again to write it that way."
+            : null;
+
+    private static string KindWords(JsonValueKind kind) => kind switch
+    {
+        JsonValueKind.String => "a string",
+        JsonValueKind.Number => "a number",
+        JsonValueKind.True or JsonValueKind.False => "true or false",
+        JsonValueKind.Array => "an array",
+        _ => "an object",
+    };
 }

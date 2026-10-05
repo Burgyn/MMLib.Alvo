@@ -187,7 +187,7 @@ public sealed class ConfirmFocusScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Page.GetByTestId(remove).Nth(at).ClickAsync();
         var dialog = session.Dialog(confirm);
         await dialog.WaitForAsync();
-        await session.WaitForFocusInDialogAsync(confirm);
+        await session.WaitForFocusInsideAsync(confirm, FocusScope.Dialog);
         return dialog;
     }
 

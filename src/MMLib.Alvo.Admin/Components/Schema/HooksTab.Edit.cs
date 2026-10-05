@@ -27,6 +27,7 @@ public partial class HooksTab
 
         _adding = false;
         _editing = new Editing(point, position, json, original, builder, builder.Fingerprint());
+        _writable = WritableFields();
         _refusal.Clear();
         CheckAll();
     }
@@ -59,6 +60,16 @@ public partial class HooksTab
     /// <summary>Where the edited hook sits in the copy now — or <see langword="null"/> for a new hook, which is appended.</summary>
     private int? CurrentPosition(WorkingCopy copy)
         => _editing is { } editing ? PositionIn(copy.HooksOf(Entity), editing.Point, editing.Json) : null;
+
+    /// <summary>
+    /// Where an action box's text is checked: the candidate hook — the draft patched onto the opened one, without the
+    /// condition (spec D4) — placed at the edited hook's position, or appended for a new one. The one place every action
+    /// slot asks (pre-flight D4).
+    /// </summary>
+    /// <param name="copy">The working copy the check runs against.</param>
+    /// <param name="slot">The slot's path inside the hook.</param>
+    private (string Json, string Path)? ActionSlot(WorkingCopy copy, params string[] slot)
+        => ExpressionSlots.ForHook(copy.Json, Entity, Current.Point, CurrentPosition(copy), Current.CandidateHook(_editing?.Original), slot);
 
     /// <summary>The condition box's descriptions: its hint, the length sentence while there is one, and the check's.</summary>
     private string ConditionDescribedBy

@@ -17,6 +17,8 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
 
         await session.Button("New entity", exact: true).ClickAsync();
         await session.Dialog("new-entity").WaitForAsync();
+        /* The editor takes focus a render after it is visible; read too early, focus is still on New entity. */
+        await session.WaitForFocusInsideAsync("new-entity", FocusScope.Dialog);
         (await session.FocusedAsync()).ShouldStartWith("input#new-entity-name");
 
         await session.Page.Keyboard.TypeAsync("tickets");
@@ -50,7 +52,7 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
         var trigger = session.Button("New entity", exact: true);
         await trigger.ClickAsync();
         await session.Dialog("new-entity").WaitForAsync();
-        await session.WaitForFocusInDialogAsync("new-entity");
+        await session.WaitForFocusInsideAsync("new-entity", FocusScope.Dialog);
 
         await session.Page.Keyboard.PressAsync("Escape");
 
@@ -139,7 +141,7 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
 
         await session.Dialog("rename-sheet").WaitForAsync();
         (await region.IsHiddenAsync()).ShouldBeTrue("pressing an action in the disclosure closes it");
-        await session.WaitForFocusInDialogAsync("rename-sheet");
+        await session.WaitForFocusInsideAsync("rename-sheet", FocusScope.Dialog);
         await session.Page.Keyboard.PressAsync("Escape");
         await session.Page.GetByTestId("rename-sheet").WaitForAsync(new() { State = WaitForSelectorState.Detached });
         await session.Page.WaitForFunctionAsync("() => document.activeElement?.dataset.testid === 'pagehead-overflow'");
@@ -171,6 +173,14 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
         await editor.GetByTestId("index-add").DblClickAsync();
 
         await session.SnackbarAsync("added to the working copy");
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        /* One more round trip before counting: a circuit handles events in order, so once New index has opened the
+           editor again, a second Add queued behind the first has run too — and would show here as a second row. */
+        await session.Page.GetByTestId("index-new").ClickAsync();
+        await editor.WaitForAsync();
+        await session.WaitForFocusInsideAsync("index-editor");
+        await session.Page.Keyboard.PressAsync("Escape");
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
         (await session.Page.GetByTestId("index-row").CountAsync()).ShouldBe(before + 1);
     }
 

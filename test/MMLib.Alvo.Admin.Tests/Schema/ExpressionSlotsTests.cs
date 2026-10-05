@@ -109,7 +109,8 @@ public class ExpressionSlotsTests
     /// The value is checked in a hook without its condition (slice B design D4): the before-hook compiler stops at a
     /// condition that does not compile and never reaches the value. And the check must key the mutate exactly as Add
     /// stages it: when the two disagreed (Add kept <c>total </c> as typed, the check trimmed it), the check found no such
-    /// key and stayed silent while Apply refused the hook. Add stages the trimmed name, so the candidate carries it too.
+    /// key and stayed silent while Apply refused the hook. Add stages the trimmed name, so the candidate carries it too;
+    /// the slot is asked for through <see cref="HookBuilder.MutateSlot"/>, the call the tab makes, never trimmed by hand.
     /// </summary>
     [Fact]
     public void The_form_s_mutate_value_is_placed_without_the_condition_under_the_key_add_stages()
@@ -123,7 +124,7 @@ public class ExpressionSlotsTests
         };
 
         var (json, path) = ExpressionSlots.ForHook(
-            WithHooks, "orders", hook.Point, null, hook.CandidateHook(null), "action", "mutate", hook.MutateRows[0].Field.Trim())!.Value;
+            WithHooks, "orders", hook.Point, null, hook.CandidateHook(null), HookBuilder.MutateSlot(hook.MutateRows[0]))!.Value;
 
         hook.Build(out var refusal).ShouldNotBeNull(refusal)["mutate"]!.AsObject().Select(pair => pair.Key)
             .ShouldBe(["total"], "what Add would stage");

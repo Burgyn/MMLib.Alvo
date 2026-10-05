@@ -1,4 +1,5 @@
 ﻿using Microsoft.Playwright;
+using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
@@ -93,13 +94,20 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     /// <remarks>
     /// Page-scoped on purpose: the library renders options in its popover provider under <c>body</c>, so an option is
     /// never a descendant of the select, nor of the dialog the select sits in (study §5.1 gotcha 1).
+    /// <para>
+    /// It returns once the select shows the choice. The library hands the choice to the page a JS round trip after the
+    /// click, so a box filled straight after it was filled first — and then emptied by the choice that "came later"
+    /// (measured: a row's field reset what was typed for it). The select shows the value only once it has passed it on.
+    /// </para>
     /// </remarks>
     /// <param name="combobox">The select, found by role and name.</param>
     /// <param name="option">The option's name, exactly.</param>
     public async Task ChooseAsync(ILocator combobox, string option)
     {
+        ArgumentNullException.ThrowIfNull(combobox);
         await combobox.ClickAsync().ConfigureAwait(false);
         await Page.GetByRole(AriaRole.Option, new() { Name = option, Exact = true }).ClickAsync().ConfigureAwait(false);
+        await combobox.Filter(new() { HasTextRegex = new Regex($"^{Regex.Escape(option)}$") }).WaitForAsync().ConfigureAwait(false);
     }
 
     /// <summary>Types a hook condition as CEL into the open hook sheet.</summary>
@@ -203,30 +211,35 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
         }
     }
 
-    /// <summary>Waits until focus is inside the element with <paramref name="testId"/>.</summary>
-    /// <param name="testId">The container's test id.</param>
-    public Task WaitForFocusInsideAsync(string testId)
-        => Page.WaitForFunctionAsync("id => !!document.activeElement?.closest(`[data-testid='${id}']`)", testId, _polling);
-
-    /// <summary>Waits until focus is inside the dialog that <see cref="Dialog"/> finds by <paramref name="testId"/>.</summary>
+    /// <summary>Waits until focus is inside the element with <paramref name="testId"/>, or inside the dialog around it.</summary>
     /// <remarks>
-    /// Call it before a key meant for a dialog that just opened. Being visible does not mean the dialog is ready for
-    /// keys: it takes focus a render later, and an Escape pressed before then goes to the page and closes nothing. That
-    /// race made <c>CreateActionScenarios</c> flaky. The dialog is the <c>role=dialog</c> around the test id, so this
-    /// works for an editor, a confirm and the palette alike, wherever the library puts the attribute.
+    /// <para>
+    /// One wait for both questions (it was two helpers): <see cref="FocusScope.Element"/> for a panel or a control that
+    /// must take focus itself — an error panel inside a sheet is <i>not</i> answered by focus elsewhere in the sheet — and
+    /// <see cref="FocusScope.Dialog"/> for a dialog that just opened, whose test id the library may put on an element
+    /// inside it that never holds focus (a confirm's does; measured).
+    /// </para>
+    /// <para>
+    /// Call it with <see cref="FocusScope.Dialog"/> before a key meant for a dialog that just opened. Being visible does not
+    /// mean the dialog is ready for keys: it takes focus a render later, and an Escape pressed before then goes to the page
+    /// and closes nothing. That race made <c>CreateActionScenarios</c> flaky. Focus on <c>&lt;body&gt;</c> is never inside.
+    /// </para>
     /// </remarks>
-    /// <param name="testId">The test id inside the dialog.</param>
-    public Task WaitForFocusInDialogAsync(string testId)
+    /// <param name="testId">The element's test id.</param>
+    /// <param name="scope">Whether focus must be inside that element, or anywhere in the dialog around it.</param>
+    public Task WaitForFocusInsideAsync(string testId, FocusScope scope = FocusScope.Element)
         => Page.WaitForFunctionAsync(
             """
-            id => {
-              const marked = document.querySelector(`[data-testid='${id}']`);
-              const dialog = marked?.closest("[role='dialog']");
+            ([id, dialog]) => {
               const focused = document.activeElement;
-              return !!dialog && !!focused && focused !== document.body && dialog.contains(focused);
+              if (!focused || focused === document.body) return false;
+              const marked = `[data-testid='${id}']`;
+              return dialog
+                ? [...document.querySelectorAll(marked)].some(m => !!m.closest("[role='dialog']")?.contains(focused))
+                : !!focused.closest(marked);
             }
             """,
-            testId, _polling);
+            new object[] { testId, scope == FocusScope.Dialog }, _polling);
 
     /// <summary>Waits until the element with <paramref name="id"/> has focus.</summary>
     /// <param name="id">The element's id.</param>
@@ -598,4 +611,14 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
         await context.DisposeAsync().ConfigureAwait(false);
     }
 
+}
+
+/// <summary>What <see cref="AdminSession.WaitForFocusInsideAsync"/> asks focus to be inside.</summary>
+public enum FocusScope
+{
+    /// <summary>The element with the test id itself.</summary>
+    Element,
+
+    /// <summary>The <c>role=dialog</c> around the element with the test id.</summary>
+    Dialog,
 }

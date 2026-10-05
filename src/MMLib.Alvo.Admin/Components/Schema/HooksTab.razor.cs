@@ -110,6 +110,8 @@ public partial class HooksTab
         _new.Fields = DeclaredFields();
         _editing = null;
         _refusal.Clear();
+        _writable = WritableFields();
+        EnsureMutateRow();
         _adding = true;
     }
 
@@ -124,6 +126,7 @@ public partial class HooksTab
     private void ChooseKind(string kind)
     {
         Current.Kind = kind;
+        EnsureMutateRow();
         CheckAll();
     }
 
@@ -139,58 +142,17 @@ public partial class HooksTab
         _ = CheckConditionAsync();
     }
 
-    private void TypeMutateValue(string? text)
-    {
-        FirstRow.Text = text ?? string.Empty;
-        FirstRow.Mode = MutateMode.Expression;
-        _ = CheckMutateValueAsync();
-    }
-
-    /// <summary>The patched field names the slot the value is checked in, so it is asked again.</summary>
-    private void TypeMutateField(string? text)
-    {
-        FirstRow.Field = text ?? string.Empty;
-        _ = CheckMutateValueAsync();
-    }
-
-    /// <summary>The one field-and-value pair the form draws until it draws rows (plan Task 9 replaces it).</summary>
-    /// <remarks>
-    /// Interim, and a getter with a side effect: it adds the row the first time the form is drawn. Accepted for the two
-    /// tasks it lives (pre-flight D7).
-    /// </remarks>
-    private MutateRow FirstRow
-    {
-        get
-        {
-            if (Current.MutateRows.Count == 0)
-            {
-                Current.MutateRows.Add(new MutateRow { Mode = MutateMode.Expression });
-            }
-
-            return Current.MutateRows[0];
-        }
-    }
-
     /// <summary>The point and the kind decide every slot's path, so every box on the form is asked again.</summary>
     private void CheckAll()
     {
         _ = CheckConditionAsync();
-        _ = CheckMutateValueAsync();
+        CheckMutateValues();
     }
 
     /// <summary>The condition, checked in a hook that carries the draft's action (stand-ins for blanks).</summary>
     private Task CheckConditionAsync() => CheckAsync("hook-condition", Current.Condition, (copy, source)
         => ExpressionSlots.ForHook(
             copy.Json, Entity, Current.Point, CurrentPosition(copy), HookPatch.Apply(_editing?.Original, source, Current.Draft()), "condition"));
-
-    /// <summary>The mutate value, checked in a hook without the condition (spec D4).</summary>
-    private Task CheckMutateValueAsync() => CheckAsync(
-        "hook-mutate-value", Current.Kind == HookBuilder.Mutate ? FirstRow.Text : string.Empty, (copy, _)
-        => string.IsNullOrWhiteSpace(FirstRow.Field)
-            ? null
-            : ExpressionSlots.ForHook(
-                copy.Json, Entity, Current.Point, CurrentPosition(copy),
-                Current.CandidateHook(_editing?.Original), "action", "mutate", FirstRow.Field.Trim()));
 
     /// <summary>
     /// Runs the check to its end and observes its fault: it is fire-and-forget, so an unobserved exception would

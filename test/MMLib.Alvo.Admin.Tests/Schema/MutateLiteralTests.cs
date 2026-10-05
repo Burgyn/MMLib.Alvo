@@ -83,7 +83,6 @@ public class MutateLiteralTests
     [Theory]
     [InlineData(FieldType.String, "Text, written as typed.")]
     [InlineData(FieldType.Text, "Text, written as typed.")]
-    [InlineData(FieldType.Enum, "Text, written as typed.")]
     [InlineData(FieldType.Integer, "A whole number such as 3 or -2.")]
     [InlineData(FieldType.Decimal, "A number such as 12.5.")]
     [InlineData(FieldType.Boolean, "true or false.")]
@@ -126,6 +125,51 @@ public class MutateLiteralTests
         MutateLiteral.TryValue(Row(text), Field(FieldType.Decimal), out var value, out var refusal).ShouldBeTrue(refusal);
 
         value!.GetValue<decimal>().ShouldBe(decimal.Parse(number, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public void An_enum_field_s_hint_names_its_declared_values()
+        => MutateLiteral.Hint(new FieldSchema { Name = "status", Type = FieldType.Enum, EnumValues = ["open", "closed"] })
+            .ShouldBe("One of open, closed.");
+
+    [Theory]
+    [InlineData(FieldType.Integer, "'f' is an integer field")]
+    [InlineData(FieldType.Decimal, "'f' is a decimal field")]
+    [InlineData(FieldType.Uuid, "'f' is a uuid field")]
+    public void The_refusal_names_the_field_s_type_with_its_article(FieldType type, string says)
+    {
+        MutateLiteral.TryValue(Row("not it"), Field(type), out _, out var refusal).ShouldBeFalse();
+
+        refusal.ShouldNotBeNull().ShouldStartWith(says);
+    }
+
+    /// <summary>
+    /// A declared literal of another JSON kind than its field holds is refused, not converted on Save: <c>"3"</c> on an
+    /// integer would otherwise be written back as <c>3</c>, a change the operator never made (Task 6 review).
+    /// </summary>
+    [Theory]
+    [InlineData(FieldType.Integer, "\"3\"", "a string")]
+    [InlineData(FieldType.Boolean, "\"true\"", "a string")]
+    [InlineData(FieldType.String, "3", "a number")]
+    [InlineData(FieldType.String, "true", "true or false")]
+    [InlineData(FieldType.Decimal, "\"1.5\"", "a string")]
+    public void A_declared_literal_of_another_json_kind_is_refused_rather_than_converted(FieldType type, string json, string says)
+    {
+        var row = MutateLiteral.Row("f", JsonNode.Parse(json));
+
+        MutateLiteral.TryValue(row, Field(type), out _, out var refusal).ShouldBeFalse();
+        refusal.ShouldNotBeNull().ShouldContain($"declared as {says}");
+    }
+
+    [Fact]
+    public void Typing_into_a_loaded_row_writes_what_was_typed_as_the_field_holds_it()
+    {
+        var row = MutateLiteral.Row("f", JsonNode.Parse("\"3\""));
+
+        row.Text = "3";
+
+        MutateLiteral.TryValue(row, Field(FieldType.Integer), out var value, out var refusal).ShouldBeTrue(refusal);
+        value!.ToJsonString().ShouldBe("3");
     }
 
     private static MutateRow Row(string text) => new("f", MutateMode.Literal, text);

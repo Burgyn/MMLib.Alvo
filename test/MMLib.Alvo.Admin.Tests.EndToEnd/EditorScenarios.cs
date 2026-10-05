@@ -167,7 +167,7 @@ public sealed class EditorScenarios(AdminWorld world) : IClassFixture<AdminWorld
         var confirm = session.Dialog("remove-field-sheet");
         await confirm.WaitForAsync();
         (await confirm.GetAttributeAsync("aria-modal")).ShouldBe("true");
-        await session.WaitForFocusInDialogAsync("remove-field-sheet");
+        await session.WaitForFocusInsideAsync("remove-field-sheet", FocusScope.Dialog);
         await session.Page.Keyboard.PressAsync("Escape");
         await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
         (await session.Page.GetByTestId("staged-name").CountAsync()).ShouldBe(0, "Escape is Cancel");
@@ -215,7 +215,7 @@ public sealed class EditorScenarios(AdminWorld world) : IClassFixture<AdminWorld
 
         await session.Page.GetByTestId("pending-discard").ClickAsync();
         await session.Dialog("discard-sheet").WaitForAsync();
-        await session.WaitForFocusInDialogAsync("discard-sheet");
+        await session.WaitForFocusInsideAsync("discard-sheet", FocusScope.Dialog);
         await session.Page.Keyboard.PressAsync("Escape");
         await session.Dialog("discard-sheet").WaitForAsync(new() { State = WaitForSelectorState.Detached });
         (await session.Page.GetByTestId("pending-bar").IsVisibleAsync()).ShouldBeTrue("Escape is Cancel");

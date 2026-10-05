@@ -90,18 +90,18 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
         await session.OpenTabAsync("On write");
         await session.Page.GetByTestId("hook-new").ClickAsync();
         await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "mutate", Exact = true }).ClickAsync();
-        await session.Page.FillAsync("#hook-mutate-field", "name");
+        await ExpressionRowAsync(session, 0, "name");
 
-        await session.Page.FillAsync("#hook-mutate-value", "new.no_such_field");
-        var finding = session.Page.GetByTestId("check-hook-mutate-value").First;
+        await session.Page.FillAsync("#hook-mutate-value-0", "new.no_such_field");
+        var finding = session.Page.GetByTestId("check-hook-mutate-value-0").First;
         await finding.WaitForAsync(new() { Timeout = 3_000 });
         (await finding.InnerTextAsync()).ShouldContain("no_such_field");
-        await ShouldKeepFocusAsync(session, "hook-mutate-value");
+        await ShouldKeepFocusAsync(session, "hook-mutate-value-0");
 
-        await session.Page.FillAsync("#hook-mutate-value", "new.code");
+        await session.Page.FillAsync("#hook-mutate-value-0", "new.code");
         await finding.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 3_000 });
-        (await session.Page.GetByTestId("check-hook-mutate-value").CountAsync()).ShouldBe(0, "every sentence goes, not only the first");
-        await ShouldKeepFocusAsync(session, "hook-mutate-value");
+        (await session.Page.GetByTestId("check-hook-mutate-value-0").CountAsync()).ShouldBe(0, "every sentence goes, not only the first");
+        await ShouldKeepFocusAsync(session, "hook-mutate-value-0");
     }
 
     /// <summary>
@@ -116,18 +116,18 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
         await session.OpenTabAsync("On write");
         await session.Page.GetByTestId("hook-new").ClickAsync();
         await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "mutate", Exact = true }).ClickAsync();
-        await session.Page.FillAsync("#hook-mutate-field", "name");
+        await ExpressionRowAsync(session, 0, "name");
         await session.Page.FillAsync("#hook-condition", "new.code ==");
         await session.Page.GetByTestId("check-hook-condition").First.WaitForAsync(new() { Timeout = 3_000 });
 
-        await session.Page.FillAsync("#hook-mutate-value", "nope(");
+        await session.Page.FillAsync("#hook-mutate-value-0", "nope(");
 
-        var value = session.Page.GetByTestId("check-hook-mutate-value").First;
+        var value = session.Page.GetByTestId("check-hook-mutate-value-0").First;
         await value.WaitForAsync(new() { Timeout = 3_000 });
         var flagged = await value.InnerTextAsync();
         await session.Page.FillAsync("#hook-condition", "new.code == 'a'");
         await session.Page.GetByTestId("check-hook-condition").First.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 3_000 });
-        (await session.Page.GetByTestId("check-hook-mutate-value").CountAsync()).ShouldBeGreaterThan(0, "the value is still broken");
+        (await session.Page.GetByTestId("check-hook-mutate-value-0").CountAsync()).ShouldBeGreaterThan(0, "the value is still broken");
         (await value.InnerTextAsync()).ShouldBe(flagged, "a condition edit leaves the value's flag shown as it was (pre-flight C4)");
     }
 
@@ -135,6 +135,10 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
     /// A check that cannot be asked — the patched field is empty, so the value has no slot — shows nothing: never the
     /// stale flag about text no longer in the box (spec §4.3, §5 criterion 4).
     /// </summary>
+    /// <remarks>
+    /// A field select cannot be emptied, so the empty field is reached the way rows still reach one: a second row whose
+    /// field is not chosen yet moves into the first row's place when that row is removed, and with it the box's check key.
+    /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task A_flag_goes_when_the_next_check_cannot_be_asked_rather_than_stay_stale()
     {
@@ -143,16 +147,19 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
         await session.OpenTabAsync("On write");
         await session.Page.GetByTestId("hook-new").ClickAsync();
         await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "mutate", Exact = true }).ClickAsync();
-        await session.Page.FillAsync("#hook-mutate-field", "name");
-        await session.Page.FillAsync("#hook-mutate-value", "new.no_such_field");
-        var finding = session.Page.GetByTestId("check-hook-mutate-value").First;
+        await ExpressionRowAsync(session, 0, "name");
+        await session.Page.FillAsync("#hook-mutate-value-0", "new.no_such_field");
+        var finding = session.Page.GetByTestId("check-hook-mutate-value-0").First;
         await finding.WaitForAsync(new() { Timeout = 3_000 });
 
-        await session.Page.FillAsync("#hook-mutate-field", string.Empty);
-        await session.Page.FillAsync("#hook-mutate-value", "new.code");
+        await session.Page.GetByTestId("hook-mutate-add").ClickAsync();
+        await ExpressionRowAsync(session, 1, field: null);
+        await session.Page.FillAsync("#hook-mutate-value-1", "new.code");
+        await session.Page.GetByTestId("hook-mutate-remove-0").ClickAsync();
 
         await finding.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 3_000 });
-        (await session.Page.GetByTestId("check-hook-mutate-value").CountAsync()).ShouldBe(0);
+        (await session.Page.InputValueAsync("#hook-mutate-value-0")).ShouldBe("new.code", "the second row is now the first");
+        (await session.Page.Locator("[data-testid^='check-hook-mutate-value']").CountAsync()).ShouldBe(0);
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -219,6 +226,17 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
         await finding.WaitForAsync(new() { Timeout = 3_000 });
         (await finding.InnerTextAsync()).ShouldStartWith("Not checked yet");
         (await finding.GetAttributeAsync("class"))!.ShouldContain("a-field__problem--muted");
+    }
+
+    /// <summary>Sets mutate row <paramref name="index"/> to take an expression, after choosing its field when one is given.</summary>
+    private static async Task ExpressionRowAsync(AdminSession session, int index, string? field)
+    {
+        if (field is not null)
+        {
+            await session.ChooseAsync(MutateEditingScenarios.Combobox(session, $"Field {index + 1}"), field);
+        }
+
+        await MutateEditingScenarios.ExpressionModeAsync(session, index);
     }
 
     /// <summary>What the pending bar says; a check stages nothing, so it must not move.</summary>

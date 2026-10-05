@@ -172,6 +172,49 @@ public class HookBuilderEditTests
         builder.Fingerprint().ShouldNotBe(opened);
     }
 
+    /// <summary>
+    /// Choosing mutate shows a blank row; choosing reject again must not leave the edit dirty because of it (Task 8
+    /// review, minor 3): a blank row is no input, here as in <see cref="HookBuilder.HasInput"/>.
+    /// </summary>
+    [Fact]
+    public void A_blank_row_left_by_a_kind_round_trip_does_not_move_the_fingerprint()
+    {
+        var builder = HookBuilder.From("beforeUpdate", Parse("""{"action":{"reject":"x"}}"""), _fields)!;
+        var opened = builder.Fingerprint();
+
+        builder.Kind = HookBuilder.Mutate;
+        builder.MutateRows.Add(new MutateRow());
+        builder.Kind = HookBuilder.Reject;
+
+        builder.Fingerprint().ShouldBe(opened);
+        builder.MutateRows[0].Text = "1";
+        builder.Fingerprint().ShouldNotBe(opened);
+    }
+
+    /// <summary>A declared <c>"3"</c> on an integer field is refused on Save, not silently written back as <c>3</c>.</summary>
+    [Fact]
+    public void A_declared_literal_of_another_json_kind_is_refused_on_save()
+    {
+        var original = Parse("""{"action":{"mutate":{"quantity":"3"}}}""");
+        var builder = HookBuilder.From("beforeUpdate", original, _fields)!;
+
+        builder.BuildHook(original, out var refusal).ShouldBeNull();
+
+        refusal.ShouldNotBeNull().ShouldContain("'quantity'");
+    }
+
+    [Theory]
+    [InlineData("total", "total")]
+    [InlineData(" total ", "total")]
+    [InlineData("a/b", "a/b")]
+    public void A_row_s_check_slot_is_keyed_as_build_stages_it(string field, string key)
+    {
+        var row = new MutateRow(field, MutateMode.Expression, "1");
+
+        HookBuilder.MutateSlot(row).ShouldBe(["action", HookBuilder.Mutate, key]);
+        HookBuilder.MutateKey(row).ShouldBe(key);
+    }
+
     [Fact]
     public void A_fresh_builder_has_no_input_until_something_is_typed()
     {

@@ -116,7 +116,7 @@ internal sealed partial class HookBuilder
     /// <remarks>The point and the kind are not counted, for the reason <c>HooksTab.Dirty</c> gives.</remarks>
     public bool HasInput => Condition.Length > 0 || RejectMessage.Length > 0 || Endpoint.Length > 0 || Payload.Length > 0
         || Template.Length > 0 || To.Length > 0
-        || MutateRows.Any(row => row.Field.Length > 0 || row.Text.Length > 0 || row.Empty);
+        || MutateRows.Any(HoldsInput);
 
     /// <summary>Whether a point runs inside the write's transaction.</summary>
     public static bool IsBefore(string point)
@@ -144,7 +144,26 @@ internal sealed partial class HookBuilder
         }
     }
 
-    /// <summary>Everything the form holds, as one string: an edit is dirty while this differs from what it opened with.</summary>
+    /// <summary>The key a row patches — the one place it is derived, so Add, the refusals and the live check agree on it.</summary>
+    /// <remarks>
+    /// Trimmed: when Add kept <c>total </c> as typed and the check trimmed it, the check found no such key and stayed silent
+    /// while apply refused the hook (33c1a16).
+    /// </remarks>
+    /// <param name="row">The row.</param>
+    public static string MutateKey(MutateRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        return row.Field.Trim();
+    }
+
+    /// <summary>Where a row's value sits in its hook, for the live check: the path <see cref="Build"/> stages it at.</summary>
+    /// <param name="row">The row.</param>
+    public static string[] MutateSlot(MutateRow row) => ["action", Mutate, MutateKey(row)];
+
+    /// <summary>
+    /// Everything the form holds, as one string: an edit is dirty while this differs from what it opened with. A blank
+    /// row is not counted, for <see cref="HasInput"/>'s reason — choosing mutate and then the old kind again adds one.
+    /// </summary>
     public string Fingerprint() => JsonSerializer.Serialize(new
     {
         Point,
@@ -155,7 +174,8 @@ internal sealed partial class HookBuilder
         Payload,
         Template,
         To,
-        Rows = MutateRows.Select(row => new { row.Field, Mode = row.Mode.ToString(), row.Text, row.Empty }),
+        Rows = MutateRows.Where(HoldsInput)
+            .Select(row => new { row.Field, Mode = row.Mode.ToString(), row.Text, row.Empty, Kind = row.DeclaredKind?.ToString() }),
     });
 
     /// <summary>
@@ -231,17 +251,22 @@ internal sealed partial class HookBuilder
 
     private static bool IsIncomplete(MutateRow row) => Blank(row.Field) || (row.Mode == MutateMode.Expression && Blank(row.Text));
 
+    private static bool HoldsInput(MutateRow row) => row.Field.Length > 0 || row.Text.Length > 0 || row.Empty;
+
     private string? MutateRefusal()
     {
-        var twice = MutateRows.GroupBy(row => row.Field.Trim(), StringComparer.Ordinal).FirstOrDefault(group => group.Count() > 1);
+        var twice = MutateRows.GroupBy(MutateKey, StringComparer.Ordinal).FirstOrDefault(group => group.Count() > 1);
         return twice is not null
             ? $"'{twice.Key}' is patched twice. Keep one row per field."
             : MutateRows.Select(RowRefusal).FirstOrDefault(refusal => refusal is not null);
     }
 
-    private string? RowRefusal(MutateRow row)
+    /// <summary>Why one row cannot be written: its field is not declared, or its literal does not fit it.</summary>
+    /// <param name="row">The row, with its field named.</param>
+    /// <returns>The refusal, or <see langword="null"/>.</returns>
+    public string? RowRefusal(MutateRow row)
     {
-        var name = row.Field.Trim();
+        var name = MutateKey(row);
         if (!Fields.TryGetValue(name, out var field))
         {
             return $"'{name}' is not a field of this entity in the working copy, so this mutate could never be written.";
@@ -274,7 +299,7 @@ internal sealed partial class HookBuilder
         var patch = new JsonObject();
         foreach (var row in MutateRows.Where(row => !Blank(row.Field)))
         {
-            patch[row.Field.Trim()] = ValueOf(row);
+            patch[MutateKey(row)] = ValueOf(row);
         }
 
         return patch;
@@ -287,7 +312,7 @@ internal sealed partial class HookBuilder
             return new JsonObject { ["$cel"] = row.Text };
         }
 
-        return Fields.TryGetValue(row.Field.Trim(), out var field) && MutateLiteral.TryValue(row, field, out var value, out _)
+        return Fields.TryGetValue(MutateKey(row), out var field) && MutateLiteral.TryValue(row, field, out var value, out _)
             ? value
             : JsonValue.Create(row.Text);
     }
