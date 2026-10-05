@@ -178,6 +178,9 @@ internal static class CelTypeChecker
 
     private sealed class Visitor(string source, EntitySchema entity, CelProfile profile, CelFunctionCatalog catalog)
     {
+        /// <summary>The fix of every "always fails with these constant arguments" refusal (spec §8).</summary>
+        private const string ConstantFixSuggestion = "Correct the constant, or pass a field instead of a literal.";
+
         private const string RoleMembershipFixSuggestion =
             "A caller holds a set of roles; test membership instead, e.g. 'editor' in @user.roles.";
 
@@ -490,7 +493,30 @@ internal static class CelTypeChecker
                 ? CelValueType.Decimal
                 : CelValueType.Int;
 
-            return (binary, resultType, profileBad || leftBad || rightBad, rightPosition);
+            var bad = profileBad || leftBad || rightBad;
+            return (binary, resultType, bad || RefusesConstantZeroDivisor(binary, rightPosition), rightPosition);
+        }
+
+        /// <summary>
+        /// A literal zero divisor in a hook profile can only fail the write (Ruling N, preflight S-3): refused here with
+        /// the shape of a constant call's refusal (§6.4). Only Condition and Mutate — the profiles whose division fails
+        /// closed (spec §5.6); Computed answers <see langword="null"/> for it, so there it never fails and stays legal.
+        /// </summary>
+        /// <remarks>
+        /// Called only for a well-typed division whose profile admits arithmetic, so until arithmetic joins Condition
+        /// and Mutate (plan Task 7, which brings its facts) no source reaches the refusal; Computed's fact pins the gate.
+        /// </remarks>
+        private bool RefusesConstantZeroDivisor(CelBinary binary, int position)
+        {
+            if (binary is not { Operator: CelBinaryOperator.Divide, Right: CelLiteral { Value: 0L or 0m } }
+                || profile is not (CelProfile.Condition or CelProfile.Mutate))
+            {
+                return false;
+            }
+
+            Errors.Add(new CelCompilationError(
+                "'/' always fails with this constant divisor: the divisor is zero.", ConstantFixSuggestion, position));
+            return true;
         }
 
         /// <summary>
@@ -964,8 +990,57 @@ internal static class CelTypeChecker
                 return Unbound(call, position);
             }
 
-            var refused = !profileBad && RefusesDateText(call, overload, position);
+            var refused = !profileBad && (RefusesDateText(call, overload, position) || FailsWithConstants(call, overload, position));
             return (call with { ResultType = overload.ResultType, Function = overload }, overload.ResultType, profileBad || refused, position);
+        }
+
+        /// <summary>
+        /// A built-in call whose literal arguments make it fail (spec E5, §6.4) is one error here instead of a
+        /// function-failed answer on every write. The tree is not rewritten: the value is computed again at run time.
+        /// Host functions are never run at apply — purity is their contract, not a guarantee (C1 X7).
+        /// </summary>
+        private bool FailsWithConstants(CelCall call, CelFunction overload, int position)
+        {
+            if (overload.IsHost || overload.IsLegacy || !call.Arguments.Any(argument => argument is CelLiteral)
+                || ConstantReason(call, overload) is not { } reason)
+            {
+                return false;
+            }
+
+            Errors.Add(new CelCompilationError(
+                $"'{call.Name}(...)' always fails with these constant arguments: {reason}.",
+                ConstantFixSuggestion,
+                position));
+            return true;
+        }
+
+        /// <summary>
+        /// Why the literal arguments make the call fail, or <see langword="null"/>: the overload's declared check first
+        /// (it sees a non-literal argument as <see langword="null"/>), then — only when every argument is a literal — one
+        /// evaluation with exactly those values. Shallow by construction: <c>int(trim('x'))</c> has no literal argument.
+        /// </summary>
+        private static string? ConstantReason(CelCall call, CelFunction overload)
+        {
+            object?[] literals = [.. call.Arguments.Select(argument => argument is CelLiteral literal ? literal.Value : null)];
+            if (overload.ConstantCheck?.Invoke(literals) is { } declared)
+            {
+                return declared;
+            }
+
+            if (!call.Arguments.All(argument => argument is CelLiteral))
+            {
+                return null;
+            }
+
+            try
+            {
+                overload.Invoke(literals);
+                return null;
+            }
+            catch (CelFunctionException failure)
+            {
+                return failure.Reason ?? "it failed";
+            }
         }
 
         /// <summary>

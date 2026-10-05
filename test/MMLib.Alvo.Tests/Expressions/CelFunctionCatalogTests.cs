@@ -12,17 +12,53 @@ public sealed class CelFunctionCatalogTests
 
     private static IReadOnlyList<string> BuiltInNames => [.. CelBuiltInFunctions.All.Select(f => f.Name).Distinct().Order(StringComparer.Ordinal)];
 
+    /// <summary>The one literal pin of the built-in names (preflight R-3): every other name list derives from the catalog.</summary>
     [Fact]
-    public void The_built_ins_are_the_legacy_calls_and_the_five_functions()
-    {
-        var catalog = CelFunctionCatalog.BuiltIns;
+    public void The_built_ins_are_the_nineteen_names_of_the_design() =>
+        CelFunctionCatalog.BuiltIns.Names.ShouldBe(
+        [
+            "contains", "endsWith", "int", "lowerAscii", "math.abs", "math.ceil", "math.floor", "math.greatest", "math.least",
+            "math.round", "now", "replace", "size", "startsWith", "string", "substring", "timestamp", "trim", "upperAscii",
+        ]);
 
-        catalog.Names.ShouldBe(BuiltInNames);
-        catalog.Overloads("math.abs").Select(o => o.ResultType).ShouldBe([CelValueType.Int, CelValueType.Decimal]);
-        catalog.Overloads("math.round").Select(o => o.ResultType).ShouldBe([CelValueType.Int, CelValueType.Decimal, CelValueType.Decimal]);
-        catalog.Functions.Where(f => f.IsLegacy).Select(f => f.Name).ShouldBe(["now"]);
-        catalog.Functions.Where(f => !f.IsLegacy).ShouldAllBe(f => f.Profiles.SetEquals(new[] { CelProfile.Condition, CelProfile.Mutate }));
-    }
+    /// <summary>
+    /// Spec §5's count: ten names with one overload (<c>now</c> among them), seven with two (<c>math.abs</c>,
+    /// <c>math.ceil</c>, <c>math.floor</c>, <c>math.greatest</c>, <c>math.least</c>, <c>substring</c>, <c>int</c>),
+    /// <c>math.round</c> with three and <c>string</c> with five: 10 + 14 + 3 + 5.
+    /// </summary>
+    [Fact]
+    public void There_are_thirty_two_built_in_overloads() => CelFunctionCatalog.BuiltIns.Functions.Count.ShouldBe(32);
+
+    [Fact]
+    public void Only_the_digits_overload_declares_a_constant_check() =>
+        CelFunctionCatalog.BuiltIns.Functions.Where(function => function.ConstantCheck is not null)
+            .ShouldHaveSingleItem().Signature().ShouldBe("math.round(x: Decimal, digits: Int) -> Decimal");
+
+    [Fact]
+    public void Now_is_the_one_legacy_call_and_offered_in_mutate_only() =>
+        CelFunctionCatalog.BuiltIns.Functions.Where(function => function.IsLegacy).ShouldHaveSingleItem()
+            .ShouldSatisfyAllConditions(
+                now => now.Name.ShouldBe(CelCall.Now),
+                now => now.Profiles.SetEquals(new[] { CelProfile.Mutate }).ShouldBeTrue());
+
+    [Fact]
+    public void Every_built_in_but_now_is_offered_in_condition_and_mutate_only() =>
+        CelFunctionCatalog.BuiltIns.Functions.Where(function => function.Name != CelCall.Now)
+            .ShouldAllBe(function => function.Profiles.SetEquals(new[] { CelProfile.Condition, CelProfile.Mutate }));
+
+    [Fact]
+    public void Overloads_of_one_name_share_their_parameter_names_by_position() =>
+        CelFunctionCatalog.BuiltIns.Functions.GroupBy(function => function.Name).ShouldAllBe(group =>
+            group.All(overload => overload.Parameters.Select(p => p.Name)
+                .SequenceEqual(group.OrderByDescending(o => o.Parameters.Count).First().Parameters.Take(overload.Parameters.Count).Select(p => p.Name))));
+
+    /// <summary>
+    /// A terminal period and a length only: a summary may hold a decimal point (<c>2.5 is 3</c>), so "one sentence" is
+    /// not something a test can check (preflight F6-3).
+    /// </summary>
+    [Fact]
+    public void Every_built_in_summary_ends_with_a_period_and_fits_two_hundred_characters() =>
+        CelFunctionCatalog.BuiltIns.Functions.ShouldAllBe(function => function.Summary.EndsWith('.') && function.Summary.Length <= 200);
 
     [Fact]
     public void Describe_is_ordinal_by_name_with_overloads_in_declaration_order()
@@ -31,9 +67,13 @@ public sealed class CelFunctionCatalogTests
 
         var described = catalog.Describe();
 
-        described.Select(f => f.Name).ShouldBe([.. CelBuiltInFunctions.All.Select(f => f.Name).Append("Zeta").Append("alpha").Order(StringComparer.Ordinal)]);
-        described.Where(f => f.Name == "math.abs").Select(f => f.Result).ShouldBe(catalog.Overloads("math.abs").Select(o => o.Describe().Result));
-        described.Where(f => f.Name == "math.round").Select(f => f.Result).ShouldBe([CelValueType.Int, CelValueType.Decimal, CelValueType.Decimal]);
+        described.Select(f => f.Name).Distinct().ShouldBe([.. BuiltInNames.Append("Zeta").Append("alpha").Order(StringComparer.Ordinal)]);
+        described.Select(f => f.Name).ShouldBeInOrder(SortDirection.Ascending, StringComparer.Ordinal);
+        described.Count.ShouldBe(catalog.Functions.Count);
+        described.Where(f => f.Name == "math.abs").Select(f => f.Result).ShouldBe([CelValueType.Int, CelValueType.Decimal]);
+        described.Where(f => f.Name == "math.round").Select(f => f.Parameters.Count).ShouldBe([1, 1, 2]);
+        described.Where(f => f.Name == "string").Select(f => f.Parameters[0].Type)
+            .ShouldBe([CelValueType.Int, CelValueType.Decimal, CelValueType.Bool, CelValueType.Uuid, CelValueType.Timestamp]);
     }
 
     [Fact]

@@ -40,6 +40,13 @@ internal sealed record CelFunction(
     public bool IsLegacy => Body is null;
 
     /// <summary>
+    /// Gets a check of the literal arguments alone, run at apply (spec §6.4): given each argument's literal value — or
+    /// <see langword="null"/> where the argument is not a literal — it answers why the call would always fail, or
+    /// <see langword="null"/>. Built-ins only; a host function never declares one, because host code never runs at apply.
+    /// </summary>
+    public Func<IReadOnlyList<object?>, string?>? ConstantCheck { get; init; }
+
+    /// <summary>
     /// Calls the body with <paramref name="arguments"/> converted to each parameter's CLR type. A null argument for a
     /// parameter that takes none makes the call null without invoking the body; a nullable parameter receives it
     /// (spec R3). A present argument that does not convert fails the call — never null, which a condition would read as

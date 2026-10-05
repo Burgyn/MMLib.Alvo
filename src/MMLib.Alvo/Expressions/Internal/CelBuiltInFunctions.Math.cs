@@ -32,7 +32,16 @@ internal static partial class CelBuiltInFunctions
         "math.round", CelValueType.Decimal,
         "x rounded to digits places after the point, halves away from zero (2.345 to 2 places is 2.35); digits is from 0 to 28.",
         arguments => RoundTo((decimal)arguments[0]!, (long)arguments[1]!),
-        Parameter("x", CelValueType.Decimal), Parameter("digits", CelValueType.Int));
+        Parameter("x", CelValueType.Decimal), Parameter("digits", CelValueType.Int)) with
+    {
+        ConstantCheck = DigitsCheck,
+    };
+
+    /// <summary><c>math.round(x, digits)</c>'s constant check: a literal <c>digits</c> outside 0 to 28 can only fail (spec E17).</summary>
+    /// <param name="literals">Each argument's literal value, or <see langword="null"/> where it is not a literal.</param>
+    /// <returns>The reason the call always fails, or <see langword="null"/>.</returns>
+    private static string? DigitsCheck(IReadOnlyList<object?> literals) =>
+        literals[1] is long digits && digits is < 0 or > 28 ? DigitsReason : null;
 
     /// <summary>
     /// <c>math.round(x, digits)</c>: halves away from zero, like the one-argument form (deviation F17 — cel-go has no

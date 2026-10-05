@@ -83,6 +83,10 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("beforeHook", BeforeCreate, "size(new.title) > 3"),
         ("beforeHook", BeforeCreate, "trim(old.note) == 'x'"),
         ("beforeHook", BeforeUpdate, "normalisePhone(new.note) == 'x'"),
+        ("beforeHook", BeforeCreate, "startsWith(new.note, 'x')"),
+        ("beforeHook", BeforeCreate, "new.quantity < int('seven')"),
+        ("beforeHook", BeforeCreate, "math.greatest(new.quantity, 3) > 4"),
+        ("beforeHook", BeforeCreate, "math.round(new.quantity, 30) > 1"),
         ("afterHook", AfterCreate, "new.quantity > 5"),
         ("afterHook", AfterCreate, "@tenant.id == 'x'"),
         ("afterHook", AfterCreate, "'dispatcher' in @user.roles"),
@@ -98,6 +102,7 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("afterHook", AfterCreate, "yes('owner' in @user.roles)"),
         ("afterHook", AfterCreate, "!yes('owner' in @user.roles)"),
         ("afterHook", AfterCreate, "new.quantity > 1 && yes('owner' in @user.roles)"),
+        ("afterHook", AfterCreate, "endsWith(new.note, '@x')"),
         ("beforeHook", BeforeCreate, "isMe(@user.id)"),
         ("mutate", Mutate + "note", "'closed'"),
         ("mutate", Mutate + "closed_at", "now()"),
@@ -114,6 +119,7 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("mutate", Mutate + "note", "normalizePhone(new.note, new.note)"),
         ("mutate", Mutate + "quantity", "math.abs(new.quantity)"),
         ("mutate", Mutate + "quantity", "math.round(new.price)"),
+        ("mutate", Mutate + "note", "upperAscii(trim(new.note))"),
         ("computed", Computed, "quantity * price"),
         ("computed", Computed, "quantity * price > 10"),
         ("computed", Computed, "(quantity + 1) * 2 > price"),
@@ -128,6 +134,7 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("computed", Computed, new string('a', 2001)),
         ("computed", Computed, "normalizePhone(note)"),
         ("computed", Computed, "math.round(price)"),
+        ("computed", Computed, "quantity / 0"),
     ];
 
     /// <summary>For every case, the check's error set equals apply's, restricted to the slot.</summary>

@@ -182,7 +182,11 @@ failed: the divisor is zero. Nothing was written." (`AlvoExceptionHandler.Functi
 * **Not in D:** `%` (Alvo's lexer has no `%`, and adding it grows the public `CelBinaryOperator` enum and needs an SQL
   rendering that differs per engine — SQLite's `%` casts to integer), Double (Alvo has no `double` type), comparison and
   ternary in Mutate, string `+` in Condition (§12).
-* **Apply-time folding** (E5) stays call-only: `1 / 0` over literals is not refused at apply in D; it fails the write.
+* **Apply-time folding** (E5) stays call-only, with one exception (controller Ruling N, preflight S-3, plan Task 6): a
+  **literal zero divisor** (`x / 0`, `x / 0.0`) in Condition or Mutate is refused at apply, in the shape of §6.4's refusal
+  (§8). Computed keeps it legal — its division answers `null`, so it never fails. No other operator is folded: `1 + x`
+  past the Int range, or `x / (1 - 1)`, fails the write. *Deviation from this section's first draft*, which kept `1 / 0`
+  for a later slice: refusing it is as cheap as Task 6's constant check and only refuses what always fails.
 
 ## 6. Parser and type checker
 
@@ -299,6 +303,7 @@ Arithmetic and Concatenation rows gain the profiles above.
 | host name `math` | `ArgumentException`: `The CEL function name 'math' is reserved: it is the namespace of CEL's math functions.` | — |
 | runtime failure of a new built-in | 500 `…/errors/function-failed`, detail names the function and the §5.5 reason | — |
 | `math.round` with a literal `digits` out of range | `'math.round(...)' always fails with these constant arguments: digits must be from 0 to 28.` | `Correct the constant, or pass a field instead of a literal.` |
+| literal zero divisor in Condition or Mutate (Ruling N) | `'/' always fails with this constant divisor: the divisor is zero.` | `Correct the constant, or pass a field instead of a literal.` |
 | `string()` over a `date` field | `'string(...)' cannot take the date field 'due' yet: its text form is not settled, and a hook that stored one could not change it later.` | `Store the date's text from the client, or make 'due' a datetime field, whose text is an RFC 3339 instant.` |
 | arithmetic in Rule/Access | `Arithmetic is legal only in the Computed, Condition and Mutate profiles; '+' is not allowed here.` | `Move this calculation into a computed field.` (unchanged) |
 | string `+` in Condition | `String concatenation ('+' over two strings) is legal only in the Computed and Mutate profiles.` | `Join the text in a computed field, and compare that field here instead.` (unchanged) |
@@ -468,7 +473,7 @@ administrator the test registers), and `POST /api/alvo/vehicles` with `vin: "1hg
 | Comparison and ternary in Mutate, string `+` in Condition | construct-table rows; the interpreter already evaluates both, and D's fail-closed flag covers what they contain |
 | `now()` in Condition | an instant threaded through `EvaluatePredicate` (after-hooks have no write stamp); the legacy arm is the only change |
 | `%` | a `CelBinaryOperator.Modulo` member (public, Abstractions — a reviewed `PublicApi` growth), a lexer token, and per-engine SQL for Computed (SQLite's `%` casts to integer); the fail-closed flag already covers modulus by zero |
-| `1 / 0` over literals refused at apply | E5's folding extended from calls to operators; additive (it only refuses what always fails) |
+| Operators over literals refused at apply (`9223372036854775807 + 1`), beyond D's literal zero divisor | E5's folding extended from calls to every operator; additive (it only refuses what always fails) |
 | `@tenant` / `@user` in Mutate | the `ContextRef*` rows gain Mutate; until then a mutate passes `new.tenant_id` (a column of a tenant-scoped row), and a condition may pass `@tenant.id`; the refusal's wording is tracked in #310 |
 | A Date type (`string(dateField)` = `2026-10-05`) | a `CelValueType` member and a marshaller arm; D refuses `string()` over a `date` field (E18), so no stored text pins either form |
 | Descriptor-defined CEL functions, edited in the portal (D-1, Q6) | a third `CelFunctionProvenance` member (string-serialized, additive) and a descriptor block of their own — never the frozen schema's `functions` block, which means csx functions; the catalog already merges two sources, so a third is a registration, not a redesign |
