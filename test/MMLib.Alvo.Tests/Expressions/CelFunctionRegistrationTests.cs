@@ -48,7 +48,7 @@ public sealed class CelFunctionRegistrationTests
     [InlineData("now")]
     [InlineData("lowerAscii")]
     [InlineData("trim")]
-    [InlineData("abs")]
+    [InlineData("replace")]
     [InlineData("in")]
     [InlineData("true")]
     [InlineData("null")]
@@ -119,7 +119,7 @@ public sealed class CelFunctionRegistrationTests
     [InlineData("filter")]
     [InlineData("all")]
     [InlineData("replace")]
-    [InlineData("round")]
+    [InlineData("lowerAscii")]
     [InlineData("size")]
     [InlineData("false")]
     public void A_macro_or_built_in_name_is_refused(string name) =>
@@ -188,7 +188,7 @@ public sealed class CelFunctionRegistrationTests
         host.Parameters.ShouldHaveSingleItem().Name.ShouldBe("phone");
         described.Select(f => f.Name).ShouldBe(described.Select(f => f.Name).Order(StringComparer.Ordinal));
         described.Where(f => f.Provenance == CelFunctionProvenance.BuiltIn).Select(f => f.Name).Distinct()
-            .ShouldBe(["abs", "lowerAscii", "now", "replace", "round", "size", "trim"]);
+            .ShouldBe(CelFunctionCatalog.BuiltIns.Names);
     }
 
     private static Delegate Multicast()

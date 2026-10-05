@@ -30,7 +30,7 @@ more: no `@user` or `@tenant`, no arithmetic, no joins. `lowerAscii` takes a fie
 of the right type, and a null argument makes the value null.
 
 <!-- gen:mutate-functions -->
-`abs` `lowerAscii` `now` `replace` `round` `size` `trim`
+`lowerAscii` `math.abs` `math.round` `now` `replace` `size` `trim`
 <!-- /gen:mutate-functions -->
 
 An embedded host may register its own functions; they work in a `condition` and a `mutate` and nowhere else. Call

@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Management;
 using System.Net;
 using System.Text.Json;
@@ -20,8 +21,8 @@ public sealed class ManagementCelFunctionsTests
 
         var functions = await ReadFunctionsAsync(world);
 
-        functions.Select(f => f["name"]!.GetValue<string>()).Distinct().ShouldBe(["abs", "lowerAscii", "now", "replace", "round", "size", "trim"]);
-        functions.Count(f => f["name"]!.GetValue<string>() == "abs").ShouldBe(2);
+        functions.Select(f => f["name"]!.GetValue<string>()).Distinct().ShouldBe(CelFunctionCatalog.BuiltIns.Names);
+        functions.Count(f => f["name"]!.GetValue<string>() == "math.abs").ShouldBe(2);
         var trim = Named(functions, "trim");
         trim["result"]!.GetValue<string>().ShouldBe("String");
         trim["resultMayBeNull"]!.GetValue<bool>().ShouldBeFalse();

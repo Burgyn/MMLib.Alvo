@@ -112,8 +112,8 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("mutate", Mutate + "note", "normalizePhone(new.note)"),
         ("mutate", Mutate + "note", "trim(replace(new.title, '-', ' '))"),
         ("mutate", Mutate + "note", "normalizePhone(new.note, new.note)"),
-        ("mutate", Mutate + "quantity", "abs(new.quantity)"),
-        ("mutate", Mutate + "quantity", "round(new.price)"),
+        ("mutate", Mutate + "quantity", "math.abs(new.quantity)"),
+        ("mutate", Mutate + "quantity", "math.round(new.price)"),
         ("computed", Computed, "quantity * price"),
         ("computed", Computed, "quantity * price > 10"),
         ("computed", Computed, "(quantity + 1) * 2 > price"),
@@ -127,7 +127,7 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("computed", Computed, "'x'"),
         ("computed", Computed, new string('a', 2001)),
         ("computed", Computed, "normalizePhone(note)"),
-        ("computed", Computed, "round(price)"),
+        ("computed", Computed, "math.round(price)"),
     ];
 
     /// <summary>For every case, the check's error set equals apply's, restricted to the slot.</summary>

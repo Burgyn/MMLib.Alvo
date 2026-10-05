@@ -62,18 +62,18 @@ public sealed class CelBuiltInFunctionTests
     [InlineData(5L, 5L)]
     [InlineData(0L, 0L)]
     public void Abs_of_an_int_is_an_int(long value, long expected) =>
-        Evaluate("abs(qty)", ("qty", value)).ShouldBe(expected);
+        Evaluate("math.abs(qty)", ("qty", value)).ShouldBe(expected);
 
     [Fact]
     public void Abs_of_a_decimal_is_a_decimal() =>
-        Evaluate("abs(price)", ("price", -2.50m)).ShouldBe(2.50m);
+        Evaluate("math.abs(price)", ("price", -2.50m)).ShouldBe(2.50m);
 
     [Fact]
     public void Abs_of_the_smallest_int_fails_closed_with_a_reason()
     {
-        var failure = Should.Throw<CelFunctionException>(() => Evaluate("abs(qty)", ("qty", long.MinValue)));
+        var failure = Should.Throw<CelFunctionException>(() => Evaluate("math.abs(qty)", ("qty", long.MinValue)));
 
-        failure.FunctionName.ShouldBe("abs");
+        failure.FunctionName.ShouldBe("math.abs");
         failure.Reason.ShouldNotBeNullOrWhiteSpace();
     }
 
@@ -85,18 +85,18 @@ public sealed class CelBuiltInFunctionTests
     [InlineData("1.4999", "1")]
     [InlineData("2.4", "2")]
     public void Round_takes_halves_away_from_zero(string value, string expected) =>
-        Evaluate("round(price)", ("price", decimal.Parse(value, CultureInfo.InvariantCulture)))
+        Evaluate("math.round(price)", ("price", decimal.Parse(value, CultureInfo.InvariantCulture)))
             .ShouldBe(decimal.Parse(expected, CultureInfo.InvariantCulture));
 
     [Fact]
-    public void Round_of_an_int_is_the_int() => Evaluate("round(qty)", ("qty", 7L)).ShouldBe(7L);
+    public void Round_of_an_int_is_the_int() => Evaluate("math.round(qty)", ("qty", 7L)).ShouldBe(7L);
 
     [Theory]
     [InlineData("trim(name)")]
     [InlineData("size(name)")]
     [InlineData("replace(name, 'a', 'b')")]
-    [InlineData("abs(qty)")]
-    [InlineData("round(price)")]
+    [InlineData("math.abs(qty)")]
+    [InlineData("math.round(price)")]
     public void A_null_argument_makes_every_built_in_null(string source) => Evaluate(source).ShouldBeNull();
 
     [Fact]

@@ -403,7 +403,30 @@ internal static class CelParser
                 return ParseCall(identifierToken);
             }
 
+            if (QualifiedName(identifierToken) is { } qualified)
+            {
+                _index += 2;
+                return ParseCatalogCall(qualified);
+            }
+
             return ResolveFieldReference(identifierToken);
+        }
+
+        /// <summary>
+        /// <c>namespace.member</c> when the next three tokens are <c>. member (</c> and the catalog knows the dotted name
+        /// (spec §6.1). The catalog decides, never the grammar: <c>new.total</c>, a field named <c>math</c>, and an
+        /// uncatalogued <c>a.b(</c> all fall through to field resolution exactly as before.
+        /// </summary>
+        private string? QualifiedName(CelToken first)
+        {
+            if (Current.Kind != CelTokenKind.Dot || _index + 2 >= tokens.Count
+                || tokens[_index + 1].Kind != CelTokenKind.Identifier || tokens[_index + 2].Kind != CelTokenKind.LeftParen)
+            {
+                return null;
+            }
+
+            var name = $"{first.Text}.{tokens[_index + 1].Text}";
+            return catalog.Contains(name) ? name : null;
         }
 
         private CelFieldRef ParseFieldRefArgument() => ResolveFieldReference(Expect(CelTokenKind.Identifier));
@@ -429,7 +452,7 @@ internal static class CelParser
             "changed" => ParseChangedCall(),
             CelCall.LowerAscii => ParseLowerAsciiCall(),
             CelCall.Now => ParseNowCall(),
-            var name when catalog.Contains(name) => ParseCatalogCall(identifierToken),
+            var name when catalog.Contains(name) => ParseCatalogCall(name),
             _ => throw UnrecognizedFunction(identifierToken),
         };
 
@@ -437,12 +460,12 @@ internal static class CelParser
         /// Parses <c>name(argument, …)</c> for a catalogued function. Each argument is a whole expression parsed as one
         /// nested level, so call nesting counts against <see cref="MaxDepth"/>; arity is the type checker's question.
         /// </summary>
-        private CelCall ParseCatalogCall(CelToken nameToken)
+        private CelCall ParseCatalogCall(string name)
         {
             Expect(CelTokenKind.LeftParen);
             IReadOnlyList<CelNode> arguments = Current.Kind == CelTokenKind.RightParen ? [] : ParseArguments();
             Expect(CelTokenKind.RightParen);
-            return new CelCall(nameToken.Text, arguments);
+            return new CelCall(name, arguments);
         }
 
         private List<CelNode> ParseArguments()
@@ -466,6 +489,7 @@ internal static class CelParser
         {
             "lower" => LowerAsciiSuggestion,
             "all" or "exists" or "exists_one" or "map" or "filter" => MacroNotSupportedSuggestion,
+            var bare when catalog.Contains($"math.{bare}") => $"Did you mean 'math.{bare}'? " + KnownFunctionsSuggestion(string.Empty),
             _ => KnownFunctionsSuggestion(name),
         };
 
@@ -578,14 +602,25 @@ internal static class CelParser
         }
 
         /// <summary>
-        /// The fix for <c>x.trim()</c> or <c>math.abs(x)</c> — CEL's receiver and namespaced spellings (deviation F1):
-        /// when the member after the dot is a catalogued function followed by <c>(</c>, say how Alvo spells the call.
+        /// The fix for <c>x.trim()</c>, <c>math.rond(x)</c> or another dotted spelling (deviation F1/F11): a catalogued
+        /// member gets the global form; a member of a catalogued namespace gets "did you mean" over the known names.
         /// </summary>
-        private string NestedAccessFix() =>
-            ReceiverCallName() is { } function && catalog.Contains(function)
-                ? $"Write {function}(...) with the value as an argument: Alvo calls a function as {function}(x), never "
-                    + $"as x.{function}() or with a namespace such as math.{function}(x)."
-                : MacroNotSupportedSuggestion;
+        private string NestedAccessFix(CelToken first) => ReceiverCallName() switch
+        {
+            { } member when catalog.Contains(member) =>
+                $"Write {member}(...) with the value as an argument: Alvo calls a function as {member}(x), never as x.{member}().",
+            { } member when IsNamespace(first.Text) => KnownFunctionsSuggestion($"{first.Text}.{member}"),
+            _ => MacroNotSupportedSuggestion,
+        };
+
+        private bool IsNamespace(string text) => catalog.Names.Any(name => name.StartsWith(text + ".", StringComparison.Ordinal));
+
+        /// <summary>The fix for <c>new.title.trim()</c>: the global call over the same image and field (spec §6.2).</summary>
+        private string? ImageReceiverFix(CelToken image, CelToken field) =>
+            ReceiverCallName() is { } member && catalog.Contains(member)
+                ? $"Write {member}({image.Text}.{field.Text}): Alvo calls a function with the value as its first argument, "
+                    + $"never as {image.Text}.{field.Text}.{member}()."
+                : null;
 
         private string? ReceiverCallName() =>
             _index + 2 < tokens.Count
@@ -601,7 +636,7 @@ internal static class CelParser
                 throw new CelSyntaxException(
                     "Alvo has no nested field access; use a single field name.",
                     identifierToken.Position,
-                    NestedAccessFix());
+                    NestedAccessFix(identifierToken));
             }
 
             Expect(CelTokenKind.Dot);
@@ -610,7 +645,9 @@ internal static class CelParser
             if (Current.Kind == CelTokenKind.Dot)
             {
                 throw new CelSyntaxException(
-                    "Alvo has no nested field access beyond old./new.; use a single field name.", Current.Position);
+                    "Alvo has no nested field access beyond old./new.; use a single field name.",
+                    Current.Position,
+                    ImageReceiverFix(identifierToken, fieldToken));
             }
 
             var state = identifierToken.Text == "old" ? CelRecordState.Old : CelRecordState.New;

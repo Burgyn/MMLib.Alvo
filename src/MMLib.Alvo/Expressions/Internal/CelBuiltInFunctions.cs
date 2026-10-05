@@ -48,12 +48,12 @@ internal static class CelBuiltInFunctions
         arguments => SizeOf((string)arguments[0]!), Parameter("text", CelValueType.String));
 
     private static CelFunction Abs(CelValueType type) => InProcess(
-        "abs", type, "The absolute value of x, of the same numeric type.",
+        "math.abs", type, "The absolute value of x, of the same numeric type.",
         arguments => type == CelValueType.Int ? (object)AbsInt((long)arguments[0]!) : Math.Abs((decimal)arguments[0]!),
         Parameter("x", type));
 
     private static CelFunction Round(CelValueType type) => InProcess(
-        "round", type, "x rounded to a whole number, halves away from zero (2.5 is 3, -2.5 is -3), of the same numeric type.",
+        "math.round", type, "x rounded to a whole number, halves away from zero (2.5 is 3, -2.5 is -3), of the same numeric type.",
         arguments => type == CelValueType.Int ? arguments[0] : Math.Round((decimal)arguments[0]!, MidpointRounding.AwayFromZero),
         Parameter("x", type));
 
@@ -96,7 +96,7 @@ internal static class CelBuiltInFunctions
     internal static long SizeOf(string text) => text.EnumerateRunes().Count();
 
     private static long AbsInt(long value) => value == long.MinValue
-        ? throw new CelFunctionException("abs", "the absolute value of the smallest Int is not an Int")
+        ? throw new CelFunctionException("math.abs", "the absolute value of the smallest Int is not an Int")
         : Math.Abs(value);
 
     private static int Occurrences(string text, string search)
