@@ -28,6 +28,8 @@ internal static class CelHookArithmetic
     private const string IntRange = "the result is outside the range of an Int";
     private const string DecimalRange = "the result is outside the range of a Decimal";
     private const string ZeroDivisor = "the divisor is zero";
+    private const string NegateName = "-_";
+    private const string NotANumber = "an operand is not an Int or a Decimal";
 
     /// <summary>
     /// Whether arithmetic in <paramref name="profile"/> fails closed: a hook condition and a mutate value, the two
@@ -38,40 +40,55 @@ internal static class CelHookArithmetic
     internal static bool FailsClosed(CelProfile profile) => profile is CelProfile.Condition or CelProfile.Mutate;
 
     /// <summary>
-    /// Applies <c>+ - * /</c>. Two integral operands take the checked 64-bit path; any other two numbers the
-    /// <see cref="decimal"/> path; a null or non-numeric operand answers <see langword="null"/>, as everywhere else.
+    /// Applies <c>+ - * /</c>. A null operand answers <see langword="null"/>, as everywhere else; two integral operands
+    /// take the checked 64-bit path; any other two numbers the <see cref="decimal"/> path. A <b>present</b> operand that
+    /// is neither — a NaN, infinite or out-of-range double, a value of an unexpected CLR type — fails closed (Ruling P):
+    /// answering <see langword="null"/> for it would quietly skip a reject or write a null.
     /// </summary>
     /// <param name="op">The operator.</param>
     /// <param name="left">The left value.</param>
     /// <param name="right">The right value.</param>
     /// <returns>A <see cref="long"/>, a <see cref="decimal"/>, or <see langword="null"/>.</returns>
-    /// <exception cref="CelFunctionException">The result overflows, or the divisor is zero.</exception>
+    /// <exception cref="CelFunctionException">
+    /// The result overflows, the divisor is zero, or a present operand is not a number.
+    /// </exception>
     internal static object? Apply(CelBinaryOperator op, object? left, object? right)
     {
-        if (TryInt(left, out var leftInt) && TryInt(right, out var rightInt))
+        if (left is null || right is null)
         {
-            return ApplyInt(op, leftInt, rightInt);
+            return null;
         }
 
-        return left is not null && right is not null
-            && CelInterpreter.TryToDecimal(left, out var leftDecimal) && CelInterpreter.TryToDecimal(right, out var rightDecimal)
-                ? ApplyDecimal(op, leftDecimal, rightDecimal)
-                : null;
+        return TryInt(left, out var leftInt) && TryInt(right, out var rightInt)
+            ? ApplyInt(op, leftInt, rightInt)
+            : ApplyDecimal(op, ToDecimal(op, left), ToDecimal(op, right));
     }
 
-    /// <summary>Unary minus. The smallest Int has no negation; a decimal always has one.</summary>
+    /// <summary>
+    /// Unary minus. A null operand answers <see langword="null"/>; the smallest Int has no negation; a decimal always has
+    /// one; a present operand that is no number fails closed, as in <see cref="Apply"/>.
+    /// </summary>
     /// <param name="value">The operand.</param>
     /// <returns>The negated value, or <see langword="null"/>.</returns>
-    /// <exception cref="CelFunctionException">The operand is the smallest Int.</exception>
+    /// <exception cref="CelFunctionException">The operand is the smallest Int, or is present and not a number.</exception>
     internal static object? Negate(object? value)
     {
-        if (TryInt(value, out var number))
+        if (value is null)
         {
-            return number == long.MinValue ? throw new CelFunctionException("-_", IntRange) : -number;
+            return null;
         }
 
-        return value is not null && CelInterpreter.TryToDecimal(value, out var amount) ? -amount : null;
+        if (TryInt(value, out var number))
+        {
+            return number == long.MinValue ? throw new CelFunctionException(NegateName, IntRange) : -number;
+        }
+
+        return CelInterpreter.TryToDecimal(value, out var amount) ? -amount : throw new CelFunctionException(NegateName, NotANumber);
     }
+
+    /// <summary>A present operand as a <see cref="decimal"/>, or the operator's failure (Ruling P).</summary>
+    private static decimal ToDecimal(CelBinaryOperator op, object value) =>
+        CelInterpreter.TryToDecimal(value, out var amount) ? amount : throw Failure(op, NotANumber);
 
     /// <summary>Checked 64-bit arithmetic; <c>/</c> truncates toward zero, as C#'s and CEL's do.</summary>
     private static long ApplyInt(CelBinaryOperator op, long left, long right)

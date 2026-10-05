@@ -96,6 +96,47 @@ public sealed class CelHookArithmeticTests
             TestCelFunctions.Compile("new.price / new.qty > 1", CelProfile.Condition), CelFixtures.Row(("price", 5m), ("qty", 0L)), null, AlvoContext.Anonymous))
             .FunctionName.ShouldBe("_/_");
 
+    /// <summary>
+    /// Ruling P: a <b>present</b> operand the arithmetic cannot hold — a NaN or infinite double, a value of an unexpected
+    /// CLR type, all reachable only through an embedded caller's own record — fails closed instead of answering
+    /// <see langword="null"/>, so it cannot quietly skip a reject or write a null. The reason names no value.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(Unconvertible))]
+    public void A_present_operand_that_is_no_number_fails_a_mutate_closed(object value) =>
+        ShouldFailClosed(() => Mutate("qty * 2", ("qty", value)), "_*_", "an operand is not an Int or a Decimal");
+
+    [Theory]
+    [MemberData(nameof(Unconvertible))]
+    public void A_present_operand_that_is_no_number_fails_a_condition_closed(object value) =>
+        ShouldFailClosed(() => Condition("new.price / new.qty > 1", ("price", 5m), ("qty", value)), "_/_", "an operand is not an Int or a Decimal");
+
+    [Theory]
+    [MemberData(nameof(Unconvertible))]
+    public void A_present_operand_that_is_no_number_fails_a_negation_closed(object value) =>
+        ShouldFailClosed(() => Condition("-new.price < 0", ("price", value)), "-_", "an operand is not an Int or a Decimal");
+
+    /// <summary>A null operand still makes the result null, even beside an operand that is no number (Ruling P).</summary>
+    [Fact]
+    public void A_null_operand_beside_one_that_is_no_number_still_makes_the_result_null() =>
+        Mutate("qty * price", ("qty", double.NaN), ("price", null)).ShouldBeNull();
+
+    /// <summary>A computed field keeps answering <see langword="null"/> for the same operand: Ruling P is the hook path's.</summary>
+    [Fact]
+    public void A_computed_field_still_answers_null_for_an_operand_that_is_no_number() =>
+        Computed("qty * 2", ("qty", double.NaN)).ShouldBeNull();
+
+    /// <summary>Operands no record the HTTP binder types can hold, but an embedded caller's own record can.</summary>
+    public static TheoryData<object> Unconvertible => new()
+    {
+        double.NaN,
+        double.PositiveInfinity,
+        float.NegativeInfinity,
+        1e30,
+        "7",
+        Guid.Empty,
+    };
+
     [Fact]
     public void A_condition_compares_arithmetic() => Condition("new.qty * 2 > 10", ("qty", 6L)).ShouldBeTrue();
 

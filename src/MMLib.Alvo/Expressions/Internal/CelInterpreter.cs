@@ -210,10 +210,11 @@ internal static class CelInterpreter
     /// surprise still collapses to <see langword="null"/> as before.</b> The two are otherwise indistinguishable to a
     /// caller, and the create path turns a <see langword="null"/> patch value into an <em>absent</em> key, so a
     /// reachable failure swallowed here would silently store a column default instead of refusing the write. Apart
-    /// from a catalogued function and an operator's overflow or division by zero (spec §5.6), nothing in a
-    /// <see cref="CelProfile.Mutate"/> tree can throw: the profile admits literals, field references, calls and
-    /// arithmetic; <see cref="Evaluate"/>'s node switch ends in <c>_ =&gt; null</c>; and <c>now()</c> reads a value the
-    /// caller already bound. The remaining <c>catch</c> is defence-in-depth, as <see cref="EvaluatePredicate"/>'s is.
+    /// from a catalogued function, an operator's overflow, division by zero or present non-number operand (spec §5.6,
+    /// Ruling P) and a join past the text cap (preflight S-2) — each a <see cref="CelFunctionException"/> — nothing in a
+    /// <see cref="CelProfile.Mutate"/> tree can throw: the profile admits literals, field references, calls,
+    /// arithmetic and joins; <see cref="Evaluate"/>'s node switch ends in <c>_ =&gt; null</c>; and <c>now()</c> reads a
+    /// value the caller already bound. The remaining <c>catch</c> is defence-in-depth, as <see cref="EvaluatePredicate"/>'s is.
     /// </remarks>
     public static object? EvaluateMutation(
         CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, DateTimeOffset now)
@@ -301,14 +302,16 @@ internal static class CelInterpreter
         };
     }
 
-    private static object? EvaluateUnary(CelUnary unary, in EvalState state) => unary.Operator switch
+    private static object? EvaluateUnary(CelUnary unary, in EvalState state)
     {
-        CelUnaryOperator.Not => !AsBoolean(Evaluate(unary.Operand, state)),
-        CelUnaryOperator.Negate => state.FailClosed
-            ? CelHookArithmetic.Negate(Evaluate(unary.Operand, state))
-            : Negate(Evaluate(unary.Operand, state)),
-        _ => null,
-    };
+        var operand = Evaluate(unary.Operand, state);
+        return unary.Operator switch
+        {
+            CelUnaryOperator.Not => !AsBoolean(operand),
+            CelUnaryOperator.Negate => state.FailClosed ? CelHookArithmetic.Negate(operand) : Negate(operand),
+            _ => null,
+        };
+    }
 
     private static object? EvaluateBinary(CelBinary binary, in EvalState state) => binary.Operator switch
     {

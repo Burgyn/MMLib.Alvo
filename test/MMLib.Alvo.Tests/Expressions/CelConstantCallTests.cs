@@ -61,7 +61,8 @@ public sealed class CelConstantCallTests
 
     /// <summary>
     /// A declared constant check runs although another argument is a field (spec §6.4, E17): with <c>digits</c> 30 the
-    /// call can never produce a value, whatever the price — a present one fails it, a null one makes it null. <c>-1</c> is a negation, not a literal, so it fails at run time instead (Task 4).
+    /// call can never produce a value, whatever the price — a present one fails it, a null one makes it null. <c>-1</c>
+    /// is a negation, not a literal, so it fails at run time instead (Task 4).
     /// </summary>
     [Theory]
     [InlineData("math.round(price, 29)")]

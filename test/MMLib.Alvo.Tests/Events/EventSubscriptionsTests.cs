@@ -152,6 +152,29 @@ public sealed class EventSubscriptionsTests : IDisposable
     }
 
     /// <summary>
+    /// An operator's failure in an after-hook condition — here a division by a zero field, which fails closed in a hook
+    /// condition (spec §5.6, D-7) — drops the hook exactly as a failing function does: a Warning naming the hook, the
+    /// operator and the event, through the real compiled condition and the product's own evaluator, and never the
+    /// record's values.
+    /// </summary>
+    [Fact]
+    public void An_arithmetic_failure_in_a_condition_drops_the_hook_and_warns_without_the_row()
+    {
+        var catalog = Catalog(new EntityHooks { AfterCreate = [Hook("new.qty / new.zero > 1")] });
+        var @event = Event("entity.deals.created", record: Record(("qty", 4242L), ("zero", 0L)));
+
+        Matching(catalog, @event).ShouldBeEmpty();
+
+        var line = _logger.Entries.ShouldHaveSingleItem();
+        line.Level.ShouldBe(LogLevel.Warning);
+        line.Message.ShouldContain("/entities/deals/hooks/afterCreate/0");
+        line.Message.ShouldContain("_/_");
+        line.Message.ShouldContain(@event.Id.ToString());
+        line.Message.ShouldNotContain("4242");
+        line.Exception.ShouldBeOfType<CelFunctionException>().Message.ShouldNotContain("4242");
+    }
+
+    /// <summary>
     /// A registered host function in an after-hook condition runs for real: the hook is selected when the function
     /// answers true on the record, and not when it answers false.
     /// </summary>
@@ -421,6 +444,8 @@ public sealed class EventSubscriptionsTests : IDisposable
             new FieldSchema { Name = "stage", Type = FieldType.Enum, EnumValues = ["lead", "won", "lost"] },
             new FieldSchema { Name = "owner_id", Type = FieldType.Uuid },
             new FieldSchema { Name = "note", Type = FieldType.String, MaxLength = 200, Nullable = true },
+            new FieldSchema { Name = "qty", Type = FieldType.Integer, Nullable = true },
+            new FieldSchema { Name = "zero", Type = FieldType.Integer, Nullable = true },
         ],
     };
 

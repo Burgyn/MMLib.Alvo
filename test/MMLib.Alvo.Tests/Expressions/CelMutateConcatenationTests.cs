@@ -31,6 +31,19 @@ public sealed class CelMutateConcatenationTests
     [Fact]
     public void A_null_operand_makes_the_value_null() => Mutate("'+421' + name", ("name", null)).ShouldBeNull();
 
+    /// <summary>
+    /// A present value that is no string in a string field — only an embedded caller's own record can hold one — is not
+    /// joined and not nulled: '+' falls to the arithmetic, which fails closed on it (Ruling P).
+    /// </summary>
+    [Fact]
+    public void A_present_value_that_is_no_string_fails_the_join_closed()
+    {
+        var failure = Should.Throw<CelFunctionException>(() => Mutate("name + 'x'", ("name", 7L)));
+
+        failure.FunctionName.ShouldBe("_+_");
+        failure.Reason.ShouldBe("an operand is not an Int or a Decimal");
+    }
+
     [Fact]
     public void A_nullable_field_is_admitted_in_a_mutate() => Compile("name + 'x'", CelProfile.Mutate).IsSuccess.ShouldBeTrue();
 
