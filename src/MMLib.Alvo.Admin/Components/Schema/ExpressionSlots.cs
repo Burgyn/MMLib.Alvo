@@ -92,6 +92,19 @@ internal static class ExpressionSlots
             : null;
     }
 
+    /// <summary>Places the hook form's mutate value, keyed exactly as Add would stage it, on a clone of the working copy.</summary>
+    /// <remarks>
+    /// The field is the form's text as it stands, untrimmed: <see cref="HookBuilder.Draft"/> and Add key the action by
+    /// it, so a trimmed name would find no such key and the check would stay silent where Apply refuses.
+    /// </remarks>
+    /// <param name="workingJson">The working copy's text; not modified.</param>
+    /// <param name="entity">The entity the hook is on.</param>
+    /// <param name="hook">The add form; its point, draft and field are read, nothing is changed.</param>
+    /// <param name="source">The CEL as it stands in the value box.</param>
+    /// <returns>As <see cref="ForMutateValue(string, string, string, JsonObject, string, string)"/>.</returns>
+    public static (string Json, string Path)? ForMutateValue(string workingJson, string entity, HookBuilder hook, string source)
+        => ForMutateValue(workingJson, entity, hook.Point, hook.Draft(), hook.MutateField, source);
+
     /// <summary>Places the field the add form would declare, with the typed expression, on a clone of the working copy.</summary>
     /// <remarks>
     /// The facets are what <c>FieldFacets.Build</c> made of the form, and the writer is the working copy's own

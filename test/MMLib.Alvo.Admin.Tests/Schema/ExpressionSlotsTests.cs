@@ -177,6 +177,22 @@ public class ExpressionSlotsTests
         ExpressionSlots.ForMutateValue(WithHooks, "missing", "beforeUpdate", Mutate("total"), "total", "1").ShouldBeNull();
     }
 
+    /// <summary>
+    /// Add keys the mutate by the field's text as typed, so the check must too: a trimmed <c>status</c> found no
+    /// <c>mutate["status "]</c>, so the check stayed silent while Apply refused <c>'status ' is not a field</c>.
+    /// </summary>
+    [Fact]
+    public void The_form_s_mutate_value_is_placed_under_the_field_as_add_keys_it_untrimmed()
+    {
+        var hook = new HookBuilder { Kind = HookBuilder.Mutate, MutateField = "total ", MutateValue = "1" };
+
+        var (json, path) = ExpressionSlots.ForMutateValue(WithHooks, "orders", hook, "1")!.Value;
+
+        path.ShouldEndWith("/action/mutate/total ");
+        hook.Build(out _)!["mutate"]!.AsObject().ContainsKey("total ").ShouldBeTrue("what Add would stage");
+        JsonNode.Parse(json)!["entities"]!["orders"]!["hooks"]![hook.Point]!.AsArray()[^1]!["action"]!["mutate"]!["total "].ShouldNotBeNull();
+    }
+
     [Fact]
     public void A_computed_expression_lands_in_the_new_field_with_the_typed_source()
     {
