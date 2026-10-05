@@ -142,22 +142,23 @@ public class ExpressionSlotsTests
     }
 
     [Fact]
-    public void A_mutate_value_lands_under_the_patched_field_with_the_typed_source_and_the_typed_condition()
+    public void A_mutate_value_lands_under_the_patched_field_with_the_typed_source_and_no_condition()
     {
         var (json, path) = ExpressionSlots.ForMutateValue(
-            WithHooks, "orders", "beforeUpdate", "old.total > 0", Mutate("total"), "total", "now()")!.Value;
+            WithHooks, "orders", "beforeUpdate", Mutate("total"), "total", "now()")!.Value;
 
         path.ShouldBe("/entities/orders/hooks/beforeUpdate/0/action/mutate/total");
         var hook = JsonNode.Parse(json)!["entities"]!["orders"]!["hooks"]!["beforeUpdate"]![0]!;
         hook["action"]!["mutate"]!["total"]!["$cel"]!.GetValue<string>().ShouldBe("now()");
-        hook["condition"]!.GetValue<string>().ShouldBe("old.total > 0");
+        hook["condition"].ShouldBeNull(
+            "the before-hook compiler stops at a condition that does not compile, so the value is checked without it");
     }
 
     [Fact]
     public void A_mutate_field_with_a_slash_is_escaped_and_the_action_is_not_modified()
     {
         var action = Mutate("a/b");
-        var (_, path) = ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", null, action, "a/b", "1")!.Value;
+        var (_, path) = ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", action, "a/b", "1")!.Value;
 
         path.ShouldBe("/entities/orders/hooks/beforeUpdate/0/action/mutate/a~1b");
         action["mutate"]!["a/b"]!["$cel"]!.GetValue<string>().ShouldBe("old");
@@ -167,20 +168,36 @@ public class ExpressionSlotsTests
     [InlineData("")]
     [InlineData("  ")]
     public void A_mutate_value_with_no_field_named_yet_has_nothing_to_check(string field)
-        => ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", null, Mutate("x"), field, "1").ShouldBeNull();
+        => ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", Mutate("x"), field, "1").ShouldBeNull();
 
     [Fact]
     public void A_mutate_value_of_an_action_that_is_not_that_mutate_has_nothing_to_check()
     {
-        ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", null, Reject(), "total", "1").ShouldBeNull();
-        ExpressionSlots.ForMutateValue(WithHooks, "missing", "beforeUpdate", null, Mutate("total"), "total", "1").ShouldBeNull();
+        ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", Reject(), "total", "1").ShouldBeNull();
+        ExpressionSlots.ForMutateValue(WithHooks, "missing", "beforeUpdate", Mutate("total"), "total", "1").ShouldBeNull();
+    }
+
+    /// <summary>
+    /// Add keys the mutate by the field's text as typed, so the check must too: a trimmed <c>status</c> found no
+    /// <c>mutate["status "]</c>, so the check stayed silent while Apply refused <c>'status ' is not a field</c>.
+    /// </summary>
+    [Fact]
+    public void The_form_s_mutate_value_is_placed_under_the_field_as_add_keys_it_untrimmed()
+    {
+        var hook = new HookBuilder { Kind = HookBuilder.Mutate, MutateField = "total ", MutateValue = "1" };
+
+        var (json, path) = ExpressionSlots.ForMutateValue(WithHooks, "orders", hook, "1")!.Value;
+
+        path.ShouldEndWith("/action/mutate/total ");
+        hook.Build(out _)!["mutate"]!.AsObject().ContainsKey("total ").ShouldBeTrue("what Add would stage");
+        JsonNode.Parse(json)!["entities"]!["orders"]!["hooks"]![hook.Point]!.AsArray()[^1]!["action"]!["mutate"]!["total "].ShouldNotBeNull();
     }
 
     [Fact]
     public void A_computed_expression_lands_in_the_new_field_with_the_typed_source()
     {
         var facets = new JsonObject { ["type"] = "decimal", ["computed"] = "stale" };
-        var (json, path) = ExpressionSlots.ForComputed(WithHooks, "orders", "double_total", facets, "total * 2")!.Value;
+        var (json, path) = ExpressionSlots.ForComputed(WithHooks, "orders", null, "double_total", facets, "total * 2")!.Value;
 
         path.ShouldBe("/entities/orders/fields/double_total/computed");
         var field = JsonNode.Parse(json)!["entities"]!["orders"]!["fields"]!["double_total"]!;
@@ -193,17 +210,49 @@ public class ExpressionSlotsTests
     public void A_computed_field_on_an_entity_with_slash_is_escaped_and_independent_of_the_other_candidate()
     {
         var facets = new JsonObject { ["type"] = "decimal" };
-        var (first, path) = ExpressionSlots.ForComputed(WithHooks, "a/b", "f~g", facets, "first")!.Value;
-        var (second, _) = ExpressionSlots.ForComputed(WithHooks, "a/b", "f~g", facets, "second")!.Value;
+        var (first, path) = ExpressionSlots.ForComputed(WithHooks, "a/b", null, "f~g", facets, "first")!.Value;
+        var (second, _) = ExpressionSlots.ForComputed(WithHooks, "a/b", null, "f~g", facets, "second")!.Value;
 
         path.ShouldBe("/entities/a~1b/fields/f~0g/computed");
         first.ShouldNotContain("second");
         second.ShouldNotContain("first");
     }
 
+    private const string WithComputed = """{"entities":{"orders":{"fields":{"total":{"type":"decimal","computed":"price * 2"},"price":{"type":"decimal"}}}}}""";
+
+    /// <summary>
+    /// Save writes an edited field over its old name and then renames it, which removes the old key: a candidate that
+    /// only added the new name kept <c>total</c>, so <c>total * 2</c> under <c>subtotal</c> read green and Apply refused.
+    /// </summary>
+    [Fact]
+    public void A_renamed_computed_field_leaves_its_old_name_behind_as_save_does()
+    {
+        var facets = new JsonObject { ["type"] = "decimal" };
+        var (json, path) = ExpressionSlots.ForComputed(WithComputed, "orders", "total", "subtotal", facets, "total * 2")!.Value;
+
+        path.ShouldBe("/entities/orders/fields/subtotal/computed");
+        var fields = JsonNode.Parse(json)!["entities"]!["orders"]!["fields"]!.AsObject();
+        fields.ContainsKey("total").ShouldBeFalse("the rename removed the old key, so the expression names nothing");
+        fields["subtotal"]!["type"]!.GetValue<string>().ShouldBe("decimal");
+        facets.ContainsKey("computed").ShouldBeFalse("the form's facets are not modified");
+    }
+
+    [Fact]
+    public void A_renamed_computed_field_with_a_valid_expression_keeps_the_fields_it_reads()
+    {
+        var facets = new JsonObject { ["type"] = "decimal" };
+        var (json, path) = ExpressionSlots.ForComputed(WithComputed, "orders", "total", "twice", facets, "price * 2")!.Value;
+
+        path.ShouldBe("/entities/orders/fields/twice/computed");
+        var fields = JsonNode.Parse(json)!["entities"]!["orders"]!["fields"]!.AsObject();
+        fields.ContainsKey("total").ShouldBeFalse();
+        fields["twice"]!["computed"]!.GetValue<string>().ShouldBe("price * 2");
+        fields.ContainsKey("price").ShouldBeTrue();
+    }
+
     [Fact]
     public void A_computed_field_on_an_unknown_entity_has_nothing_to_check()
-        => ExpressionSlots.ForComputed(WithHooks, "missing", "f", new JsonObject(), "x").ShouldBeNull();
+        => ExpressionSlots.ForComputed(WithHooks, "missing", null, "f", new JsonObject(), "x").ShouldBeNull();
 
     [Fact]
     public void The_hook_draft_is_the_built_action_once_the_form_can_build_one()

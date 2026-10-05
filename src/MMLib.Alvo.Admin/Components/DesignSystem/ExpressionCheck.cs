@@ -25,8 +25,10 @@ namespace MMLib.Alvo.Admin.Components.DesignSystem;
 /// <c>InvokeAsync(StateHasChanged)</c> and unsubscribes in its own <c>Dispose</c>.
 /// </para>
 /// <para>
-/// A check that could not be asked (a <see langword="null"/> verdict) stores nothing: a helper is never the
-/// reason an operator cannot edit.
+/// A check that could not be asked (a <see langword="null"/> verdict) shows nothing — it clears what the input
+/// showed rather than keep it: those findings were about a source no longer in the box, and a stale finding is
+/// worse than none (spec §4.3, §5 criterion 4). The previous findings stay on show only while the newer submit is
+/// still being asked, so typing does not flicker. A helper is never the reason an operator cannot edit.
 /// </para>
 /// </remarks>
 internal sealed class ExpressionCheck
@@ -79,7 +81,10 @@ internal sealed class ExpressionCheck
     /// </remarks>
     /// <param name="key">The input's key.</param>
     /// <param name="source">The expression as it stands.</param>
-    /// <param name="check">Asks the check with the submit's token; <see langword="null"/> when it could not be asked.</param>
+    /// <param name="check">
+    /// Asks the check with the submit's token; <see langword="null"/> when it could not be asked, which clears the
+    /// input's findings unless a newer submit owns it by then.
+    /// </param>
     /// <returns>A task that ends when this submit is settled, answered or abandoned.</returns>
     public async Task SubmitAsync(
         string key, string source, Func<string, CancellationToken, Task<ManagementExpressionVerdict?>> check)
@@ -97,9 +102,9 @@ internal sealed class ExpressionCheck
         {
             await Task.Delay(DebounceOverride ?? Debounce, token);
             var verdict = await check(source, token);
-            if (verdict is not null && !input.Token.IsCancellationRequested)
+            if (!input.Token.IsCancellationRequested)
             {
-                Store(input, verdict.Findings);
+                Store(input, verdict?.Findings ?? _noFindings);
             }
         }
         catch (OperationCanceledException) when (input.Token.IsCancellationRequested)

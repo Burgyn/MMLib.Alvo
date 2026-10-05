@@ -32,6 +32,35 @@ public sealed class ExpressionCheckTests
     }
 
     [Fact]
+    public async Task A_check_that_failed_after_a_refusal_clears_the_old_finding_rather_than_leave_it_stale()
+    {
+        var sut = new ExpressionCheck { DebounceOverride = TimeSpan.Zero };
+        await sut.SubmitAsync("k", "nw()", (_, _) => Task.FromResult<ManagementExpressionVerdict?>(Refusal("nw is unknown")));
+        var changes = 0;
+        sut.Changed += () => changes++;
+
+        await sut.SubmitAsync("k", "now()", (_, _) => Task.FromResult<ManagementExpressionVerdict?>(null));
+
+        sut.Findings("k").ShouldBeEmpty("the finding was about a source no longer in the box");
+        sut.DescribedBy("k").ShouldBeNull();
+        changes.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task A_failed_check_that_was_superseded_leaves_the_newer_answer_alone()
+    {
+        var sut = new ExpressionCheck { DebounceOverride = TimeSpan.Zero };
+        var slow = new TaskCompletionSource<ManagementExpressionVerdict?>();
+
+        var first = sut.SubmitAsync("k", "a", (_, _) => slow.Task);
+        await sut.SubmitAsync("k", "b", (_, _) => Task.FromResult<ManagementExpressionVerdict?>(Refusal("b is wrong")));
+        slow.SetResult(null);
+        await first;
+
+        sut.Findings("k").Single().Message.ShouldBe("b is wrong");
+    }
+
+    [Fact]
     public async Task Findings_clear_when_the_source_becomes_empty()
     {
         var sut = new ExpressionCheck { DebounceOverride = TimeSpan.Zero };

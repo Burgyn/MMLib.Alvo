@@ -259,7 +259,7 @@
                 <RulesTab @key="EntityName" Rules="_working" Entity="@EntityName" Editable="DeclaredHere" OnChanged="SetRule" />
                 break;
             case EntityTabs.OnWrite:
-                <HooksTab Hooks="@_hooks" Entity="@EntityName" Editable="DeclaredHere" Refused="_refused"
+                <HooksTab @key="EntityName" Hooks="@_hooks" Entity="@EntityName" Editable="DeclaredHere" Refused="_refused"
                           OnAdd="AddHook" OnRemove="RemoveHook" />
                 break;
             case EntityTabs.Indexes:
