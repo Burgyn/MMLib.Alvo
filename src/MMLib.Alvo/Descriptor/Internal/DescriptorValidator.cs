@@ -275,15 +275,64 @@ internal sealed class DescriptorValidator : IDescriptorValidator
         || finding.Message.StartsWith(UnreadableModel, StringComparison.Ordinal);
 
     /// <summary>
+    /// The RFC 6901 pointer (behind the schema pass's <c>#</c>) of a <see cref="JsonException.Path"/>: dotted names,
+    /// <c>['…']</c> keys taken literally, <c>[n]</c> array indices.
+    /// </summary>
+    /// <param name="jsonPath">System.Text.Json's path, such as <c>$.entities['a.b'].hooks[0].action</c>.</param>
+    internal static string PointerOf(string jsonPath)
+    {
+        if (!jsonPath.StartsWith('$'))
+        {
+            return "#/";
+        }
+
+        var segments = new List<string>();
+        for (var i = 1; i < jsonPath.Length;)
+        {
+            var (segment, next) = jsonPath[i] switch
+            {
+                '.' => ReadName(jsonPath, i + 1),
+                '[' => ReadBracket(jsonPath, i + 1),
+                _ => ReadName(jsonPath, i),
+            };
+            segments.Add(segment.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal));
+            i = next;
+        }
+
+        return segments.Count == 0 ? "#/" : "#/" + string.Join('/', segments);
+    }
+
+    private static (string Segment, int Next) ReadName(string path, int start)
+    {
+        var end = path.AsSpan(start).IndexOfAny('.', '[');
+
+        return end < 0 ? (path[start..], path.Length) : (path.Substring(start, end), start + end);
+    }
+
+    private static (string Segment, int Next) ReadBracket(string path, int start)
+    {
+        if (start < path.Length && path[start] == '\'')
+        {
+            var close = path.IndexOf("']", start + 1, StringComparison.Ordinal);
+            if (close >= 0)
+            {
+                return (path.Substring(start + 1, close - start - 1), close + 2);
+            }
+        }
+
+        var end = path.IndexOf(']', start);
+
+        return end < 0 ? (path[start..], path.Length) : (path.Substring(start, end - start), end + 1);
+    }
+
+    /// <summary>
     /// The refusal for a value the schema accepts and the typed model cannot hold. Its path is written in the schema
     /// pass's own fragment form (<c>#/…</c>): it is a refusal of the same kind (the document is not a descriptor Alvo
     /// can read) and, like a schema error, it stops the rule pass from judging anything.
     /// </summary>
     internal static DescriptorValidationError Unrepresentable(Exception ex)
     {
-        var path = ex is JsonException { Path: string jsonPath } && jsonPath.StartsWith("$.", StringComparison.Ordinal)
-            ? "#/" + jsonPath[2..].Replace('.', '/')
-            : "#/";
+        var path = ex is JsonException { Path: string jsonPath } ? PointerOf(jsonPath) : "#/";
 
         var where = path == "#/" ? "." : $" (at '{path}').";
 

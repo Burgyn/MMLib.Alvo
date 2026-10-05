@@ -71,6 +71,28 @@ public class DescriptorValidatorTests
         refusal.FixSuggestion!.ShouldNotContain("smaller", Case.Insensitive);
     }
 
+    /// <summary>System.Text.Json's path syntax becomes an RFC 6901 pointer, behind the schema pass's leading <c>#</c>.</summary>
+    /// <param name="jsonPath">What <c>JsonException.Path</c> carries.</param>
+    /// <param name="expected">The fragment-form pointer.</param>
+    [Theory]
+    [InlineData("$", "#/")]
+    [InlineData("$.entities.tasks.fields.title.maxLength", "#/entities/tasks/fields/title/maxLength")]
+    [InlineData("$.entities['a.b/c'].x", "#/entities/a.b~1c/x")]
+    [InlineData("$['a~b']", "#/a~0b")]
+    [InlineData("$.entities.o.hooks.beforeCreate[0].action", "#/entities/o/hooks/beforeCreate/0/action")]
+    [InlineData("$.a[1][2].b", "#/a/1/2/b")]
+    public void A_json_path_becomes_an_rfc_6901_pointer(string jsonPath, string expected) =>
+        DescriptorValidator.PointerOf(jsonPath).ShouldBe(expected);
+
+    [Fact]
+    public void An_unreadable_value_inside_an_array_element_is_found_under_its_slot()
+    {
+        var refusal = DescriptorValidator.Unrepresentable(new System.Text.Json.JsonException(
+            "x", "$.entities.orders.hooks.beforeCreate[0].action.mutate.status", null, null));
+
+        refusal.Path.ShouldBe("#/entities/orders/hooks/beforeCreate/0/action/mutate/status");
+    }
+
     /// <summary>
     /// A ref to an entity the descriptor does not declare is pointed at the ones it does, first: a model that named
     /// the target by the operator's word ("products") is steered to the existing entity ("parts") before it is told it
