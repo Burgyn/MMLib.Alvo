@@ -32,6 +32,10 @@ internal sealed class CelFunctionCatalog
     /// <summary>Gets every overload, ordered by name (ordinal), overloads of one name in declaration order.</summary>
     internal IReadOnlyList<CelFunction> Functions { get; }
 
+    /// <summary>Every overload as discovery shows it, in <see cref="Functions"/> order.</summary>
+    /// <returns>The public descriptions.</returns>
+    internal IReadOnlyList<CelFunctionInfo> Describe() => [.. Functions.Select(function => function.Describe())];
+
     /// <summary>Gets every distinct name, ordinal order.</summary>
     internal IReadOnlyList<string> Names => [.. _byName.Keys.Order(StringComparer.Ordinal)];
 

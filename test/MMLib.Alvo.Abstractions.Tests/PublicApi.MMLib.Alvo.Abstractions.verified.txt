@@ -1145,6 +1145,30 @@ namespace MMLib.Alvo.Expressions
         public static MMLib.Alvo.Expressions.CelValueType Of(MMLib.Alvo.Schema.FieldSchema field) { }
         public static MMLib.Alvo.Expressions.CelValueType Of(MMLib.Alvo.Schema.FieldType type) { }
     }
+    public sealed class CelFunctionInfo : System.IEquatable<MMLib.Alvo.Expressions.CelFunctionInfo>
+    {
+        public CelFunctionInfo() { }
+        public required string Name { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Expressions.CelFunctionParameter> Parameters { get; init; }
+        public required System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Expressions.CelProfile> Profiles { get; init; }
+        public required MMLib.Alvo.Expressions.CelFunctionProvenance Provenance { get; init; }
+        public required MMLib.Alvo.Expressions.CelValueType Result { get; init; }
+        public required bool ResultMayBeNull { get; init; }
+        public required string Summary { get; init; }
+    }
+    public sealed class CelFunctionParameter : System.IEquatable<MMLib.Alvo.Expressions.CelFunctionParameter>
+    {
+        public CelFunctionParameter() { }
+        public required bool AcceptsNull { get; init; }
+        public required string Name { get; init; }
+        public required MMLib.Alvo.Expressions.CelValueType Type { get; init; }
+    }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Expressions.CelFunctionProvenance>))]
+    public enum CelFunctionProvenance
+    {
+        BuiltIn = 0,
+        Host = 1,
+    }
     public sealed class CelHas : MMLib.Alvo.Expressions.CelNode, System.IEquatable<MMLib.Alvo.Expressions.CelHas>
     {
         public CelHas(MMLib.Alvo.Expressions.CelFieldRef Field) { }
@@ -1160,6 +1184,7 @@ namespace MMLib.Alvo.Expressions
     {
         protected CelNode() { }
     }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Expressions.CelProfile>))]
     public enum CelProfile
     {
         Rule = 0,
@@ -1194,6 +1219,7 @@ namespace MMLib.Alvo.Expressions
         Not = 0,
         Negate = 1,
     }
+    [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<MMLib.Alvo.Expressions.CelValueType>))]
     public enum CelValueType
     {
         Bool = 0,

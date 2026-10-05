@@ -1,6 +1,9 @@
-﻿namespace MMLib.Alvo.Expressions;
+﻿using System.Text.Json.Serialization;
+
+namespace MMLib.Alvo.Expressions;
 
 /// <summary>The runtime type of a CEL value inside an Alvo profile.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<CelValueType>))]
 public enum CelValueType
 {
     /// <summary>A boolean.</summary>

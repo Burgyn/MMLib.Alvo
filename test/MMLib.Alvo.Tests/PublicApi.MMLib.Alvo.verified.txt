@@ -201,6 +201,7 @@ namespace Microsoft.Extensions.DependencyInjection
 {
     public static class AlvoBuilderExtensions
     {
+        public static MMLib.Alvo.IAlvoBuilder AddCelFunction(this MMLib.Alvo.IAlvoBuilder builder, string name, System.Delegate function, string? summary = null) { }
         public static MMLib.Alvo.IAlvoBuilder FromDescriptor(this MMLib.Alvo.IAlvoBuilder builder, string path) { }
         public static MMLib.Alvo.IAlvoBuilder UseSchemaPrefix(this MMLib.Alvo.IAlvoBuilder builder, string prefix) { }
     }

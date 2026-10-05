@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Expressions;
+﻿using System.Text.Json.Serialization;
+
+namespace MMLib.Alvo.Expressions;
 
 /// <summary>
 /// Which slot of the project descriptor a CEL expression was authored for. The profile determines
@@ -6,6 +8,7 @@
 /// <see cref="CelRecordState.Old"/>/<see cref="CelRecordState.New"/> field qualifiers are legal only
 /// in <see cref="Condition"/>.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<CelProfile>))]
 public enum CelProfile
 {
     /// <summary>A row-level authorization rule (RLS-style <c>USING</c>/<c>WITH CHECK</c>).</summary>

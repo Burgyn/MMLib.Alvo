@@ -63,6 +63,19 @@ internal sealed record CelFunction(
         return Run(values);
     }
 
+    /// <summary>This overload as discovery shows it.</summary>
+    /// <returns>The public description.</returns>
+    public CelFunctionInfo Describe() => new()
+    {
+        Name = Name,
+        Parameters = [.. Parameters.Select(p => new CelFunctionParameter { Name = p.Name, Type = p.Type, AcceptsNull = p.Nullable })],
+        Result = ResultType,
+        ResultMayBeNull = ResultNullable,
+        Summary = Summary,
+        Provenance = IsHost ? CelFunctionProvenance.Host : CelFunctionProvenance.BuiltIn,
+        Profiles = [.. Profiles.Order()],
+    };
+
     /// <summary>The overload as one line, e.g. <c>replace(text: String, search: String, replacement: String) -> String</c>.</summary>
     /// <returns>The signature text refusals and fixes quote.</returns>
     public string Signature() =>
