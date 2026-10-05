@@ -2,6 +2,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ManagementGateway Gateway
 @inject AdminSession Session
+@inject ILogger<Integrations> Logger
 @implements IDisposable
 
 <PageTitle>Integrations · Alvo</PageTitle>
@@ -16,7 +17,13 @@
     <PageHeader Title="Integrations"
                 Subtitle="The webhook endpoints and message templates your working copy declares. A hook's webhook or email action names them; what the build does with each is said under it, in its own words." />
 
-    @if (_capabilities is null || _copy is null)
+    @if (_problem is not null)
+    {
+        <CascadingValue Value="_problem">
+            <ErrorPanel />
+        </CascadingValue>
+    }
+    else if (_capabilities is null || _copy is null)
     {
         <Skeleton />
     }
@@ -100,6 +107,7 @@
     private readonly ComponentLifetime _lifetime = new();
     private ManagementCapabilities? _capabilities;
     private WorkingCopy? _copy;
+    private AdminProblem? _problem;
     private IReadOnlyList<EndpointRow> _endpoints = [];
     private IReadOnlyList<TemplateRow> _templates = [];
     private Opened? _endpointEditor;
@@ -125,10 +133,18 @@
     /// <inheritdoc />
     protected override async Task OnInitializedAsync()
     {
-        _capabilities = await Gateway.CapabilitiesAsync(_lifetime.Token);
-        _copy = await Session.WorkingCopyAsync(_lifetime.Token);
-        Session.Follow(_copy, InvokeAsync, OnCopyChanged, _lifetime.Token);
-        Read();
+        try
+        {
+            _capabilities = await Gateway.CapabilitiesAsync(_lifetime.Token);
+            _copy = await Session.WorkingCopyAsync(_lifetime.Token);
+            Session.Follow(_copy, InvokeAsync, OnCopyChanged, _lifetime.Token);
+            Read();
+        }
+        catch (Exception exception) when (!_lifetime.Ended)
+        {
+            /* A read the gateway refused is said in place, as Overview says it — not a skeleton that never resolves. */
+            _problem = AdminProblem.From(exception, Logger);
+        }
     }
 
     /// <inheritdoc />
@@ -193,7 +209,7 @@
                 {
                     <span class="a-badge a-badge--accent" data-testid="endpoint-staged">not applied yet</span>
                 }
-                <span class="@(row.Uses.Count > 0 ? "a-badge a-badge--ok" : "a-badge")" data-testid="endpoint-uses">
+                <span class="@(row.Uses.Count > 0 ? "a-badge a-badge--ok a-integration-uses" : "a-badge a-integration-uses")" data-testid="endpoint-uses">
                     @UsesWords(row.Uses, "posted to by", "no hook posts here")
                 </span>
                 <span class="a-badge a-badge--warn">not signed</span>
@@ -203,7 +219,7 @@
                                 aria-label="@($"Edit endpoint {row.Name}")" OnClick="_ => EditEndpoint(row.Name)">Edit</AlvoButton>
                 }
             </div>
-            <span class="a-mono">@row.Url</span>
+            <span class="a-mono a-integration-url">@row.Url</span>
             <span class="a-hint">secretRef <code class="a-mono">@row.SecretRef</code> — declared, and not read by this build.</span>
         </ListRow>
     </text>;
@@ -218,7 +234,7 @@
                 {
                     <span class="a-badge a-badge--accent" data-testid="template-staged">not applied yet</span>
                 }
-                <span class="@(row.Uses.Count > 0 ? "a-badge a-badge--ok" : "a-badge")">@UsesWords(row.Uses, "sent by", "no hook sends it")</span>
+                <span class="@(row.Uses.Count > 0 ? "a-badge a-badge--ok a-integration-uses" : "a-badge a-integration-uses")">@UsesWords(row.Uses, "sent by", "no hook sends it")</span>
                 @if (row.HasBodyFile)
                 {
                     <span class="a-badge a-badge--warn">bodyFile — not read</span>

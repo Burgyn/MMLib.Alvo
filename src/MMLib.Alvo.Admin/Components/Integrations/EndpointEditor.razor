@@ -111,12 +111,11 @@
     /// <inheritdoc />
     protected override void OnInitialized()
     {
-        if (Editing is { } name && Copy is { } copy)
+        /* The first declaration of the name, as IntegrationRows.ByName reads it — so the sheet opens the row it was opened from. */
+        if (Editing is { } name && Copy is { } copy
+            && DescriptorLens.Endpoints(copy.Json).FirstOrDefault(pair => pair.Key == name) is { Key: not null } declared)
         {
-            foreach (var (key, declared) in DescriptorLens.Endpoints(copy.Json).Where(pair => pair.Key == name))
-            {
-                _draft = EndpointDraft.From(key, declared);
-            }
+            _draft = EndpointDraft.From(declared.Key, declared.Value);
         }
 
         _opened = Snapshot();

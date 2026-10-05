@@ -92,12 +92,14 @@ internal sealed partial class EndpointDraft
     /// <summary>Why a name cannot be an endpoint's key, or <see langword="null"/>.</summary>
     /// <param name="name">The name.</param>
     /// <param name="declared">The names already declared.</param>
-    /// <returns>The refusal, or <see langword="null"/>.</returns>
+    /// <returns>The refusal, which never repeats a malformed name, or <see langword="null"/>.</returns>
     public static string? NameRefusal(string name, IReadOnlyCollection<string> declared)
     {
         if (!EndpointName().IsMatch(name))
         {
-            return $"'{name}' is not an endpoint name. A name is lower case, starts with a letter, and holds letters, digits "
+            /* Not repeated: a URL or a secret pasted into the wrong box would be shown back, as UrlRefusal and
+               SecretRefusal never do. */
+            return "That is not an endpoint name. A name is lower case, starts with a letter, and holds letters, digits "
                 + "and dashes — up to 63 characters, such as 'billing-system'.";
         }
 

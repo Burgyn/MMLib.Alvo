@@ -135,8 +135,10 @@ public sealed class IntegrationsScenarios(BikeWorkshopWorld world) : IClassFixtu
         await editor.GetByTestId("endpoint-save").DblClickAsync();
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
+        await session.SnackbarAsync("Endpoint twice-desk added to the working copy");
         (await session.Page.Locator("#endpoint-twice-desk").CountAsync()).ShouldBe(1);
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
+        session.AssertConsoleClean();
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -150,7 +152,8 @@ public sealed class IntegrationsScenarios(BikeWorkshopWorld world) : IClassFixtu
         await session.Page.Keyboard.PressAsync("Escape");
         await editor.GetByTestId("editor-discard-question").WaitForAsync();
         await editor.GetByTestId("editor-keep").ClickAsync();
-        await session.WaitForFocusInsideAsync("endpoint-editor", FocusScope.Dialog);
+        /* On the box itself: focus never left the dialog for the question, so a wait for focus inside it passes at once. */
+        await session.WaitForFocusOnAsync("endpoint-name");
         (await session.Page.InputValueAsync("#endpoint-name")).ShouldBe("unsaved-desk");
     }
 
@@ -161,7 +164,15 @@ public sealed class IntegrationsScenarios(BikeWorkshopWorld world) : IClassFixtu
         await session.GoAsync("/integrations");
         await session.AssertNoHorizontalScrollAsync();
 
-        await NewEndpointAsync(session);
+        var editor = await NewEndpointAsync(session);
+        await session.AssertNoHorizontalScrollAsync();
+
+        /* A URL has no spaces to break at: its row must wrap it rather than widen the page. */
+        await session.Page.FillAsync("#endpoint-name", "long-url-desk");
+        await session.Page.FillAsync("#endpoint-url", $"https://receiver.example/hooks/{new string('x', 160)}");
+        await editor.GetByTestId("endpoint-save").ClickAsync();
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.Page.Locator("#endpoint-long-url-desk").WaitForAsync();
         await session.AssertNoHorizontalScrollAsync();
     }
 

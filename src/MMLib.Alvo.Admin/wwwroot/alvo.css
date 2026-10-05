@@ -887,6 +887,15 @@
     border-radius: var(--radius-sm);
   }
 
+  /* An integration row's URL and its "posted to by …" badge break anywhere: a URL has no spaces, and a badge does not
+     wrap by default, so either would scroll the page sideways at 375 px. */
+  .a-integration-url,
+  .a-badge.a-integration-uses {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
   /* Signing in: one narrow card, a little above the middle of the screen. */
   .a-signin {
     max-width: 380px;

@@ -64,6 +64,11 @@ public class EndpointDraftTests
         => EndpointDraft.SecretRefusal("Sup3r+Secret/Value==").ShouldNotBeNull().ShouldNotContain("Sup3r");
 
     [Fact]
+    public void A_refused_name_never_echoes_what_was_pasted()
+        => EndpointDraft.NameRefusal("https://billing.example/hooks?token=s3cr3t", ["rental-desk"])
+            .ShouldNotBeNull().ShouldNotContain("s3cr3t", Case.Sensitive, "a URL or a secret pasted into the wrong box is not repeated");
+
+    [Fact]
     public void The_secret_name_follows_the_endpoint_name_until_it_is_typed()
     {
         var draft = new EndpointDraft();
