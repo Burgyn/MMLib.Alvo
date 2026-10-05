@@ -61,6 +61,11 @@ internal static class HookShape
             return IsString(reject) ? null : "Its reject message is not a string.";
         }
 
+        if (action.ContainsKey("reject") && action.ContainsKey("mutate"))
+        {
+            return "Its action carries more than one of reject and mutate.";
+        }
+
         if (action.Count != 1 || action["mutate"] is not JsonObject patch)
         {
             return "Its action is neither a reject nor a mutate, the two a before-hook may take.";

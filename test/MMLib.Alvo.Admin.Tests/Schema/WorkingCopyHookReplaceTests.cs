@@ -43,12 +43,15 @@ public class WorkingCopyHookReplaceTests
     [InlineData("work_orders", "beforeUpdate", -1)]
     [InlineData("work_orders", "afterCreate", 0)]
     [InlineData("invoices", "beforeUpdate", 0)]
-    public void A_place_nothing_is_at_changes_nothing(string entity, string point, int position)
+    [InlineData("work_orders", "beforeUpdate", 0, true)]
+    public void A_place_nothing_is_at_changes_nothing(string entity, string point, int position, bool hooksAsArray = false)
     {
-        var copy = Copy();
+        /* The guard text is the well-formed copy's hook 0, so a malformed copy is refused for its shape alone. */
+        var drawn = Drawn(Copy(), 0);
+        var copy = hooksAsArray ? Copy(MalformedHooks) : Copy();
         var before = copy.Json;
 
-        copy.ReplaceHook(entity, point, position, Drawn(copy, 0), Hook("Edited.")).ShouldBeFalse();
+        copy.ReplaceHook(entity, point, position, drawn, Hook("Edited.")).ShouldBeFalse();
 
         copy.Json.ShouldBe(before);
     }
@@ -113,10 +116,31 @@ public class WorkingCopyHookReplaceTests
         => [.. ((JsonArray)JsonNode.Parse(copy.Json)!["entities"]!["work_orders"]!["hooks"]!["beforeUpdate"]!)
             .Select(hook => hook!["action"]!["reject"]!.GetValue<string>())];
 
-    private static WorkingCopy Copy()
+    /// <summary>The same hook 0, under a <c>hooks</c> that is an array rather than an object keyed by point.</summary>
+    private const string MalformedHooks = """
+        {
+          "apiVersion": "alvo.dev/v1",
+          "name": "field-service",
+          "entities": {
+            "work_orders": {
+              "fields": { "status": { "type": "string" } },
+              "hooks": [
+                { "condition": "old.status == 'completed'", "action": { "reject": "First." } }
+              ]
+            }
+          }
+        }
+        """;
+
+    private static WorkingCopy Copy(string descriptor)
     {
         var copy = new WorkingCopy();
-        copy.Take(
+        copy.Take(descriptor, revision: 3);
+        return copy;
+    }
+
+    private static WorkingCopy Copy()
+        => Copy(
             """
             {
               "apiVersion": "alvo.dev/v1",
@@ -133,9 +157,5 @@ public class WorkingCopyHookReplaceTests
                 }
               }
             }
-            """,
-            revision: 3);
-
-        return copy;
-    }
+            """);
 }

@@ -33,6 +33,7 @@ public class HookShapeTests
     [InlineData("beforeUpdate", """{"action":{"mutate":{}}}""", "patches no field")]
     [InlineData("beforeDelete", """{"action":{"mutate":{"a":"x"}}}""", "beforeDelete")]
     [InlineData("beforeUpdate", """{"action":{"type":"webhook","endpoint":"d"}}""", "neither a reject nor a mutate")]
+    [InlineData("beforeUpdate", """{"action":{"reject":"x","mutate":{"a":"y"}}}""", "more than one of reject and mutate")]
     [InlineData("afterCreate", """{"action":{"reject":"x"}}""", "has no type")]
     [InlineData("afterCreate", """{"action":"x"}""", "action is not an object")]
     [InlineData("afterCreate", """[1]""", "not an object")]
