@@ -154,7 +154,8 @@ public sealed class CelBuiltInFunctionTests
     [Fact]
     public void Every_built_in_body_returns_exactly_its_declared_clr_type()
     {
-        var samples = new Dictionary<CelValueType, object> { [CelValueType.Int] = -3L, [CelValueType.Decimal] = -3.5m, [CelValueType.String] = " a " };
+        // Int is a position inside the String sample, so substring's body answers rather than fails closed.
+        var samples = new Dictionary<CelValueType, object> { [CelValueType.Int] = 1L, [CelValueType.Decimal] = -3.5m, [CelValueType.String] = " a " };
 
         foreach (var function in CelBuiltInFunctions.All.Where(f => !f.IsLegacy))
         {

@@ -21,7 +21,7 @@ on update and delete; `changed(<field>)`, true when an update changes the field,
 combinations are refused at apply: a delete has no `new.`, a create no `old.`.
 
 <!-- gen:cel-condition -->
-- allowed: `new.quantity <= 0.0` `old.unit_price != new.unit_price` `changed(unit_price)` `'technician' in @user.roles` `size(new.description) > 3` `lowerAscii(new.description) == 'brake pads'`
+- allowed: `new.quantity <= 0.0` `old.unit_price != new.unit_price` `changed(unit_price)` `'technician' in @user.roles` `size(new.description) > 3` `lowerAscii(new.description) == 'brake pads'` `startsWith(new.description, 'Brake')`
 - refused: `quantity * unit_price` `now()`
 <!-- /gen:cel-condition -->
 
@@ -30,7 +30,7 @@ more: no `@user` or `@tenant`, no arithmetic, no joins. Every function takes any
 null argument makes the value null.
 
 <!-- gen:mutate-functions -->
-`lowerAscii` `math.abs` `math.round` `now` `replace` `size` `trim` `upperAscii`
+`contains` `endsWith` `lowerAscii` `math.abs` `math.round` `now` `replace` `size` `startsWith` `substring` `trim` `upperAscii`
 <!-- /gen:mutate-functions -->
 
 An embedded host may register its own functions; they work in a `condition` and a `mutate` and nowhere else. Call

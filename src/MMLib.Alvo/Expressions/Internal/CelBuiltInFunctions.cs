@@ -8,7 +8,7 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// once per test-host process, so a mutant inside one is invisible to every test (the #244 comment), and these sets
 /// are profile gates in the security core.
 /// </remarks>
-internal static class CelBuiltInFunctions
+internal static partial class CelBuiltInFunctions
 {
     /// <summary>Gets the profile set of <c>now()</c>, the one call left with its own grammar.</summary>
     internal static IReadOnlySet<CelProfile> MutateOnly => new HashSet<CelProfile> { CelProfile.Mutate };
@@ -30,7 +30,10 @@ internal static class CelBuiltInFunctions
 
     /// <summary>Gets every built-in overload.</summary>
     internal static IReadOnlyList<CelFunction> All =>
-        [LowerAscii, UpperAscii, Now, Replace, Trim, Size, Abs(CelValueType.Int), Abs(CelValueType.Decimal), Round(CelValueType.Int), Round(CelValueType.Decimal)];
+        [
+            LowerAscii, UpperAscii, Now, Replace, Trim, Size, Abs(CelValueType.Int), Abs(CelValueType.Decimal), Round(CelValueType.Int), Round(CelValueType.Decimal),
+            Substring(withEnd: false), Substring(withEnd: true), Contains, StartsWith, EndsWith,
+        ];
 
     private static CelFunction Replace => InProcess(
         "replace", CelValueType.String,
