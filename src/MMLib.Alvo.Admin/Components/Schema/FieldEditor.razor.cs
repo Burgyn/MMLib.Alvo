@@ -181,12 +181,13 @@ public partial class FieldEditor
         }
         catch (Exception ex)
         {
-            CheckFailed(Logger, Entity, ex);
+            CheckFailed(Logger, ex);
         }
     }
 
-    [LoggerMessage(EventId = 21, Level = LogLevel.Warning, Message = "The expression check on the new computed field of {Entity} failed")]
-    private static partial void CheckFailed(ILogger logger, string entity, Exception exception);
+    /// <summary>Fixed text and the exception only: the entity name is the caller's string and is never logged raw.</summary>
+    [LoggerMessage(EventId = 21, Level = LogLevel.Warning, Message = "The expression check on the new computed field failed")]
+    private static partial void CheckFailed(ILogger logger, Exception exception);
 
     /// <summary>
     /// The field exactly as <see cref="FieldFacets.Build"/> would stage it, with the typed expression, or nothing while

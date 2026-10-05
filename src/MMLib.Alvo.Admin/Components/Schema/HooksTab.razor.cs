@@ -179,12 +179,13 @@ public partial class HooksTab
         }
         catch (Exception ex)
         {
-            CheckFailed(Logger, id, Entity, ex);
+            CheckFailed(Logger, ex);
         }
     }
 
-    [LoggerMessage(EventId = 20, Level = LogLevel.Warning, Message = "The expression check on {Input} of {Entity} failed")]
-    private static partial void CheckFailed(ILogger logger, string input, string entity, Exception exception);
+    /// <summary>Fixed text and the exception only: the entity name is the caller's string and is never logged raw.</summary>
+    [LoggerMessage(EventId = 20, Level = LogLevel.Warning, Message = "The expression check on a hook input failed")]
+    private static partial void CheckFailed(ILogger logger, Exception exception);
 
     private Task<ManagementExpressionVerdict?> AskAsync(
         Func<WorkingCopy, string, (string Json, string Path)?> place, string source, CancellationToken ct)
