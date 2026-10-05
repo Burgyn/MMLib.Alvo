@@ -88,6 +88,29 @@ public sealed class CelQualifiedNameParsingTests
         Should.Throw<ArgumentException>(() => HostCelFunction.Create("math", (string s) => s, null))
             .Message.ShouldContain("namespace of CEL's math functions");
 
+    [Theory]
+    [InlineData("new.price.round()", "Write math.round(new.price): ")]
+    [InlineData("old.qty.abs()", "Write math.abs(old.qty): ")]
+    [InlineData("new.price.ceil()", "Write math.ceil(new.price): ")]
+    public void A_math_receiver_call_after_an_image_is_told_the_namespaced_form(string source, string fix)
+    {
+        var refused = Should.Throw<CelSyntaxException>(() => CelParser.Parse(source));
+
+        refused.Message.ShouldBe("Alvo has no nested field access beyond old./new.; use a single field name.");
+        refused.FixSuggestion.ShouldNotBeNull().ShouldStartWith(fix);
+    }
+
+    [Theory]
+    [InlineData("price.abs()", "Write math.abs(...) with the value as an argument: Alvo calls a function as math.abs(x), never as x.abs().")]
+    [InlineData("qty.greatest(1)", "Write math.greatest(...) with the value as an argument: Alvo calls a function as math.greatest(x), never as x.greatest().")]
+    public void A_math_receiver_call_on_a_bare_field_is_told_the_namespaced_form(string source, string fix)
+    {
+        var refused = Should.Throw<CelSyntaxException>(() => CelParser.Parse(source));
+
+        refused.Message.ShouldBe("Alvo has no nested field access; use a single field name.");
+        refused.FixSuggestion.ShouldBe(fix);
+    }
+
     [Fact]
     public void A_host_may_take_a_bare_math_name_and_its_own_function_wins()
     {

@@ -46,6 +46,22 @@ public sealed class CelTextBuiltInTests
         failure.Reason.ShouldBe("a position is outside the text");
     }
 
+    [Theory]
+    [InlineData("a😀b", long.MaxValue, null)]
+    [InlineData("a😀b", 1L, long.MaxValue)]
+    [InlineData("a😀b", 1L, 4L)]
+    [InlineData("😀", 2L, null)]
+    public void Substring_far_past_the_text_fails_closed_without_walking_further(string text, long start, long? end) =>
+        Should.Throw<CelFunctionException>(() => CelBuiltInFunctions.SubstringText(text, start, end))
+            .Reason.ShouldBe("a position is outside the text");
+
+    [Theory]
+    [InlineData("😀😀", 2L, 2L, "")]
+    [InlineData("😀😀", 1L, null, "😀")]
+    [InlineData("a😀b", 3L, null, "")]
+    public void Substring_at_the_very_end_of_a_text_is_empty_or_its_tail(string text, long start, long? end, string expected) =>
+        CelBuiltInFunctions.SubstringText(text, start, end).ShouldBe(expected);
+
     [Fact]
     public void Substring_without_an_end_past_the_text_fails_closed() =>
         Should.Throw<CelFunctionException>(() => CelBuiltInFunctions.SubstringText("abc", 4, end: null))
@@ -105,17 +121,33 @@ public sealed class CelTextBuiltInTests
     public void A_negated_text_test_over_an_empty_field_fires() =>
         Condition("!endsWith(new.name, 'x')", ("name", null)).ShouldBeTrue("!null collapses to !false, which is true");
 
+    /// <summary>
+    /// Pins today's behaviour, not a promise: the text tests compare UTF-16 code units ordinally, while
+    /// <c>size</c> and <c>substring</c> count code points. A lone surrogate therefore matches half of a pair.
+    /// </summary>
     [Theory]
-    [InlineData("contains(new.name, 'x')", "Bool")]
-    [InlineData("substring(name, 1)", "String")]
-    [InlineData("substring(name, 1, 2)", "String")]
-    public void Each_text_built_in_has_its_result_type(string source, string expected) =>
-        TestCelFunctions.Compile(source, source.Contains("new.", StringComparison.Ordinal) ? CelProfile.Condition : CelProfile.Mutate)
-            .ResultType.ToString().ShouldBe(expected);
+    [InlineData("contains(new.name, new.round)")]
+    [InlineData("startsWith(new.name, new.round)")]
+    [InlineData("endsWith(new.size, new.round)")]
+    public void A_text_test_compares_utf16_units_so_a_lone_surrogate_matches_half_a_pair(string source) =>
+        Condition(source, ("name", "😀x"), ("size", "x\ud83d"), ("round", "\ud83d")).ShouldBeTrue();
 
     [Theory]
-    [InlineData("substring(name, 1) == 'x'", CelProfile.Rule)]
-    [InlineData("contains(name, 'x')", CelProfile.Computed)]
-    public void A_text_built_in_is_refused_where_sql_renders(string source, CelProfile profile) =>
-        TestCelFunctions.Compiler().Compile(source, profile, TestCelFunctions.Items).IsSuccess.ShouldBeFalse();
+    [InlineData("contains(new.name, 'x')", CelProfile.Condition, "Bool")]
+    [InlineData("substring(name, 1)", CelProfile.Mutate, "String")]
+    [InlineData("substring(name, 1, 2)", CelProfile.Mutate, "String")]
+    public void Each_text_built_in_has_its_result_type(string source, CelProfile profile, string expected) =>
+        TestCelFunctions.Compile(source, profile).ResultType.ToString().ShouldBe(expected);
+
+    [Theory]
+    [InlineData("substring(name, 1) == 'x'", "substring", CelProfile.Rule)]
+    [InlineData("contains(name, 'x')", "contains", CelProfile.Computed)]
+    [InlineData("startsWith(name, 'x')", "startsWith", CelProfile.Access)]
+    public void A_text_built_in_is_refused_where_sql_renders(string source, string name, CelProfile profile)
+    {
+        var refused = TestCelFunctions.Compiler().Compile(source, profile, TestCelFunctions.Items);
+
+        refused.IsSuccess.ShouldBeFalse();
+        refused.Errors[0].Message.ShouldStartWith($"'{name}(...)' is not available in the {profile} profile");
+    }
 }

@@ -579,12 +579,13 @@ internal static class CelParser
 
         /// <summary>
         /// The fix for <c>x.trim()</c>, <c>math.rond(x)</c> or another dotted spelling (deviation F1/F11): a catalogued
-        /// member gets the global form; a member of a catalogued namespace gets "did you mean" over the known names.
+        /// member gets the global form (<c>price.abs()</c> gets <c>math.abs</c>); a member of a catalogued namespace gets
+        /// "did you mean" over the known names.
         /// </summary>
         private string NestedAccessFix(CelToken first) => ReceiverCallName() switch
         {
-            { } member when catalog.Contains(member) =>
-                $"Write {member}(...) with the value as an argument: Alvo calls a function as {member}(x), never as x.{member}().",
+            { } member when GlobalName(member) is { } global =>
+                $"Write {global}(...) with the value as an argument: Alvo calls a function as {global}(x), never as x.{member}().",
             { } member when IsNamespace(first.Text) => KnownFunctionsSuggestion($"{first.Text}.{member}"),
             _ => MacroNotSupportedSuggestion,
         };
@@ -593,10 +594,18 @@ internal static class CelParser
 
         /// <summary>The fix for <c>new.title.trim()</c>: the global call over the same image and field (spec §6.2).</summary>
         private string? ImageReceiverFix(CelToken image, CelToken field) =>
-            ReceiverCallName() is { } member && catalog.Contains(member)
-                ? $"Write {member}({image.Text}.{field.Text}): Alvo calls a function with the value as its first argument, "
+            ReceiverCallName() is { } member && GlobalName(member) is { } global
+                ? $"Write {global}({image.Text}.{field.Text}): Alvo calls a function with the value as its first argument, "
                     + $"never as {image.Text}.{field.Text}.{member}()."
                 : null;
+
+        /// <summary>
+        /// The catalogued name a receiver-style member stands for: itself when catalogued (a host's own <c>abs</c>
+        /// wins), else its <c>math.</c> form when that is catalogued, else <see langword="null"/>.
+        /// </summary>
+        private string? GlobalName(string member) => catalog.Contains(member)
+            ? member
+            : catalog.Contains($"math.{member}") ? $"math.{member}" : null;
 
         private string? ReceiverCallName() =>
             _index + 2 < tokens.Count
