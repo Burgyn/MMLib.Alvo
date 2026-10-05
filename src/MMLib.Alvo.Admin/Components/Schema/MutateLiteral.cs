@@ -78,8 +78,8 @@ internal static class MutateLiteral
         CelValueType.Int => long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var whole)
             ? (JsonValue.Create(whole), null)
             : (null, Shape(field, "a whole number such as 3 or -2")),
-        CelValueType.Decimal => decimal.TryParse(text, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var number)
-            ? (JsonValue.Create(number), null)
+        CelValueType.Decimal => Number(text) is { } number
+            ? (number, null)
             : (null, Shape(field, "a number such as 12.5")),
         CelValueType.Bool => text is "true" or "false" ? (JsonValue.Create(text == "true"), null) : (null, Shape(field, "true or false")),
         CelValueType.Timestamp => Reads(text, element => element.TryGetDateTimeOffset(out _))
@@ -99,6 +99,25 @@ internal static class MutateLiteral
         }
 
         return (JsonValue.Create(text), null);
+    }
+
+    /// <summary>
+    /// The text as the JSON number it is written as, when apply's <c>TryGetDecimal</c> reads it — exponent included
+    /// (<c>1e2</c> is 100) — or <see langword="null"/>.
+    /// </summary>
+    /// <remarks>Written as typed, not re-formatted, so a declared literal the editor opens saves unchanged.</remarks>
+    private static JsonValue? Number(string text)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            var root = document.RootElement;
+            return root.ValueKind == JsonValueKind.Number && root.TryGetDecimal(out _) ? JsonValue.Create(root.Clone()) : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>Asks one <c>System.Text.Json</c> question of the JSON string the row would write — the apply's own question.</summary>

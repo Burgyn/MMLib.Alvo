@@ -14,6 +14,7 @@ public class HookBuilderEditTests
         ["quantity"] = new() { Name = "quantity", Type = FieldType.Integer },
         ["paid"] = new() { Name = "paid", Type = FieldType.Boolean },
         ["note"] = new() { Name = "note", Type = FieldType.String },
+        ["price"] = new() { Name = "price", Type = FieldType.Decimal },
     };
 
     [Theory]
@@ -29,6 +30,17 @@ public class HookBuilderEditTests
         var saved = builder.BuildHook(original, out var refusal);
 
         saved.ShouldNotBeNull(refusal).ToJsonString(Relaxed.Options).ShouldBe(original.ToJsonString(Relaxed.Options));
+    }
+
+    /// <summary>Apply reads an exponent as a decimal (<c>TryGetDecimal</c>), so the editor opens it and Save leaves it as declared.</summary>
+    [Fact]
+    public void A_declared_decimal_in_exponent_form_saves_unchanged()
+    {
+        var original = Parse("""{"action":{"mutate":{"price":1e2}}}""");
+        var builder = HookBuilder.From("beforeUpdate", original, _fields).ShouldNotBeNull();
+
+        builder.BuildHook(original, out var refusal).ShouldNotBeNull(refusal).ToJsonString(Relaxed.Options)
+            .ShouldBe("""{"action":{"mutate":{"price":1e2}}}""");
     }
 
     [Fact]

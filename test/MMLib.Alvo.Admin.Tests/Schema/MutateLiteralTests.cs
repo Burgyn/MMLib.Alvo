@@ -18,6 +18,7 @@ public class MutateLiteralTests
     [InlineData(FieldType.Integer, "-2", "-2")]
     [InlineData(FieldType.Decimal, "12.50", "12.50")]
     [InlineData(FieldType.Decimal, "-0.01", "-0.01")]
+    [InlineData(FieldType.Decimal, "1e2", "1e2")]
     [InlineData(FieldType.Boolean, "true", "true")]
     [InlineData(FieldType.Date, "2026-10-05", "\"2026-10-05\"")]
     [InlineData(FieldType.DateTime, "2026-10-05T12:00:00Z", "\"2026-10-05T12:00:00Z\"")]
@@ -32,7 +33,8 @@ public class MutateLiteralTests
     [Theory]
     [InlineData(FieldType.Integer, "1.5", "whole number")]
     [InlineData(FieldType.Integer, "", "whole number")]
-    [InlineData(FieldType.Decimal, "1e3", "number")]
+    [InlineData(FieldType.Decimal, "1e40", "number")]
+    [InlineData(FieldType.Decimal, "12,5", "number")]
     [InlineData(FieldType.Decimal, "abc", "number")]
     [InlineData(FieldType.Boolean, "yes", "true or false")]
     [InlineData(FieldType.DateTime, "tomorrow", "date and time")]
@@ -99,6 +101,7 @@ public class MutateLiteralTests
     [InlineData(FieldType.String, "\"3\"")]
     [InlineData(FieldType.Integer, "3")]
     [InlineData(FieldType.Decimal, "12.50")]
+    [InlineData(FieldType.Decimal, "1e2")]
     [InlineData(FieldType.Boolean, "false")]
     [InlineData(FieldType.DateTime, "\"2026-10-05T12:00:00Z\"")]
     [InlineData(FieldType.Uuid, "\"3f2c1a9e-6b7d-4c8e-9f10-2a3b4c5d6e7f\"")]
@@ -108,6 +111,21 @@ public class MutateLiteralTests
 
         MutateLiteral.TryValue(row, Field(type), out var value, out var refusal).ShouldBeTrue(refusal);
         value!.ToJsonString(Relaxed.Options).ShouldBe(json);
+    }
+
+    /// <summary>
+    /// A decimal literal is the number apply's <c>TryGetDecimal</c> reads from the JSON it is written as, exponent
+    /// included; it is written as typed, so a declared one saves unchanged.
+    /// </summary>
+    [Theory]
+    [InlineData("1e2", "100")]
+    [InlineData("1.5E-1", "0.15")]
+    [InlineData("12.50", "12.50")]
+    public void A_decimal_literal_is_the_number_apply_reads(string text, string number)
+    {
+        MutateLiteral.TryValue(Row(text), Field(FieldType.Decimal), out var value, out var refusal).ShouldBeTrue(refusal);
+
+        value!.GetValue<decimal>().ShouldBe(decimal.Parse(number, System.Globalization.CultureInfo.InvariantCulture));
     }
 
     private static MutateRow Row(string text) => new("f", MutateMode.Literal, text);
