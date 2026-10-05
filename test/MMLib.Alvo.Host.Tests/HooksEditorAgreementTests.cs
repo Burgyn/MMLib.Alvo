@@ -4,6 +4,7 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Management.Internal;
 using System.Text.Json.Nodes;
 
@@ -107,6 +108,30 @@ public sealed class HooksEditorAgreementTests
             .ShouldBeTrue(refusal);
         MutateErrors(descriptor, JsonValue.Create("2026-10-05")).ShouldBeEmpty(
             "if apply now refuses a date-only datetime literal, MutateLiteral follows apply (preflight W1)");
+    }
+
+    /// <summary>A value the guided condition quotes is read back by the real lexer as exactly that value, in one literal.</summary>
+    /// <param name="value">The value typed.</param>
+    [Theory]
+    [InlineData("ready")]
+    [InlineData("it's")]
+    [InlineData("back\\slash")]
+    [InlineData("say \"hi\"")]
+    [InlineData("line\nbreak\r\ttab")]
+    [InlineData("čaj")]
+    [InlineData("中文")]
+    [InlineData("\U0001F600")]
+    [InlineData("' || true || '")]
+    [InlineData("{v} && {r}")]
+    [InlineData("\\'")]
+    [InlineData("")]
+    public void A_quoted_condition_value_lexes_back_to_the_value(string value)
+    {
+        var tokens = CelLexer.Tokenize(ConditionText.Quote(value));
+
+        tokens.Count.ShouldBe(2, value);
+        tokens[0].Kind.ShouldBe(CelTokenKind.StringLiteral);
+        tokens[0].Text.ShouldBe(value);
     }
 
     [Fact]
