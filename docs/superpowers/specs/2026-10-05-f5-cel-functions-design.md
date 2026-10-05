@@ -549,4 +549,7 @@ overturn in the PR.**
   Rule and Computed, so a **C2 checklist item** — the catch-alls must let it through before a call is admitted there.
 * `lowerAscii` in a Condition (X10) and the other §16 follow-ups.
 * A timestamp text without an offset parses in the machine's zone (pre-existing; relevant when `Date` arrives).
+* **Not run: `scripts/eval-assistant`** (the real-model eval; it needs a live model). The always-in-context trim removed
+  three phrases from the assistant's Skills paragraph, including "(without `rules` nobody reaches it)" — run the eval
+  before merge.
 
