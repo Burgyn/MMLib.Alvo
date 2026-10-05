@@ -158,6 +158,11 @@ real need): `substring(new.title, 0, math.least(size(new.title), 40))`.
 | `_+_`, `_-_`, `_*_`, `-_` (Int) | `the result is outside the range of an Int` |
 | `_+_`, `_-_`, `_*_`, `_/_` (Decimal) | `the result is outside the range of a Decimal` |
 | `_/_` | `the divisor is zero`; Int `/` of the smallest Int by `-1`: `the result is outside the range of an Int` |
+| `_+_` (join, Mutate) | `its result would be N characters, over the 1,048,576 a text may grow to here` (R-2) |
+| `_-_`, `_*_`, `_/_`, `-_` (a present operand that is no number, Ruling P) | `an operand is not an Int or a Decimal` |
+| `_+_` (a present operand that is neither, Ruling P) | `an operand is neither a text nor a number` |
+| `_==_`, `_!=_`, `_<_`, `_<=_`, `_>_`, `_>=_` (two present operands that cannot be compared, Ruling Q) | `the operands cannot be compared` |
+| `!_` (a present operand that is no Bool, Ruling Q) | `the operand is not a Bool` |
 | `math.abs`, `replace` | unchanged from C1 |
 
 No reason carries a value from the row (C1 §6: "text Alvo wrote, never the host's", and never the caller's data).
@@ -180,6 +185,13 @@ failed: the divisor is zero. Nothing was written." (`AlvoExceptionHandler.Functi
 * **Int vs Decimal at run time** is decided by the operands' CLR values (a record's Integer column arrives as an
   integral type, a literal `2` as `long`): two integral operands take the checked `long` path, anything else the
   `decimal` path. In Computed the `decimal` path stays for every operand pair, as today.
+* **A present operand that is no number, no text or no flag** (controller Rulings P and Q). On the fail-closed path a
+  *present* operand an operator cannot take — a NaN, infinite or out-of-range double, a string in a numeric field, a
+  value of an unexpected CLR type — throws (§5.5) instead of answering `null` (arithmetic, `+`) or `false` (a comparison,
+  `!`): `false` there is a reject that never fires. The HTTP binder types every value (`FieldClrType`), so only an
+  embedded caller's own record can hold one. A **null** operand still answers as before (`null`; a comparison `false`;
+  `!null` `true`), and Rule and Access, which take the same comparison and `!`, do not move — `false` is their deny
+  direction. A double a decimal can hold (`2.5`) is a number, not a failure.
 * **Not in D:** `%` (Alvo's lexer has no `%`, and adding it grows the public `CelBinaryOperator` enum and needs an SQL
   rendering that differs per engine — SQLite's `%` casts to integer), Double (Alvo has no `double` type), comparison and
   ternary in Mutate, string `+` in Condition (§12).
@@ -578,6 +590,14 @@ Continuing C1's F-series (`cel.md` deviations 25–36):
   CEL-conformant: checked 64-bit, `/` truncates toward zero, overflow and division by zero are errors.
 * **F20 (36)** — `string()` refuses a `date` field (E18). CEL's core has no date type; Alvo's `date` reaches CEL as
   midnight UTC, and pinning that text now would make a future Date type's natural `2026-10-05` a breaking change.
+
+**Residual, not a deviation: cumulative text growth inside one mutate value (S-2, #323).** R-2 caps each join's result
+at `MaxTextLength` (1,048,576 characters) before allocating, as C1 caps `replace`, but nothing caps the sum over one
+evaluation: a 2,000-character source holds about 600 joins, each of whose intermediates may be up to the cap, so a
+pathological mutate value can allocate about **1 GB of short-lived memory** (600 × 1 Mi characters × 2 bytes) before its
+result is refused or fails Ruling V's `maxLength`. Bounded, never unbounded, and writable only by a descriptor author at
+the Developer level, who can already ship an expensive hook. An evaluation-wide text budget for joins and every
+text-growing function is #323.
 
 From the brief and house rules: **E3** (no receiver syntax, though the brief asked to consider it), **E6** (operators in hook slots are in, fail-closed — but
 no comparison or ternary in Mutate, no `%`), **E7** (`matches` and accessors deferred, though listed as prior art

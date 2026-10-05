@@ -30,6 +30,7 @@ internal static class CelHookArithmetic
     private const string ZeroDivisor = "the divisor is zero";
     private const string NegateName = "-_";
     private const string NotANumber = "an operand is not an Int or a Decimal";
+    private const string NeitherTextNorNumber = "an operand is neither a text nor a number";
 
     /// <summary>
     /// Whether arithmetic in <paramref name="profile"/> fails closed: a hook condition and a mutate value, the two
@@ -86,9 +87,14 @@ internal static class CelHookArithmetic
         return CelInterpreter.TryToDecimal(value, out var amount) ? -amount : throw new CelFunctionException(NegateName, NotANumber);
     }
 
-    /// <summary>A present operand as a <see cref="decimal"/>, or the operator's failure (Ruling P).</summary>
+    /// <summary>
+    /// A present operand as a <see cref="decimal"/>, or the operator's failure (Ruling P). <c>+</c> also joins two
+    /// strings, so its reason names both things it takes: a join reaches this method only when an operand is no string.
+    /// </summary>
     private static decimal ToDecimal(CelBinaryOperator op, object value) =>
-        CelInterpreter.TryToDecimal(value, out var amount) ? amount : throw Failure(op, NotANumber);
+        CelInterpreter.TryToDecimal(value, out var amount)
+            ? amount
+            : throw Failure(op, op == CelBinaryOperator.Add ? NeitherTextNorNumber : NotANumber);
 
     /// <summary>Checked 64-bit arithmetic; <c>/</c> truncates toward zero, as C#'s and CEL's do.</summary>
     private static long ApplyInt(CelBinaryOperator op, long left, long right)

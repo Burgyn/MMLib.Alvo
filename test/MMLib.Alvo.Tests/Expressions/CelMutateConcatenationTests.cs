@@ -33,7 +33,7 @@ public sealed class CelMutateConcatenationTests
 
     /// <summary>
     /// A present value that is no string in a string field — only an embedded caller's own record can hold one — is not
-    /// joined and not nulled: '+' falls to the arithmetic, which fails closed on it (Ruling P).
+    /// joined and not nulled: '+' fails closed on it, naming both things it takes (Ruling P).
     /// </summary>
     [Fact]
     public void A_present_value_that_is_no_string_fails_the_join_closed()
@@ -41,7 +41,7 @@ public sealed class CelMutateConcatenationTests
         var failure = Should.Throw<CelFunctionException>(() => Mutate("name + 'x'", ("name", 7L)));
 
         failure.FunctionName.ShouldBe("_+_");
-        failure.Reason.ShouldBe("an operand is not an Int or a Decimal");
+        failure.Reason.ShouldBe("an operand is neither a text nor a number");
     }
 
     [Fact]
@@ -61,9 +61,16 @@ public sealed class CelMutateConcatenationTests
     /// lead the author to the gate refusal next (preflight R-10).
     /// </summary>
     [Fact]
-    public void A_condition_is_not_told_to_reach_for_string() =>
-        Compile("'#' + new.qty == '#7'", CelProfile.Condition).Errors
-            .ShouldNotContain(error => error.FixSuggestion != null && error.FixSuggestion.Contains("string(x)", StringComparison.Ordinal));
+    public void A_condition_is_not_told_to_reach_for_string()
+    {
+        var mismatch = Compile("'#' + new.qty == '#7'", CelProfile.Condition).Errors
+            .Where(error => error.Message == "'+' joins two strings or adds two numbers; found String and Int, and CEL converts neither implicitly.")
+            .ShouldHaveSingleItem("the mismatch is reported");
+
+        mismatch.FixSuggestion.ShouldBe(
+            "Join two string fields or string constants (first_name + ' ' + last_name). A computed field has no "
+                + "string() conversion, so keep the number in a field of its own.");
+    }
 
     [Fact]
     public void Concatenation_stays_refused_in_a_condition() =>

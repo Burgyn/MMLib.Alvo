@@ -307,7 +307,7 @@ internal static class CelInterpreter
         var operand = Evaluate(unary.Operand, state);
         return unary.Operator switch
         {
-            CelUnaryOperator.Not => !AsBoolean(operand),
+            CelUnaryOperator.Not => state.FailClosed ? NotFailClosed(operand) : !AsBoolean(operand),
             CelUnaryOperator.Negate => state.FailClosed ? CelHookArithmetic.Negate(operand) : Negate(operand),
             _ => null,
         };
@@ -377,8 +377,21 @@ internal static class CelInterpreter
         return left is string text && right is IEnumerable<string> values && values.Contains(text, StringComparer.Ordinal);
     }
 
+    /// <summary>
+    /// The hook path's <c>!</c> (Ruling Q): a null operand answers <see langword="true"/> as everywhere else, a Bool its
+    /// negation, and a <b>present</b> operand that is no Bool fails closed — reading it as <see langword="false"/> would
+    /// turn a reject's <c>!flag</c> into <see langword="true"/> on a value the row never held as a flag.
+    /// </summary>
+    /// <exception cref="CelFunctionException">The operand is present and not a Bool.</exception>
+    private static bool NotFailClosed(object? operand) => operand switch
+    {
+        null => true,
+        bool flag => !flag,
+        _ => throw new CelFunctionException("!_", "the operand is not a Bool"),
+    };
+
     private static bool EvaluateComparison(CelBinary binary, in EvalState state) =>
-        Compare(Evaluate(binary.Left, state), Evaluate(binary.Right, state), binary.Operator);
+        Compare(Evaluate(binary.Left, state), Evaluate(binary.Right, state), binary.Operator, state.FailClosed);
 
     private static object? EvaluateConditional(CelConditional conditional, in EvalState state) =>
         AsBoolean(Evaluate(conditional.Condition, state))
@@ -401,7 +414,17 @@ internal static class CelInterpreter
     /// The single place the null rule is expressed: either operand missing collapses the whole
     /// comparison to <see langword="false"/>, for every relational and equality operator alike.
     /// </summary>
-    private static bool Compare(object? left, object? right, CelBinaryOperator op)
+    /// <remarks>
+    /// Two <b>present</b> operands it cannot compare — a NaN, infinite or out-of-range double, a string in a numeric
+    /// field, a value of an unexpected CLR type — answer <see langword="false"/> for a Rule or an Access expression, the
+    /// deny direction there; on the fail-closed hook path they throw instead (Ruling Q), because <see langword="false"/>
+    /// there is a reject that never fires. <paramref name="failClosed"/> is read from the profile once, through
+    /// <see cref="CelHookArithmetic.FailsClosed"/>.
+    /// </remarks>
+    /// <exception cref="CelFunctionException">
+    /// <paramref name="failClosed"/> is set and the two present operands cannot be compared.
+    /// </exception>
+    private static bool Compare(object? left, object? right, CelBinaryOperator op, bool failClosed)
     {
         if (left is null || right is null)
         {
@@ -410,20 +433,38 @@ internal static class CelInterpreter
 
         if (!TryNormalize(left, right, out var normalizedLeft, out var normalizedRight))
         {
-            return false;
+            return failClosed ? throw Uncomparable(op) : false;
         }
 
         return op switch
         {
             CelBinaryOperator.Equal => ValuesEqualCore(normalizedLeft, normalizedRight),
             CelBinaryOperator.NotEqual => !ValuesEqualCore(normalizedLeft, normalizedRight),
-            CelBinaryOperator.Less => CompareOrder(normalizedLeft, normalizedRight) is int lt && lt < 0,
-            CelBinaryOperator.LessOrEqual => CompareOrder(normalizedLeft, normalizedRight) is int le && le <= 0,
-            CelBinaryOperator.Greater => CompareOrder(normalizedLeft, normalizedRight) is int gt && gt > 0,
-            CelBinaryOperator.GreaterOrEqual => CompareOrder(normalizedLeft, normalizedRight) is int ge && ge >= 0,
-            _ => false,
+            _ => CompareOrder(normalizedLeft, normalizedRight) is int order
+                ? IsInOrder(op, order)
+                : failClosed ? throw Uncomparable(op) : false,
         };
     }
+
+    private static bool IsInOrder(CelBinaryOperator op, int order) => op switch
+    {
+        CelBinaryOperator.Less => order < 0,
+        CelBinaryOperator.LessOrEqual => order <= 0,
+        CelBinaryOperator.Greater => order > 0,
+        CelBinaryOperator.GreaterOrEqual => order >= 0,
+        _ => false,
+    };
+
+    /// <summary>The failure of a comparison, named by CEL's own overload name for it (<c>_&lt;_</c>); it names no value.</summary>
+    private static CelFunctionException Uncomparable(CelBinaryOperator op) => new(op switch
+    {
+        CelBinaryOperator.Equal => "_==_",
+        CelBinaryOperator.NotEqual => "_!=_",
+        CelBinaryOperator.Less => "_<_",
+        CelBinaryOperator.LessOrEqual => "_<=_",
+        CelBinaryOperator.Greater => "_>_",
+        _ => "_>=_",
+    }, "the operands cannot be compared");
 
     private static bool ValuesEqual(object? left, object? right)
     {
