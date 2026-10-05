@@ -21,6 +21,7 @@ because it is infrastructure configuration rather than a block a locked-out proj
 | `GET {m}/projects/{project}/revisions/{revision:int}` | `GetRevisionAsync` | `viewer` |
 | `GET {m}/projects/{project}/schema` | `GetSchemaAsync` | `viewer` |
 | `GET {m}/projects/{project}/capabilities` | `GetCapabilitiesAsync` | `viewer` |
+| `GET {m}/projects/{project}/cel/functions` | `GetCelFunctionsAsync` | `viewer` |
 | `POST {m}/projects/{project}/policy/simulate` | `SimulatePolicyAsync` | `viewer` |
 | `POST {m}/projects/{project}/cel/check` | `CheckExpressionAsync` | `developer` |
 | `PUT {m}/projects/{project}/descriptor` | `ApplyDescriptorAsync` | `developer` |
@@ -66,6 +67,15 @@ itself by editing three lines of JSON, because every accepted apply re-primes th
 The rollback arm is the subtler half: a restore carries a **stored** descriptor the caller never had to
 write, so any project whose history ever held a looser block would otherwise be a standing escalation at a
 `developer`-gated route.
+
+## Why `cel/functions` is Viewer and project-scoped
+
+`GET {m}/projects/{project}/cel/functions` lists every function a descriptor may call on this instance, one entry
+per overload (`abs` over an integer and over a double are two entries), with parameters, result, nullability and
+the profiles each compiles in. It is Viewer because it discloses only the names and summaries a host developer
+chose to register — the same class of information `capabilities` already reveals about the build. The catalog is
+per instance, not per project; the route is project-scoped for symmetry with `cel/check` and so that per-project
+visibility stays possible without a route change.
 
 ## Why `cel/check` is not the dry run, and why it is Developer
 
