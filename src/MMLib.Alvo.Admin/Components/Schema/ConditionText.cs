@@ -87,8 +87,9 @@ internal sealed record ConditionScope(IReadOnlyList<ConditionField> Fields, IRea
 /// <c>\u</c> escape and reads every other character raw, so a value beyond ASCII is written as typed. A control character
 /// it has no escape for, and an invisible formatting character (<see cref="UnicodeCategory.Format"/>: direction overrides
 /// and isolates, zero-width marks — the Trojan Source class, CVE-2021-42574, which would make the stored condition read
-/// differently from what it does), are refused by <see cref="Refusal"/>. That includes the zero-width joiner inside some
-/// emoji sequences: rare in a condition, and text mode still writes it. A lone surrogate is not checked here because it
+/// differently from what it does), are refused by <see cref="Refusal"/>, rune by rune so a tag character above U+FFFF is
+/// caught too. The zero-width non-joiner and joiner (U+200C, U+200D) are the two exceptions: they cannot reorder what is
+/// shown, and Persian and Indic text and emoji sequences need them. A lone surrogate is not checked here because it
 /// cannot arrive: System.Text.Json refuses one on the browser's read path. <c>HooksEditorAgreementTests</c> lexes and parses
 /// the written text with the real lexer and parser.
 /// </para>
@@ -218,12 +219,22 @@ internal static partial class ConditionText
             return "This value holds a control character a condition cannot spell. Write the condition in text mode.";
         }
 
-        return value.Any(character => char.GetUnicodeCategory(character) == UnicodeCategory.Format)
+        return value.EnumerateRunes().Any(IsRefusedFormat)
             ? "This value holds an invisible formatting character, such as a text-direction mark, which would make the condition "
               + "read differently from what it does. Write the condition in text mode."
             : null;
     }
 
-    [GeneratedRegex(@"^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$", RegexOptions.CultureInvariant)]
+    /// <summary>
+    /// An invisible formatting character the guided form refuses: every <see cref="UnicodeCategory.Format"/> rune, the
+    /// supplementary planes included (tag characters), except the zero-width non-joiner and joiner, which cannot reorder
+    /// what is shown and which Persian and Indic text and emoji sequences need.
+    /// </summary>
+    /// <param name="rune">The rune.</param>
+    private static bool IsRefusedFormat(Rune rune)
+        => Rune.GetUnicodeCategory(rune) == UnicodeCategory.Format && rune.Value is not (0x200C or 0x200D);
+
+    /* \z, not $: $ also matches before a final line feed, which would let "12\n" be written bare. */
+    [GeneratedRegex(@"^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?\z", RegexOptions.CultureInvariant)]
     private static partial Regex NumberLiteral();
 }

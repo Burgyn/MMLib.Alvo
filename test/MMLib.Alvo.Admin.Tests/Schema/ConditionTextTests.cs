@@ -76,6 +76,7 @@ public class ConditionTextTests
     [InlineData("-5", "new.quantity < '-5'")]
     [InlineData("1e3", "new.quantity < '1e3'")]
     [InlineData("it's", "new.quantity < 'it\\'s'")]
+    [InlineData("12\n", "new.quantity < '12\\n'")]
     public void A_number_box_holding_anything_but_a_number_is_written_as_a_quoted_literal_never_as_syntax(string value, string cel)
         => ConditionText.Row(new ConditionRow(ConditionOperator.Less, RowImage.New, "quantity", ConditionFieldKind.Number, value)).ShouldBe(cel);
 
@@ -116,6 +117,7 @@ public class ConditionTextTests
     [InlineData("007", "not a number")]
     [InlineData("", "not a number")]
     [InlineData(" 3", "not a number")]
+    [InlineData("12\n", "not a number")]
     public void A_number_a_condition_cannot_hold_is_refused(string value, string says)
         => ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.Is, RowImage.New, "quantity", ConditionFieldKind.Number, value)))
             .ShouldNotBeNull().ShouldContain(says);
@@ -179,12 +181,28 @@ public class ConditionTextTests
     [InlineData("zero​width")]
     [InlineData("soft­hyphen")]
     [InlineData("﻿bom")]
+    [InlineData("x\U000E0041")]
     public void A_value_with_an_invisible_formatting_character_is_refused(string value)
     {
         ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.Is, RowImage.New, "title", ConditionFieldKind.Text, value)))
             .ShouldNotBeNull().ShouldContain("text mode");
         ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.HasRole, RowImage.New, ConditionTable.Writer, ConditionFieldKind.Text, value)))
             .ShouldNotBeNull().ShouldContain("text mode");
+    }
+
+    /// <summary>
+    /// The zero-width non-joiner and joiner are Format characters that Persian and Indic text and emoji sequences need; they
+    /// cannot reorder what is shown, so they are the two the guided form accepts.
+    /// </summary>
+    /// <param name="value">The value typed.</param>
+    [Theory]
+    [InlineData("می‌خواهم")]
+    [InlineData("क्‍ष")]
+    [InlineData("👨‍👩‍👧")]
+    public void A_value_with_a_joiner_or_a_non_joiner_is_accepted(string value)
+    {
+        ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.Is, RowImage.New, "title", ConditionFieldKind.Text, value))).ShouldBeNull();
+        ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.HasRole, RowImage.New, ConditionTable.Writer, ConditionFieldKind.Text, value))).ShouldBeNull();
     }
 
     [Fact]

@@ -146,6 +146,7 @@ public sealed class HooksEditorAgreementTests
     [InlineData("1 && false")]
     [InlineData("-5")]
     [InlineData("1e3")]
+    [InlineData("12\n")]
     public void A_number_box_holding_anything_but_a_number_writes_no_operator_of_its_own(string value)
     {
         var cel = ConditionText.Row(new ConditionRow(ConditionOperator.Less, RowImage.New, "quantity", ConditionFieldKind.Number, value));
@@ -182,6 +183,7 @@ public sealed class HooksEditorAgreementTests
     [InlineData("a\" || true || \"b")]
     [InlineData("line\nbreak")]
     [InlineData("čaj 中文")]
+    [InlineData("\u0645\u06CC\u200C\u062E \U0001F468\u200D\U0001F469")]
     [InlineData("{v} {r} {f} {n}")]
     public void A_hostile_value_stays_one_literal_of_one_comparison(string value)
     {
