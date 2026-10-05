@@ -70,6 +70,9 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
         await session.GoAsync("/schema/customers");
         await session.OpenTabAsync("On write");
         await session.Page.GetByTestId("hook-new").ClickAsync();
+        /* The sheet takes focus a render after it shows (AdminSession.WaitForFocusInsideAsync); typed into before then, the
+           box loses focus to the sheet's first control, and the focus asserted below is the sheet's, not the check's. */
+        await session.WaitForFocusInsideAsync("hook-editor", FocusScope.Dialog);
 
         await session.Page.FillAsync("#hook-condition", "new.no_such_field == 'priority'");
         var finding = session.Page.GetByTestId("check-hook-condition");
@@ -89,6 +92,7 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
         await session.GoAsync("/schema/regions");
         await session.OpenTabAsync("On write");
         await session.Page.GetByTestId("hook-new").ClickAsync();
+        await session.WaitForFocusInsideAsync("hook-editor", FocusScope.Dialog);
         await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "mutate", Exact = true }).ClickAsync();
         await ExpressionRowAsync(session, 0, "name");
 
