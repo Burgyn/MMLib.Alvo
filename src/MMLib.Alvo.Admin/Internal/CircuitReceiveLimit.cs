@@ -37,11 +37,33 @@ internal static class CircuitReceiveLimit
         var services = blazor.Services;
         var before = services.Count;
         blazor.AddHubOptions(_ => { });
-        var configure = services.Skip(before).Select(descriptor => descriptor.ServiceType)
-            .Last(type => type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IConfigureOptions<>));
+        var configure = HubOptionsConfiguration(services.Skip(before).Select(descriptor => descriptor.ServiceType));
         var hub = configure.GetGenericArguments()[0].GetGenericArguments()[0];
         services.AddSingleton(configure, typeof(Raise<>).MakeGenericType(hub));
     }
+
+    /// <summary>
+    /// The <c>IConfigureOptions&lt;HubOptions&lt;ComponentHub&gt;&gt;</c> among what <c>AddHubOptions</c> just registered.
+    /// </summary>
+    /// <remarks>
+    /// The registration is the framework's, not a contract: a framework that stops making it fails at start-up with a
+    /// sentence naming what it looked for, rather than LINQ's "Sequence contains no matching element".
+    /// </remarks>
+    /// <param name="added">The service types <c>AddHubOptions</c> added, in order.</param>
+    /// <returns>The last closed <c>IConfigureOptions&lt;HubOptions&lt;THub&gt;&gt;</c> among them.</returns>
+    /// <exception cref="InvalidOperationException">None of them is one.</exception>
+    internal static Type HubOptionsConfiguration(IEnumerable<Type> added)
+        => added.LastOrDefault(IsHubOptionsConfiguration)
+           ?? throw new InvalidOperationException(
+               "The dashboard raises the Blazor circuit's receive limit so a realistic descriptor can be pasted into Import "
+               + "(#316), and found no IConfigureOptions<HubOptions<THub>> among what AddHubOptions registered. This ASP.NET "
+               + "Core version registers the circuit hub's options differently; CircuitReceiveLimit has to be updated to it.");
+
+    private static bool IsHubOptionsConfiguration(Type type)
+        => type.IsGenericType
+           && type.GetGenericTypeDefinition() == typeof(IConfigureOptions<>)
+           && type.GetGenericArguments()[0] is { IsGenericType: true } options
+           && options.GetGenericTypeDefinition() == typeof(HubOptions<>);
 
     /// <summary>The raise itself, for the hub type the framework uses.</summary>
     /// <typeparam name="THub">The circuit hub.</typeparam>

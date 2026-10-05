@@ -46,6 +46,15 @@ public sealed class ImportLimitTests
     }
 
     [Fact]
+    public void A_framework_that_no_longer_registers_the_hub_options_the_raise_reads_is_named_not_a_bare_sequence_error()
+    {
+        var refusal = Should.Throw<InvalidOperationException>(() => MMLib.Alvo.Admin.Internal.CircuitReceiveLimit.HubOptionsConfiguration([typeof(object)]));
+
+        refusal.Message.ShouldContain("#316");
+        refusal.Message.ShouldContain("AddHubOptions");
+    }
+
+    [Fact]
     public void The_largest_paste_the_box_lets_through_still_fits_one_circuit_message()
     {
         /* Every character of a box at the character ceiling escaped to two bytes ('"' as \", 'č' as UTF-8) is still

@@ -217,10 +217,7 @@ public sealed class HookShapeScenarios(BikeWorkshopWorld world) : IClassFixture<
         /* Not an empty payload: the schema gives entity.update's payload minProperties: 1, so {} fails the import. */
         descriptor["entities"]!["rentals"]!["hooks"]!["afterUpdate"] = JsonNode.Parse(
             """[ { "action": { "type": "entity.update", "entity": "rental_fleet", "payload": { "in_service": false } } } ]""");
-        await session.GoAsync("/transfer");
-        await session.Page.FillAsync("#import-json", descriptor.ToJsonString());
-        await session.Page.Locator("#import-json").PressAsync("Meta+Enter");
-        await session.Page.WaitForURLAsync("**/changes");
+        await session.ImportByChordAsync(descriptor.ToJsonString());
 
         await HookEditInPlaceScenarios.OnWriteAsync(session, "rentals");
         var readOnly = session.Page.GetByTestId("hook-readonly");

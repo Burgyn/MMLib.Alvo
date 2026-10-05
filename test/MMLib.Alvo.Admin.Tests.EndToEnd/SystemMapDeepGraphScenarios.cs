@@ -44,7 +44,7 @@ public sealed class SystemMapDeepGraphScenarios(AdminWorld world) : IClassFixtur
     /// </remarks>
     internal static async Task ImportCrmAsync(AdminSession session)
     {
-        await session.GoAsync("/transfer");
+        await session.GoToImportAsync();
         await session.Page.FillAsync("#import-json", Descriptors.ComplexCrm);
         await session.Button("Load it into the working copy").ClickAsync();
 

@@ -236,10 +236,7 @@ public sealed class MutateOpenScenarios(BikeWorkshopWorld world) : IClassFixture
         var descriptor = JsonNode.Parse(Descriptors.BikeWorkshop)!.AsObject();
         descriptor["entities"]!["rentals"]!["hooks"]!["beforeUpdate"] = JsonNode.Parse(
             """[ { "action": { "mutate": { "days": "3" } } } ]""");
-        await session.GoAsync("/transfer");
-        await session.Page.FillAsync("#import-json", descriptor.ToJsonString());
-        await session.Page.Locator("#import-json").PressAsync("Meta+Enter");
-        await session.Page.WaitForURLAsync("**/changes");
+        await session.ImportByChordAsync(descriptor.ToJsonString());
 
         await HookEditInPlaceScenarios.OnWriteAsync(session, "rentals");
         await HookEditInPlaceScenarios.OpenEditAsync(session, "beforeUpdate", 0);

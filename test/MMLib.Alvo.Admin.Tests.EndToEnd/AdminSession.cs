@@ -423,6 +423,64 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     /// </summary>
     public Task WaitForPlanAsync() => Page.GetByTestId("plan").WaitForAsync();
 
+    /// <summary>Opens Import and waits until it has loaded the working copy an import replaces.</summary>
+    /// <remarks>
+    /// The circuit being up is not enough: the page reads the applied descriptor and the copy after its first render, and
+    /// it refuses an import until both are there (<c>ImportGate</c>). A chord sent in between is refused without a word —
+    /// a disabled button is waited on by a click, a key press is not. The form draws the gate's condition, so this waits on
+    /// exactly what the submit checks.
+    /// </remarks>
+    public async Task GoToImportAsync()
+    {
+        await GoAsync("/transfer").ConfigureAwait(false);
+        await Page.Locator("form[data-copy-loaded='true']").WaitForAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Opens Import, pastes <paramref name="text"/>, submits it with the chord, and waits for its plan's URL.</summary>
+    /// <remarks>
+    /// The box is read back before the key: <c>InputValueAsync</c> is a browser-local read, so it proves the fill landed
+    /// in the box the chord submits, and leaves only the circuit's side to the wait.
+    /// </remarks>
+    /// <param name="text">The descriptor to import.</param>
+    public async Task ImportByChordAsync(string text)
+    {
+        await GoToImportAsync().ConfigureAwait(false);
+        await Page.FillAsync("#import-json", text).ConfigureAwait(false);
+        (await Page.InputValueAsync("#import-json").ConfigureAwait(false)).ShouldBe(text);
+        await Page.Locator("#import-json").PressAsync("Meta+Enter").ConfigureAwait(false);
+        await WaitForImportedAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Waits for an import to reach its plan's URL, and says what Import showed when it did not.</summary>
+    public async Task WaitForImportedAsync()
+    {
+        try
+        {
+            await Page.WaitForURLAsync("**/changes").ConfigureAwait(false);
+        }
+        catch (TimeoutException timeout)
+        {
+            throw new InvalidOperationException(await ImportStateAsync().ConfigureAwait(false), timeout);
+        }
+    }
+
+    /// <summary>What Import shows, for a wait that timed out on it: the box, its hint, any refusal, and the question.</summary>
+    private async Task<string> ImportStateAsync()
+    {
+        static async Task<string> TextOf(ILocator locator)
+            => await locator.CountAsync().ConfigureAwait(false) == 0 ? "none" : await locator.First.InnerTextAsync().ConfigureAwait(false);
+
+        var box = await Page.Locator("#import-json").CountAsync().ConfigureAwait(false) == 0
+            ? "absent"
+            : await Page.InputValueAsync("#import-json").ConfigureAwait(false);
+        var shown = box.Length > 200 ? $"{box[..200]}… ({box.Length} characters)" : box;
+        var hint = await TextOf(Page.Locator("#import-json-hint")).ConfigureAwait(false);
+        var error = await TextOf(Page.GetByTestId("error-panel")).ConfigureAwait(false);
+        var asking = await Page.GetByTestId("import-replace-confirm").CountAsync().ConfigureAwait(false) > 0;
+        return $"The import never reached /changes; the page is at {Page.Url}. Box: {shown} | Hint: {hint} | Error panel: {error} "
+            + $"| Replace question open: {asking} | Console: {(_noise.Count == 0 ? "nothing" : string.Join(" | ", _noise))}";
+    }
+
     /// <summary>
     /// Opens one of an entity's tabs and waits for it to actually be the open one.
     /// </summary>

@@ -128,10 +128,7 @@ public sealed class UndeclaredReferenceScenarios(BikeWorkshopWorld world) : ICla
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         var descriptor = JsonNode.Parse(Descriptors.BikeWorkshop)!.AsObject();
         descriptor["entities"]!["rentals"]!["hooks"]!["afterCreate"]![0]!["action"]!["endpoint"] = "gone-desk";
-        await session.GoAsync("/transfer");
-        await session.Page.FillAsync("#import-json", descriptor.ToJsonString());
-        await session.Page.Locator("#import-json").PressAsync("Meta+Enter");
-        await session.Page.WaitForURLAsync("**/changes");
+        await session.ImportByChordAsync(descriptor.ToJsonString());
 
         await HookEditInPlaceScenarios.OnWriteAsync(session, "rentals");
         await HookEditInPlaceScenarios.OpenEditAsync(session, "afterCreate", 0);

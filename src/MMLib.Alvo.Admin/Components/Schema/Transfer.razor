@@ -46,7 +46,9 @@
             @* No browser maxlength: the library's default (524,288) cut a longer paste short without a word. alvo.js measures
                the box against ImportLimit instead, and refuses what is over it in place (#316). *@
             @* A form, so Ctrl/Cmd+Enter is alvo.js's one chord (data-alvo-chord-submit), as in every multi-line box. *@
-            <form class="a-stack" data-alvo-chord-submit novalidate @onsubmit="Import">
+            @* data-copy-loaded: the gate's own condition, so an end-to-end scenario waits on what the submit checks. *@
+            <form class="a-stack" data-alvo-chord-submit novalidate @onsubmit="Import"
+                  data-copy-loaded="@(ImportGate.Loaded(_descriptor, _problem) ? "true" : "false")">
                 <Field Label="Descriptor JSON" For="import-json">
                     <ChildContent>
                         <MudTextField T="string" Variant="Variant.Outlined" Lines="12" Immediate="true" id="import-json"
@@ -57,7 +59,7 @@
                     <Hint>@ImportHint</Hint>
                 </Field>
 
-                <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" Disabled="@(_pasted.Trim().Length == 0)"
+                <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" Disabled="@(!ImportGate.Ready(_descriptor, _problem, _pasted))"
                             data-testid="import-run">
                     Load it into the working copy
                 </AlvoButton>
@@ -182,12 +184,13 @@
     /// class of input that must never reach a renderer — see <see cref="DescriptorNames"/>.
     /// </para>
     /// <para>
-    /// The keyboard reaches it without the button, so the empty box is refused here as well as by the disabled button.
+    /// The keyboard reaches it without the button, so whatever disables the button — an empty box, or a copy not yet
+    /// loaded or failed to load (<see cref="ImportGate"/>) — is refused here as well.
     /// </para>
     /// </remarks>
     private Task Import()
     {
-        if (_pasted.Trim().Length == 0 || _replacing)
+        if (!ImportGate.Ready(_descriptor, _problem, _pasted) || _replacing)
         {
             return Task.CompletedTask;
         }

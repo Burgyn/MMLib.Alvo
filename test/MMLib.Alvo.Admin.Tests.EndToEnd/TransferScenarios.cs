@@ -14,7 +14,7 @@ public sealed class TransferScenarios(AdminWorld world) : IClassFixture<AdminWor
     public async Task A_refused_import_is_an_alert_with_focus_and_Enter_alone_is_a_newline()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await session.GoAsync("/transfer");
+        await session.GoToImportAsync();
         await session.Page.Locator("#import-json").FocusAsync();
 
         await session.Page.Keyboard.TypeAsync("{ \"not\": ");
@@ -43,18 +43,20 @@ public sealed class TransferScenarios(AdminWorld world) : IClassFixture<AdminWor
     /// Pasted and submitted in one breath, with nothing waited for in between: the key must import what was pasted,
     /// not what the circuit had heard of so far. field-service with a new description, so the planner can plan it.
     /// </summary>
+    /// <remarks>
+    /// Nothing is waited for between the fill and the key except the box's own value, which is read in the browser and
+    /// asks nothing of the circuit; the page having loaded the copy is waited for before the fill, because until then the
+    /// import is refused by design (<c>ImportGate</c>), and that refusal is not what this scenario is about.
+    /// </remarks>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task A_pasted_import_goes_to_its_plan_on_Meta_Enter()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await session.GoAsync("/transfer");
         var descriptor = JsonNode.Parse(Descriptors.FieldService)!.AsObject();
         descriptor["description"] = "Imported through the box.";
 
-        await session.Page.FillAsync("#import-json", descriptor.ToJsonString());
-        await session.Page.Locator("#import-json").PressAsync("Meta+Enter");
+        await session.ImportByChordAsync(descriptor.ToJsonString());
 
-        await session.Page.WaitForURLAsync("**/changes");
         await session.WaitForPlanAsync();
         (await session.Content.InnerTextAsync()).ShouldContain("Imported through the box.");
         session.AssertConsoleClean();
@@ -74,7 +76,7 @@ public sealed class ImportOverEditsScenarios(AdminWorld world) : IClassFixture<A
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await KeptFollowScenarios.StageEntityAsync(session, "vendors");
-        await session.GoAsync("/transfer");
+        await session.GoToImportAsync();
         await PasteAsync(session, "Imported over the edits.");
 
         var confirm = session.Dialog("import-replace-confirm");
@@ -101,7 +103,7 @@ public sealed class ImportOverEditsScenarios(AdminWorld world) : IClassFixture<A
         await session.Page.GetByTestId("discard").First.ClickAsync();
         await session.Dialog("discard-sheet").GetByTestId("discard-confirm").ClickAsync();
         await session.Page.WaitForURLAsync("**/schema");
-        await session.GoAsync("/transfer");
+        await session.GoToImportAsync();
         await PasteAsync(session, "Imported over a clean copy.");
         await session.Page.GetByTestId("import-run").ClickAsync();
         await session.Page.WaitForURLAsync("**/changes");
@@ -130,16 +132,13 @@ public sealed class ImportSizeScenarios(BikeWorkshopWorld world) : IClassFixture
     public async Task The_whole_bike_workshop_example_imports_through_the_box()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await session.GoAsync("/transfer");
         var descriptor = JsonNode.Parse(Descriptors.BikeWorkshop)!.AsObject();
         descriptor["description"] = "The whole example, through the box.";
         var text = descriptor.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
         text.Length.ShouldBeGreaterThan(32 * 1024, "the scenario is the size that used to close the circuit");
 
-        await session.Page.FillAsync("#import-json", text);
-        await session.Page.Locator("#import-json").PressAsync("Meta+Enter");
+        await session.ImportByChordAsync(text);
 
-        await session.Page.WaitForURLAsync("**/changes");
         await session.WaitForPlanAsync();
         (await session.Content.InnerTextAsync()).ShouldContain("The whole example, through the box.");
         session.AssertConsoleClean();
@@ -154,7 +153,7 @@ public sealed class ImportSizeScenarios(BikeWorkshopWorld world) : IClassFixture
     public async Task A_paste_over_the_limit_is_refused_in_place_and_the_circuit_stays()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await session.GoAsync("/transfer");
+        await session.GoToImportAsync();
         await session.Page.Locator("#import-json").FocusAsync();
         await session.Page.Keyboard.TypeAsync("{");
         await session.Page.GetByText("1 line,").WaitForAsync();
@@ -190,7 +189,7 @@ public sealed class LargeImportScenarios(BikeWorkshopWorld world) : IClassFixtur
     public async Task A_descriptor_of_hundreds_of_kilobytes_imports_through_the_box()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await session.GoAsync("/transfer");
+        await session.GoToImportAsync();
         var descriptor = JsonNode.Parse(Descriptors.BikeWorkshop)!.AsObject();
         descriptor["description"] = "Large. " + new string('x', 650_000);
         var text = descriptor.ToJsonString();
@@ -201,8 +200,10 @@ public sealed class LargeImportScenarios(BikeWorkshopWorld world) : IClassFixtur
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0, "under both ceilings, nothing is refused");
         await session.Page.Locator("#import-json").PressAsync("Meta+Enter");
 
-        await session.Page.WaitForURLAsync("**/changes");
+        await session.WaitForImportedAsync();
         await session.WaitForPlanAsync();
+        /* What landed is the paste, not a copy cut short: the diff names the description the paste changed. */
+        (await session.Content.InnerTextAsync()).ShouldContain("\"description\": \"Large. xxxxxxxxxxxxxxxx");
         session.AssertConsoleClean();
     }
 }
