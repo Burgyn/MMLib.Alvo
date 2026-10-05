@@ -3706,6 +3706,37 @@ Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 
 ---
 
+### Task 16b: the demo uses the functions (maintainer's request, 2026-10-06)
+
+> Added by the controller after the maintainer asked: "Nezabudni aj do demo prikladu dať nejaké použitie" (don't forget to put some usage into the demo example too). Runs **after Task 0** (B merged in), because `examples/bike-workshop` drives the admin e2e world and B's scenarios. Before Task 17 (docs).
+
+**Goal:** `scripts/demo-admin` (standalone `MMLib.Alvo.Host` over `examples/bike-workshop`) shows hooks that call the new built-ins and the hook operators. Someone opening the On write tab in the demo then sees real function calls, the editor offers them, and seeded records carry the computed values.
+
+**Files:**
+- Modify: `examples/bike-workshop/bike-workshop.alvo.json`: before-hooks only, plus a field if one is needed.
+- Modify: `examples/bike-workshop/seed/*`: seed rows whose stored values show the hooks' results.
+- Modify: `examples/bike-workshop/README.md`: a short "Hook functions" section listing each hook, what it computes, and how to see it in the dashboard.
+- Modify: every test and fixture that pins this descriptor. Find them with `grep -rn "bike-workshop" test src scripts docs/design`: `BikeWorkshopWorld`, scenario counts, and `scripts/gen-prototype-fixtures` (run `--check`, and regenerate if the prototype derives from this descriptor).
+
+**Requirements:**
+1. Add 3 or 4 before-hooks that read naturally for a bike workshop and together use:
+   - text normalisation: `upperAscii`, `trim`, `replace` (e.g. a frame or serial number normalised on create/update);
+   - money rounding: `math.round(x, 2)` over a computed price, e.g. a labour cost or a discount;
+   - string `+`: a generated code, e.g. `'R-' + …`;
+   - a text test in a condition: `startsWith`, `endsWith`, `contains` or `size` in a `reject`.
+
+   Every mutate target must honour its facets (Ruling V). Nothing may overflow or divide by zero on the seed data.
+2. **Write the hooks the way the dashboard draws them.** Each hook must open in B's editor in place, not as read-only, per HookShape: condition string, mutate rows `{ "$cel": … }` or literals. At least one condition must use a guided text operator (Task 14), so the guided form recognises it.
+3. **Seed data.** At least one seeded row per hook shows the computed value, and one seed request is refused by the reject, if the seeder can express an expected refusal. Otherwise document the refusal in the README with a curl example.
+4. **No host function in the standalone demo.** The standalone image has no C# extension point by design. The README points to `samples/MMLib.Alvo.Samples.EmbeddedHost` (Task 16, `normalizeVin`) for "set up from code", and says that the dashboard shows such a function with the "this host" badge.
+5. **Tests.**
+   - Add an admin e2e scenario (`DemoFunctionScenarios` or an addition to the plan's `FunctionOfferScenarios`) over the bike-workshop world. Open one of the new hooks and see its call in the mutate expression box and the function list offered. Write a record through the Data API and see the stored, computed value.
+   - All existing admin e2e scenarios stay green. Adjust counts that legitimately grew, and name each adjusted pin in the report.
+   - Run `scripts/demo-admin --no-ai` once headless if feasible, to confirm the seeding succeeds end to end. Otherwise run the seeder against a test host and say so.
+6. Run ring0 and ring1, `scripts/test-admin-e2e` (whole suite), and `scripts/gen-prototype-fixtures --check`.
+
+---
+
 ### Task 17: docs, the skill's prose, and the reference drift fact
 
 **Files:**
