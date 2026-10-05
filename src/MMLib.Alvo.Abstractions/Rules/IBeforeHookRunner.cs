@@ -93,7 +93,11 @@ public interface IBeforeHookRunner
     /// The fields a <c>mutate</c> set, keyed by field name, and empty when no hook fired or none mutated. A
     /// <see langword="null"/> value is a value — "store nothing here" — and not an absence.
     /// </returns>
-    /// <exception cref="AlvoAuthorizationException">A hook's <c>reject</c> fired; the write must not proceed.</exception>
+    /// <exception cref="AlvoAuthorizationException">
+    /// A hook's <c>reject</c> fired, or a <c>mutate</c> computed a value its target field's declared facets refuse
+    /// (<c>maxLength</c>, enum, <c>format</c>, decimal precision or scale, <c>required</c>); the write must not proceed.
+    /// The message names the hook and the field, never the value.
+    /// </exception>
     /// <exception cref="Exception">A CEL function failed (an internal fail-closed type); the write must not proceed.</exception>
     IReadOnlyDictionary<string, object?> Run(
         string entity,

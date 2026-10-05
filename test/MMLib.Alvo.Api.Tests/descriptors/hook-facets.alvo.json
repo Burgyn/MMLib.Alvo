@@ -1,0 +1,48 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "hook-facets",
+  "description": "One entity whose before-hooks write values into fields with declared facets (maxLength, enum, format, decimal precision and scale), selected by the row's own 'mode'. Every value a hook computes outside its field's facets must be refused the same way on every engine (Ruling V, #308). Every world over this descriptor registers the host function pad, which answers 5,000 characters.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["writer"]
+  },
+  "access": {
+    "viewer": "'writer' in @user.roles"
+  },
+  "entities": {
+    "contacts": {
+      "description": "A contact; its hooks copy, grow or compute values into faceted fields.",
+      "fields": {
+        "mode": { "type": "string", "maxLength": 20 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "note": { "type": "string", "maxLength": 500 },
+        "phone_normalized": { "type": "string", "maxLength": 40 },
+        "status": { "type": "enum", "values": ["draft", "done"] },
+        "email": { "type": "string", "format": "email" },
+        "amount": { "type": "decimal", "precision": 5, "scale": 2 },
+        "big": { "type": "decimal", "precision": 18, "scale": 4 }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      },
+      "hooks": {
+        "beforeCreate": [
+          { "condition": "new.mode == 'copy'", "action": { "mutate": { "phone_normalized": { "$cel": "new.note" } } } },
+          { "condition": "new.mode == 'grow'", "action": { "mutate": { "phone_normalized": { "$cel": "replace(new.phone, 'a', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')" } } } },
+          { "condition": "new.mode == 'host'", "action": { "mutate": { "phone_normalized": { "$cel": "pad(new.phone)" } } } },
+          { "condition": "new.mode == 'enum'", "action": { "mutate": { "status": { "$cel": "new.note" } } } },
+          { "condition": "new.mode == 'format'", "action": { "mutate": { "email": { "$cel": "new.note" } } } },
+          { "condition": "new.mode == 'decimal'", "action": { "mutate": { "amount": { "$cel": "new.big" } } } }
+        ],
+        "beforeUpdate": [
+          { "condition": "new.mode == 'copy'", "action": { "mutate": { "phone_normalized": { "$cel": "new.note" } } } }
+        ]
+      }
+    }
+  }
+}

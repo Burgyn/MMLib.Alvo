@@ -178,7 +178,38 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
     private static IEnumerable<KeyValuePair<string, object?>> Mutations(
         CompiledBeforeHook hook, AlvoRecord candidate, AlvoRecord? previous, DateTimeOffset now) =>
         hook.Mutations.Select(mutation => new KeyValuePair<string, object?>(
-            mutation.Field, Value(mutation, candidate, previous, now)));
+            mutation.Field, Fitting(hook, mutation, Value(mutation, candidate, previous, now))));
+
+    /// <summary>
+    /// The value, once it is known to honour the target field's declared facets — or the write refused, as the hook's
+    /// own refusal (Ruling V, #308).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Measured here, in the core, before any driver applies the patch</b>, so every engine answers the same: SQLite
+    /// enforces no length and would store the value, PostgreSQL's <c>varchar(n)</c> would refuse it as an anonymous
+    /// 500. The checks are the payload validator's own (<see cref="MutationTarget.Violation"/>).
+    /// </para>
+    /// <para>
+    /// <b>One rule, whatever produced the value</b> — a literal (already measured at apply), a field copy, a built-in
+    /// such as <c>replace</c>, or a host function: the descriptor's hook would store a value its own field refuses, so
+    /// the hook refuses the write, in the family a <c>reject</c> uses (<see cref="AlvoAuthorizationException"/>, HTTP
+    /// 403 <c>forbidden</c>, a per-row refusal in a batch). Not a 422: that tells the caller to fix a field of their
+    /// payload, and the field named here may be one they never sent. Not <c>function-failed</c>: that is a function
+    /// body that failed, and the same overrun is reachable with no function at all.
+    /// </para>
+    /// <para>
+    /// <b>The message names the hook's pointer, the field and the facet, never the value</b>: the value may be the
+    /// caller's own text grown by <c>replace</c>, or whatever a host function returned. The pointer and the field are
+    /// descriptor-authored — the argument <see cref="EnsureNotRejected"/> makes for the <c>reject</c> text.
+    /// </para>
+    /// </remarks>
+    private static object? Fitting(CompiledBeforeHook hook, CompiledMutation mutation, object? value) =>
+        mutation.Target.Violation(value) is { } violation
+            ? throw new AlvoAuthorizationException(
+                $"The before-hook at '{hook.Path}' computed a value for '{mutation.Field}' that breaks the "
+                + $"'{violation.Code}' facet the field declares: {violation.Message} Nothing was written.")
+            : value;
 
     /// <summary>
     /// One mutation's value: the compiled expression evaluated against the candidate, or the literal the

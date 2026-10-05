@@ -986,7 +986,7 @@ why none is documented on any operation.
 | 204 | — | deleted, no body |
 | 304 | — | `If-None-Match` covers the current version (read-one of an audited entity only) |
 | 401 | `unauthenticated` | a credential **was** presented and cannot be used |
-| 403 | `forbidden` | a policy refused the operation — one slug for every policy refusal |
+| 403 | `forbidden` | a policy refused the operation — one slug for every policy refusal, including a before-hook's: a `reject` that fired, or a `mutate` value its target field's declared facets refuse (Ruling V — the detail names the hook, the field and the facet, never the value; SQLite and PostgreSQL answer alike) |
 | 403 | `out-of-scope` | the presented key's scopes do not cover this entity and operation |
 | 404 | `not-found` | the row is absent **or** the caller's policy excludes it, indistinguishably |
 | 409 | `idempotency-conflict` | the key was reused for a different request |

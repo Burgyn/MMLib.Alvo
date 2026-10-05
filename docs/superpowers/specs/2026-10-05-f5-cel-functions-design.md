@@ -456,7 +456,8 @@ Condition).
 
 `lowerAscii` in Condition (X10); DI singleton-factory registration; `[CelFunction]` attribute; `AlvoTest.Cel`; macro
 functions; `DateOnly`; reword `UnhonouredSubsystems`' "functions" warning so it is not read as host CEL functions;
-`mutate` of a possibly-null function result into a `required` field refused at apply; the dashboard offering
+`mutate` of a possibly-null function result into a `required` field refused at apply (since Ruling V such a null is
+refused at write time as the hook's 403; an apply-time refusal would be earlier still); the dashboard offering
 functions (slice B); #85.
 
 ## 17. As built
@@ -553,3 +554,24 @@ overturn in the PR.**
   three phrases from the assistant's Skills paragraph, including "(without `rules` nobody reaches it)" — run the eval
   before merge.
 
+**Pre-PR fix wave (Opus) — after plan-guard and the security review.**
+
+* **Ruling V — a `mutate` value honours its target field's facets (security F1, closes #308).** Before it,
+  `BeforeHookCompiler.Fits` checked only the CEL *type* and the driver applied a hook's patch past the payload guard,
+  so a value outside the field's `maxLength`, enum, `format` or decimal precision/scale was stored on SQLite (a
+  2,000-character `replace` and a 5,000-character host result into a `maxLength: 40` field, `superadmin` into an enum
+  of `draft`/`done`) and refused by PostgreSQL's `varchar(n)` as an anonymous 500 — one descriptor, two answers, and a
+  growth vector this slice introduced (nested `replace` to the 1 MiB cap per field per row). **The design:** every
+  compiled mutation carries its `MutationTarget` (the declared field plus the entity's compiled formats);
+  `BeforeHookRunner` measures each value before it enters the patch, so every write face (create, update, upsert,
+  batch) and every driver gets the same answer; a literal is measured at apply instead (fail-fast). **The checks are
+  the payload validator's own** — `RecordValidator.FacetViolation` (code-point `maxLength`, scale, precision, enum,
+  `format` incl. the timeout verdict) plus `required` for a null — extracted, not copied. An `integer` field needs no
+  range check: it is `long` end to end, as CEL's `Int` is. **The one rule for the status:** the value was produced by
+  the descriptor's own hook, so the refusal is *the hook's* — the `reject` family, `AlvoAuthorizationException`, HTTP
+  403 `forbidden` (a per-row refusal in a batch), whatever produced the value. Rejected: 422 `validation` (tells the
+  caller to fix a field of their payload; the field may be one they never sent); `function-failed` 500 (a function
+  body failing; the same overrun is reachable with a field copy and no function). The detail names the hook's
+  pointer, the field and the facet (`max-length`, `enum-value`, `format`, `precision`, `scale`, `required`), never
+  the value. Proved over HTTP on SQLite **and** PostgreSQL by the shared `DataApiEngineTests` facts (RED before the
+  fix: SQLite 201, PostgreSQL `internal` 500).

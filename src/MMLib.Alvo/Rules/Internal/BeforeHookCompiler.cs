@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Descriptor;
+﻿using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Internal;
@@ -363,7 +364,9 @@ internal static class BeforeHookCompiler
             return null;
         }
 
-        return Fits(expression.ResultType, target, path, scope) ? new CompiledMutation(field, expression, null) : null;
+        return Fits(expression.ResultType, target, path, scope)
+            ? new CompiledMutation(field, expression, null, scope.TargetOf(target))
+            : null;
     }
 
     /// <summary>
@@ -397,9 +400,31 @@ internal static class BeforeHookCompiler
             return null;
         }
 
-        return LiteralValue(json, target, path, scope) is { } value
-            ? new CompiledMutation(field, null, value.Value)
+        var facets = scope.TargetOf(target);
+
+        return LiteralValue(json, target, path, scope) is { } value && HonoursTheFacets(value.Value, facets, path, scope)
+            ? new CompiledMutation(field, null, value.Value, facets)
             : null;
+    }
+
+    /// <summary>
+    /// Whether a converted literal honours the target field's declared facets — refused at apply, because a literal
+    /// that breaks one would be refused at every write the hook fires on (Ruling V; the same measure
+    /// <see cref="BeforeHookRunner"/> applies to an expression's result at write time).
+    /// </summary>
+    private static bool HonoursTheFacets(object? value, MutationTarget target, string path, BeforeHookScope scope)
+    {
+        if (target.Violation(value) is not { } violation)
+        {
+            return true;
+        }
+
+        scope.Errors.Add(Error(
+            path,
+            $"This mutate's literal breaks the '{violation.Code}' facet '{target.Field.Name}' declares: {violation.Message}",
+            violation.FixSuggestion));
+
+        return false;
     }
 
     /// <summary>
@@ -490,4 +515,14 @@ internal sealed record BeforeHookScope(
     EntitySchema Schema,
     ICelCompiler Compiler,
     string EntityPath,
-    List<DescriptorValidationError> Errors);
+    List<DescriptorValidationError> Errors)
+{
+    private FormatCatalog? _formats;
+
+    /// <summary>
+    /// <paramref name="field"/> with what a mutation's value into it is measured against. The entity's formats are
+    /// compiled once, and only when the entity declares a <c>mutate</c> at all.
+    /// </summary>
+    /// <param name="field">The declared field a mutation writes.</param>
+    internal MutationTarget TargetOf(FieldSchema field) => new(field, _formats ??= FormatCatalog.Build([Schema]));
+}

@@ -224,6 +224,16 @@ process. Purity, speed and thread-safety are by contract, not enforced (spec §5
   endpoint, the dashboard) receives an exception (the internal type surfaces as a plain `Exception`; the dashboard shows
   its generic fault). An **after-hook condition** is already post-commit, so the after-hook is dropped and a Warning is
   logged.
+- **A `mutate` value honours its field's facets** (Ruling V, #308). Whatever produced it — a literal, a field copy,
+  `replace`, a host function — the value a before-hook writes is measured by the same checks a caller's payload passes:
+  `maxLength` (code points), enum membership, `format`, decimal precision and scale (an `Int` widened into a `decimal`
+  field is measured as that decimal), and `required` (a null into a required field). A literal that breaks one is
+  refused at apply; a computed value that breaks one refuses the write **as the hook's refusal** — the family a `reject`
+  uses: HTTP 403 `forbidden` (a per-row refusal in a batch, an `AlvoAuthorizationException` in process), nothing
+  written, the detail naming the hook's pointer, the field and the facet, never the value. Measured in the core before
+  any driver sees the patch, so SQLite (no length enforcement) and PostgreSQL (`varchar(n)`) give the same answer. Not
+  422 — that tells the caller to fix a field of *their* payload, and the field may be one they never sent; not
+  `function-failed` — the same overrun is reachable with no function at all.
 - **Prefer null to a throw.** A host function should answer `null` (or `false`) on input it cannot handle rather than
   throw: every throw is a 500 and an Error log entry, once per request.
 - **Versioning.** A function whose meaning changes gets a new name (`vatRate` stays, `vatRate2` is new): a descriptor
