@@ -60,6 +60,46 @@ public sealed class CelFunctionCatalogTests
         Should.Throw<InvalidOperationException>(() => CelFunctionCatalog.BuiltIns.With([Host("vat"), Host("vat")]))
             .Message.ShouldContain("'vat'");
 
+    private static CelFunction BuiltIn(string name, CelValueType type, IReadOnlySet<CelProfile> profiles) => new(
+        name, [CelBuiltInFunctions.Parameter("x", type)], type, ResultNullable: false,
+        "A built-in.", IsHost: false, profiles, arguments => arguments[0]);
+
+    /// <summary>
+    /// The built-in overload comes first, so only the provenance half of the guard can refuse it: the "host declared
+    /// twice" half looks at the first overload's provenance, which is built-in here.
+    /// </summary>
+    [Fact]
+    public void One_name_may_not_mix_a_built_in_and_a_host_overload()
+    {
+        CelFunction[] mixed =
+        [
+            BuiltIn("vat", CelValueType.Int, CelBuiltInFunctions.ConditionAndMutate),
+            Host("vat"),
+        ];
+
+        Should.Throw<InvalidOperationException>(() => new CelFunctionCatalog(mixed)).Message.ShouldContain("'vat'");
+    }
+
+    [Fact]
+    public void One_name_may_not_mix_profiles_across_its_overloads()
+    {
+        CelFunction[] mixed =
+        [
+            BuiltIn("vat", CelValueType.Int, CelBuiltInFunctions.ConditionAndMutate),
+            BuiltIn("vat", CelValueType.Decimal, CelBuiltInFunctions.MutateOnly),
+        ];
+
+        Should.Throw<InvalidOperationException>(() => new CelFunctionCatalog(mixed)).Message.ShouldContain("'vat'");
+    }
+
+    [Fact]
+    public void Built_in_overloads_with_one_provenance_and_one_profile_set_share_a_name() =>
+        new CelFunctionCatalog(
+        [
+            BuiltIn("vat", CelValueType.Int, CelBuiltInFunctions.ConditionAndMutate),
+            BuiltIn("vat", CelValueType.Decimal, CelBuiltInFunctions.ConditionAndMutate),
+        ]).Overloads("vat").Count.ShouldBe(2);
+
     [Fact]
     public void A_signature_names_every_parameter_its_type_and_nullability()
     {
