@@ -650,7 +650,7 @@ overturn in the PR.**
   itself tells the caller that hook N writes *some* unpublished field — the same class as a `reject` gated on a
   hidden field, owned by the descriptor author. The refusal text only stops naming the field. The rule is also
   *stricter* than the document: the OpenAPI write schema still publishes a `required` hidden field's name, while
-  the refusal never names any hidden field. The detailed form (field, facet) is not logged either — a follow-up.
+  the refusal never names any hidden field. The detailed form (field, facet) is not logged either — #313.
 * **Behaviour change for stored descriptors (M3).** Refusing an out-of-facet `mutate` literal at apply means a host
   booting from a stored descriptor that carries one now fails its boot-time apply. Recorded in `CHANGELOG.md` under
   *Changed (breaking)*: such a descriptor never worked on both engines (stored silently on SQLite, a 500 on every
