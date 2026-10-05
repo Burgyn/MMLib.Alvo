@@ -218,15 +218,19 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
         await session.Page.GetByTestId("hook-new").ClickAsync();
         await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "afterCreate", Exact = true }).ClickAsync();
         await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "webhook", Exact = true }).ClickAsync();
-        /* The endpoint is picked from the declared ones now, and this world declares none, so the draft is refused elsewhere
-           by its payload instead: longer than the schema's 8000 characters (plan Task 10). */
+        /* The endpoint is picked from the declared ones now, and this world declares none, so the draft is refused elsewhere:
+           at its action, which has no endpoint and a payload over the schema's 8000 characters (plan Task 10). The schema's
+           action is a oneOf, so either is reported on the action itself, never on action/payload. */
         await session.Page.FillAsync("#hook-payload", "[" + new string('1', 8000) + "]");
 
         await session.Page.FillAsync("#hook-condition", "new.tier == 'priority'");
 
         var finding = session.Page.GetByTestId("check-hook-condition").First;
         await finding.WaitForAsync(new() { Timeout = 3_000 });
-        (await finding.InnerTextAsync()).ShouldStartWith("Not checked yet");
+        var said = await finding.InnerTextAsync();
+        said.ShouldStartWith("Not checked yet");
+        said.ShouldContain("('/entities/customers/hooks/afterCreate/0/action')", Case.Sensitive,
+            "it names the part of the draft that is refused, this hook's action, and nothing else");
         (await finding.GetAttributeAsync("class"))!.ShouldContain("a-field__problem--muted");
     }
 

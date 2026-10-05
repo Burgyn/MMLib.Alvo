@@ -89,6 +89,17 @@ public sealed class HookPickerScenarios(BikeWorkshopWorld world) : IClassFixture
         await session.AssertNoHorizontalScrollAsync();
     }
 
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task The_email_sheet_fits_a_phone()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
+        await NewAfterHookAsync(session, "service_orders", "afterUpdate", "email");
+        await session.ChooseAsync(Combobox(session, "Template"), "order-ready");
+        await session.Page.FillAsync("#hook-to", "{{new.contact_email}}");
+
+        await session.AssertNoHorizontalScrollAsync();
+    }
+
     internal static async Task NewAfterHookAsync(AdminSession session, string entity, string point, string kind)
     {
         await HookEditInPlaceScenarios.OnWriteAsync(session, entity);

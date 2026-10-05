@@ -563,6 +563,7 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
             new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
         await session.SettleAsync();
         (await rows.CountAsync()).ShouldBe(before);
+        (await rows.Filter(new() { HasText = message }).CountAsync()).ShouldBe(0, "the row removed is the one asked for");
         (await session.SnackbarCountAsync("Removed from the working copy")).ShouldBe(1);
 
         session.AssertConsoleClean();
