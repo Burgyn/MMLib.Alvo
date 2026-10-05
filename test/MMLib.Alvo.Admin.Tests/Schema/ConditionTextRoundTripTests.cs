@@ -15,11 +15,17 @@ public sealed partial class ConditionTextRoundTripTests
     private const int Cases = 2_000;
     private const string Alphabet = "ab '\\\"&|!()\n\t\rčé中 ‍";
 
+    /// <summary>
+    /// What a text value is built from: the alphabet's characters, plus the two joiners and an escaped quote as whole pieces —
+    /// so a joiner inside a literal, and a joiner next to an escaped quote, are cases, not lucky draws.
+    /// </summary>
+    private static readonly string[] _pieces = [" && ", " || ", "\\'", .. Alphabet.Select(character => character.ToString())];
+
     private static readonly ConditionScope _scope = new(
     [
         new("title", ConditionFieldKind.Text, false, []),
         new("note", ConditionFieldKind.Text, true, []),
-        new("status", ConditionFieldKind.Choice, false, ["open", "it's", "a && b", "čaj", "back\\slash"]),
+        new("status", ConditionFieldKind.Choice, false, ["open", "it's", "a && b", "čaj", "back\\slash", "x' || y"]),
         new("tier", ConditionFieldKind.Choice, true, ["gold"]),
         new("quantity", ConditionFieldKind.Number, false, []),
         new("discount", ConditionFieldKind.Number, true, []),
@@ -57,11 +63,13 @@ public sealed partial class ConditionTextRoundTripTests
     [Fact]
     public void A_mutated_condition_is_read_as_rows_only_when_the_form_offers_every_row_at_the_point_it_is_read_at()
     {
+        var cases = 0;
         var read = 0;
         var refused = 0;
         _cases.Sample(
             (seed, point) =>
             {
+                Interlocked.Increment(ref cases);
                 var random = new Random(seed);
                 var (mutated, readAt) = Mutated(random, ConditionText.Generate(Condition(random, point)), point);
                 if (ConditionText.Recognize(mutated, readAt, _scope) is not { } rows)
@@ -71,13 +79,15 @@ public sealed partial class ConditionTextRoundTripTests
                 }
 
                 Interlocked.Increment(ref read);
-                return IsOffered(rows, readAt);
+                return IsOffered(rows, readAt, mutated);
             },
             iter: Cases);
 
-        /* Not vacuous: the mutations reach both outcomes. */
-        read.ShouldBeGreaterThan(Cases / 100);
-        refused.ShouldBeGreaterThan(Cases / 100);
+        /* Not vacuous: the mutations reach both outcomes — measured against the cases actually run, which CsCheck_Time or
+           CsCheck_Iter may make other than Cases. */
+        (read + refused).ShouldBe(cases);
+        read.ShouldBeGreaterThan(cases / 100);
+        refused.ShouldBeGreaterThan(cases / 100);
     }
 
     private static bool RoundTrips(GuidedCondition condition, string point)
@@ -88,12 +98,14 @@ public sealed partial class ConditionTextRoundTripTests
     }
 
     /// <summary>
-    /// The oracle, independent of the recognizer's own final compare: the form would write these rows without a refusal,
-    /// every row is offered by the table at this point, and reading their text again gives the same rows.
+    /// The oracle. Its legality clauses are what is independent of <c>Recognize</c>: the form would write these rows without
+    /// a refusal, and every row is offered by the table at this point. The last two are the spec-level canonicity contract
+    /// (§7.3): the rows write back exactly the text they were read from, and reading that text again gives the same rows.
     /// </summary>
-    private static bool IsOffered(GuidedCondition rows, string point)
+    private static bool IsOffered(GuidedCondition rows, string point, string text)
         => ConditionText.Refusal(rows) is null
            && rows.Rows.All(row => IsOffered(row, point))
+           && ConditionText.Generate(rows) == text
            && rows.Equals(ConditionText.Recognize(ConditionText.Generate(rows), point, _scope));
 
     private static bool IsOffered(ConditionRow row, string point)
@@ -153,7 +165,7 @@ public sealed partial class ConditionTextRoundTripTests
                 ? random.Next(100_000).ToString(CultureInfo.InvariantCulture)
                 : $"{random.Next(1000).ToString(CultureInfo.InvariantCulture)}.{random.Next(100).ToString(CultureInfo.InvariantCulture)}",
             ConditionFieldKind.Choice => field.Values[random.Next(field.Values.Count)],
-            _ => new string([.. Enumerable.Range(0, random.Next(0, 13)).Select(_ => Alphabet[random.Next(Alphabet.Length)])]),
+            _ => string.Concat(Enumerable.Range(0, random.Next(0, 13)).Select(_ => _pieces[random.Next(_pieces.Length)])),
         };
 
     /// <summary>
