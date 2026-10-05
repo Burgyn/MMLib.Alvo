@@ -30,7 +30,7 @@ more: no `@user` or `@tenant`, no arithmetic, no joins. Every function takes any
 null argument makes the value null.
 
 <!-- gen:mutate-functions -->
-`contains` `endsWith` `lowerAscii` `math.abs` `math.round` `now` `replace` `size` `startsWith` `substring` `trim` `upperAscii`
+`contains` `endsWith` `lowerAscii` `math.abs` `math.ceil` `math.floor` `math.greatest` `math.least` `math.round` `now` `replace` `size` `startsWith` `substring` `trim` `upperAscii`
 <!-- /gen:mutate-functions -->
 
 An embedded host may register its own functions; they work in a `condition` and a `mutate` and nowhere else. Call

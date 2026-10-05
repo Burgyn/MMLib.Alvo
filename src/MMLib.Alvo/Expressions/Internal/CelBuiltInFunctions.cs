@@ -32,7 +32,9 @@ internal static partial class CelBuiltInFunctions
     internal static IReadOnlyList<CelFunction> All =>
         [
             LowerAscii, UpperAscii, Now, Replace, Trim, Size, Abs(CelValueType.Int), Abs(CelValueType.Decimal), Round(CelValueType.Int), Round(CelValueType.Decimal),
-            Substring(withEnd: false), Substring(withEnd: true), Contains, StartsWith, EndsWith,
+            RoundToDigits, Substring(withEnd: false), Substring(withEnd: true), Contains, StartsWith, EndsWith,
+            Ceil(CelValueType.Int), Ceil(CelValueType.Decimal), Floor(CelValueType.Int), Floor(CelValueType.Decimal),
+            Greatest(CelValueType.Int), Greatest(CelValueType.Decimal), Least(CelValueType.Int), Least(CelValueType.Decimal),
         ];
 
     private static CelFunction Replace => InProcess(

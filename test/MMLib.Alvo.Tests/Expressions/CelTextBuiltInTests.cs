@@ -67,7 +67,7 @@ public sealed class CelTextBuiltInTests
     public void A_substring_failure_in_a_mutate_value_fails_closed_rather_than_writing_null() =>
         Should.Throw<CelFunctionException>(() => Mutate("substring(name, 0, 9)", ("name", "abc"))).FunctionName.ShouldBe("substring");
 
-    [Fact(Skip = "math.least arrives in Task 4")]
+    [Fact]
     public void The_truncation_recipe_cuts_only_what_is_too_long()
     {
         const string recipe = "substring(name, 0, math.least(size(name), 5))";

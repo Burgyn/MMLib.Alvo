@@ -19,7 +19,7 @@ public sealed class CelFunctionCatalogTests
 
         catalog.Names.ShouldBe(BuiltInNames);
         catalog.Overloads("math.abs").Select(o => o.ResultType).ShouldBe([CelValueType.Int, CelValueType.Decimal]);
-        catalog.Overloads("math.round").Select(o => o.ResultType).ShouldBe([CelValueType.Int, CelValueType.Decimal]);
+        catalog.Overloads("math.round").Select(o => o.ResultType).ShouldBe([CelValueType.Int, CelValueType.Decimal, CelValueType.Decimal]);
         catalog.Functions.Where(f => f.IsLegacy).Select(f => f.Name).ShouldBe(["now"]);
         catalog.Functions.Where(f => !f.IsLegacy).ShouldAllBe(f => f.Profiles.SetEquals(new[] { CelProfile.Condition, CelProfile.Mutate }));
     }
@@ -33,7 +33,7 @@ public sealed class CelFunctionCatalogTests
 
         described.Select(f => f.Name).ShouldBe([.. CelBuiltInFunctions.All.Select(f => f.Name).Append("Zeta").Append("alpha").Order(StringComparer.Ordinal)]);
         described.Where(f => f.Name == "math.abs").Select(f => f.Result).ShouldBe(catalog.Overloads("math.abs").Select(o => o.Describe().Result));
-        described.Where(f => f.Name == "math.round").Select(f => f.Result).ShouldBe([CelValueType.Int, CelValueType.Decimal]);
+        described.Where(f => f.Name == "math.round").Select(f => f.Result).ShouldBe([CelValueType.Int, CelValueType.Decimal, CelValueType.Decimal]);
     }
 
     [Fact]
