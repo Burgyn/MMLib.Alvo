@@ -240,6 +240,13 @@ with a framework budget — are follow-ups (spec §5.8, X14).
   any driver sees the patch, so SQLite (no length enforcement) and PostgreSQL (`varchar(n)`) give the same answer. Not
   422 — that tells the caller to fix a field of *their* payload, and the field may be one they never sent; not
   `function-failed` — the same overrun is reachable with no function at all.
+- **Tenancy does not reach inside a function.** Alvo's tenant predicate filters what *Alvo* reads; a host function
+  that reads stored data itself (a lookup table, a rate per tenant) must take the tenant as a parameter — pass
+  `@tenant.id` in a `condition` — and filter by it. One that closes over a store and reads it unfiltered is a
+  cross-tenant read Alvo cannot see.
+- **The host's exception is logged, never shown.** What a function throws — message and stack trace — is logged at
+  Error for a write and at Warning for an after-hook condition. Never put caller data (a field's value, an argument)
+  in an exception message: it lands in every log sink the host ships to.
 - **Prefer null to a throw.** A host function should answer `null` (or `false`) on input it cannot handle rather than
   throw: every throw is a 500 and an Error log entry, once per request.
 - **Versioning.** A function whose meaning changes gets a new name (`vatRate` stays, `vatRate2` is new): a descriptor

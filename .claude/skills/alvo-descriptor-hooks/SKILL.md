@@ -35,7 +35,8 @@ of the right type, and a null argument makes the value null.
 
 An embedded host may register its own functions; they work in a `condition` and a `mutate` and nowhere else. Call
 `get_cel_functions` for this host's list with each function's parameters and result — never assume one exists. A
-function whose meaning changes gets a new name (`vatRate` stays, `vatRate2` is new).
+function whose meaning changes gets a new name (`vatRate` stays, `vatRate2` is new). Alvo's tenant filter does not
+reach inside a function: one that reads stored data must take the tenant as a parameter and filter by it.
 
 <!-- gen:cel-mutate -->
 - allowed: `now()` `lowerAscii(new.description)` `new.unit_price` `'part'` `trim(new.description)`

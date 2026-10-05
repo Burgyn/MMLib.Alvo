@@ -64,6 +64,15 @@ public static class AlvoBuilderExtensions
     /// rather than throwing: every throw is a 500 and an Error log entry per request.
     /// </para>
     /// <para>
+    /// <b>What the function throws is logged whole</b> — its message and stack trace, at Error for a write and at
+    /// Warning for an after-hook condition — and never shown to the caller. So never put caller data (a field's value,
+    /// an argument) in an exception message: it would land in every log sink the host ships to.
+    /// </para>
+    /// <para>
+    /// <b>Alvo's tenant filter does not reach inside the function.</b> A function that reads stored data must take the
+    /// tenant as a parameter (<c>@tenant.id</c>, passed in a <c>condition</c>) and filter by it itself.
+    /// </para>
+    /// <para>
     /// A changed meaning deserves a new name, so stored descriptors keep theirs. Removing or renaming a registered
     /// function makes a stored descriptor that calls it fail the apply at boot, refused as calling an unknown function.
     /// Only this host knows the function: the standalone image and the CLI refuse a descriptor that calls it as an
