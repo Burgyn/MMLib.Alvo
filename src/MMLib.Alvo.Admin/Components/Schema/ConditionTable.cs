@@ -185,6 +185,7 @@ internal static class ConditionTable
 
     /// <summary>What a declared field type is, for a condition.</summary>
     /// <param name="type">The field's declared type.</param>
+    /// <exception cref="ArgumentOutOfRangeException">A type this table has no arm for — a new one must be given a kind, not guessed.</exception>
     public static ConditionFieldKind KindOf(FieldType type) => type switch
     {
         FieldType.String or FieldType.Text => ConditionFieldKind.Text,
@@ -193,7 +194,8 @@ internal static class ConditionTable
         FieldType.Boolean => ConditionFieldKind.Flag,
         FieldType.Date or FieldType.DateTime => ConditionFieldKind.Moment,
         FieldType.Uuid or FieldType.Ref => ConditionFieldKind.Identity,
-        _ => ConditionFieldKind.Json,
+        FieldType.Json => ConditionFieldKind.Json,
+        _ => throw new ArgumentOutOfRangeException(nameof(type), type, "No condition kind is declared for this field type."),
     };
 
     /// <summary>Whether a point has the row as the write leaves it.</summary>

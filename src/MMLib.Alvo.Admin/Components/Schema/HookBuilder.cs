@@ -97,7 +97,7 @@ internal sealed class HookBuilder
 
     /// <summary>Whether a point runs inside the write's transaction.</summary>
     public static bool IsBefore(string point)
-        => point.StartsWith("before", StringComparison.OrdinalIgnoreCase);
+        => point.StartsWith("before", StringComparison.Ordinal);
 
     /// <summary>
     /// Switches the point, and the action kind with it when the current one no longer fits.

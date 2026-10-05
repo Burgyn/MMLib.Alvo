@@ -23,6 +23,27 @@ public class ConditionTableTests
     [InlineData(FieldType.Json, ConditionFieldKind.Json)]
     public void A_field_type_has_one_kind(FieldType type, object kind) => ConditionTable.KindOf(type).ShouldBe((ConditionFieldKind)kind);
 
+    [Fact]
+    public void Every_declared_field_type_has_a_kind()
+        => Enum.GetValues<FieldType>().ShouldAllBe(type => Enum.IsDefined(ConditionTable.KindOf(type)));
+
+    [Fact]
+    public void A_field_type_the_table_does_not_know_is_refused_rather_than_guessed()
+        => Should.Throw<ArgumentOutOfRangeException>(() => ConditionTable.KindOf((FieldType)999));
+
+    [Fact]
+    public void Every_operator_s_row_is_its_own()
+        => Enum.GetValues<ConditionOperator>().ShouldAllBe(relation => ConditionTable.Of(relation).Operator == relation);
+
+    [Fact]
+    public void A_point_is_compared_ordinally_by_every_reader()
+    {
+        HookBuilder.IsBefore("BeforeCreate").ShouldBeFalse();
+        ConditionTable.IsUpdate("beforeupdate").ShouldBeFalse();
+        HookBuilder.IsBefore("beforeCreate").ShouldBeTrue();
+        ConditionTable.IsUpdate("afterUpdate").ShouldBeTrue();
+    }
+
     [Theory]
     [InlineData("beforeCreate", new[] { RowImage.New })]
     [InlineData("beforeUpdate", new[] { RowImage.New, RowImage.Old })]
@@ -102,6 +123,7 @@ public class ConditionTableTests
     [InlineData("beforeUpdate", "<code class=\"a-mono\">new</code>, <code class=\"a-mono\">old</code>", "new.status == 'completed'")]
     [InlineData("beforeDelete", "<code class=\"a-mono\">old</code>", "old.status == 'completed'")]
     [InlineData("afterCreate", "<code class=\"a-mono\">new</code>", "new.status == 'completed'")]
+    [InlineData("afterUpdate", "<code class=\"a-mono\">new</code>, <code class=\"a-mono\">old</code>", "new.status == 'completed'")]
     [InlineData("afterDelete", "<code class=\"a-mono\">old</code>", "old.status == 'completed'")]
     public void The_hint_and_the_example_name_only_the_images_the_point_has(string point, string images, string example)
     {
