@@ -147,7 +147,8 @@ public sealed class ImportSizeScenarios(BikeWorkshopWorld world) : IClassFixture
 
     /// <summary>
     /// Over the character ceiling, and under it but over the bytes it takes as sent: each refused at the box, the box
-    /// given back what the circuit last heard, and the circuit still there to hear the next keystroke.
+    /// given back what the circuit last heard, the circuit still there to hear the next keystroke, and the refusal gone
+    /// with the next edit.
     /// </summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task A_paste_over_the_limit_is_refused_in_place_and_the_circuit_stays()
@@ -170,7 +171,38 @@ public sealed class ImportSizeScenarios(BikeWorkshopWorld world) : IClassFixture
 
         await session.Page.FillAsync("#import-json", "{\n}");
         await session.Page.GetByText("2 lines,").WaitForAsync();
+        await refusal.WaitForAsync(new() { State = WaitForSelectorState.Detached });
         session.Page.Url.ShouldEndWith("/transfer");
+        session.AssertConsoleClean();
+    }
+}
+
+/// <summary>A descriptor of hundreds of kilobytes imports whole (#316, review I2).</summary>
+/// <remarks>Its own world: the import replaces the working copy, and <see cref="ImportSizeScenarios"/> imports too.</remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class LargeImportScenarios(BikeWorkshopWorld world) : IClassFixture<BikeWorkshopWorld>
+{
+    /// <summary>
+    /// A descriptor far past SignalR's own 64 KB buffer and still under both ceilings — about 700 KB as sent — reaches the
+    /// circuit whole: the raised limit carries what the box lets through (review I2).
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_descriptor_of_hundreds_of_kilobytes_imports_through_the_box()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/transfer");
+        var descriptor = JsonNode.Parse(Descriptors.BikeWorkshop)!.AsObject();
+        descriptor["description"] = "Large. " + new string('x', 650_000);
+        var text = descriptor.ToJsonString();
+        text.Length.ShouldBeInRange(500_000, 900_000);
+
+        await session.Page.FillAsync("#import-json", text);
+        await session.Page.GetByText("1 line,").WaitForAsync();
+        (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0, "under both ceilings, nothing is refused");
+        await session.Page.Locator("#import-json").PressAsync("Meta+Enter");
+
+        await session.Page.WaitForURLAsync("**/changes");
+        await session.WaitForPlanAsync();
         session.AssertConsoleClean();
     }
 }

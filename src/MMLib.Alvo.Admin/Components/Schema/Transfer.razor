@@ -52,7 +52,7 @@
                         <MudTextField T="string" Variant="Variant.Outlined" Lines="12" Immediate="true" id="import-json"
                                       Class="a-mono" spellcheck="false" aria-describedby="import-json-hint"
                                       data-alvo-max-chars="@ImportLimit.MaxChars" data-alvo-max-bytes="@ImportLimit.MaxSentBytes" MaxLength="int.MaxValue"
-                                      Value="_pasted" ValueChanged="text => _pasted = text ?? string.Empty" />
+                                      Value="_pasted" ValueChanged="Pasted" />
                     </ChildContent>
                     <Hint>@ImportHint</Hint>
                 </Field>
@@ -89,6 +89,12 @@
     private readonly RefusalState<string> _refusal = new();
     private IAsyncDisposable? _oversized;
 
+    /// <summary>Whether the refusal on show is the one for a paste over the limit, which the next edit clears.</summary>
+    private bool _oversizeShown;
+
+    /// <summary>Whether the page has been disposed, so a subscription that arrives afterwards is given back at once.</summary>
+    private bool _disposed;
+
     /// <summary>Whether the question before an import over unapplied edits is on screen.</summary>
     private bool _replacing;
 
@@ -111,7 +117,15 @@
     {
         if (firstRender)
         {
-            _oversized = await Interop.SubscribeAsync("oversized", OnOversized);
+            var subscription = await Interop.SubscribeAsync("oversized", OnOversized);
+            if (_disposed)
+            {
+                await subscription.DisposeAsync();
+            }
+            else
+            {
+                _oversized = subscription;
+            }
         }
     }
 
@@ -123,9 +137,27 @@
     /// <param name="measured">What alvo.js measured: characters, then bytes as sent.</param>
     private Task OnOversized(string? measured) => InvokeAsync(() =>
     {
-        _refusal.Show(ImportLimit.Refusal(measured), fromPress: false, title: "That paste is too large to import here");
+        ShowOversized(measured);
         StateHasChanged();
     });
+
+    private void ShowOversized(string? measured)
+    {
+        _refusal.Show(ImportLimit.Refusal(measured), fromPress: false, title: "That paste is too large to import here");
+        _oversizeShown = true;
+    }
+
+    /// <summary>The box's text, as the circuit heard it; an edit clears a refusal that only said the last paste was too large.</summary>
+    /// <param name="text">The new text.</param>
+    private void Pasted(string? text)
+    {
+        _pasted = text ?? string.Empty;
+        if (_oversizeShown)
+        {
+            _refusal.Show(null);
+            _oversizeShown = false;
+        }
+    }
 
     private async Task DownloadAsync()
     {
@@ -159,6 +191,16 @@
         {
             return Task.CompletedTask;
         }
+
+        /* Defence in depth: alvo.js stops a longer paste at the box, but a text that reached the circuit some other way is
+           still refused here, in the same words. */
+        if (_pasted.Length > ImportLimit.MaxChars)
+        {
+            ShowOversized(ImportLimit.Measure(_pasted));
+            return Task.CompletedTask;
+        }
+
+        _oversizeShown = false;
 
         _refusal.Show(DescriptorNames.FirstRefusal(_pasted)
             ?? (CopyReplacement.IsObject(_pasted) ? null : "That is not a JSON object."));
@@ -214,6 +256,7 @@
 
     public async ValueTask DisposeAsync()
     {
+        _disposed = true;
         _lifetime.Dispose();
         if (_oversized is not null)
         {

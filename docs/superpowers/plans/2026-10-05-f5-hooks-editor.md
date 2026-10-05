@@ -5010,6 +5010,18 @@ git commit -m "feat(admin): the rules an endpoint and a template are declared by
 Claude-Session: https://claude.ai/code/session_01NJAtafM29iddLwfhb5gnmB"
 ```
 
+**What is new** (carried into this task by Ruling N, #316):
+
+- `ImportLimit` and `CircuitReceiveLimit`: while `AlvoAdminOptions.Enabled`, `AddAlvoAdmin` raises the Blazor circuit hub's
+  `MaximumReceiveMessageSize` from 32 KB to 2 MiB (raise-only), so a descriptor up to the expression check's 1,000,000
+  characters can be pasted into Import; alvo.js refuses a paste over that at the box, in place.
+- **Deviation (maintainer to accept; record in spec §17 at Task 20).** The limit belongs to the one `ComponentHub` every
+  server-interactive circuit in the process shares, an embedding host's own included, and it applies to a `/_blazor`
+  connection before authentication. A client can therefore make the server buffer up to 2 MiB per message instead of
+  32 KB, which Microsoft's guidance names as a denial-of-service risk. Bounded: raised only while the dashboard is
+  enabled, never lowered below a host's own larger limit, and stated in `AddAlvoAdmin`'s public docs. The alternative —
+  a chunked upload through JS interop or a file input — keeps 32 KB and is a larger change than #316 asked for.
+
 ---
 
 ### Task 12: writing `webhooks` and `templates`, and the rows Integrations lists

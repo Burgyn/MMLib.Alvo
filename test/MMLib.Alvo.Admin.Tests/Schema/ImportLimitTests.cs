@@ -16,6 +16,18 @@ public sealed class ImportLimitTests
         => CircuitReceiveLimit(new ServiceCollection().AddAlvoAdmin()).ShouldBe(ImportLimit.CircuitReceiveBytes);
 
     [Fact]
+    public void A_host_that_turned_the_dashboard_off_keeps_signalrs_own_limit()
+        => CircuitReceiveLimit(new ServiceCollection().AddAlvoAdmin(admin => admin.Enabled = false)).ShouldBe(32 * 1024);
+
+    [Fact]
+    public void Only_the_circuit_hub_is_raised()
+    {
+        using var provider = new ServiceCollection().AddAlvoAdmin().BuildServiceProvider();
+
+        provider.GetRequiredService<IOptions<HubOptions>>().Value.MaximumReceiveMessageSize.ShouldBe(32 * 1024);
+    }
+
+    [Fact]
     public void A_host_that_already_allows_more_keeps_it()
     {
         var services = new ServiceCollection();
@@ -58,6 +70,10 @@ public sealed class ImportLimitTests
         refusal.ShouldContain("1,984 KB");
         refusal.ShouldContain("not loaded");
     }
+
+    [Fact]
+    public void A_text_that_reached_the_circuit_is_measured_as_alvo_js_measures_it()
+        => ImportLimit.Measure("a\"č").ShouldBe("3 7", "the two enclosing quotes, a, the escaped quote (2) and č (2)");
 
     [Fact]
     public void A_refusal_with_no_measurement_still_names_the_ceiling()

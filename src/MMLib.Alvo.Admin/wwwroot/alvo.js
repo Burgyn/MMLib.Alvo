@@ -392,7 +392,9 @@
       ? { chars: Number(target.dataset.alvoMaxChars), bytes: Number(target.dataset.alvoMaxBytes) }
       : null;
 
-  /* An escaped UTF-16 unit is at most six bytes (\u0000), so a short text needs no encoding to be known small. */
+  /* An escaped UTF-16 unit is at most six bytes (\u0000), so a short text needs no encoding to be known small. Above
+     about 338,000 characters (the byte ceiling over six) every input pays a JSON.stringify and a TextEncoder pass over
+     the whole text — milliseconds at the ceiling, and only in a box this large, which is pasted into rather than typed. */
   const sentBytes = (text, ceiling) =>
     text.length * 6 + 2 <= ceiling ? 0 : encoder.encode(JSON.stringify(text)).length;
 
