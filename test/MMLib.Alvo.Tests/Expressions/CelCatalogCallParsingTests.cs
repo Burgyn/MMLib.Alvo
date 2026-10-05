@@ -99,6 +99,25 @@ public sealed class CelCatalogCallParsingTests
         refused.FixSuggestion.ShouldNotBeNull().ShouldContain("echo(x)");
     }
 
+    /// <summary>
+    /// The three field-only calls refused a nested call with a bare token mismatch and no fix (final review, M3). The
+    /// message and position stay exactly what they were — the corpus pins them — and the fix is now real.
+    /// </summary>
+    [Theory]
+    [InlineData("lowerAscii(trim(title))", 15, "lowerAscii takes a field, never a call", "trim(lowerAscii(field))")]
+    [InlineData("lowerAscii(new.echo(title))", 19, "lowerAscii takes a field, never a call", "echo(lowerAscii(field))")]
+    [InlineData("has(trim(title))", 8, "has takes one field reference, never a call", "has(field)")]
+    [InlineData("changed(trim(title))", 12, "changed takes one field reference, never a call", "trim(old.field) != trim(new.field)")]
+    public void A_call_inside_a_field_only_call_is_refused_with_a_fix(string source, int position, string lead, string recipe)
+    {
+        var refused = Should.Throw<CelSyntaxException>(() => CelParser.Parse(source, _catalog));
+
+        refused.Message.ShouldBe("Expected RightParen but found LeftParen.");
+        refused.Position.ShouldBe(position);
+        refused.FixSuggestion.ShouldNotBeNull().ShouldStartWith(lead);
+        refused.FixSuggestion.ShouldContain(recipe);
+    }
+
     [Fact]
     public void A_name_without_parentheses_is_a_field_even_when_a_function_has_that_name() =>
         CelParser.Parse("echo", _catalog).ShouldBeOfType<CelFieldRef>().FieldName.ShouldBe("echo");

@@ -390,8 +390,7 @@ internal static class CelParser
             Expect(CelTokenKind.Has);
             Expect(CelTokenKind.LeftParen);
             var field = ParseFieldRefArgument();
-            RejectExtraArgument("has");
-            Expect(CelTokenKind.RightParen);
+            ExpectFieldArgumentEnd("has");
             return new CelHas(field);
         }
 
@@ -483,8 +482,7 @@ internal static class CelParser
         {
             Expect(CelTokenKind.LeftParen);
             var fieldToken = Expect(CelTokenKind.Identifier);
-            RejectExtraArgument("changed");
-            Expect(CelTokenKind.RightParen);
+            ExpectFieldArgumentEnd("changed");
             return new CelChanged(fieldToken.Text);
         }
 
@@ -499,8 +497,7 @@ internal static class CelParser
         {
             Expect(CelTokenKind.LeftParen);
             var field = ParseFieldRefArgument();
-            RejectExtraArgument(CelCall.LowerAscii);
-            Expect(CelTokenKind.RightParen);
+            ExpectFieldArgumentEnd(CelCall.LowerAscii);
             return new CelCall(CelCall.LowerAscii, [field]);
         }
 
@@ -523,6 +520,52 @@ internal static class CelParser
 
             Expect(CelTokenKind.RightParen);
             return new CelCall(CelCall.Now, []);
+        }
+
+        /// <summary>Closes a field-only call (<c>has</c>, <c>changed</c>, <c>lowerAscii</c>) after its one field.</summary>
+        /// <param name="functionName">The field-only call being parsed.</param>
+        private void ExpectFieldArgumentEnd(string functionName)
+        {
+            RejectNestedCall(functionName);
+            RejectExtraArgument(functionName);
+            Expect(CelTokenKind.RightParen);
+        }
+
+        /// <summary>
+        /// Refuses a call where a field-only call wants its field — <c>lowerAscii(trim(name))</c>. The message and
+        /// position are exactly the token mismatch this always reported (the corpus pins them); the fix is the point.
+        /// </summary>
+        /// <param name="functionName">The field-only call being parsed.</param>
+        private void RejectNestedCall(string functionName)
+        {
+            if (Current.Kind == CelTokenKind.LeftParen)
+            {
+                throw new CelSyntaxException(
+                    $"Expected {CelTokenKind.RightParen} but found {CelTokenKind.LeftParen}.",
+                    Current.Position,
+                    FieldOnlyCallFix(functionName, tokens[_index - 1].Text));
+            }
+        }
+
+        /// <summary>What to write instead of a call inside a field-only call; names the inner call when it can be nested.</summary>
+        /// <param name="functionName">The field-only call.</param>
+        /// <param name="inner">The name written where the field belongs.</param>
+        private string FieldOnlyCallFix(string functionName, string inner)
+        {
+            var nestable = catalog.Contains(inner) && inner is not (CelCall.LowerAscii or CelCall.Now);
+            var reads = nestable ? $"the field {inner}(...) reads" : "the field itself";
+            return functionName switch
+            {
+                "has" => $"has takes one field reference, never a call: write has(field) for {reads}; a call's result is "
+                    + "compared, never tested with has.",
+                "changed" => $"changed takes one field reference, never a call: write changed(field) for {reads}"
+                    + (nestable ? $", or compare the results directly, e.g. {inner}(old.field) != {inner}(new.field)." : "."),
+                _ => $"lowerAscii takes a field, never a call: write lowerAscii(field) for {reads}"
+                    + (nestable
+                        ? ". A function takes any expression, so nest the other way when that means the same, e.g. "
+                            + $"{inner}(lowerAscii(field)), or write {inner}(...)'s result into a field with a mutate and fold that field."
+                        : "."),
+            };
         }
 
         private void RejectExtraArgument(string functionName)
