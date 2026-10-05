@@ -90,7 +90,11 @@ public sealed class CelConversionBuiltInTests
     [Fact]
     public void Int_of_an_int_binds_the_decimal_overload_and_is_the_identity()
     {
-        TestCelFunctions.Compiler().Compile("int(qty)", CelProfile.Mutate, TestCelFunctions.Items).IsSuccess.ShouldBeTrue();
+        var call = TestCelFunctions.Compile("int(qty)", CelProfile.Mutate).Root.ShouldBeOfType<CelCall>();
+
+        call.Function.ShouldNotBeNull().Parameters.ShouldHaveSingleItem().Type.ShouldBe(CelValueType.Decimal);
+        CelInterpreter.EvaluateMutation(TestCelFunctions.Compile("int(qty)", CelProfile.Mutate), CelFixtures.Row(("qty", 42L)), previous: null, _now)
+            .ShouldBe(42L);
         CelBuiltInFunctions.IntOf((decimal)long.MinValue).ShouldBe(long.MinValue);
         CelBuiltInFunctions.IntOf((decimal)long.MaxValue).ShouldBe(long.MaxValue);
     }

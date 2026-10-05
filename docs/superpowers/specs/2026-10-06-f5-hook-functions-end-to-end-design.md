@@ -173,7 +173,8 @@ failed: the divisor is zero. Nothing was written." (`AlvoExceptionHandler.Functi
 | unary `-` | Computed, **Condition, Mutate** | Int → Int; Decimal → Decimal | null → null | `-` of the smallest Int |
 | string `+` | Computed, **Mutate** | String, String → String; no implicit conversion (write `string(x)`) | **Mutate: null → null** (F18); Computed: an operand that may be null is still refused at compile (unchanged) | never (Ruling V refuses an overlong stored value with 403) |
 
-* **The flag.** `EvalState` gains `FailClosed`, set from `CompiledExpression.Profile is Condition or Mutate`. Only those
+* **The flag.** `EvalState` gains `FailClosed`, set from `CompiledExpression.Profile is Condition or Mutate` through one
+  predicate, `CelHookArithmetic.FailsClosed`, which the literal-zero-divisor refusal below reads too. Only those
   two profiles throw; `EvaluateScalar` (Computed) and a Rule's `EvaluatePredicate` keep answering `null` exactly as
   today, so no generated column and no rule changes behaviour.
 * **Int vs Decimal at run time** is decided by the operands' CLR values (a record's Integer column arrives as an
@@ -183,8 +184,9 @@ failed: the divisor is zero. Nothing was written." (`AlvoExceptionHandler.Functi
   rendering that differs per engine — SQLite's `%` casts to integer), Double (Alvo has no `double` type), comparison and
   ternary in Mutate, string `+` in Condition (§12).
 * **Apply-time folding** (E5) stays call-only, with one exception (controller Ruling N, preflight S-3, plan Task 6): a
-  **literal zero divisor** (`x / 0`, `x / 0.0`) in Condition or Mutate is refused at apply, in the shape of §6.4's refusal
-  (§8). Computed keeps it legal — its division answers `null`, so it never fails. No other operator is folded: `1 + x`
+  **literal zero divisor** (`x / 0`, `x / 0.0`, `x / 0.00`) in Condition or Mutate is refused at apply, in the shape of
+  §6.4's refusal but worded for its one constant operand: `'/' always fails with this constant divisor: the divisor is
+  zero.` (§8), at the division's position, with §6.4's fix. Computed keeps it legal — its division answers `null`, so it never fails. No other operator is folded: `1 + x`
   past the Int range, or `x / (1 - 1)`, fails the write. *Deviation from this section's first draft*, which kept `1 / 0`
   for a later slice: refusing it is as cheap as Task 6's constant check and only refuses what always fails.
 
@@ -233,7 +235,7 @@ acceptance in Condition); plan Task 2 regenerates them by rule and lists them in
 
 ### 6.4 Apply-time evaluation of constant calls (E5)
 
-In `CelTypeChecker.Bind` (`:973`), after an overload is bound and **only when** the profile gate passed, the overload is a
+In `CelTypeChecker.Bind`, after an overload is bound and **only when** the profile gate passed, the overload is a
 built-in with a body (`!IsHost && !IsLegacy`) and every argument node is a `CelLiteral`: invoke it with the literal
 values. A `CelFunctionException` adds one `CelCompilationError` at the call's position:
 
@@ -603,8 +605,8 @@ null policy C1 already pinned (a null argument makes the call null; a condition 
 2. `CelAcceptanceBaseline.jsonl` moves only in rows whose source names `lowerAscii` and rows that carry an arithmetic or
    concatenation gate message (272 at C1 HEAD), each set listed in its commit; 2,000 characters, `MaxDepth` 32 and
    `MaxTreeDepth` 128 are unchanged.
-3. A literal-only built-in call that always fails is refused at apply, and so is a literal `digits` outside 0–28;
-   `cel/check` answers the same. `string()` over a `date` field is refused at apply.
+3. A literal-only built-in call that always fails is refused at apply, and so is a literal `digits` outside 0–28 and
+   a literal zero divisor (`x / 0`, `x / 0.0`, `x / 0.00`) in Condition or Mutate (Ruling N); `cel/check` answers the same. `string()` over a `date` field is refused at apply.
 3a. In Condition and Mutate, Int overflow, Decimal overflow and division by zero answer 500 `function-failed` and write
    nothing; `7 / 2` is `3`; in Computed and Rule the same inputs answer exactly what they answer at C1 HEAD.
 4. Under a mutate value (expression mode) and a condition (text mode) the hook editor lists every function of that

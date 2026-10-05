@@ -1029,6 +1029,8 @@ internal static class CelTypeChecker
         /// Why the literal arguments make the call fail, or <see langword="null"/>: the overload's declared check first
         /// (it sees a non-literal argument as <see langword="null"/>), then — only when every argument is a literal — one
         /// evaluation with exactly those values. Shallow by construction: <c>int(trim('x'))</c> has no literal argument.
+        /// Only a built-in's own refusal, which carries a reason, refuses the apply: a body that threw something else (a
+        /// regex timeout) is wrapped without one, may not fail again, and is left for run time to decide.
         /// </summary>
         private static string? ConstantReason(CelCall call, CelFunction overload)
         {
@@ -1050,7 +1052,7 @@ internal static class CelTypeChecker
             }
             catch (CelFunctionException failure)
             {
-                return failure.Reason ?? "it failed";
+                return failure.Reason;
             }
         }
 

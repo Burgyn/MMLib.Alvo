@@ -41,7 +41,7 @@ internal sealed record CelFunction(
 
     /// <summary>
     /// Gets a check of the literal arguments alone, run at apply (spec §6.4): given each argument's literal value — or
-    /// <see langword="null"/> where the argument is not a literal — it answers why the call would always fail, or
+    /// <see langword="null"/> where the argument is not a literal — it answers why the call can never produce a value, or
     /// <see langword="null"/>. Built-ins only; a host function never declares one, because host code never runs at apply.
     /// </summary>
     public Func<IReadOnlyList<object?>, string?>? ConstantCheck { get; init; }

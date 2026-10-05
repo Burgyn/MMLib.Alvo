@@ -37,9 +37,12 @@ internal static partial class CelBuiltInFunctions
         ConstantCheck = DigitsCheck,
     };
 
-    /// <summary><c>math.round(x, digits)</c>'s constant check: a literal <c>digits</c> outside 0 to 28 can only fail (spec E17).</summary>
+    /// <summary>
+    /// <c>math.round(x, digits)</c>'s constant check: with a literal <c>digits</c> outside 0 to 28 the call can never
+    /// produce a value — a present <c>x</c> fails it, a null one makes it null (spec E17).
+    /// </summary>
     /// <param name="literals">Each argument's literal value, or <see langword="null"/> where it is not a literal.</param>
-    /// <returns>The reason the call always fails, or <see langword="null"/>.</returns>
+    /// <returns>The reason the call can never produce a value, or <see langword="null"/>.</returns>
     private static string? DigitsCheck(IReadOnlyList<object?> literals) =>
         literals[1] is long digits && digits is < 0 or > 28 ? DigitsReason : null;
 

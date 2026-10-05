@@ -60,8 +60,8 @@ public sealed class CelConstantCallTests
             .Compile("boom('x')", CelProfile.Condition, TestCelFunctions.Items).IsSuccess.ShouldBeTrue();
 
     /// <summary>
-    /// A declared constant check runs although another argument is a field (spec §6.4, E17): <c>digits</c> 30 can only
-    /// ever fail, whatever the price. <c>-1</c> is a negation, not a literal, so it fails at run time instead (Task 4).
+    /// A declared constant check runs although another argument is a field (spec §6.4, E17): with <c>digits</c> 30 the
+    /// call can never produce a value, whatever the price — a present one fails it, a null one makes it null. <c>-1</c> is a negation, not a literal, so it fails at run time instead (Task 4).
     /// </summary>
     [Theory]
     [InlineData("math.round(price, 29)")]
@@ -95,7 +95,50 @@ public sealed class CelConstantCallTests
     /// </summary>
     [Theory]
     [InlineData("price / 0")]
+    [InlineData("qty / 0")]
     [InlineData("qty / 0.0")]
+    [InlineData("qty / 0.00")]
     public void A_literal_zero_divisor_in_a_computed_field_still_compiles(string source) =>
         TestCelFunctions.Compiler().Compile(source, CelProfile.Computed, TestCelFunctions.Items).IsSuccess.ShouldBeTrue();
+
+    /// <summary>
+    /// Ruling N (preflight S-3): in the two profiles whose division fails closed (spec §5.6), a literal zero divisor can
+    /// never produce a value, so it is refused at apply — an Int zero, a decimal zero, and a decimal zero with a scale.
+    /// </summary>
+    [Theory]
+    [InlineData("new.qty / 0 > 1", CelProfile.Condition)]
+    [InlineData("new.price / 0.0 > 1", CelProfile.Condition)]
+    [InlineData("new.qty / 0.00 > 1", CelProfile.Condition)]
+    [InlineData("qty / 0", CelProfile.Mutate)]
+    [InlineData("price / 0.0", CelProfile.Mutate)]
+    [InlineData("qty / 0.00", CelProfile.Mutate)]
+    public void A_literal_zero_divisor_in_a_hook_is_refused_at_apply(string source, CelProfile profile)
+    {
+        var error = TestCelFunctions.Compiler().Compile(source, profile, TestCelFunctions.Items).Errors.ShouldHaveSingleItem();
+
+        error.Message.ShouldBe("'/' always fails with this constant divisor: the divisor is zero.");
+        error.FixSuggestion.ShouldBe("Correct the constant, or pass a field instead of a literal.");
+        error.Position.ShouldBe(source.IndexOf(" /", StringComparison.Ordinal), "the division's own position, where every arithmetic error sits");
+    }
+
+    /// <summary>The refusal is shallow (spec §5.6): a divisor that is not itself a literal fails each write at run time.</summary>
+    [Theory]
+    [InlineData("qty / (1 - 1)")]
+    [InlineData("qty / -0")]
+    [InlineData("qty / 2")]
+    public void A_divisor_that_is_not_a_literal_zero_compiles(string source) =>
+        TestCelFunctions.Compiler().Compile(source, CelProfile.Mutate, TestCelFunctions.Items).IsSuccess.ShouldBeTrue();
+
+    /// <summary>
+    /// A built-in whose body throws something other than its own refusal — a regex timeout, say — has no reason Alvo can
+    /// quote, and its failure may not repeat: the apply does not refuse, and run time decides (preflight carry-over).
+    /// </summary>
+    [Fact]
+    public void A_constant_call_whose_body_throws_without_a_reason_compiles()
+    {
+        var throwing = TestCelFunctions.Host("flaky", CelValueType.Bool, _ => throw new TimeoutException("regex"), TestCelFunctions.Parameter("s", CelValueType.String));
+        var flaky = throwing with { IsHost = false };
+
+        TestCelFunctions.Compiler(flaky).Compile("flaky('x')", CelProfile.Condition, TestCelFunctions.Items).IsSuccess.ShouldBeTrue();
+    }
 }
