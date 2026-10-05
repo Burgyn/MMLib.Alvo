@@ -69,6 +69,8 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("rule", Orders + "/rules/delete", "[1, 2, 3]"),
         ("rule", Orders + "/rules/list", new string('a', 2001)),
         ("rule", Orders + "/rules/list", new string('a', 2000)),
+        ("rule", Orders + "/rules/list", "normalizePhone(note) == 'x'"),
+        ("rule", Orders + "/rules/get", "trim(note) == 'x'"),
         ("beforeHook", BeforeCreate, "new.quantity > 0"),
         ("beforeHook", BeforeCreate, "old.status == 'open'"),
         ("beforeHook", BeforeUpdate, "old.status == 'open' && new.status == 'closed'"),
@@ -77,6 +79,10 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("beforeHook", BeforeUpdate, "'dispatcher' in @user.roles"),
         ("beforeHook", BeforeCreate, "@tenant.id == 'x'"),
         ("beforeHook", BeforeCreate, "{}"),
+        ("beforeHook", BeforeCreate, "normalizePhone(new.note) == '1'"),
+        ("beforeHook", BeforeCreate, "size(new.title) > 3"),
+        ("beforeHook", BeforeCreate, "trim(old.note) == 'x'"),
+        ("beforeHook", BeforeUpdate, "normalisePhone(new.note) == 'x'"),
         ("afterHook", AfterCreate, "new.quantity > 5"),
         ("afterHook", AfterCreate, "@tenant.id == 'x'"),
         ("afterHook", AfterCreate, "'dispatcher' in @user.roles"),
@@ -84,6 +90,7 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("afterHook", AfterCreate, "old.status == 'open'"),
         ("afterHook", AfterCreate, "new.quantity >"),
         ("afterHook", AfterCreate, "null"),
+        ("afterHook", AfterCreate, "normalizePhone(new.note) == 'x'"),
         ("mutate", Mutate + "note", "'closed'"),
         ("mutate", Mutate + "closed_at", "now()"),
         ("mutate", Mutate + "quantity", "'abc'"),
@@ -94,6 +101,11 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("mutate", Mutate + "note", "@user.roles"),
         ("mutate", Mutate + "quantity", ""),
         ("mutate", Mutate + "note", new string('a', 2001)),
+        ("mutate", Mutate + "note", "normalizePhone(new.note)"),
+        ("mutate", Mutate + "note", "trim(replace(new.title, '-', ' '))"),
+        ("mutate", Mutate + "note", "normalizePhone(new.note, new.note)"),
+        ("mutate", Mutate + "quantity", "abs(new.quantity)"),
+        ("mutate", Mutate + "quantity", "round(new.price)"),
         ("computed", Computed, "quantity * price"),
         ("computed", Computed, "quantity * price > 10"),
         ("computed", Computed, "(quantity + 1) * 2 > price"),
@@ -106,6 +118,8 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("computed", Computed, "quantity == 1 ? price : price * 2"),
         ("computed", Computed, "'x'"),
         ("computed", Computed, new string('a', 2001)),
+        ("computed", Computed, "normalizePhone(note)"),
+        ("computed", Computed, "round(price)"),
     ];
 
     /// <summary>For every case, the check's error set equals apply's, restricted to the slot.</summary>
@@ -198,6 +212,22 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         refused.Result.Errors.ShouldNotBeEmpty("apply refuses the whole descriptor");
         verdict.IsValid.ShouldBeFalse();
         verdict.Findings.Single().Message.ShouldStartWith("Not checked yet");
+    }
+
+    /// <summary>A host function in a rule is refused once, with the recipe that works — not with a misleading operand error.</summary>
+    /// <returns>A task that completes when the check has answered.</returns>
+    [Fact]
+    public async Task A_host_function_in_a_rule_is_refused_once_with_the_mutate_recipe()
+    {
+        var management = fixture.Management();
+        var current = await WorkingCopyAsync(management);
+
+        var verdict = await management.CheckExpressionAsync(
+            Project, new ManagementExpressionCheck(current.DescriptorJson, Orders + "/rules/list", "normalizePhone(note) == 'x'"), Ct);
+
+        var finding = verdict.Findings.ShouldHaveSingleItem();
+        finding.Message.ShouldStartWith("'normalizePhone(...)' is not available in the Rule profile; it is available in Condition and Mutate.");
+        finding.FixSuggestion.ShouldNotBeNull().ShouldContain("before-hook mutate");
     }
 
     private static void BreakElsewhere(JsonNode root, string breakage)
@@ -347,7 +377,10 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
             _world = await AlvoApiWorld.FromDescriptorAsync(
                 "expression-agreement.alvo.json",
                 [],
-                new AlvoApiWorldSetup(MapBeforePriming: true, MapManagementApi: true));
+                new AlvoApiWorldSetup(
+                    MapBeforePriming: true,
+                    MapManagementApi: true,
+                    ConfigureServicesAfterAlvo: services => CelFunctionsWorld.Register(services, phone => phone)));
 
         /// <inheritdoc/>
         public async ValueTask DisposeAsync()
