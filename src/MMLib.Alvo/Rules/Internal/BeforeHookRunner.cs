@@ -138,23 +138,17 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
     /// reads as its stored value, so the collapse never stands in for "the caller did not mention it".
     /// </para>
     /// <para>
-    /// <b>The unreachable half is the caught exception, and its direction is defence-in-depth rather than a
-    /// live decision.</b> Nothing in a <see cref="CelProfile.Condition"/> tree can throw:
-    /// <c>CelInterpreter.Evaluate</c>'s node switch ends in <c>_ =&gt; null</c>, every comparison funnels
-    /// through a <c>TryNormalize</c> that answers <see langword="false"/> rather than converting
-    /// unsuccessfully, and the profile admits no arithmetic — the one family that could overflow. That is the
-    /// property `CelInterpreter`'s own remarks assert for any well-typed expression and any record, including
-    /// one whose stored value is of an unexpected CLR type. So no input reaches the <c>catch</c>, and a
-    /// fail-closed entry point for this one caller would be a change to the security core that <b>no fact
-    /// could discriminate</b> — which is the shape this repository requires a killing mutant for.
+    /// <b>A function failure is not collapsed.</b> A <see cref="CelProfile.Condition"/> tree can call a CEL
+    /// function, and a function is the one construct whose failure is reachable: <c>CelInterpreter.EvaluatePredicate</c>
+    /// lets it escape, so the write is refused (fail closed) instead of the hook silently not firing. Everything
+    /// else in the tree still cannot throw — the node switch ends in <c>_ =&gt; null</c> and every comparison
+    /// funnels through a <c>TryNormalize</c> that answers <see langword="false"/> — so the open direction remains
+    /// only for the two-valued null rule above.
     /// </para>
     /// <para>
-    /// <b>The obligation this creates, which is the real answer.</b> The argument above is a property of the
-    /// profile's grammar, not a guarantee of the interpreter's signature. Admitting arithmetic into
-    /// <see cref="CelProfile.Condition"/> — or any construct that can throw — makes the open direction
-    /// <em>reachable</em>, and at that moment a <c>reject</c> gate needs its own fail-closed evaluation and
-    /// this paragraph is what should be re-read. Recorded as deviation 84 so it is a decision on the record
-    /// rather than an inherited default.
+    /// <b>The obligation deviation 84 recorded is now discharged:</b> admitting a construct that can throw into
+    /// <see cref="CelProfile.Condition"/> was the trigger it named, and the answer is that the exception is not
+    /// swallowed by this gate, so a <c>reject</c> gate cannot be bypassed by making its condition fail.
     /// </para>
     /// </remarks>
     private static bool Fires(

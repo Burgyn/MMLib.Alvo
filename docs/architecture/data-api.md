@@ -975,9 +975,9 @@ one document-wide list of every classification Alvo can mint, not a per-operatio
 
 Problem documents are RFC 9457, media type `application/problem+json`, with an Alvo `violations` array.
 Every `type` is `https://alvo.dev/errors/<slug>`; the slugs are exactly `AlvoProblemTypes.All`, and the
-table below is that list. Two of them — `unreadable-request` and `internal` — are emitted only by
+table below is that list. Three of them — `unreadable-request`, `internal` and `function-failed` — are emitted only by
 `AlvoExceptionHandler`, so only a host that called `AddAlvoProblemDetails()` can produce one, which is
-why neither is documented on any operation.
+why none is documented on any operation.
 
 | Status | Slug | Means |
 |---|---|---|
@@ -999,6 +999,7 @@ why neither is documented on any operation.
 | 428 | `precondition-required` | **Management API only** — the write requires `If-Match` and carried none |
 | 413, 408, 400 | `unreadable-request` | the **web server** refused the request before Alvo read it (a body over `MaxRequestBodySize`, one arriving too slowly, one whose framing broke) — same opt-in as `internal`, and likewise documented on no operation |
 | 500 | `internal` | an invariant Alvo relies on is broken — **only** in a host that called `AddAlvoProblemDetails()`; no endpoint produces it and no operation documents it |
+| 500 | `function-failed` | a CEL function failed while a write was evaluated (a host function threw, or a built-in refused) — nothing was written; the detail names the function, never the host's exception text; same opt-in as `internal` |
 
 **Two rows are marked *Management API only*, and they are in this table because the sentence above is
 exact.** The slugs are `AlvoProblemTypes.All`, one catalogue for the whole framework — so the Management

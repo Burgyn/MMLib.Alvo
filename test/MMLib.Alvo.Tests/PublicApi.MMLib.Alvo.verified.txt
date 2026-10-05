@@ -46,6 +46,7 @@ namespace MMLib.Alvo.Api
         public const string Conflict = "conflict";
         public const string DestructiveChange = "destructive-change";
         public const string Forbidden = "forbidden";
+        public const string FunctionFailed = "function-failed";
         public const string IdempotencyConflict = "idempotency-conflict";
         public const string Internal = "internal";
         public const string MalformedQuery = "malformed-query";

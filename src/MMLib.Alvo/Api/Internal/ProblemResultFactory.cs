@@ -275,6 +275,12 @@ internal static class ProblemResultFactory
         "The request could not be completed because of an internal error. It has been logged; retry, and if it "
         + "persists, report it to whoever operates this instance.");
 
+    /// <summary>The 500 for a CEL function that failed during the write; the write was rolled back.</summary>
+    /// <param name="detail">Names the function, and a built-in's reason; never the host's exception text.</param>
+    /// <returns>The problem result.</returns>
+    internal static IResult FunctionFailed(string detail) =>
+        Problem(StatusCodes.Status500InternalServerError, AlvoProblemTypes.FunctionFailed, detail);
+
     /// <summary>
     /// The refusal for a request the web server would not read — rendered at <em>its</em> status, not 500.
     /// </summary>

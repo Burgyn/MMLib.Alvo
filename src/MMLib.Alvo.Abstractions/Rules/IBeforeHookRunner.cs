@@ -31,9 +31,10 @@ namespace MMLib.Alvo.Rules;
 /// <b>What bounds the time a hook may spend, given there is no cancellation token to bound it with.</b> The
 /// bound is structural, and it is the reason no timeout is offered. A hook is a fixed number of compiled CEL
 /// expressions — the count fixed by the descriptor at apply, never by the request — and the profile they
-/// compile in has no loop, no comprehension macro, no recursion, no user-defined function and no I/O: the
-/// only two calls it allow-lists are an ASCII fold over one string and a read of an instant the caller
-/// already bound. Each expression's tree is walked once, and its node count is bounded by its source length,
+/// compile in has no loop, no comprehension macro, no recursion, no user-defined function of the descriptor's
+/// own and no I/O: a host-registered function (<c>AddCelFunction</c>) is host code the host vouches for —
+/// synchronous and once per evaluation, but bounded only by the host's own contract — and the rest of what it
+/// allow-lists is an ASCII fold over one string and a read of an instant the caller already bound. Each expression's tree is walked once, and its node count is bounded by its source length,
 /// which the frozen schema caps at 2000 characters. So the work is O(descriptor), not O(caller input): no
 /// request can make a hook slower, and a wall-clock budget could only fire on a machine that had already
 /// stopped serving. A timeout would add a clock read per hook plus a second failure mode inside a
@@ -84,6 +85,7 @@ public interface IBeforeHookRunner
     /// <see langword="null"/> value is a value — "store nothing here" — and not an absence.
     /// </returns>
     /// <exception cref="AlvoAuthorizationException">A hook's <c>reject</c> fired; the write must not proceed.</exception>
+    /// <exception cref="Exception">A CEL function failed (an internal fail-closed type); the write must not proceed.</exception>
     IReadOnlyDictionary<string, object?> Run(
         string entity,
         DataOperation operation,
