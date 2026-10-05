@@ -210,9 +210,12 @@ process. Purity, speed and thread-safety are by contract, not enforced (spec §5
 guarantee, deliberately:** `alvo-specifikacia.md` §1.2 promises before-hooks a time budget and a network ban enforced
 by an analyzer or structurally for both faces, C# included, and `baas-analyza.md` §2.7 a `CancellationToken` the
 framework enforces. For a host function there is **no time budget, no `CancellationToken` and no analyzer** — host
-code is trusted code (the embedded host's own process, §2.7's in-process trust model) — while the descriptor author's
-face keeps all three. The open mitigations — an analyzer over registered delegates, and a token-aware delegate shape
-with a framework budget — are follow-ups (spec §5.8, X14).
+code is trusted code (the embedded host's own process, §2.7's in-process trust model). The descriptor author's face
+has no millisecond budget and no `CancellationToken` either; it needs neither, because it can express no I/O and its
+work is bounded by the descriptor. Trust does not remove the budget: §2.7 keeps it even for fully trusted csx, as a
+liveness guarantee — a before-hook runs while the row's locks are held — so a slow host function is an open gap, not
+a covered case. The open mitigations — an analyzer over registered delegates, and a token-aware delegate shape with a
+framework budget (#309) — are follow-ups (spec §5.8, X14).
 
 #### Resolution, null and failure
 
@@ -236,13 +239,21 @@ with a framework budget — are follow-ups (spec §5.8, X14).
   field is measured as that decimal), and `required` (a null into a required field). A literal that breaks one is
   refused at apply; a computed value that breaks one refuses the write **as the hook's refusal** — the family a `reject`
   uses: HTTP 403 `forbidden` (a per-row refusal in a batch, an `AlvoAuthorizationException` in process), nothing
-  written, the detail naming the hook's pointer, the field and the facet, never the value. Measured in the core before
+  written, the detail naming the hook's pointer, the field and the facet, never the value. **A field the descriptor
+  flags `hidden`** — a static `true` or a per-role expression, the rule the OpenAPI document uses to leave a name out
+  (Ruling X) — is not named: its refusal names the hook's pointer only ("computed a value one of the fields it writes
+  cannot hold"), with no field, facet or limit, because a refusal naming a field the caller never sent and cannot see
+  would disclose that it exists and how wide it is. **The check runs once, on the final patch** after the whole hook
+  chain (Ruling W): a later hook may shorten or replace what an earlier one wrote, and the refusal names the hook that
+  last wrote the field. Measured in the core before
   any driver sees the patch, so SQLite (no length enforcement) and PostgreSQL (`varchar(n)`) give the same answer. Not
   422 — that tells the caller to fix a field of *their* payload, and the field may be one they never sent; not
   `function-failed` — the same overrun is reachable with no function at all.
 - **Tenancy does not reach inside a function.** Alvo's tenant predicate filters what *Alvo* reads; a host function
-  that reads stored data itself (a lookup table, a rate per tenant) must take the tenant as a parameter — pass
-  `@tenant.id` in a `condition` — and filter by it. One that closes over a store and reads it unfiltered is a
+  that reads stored data itself (a lookup table, a rate per tenant) must take the tenant as a parameter and filter by
+  it. On a tenant-scoped entity pass the row's own `new.tenant_id`, which works in a `condition` and in a `mutate`
+  alike — the tenant scope has already admitted it before any hook runs. `@tenant.id` works in a `condition` only: the
+  `Mutate` profile refuses it (its refusal message is tracked in #310). One that closes over a store and reads it unfiltered is a
   cross-tenant read Alvo cannot see.
 - **The host's exception is logged, never shown.** What a function throws — message and stack trace — is logged at
   Error for a write and at Warning for an after-hook condition. Never put caller data (a field's value, an argument)

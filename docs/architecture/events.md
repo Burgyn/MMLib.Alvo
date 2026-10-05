@@ -367,7 +367,7 @@ Two actions, both from the frozen schema, and nothing else is expressible in-tra
 | Action | Valid on | What it does | How the caller sees it |
 |---|---|---|---|
 | `reject` | all three points | refuses the write | `AlvoAuthorizationException` → **403** with the author's own text, and the hook's JSON pointer |
-| `mutate` | `beforeCreate`, `beforeUpdate` | rewrites fields of the row about to be written | nothing, except the stored row and the emitted event |
+| `mutate` | `beforeCreate`, `beforeUpdate` | rewrites fields of the row about to be written | nothing, except the stored row and the emitted event — unless the value the chain would store breaks its field's facets: then **403** with the hook's JSON pointer, naming the field and facet only when the field is not `hidden` (Ruling V, W, X — cel.md) |
 
 `mutate` is absent from `beforeDelete` because there is no row about to be written — the row is about to
 stop existing, so a patch has nowhere to land. It is refused at **apply**, not dropped at run time; the

@@ -91,12 +91,16 @@ public interface IBeforeHookRunner
     /// </param>
     /// <returns>
     /// The fields a <c>mutate</c> set, keyed by field name, and empty when no hook fired or none mutated. A
-    /// <see langword="null"/> value is a value — "store nothing here" — and not an absence.
+    /// <see langword="null"/> value is a value — "store nothing here" — and not an absence. <b>Every value honours its
+    /// target field's declared facets</b> (<c>maxLength</c>, enum, <c>format</c>, decimal precision and scale,
+    /// <c>required</c>), measured once on the final patch after the whole chain; drivers apply the patch and do not
+    /// re-check, so an implementation that returns a value outside them gives each engine a different answer.
     /// </returns>
     /// <exception cref="AlvoAuthorizationException">
-    /// A hook's <c>reject</c> fired, or a <c>mutate</c> computed a value its target field's declared facets refuse
-    /// (<c>maxLength</c>, enum, <c>format</c>, decimal precision or scale, <c>required</c>); the write must not proceed.
-    /// The message names the hook and the field, never the value.
+    /// A hook's <c>reject</c> fired, or the value the chain would store breaks its target field's declared facets; the
+    /// write must not proceed. The message names the hook whose value it is and never the value; it names the field and
+    /// the facet unless the descriptor flags the field <c>hidden</c> (statically or per role), whose name the data API
+    /// never publishes.
     /// </exception>
     /// <exception cref="Exception">A CEL function failed (an internal fail-closed type); the write must not proceed.</exception>
     IReadOnlyDictionary<string, object?> Run(

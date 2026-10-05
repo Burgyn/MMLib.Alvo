@@ -26,7 +26,9 @@ namespace MMLib.Alvo.Tests.Rules;
 /// <para>
 /// <b>The refusal is a hook refusal</b> — <see cref="AlvoAuthorizationException"/>, the family a <c>reject</c> uses —
 /// naming the hook's pointer, the field and the facet, never the value: the value may be the caller's own text
-/// grown by <c>replace</c>, or whatever a host function returned.
+/// grown by <c>replace</c>, or whatever a host function returned. For a target the descriptor flags <c>hidden</c>
+/// it names no field, facet or limit (Ruling X), and it is measured on the final patch, blamed on the hook that last
+/// wrote the field (Ruling W).
 /// </para>
 /// </remarks>
 public sealed class BeforeHookFacetTests

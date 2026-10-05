@@ -70,7 +70,9 @@ public static class AlvoBuilderExtensions
     /// </para>
     /// <para>
     /// <b>Alvo's tenant filter does not reach inside the function.</b> A function that reads stored data must take the
-    /// tenant as a parameter (<c>@tenant.id</c>, passed in a <c>condition</c>) and filter by it itself.
+    /// tenant as a parameter and filter by it itself. On a tenant-scoped entity pass the row's own <c>new.tenant_id</c>,
+    /// which a <c>condition</c> and a <c>mutate</c> both read; <c>@tenant.id</c> works in a <c>condition</c> only, because
+    /// the <c>Mutate</c> profile refuses it.
     /// </para>
     /// <para>
     /// A changed meaning deserves a new name, so stored descriptors keep theirs. Removing or renaming a registered

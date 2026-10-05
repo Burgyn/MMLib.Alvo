@@ -12,7 +12,9 @@ namespace MMLib.Alvo.Api.Tests;
 /// Engine-sensitive by construction, which is why it lives in this suite: before the fix SQLite (no length
 /// enforcement) stored a 2,000-character value in a <c>maxLength: 40</c> field with a 201, while PostgreSQL's
 /// <c>varchar(40)</c> refused the same request as an anonymous 500. The answer now is the hook's refusal on both: 403
-/// <c>forbidden</c>, naming the hook, the field and the facet, never the value, and nothing stored.
+/// <c>forbidden</c>, naming the hook, the field and the facet, never the value, and nothing stored. Measured on the
+/// final patch, so a later hook may repair an earlier overrun (Ruling W); a field the descriptor flags hidden is never
+/// named, nor its facet or limit (Ruling X).
 /// </remarks>
 public abstract partial class DataApiEngineTests
 {

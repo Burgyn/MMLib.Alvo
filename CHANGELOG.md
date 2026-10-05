@@ -76,6 +76,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   would not accept. An expression-valued `readOnly` is unaffected: it is legal for one role and
   impossible for another, and the request-time half below answers that caller.
 
+- **A before-hook `mutate` value must honour its target field's facets** (#308, Ruling V). Two
+  changes for descriptors already stored. **At apply:** a `mutate` *literal* outside the field's
+  `maxLength`, enum `values`, `format` or decimal precision/scale — or a `null` into a `required`
+  field — is now refused, so a host booting from a stored descriptor that carries one **fails the
+  boot-time apply** instead of starting. Before, the same literal was stored silently on SQLite and
+  failed every firing as an anonymous `500` on PostgreSQL, so the descriptor never worked on both
+  engines; refusing it at boot, before 1.0, trades a start that used to succeed for one answer on
+  every engine, named at the hook's pointer. **At write time:** a *computed* value outside the facets
+  refuses the write as the hook's `403 forbidden` (a per-row refusal in a batch) where SQLite used to
+  store it with a `201`. The check runs once on the final patch, so a later hook may still repair an
+  earlier one's value; the refusal names the field and facet only when the descriptor does not flag
+  the field `hidden`.
+
 - **Alvo applies the descriptor on boot by default, and the host no longer applies anything itself.**
   The boot sequence runs as part of the host lifecycle, before the server binds: it loads and
   validates the descriptor, brings the schema up as far as the startup mode allows, primes the policy

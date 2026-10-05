@@ -259,13 +259,20 @@ three:
 * **no analyzer** — nothing inspects a registered delegate for I/O; the network ban holds for the descriptor author
   (structurally: they can call only what the host exposed) and not for the host developer.
 
-The declarative face keeps all three (no I/O, O(descriptor) work — `IBeforeHookRunner`'s remarks). **Why:** host code
-is trusted code. Spec §0.5's embedded mode runs the host's own code in the host's own process, and `baas-analyza.md`
+The declarative face has **no millisecond budget and no `CancellationToken` either** — it never had them: what it has
+is no I/O and work bounded by the descriptor, by construction (`IBeforeHookRunner`'s remarks), so it can express no
+network call and no unbounded loop, and that is what makes it safe without a budget. **Why** the narrowing for host
+code: host code is trusted code. Spec §0.5's embedded mode runs the host's own code in the host's own process, and `baas-analyza.md`
 §2.7 states the same trust model for in-process C#/csx — it runs with full trust; isolation is for untrusted code, out
 of process. A budget or a ban the host can bypass by replacing `IBeforeHookRunner` would be a promise, not a guarantee.
+**What trust does not remove is the budget.** Trust removes the case for an analyzer as a *security* boundary; it does
+not remove the time budget, because §2.7 frames that budget as *liveness* — a before-hook runs while the write's row
+locks are held — and gives even fully trusted in-process csx before-hooks "ten istý časový rozpočet a zákaz siete ako
+C# hooky". A slow host function holds those locks for as long as it runs. That gap is a known deviation, not a claim
+that trust covers it; the budget is follow-up (b) below, tracked as **#309**.
 **Mitigations, kept open as follow-ups (nothing in C1's public surface forecloses them):** (a) an analyzer over the
 delegates passed to `AddCelFunction`, flagging I/O types (`HttpClient`, sockets, `DbConnection`, file APIs) — additive,
-an analyzer package; (b) a `CancellationToken`-aware delegate shape (an additive `AddCelFunction` overload whose last
+an analyzer package; (b) **#309** — a `CancellationToken`-aware delegate shape (an additive `AddCelFunction` overload whose last
 parameter is a token) with a framework-enforced budget — the runner would mint the budgeted token itself, so
 `IBeforeHookRunner.Run` stays token-free.
 
@@ -425,7 +432,10 @@ From the product spec: **X14** a host function narrows the before-hook hard guar
 §1.2 ("before = in-transaction, time budget, network ban enforced by an analyzer/structurally", both faces) and
 `baas-analyza.md` §2.7 (a budget in ms; a `CancellationToken` the framework enforces): **no time budget, no
 `CancellationToken`, no analyzer** for host code — host code is trusted (§0.5 embedded mode; §2.7's in-process trust
-model); the descriptor author's face keeps all three. Reason, scope and the two follow-up mitigations: §5.8.
+model). The declarative face has no ms budget or token either; it needs neither, since it can express no I/O and its
+work is bounded by the descriptor. Trust does not remove the budget, which §2.7 keeps even for trusted csx as a
+liveness guarantee for held locks — that half stays open as **#309**. Reason, scope and the two follow-up mitigations:
+§5.8.
 
 ## 12. Forecloses / keeps open
 
@@ -486,7 +496,7 @@ Condition).
 functions; `DateOnly`; reword `UnhonouredSubsystems`' "functions" warning so it is not read as host CEL functions;
 `mutate` of a possibly-null function result into a `required` field refused at apply (since Ruling V such a null is
 refused at write time as the hook's 403; an apply-time refusal would be earlier still); X14's two mitigations — an
-analyzer over `AddCelFunction` delegates and a `CancellationToken`-aware delegate shape with a framework budget; the dashboard offering
+analyzer over `AddCelFunction` delegates and a `CancellationToken`-aware delegate shape with a framework budget (#309); the dashboard offering
 functions (slice B); #85.
 
 ## 17. As built
@@ -592,7 +602,8 @@ overturn in the PR.**
   of `draft`/`done`) and refused by PostgreSQL's `varchar(n)` as an anonymous 500 — one descriptor, two answers, and a
   growth vector this slice introduced (nested `replace` to the 1 MiB cap per field per row). **The design:** every
   compiled mutation carries its `MutationTarget` (the declared field plus the entity's compiled formats);
-  `BeforeHookRunner` measures each value before it enters the patch, so every write face (create, update, upsert,
+  `BeforeHookRunner` measures the final patch before any driver applies it (once, after the whole chain — Ruling W
+  below), so every write face (create, update, upsert,
   batch) and every driver gets the same answer; a literal is measured at apply instead (fail-fast). **The checks are
   the payload validator's own** — `RecordValidator.FacetViolation` (code-point `maxLength`, scale, precision, enum,
   `format` incl. the timeout verdict) plus `required` for a null — extracted, not copied. An `integer` field needs no
@@ -602,7 +613,7 @@ overturn in the PR.**
   caller to fix a field of their payload; the field may be one they never sent); `function-failed` 500 (a function
   body failing; the same overrun is reachable with a field copy and no function). The detail names the hook's
   pointer, the field and the facet (`max-length`, `enum-value`, `format`, `precision`, `scale`, `required`), never
-  the value. Proved over HTTP on SQLite **and** PostgreSQL by the shared `DataApiEngineTests` facts (RED before the
+  the value — unless the field is hidden (Ruling X below), when it names the pointer only. Proved over HTTP on SQLite **and** PostgreSQL by the shared `DataApiEngineTests` facts (RED before the
   fix: SQLite 201, PostgreSQL `internal` 500).
 * **The assistant's steering phrases are restored (plan-guard).** "(without `rules` nobody reaches it)" and "The rules
   skill shows a whole new entity." are back in the always-in-context new-entity rule, verbatim, inside the unchanged
@@ -613,3 +624,41 @@ overturn in the PR.**
   describe from memory what a hook or a hook action does." The always-in-context text now differs from the pre-slice
   text only by the `get_cel_functions` tool bullet, "so it costs no extra round" and that example, so the real-model
   eval is less load-bearing than it was — still worth a run before merge.
+
+**Fix wave 3 (Opus) — after the re-review of the pre-PR wave.**
+
+* **Ruling W — the facet check runs once, on the final patch.** The pre-PR wave measured each hook's value as that
+  hook produced it, which refused a valid pipeline: `beforeCreate[0]` writes a long `code`, `beforeCreate[1]`
+  shortens it, and the value that would be stored fits — both engines stored it before Ruling V. `BeforeHookRunner`
+  now records which hook last wrote each field and measures the final patch after the loop; the refusal names that
+  hook's pointer, because its value is the one refused. An intermediate value is never stored, so measuring it bought
+  nothing. Proved over HTTP on both engines (`DataApiEngineTests`: an earlier overrun a later hook repairs → 201 and
+  the repaired value; an earlier fit a later hook overruns → 403 naming `beforeCreate/9`, not `/8`).
+* **Ruling X — a hidden target is never named.** A `mutate` may target a `hidden` field (hook-maintained
+  `phone_normalized`, `internal_score`), and the refusal named it with its facet and bound — a field the caller never
+  sent and the OpenAPI document deliberately leaves out. Whether a target may be named is decided **at apply**, from
+  the descriptor, by the rule `SchemaComponentBuilder` uses: a field with *any* `hidden` flag, static or per role, is
+  not disclosable, because a name published to the callers who may read it is published to the callers who may not.
+  The one spelling of that rule is now `EntityPolicy.Flagged`, read by both the OpenAPI document and
+  `BeforeHookScope`. For such a target the detail is "The before-hook at '…' computed a value one of the fields it
+  writes cannot hold. Nothing was written." — the hook's pointer only, as a `reject` names its pointer: it locates
+  the descriptor rule and says nothing about the row's shape. Batch rows carry the same text. **Not fixed here, and
+  recorded:** a hook whose value *reads* a hidden field still turns 403-versus-201 into an oracle the caller can drive
+  — the same class as a `reject` gated on a hidden field, owned by the descriptor author.
+* **Behaviour change for stored descriptors (M3).** Refusing an out-of-facet `mutate` literal at apply means a host
+  booting from a stored descriptor that carries one now fails its boot-time apply. Recorded in `CHANGELOG.md` under
+  *Changed (breaking)*: such a descriptor never worked on both engines (stored silently on SQLite, a 500 on every
+  firing on PostgreSQL), and before 1.0 one named refusal at boot is preferred to two engine-specific answers at write.
+* **The trust-shift text is corrected (M2).** The declarative face does not "keep all three": it has no ms budget and
+  no `CancellationToken` either, and needs neither because it can express no I/O and its work is bounded by the
+  descriptor. Trust does not remove the budget — `baas-analyza.md` §2.7 keeps it even for trusted csx, as a liveness
+  guarantee for held locks — so that half of X14 stays open as **#309** (§5.8, §11, cel.md).
+* **The tenant guidance is accurate (M4).** A host function that reads stored data takes the tenant as a parameter:
+  on a tenant-scoped entity, the row's own `new.tenant_id`, which a `condition` and a `mutate` both read (the tenant
+  scope has admitted it before any hook runs). `@tenant.id` works in a `condition` only — the `Mutate` profile refuses
+  it, with a misleading message tracked in #310.
+* **The port states the facet obligation (M5).** `IBeforeHookRunner.Run`'s `<returns>` now says every value honours
+  its target field's declared facets and drivers do not re-check, so a host-supplied runner knows the contract it
+  takes on. Docs only; no public symbol moved.
+* **Out of scope (Ruling Y):** a `null` into a `nullable: false`, non-`required` field still reaches the database as
+  a 500 — the payload validator has the same gap, so it is pre-existing parity, left for a follow-up.

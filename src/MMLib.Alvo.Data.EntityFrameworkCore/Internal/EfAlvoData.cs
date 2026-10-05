@@ -286,8 +286,8 @@ internal sealed class EfAlvoData : IAlvoData
     /// caller-reachable authorization bypass — a hook writing <c>owner_id</c> from a field the caller controls
     /// would place a row the <c>create</c> rule refuses — so the post-image verdict runs again over exactly
     /// what will be written. <b>A patched value's declared facets</b> (<c>maxLength</c>, enum, <c>format</c>,
-    /// precision, scale, <c>required</c>) are not this driver's to check: <see cref="IBeforeHookRunner"/> has already
-    /// refused a value outside them, so every driver answers the same (Ruling V).
+    /// precision, scale, <c>required</c>) are not this driver's to check: <see cref="IBeforeHookRunner"/>'s contract
+    /// is that it has already refused a value outside them, so every driver answers the same (Ruling V).
     /// </para>
     /// </remarks>
     /// <returns>
