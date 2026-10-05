@@ -6,6 +6,10 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using MMLib.Alvo.Auth;
+using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Management;
 using MMLib.Alvo.Samples.EmbeddedHost;
 using System.Net;
 using System.Net.Http.Json;
@@ -43,6 +47,9 @@ public class EmbeddedSampleTests
 
     /// <summary>The roles a caller would try to grant itself, if the sign-in read them from the body.</summary>
     private static readonly string[] _forgedRoles = ["admin"];
+
+    /// <summary>The user the in-process management call acts as: this suite's bootstrap administrator.</summary>
+    private static readonly Guid _administrator = Guid.Parse("0b5e7a1c-2d3f-4a5b-8c6d-7e8f9a0b1c2d");
 
     /// <summary>The descriptor both modes serve — the one the root compose mounts into the image.</summary>
     private static string DescriptorPath => Path.Combine(
@@ -279,6 +286,82 @@ public class EmbeddedSampleTests
     }
 
     /// <summary>
+    /// The sample registers a CEL function of its own, in its one <c>AddAlvo</c> call (spec E16): the catalog lists it
+    /// as the host's, and a descriptor hook that calls it shapes a write through the generated Data API.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Over a test-local descriptor, never the shared one.</b> <c>vehicles.alvo.json</c> is what the standalone image
+    /// serves, and the image knows built-in functions only — so the hook that calls <c>normalizeVin</c> is added to a copy
+    /// read from that file at run time, which can never drift from it.
+    /// </para>
+    /// <para>
+    /// The write goes first and the management read second: publishing an in-process principal sets an ambient value,
+    /// which must not be in place while the Data API's own filter resolves the agent's key.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task The_sample_registers_a_cel_function_a_hook_can_call()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var descriptor = DescriptorCallingNormalizeVin();
+        try
+        {
+            await using var sample = await SampleWorld.StartAsync(descriptorPath: descriptor, bootstrapAdministrator: _administrator);
+            var agent = sample.AsAgent();
+            using var owner = await agent.PostAsJsonAsync(
+                "/api/alvo/owners", new Dictionary<string, object?> { ["name"] = "Fleet Desk Ltd" }, ct);
+            owner.StatusCode.ShouldBe(HttpStatusCode.Created);
+            var ownerId = (await owner.Content.ReadFromJsonAsync<JsonObject>(ct))!["id"]!.GetValue<Guid>();
+
+            using var vehicle = await agent.PostAsJsonAsync(
+                "/api/alvo/vehicles",
+                new Dictionary<string, object?>
+                {
+                    ["vin"] = "1hgcm82633a004352",
+                    ["plate"] = "BA-777AB",
+                    ["make"] = "Skoda",
+                    ["model"] = "Fabia",
+                    ["year"] = 2020,
+                    ["owner_id"] = ownerId,
+                },
+                ct);
+
+            vehicle.StatusCode.ShouldBe(HttpStatusCode.Created);
+            (await vehicle.Content.ReadFromJsonAsync<JsonObject>(ct))!["vin"]!.GetValue<string>()
+                .ShouldBe("1HGCM82633A004352", "the descriptor's mutate called the sample's normalizeVin");
+
+            var listed = (await sample.AsBootstrapAdmin(_administrator).GetCelFunctionsAsync("vehicle-registry", ct)).Functions
+                .Single(function => function.Name == "normalizeVin");
+            listed.Provenance.ShouldBe(CelFunctionProvenance.Host);
+            listed.Summary.ShouldBe(SampleHost.NormalizeVinSummary);
+
+            // The signature the README shows: read off the delegate, the parameter's name included.
+            var parameter = listed.Parameters.ShouldHaveSingleItem();
+            (parameter.Name, parameter.Type, parameter.AcceptsNull).ShouldBe(("vin", CelValueType.String, false));
+            (listed.Result, listed.ResultMayBeNull).ShouldBe((CelValueType.String, false));
+            listed.Profiles.ShouldBe([CelProfile.Condition, CelProfile.Mutate]);
+        }
+        finally
+        {
+            File.Delete(descriptor);
+        }
+    }
+
+    /// <summary>
+    /// <c>vehicles.alvo.json</c> with one before-create hook that calls <c>normalizeVin</c>, written to a temp file.
+    /// </summary>
+    private static string DescriptorCallingNormalizeVin()
+    {
+        var descriptor = JsonNode.Parse(File.ReadAllText(DescriptorPath))!.AsObject();
+        descriptor["entities"]!["vehicles"]!["hooks"] = JsonNode.Parse(
+            """{ "beforeCreate": [ { "action": { "mutate": { "vin": { "$cel": "normalizeVin(new.vin)" } } } } ] }""");
+        var path = Path.Combine(Path.GetTempPath(), $"alvo-embedded-sample-{Guid.NewGuid():N}.alvo.json");
+        File.WriteAllText(path, descriptor.ToJsonString());
+        return path;
+    }
+
+    /// <summary>
     /// <b>The sample resolves its own callers and takes no identity package with it.</b> #248's DoD
     /// says so in as many words, and the reason is package-boundary rule (b): identity is a real swap
     /// point, and this sample is the swap already in the tree — it mints an
@@ -383,7 +466,12 @@ public class EmbeddedSampleTests
         /// makes the development sign-in reachable at all —
         /// <see cref="The_development_sign_in_is_not_mapped_outside_development"/> is the other half.
         /// </param>
-        internal static async Task<SampleWorld> StartAsync(string environment = "Development")
+        /// <param name="descriptorPath">The descriptor to serve; <c>vehicles.alvo.json</c> when omitted.</param>
+        /// <param name="bootstrapAdministrator">
+        /// A user to make the deployment's bootstrap administrator, so <see cref="AsBootstrapAdmin"/> can call management.
+        /// </param>
+        internal static async Task<SampleWorld> StartAsync(
+            string environment = "Development", string? descriptorPath = null, Guid? bootstrapAdministrator = null)
         {
             var databasePath = TempDatabasePath("sample");
             var builder = SampleHost.CreateBuilder(
@@ -405,9 +493,15 @@ public class EmbeddedSampleTests
                     ["Alvo:Auth:DevKeys:0:Scopes:0"] = "*:read",
                     ["Alvo:Auth:DevKeys:0:Scopes:1"] = "*:write",
                     ["FleetDesk:DatabasePath"] = databasePath,
-                    ["FleetDesk:DescriptorPath"] = DescriptorPath,
+                    ["FleetDesk:DescriptorPath"] = descriptorPath ?? DescriptorPath,
                 }));
             builder.WebHost.UseTestServer();
+            if (bootstrapAdministrator is { } administrator)
+            {
+                // Management answers a caller it can place; this suite's in-process caller is a bootstrap administrator,
+                // the one identity a descriptor's access block does not govern (vehicles.alvo.json declares none).
+                builder.Services.Replace(ServiceDescriptor.Singleton<IAlvoBootstrapAdmin>(new OneBootstrapAdmin(new UserId(administrator))));
+            }
 
             var app = SampleHost.Build(builder);
             await app.StartAsync(TestContext.Current.CancellationToken);
@@ -498,12 +592,37 @@ public class EmbeddedSampleTests
             return row!["id"]!.GetValue<Guid>();
         }
 
+        /// <summary>
+        /// Publishes the bootstrap administrator as the in-process caller and hands back the management contract —
+        /// the same seam <c>ManagementInProcessAccessTests.Publish</c> uses, because there is no second one.
+        /// </summary>
+        /// <param name="administrator">The user <see cref="StartAsync"/> was given as the bootstrap administrator.</param>
+        internal IAlvoManagement AsBootstrapAdmin(Guid administrator)
+        {
+            var catalog = _app.Services.GetRequiredService<IRoleCatalogProvider>().DeclaredRoles!;
+            _app.Services.GetRequiredService<IAlvoContextAccessor>().Principal = new AlvoPrincipal
+            {
+                Context = new AlvoContext { User = new UserId(administrator), Roles = catalog.Resolve(["authenticated"]) },
+                Scopes = new HashSet<ApiKeyScope>(),
+                KeyId = "in-process",
+            };
+
+            return _app.Services.GetRequiredService<IAlvoManagement>();
+        }
+
         public async ValueTask DisposeAsync()
         {
             Client.Dispose();
             await _app.DisposeAsync();
             TryDelete(_databasePath);
         }
+    }
+
+    /// <summary>A bootstrap administrator who is one fixed user.</summary>
+    /// <param name="user">The one user it answers <see langword="true"/> for.</param>
+    private sealed class OneBootstrapAdmin(UserId user) : IAlvoBootstrapAdmin
+    {
+        public bool IsBootstrapAdmin(UserId candidate) => candidate == user;
     }
 
     /// <summary>The standalone host, running on <c>TestServer</c> over the same descriptor.</summary>

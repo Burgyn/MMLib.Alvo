@@ -29,7 +29,8 @@ namespace MMLib.Alvo.Samples.EmbeddedHost;
 /// <para>
 /// Both serve <c>examples/vehicle-registry/vehicles.alvo.json</c> — the same descriptor the repository's
 /// root <c>docker-compose.yml</c> mounts into the standalone image. That is spec §"Spoločné kontrakty"
-/// point 2: one descriptor, several doors, identical result.
+/// point 2: one descriptor, several doors, identical result. The host also registers a CEL function,
+/// <c>normalizeVin</c>, which that shared descriptor deliberately never calls.
 /// </para>
 /// <para>
 /// <b>The shape is <c>CreateBuilder</c> + <c>Build</c>, not a top-level <c>Program</c></b>, for the same
@@ -44,6 +45,10 @@ public static class SampleHost
 
     /// <summary>Every signed-in caller holds this, and the descriptor's read rules key on it.</summary>
     private const string AuthenticatedRole = "authenticated";
+
+    /// <summary>What <c>normalizeVin</c> says about itself — the text <c>cel/functions</c> and the dashboard show.</summary>
+    public const string NormalizeVinSummary =
+        "Upper-cases a vehicle identification number and drops every character that is not a letter or a digit.";
 
     /// <summary>Builds the host, registering Alvo through its one entry point.</summary>
     /// <param name="args">The process arguments.</param>
@@ -104,13 +109,33 @@ public static class SampleHost
                 // media-type requirement is reachable as a CORS simple request, which stops being harmless
                 // the moment a host authenticates with cookies. See docs/architecture/data-api.md,
                 // "Requiring a JSON Content-Type".
-            }));
+            })
+
+            // A function of this app's own, callable from the descriptor's hook conditions and mutate values
+            // (docs/architecture/cel.md, "Host functions"). vehicles.alvo.json calls it nowhere, on purpose:
+            // the standalone image serves that same file and knows built-in functions only — see README.md.
+            .AddCelFunction("normalizeVin", NormalizeVin, NormalizeVinSummary));
 
         // AddAlvoProblemDetails() is deliberately NOT called. An embedded host owns its own error
         // rendering, and Alvo taking over the shape of UseExceptionHandler's document inside somebody
         // else's application is worse than one explicit call (#119).
         return builder;
     }
+
+    /// <summary>
+    /// <c>normalizeVin</c>: pure, fast and thread-safe, as every CEL function must be — it runs inside the write's
+    /// transaction, on any request thread, with no time budget and no cancellation.
+    /// </summary>
+    /// <remarks>
+    /// It reads nothing but its argument, so it needs no tenant: a function that looks stored data up must take the
+    /// tenant as a parameter (a hook passes <c>new.tenant_id</c>), because Alvo's tenant filter does not reach inside it.
+    /// It throws nothing of its own, and must never put the VIN into an exception message — what a function throws is
+    /// logged, and a log line is no place for caller data.
+    /// </remarks>
+    /// <param name="vin">The VIN as written.</param>
+    /// <returns>The VIN upper-cased, with only ASCII letters and digits kept.</returns>
+    private static string NormalizeVin(string vin) =>
+        new string([.. vin.Where(char.IsAsciiLetterOrDigit).Select(char.ToUpperInvariant)]);
 
     /// <summary>Maps this app's own endpoints and Alvo's, and returns the application unstarted.</summary>
     /// <param name="builder">The builder <see cref="CreateBuilder"/> produced.</param>
