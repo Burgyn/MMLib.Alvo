@@ -19,6 +19,13 @@ namespace MMLib.Alvo.Host.Tests;
 /// </remarks>
 public sealed class HooksEditorAgreementTests
 {
+    /// <summary>The endpoint sheet refuses a URL exactly when apply refuses it.</summary>
+    /// <remarks>
+    /// The agreement holds for an endpoint a hook references: apply checks an endpoint's URL only then, which is why the
+    /// probe descriptor gives the endpoint an <c>afterCreate</c> webhook hook. The sheet trims the box before it checks
+    /// (<c>EndpointDraft.Refusals</c>), so a URL with surrounding blanks is the trimmed URL's case, not a row here.
+    /// </remarks>
+    /// <param name="url">The URL typed.</param>
     [Theory]
     [InlineData("https://example.com/hooks")]
     [InlineData("http://localhost:5081/hooks")]
@@ -113,6 +120,8 @@ public sealed class HooksEditorAgreementTests
 
         sentence.ShouldContain("no delivery is signed", Case.Sensitive, "IntegrationStatement.Title says so; when signing lands (#120) both change");
         sentence.ShouldContain("#152", Case.Sensitive, "IntegrationStatement.HiddenFields says so; projection retires it");
+        IntegrationStatement.Title.ShouldContain("not signed", Case.Sensitive, "the core still says no delivery is signed");
+        IntegrationStatement.HiddenFields.ShouldContain("'hidden' included", Case.Sensitive, "the core still projects nothing (#152)");
     }
 
     [Fact]
