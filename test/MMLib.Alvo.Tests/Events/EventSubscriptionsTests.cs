@@ -5,6 +5,7 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Tests.Expressions;
@@ -125,6 +126,29 @@ public sealed class EventSubscriptionsTests : IDisposable
         line.Message.ShouldContain("/entities/deals/hooks/afterUpdate/0");
         line.Message.ShouldContain(@event.Id.ToString());
         line.Exception.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// A CEL function that fails inside an after-hook condition drops the hook (the spec sanctions it: an event
+    /// consumer cannot refuse a write that already committed) but is <b>loud</b>: a Warning naming the hook, the
+    /// function and the event, carrying the host's exception — never the event's own record data.
+    /// </summary>
+    [Fact]
+    public void A_failing_cel_function_in_a_condition_drops_the_hook_and_warns_without_the_row()
+    {
+        var @event = Updated("won", "lead");
+
+        EventSubscriptions.Matching(
+            CatalogConditionedOnWinning, @event, new FailingFunctionEvaluator(), _logger).ShouldBeEmpty();
+
+        var line = _logger.Entries.ShouldHaveSingleItem();
+        line.Level.ShouldBe(LogLevel.Warning);
+        line.Message.ShouldContain("/entities/deals/hooks/afterUpdate/0");
+        line.Message.ShouldContain("normalizePhone");
+        line.Message.ShouldContain(@event.Id.ToString());
+        line.Message.ShouldNotContain("won");
+        line.Message.ShouldNotContain("lead");
+        line.Exception.ShouldBeOfType<InvalidOperationException>().Message.ShouldBe("the host broke");
     }
 
     /// <summary>
@@ -356,6 +380,14 @@ public sealed class EventSubscriptionsTests : IDisposable
 
     private static AlvoRecord Record(params (string Field, object? Value)[] values) =>
         new(values.ToDictionary(value => value.Field, value => value.Value, StringComparer.Ordinal));
+
+    /// <summary>An evaluator whose condition calls a CEL function that fails, as the interpreter reports it.</summary>
+    private sealed class FailingFunctionEvaluator : IPredicateEvaluator
+    {
+        public bool Evaluate(
+            CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, AlvoContext context) =>
+            throw new CelFunctionException("normalizePhone", isHost: true, new InvalidOperationException("the host broke"));
+    }
 
     /// <summary>
     /// An evaluator that fails on every expression — the only way to reach the fail-closed arm, since a condition

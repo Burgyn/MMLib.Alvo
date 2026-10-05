@@ -33,6 +33,12 @@
               }
             }
           }
+        ],
+        "beforeUpdate": [
+          { "condition": "normalizePhone(new.phone) == 'never-matches'", "action": { "reject": "update gate" } }
+        ],
+        "beforeDelete": [
+          { "condition": "normalizePhone(old.phone) == 'never-matches'", "action": { "reject": "delete gate" } }
         ]
       }
     }

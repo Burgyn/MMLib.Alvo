@@ -1,4 +1,7 @@
-﻿using System.Net;
+﻿using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Expressions.Internal;
+using System.Net;
+using System.Reflection;
 using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Tests;
@@ -58,4 +61,108 @@ public sealed class CelFunctionWriteTests
         created.StatusCode.ShouldBe(HttpStatusCode.Created);
         calls.ShouldBe(0);
     }
+
+    /// <summary>A world whose function passes until <c>failing</c> is switched on, so a row can exist first.</summary>
+    private static async Task<(AlvoApiWorld World, Func<bool> Arm)> StartArmableAsync()
+    {
+        var failing = false;
+        var world = await CelFunctionsWorld.StartAsync(phone => failing ? throw new FormatException("secret-detail-from-the-host") : phone);
+        return (world, () => failing = true);
+    }
+
+    private static async Task<Guid> CreateAsync(AlvoApiWorld world, string phone)
+    {
+        using var created = await world.SendAsync(HttpMethod.Post, "/api/contacts", CelFunctionsWorld.Writer, body: Contact(phone));
+        created.StatusCode.ShouldBe(HttpStatusCode.Created);
+        return (await created.ReadJsonObjectAsync())["id"]!.GetValue<Guid>();
+    }
+
+    private static async Task ShouldBeFunctionFailedAsync(HttpResponseMessage refused)
+    {
+        refused.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        var text = await refused.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        text.ShouldContain("https://alvo.dev/errors/function-failed");
+        text.ShouldNotContain("secret-detail-from-the-host");
+    }
+
+    private static async Task<string?> PhoneOfAsync(AlvoApiWorld world, Guid id)
+    {
+        using var read = await world.SendAsync(HttpMethod.Get, $"/api/contacts/{id}", CelFunctionsWorld.Writer);
+        return read.StatusCode == HttpStatusCode.OK ? (await read.ReadJsonObjectAsync())["phone"]?.GetValue<string>() : null;
+    }
+
+    [Fact]
+    public async Task A_failing_function_in_an_update_reject_condition_refuses_the_update_and_keeps_the_row()
+    {
+        var (world, arm) = await StartArmableAsync();
+        await using var _ = world;
+        var id = await CreateAsync(world, "111");
+        arm();
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Patch, $"/api/contacts/{id}", CelFunctionsWorld.Writer, body: Contact("222"));
+
+        await ShouldBeFunctionFailedAsync(refused);
+        (await PhoneOfAsync(world, id)).ShouldBe("111");
+    }
+
+    [Fact]
+    public async Task A_failing_function_in_a_delete_reject_condition_refuses_the_delete_and_keeps_the_row()
+    {
+        var (world, arm) = await StartArmableAsync();
+        await using var _ = world;
+        var id = await CreateAsync(world, "111");
+        arm();
+
+        using var refused = await world.SendAsync(HttpMethod.Delete, $"/api/contacts/{id}", CelFunctionsWorld.Writer);
+
+        await ShouldBeFunctionFailedAsync(refused);
+        (await PhoneOfAsync(world, id)).ShouldBe("111");
+    }
+
+    [Fact]
+    public async Task A_batch_with_one_failing_row_writes_none_of_its_rows()
+    {
+        await using var world = await CelFunctionsWorld.StartAsync(
+            phone => phone == "bad" ? throw new FormatException("secret-detail-from-the-host") : phone);
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Post,
+            "/api/contacts/batch",
+            CelFunctionsWorld.Writer,
+            body: new JsonObject { ["rows"] = new JsonArray(Contact("good"), Contact("bad")) });
+
+        await ShouldBeFunctionFailedAsync(refused);
+        (await world.CountRowsAsync("contacts")).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task A_refused_write_leaves_no_row_and_no_outbox_entry()
+    {
+        await using var world = await CelFunctionsWorld.StartAsync(_ => throw new FormatException("secret-detail-from-the-host"));
+        var outboxBefore = await world.CountRowsAsync("alvo_outbox");
+
+        using var refused = await world.SendAsync(HttpMethod.Post, "/api/contacts", CelFunctionsWorld.Writer, body: Contact("x"));
+
+        await ShouldBeFunctionFailedAsync(refused);
+        (await world.CountRowsAsync("contacts")).ShouldBe(0);
+        (await world.CountRowsAsync("alvo_outbox")).ShouldBe(outboxBefore);
+    }
+
+    [Fact]
+    public void A_function_failure_is_found_inside_a_wrapper_of_any_kind()
+    {
+        var failure = new CelFunctionException("f", isHost: true, new FormatException("host"));
+        var other = new InvalidOperationException("other");
+
+        FunctionFailure(failure).ShouldBeSameAs(failure);
+        FunctionFailure(new TargetInvocationException(failure)).ShouldBeSameAs(failure);
+        FunctionFailure(new AggregateException(failure)).ShouldBeSameAs(failure);
+        FunctionFailure(new AggregateException(other, failure)).ShouldBeSameAs(failure);
+        FunctionFailure(new AggregateException(new AggregateException(other, failure))).ShouldBeSameAs(failure);
+        FunctionFailure(new InvalidOperationException("o", new InvalidOperationException("i", failure))).ShouldBeSameAs(failure);
+        FunctionFailure(new AggregateException(other, new InvalidOperationException("x"))).ShouldBeNull();
+    }
+
+    private static CelFunctionException? FunctionFailure(Exception exception) => AlvoExceptionHandler.FunctionFailure(exception);
 }
