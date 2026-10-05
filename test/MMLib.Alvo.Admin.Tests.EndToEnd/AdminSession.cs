@@ -208,6 +208,26 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     public Task WaitForFocusInsideAsync(string testId)
         => Page.WaitForFunctionAsync("id => !!document.activeElement?.closest(`[data-testid='${id}']`)", testId, _polling);
 
+    /// <summary>Waits until focus is inside the dialog that <see cref="Dialog"/> finds by <paramref name="testId"/>.</summary>
+    /// <remarks>
+    /// Call it before a key meant for a dialog that just opened. Being visible does not mean the dialog is ready for
+    /// keys: it takes focus a render later, and an Escape pressed before then goes to the page and closes nothing. That
+    /// race made <c>CreateActionScenarios</c> flaky. The dialog is the <c>role=dialog</c> around the test id, so this
+    /// works for an editor, a confirm and the palette alike, wherever the library puts the attribute.
+    /// </remarks>
+    /// <param name="testId">The test id inside the dialog.</param>
+    public Task WaitForFocusInDialogAsync(string testId)
+        => Page.WaitForFunctionAsync(
+            """
+            id => {
+              const marked = document.querySelector(`[data-testid='${id}']`);
+              const dialog = marked?.closest("[role='dialog']");
+              const focused = document.activeElement;
+              return !!dialog && !!focused && focused !== document.body && dialog.contains(focused);
+            }
+            """,
+            testId, _polling);
+
     /// <summary>Waits until the element with <paramref name="id"/> has focus.</summary>
     /// <param name="id">The element's id.</param>
     public Task WaitForFocusOnAsync(string id)

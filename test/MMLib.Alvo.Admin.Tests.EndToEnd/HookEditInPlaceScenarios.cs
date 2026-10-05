@@ -49,6 +49,7 @@ public sealed class HookEditInPlaceScenarios(BikeWorkshopWorld world) : IClassFi
         (await editor.GetByTestId("hook-points").CountAsync()).ShouldBe(0, "an opened hook keeps its point (spec D1)");
         (await session.Page.InputValueAsync("#hook-condition")).ShouldBe("new.quantity <= 0");
 
+        await session.WaitForFocusInsideAsync("hook-editor");
         await session.Page.Keyboard.PressAsync("Escape");
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
         session.AssertConsoleClean();
@@ -69,7 +70,6 @@ public sealed class HookEditInPlaceScenarios(BikeWorkshopWorld world) : IClassFi
         /* Focus is back on the form's first control — the condition, since Edit draws no point chips — before the next
            Escape: pressed while Keep editing still had focus, it would only press Keep editing again. */
         await session.WaitForFocusOnAsync("hook-condition");
-        (await session.FocusIsInsideAsync("hook-editor")).ShouldBeTrue();
 
         await session.Page.Keyboard.PressAsync("Escape");
         await editor.GetByTestId("editor-discard-question").WaitForAsync();
@@ -90,6 +90,9 @@ public sealed class HookEditInPlaceScenarios(BikeWorkshopWorld world) : IClassFi
         await OnWriteAsync(other, "rentals");
         await other.Page.Locator("#hook-afterCreate-0 [data-testid='hook-remove']").ClickAsync();
         await other.Dialog("remove-hook").GetByTestId("remove-hook-run").ClickAsync();
+        /* The removal reaches the editing tab's circuit through the shared working copy, on its own time: Save pressed
+           before it arrives would race it. The row going from the list behind the sheet is the sign it arrived. */
+        await editing.Page.Locator("#hook-afterCreate-0").WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
         await editor.GetByTestId("hook-save").ClickAsync();
         var refusal = editor.GetByTestId("error-panel");
@@ -113,6 +116,8 @@ public sealed class HookEditInPlaceScenarios(BikeWorkshopWorld world) : IClassFi
         await OnWriteAsync(other, "customers");
         await other.Page.Locator("#hook-beforeDelete-0 [data-testid='hook-remove']").ClickAsync();
         await other.Dialog("remove-hook").GetByTestId("remove-hook-run").ClickAsync();
+        /* As above: the list behind the sheet loses its second row once the removal has reached this circuit. */
+        await editing.Page.Locator("#hook-beforeDelete-1").WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
         await editor.GetByTestId("hook-save").ClickAsync();
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
@@ -147,7 +152,20 @@ public sealed class HookEditInPlaceScenarios(BikeWorkshopWorld world) : IClassFi
         await session.Dialog("hook-editor").GetByTestId("hook-add").DblClickAsync();
 
         await session.Page.GetByTestId("hook-row").Nth(before).WaitForAsync();
+        await session.SnackbarAsync("added to the working copy");
+        var editor = session.Dialog("hook-editor");
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+
+        /* One more round trip before counting. A circuit handles events in order, so once New hook has opened the sheet
+           again, a second Add queued behind the first has run too — and would show here as a second row. */
+        await session.Page.GetByTestId("hook-new").ClickAsync();
+        await editor.WaitForAsync();
+        await session.WaitForFocusInsideAsync("hook-editor");
+        await session.Page.Keyboard.PressAsync("Escape");
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+
         (await session.Page.GetByTestId("hook-row").CountAsync()).ShouldBe(before + 1);
+        (await session.SnackbarCountAsync("added to the working copy")).ShouldBe(1, "one Add, one hook");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -197,6 +215,7 @@ public sealed class HookShapeScenarios(BikeWorkshopWorld world) : IClassFixture<
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         var descriptor = Importable();
+        /* Not an empty payload: the schema gives entity.update's payload minProperties: 1, so {} fails the import. */
         descriptor["entities"]!["rentals"]!["hooks"]!["afterUpdate"] = JsonNode.Parse(
             """[ { "action": { "type": "entity.update", "entity": "rental_fleet", "payload": { "in_service": false } } } ]""");
         await session.GoAsync("/transfer");
@@ -225,7 +244,8 @@ public sealed class HookShapeScenarios(BikeWorkshopWorld world) : IClassFixture<
     /// <remarks>
     /// Typed into the import box whole, the text is one input event larger than a circuit message may be: the circuit
     /// closes with an error, the box comes back empty and the form posts natively. Measured: without descriptions alone
-    /// (14 KB) it still closed; cut to these three entities it imports. Nothing here reads a dropped entity.
+    /// (14 KB) it still closed; cut to these three entities it imports. Nothing here reads a dropped entity. Issue #316
+    /// tracks the import limit; once it is fixed, this cut-down can go and the scenario can import the whole example.
     /// </remarks>
     private static JsonObject Importable()
     {

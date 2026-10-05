@@ -50,6 +50,7 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
         var trigger = session.Button("New entity", exact: true);
         await trigger.ClickAsync();
         await session.Dialog("new-entity").WaitForAsync();
+        await session.WaitForFocusInDialogAsync("new-entity");
 
         await session.Page.Keyboard.PressAsync("Escape");
 
@@ -138,6 +139,7 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
 
         await session.Dialog("rename-sheet").WaitForAsync();
         (await region.IsHiddenAsync()).ShouldBeTrue("pressing an action in the disclosure closes it");
+        await session.WaitForFocusInDialogAsync("rename-sheet");
         await session.Page.Keyboard.PressAsync("Escape");
         await session.Page.GetByTestId("rename-sheet").WaitForAsync(new() { State = WaitForSelectorState.Detached });
         await session.Page.WaitForFunctionAsync("() => document.activeElement?.dataset.testid === 'pagehead-overflow'");

@@ -88,6 +88,7 @@ public sealed class CreateActionScenarios(AdminWorld world) : IClassFixture<Admi
             ? dialog.GetByRole(AriaRole.Button, new() { Name = submit, Exact = true })
             : dialog.GetByTestId(submitTestId);
         (await button.InnerTextAsync()).Trim().ShouldBe(submit);
+        await session.WaitForFocusInDialogAsync(editor);
         await session.Page.Keyboard.PressAsync("Escape");
         await dialog.WaitForAsync(new() { State = WaitForSelectorState.Detached });
     }

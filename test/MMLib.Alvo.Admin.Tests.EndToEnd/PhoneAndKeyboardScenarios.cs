@@ -329,6 +329,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
            snapshot; WaitForAsync is the question actually being asked. */
         await session.Page.Keyboard.PressAsync("Meta+k");
         await session.Dialog("palette").WaitForAsync();
+        await session.WaitForFocusInDialogAsync("palette");
 
         await session.Page.Keyboard.PressAsync("Escape");
         await session.Dialog("palette")
