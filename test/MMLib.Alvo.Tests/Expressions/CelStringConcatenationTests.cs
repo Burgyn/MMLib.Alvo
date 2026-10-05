@@ -83,7 +83,8 @@ public class CelStringConcatenationTests
 
     /// <summary>
     /// Deny by default: concatenation is a construct of its own in the profile table, admitted where a generated
-    /// column renders it and nowhere else — a rule or a hook condition has no rendering for it.
+    /// column renders it and in a mutate value (whose null operand makes the value null, see
+    /// <see cref="CelMutateConcatenationTests"/>) — a rule or a hook condition has no use for it.
     /// </summary>
     [Theory]
     [InlineData(CelProfile.Rule)]

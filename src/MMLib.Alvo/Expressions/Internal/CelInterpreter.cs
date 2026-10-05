@@ -322,13 +322,34 @@ internal static class CelInterpreter
 
     /// <summary>
     /// CEL's <c>+</c>: two strings concatenate, anything else is arithmetic. A null operand yields
-    /// <see langword="null"/> either way, which is what SQL's <c>||</c> answers too — unreachable for a
-    /// concatenation the compiler admitted, since it refuses an operand that can be null.
+    /// <see langword="null"/> either way, which is what SQL's <c>||</c> answers too — reachable in a mutate value, where
+    /// it is the answer (spec F18); in a computed field the compiler refuses an operand that can be null.
     /// </summary>
     private static object? EvaluateAdd(object? left, object? right, bool failClosed) =>
         left is string leftText && right is string rightText
-            ? string.Concat(leftText, rightText)
+            ? Concatenate(leftText, rightText, failClosed)
             : EvaluateArithmetic(CelBinaryOperator.Add, left, right, failClosed);
+
+    /// <summary>
+    /// Joins two strings. On the fail-closed hook path the joined length is capped at
+    /// <see cref="CelBuiltInFunctions.MaxTextLength"/>, as <c>replace</c>'s is, and checked <b>before</b> allocating
+    /// (preflight S-2): a chain of joins over a large field would otherwise be an out-of-memory inside the write — one
+    /// <see cref="EvaluateMutation"/>'s catch would turn into a silent null write. A computed join keeps SQL's
+    /// <c>||</c>, bounded by its own columns.
+    /// </summary>
+    /// <exception cref="CelFunctionException">The joined text would be longer than the cap.</exception>
+    private static string Concatenate(string left, string right, bool failClosed)
+    {
+        var length = (long)left.Length + right.Length;
+        if (failClosed && length > CelBuiltInFunctions.MaxTextLength)
+        {
+            throw new CelFunctionException("_+_", string.Create(
+                CultureInfo.InvariantCulture,
+                $"its result would be {length:N0} characters, over the {CelBuiltInFunctions.MaxTextLength:N0} a text may grow to here"));
+        }
+
+        return string.Concat(left, right);
+    }
 
     private static bool EvaluateLogical(CelBinary binary, in EvalState state)
     {

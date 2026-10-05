@@ -25,8 +25,9 @@ combinations are refused at apply: a delete has no `new.`, a create no `old.`.
 - refused: `quantity * unit_price` `now()`
 <!-- /gen:cel-condition -->
 
-A `mutate` value is a field, a literal, arithmetic (`+ - * /`, unary `-`) or a call to one of these built-in
-functions (both may nest), and nothing more: no `@user` or `@tenant`, no joins. Every function takes any value of
+A `mutate` value is a field, a literal, arithmetic (`+ - * /`, unary `-`), `+` joining two strings, or a call to
+one of these built-in functions (all may nest), and nothing more: no `@user` or `@tenant`. A number joins through
+`string()`: `'#' + string(new.quantity)`. Every function takes any value of
 the right type, and a null argument or operand makes the value null. An Int divided by an Int stays an Int, cut
 toward zero; an overflow or a division by zero refuses the write, in a `mutate` and in a `condition` alike.
 

@@ -141,13 +141,20 @@ internal static class CelTypeChecker
         new HashSet<CelProfile> { CelProfile.Computed, CelProfile.Condition, CelProfile.Mutate };
 
     /// <summary>
+    /// Concatenation's profiles: a computed column (SQL's <c>||</c>, a nullable operand refused at compile) and a mutate
+    /// value (interpreter-only, a null operand makes the value null — spec §5.6, F18).
+    /// </summary>
+    private static readonly IReadOnlySet<CelProfile> _computedAndMutate =
+        new HashSet<CelProfile> { CelProfile.Computed, CelProfile.Mutate };
+
+    /// <summary>
     /// The one positive table that decides where each construct is legal. <see cref="CelProfile.Mutate"/>
-    /// holds six rows today — literals, current-row and <c>old.</c>/<c>new.</c> field references, the
-    /// <c>now()</c> call, catalogued function calls and arithmetic — which is exactly what its functions, their
-    /// arguments and a computed value need; <see cref="CelProfile.Condition"/> also holds the catalogued function
-    /// call and arithmetic, whose overflow or zero divisor fails closed in both (spec §5.6, D-7). String
-    /// concatenation joins <see cref="CelProfile.Mutate"/> in a later task of the same slice. The
-    /// remaining rows (logical, comparison, <c>in</c>, <c>has</c>, concatenation, ternary, <c>changed</c>,
+    /// holds seven rows today — literals, current-row and <c>old.</c>/<c>new.</c> field references, the
+    /// <c>now()</c> call, catalogued function calls, arithmetic and string concatenation — which is exactly what its
+    /// functions, their arguments and a computed value need; <see cref="CelProfile.Condition"/> also holds the
+    /// catalogued function call and arithmetic, whose overflow or zero divisor fails closed in both (spec §5.6, D-7).
+    /// A mutate's concatenation answers null for a null operand rather than being refused (F18). The
+    /// remaining rows (logical, comparison, <c>in</c>, <c>has</c>, ternary, <c>changed</c>,
     /// context references) are <b>not</b> a decision that <c>mutate</c> may never use them; they are simply
     /// not admitted yet, and each arrives with the fact that needs it — a before-hook <c>mutate</c> like
     /// <c>new.stage == 'won'</c> will bring the comparison row with it. Deny-by-default is what makes that
@@ -166,7 +173,7 @@ internal static class CelTypeChecker
             [CelConstructKind.In] = _ruleConditionAndAccess,
             [CelConstructKind.Has] = _ruleComputedCondition,
             [CelConstructKind.Arithmetic] = _computedConditionAndMutate,
-            [CelConstructKind.Concatenation] = _computedOnly,
+            [CelConstructKind.Concatenation] = _computedAndMutate,
             [CelConstructKind.Conditional] = _computedOnly,
             [CelConstructKind.Changed] = _conditionOnly,
             [CelConstructKind.Call] = _mutateOnly,
@@ -547,14 +554,21 @@ internal static class CelTypeChecker
         /// <remarks>
         /// <para>
         /// <b>No implicit conversion (CEL spec: there is no <c>(int, string)</c> overload).</b> A mixed pair is a type
-        /// error, and its fix says this profile has no <c>string()</c> to reach for.
+        /// error; its fix names <c>string()</c> in a mutate, and says a computed field has none to reach for
+        /// (<see cref="JoinConversionFix"/>).
         /// </para>
         /// <para>
-        /// <b>The null rule is a refusal.</b> CEL's <c>+</c> has no null overload — a null operand is an evaluation
+        /// <b>The null rule is a refusal where SQL renders the join</b> (<see cref="_sqlRenderedProfiles"/>, so a computed
+        /// field). CEL's <c>+</c> has no null overload — a null operand is an evaluation
         /// error — while SQL's <c>||</c> answers <c>NULL</c> for the whole value when any operand is. Rather than
         /// picking one of the two and diverging from the other, an operand that can be null is refused here, with
         /// the explicit fallback in the profile's own syntax as the fix; see <see cref="IsNeverNull"/> for what counts
         /// as never null.
+        /// </para>
+        /// <para>
+        /// <b>In a mutate a null operand makes the value null</b> (spec §5.6, F18): the rule every function's argument
+        /// follows there, and the answer SQL's <c>||</c> gives, so the two semantics still agree. The interpreter caps the
+        /// joined length on that path (preflight S-2).
         /// </para>
         /// </remarks>
         private (CelNode, CelValueType, bool, int) CheckConcatenation(
@@ -562,11 +576,11 @@ internal static class CelTypeChecker
         {
             var profileBad = CheckConstruct(
                 CelConstructKind.Concatenation,
-                "String concatenation ('+' over two strings) is legal only in the Computed profile.",
+                "String concatenation ('+' over two strings) is legal only in the Computed and Mutate profiles.",
                 "Join the text in a computed field, and compare that field here instead.",
                 rightPosition);
             var mismatch = RequireTwoStrings(leftType, rightType, leftError, rightError, rightPosition);
-            var nullBad = !profileBad && !mismatch
+            var nullBad = !profileBad && !mismatch && _sqlRenderedProfiles.Contains(profile)
                 && (RequireNeverNull(binary.Left, leftError, leftPosition) | RequireNeverNull(binary.Right, rightError, rightPosition));
 
             return (binary, CelValueType.String, profileBad || mismatch || nullBad || leftError || rightError, rightPosition);
@@ -582,11 +596,20 @@ internal static class CelTypeChecker
             Errors.Add(new CelCompilationError(
                 $"'+' joins two strings or adds two numbers; found {leftType} and {rightType}, and CEL converts "
                 + "neither implicitly.",
-                "Join two string fields or string constants (first_name + ' ' + last_name). A computed field has no "
-                + "string() conversion, so keep the number in a field of its own.",
+                JoinConversionFix,
                 position));
             return true;
         }
+
+        /// <summary>
+        /// The fix for a string joined with a non-string: a mutate can join and has <c>string()</c> (spec §5.3), so it is
+        /// told to reach for it; elsewhere the computed-field advice stands — a condition has <c>string()</c> but cannot
+        /// join, so that fix would only lead to the gate refusal (preflight R-10).
+        /// </summary>
+        private string JoinConversionFix => profile is CelProfile.Mutate
+            ? "Write string(x) to join a number, a flag, an id or an instant."
+            : "Join two string fields or string constants (first_name + ' ' + last_name). A computed field has no "
+                + "string() conversion, so keep the number in a field of its own.";
 
         private bool RequireNeverNull(CelNode operand, bool operandError, int position)
         {
