@@ -90,20 +90,10 @@ internal sealed class HookBuilder
     /// <c>BeforeHookCompiler</c> refuses both, because an unanswerable reference resolves to null and the
     /// null rule collapses every comparison against it, including <c>!=</c>.
     /// </remarks>
-    public string Images => Point switch
-    {
-        "beforeCreate" => "<code class=\"a-mono\">new</code>",
-        "beforeDelete" => "<code class=\"a-mono\">old</code>",
-        _ => "<code class=\"a-mono\">new</code>, <code class=\"a-mono\">old</code>",
-    };
+    public string Images => ConditionTable.ImagesMarkup(Point);
 
     /// <summary>A condition that is valid at this point, for the placeholder.</summary>
-    public string Example => Point switch
-    {
-        "beforeCreate" => "new.priority == 'high'",
-        "beforeDelete" => "old.status == 'completed'",
-        _ => "new.status == 'completed'",
-    };
+    public string Example => ConditionTable.Example(Point);
 
     /// <summary>Whether a point runs inside the write's transaction.</summary>
     public static bool IsBefore(string point)
