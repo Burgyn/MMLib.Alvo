@@ -200,7 +200,7 @@ public partial class FieldEditor
 
     private (string Json, string Path)? Candidate(WorkingCopy copy, string source)
         => _facets.Build(Editing, EditingJson, Siblings, out _) is { } facets
-            ? ExpressionSlots.ForComputed(copy.Json, Entity, _facets.Name, facets, source)
+            ? ExpressionSlots.ForComputed(copy.Json, Entity, Editing, _facets.Name, facets, source)
             : null;
 
     private bool IsEditing => Editing is { Length: > 0 };

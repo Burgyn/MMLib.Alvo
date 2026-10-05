@@ -95,17 +95,19 @@ internal static class ExpressionSlots
     /// <summary>Places the field the add form would declare, with the typed expression, on a clone of the working copy.</summary>
     /// <remarks>
     /// The facets are what <c>FieldFacets.Build</c> made of the form, and the writer is the working copy's own
-    /// <see cref="WorkingCopy.AddField"/>. The form's other refusals are not this check's to repeat: the caller passes
-    /// nothing when the form cannot build a field yet.
+    /// <see cref="WorkingCopy.SaveField"/> — the one Save runs, so an edited field that is renamed loses its old key
+    /// (and the references to it are carried) here exactly as it would there. The form's other refusals are not this
+    /// check's to repeat: the caller passes nothing when the form cannot build a field yet.
     /// </remarks>
     /// <param name="workingJson">The working copy's text; not modified.</param>
     /// <param name="entity">The entity the field is added to.</param>
+    /// <param name="editing">The name of the field being edited, or <see langword="null"/> for a new one.</param>
     /// <param name="field">The field's name.</param>
     /// <param name="facets">The facets the form built; not modified.</param>
     /// <param name="source">The CEL as it stands in the expression box.</param>
     /// <returns>The clone's text and the expression's JSON Pointer, or <see langword="null"/> when there is no such entity.</returns>
     public static (string Json, string Path)? ForComputed(
-        string workingJson, string entity, string field, JsonObject facets, string source)
+        string workingJson, string entity, string? editing, string field, JsonObject facets, string source)
     {
         if (Scratch(workingJson, entity) is not { } scratch || facets.DeepClone() is not JsonObject declared)
         {
@@ -113,7 +115,7 @@ internal static class ExpressionSlots
         }
 
         declared["computed"] = source;
-        scratch.AddField(entity, field, declared);
+        scratch.SaveField(entity, editing, field, declared);
         return (scratch.Json, Pointer("entities", entity, "fields", field, "computed"));
     }
 

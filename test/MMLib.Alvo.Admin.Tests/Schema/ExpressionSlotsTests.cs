@@ -181,7 +181,7 @@ public class ExpressionSlotsTests
     public void A_computed_expression_lands_in_the_new_field_with_the_typed_source()
     {
         var facets = new JsonObject { ["type"] = "decimal", ["computed"] = "stale" };
-        var (json, path) = ExpressionSlots.ForComputed(WithHooks, "orders", "double_total", facets, "total * 2")!.Value;
+        var (json, path) = ExpressionSlots.ForComputed(WithHooks, "orders", null, "double_total", facets, "total * 2")!.Value;
 
         path.ShouldBe("/entities/orders/fields/double_total/computed");
         var field = JsonNode.Parse(json)!["entities"]!["orders"]!["fields"]!["double_total"]!;
@@ -194,17 +194,49 @@ public class ExpressionSlotsTests
     public void A_computed_field_on_an_entity_with_slash_is_escaped_and_independent_of_the_other_candidate()
     {
         var facets = new JsonObject { ["type"] = "decimal" };
-        var (first, path) = ExpressionSlots.ForComputed(WithHooks, "a/b", "f~g", facets, "first")!.Value;
-        var (second, _) = ExpressionSlots.ForComputed(WithHooks, "a/b", "f~g", facets, "second")!.Value;
+        var (first, path) = ExpressionSlots.ForComputed(WithHooks, "a/b", null, "f~g", facets, "first")!.Value;
+        var (second, _) = ExpressionSlots.ForComputed(WithHooks, "a/b", null, "f~g", facets, "second")!.Value;
 
         path.ShouldBe("/entities/a~1b/fields/f~0g/computed");
         first.ShouldNotContain("second");
         second.ShouldNotContain("first");
     }
 
+    private const string WithComputed = """{"entities":{"orders":{"fields":{"total":{"type":"decimal","computed":"price * 2"},"price":{"type":"decimal"}}}}}""";
+
+    /// <summary>
+    /// Save writes an edited field over its old name and then renames it, which removes the old key: a candidate that
+    /// only added the new name kept <c>total</c>, so <c>total * 2</c> under <c>subtotal</c> read green and Apply refused.
+    /// </summary>
+    [Fact]
+    public void A_renamed_computed_field_leaves_its_old_name_behind_as_save_does()
+    {
+        var facets = new JsonObject { ["type"] = "decimal" };
+        var (json, path) = ExpressionSlots.ForComputed(WithComputed, "orders", "total", "subtotal", facets, "total * 2")!.Value;
+
+        path.ShouldBe("/entities/orders/fields/subtotal/computed");
+        var fields = JsonNode.Parse(json)!["entities"]!["orders"]!["fields"]!.AsObject();
+        fields.ContainsKey("total").ShouldBeFalse("the rename removed the old key, so the expression names nothing");
+        fields["subtotal"]!["type"]!.GetValue<string>().ShouldBe("decimal");
+        facets.ContainsKey("computed").ShouldBeFalse("the form's facets are not modified");
+    }
+
+    [Fact]
+    public void A_renamed_computed_field_with_a_valid_expression_keeps_the_fields_it_reads()
+    {
+        var facets = new JsonObject { ["type"] = "decimal" };
+        var (json, path) = ExpressionSlots.ForComputed(WithComputed, "orders", "total", "twice", facets, "price * 2")!.Value;
+
+        path.ShouldBe("/entities/orders/fields/twice/computed");
+        var fields = JsonNode.Parse(json)!["entities"]!["orders"]!["fields"]!.AsObject();
+        fields.ContainsKey("total").ShouldBeFalse();
+        fields["twice"]!["computed"]!.GetValue<string>().ShouldBe("price * 2");
+        fields.ContainsKey("price").ShouldBeTrue();
+    }
+
     [Fact]
     public void A_computed_field_on_an_unknown_entity_has_nothing_to_check()
-        => ExpressionSlots.ForComputed(WithHooks, "missing", "f", new JsonObject(), "x").ShouldBeNull();
+        => ExpressionSlots.ForComputed(WithHooks, "missing", null, "f", new JsonObject(), "x").ShouldBeNull();
 
     [Fact]
     public void The_hook_draft_is_the_built_action_once_the_form_can_build_one()
