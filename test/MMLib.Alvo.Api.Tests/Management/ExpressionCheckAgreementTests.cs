@@ -92,9 +92,13 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("afterHook", AfterCreate, "null"),
         ("afterHook", AfterCreate, "normalizePhone(new.note) == 'x'"),
         ("afterHook", AfterCreate, "size(new.note) > 3"),
-        ("afterHook", AfterCreate, "normalizePhone(@user.id) == 'x'"),
-        ("afterHook", AfterCreate, "replace(new.note, 'a', @tenant.id) == 'x'"),
-        ("beforeHook", BeforeCreate, "normalizePhone(@user.id) == 'x'"),
+        ("afterHook", AfterCreate, "isMe(@user.id)"),
+        ("afterHook", AfterCreate, "isMe(@tenant.id)"),
+        ("afterHook", AfterCreate, "yes(isMe(@tenant.id))"),
+        ("afterHook", AfterCreate, "yes('owner' in @user.roles)"),
+        ("afterHook", AfterCreate, "!yes('owner' in @user.roles)"),
+        ("afterHook", AfterCreate, "new.quantity > 1 && yes('owner' in @user.roles)"),
+        ("beforeHook", BeforeCreate, "isMe(@user.id)"),
         ("mutate", Mutate + "note", "'closed'"),
         ("mutate", Mutate + "closed_at", "now()"),
         ("mutate", Mutate + "quantity", "'abc'"),
@@ -235,16 +239,22 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
     }
 
     /// <summary>
-    /// Agreement is not correctness (both sides share the validator), so pin the after-hook verdicts: a call over a
-    /// row field reads no caller context and is accepted. (No registered function accepts a context value, so the
-    /// refusal side is pinned at the walker and event level in the core tests.)
+    /// Agreement is not correctness (both sides share the validator), so pin what an after-hook refuses and why:
+    /// a call reads exactly what its arguments read, so the refusal names the one context value inside it.
     /// </summary>
     /// <param name="source">The after-hook condition.</param>
+    /// <param name="refusedFor">The one context value the refusal names, or null when the condition is valid.</param>
     /// <returns>A task that completes when the check has answered.</returns>
     [Theory]
-    [InlineData("normalizePhone(new.note) == 'x'")]
-    [InlineData("size(new.note) > 3")]
-    public async Task An_after_hook_call_reads_only_the_context_its_arguments_name(string source)
+    [InlineData("normalizePhone(new.note) == 'x'", null)]
+    [InlineData("size(new.note) > 3", null)]
+    [InlineData("isMe(@user.id)", null)]
+    [InlineData("isMe(@tenant.id)", "@tenant.id")]
+    [InlineData("yes(isMe(@tenant.id))", "@tenant.id")]
+    [InlineData("yes('owner' in @user.roles)", "@user.roles")]
+    [InlineData("!yes('owner' in @user.roles)", "@user.roles")]
+    [InlineData("new.quantity > 1 && yes('owner' in @user.roles)", "@user.roles")]
+    public async Task An_after_hook_call_reads_only_the_context_its_arguments_name(string source, string? refusedFor)
     {
         var management = fixture.Management();
         var current = await WorkingCopyAsync(management);
@@ -252,7 +262,13 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         var verdict = await management.CheckExpressionAsync(
             Project, new ManagementExpressionCheck(current.DescriptorJson, AfterCreate, source), Ct);
 
-        verdict.IsValid.ShouldBeTrue(string.Join(" | ", verdict.Findings.Select(f => f.Message)));
+        var messages = string.Join(" | ", verdict.Findings.Select(f => f.Message));
+        verdict.IsValid.ShouldBe(refusedFor is null, messages);
+        var reason = verdict.Findings.Where(f => f.Severity == DescriptorValidationSeverity.Error).ToList();
+        if (refusedFor is not null)
+        {
+            reason.ShouldHaveSingleItem(messages).Message.ShouldStartWith($"This after-hook condition reads '{refusedFor}'");
+        }
     }
 
     private static void BreakElsewhere(JsonNode root, string breakage)
@@ -405,7 +421,11 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
                 new AlvoApiWorldSetup(
                     MapBeforePriming: true,
                     MapManagementApi: true,
-                    ConfigureServicesAfterAlvo: services => CelFunctionsWorld.Register(services, phone => phone)));
+                    ConfigureServicesAfterAlvo: services =>
+                    {
+                        CelFunctionsWorld.Register(services, phone => phone);
+                        CelFunctionsWorld.RegisterContextProbes(services);
+                    }));
 
         /// <inheritdoc/>
         public async ValueTask DisposeAsync()

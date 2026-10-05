@@ -133,6 +133,13 @@ public class PolicyCatalogBuilderTests
         PolicyCatalogBuilder.ReferencesContextValue(new CelCall("trim", [field]), CelContextValue.TenantId).ShouldBeFalse();
         PolicyCatalogBuilder.ReferencesContextValue(new CelCall("pair", [field, user]), CelContextValue.UserId).ShouldBeTrue();
         PolicyCatalogBuilder.ReferencesContextValue(new CelCall("pair", [field, user]), CelContextValue.TenantId).ShouldBeFalse();
+
+        var tenant = new CelContextRef(CelContextValue.TenantId, CelValueType.Uuid);
+        var roles = new CelContextRef(CelContextValue.UserRoles, CelValueType.String);
+        PolicyCatalogBuilder.ReferencesContextValue(new CelCall("f", [tenant]), CelContextValue.TenantId).ShouldBeTrue();
+        PolicyCatalogBuilder.ReferencesContextValue(new CelCall("f", [roles]), CelContextValue.UserRoles).ShouldBeTrue();
+        PolicyCatalogBuilder.ReferencesContextValue(new CelCall("f", [new CelCall("g", [tenant])]), CelContextValue.TenantId).ShouldBeTrue();
+        PolicyCatalogBuilder.ReferencesContextValue(new CelCall("f", [new CelCall("g", [tenant])]), CelContextValue.UserRoles).ShouldBeFalse();
     }
 
     /// <summary>

@@ -197,7 +197,7 @@ internal static class PolicyCatalogBuilder
             ReferencesContextValue(conditional.Condition, value)
             || ReferencesContextValue(conditional.WhenTrue, value)
             || ReferencesContextValue(conditional.WhenFalse, value),
-        // A call reads exactly what its arguments read; without this arm it fell to the wildcard below.
+        // A call reads exactly what its arguments read.
         CelCall call => call.Arguments.Any(argument => ReferencesContextValue(argument, value)),
         _ => true,
     };
@@ -463,7 +463,7 @@ internal static class PolicyCatalogBuilder
         CelBinary binary => ReferencesRowField(binary.Left) || ReferencesRowField(binary.Right),
         CelConditional conditional =>
             ReferencesRowField(conditional.Condition) || ReferencesRowField(conditional.WhenTrue) || ReferencesRowField(conditional.WhenFalse),
-        // A call reads exactly what its arguments read; without this arm it fell to the wildcard below.
+        // A call reads exactly what its arguments read.
         CelCall call => call.Arguments.Any(ReferencesRowField),
         _ => true,
     };

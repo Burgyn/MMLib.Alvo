@@ -28,6 +28,13 @@ internal static class CelFunctionsWorld
     internal static void Register(IServiceCollection services, Func<string, string?> normalizePhone) =>
         new Builder(services).AddCelFunction("normalizePhone", (string phone) => normalizePhone(phone), Summary);
 
+    /// <summary>Registers <c>yes(bool)</c> and <c>isMe(Guid)</c>, the two functions that let a test put a context value inside a call.</summary>
+    /// <param name="services">The host's services, after <c>AddAlvo</c>.</param>
+    internal static void RegisterContextProbes(IServiceCollection services) =>
+        new Builder(services)
+            .AddCelFunction("yes", (bool value) => value, "Answers its argument.")
+            .AddCelFunction("isMe", (Guid id) => id != Guid.Empty, "True for any identity.");
+
     /// <summary>The builder a host holds; <c>AddCelFunction</c> reads only <see cref="Services"/>.</summary>
     private sealed class Builder(IServiceCollection services) : IAlvoBuilder
     {

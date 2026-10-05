@@ -187,29 +187,44 @@ public sealed class EventSubscriptionsTests : IDisposable
         var line = _logger.Entries.ShouldHaveSingleItem();
         line.Level.ShouldBe(LogLevel.Warning);
         line.Message.ShouldContain("boom");
+        line.Message.ShouldNotContain("\"x\"");
         line.Exception.ShouldBeOfType<InvalidOperationException>().Message.ShouldBe("the host broke");
     }
 
     /// <summary>
-    /// A call over <c>@user.id</c> reads exactly that value: it is judged against the envelope's actor, and an
-    /// actorless event selects nothing — the gate sees through the call.
+    /// A call over <c>@user.id</c> reads that value, so an event that records no actor selects nothing — even for
+    /// a negated condition that would be true of the anonymous id. This is the row that fails if the gate cannot
+    /// see through the call: without the gate, <c>!isActor(@user.id)</c> is true for the reserved anonymous id.
     /// </summary>
-    /// <param name="actedBy">The envelope's actor, or null for an anonymous write.</param>
-    /// <param name="selected">Whether the hook fires.</param>
-    [Theory]
-    [InlineData(Actor, true)]
-    [InlineData(null, false)]
-    public void A_call_over_user_id_is_judged_against_the_envelopes_actor(string? actedBy, bool selected)
+    [Fact]
+    public void A_call_over_user_id_is_not_selected_when_the_event_records_no_actor()
     {
-        var actor = TestCelFunctions.Host(
-            "isActor", CelValueType.Bool, arguments => arguments[0]!.Equals(Guid.Parse(Actor)),
-            TestCelFunctions.Parameter("id", CelValueType.Uuid));
-        var catalog = HostFunctionCatalog(actor, "isActor(@user.id)");
+        var catalog = HostFunctionCatalog(IsActor, "!isActor(@user.id)");
 
         EventSubscriptions.Matching(
-            catalog, Event("entity.deals.created", record: Record(("note", "x")), authId: actedBy), CelFixtures.Evaluator, _logger)
+            catalog, Event("entity.deals.created", record: Record(("note", "x")), authId: null), CelFixtures.Evaluator, _logger)
+            .ShouldBeEmpty();
+        _logger.Entries.ShouldHaveSingleItem().Message.ShouldContain("@user.id");
+    }
+
+    /// <summary>A call over <c>@user.id</c> is judged against the envelope's actor.</summary>
+    /// <param name="condition">The condition.</param>
+    /// <param name="selected">Whether the hook fires for the actor.</param>
+    [Theory]
+    [InlineData("isActor(@user.id)", true)]
+    [InlineData("!isActor(@user.id)", false)]
+    public void A_call_over_user_id_is_judged_against_the_envelopes_actor(string condition, bool selected)
+    {
+        var catalog = HostFunctionCatalog(IsActor, condition);
+
+        EventSubscriptions.Matching(
+            catalog, Event("entity.deals.created", record: Record(("note", "x")), authId: Actor), CelFixtures.Evaluator, _logger)
             .Count.ShouldBe(selected ? 1 : 0);
     }
+
+    private static CelFunction IsActor { get; } = TestCelFunctions.Host(
+        "isActor", CelValueType.Bool, arguments => arguments[0]!.Equals(Guid.Parse(Actor)),
+        TestCelFunctions.Parameter("id", CelValueType.Uuid));
 
     private static PolicyCatalog HostFunctionCatalog(CelFunction function, string condition)
     {
