@@ -43,9 +43,12 @@ public sealed class MutateEditingScenarios(BikeWorkshopWorld world) : IClassFixt
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await NewMutateAsync(session, "bikes", "beforeCreate");
-        await session.ChooseAsync(Combobox(session, "Field 1"), "model_year");
         /* The library's list closes and its box is swapped for the one showing the value; focus stays on the select,
-           inside the sheet, rather than falling to the page where Escape no longer reaches the sheet. */
+           inside the sheet, rather than falling to the page where Escape no longer reaches the sheet — on a first choice
+           and on a re-choice of a select that already shows one. */
+        await session.ChooseAsync(Combobox(session, "Field 1"), "battery_wh");
+        await session.WaitForFocusInsideAsync("hook-mutate-field-0");
+        await session.ChooseAsync(Combobox(session, "Field 1"), "model_year");
         await session.WaitForFocusInsideAsync("hook-mutate-field-0");
 
         await session.Page.FillAsync("#hook-mutate-value-0", "abc");
@@ -69,7 +72,10 @@ public sealed class MutateEditingScenarios(BikeWorkshopWorld world) : IClassFixt
         await NewMutateAsync(session, "rentals", "beforeUpdate");
         await session.ChooseAsync(Combobox(session, "Field 1"), "status");
 
+        await session.ChooseAsync(Combobox(session, "Set field 1 to"), "active");
+        await session.WaitForFocusInsideAsync("hook-mutate-value-0");
         await session.ChooseAsync(Combobox(session, "Set field 1 to"), "returned");
+        await session.WaitForFocusInsideAsync("hook-mutate-value-0");
         var editor = session.Dialog("hook-editor");
         await editor.GetByTestId("hook-add").ClickAsync();
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
@@ -97,7 +103,13 @@ public sealed class MutateEditingScenarios(BikeWorkshopWorld world) : IClassFixt
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
         await NewMutateAsync(session, "customers", "beforeUpdate");
+        await session.ChooseAsync(Combobox(session, "Field 1"), "email");
         await session.Page.GetByTestId("hook-mutate-add").ClickAsync();
+        /* Measured once both rows are drawn whole: the second row, and each row's value box and Set to empty. */
+        await session.Page.GetByTestId("hook-mutate-remove-1").WaitForAsync();
+        await session.ChooseAsync(Combobox(session, "Field 2"), "loyalty_tier");
+        await session.Page.GetByTestId("hook-mutate-empty-0").WaitForAsync();
+        await session.Page.GetByTestId("hook-mutate-value-1").WaitForAsync();
 
         await session.AssertNoHorizontalScrollAsync();
     }

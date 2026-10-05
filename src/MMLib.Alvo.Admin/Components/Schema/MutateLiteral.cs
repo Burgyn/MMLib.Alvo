@@ -146,7 +146,7 @@ internal static class MutateLiteral
     private static string? KindRefusal(MutateRow row, FieldSchema field, JsonNode? value)
         => row.DeclaredKind is { } declared && value is not null && KindWords(declared) != KindWords(value.GetValueKind())
             ? $"'{field.Name}' is declared as {KindWords(declared)}, and {TypeWords(field)} field is written as "
-              + $"{KindWords(value.GetValueKind())}. Type the value again to write it that way."
+              + $"{KindWords(value.GetValueKind())}. Enter the value again to write it that way."
             : null;
 
     private static string KindWords(JsonValueKind kind) => kind switch

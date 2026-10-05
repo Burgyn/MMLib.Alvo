@@ -1,5 +1,5 @@
-﻿using MMLib.Alvo.Schema;
-using InputMode = MudBlazor.InputMode;
+﻿using Microsoft.JSInterop;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
@@ -13,6 +13,9 @@ public partial class HooksTab
 
     /// <summary>The fields a mutate may name, read when the sheet opens (<see cref="HookFields.Writable"/>).</summary>
     private IReadOnlyList<string> _writable = [];
+
+    /// <summary>The rows' selects by id (<see cref="FieldSelectId"/>, <see cref="MutateValueId"/>), for <see cref="RefocusSelectAsync"/>.</summary>
+    private readonly Dictionary<string, MudBlazor.MudSelect<string>> _selects = new(StringComparer.Ordinal);
 
     /// <summary>How many row check keys may still hold a sentence: every key past the last row is cleared once.</summary>
     private int _mutateKeys;
@@ -43,7 +46,7 @@ public partial class HooksTab
         row.Text = string.Empty;
         row.Empty = false;
         CheckMutateValues();
-        return RefocusSelectAsync($"hook-mutate-field-{index}");
+        return RefocusSelectAsync(FieldSelectId(index));
     }
 
     /// <summary>An enum row's value, chosen from its declared values.</summary>
@@ -58,7 +61,34 @@ public partial class HooksTab
     /// that shows the value, and focus, left on the list's option, fell to <c>&lt;body&gt;</c> — outside the sheet, where
     /// Escape no longer reaches it (measured in a browser; a select inside a dialog is new here, spec §11).
     /// </summary>
-    private Task RefocusSelectAsync(string testId) => Interop.FocusFirstOnceShownAsync([$"div[data-testid='{testId}']"]);
+    /// <remarks>
+    /// Through the select's own <c>FocusAsync</c>, not a selector over the library's markup. Not awaited: the library
+    /// awaits this handler before it draws the value, so focus is asked for once the handler has returned and the
+    /// current work has run (<see cref="Task.Yield"/>). Measured to hold on a first choice, a re-choice and the enum select.
+    /// </remarks>
+    private Task RefocusSelectAsync(string id)
+    {
+        if (_selects.TryGetValue(id, out var select))
+        {
+            _ = FocusWhenDrawnAsync(select);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Focuses the select after the current render; a select gone by then (the sheet closed) is left alone.</summary>
+    private static async Task FocusWhenDrawnAsync(MudBlazor.MudSelect<string> select)
+    {
+        await Task.Yield();
+        try
+        {
+            await select.FocusAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or ObjectDisposedException or TaskCanceledException)
+        {
+            /* Focus is a courtesy; a select or circuit that went away in between asks nothing of anyone. */
+        }
+    }
 
     private void ChooseMutateMode(int index, string word)
     {
@@ -68,9 +98,12 @@ public partial class HooksTab
         CheckMutateValues();
     }
 
+    /// <summary>A value typed or chosen: the row writes it, so it no longer sets the field to empty.</summary>
     private void TypeMutateText(int index, string? text)
     {
-        Current.MutateRows[index].Text = text ?? string.Empty;
+        var row = Current.MutateRows[index];
+        row.Text = text ?? string.Empty;
+        row.Empty = false;
         _ = CheckMutateValueAsync(index);
     }
 
@@ -117,6 +150,8 @@ public partial class HooksTab
 
     private static string MutateValueId(int index) => $"hook-mutate-value-{index}";
 
+    private static string FieldSelectId(int index) => $"hook-mutate-field-{index}";
+
     private static string ModeWord(MutateRow row) => row.Mode == MutateMode.Expression ? ExpressionWord : ValueWord;
 
     private FieldSchema? FieldOf(MutateRow row) => Current.Fields.GetValueOrDefault(HookBuilder.MutateKey(row));
@@ -128,10 +163,6 @@ public partial class HooksTab
     private string TargetLabel(string target) => _writable.Contains(target, StringComparer.Ordinal) ? target : $"{target} (not offered)";
 
     private static IReadOnlyCollection<string> FlagSelected(MutateRow row) => row.Text.Length > 0 ? [row.Text] : [];
-
-    /// <summary>The phone keyboard a literal box asks for: digits for a number, letters otherwise.</summary>
-    private InputMode Keyboard(MutateRow row)
-        => FieldOf(row)?.Type is FieldType.Integer or FieldType.Decimal ? InputMode.@decimal : InputMode.text;
 
     /// <summary>
     /// Why the row cannot be written — its field is not declared, or its literal does not fit it — computed on each render
@@ -149,14 +180,17 @@ public partial class HooksTab
         return FieldOf(row) is null || !untyped ? Current.RowRefusal(row) : null;
     }
 
-    private string LiteralDescribedBy(MutateRow row, int index) => WithFit($"{MutateValueId(index)}-hint", row, index);
+    /// <summary>A literal box's descriptions: its hint, and the row's fit sentence while there is one.</summary>
+    /// <param name="index">The row's index.</param>
+    /// <param name="fit">The row's <see cref="MutateFit"/>, computed once per row and render.</param>
+    private static string LiteralDescribedBy(int index, string? fit) => WithFit($"{MutateValueId(index)}-hint", index, fit);
 
     /// <summary>The expression box's descriptions: its hint, the check's sentence while there is one, and the row's fit.</summary>
-    private string ExpressionDescribedBy(MutateRow row, int index) => WithFit(Described(MutateValueId(index)), row, index);
+    private string ExpressionDescribedBy(int index, string? fit) => WithFit(Described(MutateValueId(index)), index, fit);
 
-    /// <summary>The fit sentence's id while there is one, for a box with no hint of its own to point at.</summary>
-    private string? FitDescribedBy(MutateRow row, int index) => MutateFit(row) is null ? null : $"{MutateValueId(index)}-fit";
+    /// <summary>The fit sentence's id while there is one, for a group with no hint of its own to point at.</summary>
+    private static string? FitDescribedBy(int index, string? fit) => fit is null ? null : $"{MutateValueId(index)}-fit";
 
-    private string WithFit(string described, MutateRow row, int index)
-        => FitDescribedBy(row, index) is { } fit ? $"{described} {fit}" : described;
+    private static string WithFit(string described, int index, string? fit)
+        => FitDescribedBy(index, fit) is { } id ? $"{described} {id}" : described;
 }

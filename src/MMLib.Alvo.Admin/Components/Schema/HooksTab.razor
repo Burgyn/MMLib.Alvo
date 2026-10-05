@@ -267,10 +267,11 @@ else
         {
             var row = Current.MutateRows[index];
             var i = index;
+            var fit = MutateFit(row);
             <div class="a-stack" role="group" aria-label="@($"Patched field {i + 1}")" data-testid="hook-mutate-row">
                 <div class="a-field-row">
                     <Field Label="@($"Field {i + 1}")" LabelId="@($"hook-mutate-field-{i}-label")">
-                        <MudSelect T="string" Variant="Variant.Outlined" Value="row.Field" ValueChanged="chosen => ChooseMutateFieldAsync(i, chosen)"
+                        <MudSelect @ref="_selects[FieldSelectId(i)]" T="string" Variant="Variant.Outlined" Value="row.Field" ValueChanged="chosen => ChooseMutateFieldAsync(i, chosen)"
                                    aria-labelledby="@($"hook-mutate-field-{i}-label")" Class="a-mono"
                                    data-testid="@($"hook-mutate-field-{i}")">
                             @foreach (var target in MutateTargets(row))
@@ -285,7 +286,7 @@ else
                                    SelectedChanged="modes => ChooseMutateMode(i, modes[0])" />
                     </Field>
                 </div>
-                @MutateValue(row, i)
+                @MutateValue(row, i, fit)
                 @if (Current.MutateRows.Count > 1)
                 {
                     <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="@($"hook-mutate-remove-{i}")"
@@ -297,13 +298,16 @@ else
     </text>;
 
     /// <summary>The box a row's field and mode take: CEL, a declared value, true/false, or typed text — then why it does not fit.</summary>
-    private RenderFragment MutateValue(MutateRow row, int i) => @<text>
+    /// <param name="row">The row.</param>
+    /// <param name="i">Its index.</param>
+    /// <param name="fit">Its <see cref="MutateFit"/>, computed once for the row's render.</param>
+    private RenderFragment MutateValue(MutateRow row, int i, string? fit) => @<text>
         @if (row.Mode == MutateMode.Expression)
         {
             <Field Label="@($"Set field {i + 1} to")" For="@MutateValueId(i)">
                 <ChildContent>
                     <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="@MutateValueId(i)" Class="a-mono"
-                                  autocomplete="off" Placeholder="now()" aria-describedby="@ExpressionDescribedBy(row, i)"
+                                  autocomplete="off" Placeholder="now()" aria-describedby="@ExpressionDescribedBy(i, fit)"
                                   Value="row.Text" ValueChanged="text => TypeMutateText(i, text)" />
                     @Findings(MutateValueId(i))
                 </ChildContent>
@@ -312,46 +316,50 @@ else
         }
         else if (FieldOf(row) is { Type: FieldType.Enum } choice)
         {
+            @* A labelled group's Field draws no hint id, so the hint is drawn here with one the select can point at. *@
             <Field Label="@($"Set field {i + 1} to")" LabelId="@($"{MutateValueId(i)}-label")">
-                <ChildContent>
-                    <MudSelect T="string" Variant="Variant.Outlined" Value="row.Text" ValueChanged="text => ChooseMutateValueAsync(i, text)"
-                               aria-labelledby="@($"{MutateValueId(i)}-label")" aria-describedby="@FitDescribedBy(row, i)"
-                               Class="a-mono" Disabled="row.Empty" data-testid="@MutateValueId(i)">
-                        @foreach (var value in choice.EnumValues ?? Array.Empty<string>())
-                        {
-                            <MudSelectItem Value="@value">@value</MudSelectItem>
-                        }
-                    </MudSelect>
-                </ChildContent>
-                <Hint>@MutateLiteral.Hint(choice)</Hint>
+                <MudSelect @ref="_selects[MutateValueId(i)]" T="string" Variant="Variant.Outlined" Value="row.Text"
+                           ValueChanged="text => ChooseMutateValueAsync(i, text)"
+                           aria-labelledby="@($"{MutateValueId(i)}-label")" aria-describedby="@LiteralDescribedBy(i, fit)"
+                           Class="a-mono" Disabled="row.Empty" data-testid="@MutateValueId(i)">
+                    @foreach (var value in choice.EnumValues ?? Array.Empty<string>())
+                    {
+                        <MudSelectItem Value="@value">@value</MudSelectItem>
+                    }
+                </MudSelect>
+                <span class="a-hint" id="@($"{MutateValueId(i)}-hint")">@MutateLiteral.Hint(choice)</span>
             </Field>
         }
         else if (FieldOf(row) is { Type: FieldType.Boolean })
         {
             <Field Label="@($"Set field {i + 1} to")" LabelId="@($"{MutateValueId(i)}-label")">
                 <ChipGroup TValue="string" Items="_flags" Selected="FlagSelected(row)"
-                           aria-labelledby="@($"{MutateValueId(i)}-label")" data-testid="@MutateValueId(i)"
-                           SelectedChanged="flags => TypeMutateText(i, flags[0])" />
+                           aria-labelledby="@($"{MutateValueId(i)}-label")" aria-describedby="@FitDescribedBy(i, fit)"
+                           data-testid="@MutateValueId(i)" SelectedChanged="flags => TypeMutateText(i, flags[0])" />
             </Field>
         }
         else if (FieldOf(row) is { Type: FieldType.Json } json)
         {
             <p class="a-note" data-testid="@($"hook-mutate-json-{i}")">
-                '@json.Name' is a json field, and this build converts no literal into one. Write an expression, or set it to empty.
+                '@json.Name' is a json field, and this build converts no literal into one. Write an expression@(json.Required ? "." : ", or set it to empty.")
             </p>
         }
         else
         {
+            @*
+                No numeric inputmode, even for a number: iOS's decimal and numeric keypads have no minus sign, so a negative
+                literal could not be typed at all. The hint says what the box takes (a deviation from spec §4.3's inputmode).
+            *@
             <Field Label="@($"Set field {i + 1} to")" For="@MutateValueId(i)">
                 <ChildContent>
                     <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="@MutateValueId(i)" Class="a-mono"
-                                  autocomplete="off" InputMode="Keyboard(row)" Disabled="row.Empty"
-                                  aria-describedby="@LiteralDescribedBy(row, i)" Value="row.Text" ValueChanged="text => TypeMutateText(i, text)" />
+                                  autocomplete="off" Disabled="row.Empty"
+                                  aria-describedby="@LiteralDescribedBy(i, fit)" Value="row.Text" ValueChanged="text => TypeMutateText(i, text)" />
                 </ChildContent>
                 <Hint>@(FieldOf(row) is { } declared ? MutateLiteral.Hint(declared) : "Choose the field first.")</Hint>
             </Field>
         }
-        @Fit(row, i)
+        @Fit(i, fit)
         @if (row.Mode == MutateMode.Literal && FieldOf(row) is { Required: false })
         {
             <MudCheckBox T="bool" Value="row.Empty" ValueChanged="on => SetMutateEmpty(i, on)" Label="Set to empty"
@@ -360,8 +368,8 @@ else
     </text>;
 
     /// <summary>Why a row cannot be written, under its box and after its hint (spec §3.8) — from the moment it opens.</summary>
-    private RenderFragment Fit(MutateRow row, int i) => @<text>
-        @if (MutateFit(row) is { } fit)
+    private static RenderFragment Fit(int i, string? fit) => @<text>
+        @if (fit is not null)
         {
             <p class="a-field__problem" id="@($"{MutateValueId(i)}-fit")" data-testid="@($"hook-mutate-fit-{i}")">@fit</p>
         }

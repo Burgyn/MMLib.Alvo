@@ -57,7 +57,7 @@ internal sealed class MutateRow
     /// <remarks>
     /// A declared <c>"3"</c> on an integer field reads as the text <c>3</c>, which the field would take — and Save would
     /// write <c>3</c>, a change nobody made. Remembered, the row is refused instead (<see cref="MutateLiteral.TryValue"/>)
-    /// until the value is typed again; set it after <see cref="Text"/>, which clears it.
+    /// until the value is entered again; set it after <see cref="Text"/>, which clears it.
     /// </remarks>
     public JsonValueKind? DeclaredKind { get; set; }
 

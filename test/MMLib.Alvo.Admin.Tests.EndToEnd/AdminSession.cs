@@ -99,6 +99,11 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     /// click, so a box filled straight after it was filled first — and then emptied by the choice that "came later"
     /// (measured: a row's field reset what was typed for it). The select shows the value only once it has passed it on.
     /// </para>
+    /// <para>
+    /// The wait assumes the select shows exactly the option's name. A select whose shown text differs from its option
+    /// label (a <c>ToStringFunc</c>, or a label such as <c>phone (not offered)</c> for a value <c>phone</c>) would never
+    /// match and time out here; such a caller waits on something of its own instead.
+    /// </para>
     /// </remarks>
     /// <param name="combobox">The select, found by role and name.</param>
     /// <param name="option">The option's name, exactly.</param>
