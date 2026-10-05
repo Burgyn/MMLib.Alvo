@@ -134,11 +134,20 @@ internal static class CelTypeChecker
         new HashSet<CelProfile> { CelProfile.Condition, CelProfile.Mutate };
 
     /// <summary>
+    /// Arithmetic's profiles: a computed column (which renders it to SQL and answers null on failure) and the two hook
+    /// slots (interpreter-only, where an overflow or a zero divisor fails closed — spec §5.6, D-7).
+    /// </summary>
+    private static readonly IReadOnlySet<CelProfile> _computedConditionAndMutate =
+        new HashSet<CelProfile> { CelProfile.Computed, CelProfile.Condition, CelProfile.Mutate };
+
+    /// <summary>
     /// The one positive table that decides where each construct is legal. <see cref="CelProfile.Mutate"/>
-    /// holds five rows today — literals, current-row and <c>old.</c>/<c>new.</c> field references, the
-    /// <c>now()</c> call and catalogued function calls — which is exactly what its functions and their
-    /// arguments need; <see cref="CelProfile.Condition"/> also holds the catalogued function call. The
-    /// remaining rows (logical, comparison, <c>in</c>, <c>has</c>, arithmetic, ternary, <c>changed</c>,
+    /// holds six rows today — literals, current-row and <c>old.</c>/<c>new.</c> field references, the
+    /// <c>now()</c> call, catalogued function calls and arithmetic — which is exactly what its functions, their
+    /// arguments and a computed value need; <see cref="CelProfile.Condition"/> also holds the catalogued function
+    /// call and arithmetic, whose overflow or zero divisor fails closed in both (spec §5.6, D-7). String
+    /// concatenation joins <see cref="CelProfile.Mutate"/> in a later task of the same slice. The
+    /// remaining rows (logical, comparison, <c>in</c>, <c>has</c>, concatenation, ternary, <c>changed</c>,
     /// context references) are <b>not</b> a decision that <c>mutate</c> may never use them; they are simply
     /// not admitted yet, and each arrives with the fact that needs it — a before-hook <c>mutate</c> like
     /// <c>new.stage == 'won'</c> will bring the comparison row with it. Deny-by-default is what makes that
@@ -156,7 +165,7 @@ internal static class CelTypeChecker
             [CelConstructKind.Comparison] = _ruleComputedConditionAndAccess,
             [CelConstructKind.In] = _ruleConditionAndAccess,
             [CelConstructKind.Has] = _ruleComputedCondition,
-            [CelConstructKind.Arithmetic] = _computedOnly,
+            [CelConstructKind.Arithmetic] = _computedConditionAndMutate,
             [CelConstructKind.Concatenation] = _computedOnly,
             [CelConstructKind.Conditional] = _computedOnly,
             [CelConstructKind.Changed] = _conditionOnly,
@@ -409,7 +418,7 @@ internal static class CelTypeChecker
         {
             var profileBad = CheckConstruct(
                 CelConstructKind.Arithmetic,
-                "Arithmetic negation ('-') is legal only in the Computed profile.",
+                "Arithmetic negation ('-') is legal only in the Computed, Condition and Mutate profiles.",
                 "Move this calculation into a computed field.",
                 position);
             var operandBad = RequireNumeric(operandType, operandError, "Unary '-' operand", position);
@@ -483,7 +492,7 @@ internal static class CelTypeChecker
 
             var profileBad = CheckConstruct(
                 CelConstructKind.Arithmetic,
-                $"Arithmetic is legal only in the Computed profile; '{OperatorText(binary.Operator)}' is not allowed here.",
+                $"Arithmetic is legal only in the Computed, Condition and Mutate profiles; '{OperatorText(binary.Operator)}' is not allowed here.",
                 "Move this calculation into a computed field.",
                 rightPosition);
 
@@ -498,18 +507,20 @@ internal static class CelTypeChecker
         }
 
         /// <summary>
-        /// A literal zero divisor in a hook profile can only fail the write (Ruling N, preflight S-3): refused here with
-        /// the shape of a constant call's refusal (§6.4). Only Condition and Mutate — the profiles whose division fails
-        /// closed (spec §5.6); Computed answers <see langword="null"/> for it, so there it never fails and stays legal.
+        /// A literal zero divisor in a hook profile can never produce a value — every write it meets with a present
+        /// dividend fails (Ruling N, preflight S-3) — so it is refused here with the shape of a constant call's refusal
+        /// (§6.4), worded for its one constant operand. Only where division fails closed
+        /// (<see cref="CelHookArithmetic.FailsClosed"/>, the predicate the interpreter's flag reads too); Computed answers
+        /// <see langword="null"/> for it, so there it never fails and stays legal.
         /// </summary>
         /// <remarks>
-        /// Called only for a well-typed division whose profile admits arithmetic, so until arithmetic joins Condition
-        /// and Mutate (plan Task 7, which brings its facts) no source reaches the refusal; Computed's fact pins the gate.
+        /// Called only for a division whose profile admits arithmetic. Shallow by construction: <c>0</c>, <c>0.0</c> and
+        /// <c>0.00</c> are literals; <c>-0</c> and <c>1 - 1</c> are not, and fail each write at run time instead.
         /// </remarks>
         private bool RefusesConstantZeroDivisor(CelBinary binary, int position)
         {
             if (binary is not { Operator: CelBinaryOperator.Divide, Right: CelLiteral { Value: 0L or 0m } }
-                || profile is not (CelProfile.Condition or CelProfile.Mutate))
+                || !CelHookArithmetic.FailsClosed(profile))
             {
                 return false;
             }

@@ -70,7 +70,8 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// </para>
 /// <para>
 /// A <see cref="CelFunctionException"/> escapes <see cref="EvaluatePredicate"/> and <see cref="EvaluateMutation"/>
-/// on purpose — a function failure fails closed; every other surprise still collapses as before: no other exception
+/// on purpose — a function failure fails closed, and so does an operator's overflow or zero divisor in a hook profile
+/// (<see cref="CelHookArithmetic"/>, spec §5.6); every other surprise still collapses as before: no other exception
 /// escapes <see cref="EvaluatePredicate"/> or <see cref="EvaluateScalar"/> for
 /// any well-typed <see cref="CompiledExpression"/> and any <see cref="AlvoRecord"/>, including one
 /// whose values are of an unexpected CLR type (a nested dictionary, an array, a
@@ -108,7 +109,7 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(current, previous, context);
+            var state = new EvalState(current, previous, context, failClosed: FailsClosed(expression));
             return AsBoolean(Evaluate(expression.Root, state));
         }
 #pragma warning disable CA1031
@@ -154,7 +155,8 @@ internal static class CelInterpreter
     /// <summary>
     /// Evaluates a Computed expression's scalar value. Arithmetic on a <see langword="null"/>
     /// operand, and a division by zero, both yield <see langword="null"/> rather than throwing —
-    /// a generated column must never make a write crash.
+    /// a generated column must never make a write crash. Only here: a hook condition or mutate value
+    /// fails closed instead (spec §5.6), and this entry point never sets that flag.
     /// </summary>
     /// <param name="expression">The compiled Computed expression.</param>
     /// <param name="current">The row the computed value is derived from.</param>
@@ -208,9 +210,10 @@ internal static class CelInterpreter
     /// surprise still collapses to <see langword="null"/> as before.</b> The two are otherwise indistinguishable to a
     /// caller, and the create path turns a <see langword="null"/> patch value into an <em>absent</em> key, so a
     /// reachable failure swallowed here would silently store a column default instead of refusing the write. Apart
-    /// from a catalogued function, nothing in a <see cref="CelProfile.Mutate"/> tree can throw: the profile admits
-    /// literals, field references and calls; <see cref="Evaluate"/>'s node switch ends in <c>_ =&gt; null</c>; and
-    /// <c>now()</c> reads a value the caller already bound. The remaining <c>catch</c> is defence-in-depth, as <see cref="EvaluatePredicate"/>'s is.
+    /// from a catalogued function and an operator's overflow or division by zero (spec §5.6), nothing in a
+    /// <see cref="CelProfile.Mutate"/> tree can throw: the profile admits literals, field references, calls and
+    /// arithmetic; <see cref="Evaluate"/>'s node switch ends in <c>_ =&gt; null</c>; and <c>now()</c> reads a value the
+    /// caller already bound. The remaining <c>catch</c> is defence-in-depth, as <see cref="EvaluatePredicate"/>'s is.
     /// </remarks>
     public static object? EvaluateMutation(
         CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, DateTimeOffset now)
@@ -220,7 +223,7 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(current, previous, null, now);
+            var state = new EvalState(current, previous, null, now, FailsClosed(expression));
             return Evaluate(expression.Root, state);
         }
 #pragma warning disable CA1031
@@ -230,6 +233,13 @@ internal static class CelInterpreter
             return null;
         }
     }
+
+    /// <summary>
+    /// Whether this expression's arithmetic fails closed — the one place an evaluation reads
+    /// <see cref="CompiledExpression.Profile"/> for it, through <see cref="CelHookArithmetic.FailsClosed"/>, the predicate
+    /// the type checker's literal-zero-divisor refusal reads too.
+    /// </summary>
+    private static bool FailsClosed(CompiledExpression expression) => CelHookArithmetic.FailsClosed(expression.Profile);
 
     private static object? Evaluate(CelNode node, in EvalState state) => node switch
     {
@@ -294,7 +304,9 @@ internal static class CelInterpreter
     private static object? EvaluateUnary(CelUnary unary, in EvalState state) => unary.Operator switch
     {
         CelUnaryOperator.Not => !AsBoolean(Evaluate(unary.Operand, state)),
-        CelUnaryOperator.Negate => Negate(Evaluate(unary.Operand, state)),
+        CelUnaryOperator.Negate => state.FailClosed
+            ? CelHookArithmetic.Negate(Evaluate(unary.Operand, state))
+            : Negate(Evaluate(unary.Operand, state)),
         _ => null,
     };
 
@@ -302,9 +314,9 @@ internal static class CelInterpreter
     {
         CelBinaryOperator.And or CelBinaryOperator.Or => EvaluateLogical(binary, state),
         CelBinaryOperator.In => EvaluateIn(binary, state),
-        CelBinaryOperator.Add => EvaluateAdd(Evaluate(binary.Left, state), Evaluate(binary.Right, state)),
+        CelBinaryOperator.Add => EvaluateAdd(Evaluate(binary.Left, state), Evaluate(binary.Right, state), state.FailClosed),
         CelBinaryOperator.Subtract or CelBinaryOperator.Multiply or CelBinaryOperator.Divide =>
-            EvaluateArithmetic(binary.Operator, Evaluate(binary.Left, state), Evaluate(binary.Right, state)),
+            EvaluateArithmetic(binary.Operator, Evaluate(binary.Left, state), Evaluate(binary.Right, state), state.FailClosed),
         _ => EvaluateComparison(binary, state),
     };
 
@@ -313,10 +325,10 @@ internal static class CelInterpreter
     /// <see langword="null"/> either way, which is what SQL's <c>||</c> answers too — unreachable for a
     /// concatenation the compiler admitted, since it refuses an operand that can be null.
     /// </summary>
-    private static object? EvaluateAdd(object? left, object? right) =>
+    private static object? EvaluateAdd(object? left, object? right, bool failClosed) =>
         left is string leftText && right is string rightText
             ? string.Concat(leftText, rightText)
-            : EvaluateArithmetic(CelBinaryOperator.Add, left, right);
+            : EvaluateArithmetic(CelBinaryOperator.Add, left, right, failClosed);
 
     private static bool EvaluateLogical(CelBinary binary, in EvalState state)
     {
@@ -571,7 +583,18 @@ internal static class CelInterpreter
         }
     }
 
-    private static decimal? EvaluateArithmetic(CelBinaryOperator op, object? left, object? right)
+    /// <summary>
+    /// <c>+ - * /</c> over numbers: a hook profile's checked, fail-closed arithmetic (<see cref="CelHookArithmetic"/>), or
+    /// Computed's decimal arithmetic, which answers <see langword="null"/> on every failure.
+    /// </summary>
+    private static object? EvaluateArithmetic(CelBinaryOperator op, object? left, object? right, bool failClosed) =>
+        failClosed ? CelHookArithmetic.Apply(op, left, right) : ComputedArithmetic(op, left, right);
+
+    /// <summary>
+    /// Computed's arithmetic, the one its SQL rendering agrees with: every operand pair on the <see cref="decimal"/>
+    /// path; a null operand, a zero divisor or an overflow answers <see langword="null"/>.
+    /// </summary>
+    private static decimal? ComputedArithmetic(CelBinaryOperator op, object? left, object? right)
     {
         if (!TryPrepareArithmeticOperands(left, right, op, out var leftDecimal, out var rightDecimal))
         {
@@ -616,7 +639,7 @@ internal static class CelInterpreter
         : null;
 
     private readonly struct EvalState(
-        AlvoRecord current, AlvoRecord? previous, AlvoContext? context, DateTimeOffset? now = null)
+        AlvoRecord current, AlvoRecord? previous, AlvoContext? context, DateTimeOffset? now = null, bool failClosed = false)
     {
         public AlvoRecord Current { get; } = current;
 
@@ -633,5 +656,12 @@ internal static class CelInterpreter
         /// value rather than to some substitute instant if a defect ever makes it reachable.
         /// </summary>
         public DateTimeOffset? Now { get; } = now;
+
+        /// <summary>
+        /// Gets a value indicating whether arithmetic fails closed (a hook condition or mutate value, spec §5.6) rather
+        /// than answering <see langword="null"/> (a computed column). Defaults to <see langword="false"/>, so an entry
+        /// point that does not ask for it — <see cref="EvaluateScalar"/>, <see cref="EvaluateMask"/> — cannot throw.
+        /// </summary>
+        public bool FailClosed { get; } = failClosed;
     }
 }

@@ -21,13 +21,14 @@ on update and delete; `changed(<field>)`, true when an update changes the field,
 combinations are refused at apply: a delete has no `new.`, a create no `old.`.
 
 <!-- gen:cel-condition -->
-- allowed: `new.quantity <= 0.0` `old.unit_price != new.unit_price` `changed(unit_price)` `'technician' in @user.roles` `size(new.description) > 3` `lowerAscii(new.description) == 'brake pads'` `startsWith(new.description, 'Brake')`
+- allowed: `new.quantity <= 0.0` `new.quantity * new.unit_price > 1000.0` `old.unit_price != new.unit_price` `changed(unit_price)` `'technician' in @user.roles` `size(new.description) > 3` `lowerAscii(new.description) == 'brake pads'` `startsWith(new.description, 'Brake')`
 - refused: `quantity * unit_price` `now()`
 <!-- /gen:cel-condition -->
 
-A `mutate` value is a field, a literal, or a call to one of these built-in functions (calls may nest), and nothing
-more: no `@user` or `@tenant`, no arithmetic, no joins. Every function takes any value of the right type, and a
-null argument makes the value null.
+A `mutate` value is a field, a literal, arithmetic (`+ - * /`, unary `-`) or a call to one of these built-in
+functions (both may nest), and nothing more: no `@user` or `@tenant`, no joins. Every function takes any value of
+the right type, and a null argument or operand makes the value null. An Int divided by an Int stays an Int, cut
+toward zero; an overflow or a division by zero refuses the write, in a `mutate` and in a `condition` alike.
 
 <!-- gen:mutate-functions -->
 `contains` `endsWith` `int` `lowerAscii` `math.abs` `math.ceil` `math.floor` `math.greatest` `math.least` `math.round` `now` `replace` `size` `startsWith` `string` `substring` `timestamp` `trim` `upperAscii`
@@ -39,8 +40,8 @@ function whose meaning changes gets a new name (`vatRate` stays, `vatRate2` is n
 reach inside a function: one that reads stored data must take the tenant as a parameter and filter by it.
 
 <!-- gen:cel-mutate -->
-- allowed: `now()` `lowerAscii(new.description)` `new.unit_price` `'part'` `trim(new.description)`
-- refused: `quantity * 2.0` `new.quantity > 0.0` `'admin' in @user.roles` `changed(quantity)`
+- allowed: `now()` `lowerAscii(new.description)` `new.unit_price` `'part'` `trim(new.description)` `quantity * 2.0`
+- refused: `new.quantity > 0.0` `'admin' in @user.roles` `changed(quantity)`
 <!-- /gen:cel-mutate -->
 
 A `mutate` value cannot compare. For a flag decided by a comparison, let the `condition` compare and the `mutate`

@@ -173,9 +173,10 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
     /// reads as its stored value, so the collapse never stands in for "the caller did not mention it".
     /// </para>
     /// <para>
-    /// <b>A function failure is not collapsed.</b> A <see cref="CelProfile.Condition"/> tree can call a CEL
-    /// function, and a function is the one construct whose failure is reachable: <c>CelInterpreter.EvaluatePredicate</c>
-    /// lets it escape, so the write is refused (fail closed) instead of the hook silently not firing. Everything
+    /// <b>A function or operator failure is not collapsed.</b> A <see cref="CelProfile.Condition"/> tree can call a
+    /// CEL function and compute with <c>+ - * /</c>, and those are the constructs whose failure is reachable — a
+    /// function that refuses its argument, an overflow, a zero divisor (spec §5.6): <c>CelInterpreter.EvaluatePredicate</c>
+    /// lets the failure escape, so the write is refused (fail closed) instead of the hook silently not firing. Everything
     /// else in the tree still cannot throw — the node switch ends in <c>_ =&gt; null</c> and every comparison
     /// funnels through a <c>TryNormalize</c> that answers <see langword="false"/> — so the open direction remains
     /// only for the two-valued null rule above.
