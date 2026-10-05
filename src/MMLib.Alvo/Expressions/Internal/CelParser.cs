@@ -417,17 +417,10 @@ internal static class CelParser
         /// (spec §6.1). The catalog decides, never the grammar: <c>new.total</c>, a field named <c>math</c>, and an
         /// uncatalogued <c>a.b(</c> all fall through to field resolution exactly as before.
         /// </summary>
-        private string? QualifiedName(CelToken first)
-        {
-            if (Current.Kind != CelTokenKind.Dot || _index + 2 >= tokens.Count
-                || tokens[_index + 1].Kind != CelTokenKind.Identifier || tokens[_index + 2].Kind != CelTokenKind.LeftParen)
-            {
-                return null;
-            }
-
-            var name = $"{first.Text}.{tokens[_index + 1].Text}";
-            return catalog.Contains(name) ? name : null;
-        }
+        private string? QualifiedName(CelToken first) =>
+            Current.Kind == CelTokenKind.Dot && ReceiverCallName() is { } member && catalog.Contains($"{first.Text}.{member}")
+                ? $"{first.Text}.{member}"
+                : null;
 
         private CelFieldRef ParseFieldRefArgument() => ResolveFieldReference(Expect(CelTokenKind.Identifier));
 
@@ -488,7 +481,7 @@ internal static class CelParser
         {
             "lower" => LowerAsciiSuggestion,
             "all" or "exists" or "exists_one" or "map" or "filter" => MacroNotSupportedSuggestion,
-            var bare when catalog.Contains($"math.{bare}") => $"Did you mean 'math.{bare}'? " + KnownFunctionsSuggestion(string.Empty),
+            var bare when catalog.Contains($"math.{bare}") => $"Did you mean 'math.{bare}'? " + KnownFunctionsList(),
             _ => KnownFunctionsSuggestion(name),
         };
 
@@ -497,9 +490,13 @@ internal static class CelParser
         {
             var closest = NameSuggestion.Closest(name, catalog.Names);
             var lead = closest is null ? string.Empty : $"Did you mean '{closest}'? ";
-            return lead + $"Known functions: {string.Join(", ", catalog.Names)}. A function a host registers with "
-                + "AddCelFunction exists only in that host; the standalone image and the CLI know the built-in ones only.";
+            return lead + KnownFunctionsList();
         }
+
+        /// <summary>Every known name, with no "did you mean" of its own, for a fix that already names the right one.</summary>
+        private string KnownFunctionsList() =>
+            $"Known functions: {string.Join(", ", catalog.Names)}. A function a host registers with "
+            + "AddCelFunction exists only in that host; the standalone image and the CLI know the built-in ones only.";
 
         private CelChanged ParseChangedCall()
         {

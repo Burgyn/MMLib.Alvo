@@ -43,6 +43,21 @@ public sealed class CelQualifiedNameParsingTests
         refused.FixSuggestion.ShouldNotBeNull().ShouldContain(suggestion);
     }
 
+    /// <summary>
+    /// A bare math name already says where it went; a host name within two edits of the empty string must not add a
+    /// second, unrelated "Did you mean".
+    /// </summary>
+    [Fact]
+    public void A_bare_math_name_gets_one_did_you_mean_even_beside_a_short_host_name()
+    {
+        var catalog = CelFunctionCatalog.BuiltIns.With([HostCelFunction.Create("ab", (string s) => s, null)]);
+
+        var refused = Should.Throw<CelSyntaxException>(() => CelParser.Parse("abs(qty)", catalog));
+
+        refused.FixSuggestion.ShouldNotBeNull().ShouldStartWith("Did you mean 'math.abs'? Known functions: ab, ");
+        refused.FixSuggestion.Split("Did you mean").Length.ShouldBe(2);
+    }
+
     [Fact]
     public void An_unknown_member_of_the_namespace_gets_did_you_mean()
     {
