@@ -47,6 +47,11 @@ public class HookFieldsTests
     }
 
     [Fact]
+    public void A_field_key_written_twice_is_offered_once()
+        => HookFields.Writable("""{"entities":{"orders":{"fields":{"price":{"type":"decimal"},"price":{"type":"integer"}}}}}""", "orders")
+            .ShouldBe(["price"]);
+
+    [Fact]
     public void Text_that_is_not_a_descriptor_has_no_fields()
         => HookFields.Writable("not json", "orders").ShouldBeEmpty();
 

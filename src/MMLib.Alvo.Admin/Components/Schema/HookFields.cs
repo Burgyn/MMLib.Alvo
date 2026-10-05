@@ -43,6 +43,7 @@ internal static class HookFields
         var managed = AlvoManagedColumns.For(schema);
         return [.. schema.Fields
             .Where(field => !managed.Contains(field.Name) && field.ComputedExpression is null && field.Rollup is null)
-            .Select(field => field.Name)];
+            .Select(field => field.Name)
+            .Distinct(StringComparer.Ordinal)];
     }
 }

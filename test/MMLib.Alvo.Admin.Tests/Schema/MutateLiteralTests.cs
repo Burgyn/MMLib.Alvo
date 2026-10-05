@@ -19,6 +19,7 @@ public class MutateLiteralTests
     [InlineData(FieldType.Decimal, "12.50", "12.50")]
     [InlineData(FieldType.Decimal, "-0.01", "-0.01")]
     [InlineData(FieldType.Boolean, "true", "true")]
+    [InlineData(FieldType.Date, "2026-10-05", "\"2026-10-05\"")]
     [InlineData(FieldType.DateTime, "2026-10-05T12:00:00Z", "\"2026-10-05T12:00:00Z\"")]
     [InlineData(FieldType.Uuid, "3f2c1a9e-6b7d-4c8e-9f10-2a3b4c5d6e7f", "\"3f2c1a9e-6b7d-4c8e-9f10-2a3b4c5d6e7f\"")]
     public void A_literal_the_field_holds_is_written_as_its_json(FieldType type, string text, string json)
