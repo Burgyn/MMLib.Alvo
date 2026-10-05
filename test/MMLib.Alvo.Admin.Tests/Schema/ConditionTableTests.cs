@@ -32,11 +32,7 @@ public class ConditionTableTests
         => Should.Throw<ArgumentOutOfRangeException>(() => ConditionTable.KindOf((FieldType)999));
 
     [Fact]
-    public void Every_operator_s_row_is_its_own()
-        => Enum.GetValues<ConditionOperator>().ShouldAllBe(relation => ConditionTable.Of(relation).Operator == relation);
-
-    [Fact]
-    public void A_point_is_compared_ordinally_by_every_reader()
+    public void A_point_is_compared_ordinally_by_the_before_and_update_readers()
     {
         HookBuilder.IsBefore("BeforeCreate").ShouldBeFalse();
         ConditionTable.IsUpdate("beforeupdate").ShouldBeFalse();

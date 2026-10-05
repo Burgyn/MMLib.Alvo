@@ -52,6 +52,15 @@ public class DescriptorLensIntegrationTests
         DescriptorLens.IntegrationUses(json).ShouldBeEmpty();
     }
 
+    [Theory]
+    [InlineData("""{"entities": []}""")]
+    [InlineData("""{"entities": {"a": {"hooks": []}}}""")]
+    [InlineData("""{"entities": {"a": {"hooks": {"afterCreate": {}}}}}""")]
+    [InlineData("""{"entities": {"a": {"hooks": {"afterCreate": [1]}}}}""")]
+    [InlineData("""{"entities": {"a": {"hooks": {"afterCreate": [{"action": ["endpoint"]}]}}}}""")]
+    public void A_malformed_hook_container_reads_as_no_use_rather_than_throwing(string json)
+        => DescriptorLens.IntegrationUses(json).ShouldBeEmpty();
+
     [Fact]
     public void Every_hook_that_posts_or_sends_is_a_use_with_its_place()
         => DescriptorLens.IntegrationUses(Descriptor).ShouldBe(
