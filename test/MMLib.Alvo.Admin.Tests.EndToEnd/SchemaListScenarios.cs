@@ -222,10 +222,11 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
 
         await session.Page.GetByTestId("hook-new").ClickAsync();
         var editor = session.Dialog("hook-editor");
-        await editor.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "afterDelete", Exact = true }).ClickAsync();
-        await session.Page.FillAsync("#hook-endpoint", "dispatch");
+        /* A reject, not a webhook: an endpoint is picked from the declared ones (plan Task 10), and this world declares none. */
+        await editor.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeDelete", Exact = true }).ClickAsync();
+        await session.Page.FillAsync("#hook-reject", "A work order is closed, never deleted.");
         await editor.GetByTestId("hook-add").ClickAsync();
-        await session.SnackbarAsync("Hook afterDelete added to the working copy");
+        await session.SnackbarAsync("Hook beforeDelete added to the working copy");
 
         var added = session.Page.Locator("[data-testid='hook-row'][data-alvo-new]");
         await added.WaitForAsync();

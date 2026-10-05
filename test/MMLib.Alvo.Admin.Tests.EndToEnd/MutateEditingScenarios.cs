@@ -50,6 +50,7 @@ public sealed class MutateEditingScenarios(BikeWorkshopWorld world) : IClassFixt
         await session.WaitForFocusInsideAsync("hook-mutate-field-0");
         await session.ChooseAsync(Combobox(session, "Field 1"), "model_year");
         await session.WaitForFocusInsideAsync("hook-mutate-field-0");
+        await session.ChooseAgainAsync(Combobox(session, "Field 1"), "model_year", "hook-mutate-field-0");
 
         await session.Page.FillAsync("#hook-mutate-value-0", "abc");
         var fit = session.Page.GetByTestId("hook-mutate-fit-0");
@@ -76,11 +77,38 @@ public sealed class MutateEditingScenarios(BikeWorkshopWorld world) : IClassFixt
         await session.WaitForFocusInsideAsync("hook-mutate-value-0");
         await session.ChooseAsync(Combobox(session, "Set field 1 to"), "returned");
         await session.WaitForFocusInsideAsync("hook-mutate-value-0");
+        await session.ChooseAgainAsync(Combobox(session, "Set field 1 to"), "returned", "hook-mutate-value-0");
         var editor = session.Dialog("hook-editor");
         await editor.GetByTestId("hook-add").ClickAsync();
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
         (await session.Page.Locator("#hook-beforeUpdate-0").InnerTextAsync()).ShouldContain("\"status\": \"returned\"");
+    }
+
+    /// <summary>
+    /// A flag chosen writes that flag: it unticks Set to empty, and no chip reads as chosen while the box is ticked (Task 9
+    /// review carry-over).
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_flag_chosen_after_set_to_empty_writes_the_flag()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await NewMutateAsync(session, "parts", "beforeUpdate");
+        await session.ChooseAsync(Combobox(session, "Field 1"), "discontinued");
+        var flags = session.Page.GetByTestId("hook-mutate-value-0");
+        var empty = session.Page.GetByRole(AriaRole.Checkbox, new() { Name = "Set to empty", Exact = true });
+        await flags.GetByRole(AriaRole.Radio, new() { Name = "false", Exact = true }).ClickAsync();
+
+        await empty.CheckAsync();
+        await flags.GetByRole(AriaRole.Radio, new() { Checked = true }).WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await flags.GetByRole(AriaRole.Radio, new() { Name = "true", Exact = true }).ClickAsync();
+        await flags.GetByRole(AriaRole.Radio, new() { Name = "true", Exact = true, Checked = true }).WaitForAsync();
+        (await empty.IsCheckedAsync()).ShouldBeFalse();
+
+        var editor = session.Dialog("hook-editor");
+        await editor.GetByTestId("hook-add").ClickAsync();
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        (await session.Page.Locator("#hook-beforeUpdate-0").InnerTextAsync()).ShouldContain("\"discontinued\": true");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]

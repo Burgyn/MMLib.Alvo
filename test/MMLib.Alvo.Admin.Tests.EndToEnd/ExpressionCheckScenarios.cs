@@ -218,7 +218,9 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
         await session.Page.GetByTestId("hook-new").ClickAsync();
         await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "afterCreate", Exact = true }).ClickAsync();
         await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "webhook", Exact = true }).ClickAsync();
-        await session.Page.FillAsync("#hook-endpoint", "Not A Name!");
+        /* The endpoint is picked from the declared ones now, and this world declares none, so the draft is refused elsewhere
+           by its payload instead: longer than the schema's 8000 characters (plan Task 10). */
+        await session.Page.FillAsync("#hook-payload", "[" + new string('1', 8000) + "]");
 
         await session.Page.FillAsync("#hook-condition", "new.tier == 'priority'");
 

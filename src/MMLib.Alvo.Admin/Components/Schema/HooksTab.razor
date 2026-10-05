@@ -272,6 +272,7 @@ else
                 <div class="a-field-row">
                     <Field Label="@($"Field {i + 1}")" LabelId="@($"hook-mutate-field-{i}-label")">
                         <MudSelect @ref="_selects[FieldSelectId(i)]" T="string" Variant="Variant.Outlined" Value="row.Field" ValueChanged="chosen => ChooseMutateFieldAsync(i, chosen)"
+                                   OpenChanged="open => SelectOpenChanged(FieldSelectId(i), open)"
                                    aria-labelledby="@($"hook-mutate-field-{i}-label")" Class="a-mono"
                                    data-testid="@($"hook-mutate-field-{i}")">
                             @foreach (var target in MutateTargets(row))
@@ -320,6 +321,7 @@ else
             <Field Label="@($"Set field {i + 1} to")" LabelId="@($"{MutateValueId(i)}-label")">
                 <MudSelect @ref="_selects[MutateValueId(i)]" T="string" Variant="Variant.Outlined" Value="row.Text"
                            ValueChanged="text => ChooseMutateValueAsync(i, text)"
+                           OpenChanged="open => SelectOpenChanged(MutateValueId(i), open)"
                            aria-labelledby="@($"{MutateValueId(i)}-label")" aria-describedby="@LiteralDescribedBy(i, fit)"
                            Class="a-mono" Disabled="row.Empty" data-testid="@MutateValueId(i)">
                     @foreach (var value in choice.EnumValues ?? Array.Empty<string>())
@@ -375,34 +377,84 @@ else
         }
     </text>;
 
-    /// <summary>A webhook's endpoint (plan Task 10 replaces this with the picker and the payload box).</summary>
+    /// <summary>A webhook's endpoint, picked from the working copy, and its optional payload (spec §4.4, §4.5).</summary>
     private RenderFragment WebhookFields => @<text>
-        <Field Label="Endpoint" For="hook-endpoint">
+        <Field Label="Endpoint" LabelId="hook-endpoint-label">
             <ChildContent>
-                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-endpoint" Class="a-mono"
-                              aria-describedby="hook-endpoint-hint" autocomplete="off" Placeholder="dispatch"
-                              Value="Current.Endpoint" ValueChanged="text => Current.Endpoint = text ?? string.Empty" />
+                <MudSelect @ref="_selects[EndpointSelectId]" T="string" Variant="Variant.Outlined" Value="Current.Endpoint"
+                           ValueChanged="ChooseEndpointAsync" OpenChanged="open => SelectOpenChanged(EndpointSelectId, open)"
+                           aria-labelledby="hook-endpoint-label" aria-describedby="hook-endpoint-hint" Class="a-mono"
+                           data-testid="hook-endpoint" Disabled="@(_endpoints.Count == 0)">
+                    @foreach (var choice in _endpoints)
+                    {
+                        <MudSelectItem Value="@choice.Name">@choice.Label</MudSelectItem>
+                    }
+                </MudSelect>
+            </ChildContent>
+            <Hint><span id="hook-endpoint-hint" data-testid="hook-endpoint-hint">@EndpointHint</span></Hint>
+        </Field>
+        <Field Label="Payload (optional)" For="hook-payload">
+            <ChildContent>
+                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-payload" Class="a-mono" Lines="4"
+                              autocomplete="off" spellcheck="false" Placeholder="[&quot;{{new.order_number}}&quot;, {{new.total}}]"
+                              aria-describedby="@PayloadDescribedBy" Value="Current.Payload" ValueChanged="TypePayload" />
+                @PayloadNotes
+                @Findings("hook-payload")
             </ChildContent>
             <Hint>
-                A name declared under <code class="a-mono">webhooks.endpoints</code>, not a URL — the
-                managed path is the one this build delivers on.
+                Left empty, the endpoint receives the CloudEvents envelope: the whole row, <code class="a-mono">hidden</code>
+                fields included. A payload is JSON around <code class="a-mono">{{…}}</code> placeholders over
+                <code class="a-mono">new</code>, <code class="a-mono">old</code>, <code class="a-mono">event</code> and
+                <code class="a-mono">@@user.id</code> — in quotes for text (<code class="a-mono">"{{new.order_number}}"</code>),
+                bare for a value (<code class="a-mono">[{{new.total}}]</code>). This build reads a <code class="a-mono">{</code>
+                or <code class="a-mono">}</code> outside a placeholder as JSONata and refuses it, so an object payload is
+                refused today — write an array.
+                @ChordHint.Of(_editing is null ? "adds the hook to the working copy" : "saves the hook to the working copy")
             </Hint>
         </Field>
     </text>;
 
-    /// <summary>An email's template and recipient (plan Task 10 replaces this with the picker and the checked box).</summary>
+    /// <summary>What the payload box says without asking the server: too long, or not checked until an endpoint is declared.</summary>
+    private RenderFragment PayloadNotes => @<text>
+        @if (Current.Payload.Length > HookBuilder.MaxPayloadLength)
+        {
+            <p class="a-field__problem" id="hook-payload-length" data-testid="hook-payload-length">
+                This payload is @Current.Payload.Length characters; a payload holds at most @HookBuilder.MaxPayloadLength.
+            </p>
+        }
+        else if (Current.Payload.Length > 0 && !EndpointDeclared)
+        {
+            <p class="a-hint" id="hook-payload-pending" data-testid="hook-payload-pending">Checked once a declared endpoint is chosen.</p>
+        }
+    </text>;
+
+    /// <summary>An email's template, picked from the working copy, and its recipient, checked as typed (spec §4.2, §4.4).</summary>
     private RenderFragment EmailFields => @<text>
-        <div class="a-field-row">
-            <Field Label="Template" For="hook-template">
-                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-template"
-                              Class="a-mono" autocomplete="off" Placeholder="work_order_completed"
-                              Value="Current.Template" ValueChanged="text => Current.Template = text ?? string.Empty" />
-            </Field>
-            <Field Label="To" For="hook-to">
-                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-to"
-                              Class="a-mono" autocomplete="off" Placeholder="{{new.contact_email}}"
-                              Value="Current.To" ValueChanged="text => Current.To = text ?? string.Empty" />
-            </Field>
-        </div>
+        <Field Label="Template" LabelId="hook-template-label">
+            <ChildContent>
+                <MudSelect @ref="_selects[TemplateSelectId]" T="string" Variant="Variant.Outlined" Value="Current.Template"
+                           ValueChanged="ChooseTemplateAsync" OpenChanged="open => SelectOpenChanged(TemplateSelectId, open)"
+                           aria-labelledby="hook-template-label" aria-describedby="hook-template-hint" Class="a-mono"
+                           data-testid="hook-template" Disabled="@(_templates.Count == 0)">
+                    @foreach (var choice in _templates)
+                    {
+                        <MudSelectItem Value="@choice.Name">@choice.Label</MudSelectItem>
+                    }
+                </MudSelect>
+            </ChildContent>
+            <Hint><span id="hook-template-hint" data-testid="hook-template-hint">@TemplateHint</span></Hint>
+        </Field>
+        <Field Label="To" For="hook-to">
+            <ChildContent>
+                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-to" Class="a-mono" autocomplete="off"
+                              Placeholder="{{new.contact_email}}" aria-describedby="@Described("hook-to")"
+                              Value="Current.To" ValueChanged="TypeTo" />
+                @Findings("hook-to")
+            </ChildContent>
+            <Hint>
+                One address, or a <code class="a-mono">{{…}}</code> placeholder such as
+                <code class="a-mono">{{new.contact_email}}</code>, on one line. Checked once a declared template is chosen.
+            </Hint>
+        </Field>
     </text>;
 }

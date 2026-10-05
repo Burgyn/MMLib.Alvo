@@ -115,6 +115,25 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
         await combobox.Filter(new() { HasTextRegex = new Regex($"^{Regex.Escape(option)}$") }).WaitForAsync().ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Chooses the option a select already shows, and waits until its list has gone and focus is back inside
+    /// <paramref name="testId"/> — never left on <c>&lt;body&gt;</c>, outside the sheet.
+    /// </summary>
+    /// <remarks>
+    /// A re-choice of the same value is its own case: the library closes the list without raising a value change, so
+    /// nothing a choice runs runs, and focus, left on the option it removed, falls to the page (measured in MudBlazor 9.10).
+    /// </remarks>
+    /// <param name="combobox">The select, found by role and name, already showing <paramref name="option"/>.</param>
+    /// <param name="option">The option's name, exactly.</param>
+    /// <param name="testId">The select's test id, which focus must be inside.</param>
+    public async Task ChooseAgainAsync(ILocator combobox, string option, string testId)
+    {
+        await ChooseAsync(combobox, option).ConfigureAwait(false);
+        await Page.GetByRole(AriaRole.Option, new() { Name = option, Exact = true })
+            .WaitForAsync(new() { State = WaitForSelectorState.Hidden }).ConfigureAwait(false);
+        await WaitForFocusInsideAsync(testId).ConfigureAwait(false);
+    }
+
     /// <summary>Types a hook condition as CEL into the open hook sheet.</summary>
     /// <remarks>One place for every scenario: the guided form (plan Task 19) puts a mode switch in front of the box.</remarks>
     /// <param name="condition">The CEL.</param>

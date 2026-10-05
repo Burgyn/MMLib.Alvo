@@ -111,6 +111,7 @@ public partial class HooksTab
         _editing = null;
         _refusal.Clear();
         _writable = WritableFields();
+        ReadPickers();
         EnsureMutateRow();
         _adding = true;
     }
@@ -147,6 +148,8 @@ public partial class HooksTab
     {
         _ = CheckConditionAsync();
         CheckMutateValues();
+        _ = CheckPayloadAsync();
+        _ = CheckToAsync();
     }
 
     /// <summary>The condition, checked in a hook that carries the draft's action (stand-ins for blanks).</summary>

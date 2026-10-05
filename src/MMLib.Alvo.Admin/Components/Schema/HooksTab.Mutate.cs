@@ -1,5 +1,4 @@
-﻿using Microsoft.JSInterop;
-using MMLib.Alvo.Schema;
+﻿using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
@@ -13,9 +12,6 @@ public partial class HooksTab
 
     /// <summary>The fields a mutate may name, read when the sheet opens (<see cref="HookFields.Writable"/>).</summary>
     private IReadOnlyList<string> _writable = [];
-
-    /// <summary>The rows' selects by id (<see cref="FieldSelectId"/>, <see cref="MutateValueId"/>), for <see cref="RefocusSelectAsync"/>.</summary>
-    private readonly Dictionary<string, MudBlazor.MudSelect<string>> _selects = new(StringComparer.Ordinal);
 
     /// <summary>How many row check keys may still hold a sentence: every key past the last row is cleared once.</summary>
     private int _mutateKeys;
@@ -54,40 +50,6 @@ public partial class HooksTab
     {
         TypeMutateText(index, value);
         return RefocusSelectAsync(MutateValueId(index));
-    }
-
-    /// <summary>
-    /// Gives focus back to a select once its choice is drawn: the library closes its list and swaps its box for the one
-    /// that shows the value, and focus, left on the list's option, fell to <c>&lt;body&gt;</c> — outside the sheet, where
-    /// Escape no longer reaches it (measured in a browser; a select inside a dialog is new here, spec §11).
-    /// </summary>
-    /// <remarks>
-    /// Through the select's own <c>FocusAsync</c>, not a selector over the library's markup. Not awaited: the library
-    /// awaits this handler before it draws the value, so focus is asked for once the handler has returned and the
-    /// current work has run (<see cref="Task.Yield"/>). Measured to hold on a first choice, a re-choice and the enum select.
-    /// </remarks>
-    private Task RefocusSelectAsync(string id)
-    {
-        if (_selects.TryGetValue(id, out var select))
-        {
-            _ = FocusWhenDrawnAsync(select);
-        }
-
-        return Task.CompletedTask;
-    }
-
-    /// <summary>Focuses the select after the current render; a select gone by then (the sheet closed) is left alone.</summary>
-    private static async Task FocusWhenDrawnAsync(MudBlazor.MudSelect<string> select)
-    {
-        await Task.Yield();
-        try
-        {
-            await select.FocusAsync();
-        }
-        catch (Exception ex) when (ex is JSException or JSDisconnectedException or ObjectDisposedException or TaskCanceledException)
-        {
-            /* Focus is a courtesy; a select or circuit that went away in between asks nothing of anyone. */
-        }
     }
 
     private void ChooseMutateMode(int index, string word)
@@ -162,7 +124,8 @@ public partial class HooksTab
 
     private string TargetLabel(string target) => _writable.Contains(target, StringComparer.Ordinal) ? target : $"{target} (not offered)";
 
-    private static IReadOnlyCollection<string> FlagSelected(MutateRow row) => row.Text.Length > 0 ? [row.Text] : [];
+    /// <summary>The chip that reads as chosen: none while Set to empty is ticked, because the row then writes no flag.</summary>
+    private static IReadOnlyCollection<string> FlagSelected(MutateRow row) => row.Empty || row.Text.Length == 0 ? [] : [row.Text];
 
     /// <summary>
     /// Why the row cannot be written — its field is not declared, or its literal does not fit it — computed on each render
