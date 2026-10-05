@@ -213,7 +213,10 @@ process. Purity, speed and thread-safety are by contract, not enforced (spec §5
 - **Overloads** are resolved by arity then argument types; an `Int` argument may bind a `Decimal` parameter
   (deviation 22), nothing else converts.
 - **Null.** A null argument for a non-nullable parameter makes the call null without invoking the body; a nullable
-  parameter receives the null.
+  parameter receives the null. A **present** argument that does not convert to the parameter's CLR type (an `Int` past
+  `int`'s range for an `int` parameter, a fraction for an `Int` one, a text that is no `Guid`) is never read as null —
+  null would make a `reject` condition `false` and let the write through — it fails the call closed, the reason naming
+  the parameter and its type (`an argument does not fit parameter 'n' (Int32)`), never the value.
 - **Failure fails closed.** A function that throws aborts evaluation as a `CelFunctionException`, which the
   interpreter's catch-alls let through: a before-hook condition or `mutate` refuses the write (HTTP 500,
   `function-failed`, the function's name and no exception text; the transaction rolls back); an after-hook condition

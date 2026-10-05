@@ -22,6 +22,21 @@ internal static class CelFunctionsWorld
             [Writer],
             new AlvoApiWorldSetup(MapAlvoProblemDetails: true, ConfigureServicesAfterAlvo: services => Register(services, normalizePhone)));
 
+    /// <summary>Gets a key that may read and write the gate world's orders.</summary>
+    internal static TestApiKey OrdersWriter { get; } = new("orders-writer", ["writer"], ["orders:read", "orders:write"]);
+
+    /// <summary>
+    /// Starts a world over <c>cel-functions-gate.alvo.json</c>, whose before-create reject is gated by
+    /// <c>tooMany(new.qty)</c> — registered with an <see cref="int"/> parameter, as a host naturally writes it.
+    /// </summary>
+    internal static Task<AlvoApiWorld> StartGateAsync() =>
+        AlvoApiWorld.FromDescriptorAsync(
+            "cel-functions-gate.alvo.json",
+            [OrdersWriter],
+            new AlvoApiWorldSetup(
+                MapAlvoProblemDetails: true,
+                ConfigureServicesAfterAlvo: services => new Builder(services).AddCelFunction("tooMany", (int n) => n > 100, "True above 100.")));
+
     /// <summary>Registers <c>normalizePhone</c> into <paramref name="services"/>, as a host's <c>AddAlvo().AddCelFunction(…)</c> would.</summary>
     /// <param name="services">The host's services, after <c>AddAlvo</c>.</param>
     /// <param name="normalizePhone">The implementation.</param>

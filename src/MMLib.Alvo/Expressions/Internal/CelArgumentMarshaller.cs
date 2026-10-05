@@ -3,26 +3,31 @@
 /// <summary>
 /// Turns the loosely typed values a record carries (<c>int</c>/<c>long</c>/<c>decimal</c>/<c>double</c>,
 /// <c>DateTimeOffset</c>/<c>DateTime</c>/<c>DateOnly</c>/text, <c>Guid</c>/text) into the CLR type a function body
-/// takes. A value that does not convert reads as <see langword="null"/> — the interpreter's existing rule for a value
-/// of an unexpected CLR type — and never throws.
+/// takes. It never throws: it answers whether a present value converts, and the caller decides what a value that does
+/// not convert means (a function call fails closed — spec R3).
 /// </summary>
 internal static class CelArgumentMarshaller
 {
-    /// <summary>The value as <paramref name="target"/>, or <see langword="null"/> when it is absent or does not convert.</summary>
-    /// <param name="value">The evaluated argument.</param>
+    /// <summary>Converts a present <paramref name="value"/> to <paramref name="target"/>.</summary>
+    /// <param name="value">The evaluated argument, never <see langword="null"/>.</param>
     /// <param name="target">The parameter's CLR type (never a <see cref="Nullable{T}"/>).</param>
-    /// <returns>The converted value, boxed, or <see langword="null"/>.</returns>
-    internal static object? Convert(object? value, System.Type target) => value is null ? null : target switch
+    /// <param name="converted">The converted value, boxed, when the conversion succeeded.</param>
+    /// <returns>Whether the value converts — exactly, with nothing lost (no truncation, no overflow, no parse guess).</returns>
+    internal static bool TryConvert(object value, System.Type target, out object? converted)
     {
-        _ when target == typeof(string) => value as string,
-        _ when target == typeof(bool) => ToBool(value),
-        _ when target == typeof(decimal) => ToDecimal(value),
-        _ when target == typeof(long) => ToInteger(value),
-        _ when target == typeof(int) => ToInt32(value),
-        _ when target == typeof(DateTimeOffset) => ToInstant(value),
-        _ when target == typeof(Guid) => ToGuid(value),
-        _ => null,
-    };
+        converted = target switch
+        {
+            _ when target == typeof(string) => value as string,
+            _ when target == typeof(bool) => ToBool(value),
+            _ when target == typeof(decimal) => ToDecimal(value),
+            _ when target == typeof(long) => ToInteger(value),
+            _ when target == typeof(int) => ToInt32(value),
+            _ when target == typeof(DateTimeOffset) => ToInstant(value),
+            _ when target == typeof(Guid) => ToGuid(value),
+            _ => null,
+        };
+        return converted is not null;
+    }
 
     /// <summary>A body's result in the representation the rest of the interpreter uses: an <c>int</c> becomes a <c>long</c>.</summary>
     /// <param name="result">What the body returned.</param>

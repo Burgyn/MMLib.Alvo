@@ -157,6 +157,39 @@ public sealed class CelFunctionWriteTests
     }
 
     [Fact]
+    public async Task A_reject_gate_still_refuses_an_integer_within_its_parameter()
+    {
+        await using var world = await CelFunctionsWorld.StartGateAsync();
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Post, "/api/orders", CelFunctionsWorld.OrdersWriter, body: new JsonObject { ["qty"] = 500 });
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+        (await world.CountRowsAsync("orders")).ShouldBe(0);
+    }
+
+    /// <summary>
+    /// The fail-open the final review reproduced: an Int past <see cref="int"/> used to marshal to null, the call to
+    /// null, the condition to false — and the reject never fired, so the row was stored.
+    /// </summary>
+    [Fact]
+    public async Task An_integer_that_does_not_fit_the_gate_function_fails_the_write_instead_of_passing_the_reject()
+    {
+        await using var world = await CelFunctionsWorld.StartGateAsync();
+
+        using var refused = await world.SendAsync(
+            HttpMethod.Post, "/api/orders", CelFunctionsWorld.OrdersWriter, body: new JsonObject { ["qty"] = 3_000_000_000L });
+
+        refused.StatusCode.ShouldBe(HttpStatusCode.InternalServerError);
+        var text = await refused.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+        text.ShouldContain("https://alvo.dev/errors/function-failed");
+        text.ShouldContain("tooMany");
+        text.ShouldContain("parameter 'n' (Int32)");
+        text.ShouldNotContain("3000000000");
+        (await world.CountRowsAsync("orders")).ShouldBe(0);
+    }
+
+    [Fact]
     public void A_function_failure_is_found_inside_a_wrapper_of_any_kind()
     {
         var failure = new CelFunctionException("f", isHost: true, new FormatException("host"));

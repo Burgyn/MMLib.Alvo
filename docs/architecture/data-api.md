@@ -999,7 +999,7 @@ why none is documented on any operation.
 | 428 | `precondition-required` | **Management API only** — the write requires `If-Match` and carried none |
 | 413, 408, 400 | `unreadable-request` | the **web server** refused the request before Alvo read it (a body over `MaxRequestBodySize`, one arriving too slowly, one whose framing broke) — same opt-in as `internal`, and likewise documented on no operation |
 | 500 | `internal` | an invariant Alvo relies on is broken — **only** in a host that called `AddAlvoProblemDetails()`; no endpoint produces it and no operation documents it |
-| 500 | `function-failed` | a CEL function failed while a write was evaluated (a host function threw, or a built-in refused) — nothing was written; the detail names the function, never the host's exception text; same opt-in as `internal` |
+| 500 | `function-failed` | a CEL function failed while a write was evaluated (a host function threw, a built-in refused, or a present argument did not fit its parameter's type) — nothing was written; the detail names the function, never the host's exception text; same opt-in as `internal` |
 
 **Two rows are marked *Management API only*, and they are in this table because the sentence above is
 exact.** The slugs are `AlvoProblemTypes.All`, one catalogue for the whole framework — so the Management

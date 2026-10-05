@@ -45,7 +45,9 @@ public static class AlvoBuilderExtensions
     /// <para>
     /// Up to four parameters of <see cref="string"/>, <see cref="long"/>, <see cref="int"/>, <see cref="decimal"/>,
     /// <see cref="bool"/>, <see cref="DateTimeOffset"/> or <see cref="Guid"/> (or a nullable one), and a result of the
-    /// same set. A null argument for a non-nullable parameter makes the call null without invoking the function.
+    /// same set. A null argument for a non-nullable parameter makes the call null without invoking the function; a
+    /// present argument that does not fit its parameter (a value past <see cref="int"/>'s range for an <see cref="int"/>)
+    /// fails the call without invoking it, exactly as a throw does — it never reads as null.
     /// Everything is checked here, at the call, so a mistake fails startup rather than an apply.
     /// </para>
     /// <para>

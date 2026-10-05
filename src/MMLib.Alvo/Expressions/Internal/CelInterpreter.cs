@@ -75,7 +75,8 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// any well-typed <see cref="CompiledExpression"/> and any <see cref="AlvoRecord"/>, including one
 /// whose values are of an unexpected CLR type (a nested dictionary, an array, a
 /// <c>System.Text.Json.JsonElement</c>) — such a value simply fails every type pattern below and
-/// collapses to <see langword="false"/>/<see langword="null"/>.
+/// collapses to <see langword="false"/>/<see langword="null"/>. The one exception is such a value passed to a
+/// function: it does not fit the parameter, and the call fails closed rather than collapsing (spec R3, §17).
 /// </para>
 /// </remarks>
 internal static class CelInterpreter

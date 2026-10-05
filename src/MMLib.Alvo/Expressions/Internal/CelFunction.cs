@@ -41,19 +41,24 @@ internal sealed record CelFunction(
     public bool IsLegacy => Body is null;
 
     /// <summary>
-    /// Calls the body with <paramref name="arguments"/> converted to each parameter's CLR type. A null (or
-    /// unconvertible) argument for a parameter that takes none makes the call null without invoking the body (spec R3).
+    /// Calls the body with <paramref name="arguments"/> converted to each parameter's CLR type. A null argument for a
+    /// parameter that takes none makes the call null without invoking the body; a nullable parameter receives it
+    /// (spec R3). A present argument that does not convert fails the call — never null, which a condition would read as
+    /// <c>false</c> and a before-hook <c>reject</c> would let through.
     /// </summary>
     /// <param name="arguments">The evaluated arguments, one per parameter.</param>
     /// <returns>The normalised result, or <see langword="null"/>.</returns>
-    /// <exception cref="CelFunctionException">The body failed; whatever it threw is the inner exception.</exception>
+    /// <exception cref="CelFunctionException">
+    /// An argument does not fit its parameter (the reason names the parameter and its type, never the value), or the
+    /// body failed (whatever it threw is the inner exception).
+    /// </exception>
     public object? Invoke(IReadOnlyList<object?> arguments)
     {
         ArgumentNullException.ThrowIfNull(arguments);
         var values = new object?[Parameters.Count];
         for (var index = 0; index < values.Length; index++)
         {
-            values[index] = CelArgumentMarshaller.Convert(arguments[index], Parameters[index].ClrType);
+            values[index] = Bind(arguments[index], Parameters[index]);
             if (values[index] is null && !Parameters[index].Nullable)
             {
                 return null;
@@ -80,6 +85,23 @@ internal sealed record CelFunction(
     /// <returns>The signature text refusals and fixes quote.</returns>
     public string Signature() =>
         $"{Name}({string.Join(", ", Parameters.Select(DescribeParameter))}) -> {ResultType}{(ResultNullable ? "?" : string.Empty)}";
+
+    /// <summary>One argument as its parameter's CLR type: null stays null, anything else converts or fails the call.</summary>
+    /// <param name="argument">The evaluated argument.</param>
+    /// <param name="parameter">The parameter it binds.</param>
+    /// <returns>The converted value, or <see langword="null"/> for a null argument.</returns>
+    /// <exception cref="CelFunctionException">The argument is present but does not convert.</exception>
+    private object? Bind(object? argument, CelFunctionArgument parameter)
+    {
+        if (argument is null)
+        {
+            return null;
+        }
+
+        return CelArgumentMarshaller.TryConvert(argument, parameter.ClrType, out var converted)
+            ? converted
+            : throw new CelFunctionException(Name, IsHost, $"an argument does not fit parameter '{parameter.Name}' ({parameter.ClrType.Name})");
+    }
 
     private object? Run(object?[] values)
     {

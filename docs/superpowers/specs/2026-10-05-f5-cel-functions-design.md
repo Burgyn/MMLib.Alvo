@@ -53,7 +53,7 @@ the profile set (deny-by-default: nothing C1 refuses becomes silently legal by a
 |---|---|---|---|
 | R1 | Host name pattern `^[a-z][a-zA-Z0-9_]*$`; may not collide with `has changed now in true false null` or any built-in | a host wanting `NormalizePhone` must rename; loosening later is additive | kept; **extended** (X3) and anchored with `\z` (a `$` admits a trailing newline in .NET); **length capped at 64** (a longer name cannot be called inside the 2,000-character expression cap; the schema's `$defs/identifier` allows 63, one fewer, deliberately not mirrored) |
 | R2 | Host functions in-process only: Condition + Mutate; refused in Rule/Computed/Access with why and where. `lowerAscii`/`now()` keep their grammar and Mutate-only profile, catalogued for discovery | persona 1 wants rules/computed first (review §3); the recipe "store with `mutate`, filter by the field" is the answer, stated in the refusal's fix | kept; cost X10 recorded |
-| R3 | `Delegate`, ≤ 4 params of `string long int decimal bool DateTimeOffset Guid` (+ nullable forms), same result set; singleton closure; non-nullable param + null → null without invoking; `T?` receives null; result nullability from the return type | a scoped service cannot be used (G3); DateOnly not accepted (#272's own example uses a date) | kept; DateOnly is open question Q5 |
+| R3 | `Delegate`, ≤ 4 params of `string long int decimal bool DateTimeOffset Guid` (+ nullable forms), same result set; singleton closure; non-nullable param + null → null without invoking; `T?` receives null; a present argument that does not convert fails closed (§17, final review); result nullability from the return type | a scoped service cannot be used (G3); DateOnly not accepted (#272's own example uses a date) | kept; DateOnly is open question Q5 |
 | R4 | A throwing host function → `CelFunctionException` (internal), rethrown past the interpreter's catch-alls, surfaced as a rolled-back write with RFC 7807 (distinct type, names the function, no exception text); fail closed; purity by contract | the hook network ban and time bound stop being structural (X7) | kept; X7 needs maintainer sign-off |
 | R5 | Public surface minimal and additive: `ICelFunctionCatalog` + `CelFunctionInfo` in Abstractions; `AddCelFunction` in core; `IAlvoManagement.GetCelFunctionsAsync` (Viewer); no Purity/Cost/Examples/Evaluation | each `IAlvoManagement` member breaks external implementers | kept except X1 (catalog interface stays internal) and X2 (nullability shown) |
 | R6 | C1 built-ins `replace(s,a,b)`, `trim(s)` (ASCII ws), `size(s)` (code points, string only), `abs(x)`, `round(x)` (one arg, half away from zero, same numeric type), interpreter only; C2 adds SQL via one `RenderFunction` default member | a semantic chosen now must be what every engine can produce later — §6 pins each against SQL | kept |
@@ -115,7 +115,7 @@ CelFunctionCatalog (singleton) = built-ins ∪ host ◄────────�
 | `CelFunctionArgument`, `CelFunction` | internal records | `Expressions/Internal/CelFunction.cs` | one overload: name, typed params (CEL type, nullability, CLR type), result, summary, host/built-in, profiles, body; `Invoke` marshals, null-propagates, wraps failures |
 | `CelBuiltInFunctions` | internal static | `Expressions/Internal/CelBuiltInFunctions.cs` | the built-in entries (legacy `lowerAscii`/`now` with no body + the five) and their bodies |
 | `CelFunctionCatalog` | internal sealed class | `Expressions/Internal/CelFunctionCatalog.cs` | name → overloads; `BuiltIns`, `With(host)`, `Names`, `Contains`, `Overloads`, `Describe()` |
-| `CelArgumentMarshaller` | internal static | `Expressions/Internal/CelArgumentMarshaller.cs` | loose runtime values → the CLR type a body takes; unconvertible → null |
+| `CelArgumentMarshaller` | internal static | `Expressions/Internal/CelArgumentMarshaller.cs` | loose runtime values → the CLR type a body takes; a present value that does not convert fails the call (§17) |
 | `CelFunctionException` | internal exception | `Expressions/Internal/CelFunctionException.cs` | function name, host flag, optional built-in reason; inner = the host's exception |
 | `HostCelFunction` | internal static | `Expressions/Internal/HostCelFunction.cs` | `Delegate` → `CelFunction`, refusing at registration what the catalog cannot honour |
 | `CelFunctionRegistration` | internal record | `Expressions/Internal/CelFunctionRegistration.cs` | the DI carrier of one host function |
@@ -176,8 +176,10 @@ walk, `OwnerComparisonCheck` and the hook-phase check (`BeforeHookCompiler.Reads
 * **Marshaller** (values arrive loosely typed — `int/long/decimal/double`, `DateTimeOffset/DateTime/DateOnly/string`,
   `Guid/string`): reuses `CelInterpreter.TryToDecimal`/`TryToDateTimeOffset` (`:556`, `:533`, made `internal`); a
   `date` column's `DateOnly` (`FilterValueReader.cs:16` documents that date columns hold one) becomes midnight UTC;
-  anything that does not convert reads as **null**, the interpreter's existing rule for a value of an unexpected CLR
-  type (`CelInterpreter.cs:72-77`). An Int outside `int`'s range reads as null for an `int` parameter.
+  a present value that does not convert **fails the call closed** (`CelFunctionException`, the reason naming the
+  parameter and its CLR type, never the value). *Superseded:* this bullet first said such a value reads as null, the
+  interpreter's rule for a value of an unexpected CLR type — the final review showed that turns a before-hook `reject`
+  off (§17).
 * **Null policy (R3):** a null argument for a non-nullable parameter → the call is null and the body is **not**
   invoked; a nullable parameter receives null. Built-ins are all non-nullable → null in, null out (= SQL).
 * **Failure policy (R4), fail closed:** any exception from a body becomes `CelFunctionException` (built-ins throw it
@@ -419,7 +421,7 @@ Condition).
 
 * **Trust boundary (X7)** — mitigated by documentation, `Provenance` in discovery, `needs-deep-review`; not enforced.
 * **A slow host function** holds row locks; no timeout. Mitigation: documented; invoked once per evaluation (pinned).
-* **Silent nulls** from unconvertible arguments (e.g. Int out of `int` range) — documented; register `long`.
+* ~~**Silent nulls** from unconvertible arguments (e.g. Int out of `int` range) — documented; register `long`.~~ Closed by the final review: such an argument fails the call closed (§17).
 * **`NullabilityInfoContext` on lambdas** relies on the compiler's nullable metadata *(unverified for every compiler
   configuration; pinned for the repo's own build by a test)*; oblivious → non-nullable is the safe side.
 * **Admin's `CelNames.Rename`** treats `name(` as a call; a call written with a space (`size (x)`, legal CEL) may be
@@ -518,6 +520,17 @@ overturn in the PR.**
   open-instance delegate, a compiled expression and a dynamic method read as non-nullable parameters (the safe
   default), and a lambda's *result* reads as may-be-null because the compiler emits no non-null return annotation
   for it — conservative, not pinned by a test.
+* **A present argument that does not convert fails closed (final review; supersedes §5.6's "reads as null").** As
+  first built, the marshaller turned any value that did not convert to its parameter's CLR type into null — an Int past
+  `int`'s range for an `int` parameter, a Decimal with a fraction for an Int one, a non-Guid text, a text for a Bool.
+  The call then answered null without running (or passed null to a `T?` parameter), `EvaluatePredicate` read null as
+  `false`, and a before-hook `reject` gated by the function did not fire: reproduced over HTTP, `qty` = 500 was refused
+  (403) and `qty` = 3,000,000,000 was stored (201). Now every conversion is consistent: a **null** argument keeps R3's
+  null propagation, and a **non-null** argument that does not convert throws `CelFunctionException` with the reason
+  "an argument does not fit parameter 'n' (Int32)" — the parameter and its type, never the value — so the write
+  answers `function-failed` and rolls back. Reason: fail-closed is this slice's headline rule (R4), and `abs` over the
+  smallest Int already fails closed rather than answering a value; a null that a condition reads as `false` is a
+  fail-open in exactly the place the rule exists to close.
 * **Test and text adapted in this task:** `SkillCoreClaimsTests` derives the Mutate-functions list from the catalog
   instead of a constant; `ManagementToolsTests` and `EmbeddedSkillsTests` count seven management tools; and the
   assistant instructions' always-in-context budget (22,758 bytes, the v3 base prompt, untouched) held only after

@@ -42,11 +42,12 @@ public sealed class CelFunctionInvocationTests
         Condition("isBlank(name)", CelFixtures.Row(("name", null)), TestCelFunctions.IsBlank).ShouldBeTrue();
 
     [Fact]
-    public void A_value_of_an_unexpected_clr_type_reads_as_null()
+    public void A_value_of_an_unexpected_clr_type_fails_the_call_without_invoking()
     {
         var calls = 0;
 
-        Mutate("count(name)", CelFixtures.Row(("name", 5)), Counting(() => calls++)).ShouldBeNull();
+        Should.Throw<CelFunctionException>(() => Mutate("count(name)", CelFixtures.Row(("name", 5)), Counting(() => calls++)))
+            .Reason.ShouldBe("an argument does not fit parameter 's' (String)");
         calls.ShouldBe(0);
     }
 
