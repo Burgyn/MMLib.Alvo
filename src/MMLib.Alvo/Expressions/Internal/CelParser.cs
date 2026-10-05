@@ -452,7 +452,7 @@ internal static class CelParser
             var field = ParseFieldRefArgument();
             RejectExtraArgument(CelCall.LowerAscii);
             Expect(CelTokenKind.RightParen);
-            return new CelCall(CelCall.LowerAscii, field);
+            return new CelCall(CelCall.LowerAscii, [field]);
         }
 
         /// <summary>
@@ -473,7 +473,7 @@ internal static class CelParser
             }
 
             Expect(CelTokenKind.RightParen);
-            return new CelCall(CelCall.Now, null);
+            return new CelCall(CelCall.Now, []);
         }
 
         private void RejectExtraArgument(string functionName)

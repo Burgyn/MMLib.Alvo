@@ -906,8 +906,9 @@ internal static class CelTypeChecker
 
             return call switch
             {
-                { Name: CelCall.LowerAscii, Argument: { } argument } => CheckLowerAsciiCall(call, argument, profileBad, position),
-                { Name: CelCall.Now, Argument: null } => (call, CelValueType.Timestamp, profileBad, position),
+                { Name: CelCall.LowerAscii, Arguments: [var argument] } => CheckLowerAsciiCall(call, argument, profileBad, position),
+                { Name: CelCall.Now, Arguments: [] } =>
+                    (call with { ResultType = CelValueType.Timestamp }, CelValueType.Timestamp, profileBad, position),
                 _ => UnrecognizedNode(call),
             };
         }
@@ -919,7 +920,7 @@ internal static class CelTypeChecker
             var argumentBad = RequireString(
                 argumentType, argumentError, $"{call.Name}(...)'s argument", argumentPosition);
 
-            return (call with { Argument = checkedArgument }, CelValueType.String, profileBad || argumentBad, position);
+            return (call with { Arguments = [checkedArgument], ResultType = CelValueType.String }, CelValueType.String, profileBad || argumentBad, position);
         }
 
         private bool RequireBool(CelValueType type, bool childError, string subject, int position)

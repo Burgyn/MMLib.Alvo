@@ -253,8 +253,8 @@ internal static class CelInterpreter
     /// </summary>
     private static object? EvaluateCall(CelCall call, in EvalState state) => call switch
     {
-        { Name: CelCall.LowerAscii, Argument: { } argument } => LowerAscii(Evaluate(argument, state)),
-        { Name: CelCall.Now, Argument: null } => state.Now,
+        { Name: CelCall.LowerAscii, Arguments: [var argument] } => LowerAscii(Evaluate(argument, state)),
+        { Name: CelCall.Now, Arguments: [] } => state.Now,
         _ => null,
     };
 
