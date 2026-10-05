@@ -104,6 +104,30 @@ public sealed class ExpressionCheckScenarios(AdminWorld world) : IClassFixture<A
         await ShouldKeepFocusAsync(session, "hook-mutate-value");
     }
 
+    /// <summary>
+    /// A check that cannot be asked — the patched field is empty, so the value has no slot — shows nothing: never the
+    /// stale flag about text no longer in the box (spec §4.3, §5 criterion 4).
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_flag_goes_when_the_next_check_cannot_be_asked_rather_than_stay_stale()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoAsync("/schema/regions");
+        await session.OpenTabAsync("On write");
+        await session.Page.GetByTestId("hook-new").ClickAsync();
+        await session.Page.GetByTestId("hook-actions").GetByRole(AriaRole.Radio, new() { Name = "mutate", Exact = true }).ClickAsync();
+        await session.Page.FillAsync("#hook-mutate-field", "name");
+        await session.Page.FillAsync("#hook-mutate-value", "new.no_such_field");
+        var finding = session.Page.GetByTestId("check-hook-mutate-value").First;
+        await finding.WaitForAsync(new() { Timeout = 3_000 });
+
+        await session.Page.FillAsync("#hook-mutate-field", string.Empty);
+        await session.Page.FillAsync("#hook-mutate-value", "new.code");
+
+        await finding.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 3_000 });
+        (await session.Page.GetByTestId("check-hook-mutate-value").CountAsync()).ShouldBe(0);
+    }
+
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task A_computed_expression_naming_an_undeclared_field_is_flagged_and_the_flag_clears_when_it_is_fixed()
     {
