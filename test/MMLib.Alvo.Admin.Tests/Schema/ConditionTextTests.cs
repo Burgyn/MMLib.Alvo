@@ -71,6 +71,26 @@ public class ConditionTextTests
         ConditionText.Row(new ConditionRow(ConditionOperator.Is, RowImage.New, "status", ConditionFieldKind.Choice, "3")).ShouldBe("new.status == '3'");
     }
 
+    [Theory]
+    [InlineData("0 || true", "new.quantity < '0 || true'")]
+    [InlineData("-5", "new.quantity < '-5'")]
+    [InlineData("1e3", "new.quantity < '1e3'")]
+    [InlineData("it's", "new.quantity < 'it\\'s'")]
+    public void A_number_box_holding_anything_but_a_number_is_written_as_a_quoted_literal_never_as_syntax(string value, string cel)
+        => ConditionText.Row(new ConditionRow(ConditionOperator.Less, RowImage.New, "quantity", ConditionFieldKind.Number, value)).ShouldBe(cel);
+
+    [Fact]
+    public void A_row_whose_value_is_null_is_written_and_judged_as_empty()
+    {
+        var literal = new ConditionRow(ConditionOperator.Is, RowImage.New, "title", ConditionFieldKind.Text, null!);
+        var role = new ConditionRow(ConditionOperator.HasRole, RowImage.New, ConditionTable.Writer, ConditionFieldKind.Text, "manager") with { Value = null! };
+
+        literal.Value.ShouldBe(string.Empty);
+        ConditionText.Row(literal).ShouldBe("new.title == ''");
+        ConditionText.Refusal(Single(role)).ShouldBe("Choose a role.");
+        ConditionText.Normalize(Single(literal)).Rows.Single().Value.ShouldBe(string.Empty);
+    }
+
     [Fact]
     public void Rows_are_joined_by_all_or_any()
     {
@@ -108,6 +128,22 @@ public class ConditionTextTests
     public void A_number_a_condition_can_hold_is_accepted(string value)
         => ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.Is, RowImage.New, "quantity", ConditionFieldKind.Number, value))).ShouldBeNull();
 
+    /// <summary>The core reads a whole number as a <c>long</c> and a decimal as a <c>decimal</c> (<c>CelParser</c>).</summary>
+    /// <param name="value">The value typed.</param>
+    [Theory]
+    [InlineData("9223372036854775808")]
+    [InlineData("99999999999999999999999999999")]
+    [InlineData("79228162514264337593543950336.5")]
+    public void A_number_beyond_what_the_core_reads_is_refused(string value)
+        => ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.Is, RowImage.New, "quantity", ConditionFieldKind.Number, value)))
+            .ShouldNotBeNull().ShouldContain("too large");
+
+    [Theory]
+    [InlineData("9223372036854775807")]
+    [InlineData("79228162514264337593543950335.0")]
+    public void The_largest_number_the_core_reads_is_accepted(string value)
+        => ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.Is, RowImage.New, "quantity", ConditionFieldKind.Number, value))).ShouldBeNull();
+
     [Fact]
     public void A_condition_longer_than_a_condition_may_be_is_refused()
         => ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.Is, RowImage.New, "title", ConditionFieldKind.Text, new string('x', 2000))))
@@ -130,6 +166,30 @@ public class ConditionTextTests
     [InlineData("next\u0085line")]
     public void A_value_with_a_control_character_the_lexer_cannot_spell_is_refused(string value)
         => ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.Is, RowImage.New, "title", ConditionFieldKind.Text, value)))
+            .ShouldNotBeNull().ShouldContain("text mode");
+
+    /// <summary>
+    /// An invisible formatting character would make the stored condition read differently from what it does (Trojan
+    /// Source, CVE-2021-42574), so the guided form refuses it in a value and in a role.
+    /// </summary>
+    /// <param name="value">The value typed.</param>
+    [Theory]
+    [InlineData("admin‮' || true")]
+    [InlineData("⁦x⁩")]
+    [InlineData("zero​width")]
+    [InlineData("soft­hyphen")]
+    [InlineData("﻿bom")]
+    public void A_value_with_an_invisible_formatting_character_is_refused(string value)
+    {
+        ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.Is, RowImage.New, "title", ConditionFieldKind.Text, value)))
+            .ShouldNotBeNull().ShouldContain("text mode");
+        ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.HasRole, RowImage.New, ConditionTable.Writer, ConditionFieldKind.Text, value)))
+            .ShouldNotBeNull().ShouldContain("text mode");
+    }
+
+    [Fact]
+    public void A_role_with_a_control_character_is_refused_as_a_value_is()
+        => ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.LacksRole, RowImage.New, ConditionTable.Writer, ConditionFieldKind.Text, "bell\u0007")))
             .ShouldNotBeNull().ShouldContain("text mode");
 
     [Fact]

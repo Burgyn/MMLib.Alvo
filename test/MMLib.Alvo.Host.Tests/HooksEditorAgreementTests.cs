@@ -4,6 +4,7 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Descriptor.Internal;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Management.Internal;
 using System.Text.Json.Nodes;
@@ -134,6 +135,69 @@ public sealed class HooksEditorAgreementTests
         tokens[0].Text.ShouldBe(value);
     }
 
+    /// <summary>
+    /// A value typed into a number box that is not a number never becomes CEL syntax: the row is safe on its own, even
+    /// while the form shows the refusal (review I1).
+    /// </summary>
+    /// <param name="value">The value typed.</param>
+    [Theory]
+    [InlineData("0 || true")]
+    [InlineData("0) || (true")]
+    [InlineData("1 && false")]
+    [InlineData("-5")]
+    [InlineData("1e3")]
+    public void A_number_box_holding_anything_but_a_number_writes_no_operator_of_its_own(string value)
+    {
+        var cel = ConditionText.Row(new ConditionRow(ConditionOperator.Less, RowImage.New, "quantity", ConditionFieldKind.Number, value));
+
+        CelLexer.Tokenize(cel).Select(token => token.Kind).ShouldBe(
+            [CelTokenKind.Identifier, CelTokenKind.Dot, CelTokenKind.Identifier, CelTokenKind.Less, CelTokenKind.StringLiteral, CelTokenKind.EndOfInput],
+            cel);
+        RightLiteral(CelParser.Parse(cel), CelBinaryOperator.Less).ShouldBe(value);
+    }
+
+    /// <summary>A number box holding a number writes it bare, which the real parser reads as that number.</summary>
+    /// <param name="value">The value typed.</param>
+    [Theory]
+    [InlineData("0")]
+    [InlineData("12")]
+    [InlineData("4.5")]
+    public void A_number_box_holding_a_number_writes_it_bare(string value)
+    {
+        var cel = ConditionText.Row(new ConditionRow(ConditionOperator.Less, RowImage.New, "quantity", ConditionFieldKind.Number, value));
+
+        cel.ShouldBe($"new.quantity < {value}");
+        CelParser.Parse(cel).ShouldBeOfType<CelBinary>().Right.ShouldBeOfType<CelLiteral>().Type.ShouldNotBe(CelValueType.String);
+    }
+
+    /// <summary>
+    /// A hostile value in a text row or a role row is read by the real parser as one comparison whose literal is exactly
+    /// the value (review minor 1).
+    /// </summary>
+    /// <param name="value">The value typed.</param>
+    [Theory]
+    [InlineData("' || true || '")]
+    [InlineData("x') || ('y")]
+    [InlineData("\\' || true || \\'")]
+    [InlineData("a\" || true || \"b")]
+    [InlineData("line\nbreak")]
+    [InlineData("čaj 中文")]
+    [InlineData("{v} {r} {f} {n}")]
+    public void A_hostile_value_stays_one_literal_of_one_comparison(string value)
+    {
+        var text = ConditionText.Row(new ConditionRow(ConditionOperator.Is, RowImage.New, "title", ConditionFieldKind.Text, value));
+        var role = ConditionText.Row(new ConditionRow(ConditionOperator.HasRole, RowImage.New, ConditionTable.Writer, ConditionFieldKind.Text, value));
+
+        var equality = CelParser.Parse(text);
+        equality.ShouldBeOfType<CelBinary>().Left.ShouldBeOfType<CelFieldRef>().FieldName.ShouldBe("title");
+        RightLiteral(equality, CelBinaryOperator.Equal).ShouldBe(value);
+
+        var membership = CelParser.Parse(role).ShouldBeOfType<CelBinary>();
+        membership.Operator.ShouldBe(CelBinaryOperator.In);
+        membership.Left.ShouldBeOfType<CelLiteral>().Value.ShouldBe(value);
+        membership.Right.ShouldBeOfType<CelContextRef>().Value.ShouldBe(CelContextValue.UserRoles);
+    }
+
     [Fact]
     public void The_template_sheet_knows_exactly_the_roots_an_email_resolves()
         => TemplateDraft.Roots.ShouldBe(TemplatePlaceholder.Roots);
@@ -179,6 +243,15 @@ public sealed class HooksEditorAgreementTests
             },
         },
     }.ToJsonString();
+
+    private static object? RightLiteral(CelNode node, CelBinaryOperator relation)
+    {
+        var binary = node.ShouldBeOfType<CelBinary>();
+        binary.Operator.ShouldBe(relation);
+        var literal = binary.Right.ShouldBeOfType<CelLiteral>();
+        literal.Type.ShouldBe(CelValueType.String);
+        return literal.Value;
+    }
 
     private static string Probe(string type)
     {

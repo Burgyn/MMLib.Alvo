@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Schema;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -10,7 +11,17 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /// <param name="Field">The field, or <see cref="ConditionTable.Writer"/> for a role row.</param>
 /// <param name="Kind">What the field is; <c>Text</c> for a role row.</param>
 /// <param name="Value">The literal unquoted, the role's name, or empty when the relation takes nothing.</param>
-internal sealed record ConditionRow(ConditionOperator Operator, RowImage Image, string Field, ConditionFieldKind Kind, string Value);
+internal sealed record ConditionRow(ConditionOperator Operator, RowImage Image, string Field, ConditionFieldKind Kind, string Value)
+{
+    private readonly string _value = Value ?? string.Empty;
+
+    /// <summary>The literal unquoted, the role's name, or empty; never <see langword="null"/>, a null is read as empty.</summary>
+    public string Value
+    {
+        get => _value;
+        init => _value = value ?? string.Empty;
+    }
+}
 
 /// <summary>A guided condition: rows joined by all (<c>&amp;&amp;</c>) or any (<c>||</c>).</summary>
 /// <param name="All">Whether every row must hold; otherwise any one.</param>
@@ -67,10 +78,23 @@ internal sealed record ConditionScope(IReadOnlyList<ConditionField> Fields, IRea
 /// is text mode. The core stays the authority: the text is judged by <c>cel/check</c> and by the apply.
 /// </para>
 /// <para>
+/// <b>Every row is safe on its own, refused or not.</b> The form may show <see cref="Refusal"/> while it still holds the text
+/// <see cref="Row"/> writes, so a value never becomes CEL syntax: a number box writes its value bare only when it is a
+/// number literal, and quotes anything else, which the core then refuses as a text compared with a number.
+/// </para>
+/// <para>
 /// Text literals use only the lexer's escapes (<c>\\ \' \n \r \t</c>, <c>CelLexer.ReadEscape</c>). The lexer has no
-/// <c>\u</c> escape and reads every other character raw, so a value beyond ASCII is written as typed; a control character
-/// it has no escape for is refused (<see cref="Refusal"/>) rather than written raw. <c>HooksEditorAgreementTests</c> lexes
-/// the quoted text with the real lexer.
+/// <c>\u</c> escape and reads every other character raw, so a value beyond ASCII is written as typed. A control character
+/// it has no escape for, and an invisible formatting character (<see cref="UnicodeCategory.Format"/>: direction overrides
+/// and isolates, zero-width marks — the Trojan Source class, CVE-2021-42574, which would make the stored condition read
+/// differently from what it does), are refused by <see cref="Refusal"/>. That includes the zero-width joiner inside some
+/// emoji sequences: rare in a condition, and text mode still writes it. A lone surrogate is not checked here because it
+/// cannot arrive: System.Text.Json refuses one on the browser's read path. <c>HooksEditorAgreementTests</c> lexes and parses
+/// the written text with the real lexer and parser.
+/// </para>
+/// <para>
+/// A field named like a CEL keyword (<c>in</c>, <c>has</c>, <c>true</c>, <c>false</c>, <c>null</c>) is written as named; the
+/// core refuses the result, and that refusal is the one shown.
 /// </para>
 /// </remarks>
 internal static partial class ConditionText
@@ -83,7 +107,7 @@ internal static partial class ConditionText
     public static string Generate(GuidedCondition condition)
         => string.Join(condition.All ? And : Or, condition.Rows.Select(Row));
 
-    /// <summary>One row's CEL, in its table format.</summary>
+    /// <summary>One row's CEL, in its table format; never syntax a value brought in, whether or not the row is refused.</summary>
     /// <param name="row">The row.</param>
     public static string Row(ConditionRow row)
     {
@@ -96,7 +120,7 @@ internal static partial class ConditionText
            "{r}" is never substituted again. */
         return spec.Operand switch
         {
-            OperandKind.Literal => text.Replace("{v}", row.Kind == ConditionFieldKind.Number ? row.Value : Quote(row.Value), StringComparison.Ordinal),
+            OperandKind.Literal => text.Replace("{v}", LiteralOf(row), StringComparison.Ordinal),
             OperandKind.Role => text.Replace("{r}", Quote(row.Value), StringComparison.Ordinal),
             _ => text,
         };
@@ -144,6 +168,9 @@ internal static partial class ConditionText
     public static GuidedCondition Normalize(GuidedCondition condition)
         => new(condition.All || condition.Rows.Count < 2, [.. condition.Rows.Select(NormalizeRow)]);
 
+    private static string LiteralOf(ConditionRow row)
+        => row.Kind == ConditionFieldKind.Number && NumberLiteral().IsMatch(row.Value) ? row.Value : Quote(row.Value);
+
     private static ConditionRow NormalizeRow(ConditionRow row)
     {
         var operand = ConditionTable.Of(row.Operator).Operand;
@@ -158,14 +185,44 @@ internal static partial class ConditionText
 
     private static string? RowRefusal(ConditionRow row) => ConditionTable.Of(row.Operator).Operand switch
     {
-        OperandKind.Literal when row.Kind == ConditionFieldKind.Number && !NumberLiteral().IsMatch(row.Value)
-            => $"'{row.Value}' is not a number a condition can hold: write digits, with a point for a decimal, such as 12 or 4.5. "
-               + "A negative number cannot be written in a condition in this build.",
-        OperandKind.Literal when row.Value.Any(character => char.IsControl(character) && character is not ('\n' or '\r' or '\t'))
-            => "This value holds a control character a condition cannot spell. Write the condition in text mode.",
+        OperandKind.Literal when row.Kind == ConditionFieldKind.Number => NumberRefusal(row.Value),
+        OperandKind.Literal => SpellingRefusal(row.Value),
         OperandKind.Role when row.Value.Length == 0 => "Choose a role.",
+        OperandKind.Role => SpellingRefusal(row.Value),
         _ => null,
     };
+
+    /// <summary>Why a number box's value cannot be written, or <see langword="null"/>.</summary>
+    /// <remarks>The range is <c>CelParser</c>'s: a whole number is read as a <c>long</c>, one with a point as a <c>decimal</c>.</remarks>
+    /// <param name="value">The value typed.</param>
+    private static string? NumberRefusal(string value)
+    {
+        if (!NumberLiteral().IsMatch(value))
+        {
+            return $"'{value}' is not a number a condition can hold: write digits, with a point for a decimal, such as 12 or 4.5. "
+                + "A negative number cannot be written in a condition in this build.";
+        }
+
+        var fits = value.Contains('.', StringComparison.Ordinal)
+            ? decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out _)
+            : long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _);
+        return fits
+            ? null
+            : $"'{value}' is too large for a condition: a whole number holds at most {long.MaxValue}, and a decimal at most {decimal.MaxValue}.";
+    }
+
+    private static string? SpellingRefusal(string value)
+    {
+        if (value.Any(character => char.IsControl(character) && character is not ('\n' or '\r' or '\t')))
+        {
+            return "This value holds a control character a condition cannot spell. Write the condition in text mode.";
+        }
+
+        return value.Any(character => char.GetUnicodeCategory(character) == UnicodeCategory.Format)
+            ? "This value holds an invisible formatting character, such as a text-direction mark, which would make the condition "
+              + "read differently from what it does. Write the condition in text mode."
+            : null;
+    }
 
     [GeneratedRegex(@"^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$", RegexOptions.CultureInvariant)]
     private static partial Regex NumberLiteral();
