@@ -240,10 +240,11 @@ framework budget (#309) — are follow-ups (spec §5.8, X14).
   refused at apply; a computed value that breaks one refuses the write **as the hook's refusal** — the family a `reject`
   uses: HTTP 403 `forbidden` (a per-row refusal in a batch, an `AlvoAuthorizationException` in process), nothing
   written, the detail naming the hook's pointer, the field and the facet, never the value. **A field the descriptor
-  flags `hidden`** — a static `true` or a per-role expression, the rule the OpenAPI document uses to leave a name out
-  (Ruling X) — is not named: its refusal names the hook's pointer only ("computed a value one of the fields it writes
+  flags `hidden`** — a static `true` or a per-role expression, the rule the OpenAPI document uses to leave an optional
+  field's name out, applied more strictly (Ruling X) — is not named: its refusal names the hook's pointer only ("computed a value one of the fields it writes
   cannot hold"), with no field, facet or limit, because a refusal naming a field the caller never sent and cannot see
-  would disclose that it exists and how wide it is. **The check runs once, on the final patch** after the whole hook
+  would disclose that it exists and how wide it is. (The text only stops naming it: a caller-driven value
+  copied into a hidden field still makes 403-versus-201 an oracle for its facets — owned by the descriptor author.) **The check runs once, on the final patch** after the whole hook
   chain (Ruling W): a later hook may shorten or replace what an earlier one wrote, and the refusal names the hook that
   last wrote the field. Measured in the core before
   any driver sees the patch, so SQLite (no length enforcement) and PostgreSQL (`varchar(n)`) give the same answer. Not

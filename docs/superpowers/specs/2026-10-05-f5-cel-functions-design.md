@@ -633,7 +633,9 @@ overturn in the PR.**
   now records which hook last wrote each field and measures the final patch after the loop; the refusal names that
   hook's pointer, because its value is the one refused. An intermediate value is never stored, so measuring it bought
   nothing. Proved over HTTP on both engines (`DataApiEngineTests`: an earlier overrun a later hook repairs → 201 and
-  the repaired value; an earlier fit a later hook overruns → 403 naming `beforeCreate/9`, not `/8`).
+  the repaired value; an earlier fit a later hook overruns → 403 naming `beforeCreate/9`, not `/8`) A *literal* outside
+  its own field's facets is still refused at apply, even when a later hook would overwrite it: a literal that can never
+  fit is an authoring error, so only a computed value gets the repair window.
 * **Ruling X — a hidden target is never named.** A `mutate` may target a `hidden` field (hook-maintained
   `phone_normalized`, `internal_score`), and the refusal named it with its facet and bound — a field the caller never
   sent and the OpenAPI document deliberately leaves out. Whether a target may be named is decided **at apply**, from
@@ -643,8 +645,12 @@ overturn in the PR.**
   `BeforeHookScope`. For such a target the detail is "The before-hook at '…' computed a value one of the fields it
   writes cannot hold. Nothing was written." — the hook's pointer only, as a `reject` names its pointer: it locates
   the descriptor rule and says nothing about the row's shape. Batch rows carry the same text. **Not fixed here, and
-  recorded:** a hook whose value *reads* a hidden field still turns 403-versus-201 into an oracle the caller can drive
-  — the same class as a `reject` gated on a hidden field, owned by the descriptor author.
+  recorded:** any caller-driven value written into a hidden field (a hook that copies `new.note` into it, or whose
+  value *reads* a hidden field) still makes 403-versus-201 an oracle for that field's facets, and the generic text
+  itself tells the caller that hook N writes *some* unpublished field — the same class as a `reject` gated on a
+  hidden field, owned by the descriptor author. The refusal text only stops naming the field. The rule is also
+  *stricter* than the document: the OpenAPI write schema still publishes a `required` hidden field's name, while
+  the refusal never names any hidden field. The detailed form (field, facet) is not logged either — a follow-up.
 * **Behaviour change for stored descriptors (M3).** Refusing an out-of-facet `mutate` literal at apply means a host
   booting from a stored descriptor that carries one now fails its boot-time apply. Recorded in `CHANGELOG.md` under
   *Changed (breaking)*: such a descriptor never worked on both engines (stored silently on SQLite, a 500 on every
