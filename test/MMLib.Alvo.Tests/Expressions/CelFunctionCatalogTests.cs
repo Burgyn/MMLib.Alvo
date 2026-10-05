@@ -20,7 +20,7 @@ public sealed class CelFunctionCatalogTests
         catalog.Names.ShouldBe(BuiltInNames);
         catalog.Overloads("math.abs").Select(o => o.ResultType).ShouldBe([CelValueType.Int, CelValueType.Decimal]);
         catalog.Overloads("math.round").Select(o => o.ResultType).ShouldBe([CelValueType.Int, CelValueType.Decimal]);
-        catalog.Functions.Where(f => f.IsLegacy).Select(f => f.Name).ShouldBe(["lowerAscii", "now"]);
+        catalog.Functions.Where(f => f.IsLegacy).Select(f => f.Name).ShouldBe(["now"]);
         catalog.Functions.Where(f => !f.IsLegacy).ShouldAllBe(f => f.Profiles.SetEquals(new[] { CelProfile.Condition, CelProfile.Mutate }));
     }
 
@@ -105,7 +105,7 @@ public sealed class CelFunctionCatalogTests
     [Fact]
     public void A_signature_names_every_parameter_its_type_and_nullability()
     {
-        CelFunctionCatalog.BuiltIns.Overloads("lowerAscii").Single().Signature().ShouldBe("lowerAscii(value: String) -> String?");
+        CelFunctionCatalog.BuiltIns.Overloads("lowerAscii").Single().Signature().ShouldBe("lowerAscii(text: String) -> String");
         CelFunctionCatalog.BuiltIns.Overloads("now").Single().Signature().ShouldBe("now() -> Timestamp");
     }
 }

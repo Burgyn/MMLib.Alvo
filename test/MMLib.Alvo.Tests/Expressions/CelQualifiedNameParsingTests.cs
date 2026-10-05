@@ -59,20 +59,13 @@ public sealed class CelQualifiedNameParsingTests
 
     [Theory]
     [InlineData("new.name.trim()", "Write trim(new.name)")]
-    [InlineData("old.name.upperAscii()", null)]
-    public void A_receiver_call_after_an_image_is_told_the_global_form(string source, string? fix)
+    [InlineData("old.name.upperAscii()", "Write upperAscii(old.name)")]
+    public void A_receiver_call_after_an_image_is_told_the_global_form(string source, string fix)
     {
         var refused = Should.Throw<CelSyntaxException>(() => CelParser.Parse(source));
 
         refused.Message.ShouldBe("Alvo has no nested field access beyond old./new.; use a single field name.");
-        if (fix is null)
-        {
-            refused.FixSuggestion.ShouldBeNull("upperAscii is not catalogued until Task 2");
-        }
-        else
-        {
-            refused.FixSuggestion.ShouldNotBeNull().ShouldStartWith(fix);
-        }
+        refused.FixSuggestion.ShouldNotBeNull().ShouldStartWith(fix);
     }
 
     [Fact]

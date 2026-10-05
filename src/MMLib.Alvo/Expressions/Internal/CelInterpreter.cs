@@ -209,9 +209,8 @@ internal static class CelInterpreter
     /// caller, and the create path turns a <see langword="null"/> patch value into an <em>absent</em> key, so a
     /// reachable failure swallowed here would silently store a column default instead of refusing the write. Apart
     /// from a catalogued function, nothing in a <see cref="CelProfile.Mutate"/> tree can throw: the profile admits
-    /// literals, field references and calls; <see cref="Evaluate"/>'s node switch ends in <c>_ =&gt; null</c>;
-    /// <c>lowerAscii</c> of a non-string is <see langword="null"/>; and <c>now()</c> reads a value the caller already
-    /// bound. The remaining <c>catch</c> is defence-in-depth, as <see cref="EvaluatePredicate"/>'s is.
+    /// literals, field references and calls; <see cref="Evaluate"/>'s node switch ends in <c>_ =&gt; null</c>; and
+    /// <c>now()</c> reads a value the caller already bound. The remaining <c>catch</c> is defence-in-depth, as <see cref="EvaluatePredicate"/>'s is.
     /// </remarks>
     public static object? EvaluateMutation(
         CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, DateTimeOffset now)
@@ -247,14 +246,13 @@ internal static class CelInterpreter
     };
 
     /// <summary>
-    /// Evaluates one of the two legacy <see cref="CelProfile.Mutate"/> calls (<c>lowerAscii</c>, <c>now</c>). <c>now()</c> reads the
-    /// instant the caller bound for this write — it is <b>not</b> a clock read, and there is deliberately no
-    /// <see cref="TimeProvider"/> in reach of this class to make one from.
+    /// Evaluates a catalogued call through the overload the type checker bound, or <c>now()</c>, the one call left with
+    /// its own grammar. <c>now()</c> reads the instant the caller bound for this write — it is <b>not</b> a clock read,
+    /// and there is deliberately no <see cref="TimeProvider"/> in reach of this class to make one from.
     /// </summary>
     private static object? EvaluateCall(CelCall call, in EvalState state) => call switch
     {
         { Function: { IsLegacy: false } function } => function.Invoke(EvaluateArguments(call.Arguments, state)),
-        { Name: CelCall.LowerAscii, Arguments: [var argument] } => LowerAscii(Evaluate(argument, state)),
         { Name: CelCall.Now, Arguments: [] } => state.Now,
         _ => null,
     };
@@ -269,47 +267,6 @@ internal static class CelInterpreter
         }
 
         return values;
-    }
-
-    /// <summary>
-    /// Applies <c>lowerAscii</c>. A value that is not a string is <see langword="null"/> rather than an
-    /// error: the type checker already refused a non-string argument, so this can only be reached by a
-    /// record whose stored value disagrees with its declared type, and this class never throws.
-    /// </summary>
-    private static string? LowerAscii(object? value) => value is string text ? FoldAsciiUpperCase(text) : null;
-
-    /// <summary>
-    /// Folds <c>A</c>–<c>Z</c> and nothing else — spelled out character by character, so nothing
-    /// culture- or Unicode-sensitive can creep in later.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b><see cref="string.ToLowerInvariant"/> is not equivalent and must never replace this.</b> It folds
-    /// every non-ASCII letter it has a mapping for — <c>Ž</c>→<c>ž</c>, <c>Ä</c>→<c>ä</c>, <c>Σ</c>→<c>σ</c>,
-    /// and <c>ẞ</c>→<c>ß</c>, which no reverse mapping recovers — and a stored value folded that way is a
-    /// permanently wrong row: fixing the expression afterwards does not restore the bytes.
-    /// </para>
-    /// <para>
-    /// <b>The set of characters it folds is a runtime detail, which is the deeper reason this loop is
-    /// positive rather than a list of exceptions.</b> <c>İ</c> (U+0130) is the famous trap and is exactly
-    /// where the reputation misleads: .NET 10's invariant casing leaves it <em>unchanged</em> (measured, not
-    /// assumed), while a full Unicode case mapping folds it to two code points. Either way an author asked
-    /// for an ASCII fold and must get one on every runtime and ICU version — which "fold A–Z" satisfies by
-    /// construction and "fold, but skip the ones we know about" cannot.
-    /// </para>
-    /// </remarks>
-    private static string FoldAsciiUpperCase(string value)
-    {
-        var folded = value.ToCharArray();
-        for (var index = 0; index < folded.Length; index++)
-        {
-            if (folded[index] is >= 'A' and <= 'Z')
-            {
-                folded[index] = (char)(folded[index] + 32);
-            }
-        }
-
-        return new string(folded);
     }
 
     private static object? ResolveField(CelFieldRef fieldRef, in EvalState state)

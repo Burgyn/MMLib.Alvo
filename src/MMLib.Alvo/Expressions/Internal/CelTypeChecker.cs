@@ -136,7 +136,7 @@ internal static class CelTypeChecker
     /// <summary>
     /// The one positive table that decides where each construct is legal. <see cref="CelProfile.Mutate"/>
     /// holds five rows today — literals, current-row and <c>old.</c>/<c>new.</c> field references, the
-    /// allow-listed legacy call and catalogued function calls — which is exactly what its functions and their
+    /// <c>now()</c> call and catalogued function calls — which is exactly what its functions and their
     /// arguments need; <see cref="CelProfile.Condition"/> also holds the catalogued function call. The
     /// remaining rows (logical, comparison, <c>in</c>, <c>has</c>, arithmetic, ternary, <c>changed</c>,
     /// context references) are <b>not</b> a decision that <c>mutate</c> may never use them; they are simply
@@ -906,10 +906,8 @@ internal static class CelTypeChecker
         }
 
         /// <summary>
-        /// Checks one of the two legacy <see cref="CelProfile.Mutate"/> calls (<c>lowerAscii</c>, <c>now</c>). The profile gate
-        /// runs first and unconditionally, so a call outside <see cref="CelProfile.Mutate"/> is reported for
-        /// the profile it is in even when its argument is also wrong — one error per independent problem,
-        /// which is this checker's whole contract.
+        /// Checks <c>now()</c>, the one call left with its own grammar and the <see cref="CelConstructKind.Call"/> row's
+        /// only member, so it is legal in <see cref="CelProfile.Mutate"/> alone.
         /// </summary>
         private (CelNode, CelValueType, bool, int) CheckLegacyCall(CelCall call)
         {
@@ -922,28 +920,17 @@ internal static class CelTypeChecker
 
             return call switch
             {
-                { Name: CelCall.LowerAscii, Arguments: [var argument] } => CheckLowerAsciiCall(call, argument, profileBad, position),
                 { Name: CelCall.Now, Arguments: [] } =>
                     (call with { ResultType = CelValueType.Timestamp }, CelValueType.Timestamp, profileBad, position),
                 _ => UnrecognizedNode(call),
             };
         }
 
-        private (CelNode, CelValueType, bool, int) CheckLowerAsciiCall(
-            CelCall call, CelNode argument, bool profileBad, int position)
-        {
-            var (checkedArgument, argumentType, argumentError, argumentPosition) = CheckNode(argument);
-            var argumentBad = RequireString(
-                argumentType, argumentError, $"{call.Name}(...)'s argument", argumentPosition);
-
-            return (call with { Arguments = [checkedArgument], ResultType = CelValueType.String }, CelValueType.String, profileBad || argumentBad, position);
-        }
-
         private (CelNode, CelValueType, bool, int) CheckCall(CelCall call) =>
-            call.Name is CelCall.LowerAscii or CelCall.Now ? CheckLegacyCall(call) : CheckCatalogCall(call);
+            call.Name is CelCall.Now ? CheckLegacyCall(call) : CheckCatalogCall(call);
 
         /// <summary>
-        /// Checks a call to a catalogued function: the profile gate first (as the legacy calls do), then every argument,
+        /// Checks a call to a catalogued function: the profile gate first (as <c>now()</c>'s check does), then every argument,
         /// then overload resolution. A bad argument stops the call from adding a second, cascading error.
         /// </summary>
         private (CelNode, CelValueType, bool, int) CheckCatalogCall(CelCall call)
@@ -1100,25 +1087,6 @@ internal static class CelTypeChecker
             Errors.Add(new CelCompilationError(
                 $"{subject} must be boolean; found {type}.",
                 "Use a comparison (field == value) or has(field) so this operand evaluates to true/false.",
-                position));
-            return true;
-        }
-
-        private bool RequireString(CelValueType type, bool childError, string subject, int position)
-        {
-            if (childError)
-            {
-                return true;
-            }
-
-            if (type == CelValueType.String)
-            {
-                return false;
-            }
-
-            Errors.Add(new CelCompilationError(
-                $"{subject} must be a string; found {type}.",
-                "Pass a string, text or enum field, or drop the fold.",
                 position));
             return true;
         }

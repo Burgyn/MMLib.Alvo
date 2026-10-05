@@ -24,8 +24,7 @@ internal sealed record CelFunctionArgument(string Name, CelValueType Type, bool 
 /// <param name="IsHost">Whether the embedding host registered it (as opposed to a built-in).</param>
 /// <param name="Profiles">The profiles the function may appear in, inside the type checker's ceiling.</param>
 /// <param name="Body">
-/// The implementation, or <see langword="null"/> for <c>lowerAscii</c> and <c>now</c>, which keep their own grammar and
-/// are evaluated by name.
+/// The implementation, or <see langword="null"/> for <c>now</c>, which keeps its own grammar and is evaluated by name.
 /// </param>
 internal sealed record CelFunction(
     string Name,
@@ -37,7 +36,7 @@ internal sealed record CelFunction(
     IReadOnlySet<CelProfile> Profiles,
     Func<object?[], object?>? Body)
 {
-    /// <summary>Gets a value indicating whether this is one of the two calls with their own grammar, evaluated by name.</summary>
+    /// <summary>Gets a value indicating whether this is <c>now</c>, the one call with its own grammar, evaluated by name.</summary>
     public bool IsLegacy => Body is null;
 
     /// <summary>

@@ -108,7 +108,6 @@ public class CelParserGrammarTests
     [Theory]
     [InlineData("has(a, b)", "has()")]
     [InlineData("changed(a, b)", "changed()")]
-    [InlineData("lowerAscii(a, b)", "lowerAscii()")]
     [InlineData("now(a)", "now()")]
     public void A_call_with_a_wrong_argument_list_names_the_function(string source, string expected)
     {

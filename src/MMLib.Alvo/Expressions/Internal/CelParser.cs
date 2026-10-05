@@ -78,7 +78,7 @@ internal static class CelParser
         /// culture-sensitive one that would rewrite a stored value beyond recovery.
         /// </summary>
         private const string LowerAsciiSuggestion =
-            "CEL spells a lower-case fold lowerAscii, and it folds A-Z only: write lowerAscii(field). A "
+            "CEL spells a lower-case fold lowerAscii, and it folds A-Z only: write lowerAscii(text). A "
             + "Unicode-wide fold also rewrites non-ASCII letters ('Ä' becomes 'ä', 'ẞ' becomes 'ß'), and a "
             + "stored value folded that way is permanently wrong.";
 
@@ -442,7 +442,7 @@ internal static class CelParser
         }
 
         /// <summary>
-        /// The closed set of identifiers that may be followed by <c>(</c>: the three calls with their own grammar, then
+        /// The closed set of identifiers that may be followed by <c>(</c>: the two calls with their own grammar, then
         /// whatever the catalog knows. A <b>positive</b> list on purpose — a name missing from it is refused, so a
         /// function is unavailable until somebody catalogues it. Profiles are not decided here: the parser is
         /// profile-blind and the type checker gates every call.
@@ -450,7 +450,6 @@ internal static class CelParser
         private CelNode ParseCall(CelToken identifierToken) => identifierToken.Text switch
         {
             "changed" => ParseChangedCall(),
-            CelCall.LowerAscii => ParseLowerAsciiCall(),
             CelCall.Now => ParseNowCall(),
             var name when catalog.Contains(name) => ParseCatalogCall(name),
             _ => throw UnrecognizedFunction(identifierToken),
@@ -511,21 +510,6 @@ internal static class CelParser
         }
 
         /// <summary>
-        /// Parses <c>lowerAscii(field)</c>. The argument is a field reference — optionally
-        /// <c>old.</c>/<c>new.</c>-qualified — and not an arbitrary expression, the same narrowing
-        /// <c>has(field)</c> and <c>changed(field)</c> already use. Admitting a general expression later
-        /// accepts strictly more source than this does and so cannot break an authored descriptor; starting
-        /// general and narrowing afterwards would.
-        /// </summary>
-        private CelCall ParseLowerAsciiCall()
-        {
-            Expect(CelTokenKind.LeftParen);
-            var field = ParseFieldRefArgument();
-            ExpectFieldArgumentEnd(CelCall.LowerAscii);
-            return new CelCall(CelCall.LowerAscii, [field]);
-        }
-
-        /// <summary>
         /// Parses <c>now()</c>, which takes no arguments — and says so rather than reporting a missing
         /// identifier, because "now() takes no arguments" is the sentence that tells an author the value is
         /// the write's own instant and not something they get to choose.
@@ -546,7 +530,7 @@ internal static class CelParser
             return new CelCall(CelCall.Now, []);
         }
 
-        /// <summary>Closes a field-only call (<c>has</c>, <c>changed</c>, <c>lowerAscii</c>) after its one field.</summary>
+        /// <summary>Closes a field-only call (<c>has</c>, <c>changed</c>) after its one field.</summary>
         /// <param name="functionName">The field-only call being parsed.</param>
         private void ExpectFieldArgumentEnd(string functionName)
         {
@@ -556,7 +540,7 @@ internal static class CelParser
         }
 
         /// <summary>
-        /// Refuses a call where a field-only call wants its field — <c>lowerAscii(trim(name))</c>. The message and
+        /// Refuses a call where a field-only call wants its field — <c>changed(trim(name))</c>. The message and
         /// position are exactly the token mismatch this always reported (the corpus pins them); the fix is the point.
         /// </summary>
         /// <param name="functionName">The field-only call being parsed.</param>
@@ -576,19 +560,14 @@ internal static class CelParser
         /// <param name="inner">The name written where the field belongs.</param>
         private string FieldOnlyCallFix(string functionName, string inner)
         {
-            var nestable = catalog.Contains(inner) && inner is not (CelCall.LowerAscii or CelCall.Now);
+            var nestable = catalog.Contains(inner) && inner is not CelCall.Now;
             var reads = nestable ? $"the field {inner}(...) reads" : "the field itself";
             return functionName switch
             {
                 "has" => $"has takes one field reference, never a call: write has(field) for {reads}; a call's result is "
                     + "compared, never tested with has.",
-                "changed" => $"changed takes one field reference, never a call: write changed(field) for {reads}"
+                _ => $"changed takes one field reference, never a call: write changed(field) for {reads}"
                     + (nestable ? $", or compare the results directly, e.g. {inner}(old.field) != {inner}(new.field)." : "."),
-                _ => $"lowerAscii takes a field, never a call: write lowerAscii(field) for {reads}"
-                    + (nestable
-                        ? ". A function takes any expression, so nest the other way when that means the same, e.g. "
-                            + $"{inner}(lowerAscii(field)), or write {inner}(...)'s result into a field with a mutate and fold that field."
-                        : "."),
             };
         }
 
