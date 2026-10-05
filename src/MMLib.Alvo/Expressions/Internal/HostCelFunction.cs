@@ -67,6 +67,7 @@ internal static partial class HostCelFunction
 
     private static string? ReservedReason(string name) => name switch
     {
+        _ when CelFunctionCatalog.BuiltIns.Contains(name) => "it is a built-in function",
         "has" or "changed" => "it is one of Alvo's own CEL macros",
         "in" or "true" or "false" or "null" => "it is a CEL keyword",
         "old" or "new" => "it names a row image (old./new.)",
@@ -76,7 +77,6 @@ internal static partial class HostCelFunction
         "int" or "uint" or "double" or "bool" or "string" or "bytes" or "list" or "timestamp" or "duration" or "dyn"
             or "type" or "contains" or "startsWith" or "endsWith" or "matches" => "it is a standard CEL type or function name, which an agent reads as CEL syntax",
         "math" => "it is the namespace of CEL's math functions",
-        _ when CelFunctionCatalog.BuiltIns.Contains(name) => "it is a built-in function",
         _ => null,
     };
 

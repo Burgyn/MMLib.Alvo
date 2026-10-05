@@ -99,6 +99,14 @@ public sealed class CelBuiltInPropertyTests
                 },
                 iter: Iterations);
 
+    [Fact]
+    public void String_then_timestamp_is_the_same_instant() =>
+        Gen.DateTimeOffset.Sample(value => CelBuiltInFunctions.TimestampOf(CelBuiltInFunctions.StringOf(value)) == value, iter: 2_000);
+
+    [Fact]
+    public void String_then_int_is_the_same_whole_number() =>
+        Gen.Long.Sample(value => CelBuiltInFunctions.IntOf(CelBuiltInFunctions.StringOf(value)) == value, iter: 2_000);
+
     /// <summary>Equal by code point; <c>EnumerateRunes</c> maps a lone surrogate to U+FFFD on both sides, as <c>size</c> counts it.</summary>
     private static bool SameCodePoints(string actual, string expected) =>
         actual.EnumerateRunes().Select(rune => rune.Value).SequenceEqual(expected.EnumerateRunes().Select(rune => rune.Value));

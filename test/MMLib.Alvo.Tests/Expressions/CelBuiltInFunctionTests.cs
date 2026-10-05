@@ -154,12 +154,24 @@ public sealed class CelBuiltInFunctionTests
     [Fact]
     public void Every_built_in_body_returns_exactly_its_declared_clr_type()
     {
-        // Int is a position inside the String sample, so substring's body answers rather than fails closed.
-        var samples = new Dictionary<CelValueType, object> { [CelValueType.Int] = 1L, [CelValueType.Decimal] = -3.5m, [CelValueType.String] = " a " };
+        // Int is a position inside the String sample, so substring's body answers rather than fails closed; the two
+        // conversions that read their text get a text they accept, for the same reason.
+        var samples = new Dictionary<CelValueType, object>
+        {
+            [CelValueType.Int] = 1L,
+            [CelValueType.Decimal] = -3.5m,
+            [CelValueType.String] = " a ",
+            [CelValueType.Bool] = true,
+            [CelValueType.Uuid] = Guid.Empty,
+            [CelValueType.Timestamp] = DateTimeOffset.UnixEpoch,
+        };
+        var texts = new Dictionary<string, object> { ["int"] = "-7", ["timestamp"] = "2026-10-05T12:00:00Z" };
 
         foreach (var function in CelBuiltInFunctions.All.Where(f => !f.IsLegacy))
         {
-            var arguments = function.Parameters.Select(p => samples[p.Type]).ToArray();
+            var arguments = function.Parameters
+                .Select(p => p.Type == CelValueType.String && texts.TryGetValue(function.Name, out var text) ? text : samples[p.Type])
+                .ToArray();
             var result = function.Body!(arguments);
 
             result.ShouldBeOfType(CelBuiltInFunctions.ClrTypeOf(function.ResultType), function.Signature());

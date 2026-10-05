@@ -957,10 +957,39 @@ internal static class CelTypeChecker
         private (CelNode, CelValueType, bool, int) Unbound(CelCall call, int position) =>
             (call, catalog.Overloads(call.Name)[0].ResultType, true, position);
 
-        private (CelNode, CelValueType, bool, int) Bind(CelCall call, CelFunction? overload, bool profileBad, int position) =>
-            overload is null
-                ? Unbound(call, position)
-                : (call with { ResultType = overload.ResultType, Function = overload }, overload.ResultType, profileBad, position);
+        private (CelNode, CelValueType, bool, int) Bind(CelCall call, CelFunction? overload, bool profileBad, int position)
+        {
+            if (overload is null)
+            {
+                return Unbound(call, position);
+            }
+
+            var refused = !profileBad && RefusesDateText(call, overload, position);
+            return (call with { ResultType = overload.ResultType, Function = overload }, overload.ResultType, profileBad || refused, position);
+        }
+
+        /// <summary>
+        /// <c>string()</c> over a <c>date</c> field (spec §6.5, E18): its value reaches CEL as midnight UTC, and the text
+        /// that would pin is one a later Date type would want to change — after a hook had stored it. A field reference is
+        /// the only way a <c>date</c> reaches a call in Condition or Mutate, so it is the whole surface.
+        /// </summary>
+        private bool RefusesDateText(CelCall call, CelFunction overload, int position)
+        {
+            if (overload is not { Name: "string", IsHost: false, Parameters: [{ Type: CelValueType.Timestamp }] }
+                || call.Arguments is not [CelFieldRef fieldRef]
+                || ResolveField(fieldRef.FieldName) is not { Type: FieldType.Date })
+            {
+                return false;
+            }
+
+            Errors.Add(new CelCompilationError(
+                $"'string(...)' cannot take the date field '{fieldRef.FieldName}' yet: its text form is not settled, and a hook "
+                + "that stored one could not change it later.",
+                $"Store the date's text from the client, or make '{fieldRef.FieldName}' a datetime field, whose text is an RFC "
+                + "3339 instant.",
+                position));
+            return true;
+        }
 
         /// <summary>
         /// The two deny-by-default gates: the <see cref="CelConstructKind.FunctionCall"/> row is the ceiling, and the

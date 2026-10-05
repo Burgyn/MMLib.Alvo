@@ -537,9 +537,11 @@ Continuing C1's F-series (`cel.md` deviations 25–36):
   form (standard and cel-go: member form). F1 extended; receiver syntax is deferred, additively (E3).
 * **F12 (28)** — `string(Decimal)` writes the shortest form (no trailing fractional zeros). CEL has no decimal; this is
   `string(double)`'s behaviour and the only engine-agnostic answer (a column's scale differs per engine).
-  `string(Timestamp)` always writes UTC (`Z`). Whether cel-go keeps the offset a timestamp was parsed with is
-  *unverified*; plan Task 5 reads cel-go's timestamp-to-string conversion and, if it keeps the offset, records that here
-  and in cel.md as part of F12 (Alvo stores instants, not offsets, so UTC stays the answer).
+  `string(Timestamp)` always writes UTC (`Z`). cel-go keeps the parsed offset; Alvo writes UTC because it stores
+  instants, not offsets. (Read in Task 5, cel-go v0.29.2: `String.ConvertToType(TimestampType)` is
+  `time.Parse(time.RFC3339, …)`, which keeps the text's offset, and `Timestamp.ConvertToType(StringType)` is
+  `t.Format(time.RFC3339Nano)` with no `UTC()`, so `string(timestamp('2026-10-05T14:00:00+02:00'))` is
+  `'2026-10-05T14:00:00+02:00'` there and `'2026-10-05T12:00:00Z'` in Alvo. Carried into cel.md deviation 28 in Task 17.)
 * **F13 (29)** — `timestamp(text)` admits upper-case `T`/`Z` only and keeps 100 ns of the fraction (CEL: nanoseconds).
   .NET's resolution; Go's RFC 3339 parser is case-sensitive too.
 * **F14 (30)** — `int(String)` admits `[+-]?[0-9]+` only (no whitespace, no other base) = Go's `ParseInt(s, 10, 64)`.

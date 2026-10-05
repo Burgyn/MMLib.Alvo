@@ -35,6 +35,8 @@ internal static partial class CelBuiltInFunctions
             RoundToDigits, Substring(withEnd: false), Substring(withEnd: true), Contains, StartsWith, EndsWith,
             Ceil(CelValueType.Int), Ceil(CelValueType.Decimal), Floor(CelValueType.Int), Floor(CelValueType.Decimal),
             Greatest(CelValueType.Int), Greatest(CelValueType.Decimal), Least(CelValueType.Int), Least(CelValueType.Decimal),
+            String(CelValueType.Int), String(CelValueType.Decimal), String(CelValueType.Bool), String(CelValueType.Uuid), String(CelValueType.Timestamp),
+            Int(CelValueType.Decimal), Int(CelValueType.String), Timestamp,
         ];
 
     private static CelFunction Replace => InProcess(
