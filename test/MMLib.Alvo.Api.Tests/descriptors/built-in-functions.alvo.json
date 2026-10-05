@@ -1,0 +1,60 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "built-in-functions",
+  "description": "One entity whose before-hooks use the built-in functions and the hook operators of slice D: a text test and an integer division gate a reject, a mutate normalises, cuts, prefixes and rounds the written values, and an update's mutate takes a substring past the end of short data. The Data API's own write path must evaluate all of them, refuse on a reject, and fail the write closed on a data-dependent failure.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["writer"]
+  },
+  "access": {
+    "viewer": "'writer' in @user.roles"
+  },
+  "entities": {
+    "frames": {
+      "description": "A bike frame; its hooks shape the code, label, tag and gross price as it is written.",
+      "fields": {
+        "code": { "type": "string", "maxLength": 32 },
+        "label": { "type": "string", "maxLength": 12 },
+        "tag": { "type": "string", "maxLength": 40 },
+        "owner_email": { "type": "string", "maxLength": 160, "format": "email" },
+        "price": { "type": "decimal", "precision": 10, "scale": 2 },
+        "gross": { "type": "decimal", "precision": 10, "scale": 2 },
+        "ratio": { "type": "integer" },
+        "divisor": { "type": "integer" }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      },
+      "hooks": {
+        "beforeCreate": [
+          {
+            "condition": "endsWith(lowerAscii(new.owner_email), '@example.com')",
+            "action": { "reject": "Use the owner's real email address." }
+          },
+          {
+            "condition": "new.ratio / new.divisor > 10",
+            "action": { "reject": "The ratio is too high." }
+          },
+          {
+            "action": {
+              "mutate": {
+                "code": { "$cel": "upperAscii(replace(trim(new.code), ' ', ''))" },
+                "label": { "$cel": "upperAscii(substring(replace(trim(new.code), ' ', ''), 0, math.least(size(replace(trim(new.code), ' ', '')), 12)))" },
+                "tag": { "$cel": "'FR-' + upperAscii(trim(new.code))" },
+                "gross": { "$cel": "math.round(new.price * 1.2, 2)" }
+              }
+            }
+          }
+        ],
+        "beforeUpdate": [
+          { "action": { "mutate": { "label": { "$cel": "substring(new.code, 20)" } } } }
+        ]
+      }
+    }
+  }
+}
