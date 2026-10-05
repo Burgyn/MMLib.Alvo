@@ -91,6 +91,10 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("afterHook", AfterCreate, "new.quantity >"),
         ("afterHook", AfterCreate, "null"),
         ("afterHook", AfterCreate, "normalizePhone(new.note) == 'x'"),
+        ("afterHook", AfterCreate, "size(new.note) > 3"),
+        ("afterHook", AfterCreate, "normalizePhone(@user.id) == 'x'"),
+        ("afterHook", AfterCreate, "replace(new.note, 'a', @tenant.id) == 'x'"),
+        ("beforeHook", BeforeCreate, "normalizePhone(@user.id) == 'x'"),
         ("mutate", Mutate + "note", "'closed'"),
         ("mutate", Mutate + "closed_at", "now()"),
         ("mutate", Mutate + "quantity", "'abc'"),
@@ -228,6 +232,27 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         var finding = verdict.Findings.ShouldHaveSingleItem();
         finding.Message.ShouldStartWith("'normalizePhone(...)' is not available in the Rule profile; it is available in Condition and Mutate.");
         finding.FixSuggestion.ShouldNotBeNull().ShouldContain("before-hook mutate");
+    }
+
+    /// <summary>
+    /// Agreement is not correctness (both sides share the validator), so pin the after-hook verdicts: a call over a
+    /// row field reads no caller context and is accepted. (No registered function accepts a context value, so the
+    /// refusal side is pinned at the walker and event level in the core tests.)
+    /// </summary>
+    /// <param name="source">The after-hook condition.</param>
+    /// <returns>A task that completes when the check has answered.</returns>
+    [Theory]
+    [InlineData("normalizePhone(new.note) == 'x'")]
+    [InlineData("size(new.note) > 3")]
+    public async Task An_after_hook_call_reads_only_the_context_its_arguments_name(string source)
+    {
+        var management = fixture.Management();
+        var current = await WorkingCopyAsync(management);
+
+        var verdict = await management.CheckExpressionAsync(
+            Project, new ManagementExpressionCheck(current.DescriptorJson, AfterCreate, source), Ct);
+
+        verdict.IsValid.ShouldBeTrue(string.Join(" | ", verdict.Findings.Select(f => f.Message)));
     }
 
     private static void BreakElsewhere(JsonNode root, string breakage)

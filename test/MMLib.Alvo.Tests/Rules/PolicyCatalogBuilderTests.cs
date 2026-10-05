@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Rules.Internal;
 using MMLib.Alvo.Schema;
@@ -106,6 +107,32 @@ public class PolicyCatalogBuilderTests
     {
         PolicyCatalogBuilder.ReferencesRowField(new CelLiteral(CelValueType.Bool, true)).ShouldBeFalse();
         PolicyCatalogBuilder.ReferencesRowField(new CelContextRef(CelContextValue.TenantId, CelValueType.Uuid)).ShouldBeFalse();
+    }
+
+    /// <summary>A call reads what its arguments read: a call over a literal or a context value reads no row field.</summary>
+    [Fact]
+    public void ReferencesRowField_recurses_into_the_arguments_of_a_call()
+    {
+        var literal = new CelLiteral(CelValueType.String, "x");
+        var field = new CelFieldRef("note", CelValueType.String, CelRecordState.Current);
+
+        PolicyCatalogBuilder.ReferencesRowField(new CelCall("trim", [literal])).ShouldBeFalse();
+        PolicyCatalogBuilder.ReferencesRowField(new CelCall("replace", [literal, literal, literal])).ShouldBeFalse();
+        PolicyCatalogBuilder.ReferencesRowField(new CelCall("trim", [field])).ShouldBeTrue();
+        PolicyCatalogBuilder.ReferencesRowField(new CelCall("replace", [literal, field, literal])).ShouldBeTrue();
+    }
+
+    /// <summary>A call reads exactly the context values its arguments read, no more.</summary>
+    [Fact]
+    public void ReferencesContextValue_recurses_into_the_arguments_of_a_call()
+    {
+        var field = new CelFieldRef("note", CelValueType.String, CelRecordState.New);
+        var user = new CelContextRef(CelContextValue.UserId, CelValueType.Uuid);
+
+        PolicyCatalogBuilder.ReferencesContextValue(new CelCall("trim", [field]), CelContextValue.UserId).ShouldBeFalse();
+        PolicyCatalogBuilder.ReferencesContextValue(new CelCall("trim", [field]), CelContextValue.TenantId).ShouldBeFalse();
+        PolicyCatalogBuilder.ReferencesContextValue(new CelCall("pair", [field, user]), CelContextValue.UserId).ShouldBeTrue();
+        PolicyCatalogBuilder.ReferencesContextValue(new CelCall("pair", [field, user]), CelContextValue.TenantId).ShouldBeFalse();
     }
 
     /// <summary>

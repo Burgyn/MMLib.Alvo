@@ -152,6 +152,75 @@ public sealed class EventSubscriptionsTests : IDisposable
     }
 
     /// <summary>
+    /// A registered host function in an after-hook condition runs for real: the hook is selected when the function
+    /// answers true on the record, and not when it answers false.
+    /// </summary>
+    /// <param name="note">The record's note.</param>
+    /// <param name="selected">Whether the hook fires.</param>
+    [Theory]
+    [InlineData("text", true)]
+    [InlineData("", false)]
+    public void A_host_function_in_a_condition_decides_whether_the_hook_fires(string note, bool selected)
+    {
+        var catalog = HostFunctionCatalog(TestCelFunctions.IsBlank, "!isBlank(new.note)");
+        var @event = Event("entity.deals.created", record: Record(("note", note)));
+
+        EventSubscriptions.Matching(catalog, @event, CelFixtures.Evaluator, _logger).Count.ShouldBe(selected ? 1 : 0, note);
+    }
+
+    /// <summary>
+    /// A host function that throws drops the hook and logs a Warning, through the real compiled condition and
+    /// the product's own evaluator.
+    /// </summary>
+    [Fact]
+    public void A_host_function_that_throws_in_a_condition_drops_the_hook_with_a_warning()
+    {
+        var boom = TestCelFunctions.Host(
+            "boom", CelValueType.Bool, _ => throw new InvalidOperationException("the host broke"),
+            TestCelFunctions.Parameter("s", CelValueType.String, nullable: true));
+        var catalog = HostFunctionCatalog(boom, "boom(new.note)");
+
+        EventSubscriptions.Matching(
+            catalog, Event("entity.deals.created", record: Record(("note", "x"))), CelFixtures.Evaluator, _logger)
+            .ShouldBeEmpty();
+
+        var line = _logger.Entries.ShouldHaveSingleItem();
+        line.Level.ShouldBe(LogLevel.Warning);
+        line.Message.ShouldContain("boom");
+        line.Exception.ShouldBeOfType<InvalidOperationException>().Message.ShouldBe("the host broke");
+    }
+
+    /// <summary>
+    /// A call over <c>@user.id</c> reads exactly that value: it is judged against the envelope's actor, and an
+    /// actorless event selects nothing — the gate sees through the call.
+    /// </summary>
+    /// <param name="actedBy">The envelope's actor, or null for an anonymous write.</param>
+    /// <param name="selected">Whether the hook fires.</param>
+    [Theory]
+    [InlineData(Actor, true)]
+    [InlineData(null, false)]
+    public void A_call_over_user_id_is_judged_against_the_envelopes_actor(string? actedBy, bool selected)
+    {
+        var actor = TestCelFunctions.Host(
+            "isActor", CelValueType.Bool, arguments => arguments[0]!.Equals(Guid.Parse(Actor)),
+            TestCelFunctions.Parameter("id", CelValueType.Uuid));
+        var catalog = HostFunctionCatalog(actor, "isActor(@user.id)");
+
+        EventSubscriptions.Matching(
+            catalog, Event("entity.deals.created", record: Record(("note", "x")), authId: actedBy), CelFixtures.Evaluator, _logger)
+            .Count.ShouldBe(selected ? 1 : 0);
+    }
+
+    private static PolicyCatalog HostFunctionCatalog(CelFunction function, string condition)
+    {
+        var hooks = new EntityHooks { AfterCreate = [Hook(condition)] };
+        PolicyCatalog.TryBuild(Descriptor(hooks), Schema, TestCelFunctions.Compiler(function), out var catalog, out var errors)
+            .ShouldBeTrue($"expected a clean build, got: {string.Join("; ", errors.Select(e => $"{e.Path}: {e.Message}"))}");
+
+        return catalog!;
+    }
+
+    /// <summary>
     /// A condition's <c>@user.id</c> is the <b>envelope's</b> actor, not the process draining the queue.
     /// </summary>
     /// <remarks>
@@ -336,6 +405,7 @@ public sealed class EventSubscriptionsTests : IDisposable
             new FieldSchema { Name = "id", Type = FieldType.Uuid },
             new FieldSchema { Name = "stage", Type = FieldType.Enum, EnumValues = ["lead", "won", "lost"] },
             new FieldSchema { Name = "owner_id", Type = FieldType.Uuid },
+            new FieldSchema { Name = "note", Type = FieldType.String, MaxLength = 200, Nullable = true },
         ],
     };
 
