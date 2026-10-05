@@ -97,7 +97,7 @@ public class CelMutateFunctionTests
         var refused = Compile("lowerAscii(title)", profile);
 
         refused.IsSuccess.ShouldBeFalse();
-        refused.Errors[0].Message.ShouldContain(nameof(CelProfile.Mutate));
+        refused.Errors[0].Message.ShouldStartWith($"'lowerAscii(...)' is not available in the {profile} profile");
     }
 
     public static TheoryData<CelProfile> EveryProfileButMutate() => EveryProfileBut(CelProfile.Mutate);

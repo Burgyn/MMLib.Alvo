@@ -66,7 +66,7 @@ internal static partial class CelBuiltInFunctions
         arguments => LowerAsciiText((string)arguments[0]!), Parameter("text", CelValueType.String));
 
     private static CelFunction UpperAscii => InProcess(
-        "upperAscii", CelValueType.String,
+        CelCall.UpperAscii, CelValueType.String,
         "Folds a-z to A-Z and changes nothing else: accented and other non-ASCII letters stay as they are.",
         arguments => UpperAsciiText((string)arguments[0]!), Parameter("text", CelValueType.String));
 

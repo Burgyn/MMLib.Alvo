@@ -63,6 +63,9 @@ internal sealed record CelCall(string Name, IReadOnlyList<CelNode> Arguments) : 
     /// <summary>The ASCII-only lower-case fold, <c>lowerAscii(text)</c>: folds <c>A</c>–<c>Z</c> and nothing else.</summary>
     public const string LowerAscii = "lowerAscii";
 
+    /// <summary>The ASCII-only upper-case fold, <c>upperAscii(text)</c>: folds <c>a</c>–<c>z</c> and nothing else.</summary>
+    public const string UpperAscii = "upperAscii";
+
     /// <summary>
     /// The write's own instant, <c>now()</c> — not a clock read. It resolves to the
     /// <see cref="DateTimeOffset"/> the caller bound for the whole write (the same one the audit stamp

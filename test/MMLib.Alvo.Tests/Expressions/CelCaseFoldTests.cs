@@ -16,6 +16,7 @@ public sealed class CelCaseFoldTests
     [InlineData("ÄBC", "Äbc")]
     [InlineData("ẞ", "ẞ")]
     [InlineData("", "")]
+    [InlineData("@AZ[", "@az[")]
     public void Lower_ascii_folds_a_to_z_and_nothing_else(string text, string expected) =>
         Mutate("lowerAscii(name)", ("name", text)).ShouldBe(expected);
 
@@ -23,6 +24,7 @@ public sealed class CelCaseFoldTests
     [InlineData("abc DEF", "ABC DEF")]
     [InlineData("äbc", "äBC")]
     [InlineData("ß", "ß")]
+    [InlineData("`az{", "`AZ{")]
     public void Upper_ascii_folds_a_to_z_and_nothing_else(string text, string expected) =>
         Mutate("upperAscii(name)", ("name", text)).ShouldBe(expected);
 
@@ -41,6 +43,12 @@ public sealed class CelCaseFoldTests
     [InlineData("upperAscii(old.name) != 'X'")]
     public void A_fold_is_legal_in_a_condition(string source) =>
         TestCelFunctions.Compiler().Compile(source, CelProfile.Condition, TestCelFunctions.Items).IsSuccess.ShouldBeTrue();
+
+    [Fact]
+    public void A_fold_in_a_condition_evaluates_over_the_candidate_row() =>
+        CelInterpreter.EvaluatePredicate(
+            TestCelFunctions.Compile("lowerAscii(new.name) == 'abc'", CelProfile.Condition), CelFixtures.Row(("name", "ABC")), previous: null, AlvoContext.Anonymous)
+            .ShouldBeTrue();
 
     [Theory]
     [InlineData("lowerAscii(name) == 'x'", CelProfile.Rule)]
