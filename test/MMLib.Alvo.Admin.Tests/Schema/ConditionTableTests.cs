@@ -117,6 +117,7 @@ public class ConditionTableTests
     public void A_text_test_is_offered_for_text_only_at_every_image_point(object relation)
     {
         var offered = (ConditionOperator)relation;
+        ConditionTable.Of(offered).RefusesEmpty.ShouldBeTrue("every text passes a text test with an empty value");
         foreach (var point in HookBuilder.Points.Where(point => ConditionTable.ImagesAt(point).Count > 0))
         {
             ConditionTable.For(point, ConditionFieldKind.Text, nullable: true).ShouldContain(spec => spec.Operator == offered);
@@ -124,9 +125,15 @@ public class ConditionTableTests
             foreach (var kind in Enum.GetValues<ConditionFieldKind>().Where(kind => kind != ConditionFieldKind.Text))
             {
                 ConditionTable.For(point, kind, nullable: true).ShouldNotContain(spec => spec.Operator == offered, kind.ToString());
+                ConditionTable.For(point, kind, nullable: false).ShouldNotContain(spec => spec.Operator == offered, kind.ToString());
             }
         }
     }
+
+    [Fact]
+    public void Only_a_text_test_refuses_an_empty_value()
+        => ConditionTable.Rows.Where(spec => spec.RefusesEmpty).Select(spec => spec.Format)
+            .ShouldAllBe(format => format.EndsWith("({f}, {v})", StringComparison.Ordinal));
 
     [Fact]
     public void Every_format_carries_exactly_the_placeholder_its_operand_needs()

@@ -170,7 +170,7 @@ public sealed partial class ConditionTextRoundTripTests
 
     /// <summary>A text test needs a value (an empty one is refused, so it is no condition the form writes); equality may be empty.</summary>
     private static int MinimumPieces(OperatorSpec spec)
-        => spec.Operator is ConditionOperator.StartsWith or ConditionOperator.EndsWith or ConditionOperator.Contains ? 1 : 0;
+        => spec.RefusesEmpty ? 1 : 0;
 
     /// <summary>
     /// One change: the text read at another point, a token swapped for another, or one character inserted or removed.

@@ -126,6 +126,10 @@ internal enum OperandKind
 /// Whether its CEL names an image (<c>new.</c> or <c>old.</c>); <c>changed</c> and the role rows do not, so the form asks for
 /// none and the generator writes none.
 /// </param>
+/// <param name="RefusesEmpty">
+/// Whether an empty value is refused: every text passes a text test (<c>startsWith</c>, <c>endsWith</c>, <c>contains</c>) with
+/// an empty value, so the form asks for a value rather than write a condition that always holds.
+/// </param>
 internal sealed record OperatorSpec(
     ConditionOperator Operator,
     string Words,
@@ -136,7 +140,8 @@ internal sealed record OperatorSpec(
     bool UpdateOnly,
     bool BeforeOnly,
     string WhenEmpty,
-    bool ReadsImage = true);
+    bool ReadsImage = true,
+    bool RefusesEmpty = false);
 
 /// <summary>
 /// The one table of what the guided condition may write: operator × field kind × point × canonical CEL × null semantics.
@@ -181,9 +186,9 @@ internal static class ConditionTable
         new(ConditionOperator.Is, "is", "{f} == {v}", OperandKind.Literal, _compared, false, false, false, "false: an empty value equals nothing"),
         new(ConditionOperator.IsNot, "is not (and has a value)", "{f} != {v}", OperandKind.Literal, _compared, false, false, false, "false: every comparison with an empty value is false, != included"),
         new(ConditionOperator.IsNotOrEmpty, "is not, or is empty", "!({f} == {v})", OperandKind.Literal, _compared, true, false, false, "true"),
-        new(ConditionOperator.StartsWith, "starts with", "startsWith({f}, {v})", OperandKind.Literal, _text, false, false, false, "false: a test of an empty value is empty, and an empty condition does not fire"),
-        new(ConditionOperator.EndsWith, "ends with", "endsWith({f}, {v})", OperandKind.Literal, _text, false, false, false, "false: a test of an empty value is empty, and an empty condition does not fire"),
-        new(ConditionOperator.Contains, "contains", "contains({f}, {v})", OperandKind.Literal, _text, false, false, false, "false: a test of an empty value is empty, and an empty condition does not fire"),
+        new(ConditionOperator.StartsWith, "starts with", "startsWith({f}, {v})", OperandKind.Literal, _text, false, false, false, "false: a test of an empty value is empty, and an empty condition does not fire", RefusesEmpty: true),
+        new(ConditionOperator.EndsWith, "ends with", "endsWith({f}, {v})", OperandKind.Literal, _text, false, false, false, "false: a test of an empty value is empty, and an empty condition does not fire", RefusesEmpty: true),
+        new(ConditionOperator.Contains, "contains", "contains({f}, {v})", OperandKind.Literal, _text, false, false, false, "false: a test of an empty value is empty, and an empty condition does not fire", RefusesEmpty: true),
         new(ConditionOperator.Less, "is less than", "{f} < {v}", OperandKind.Literal, _number, false, false, false, "false"),
         new(ConditionOperator.LessOrEqual, "is at most", "{f} <= {v}", OperandKind.Literal, _number, false, false, false, "false"),
         new(ConditionOperator.Greater, "is more than", "{f} > {v}", OperandKind.Literal, _number, false, false, false, "false"),

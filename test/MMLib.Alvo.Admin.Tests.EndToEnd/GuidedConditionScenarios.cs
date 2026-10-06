@@ -48,6 +48,7 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
         await HookEditInPlaceScenarios.OnWriteAsync(session, "order_lines");
         await HookEditInPlaceScenarios.OpenEditAsync(session, "beforeCreate", 0);
 
+        await Mode(session, "Guided").WaitForAsync();
         (await Mode(session, "Guided").CountAsync()).ShouldBe(1);
         (await session.Page.GetByTestId("hook-condition-readout").InnerTextAsync()).ShouldBe("new.quantity <= 0");
         (await Combobox(session, "Condition 1 operator").InnerTextAsync()).ShouldContain("is at most");
@@ -316,6 +317,7 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
 
         (await session.Page.Locator("#hook-beforeCreate-0").InnerTextAsync()).ShouldContain("endsWith(new.email, '@example.com')");
         await HookEditInPlaceScenarios.OpenEditAsync(session, "beforeCreate", 0);
+        await Mode(session, "Guided").WaitForAsync();
         (await Mode(session, "Guided").CountAsync()).ShouldBe(1, "the canonical text test reads back as a row");
         (await Combobox(session, "Condition 1 operator").InnerTextAsync()).ShouldContain("ends with");
         await session.Page.Keyboard.PressAsync("Escape");
