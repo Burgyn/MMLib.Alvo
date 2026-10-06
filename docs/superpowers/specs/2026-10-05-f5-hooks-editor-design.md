@@ -617,7 +617,7 @@ Controller rulings and implementation findings:
   - A draft carries `ValueGiven`, so a field chosen with no value given is "Condition N needs a value". An empty text
     compared on purpose (`new.f == ''`) stays writable.
   - Added in Task 20: a row whose field has left the working copy (removed in another tab while the sheet was open) was
-    quietly dropped from the condition. It now blocks with "Condition N names a field that no longer exists." and is
+    quietly dropped from the condition. It now blocks with "Condition N names a field a condition can no longer read." and is
     refused in place.
 - **T-B. The gate has no `Detach` and no `Dispose`.** `ConditionBuilder` attaches in `OnParametersSet` and never
   detaches. `IDisposable` or an `OnInitialized` override would have grown the public component's surface (measured on

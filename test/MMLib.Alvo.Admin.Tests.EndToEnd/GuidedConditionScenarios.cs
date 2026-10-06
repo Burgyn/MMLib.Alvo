@@ -234,14 +234,16 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
         await other.Dialog("remove-field-sheet").GetByTestId("remove-field-anyway").ClickAsync();
         await other.Page.GetByTestId("restore-field-phone").WaitForAsync();
         /* The field's going reaches the editing circuit on its own time: the row turns refused in place once it has. */
-        await editing.Page.GetByTestId("condition-refusal").WaitForAsync();
+        var refusal = editing.Page.GetByTestId("condition-refusal");
+        await refusal.WaitForAsync();
+        (await refusal.InnerTextAsync()).ShouldContain("This field no longer exists in the working copy.");
 
         var editor = editing.Dialog("hook-editor");
         await editor.GetByTestId("hook-add").ClickAsync();
 
         var panel = editor.GetByTestId("error-panel");
         await panel.WaitForAsync();
-        (await panel.InnerTextAsync()).ShouldContain("Condition 1 names a field that no longer exists.");
+        (await panel.InnerTextAsync()).ShouldContain("Condition 1 names a field a condition can no longer read.");
         (await editing.Page.Locator("#hook-beforeCreate-0").CountAsync()).ShouldBe(0, "nothing is staged");
     }
 

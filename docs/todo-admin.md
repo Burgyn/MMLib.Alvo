@@ -476,7 +476,7 @@ Entity.razor.cs, `PS` PendingSchema.cs, `WC*` WorkingCopy.*.cs (all `Admin/Compo
 | `webhook.payload` | `{{…}}` template honoured; raw JSONata refused | edit — {{…}} payload, judged live by cel/check; raw JSONata gets the build's refusal | — | HooksTab.Pickers.cs |
 | `email.template` | honoured | edit (picker; a bodyFile template is not offered) | — | HooksTab.Pickers.cs |
 | `email.to` | honoured | edit | — | |
-| `email.data` | refused | said (Integrations "why no button" only) | not on the On-write tab | UF:210; AHC:306; Integrations.razor:71-77 |
+| `email.data` | refused | said (On-write tab and Integrations "What this build refuses") | — | UF:210; AHC:306; RefusalPlaces.cs:63; HooksTab.razor.cs:79; Integrations.razor:82-96 |
 | `function.name` / `.input` (2) | refused | said ×2 (On-write tab) | — | AHC:226; HooksTab.razor.cs:86 |
 | `entity.update.entity` / `.recordId` / `.payload` (3) | refused | said ×3 | — | same |
 | `http.call.url` / `.method` / `.headersSecretRef` / `.payload` (4) | refused | said ×4 | — | same |
@@ -495,12 +495,12 @@ Entity.razor.cs, `PS` PendingSchema.cs, `WC*` WorkingCopy.*.cs (all `Admin/Compo
 | `x-*` | preserved | gap | preserved | |
 | `templates.<t>.subject` | honoured for after-hook email; warned for automation | edit (Integrations) | — | TemplateEditor.razor |
 | `templates.<t>.body` | same | edit (Integrations) | — | TemplateEditor.razor |
-| `templates.<t>.bodyFile` | refused when an after-hook references it, else warned | read (raw) | refusal (`bodyFile`) dropped by the Integrations prefix filter | UF:229; AHC:344; Integrations.razor:71-77 |
+| `templates.<t>.bodyFile` | refused when an after-hook references it, else warned | read (raw); never offered by the template picker | refusal (`bodyFile`) shown under the template's row and in "What this build refuses" | UF:229; AHC:344; RefusalPlaces.cs:64; Integrations.razor:142,269-272 |
 | `formats.<f>.pattern` | honoured | gap | preserved | Map:128-153; RecordValidator.cs:195 |
 | `formats.<f>.description` | ignored (unverified — no reader found) | gap | preserved | |
 | `webhooks.endpoints.<n>.url` | honoured for after-hooks | edit (Integrations; https or loopback http; secretRef a SecretName) | — | EndpointEditor.razor |
 | `.secretRef` | warned — not read, no HMAC | edit (Integrations; https or loopback http; secretRef a SecretName) | — | EndpointEditor.razor |
-| `.description` | ignored (unverified) | read (raw) | — | |
+| `.description` | ignored (unverified) | edit (Integrations, optional) | — | EndpointEditor.razor:73-76 |
 | `functions.<f>.script` | warned | said (Functions page, Overview) | — | US:145; NotYet.razor:57 |
 | `.trigger.http.route` | warned | said | — | |
 | `.trigger.http.method` | warned | said | — | |
@@ -538,10 +538,10 @@ Entity.razor.cs, `PS` PendingSchema.cs, `WC*` WorkingCopy.*.cs (all `Admin/Compo
 | lead, 5d | "all twelve `IAlvoManagement` operations" | Eleven; the table lists eleven. |
 | 5a `automation` | said — Right | Wrong on its own page: `NotYet.razor:57` looks up `automations`; the build's block is `automation` (US:127). Overview does list it. |
 | 5a `dynamicEntities` | gap | Stale: Overview "Declared, with limits" lists it with the build's sentence (Overview.razor:66-79). |
-| 5a `templates` / `webhooks` | read — Right | The "Why there is no new endpoint button" panel's prefix filter admits only `email.data`; `bodyFile` and `JSONata` are dropped (Integrations.razor:71-77). |
+| 5a `templates` / `webhooks` | read — Right | The "Why there is no new endpoint button" panel's prefix filter admits only `email.data`; `bodyFile` and `JSONata` are dropped (Integrations.razor:71-77, before item 19). (since #276: edit) |
 | 5a `auth.providers`, 5b `realtime`, 5a `description`/`branding` | gap | Also **ignored by the build** — no reader, no warning. A "not editable here" sentence would be false; the sentence owed is "this build does nothing with it". |
 | 5b `storage` | read — Right | Wrong for `dynamic`: dropped by the mapper, listed as not-applied forever, badged `physical table` (8a). |
-| 5b `hooks` | edit | Add/remove only; mutate literal and multi-field, and a `{{…}}` webhook `payload`, are honoured and not offered. §3's "`payload` and `data` are both JSONata slots this build refuses" is half wrong: `payload` as a template is honoured (AHC:379). |
+| 5b `hooks` | edit | Add/remove only; mutate literal and multi-field, and a `{{…}}` webhook `payload`, are honoured and not offered. §3's "`payload` and `data` are both JSONata slots this build refuses" is half wrong: `payload` as a template is honoured (AHC:379). (since #276: edit) |
 | 5b `indexes` | edit | Candidates are applied fields; field rename/remove is not carried into the index. |
 | 5c lead | "nothing below is destroyed by an edit — it is only unauthorable" | Wrong: `maxLength` is injected, a hidden `unique` is rewritten, a `default` survives into a type that refuses it, a `$cel` default is rewritten as a string (8a). |
 | 5c `maxLength`, `unique` | edit | Edit with a hidden write each (8a). |
