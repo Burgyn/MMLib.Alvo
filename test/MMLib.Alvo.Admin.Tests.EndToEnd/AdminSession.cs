@@ -1,4 +1,5 @@
 ﻿using Microsoft.Playwright;
+using System.Text.RegularExpressions;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
@@ -93,13 +94,58 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     /// <remarks>
     /// Page-scoped on purpose: the library renders options in its popover provider under <c>body</c>, so an option is
     /// never a descendant of the select, nor of the dialog the select sits in (study §5.1 gotcha 1).
+    /// <para>
+    /// It returns once the select shows the choice. The library hands the choice to the page a JS round trip after the
+    /// click, so a box filled straight after it was filled first — and then emptied by the choice that "came later"
+    /// (measured: a row's field reset what was typed for it). The select shows the value only once it has passed it on.
+    /// </para>
+    /// <para>
+    /// The wait assumes the select shows exactly the option's name. A select whose shown text differs from its option
+    /// label (a <c>ToStringFunc</c>, or a label such as <c>phone (not offered)</c> for a value <c>phone</c>) would never
+    /// match and time out here; such a caller waits on something of its own instead.
+    /// </para>
     /// </remarks>
     /// <param name="combobox">The select, found by role and name.</param>
     /// <param name="option">The option's name, exactly.</param>
     public async Task ChooseAsync(ILocator combobox, string option)
     {
+        ArgumentNullException.ThrowIfNull(combobox);
         await combobox.ClickAsync().ConfigureAwait(false);
         await Page.GetByRole(AriaRole.Option, new() { Name = option, Exact = true }).ClickAsync().ConfigureAwait(false);
+        await combobox.Filter(new() { HasTextRegex = new Regex($"^{Regex.Escape(option)}$") }).WaitForAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Chooses the option a select already shows, and waits until its list has gone and focus is back inside
+    /// <paramref name="testId"/> — never left on <c>&lt;body&gt;</c>, outside the sheet.
+    /// </summary>
+    /// <remarks>
+    /// A re-choice of the same value is its own case: the library closes the list without raising a value change, so
+    /// nothing a choice runs runs. This pins that focus stays inside the select all the same. A loss to the page was
+    /// suspected here, and did not reproduce in headless Chromium (MudBlazor 9.10); the pin is what would catch one.
+    /// </remarks>
+    /// <param name="combobox">The select, found by role and name, already showing <paramref name="option"/>.</param>
+    /// <param name="option">The option's name, exactly.</param>
+    /// <param name="testId">The select's test id, which focus must be inside.</param>
+    public async Task ChooseAgainAsync(ILocator combobox, string option, string testId)
+    {
+        await ChooseAsync(combobox, option).ConfigureAwait(false);
+        await Page.GetByRole(AriaRole.Option, new() { Name = option, Exact = true })
+            .WaitForAsync(new() { State = WaitForSelectorState.Hidden }).ConfigureAwait(false);
+        await WaitForFocusInsideAsync(testId).ConfigureAwait(false);
+    }
+
+    /// <summary>Types a hook condition as CEL: switches the condition to text mode first, which the guided form is not.</summary>
+    /// <remarks>
+    /// One place for every scenario. The text box appears a round trip after the switch is pressed; the fill waits for it
+    /// (<c>input#</c>, since the guided form's readout carries the same id).
+    /// </remarks>
+    /// <param name="condition">The CEL.</param>
+    public async Task TypeConditionAsync(string condition)
+    {
+        await Page.GetByTestId("hook-condition-mode").GetByRole(AriaRole.Radio, new() { Name = "Text", Exact = true })
+            .ClickAsync().ConfigureAwait(false);
+        await Page.FillAsync("input#hook-condition", condition).ConfigureAwait(false);
     }
 
     /// <summary>Waits for the snackbar that says <paramref name="text"/>.</summary>
@@ -198,10 +244,35 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
         }
     }
 
-    /// <summary>Waits until focus is inside the element with <paramref name="testId"/>.</summary>
-    /// <param name="testId">The container's test id.</param>
-    public Task WaitForFocusInsideAsync(string testId)
-        => Page.WaitForFunctionAsync("id => !!document.activeElement?.closest(`[data-testid='${id}']`)", testId, _polling);
+    /// <summary>Waits until focus is inside the element with <paramref name="testId"/>, or inside the dialog around it.</summary>
+    /// <remarks>
+    /// <para>
+    /// One wait for both questions (it was two helpers): <see cref="FocusScope.Element"/> for a panel or a control that
+    /// must take focus itself — an error panel inside a sheet is <i>not</i> answered by focus elsewhere in the sheet — and
+    /// <see cref="FocusScope.Dialog"/> for a dialog that just opened, whose test id the library may put on an element
+    /// inside it that never holds focus (a confirm's does; measured).
+    /// </para>
+    /// <para>
+    /// Call it with <see cref="FocusScope.Dialog"/> before a key meant for a dialog that just opened. Being visible does not
+    /// mean the dialog is ready for keys: it takes focus a render later, and an Escape pressed before then goes to the page
+    /// and closes nothing. That race made <c>CreateActionScenarios</c> flaky. Focus on <c>&lt;body&gt;</c> is never inside.
+    /// </para>
+    /// </remarks>
+    /// <param name="testId">The element's test id.</param>
+    /// <param name="scope">Whether focus must be inside that element, or anywhere in the dialog around it.</param>
+    public Task WaitForFocusInsideAsync(string testId, FocusScope scope = FocusScope.Element)
+        => Page.WaitForFunctionAsync(
+            """
+            ([id, dialog]) => {
+              const focused = document.activeElement;
+              if (!focused || focused === document.body) return false;
+              const marked = `[data-testid='${id}']`;
+              return dialog
+                ? [...document.querySelectorAll(marked)].some(m => !!m.closest("[role='dialog']")?.contains(focused))
+                : !!focused.closest(marked);
+            }
+            """,
+            new object[] { testId, scope == FocusScope.Dialog }, _polling);
 
     /// <summary>Waits until the element with <paramref name="id"/> has focus.</summary>
     /// <param name="id">The element's id.</param>
@@ -359,6 +430,66 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     /// Waits for the plan Preview asks for on arrival — a dry run, so the screen runs it without a click.
     /// </summary>
     public Task WaitForPlanAsync() => Page.GetByTestId("plan").WaitForAsync();
+
+    /// <summary>Opens Import and waits until it has loaded the working copy an import replaces.</summary>
+    /// <remarks>
+    /// The circuit being up is not enough: the page reads the applied descriptor and the copy after its first render, and
+    /// it refuses an import until both are there (<c>ImportGate</c>). A chord sent in between is refused without a word —
+    /// a disabled button is waited on by a click, a key press is not. The form draws the gate's condition, so this waits on
+    /// exactly what the submit checks. It relies on <see cref="GoAsync"/> settling first: the page is prerendered, so the
+    /// HTML that arrives before the circuit can already read <c>data-copy-loaded='true'</c>, and only the circuit being up
+    /// makes that attribute the interactive page's own.
+    /// </remarks>
+    public async Task GoToImportAsync()
+    {
+        await GoAsync("/transfer").ConfigureAwait(false);
+        await Page.Locator("form[data-copy-loaded='true']").WaitForAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Opens Import, pastes <paramref name="text"/>, submits it with the chord, and waits for its plan's URL.</summary>
+    /// <remarks>
+    /// The box is read back before the key: <c>InputValueAsync</c> is a browser-local read, so it proves the fill landed
+    /// in the box the chord submits, and leaves only the circuit's side to the wait.
+    /// </remarks>
+    /// <param name="text">The descriptor to import.</param>
+    public async Task ImportByChordAsync(string text)
+    {
+        await GoToImportAsync().ConfigureAwait(false);
+        await Page.FillAsync("#import-json", text).ConfigureAwait(false);
+        (await Page.InputValueAsync("#import-json").ConfigureAwait(false)).ShouldBe(text);
+        await Page.Locator("#import-json").PressAsync("Meta+Enter").ConfigureAwait(false);
+        await WaitForImportedAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>Waits for an import to reach its plan's URL, and says what Import showed when it did not.</summary>
+    public async Task WaitForImportedAsync()
+    {
+        try
+        {
+            await Page.WaitForURLAsync("**/changes").ConfigureAwait(false);
+        }
+        catch (TimeoutException timeout)
+        {
+            throw new InvalidOperationException(await ImportStateAsync().ConfigureAwait(false), timeout);
+        }
+    }
+
+    /// <summary>What Import shows, for a wait that timed out on it: the box, its hint, any refusal, and the question.</summary>
+    private async Task<string> ImportStateAsync()
+    {
+        static async Task<string> TextOf(ILocator locator)
+            => await locator.CountAsync().ConfigureAwait(false) == 0 ? "none" : await locator.First.InnerTextAsync().ConfigureAwait(false);
+
+        var box = await Page.Locator("#import-json").CountAsync().ConfigureAwait(false) == 0
+            ? "absent"
+            : await Page.InputValueAsync("#import-json").ConfigureAwait(false);
+        var shown = box.Length > 200 ? $"{box[..200]}… ({box.Length} characters)" : box;
+        var hint = await TextOf(Page.Locator("#import-json-hint")).ConfigureAwait(false);
+        var error = await TextOf(Page.GetByTestId("error-panel")).ConfigureAwait(false);
+        var asking = await Page.GetByTestId("import-replace-confirm").CountAsync().ConfigureAwait(false) > 0;
+        return $"The import never reached /changes; the page is at {Page.Url}. Box: {shown} | Hint: {hint} | Error panel: {error} "
+            + $"| Replace question open: {asking} | Console: {(_noise.Count == 0 ? "nothing" : string.Join(" | ", _noise))}";
+    }
 
     /// <summary>
     /// Opens one of an entity's tabs and waits for it to actually be the open one.
@@ -573,4 +704,14 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
         await context.DisposeAsync().ConfigureAwait(false);
     }
 
+}
+
+/// <summary>What <see cref="AdminSession.WaitForFocusInsideAsync"/> asks focus to be inside.</summary>
+public enum FocusScope
+{
+    /// <summary>The element with the test id itself.</summary>
+    Element,
+
+    /// <summary>The <c>role=dialog</c> around the element with the test id.</summary>
+    Dialog,
 }

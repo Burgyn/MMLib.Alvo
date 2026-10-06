@@ -11,10 +11,14 @@
     `before*` — which is what unblocked editing them at all. What is still refused is three of the
     five *action types*, and those are read off `capabilities` rather than listed here, so the day
     one of them lands the tab stops warning about it without anybody editing this file.
+
+    One sheet adds and edits (spec §4.2): an edit keeps the hook's place in its point's ordered list,
+    and a hook the editor cannot draw whole has no Edit at all — it is kept as it is (§5.2).
 *@
 @inject AdminInterop Interop
 @inject ManagementGateway Gateway
 @inject ILogger<HooksTab> Logger
+@inject ISnackbar Snackbar
 @implements IDisposable
 
 @* A create inside a tab sits in its section's head, right-aligned (spec §3.7). *@
@@ -26,7 +30,7 @@
     <Actions>
         @if (Editable)
         {
-            <AlvoButton Small="true" data-testid="hook-new" OnClick="_ => _adding = true">New hook</AlvoButton>
+            <AlvoButton Small="true" data-testid="hook-new" OnClick="OpenNew">New hook</AlvoButton>
         }
     </Actions>
 </SectionHead>
@@ -78,9 +82,10 @@ else
             {
                 var hook = declared[position];
                 var at = position;
+                var undrawable = Undrawable(name, hook);
 
                 @*
-                    The control sits under the declaration on a phone and beside it on a desktop. Beside it
+                    The controls sit under the declaration on a phone and beside it on a desktop. Beside it
                     at 375 px, the code block gave up a third of the row to one word and every condition
                     wrapped mid-token.
                 *@
@@ -94,50 +99,68 @@ else
                     <CodeBlock Json="@hook" />
                     @if (Editable)
                     {
-                        <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" class="a-hookrow__remove"
-                                    data-testid="hook-remove" aria-label="@($"Remove hook {at + 1} of {name}")"
-                                    OnClick="_ => _removing = new PendingRemoval(name, hook)">Remove</AlvoButton>
+                        <div class="a-row a-hookrow__actions">
+                            @if (undrawable is null)
+                            {
+                                <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="hook-edit"
+                                            aria-label="@($"Edit hook {at + 1} of {name}")"
+                                            OnClick="_ => OpenEdit(name, at, hook)">Edit</AlvoButton>
+                            }
+                            <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true"
+                                        data-testid="hook-remove" aria-label="@($"Remove hook {at + 1} of {name}")"
+                                        OnClick="_ => _removing = new PendingRemoval(name, hook)">Remove</AlvoButton>
+                        </div>
                     }
                 </div>
+                @if (undrawable is not null)
+                {
+                    <p class="a-note" data-testid="hook-readonly">
+                        @undrawable It is kept as it is: remove it here, or change it in the descriptor.
+                    </p>
+                }
             }
         </ListRow>
     }
 }
 
-@if (_reveal is { } added)
+@if (_reveal is { } revealed)
 {
-    @RevealOnRender.On($"#{added}", _reveals)
+    @RevealOnRender.On($"#{revealed}", _reveals)
 }
 
-@if (_adding)
+@if (_adding || _editing is not null)
 {
-    <AlvoEditor TestId="hook-editor" Title="New hook" SubmitText="Add to the working copy" SubmitTestId="hook-add"
-                Subtitle="The point decides what the action may be. A before-hook runs in the transaction and may only refuse or patch the row; a beforeDelete may only refuse, because the row is going."
-                Dirty="Dirty" OnSubmit="AddAsync" OnClose="CloseAdding">
-        @RefusalPanel.Of(_refusal, "That hook cannot be added")
+    <AlvoEditor TestId="hook-editor"
+                Title="@(_editing is { } editing ? $"Edit {editing.Point} hook {editing.Position + 1}" : "New hook")"
+                SubmitText="@(_editing is null ? "Add to the working copy" : "Save to the working copy")"
+                SubmitTestId="@(_editing is null ? "hook-add" : "hook-save")"
+                Subtitle="@(_editing is { } opened
+                    ? $"It keeps its place: the hooks at one point run in order, and this is number {opened.Position + 1} of {CountAt(opened.Point)}."
+                    : "The point decides what the action may be. A before-hook runs in the transaction and may only refuse or patch the row; a beforeDelete may only refuse, because the row is going.")"
+                Dirty="Dirty" OnSubmit="SubmitAsync" OnClose="CloseEditor">
+        @RefusalPanel.Of(_refusal, _editing is null ? "That hook cannot be added" : "That hook could not be saved")
 
-        <Field Label="When" LabelId="hook-points-label">
-            <ChipGroup TValue="string" Items="HookBuilder.Points" Selected="[_hook.Point]" aria-labelledby="hook-points-label"
-                       data-testid="hook-points" SelectedChanged="points => Choose(points[0])" />
-        </Field>
+        @if (_editing is null)
+        {
+            <Field Label="When" LabelId="hook-points-label">
+                <ChipGroup TValue="string" Items="HookBuilder.Points" Selected="[Current.Point]" aria-labelledby="hook-points-label"
+                           data-testid="hook-points" SelectedChanged="points => Choose(points[0])" />
+            </Field>
+        }
+        else
+        {
+            <Field Label="When">
+                <ChildContent>
+                    <span class="a-mono" data-testid="hook-point-fixed">@Current.Point</span>
+                </ChildContent>
+                <Hint>To move it to another point, remove it and add a new one.</Hint>
+            </Field>
+        }
 
-        <Field Label="Only when (optional)" For="hook-condition">
-            <ChildContent>
-                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-condition" Class="a-mono"
-                              autocomplete="off" Placeholder="@_hook.Example" aria-describedby="@Described("hook-condition")"
-                              Value="_hook.Condition" ValueChanged="TypeCondition" />
-                @Findings("hook-condition")
-            </ChildContent>
-            <Hint>
-                <span data-testid="hook-condition-hint">
-                    CEL over @((MarkupString)_hook.Images) and <code class="a-mono">@@user</code>. Left empty, the hook
-                    runs on every write.
-                </span>
-            </Hint>
-        </Field>
+        @ConditionField
 
         <Field Label="Then" LabelId="hook-actions-label">
-            <ChipGroup TValue="string" Items="_hook.Kinds" Selected="[_hook.Kind]" aria-labelledby="hook-actions-label"
+            <ChipGroup TValue="string" Items="Current.Kinds" Selected="[Current.Kind]" aria-labelledby="hook-actions-label"
                        data-testid="hook-actions" SelectedChanged="kinds => ChooseKind(kinds[0])" />
         </Field>
 
@@ -175,71 +198,300 @@ else
     /// <summary>The box is described by its hint, and by the sentence under it while it has one.</summary>
     private string Described(string id) => _check.DescribedBy(id) is { } check ? $"{id}-hint {check}" : $"{id}-hint";
 
+    /// <summary>The condition: guided rows that write CEL, or the CEL itself — one switch between them (spec §4.6).</summary>
+    /// <remarks>
+    /// The rows get the working copy through a cascade set here: the sheet's content renders inside the dialog provider,
+    /// which a cascade from the entity screen does not reach (<see cref="AlvoEditor"/>). The gate the submit asks goes the
+    /// same way (ruling S-B).
+    /// </remarks>
+    private RenderFragment ConditionField => @<text>
+        <Field Label="Only when (optional)" LabelId="hook-condition-mode-label">
+            <ChildContent>
+                <ChipGroup TValue="string" Items="_conditionModes" Selected="[_guided ? GuidedWord : TextWord]"
+                           aria-labelledby="hook-condition-mode-label" data-testid="hook-condition-mode"
+                           SelectedChanged="modes => ChooseConditionMode(modes[0])" />
+                @if (_conditionNote is { } note)
+                {
+                    <p class="a-hint" data-testid="hook-condition-note">@note</p>
+                }
+            </ChildContent>
+            <Hint>
+                <span data-testid="hook-condition-hint">
+                    CEL over @((MarkupString)Current.Images) and <code class="a-mono">@@user</code>. Left empty, the hook
+                    runs on every write.
+                </span>
+            </Hint>
+        </Field>
+        @if (_guided)
+        {
+            <CascadingValue Value="Copy">
+                <CascadingValue Value="_conditionGate" IsFixed="true">
+                    <ConditionBuilder Point="@Current.Point" Entity="@Entity" Value="@Current.Condition" ValueChanged="TypeCondition" />
+                </CascadingValue>
+            </CascadingValue>
+            <Field Label="Expression">
+                <ChildContent>
+                    <code class="a-mono" id="hook-condition" data-testid="hook-condition-readout"
+                          aria-describedby="@_check.DescribedBy("hook-condition")">@(Current.Condition.Length == 0 ? "(none: the hook runs on every write)" : Current.Condition)</code>
+                    @ConditionLength
+                    @Findings("hook-condition")
+                </ChildContent>
+            </Field>
+        }
+        else
+        {
+            <Field Label="Condition (CEL)" For="hook-condition">
+                <ChildContent>
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-condition" Class="a-mono"
+                                  autocomplete="off" Placeholder="@Current.Example" aria-describedby="@ConditionDescribedBy"
+                                  Value="Current.Condition" ValueChanged="TypeCondition" />
+                    @ConditionLength
+                    @Findings("hook-condition")
+                </ChildContent>
+                <Hint>
+                    What the guided rows write, as text. Anything the rows cannot say — a function, a field compared with a
+                    field, a mix of all and any — is written here.
+                </Hint>
+            </Field>
+        }
+    </text>;
+
+    /// <summary>Said under the condition when it is longer than a condition may be, without asking the server (spec §4.6).</summary>
+    private RenderFragment ConditionLength => @<text>
+        @if (Current.Condition.Length > ConditionTable.MaxConditionLength)
+        {
+            <p class="a-field__problem" id="hook-condition-length" data-testid="hook-condition-length">
+                This condition is @Current.Condition.Length characters; a condition holds at most @ConditionTable.MaxConditionLength.
+            </p>
+        }
+    </text>;
+
     /// <summary>The boxes the chosen action takes.</summary>
     private RenderFragment ActionFields => @<text>
-        @switch (_hook.Kind)
+        @switch (Current.Kind)
         {
             case HookBuilder.Reject:
-                <Field Label="Refuse with" For="hook-reject">
-                    <ChildContent>
-                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-reject" autocomplete="off"
-                                      aria-describedby="hook-reject-hint" MaxLength="500" Placeholder="A completed work order cannot be reopened."
-                                      Value="_hook.RejectMessage" ValueChanged="text => _hook.RejectMessage = text ?? string.Empty" />
-                    </ChildContent>
-                    <Hint>
-                        Becomes the <code class="a-mono">detail</code> of the RFC 7807 problem the caller
-                        reads, so write it for them rather than for the log.
-                    </Hint>
-                </Field>
+                @RejectFields
                 break;
             case HookBuilder.Mutate:
-                <div class="a-field-row">
-                    <Field Label="Field" For="hook-mutate-field">
-                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-mutate-field"
-                                      Class="a-mono" autocomplete="off" Placeholder="completed_on"
-                                      Value="_hook.MutateField" ValueChanged="TypeMutateField" />
-                    </Field>
-                    <Field Label="Set to" For="hook-mutate-value">
-                        <ChildContent>
-                            <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-mutate-value"
-                                          aria-describedby="@Described("hook-mutate-value")" Class="a-mono" autocomplete="off" Placeholder="now()"
-                                          Value="_hook.MutateValue" ValueChanged="TypeMutateValue" />
-                            @Findings("hook-mutate-value")
-                        </ChildContent>
-                        <Hint>
-                            A CEL expression, stored as <code class="a-mono">{"$cel": "…"}</code>. Wrap it in
-                            quotes for a literal string.
-                        </Hint>
-                    </Field>
-                </div>
+                @MutateFields
                 break;
             case HookBuilder.Webhook:
-                <Field Label="Endpoint" For="hook-endpoint">
-                    <ChildContent>
-                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-endpoint" Class="a-mono"
-                                      aria-describedby="hook-endpoint-hint" autocomplete="off" Placeholder="dispatch"
-                                      Value="_hook.Endpoint" ValueChanged="text => _hook.Endpoint = text ?? string.Empty" />
-                    </ChildContent>
-                    <Hint>
-                        A name declared under <code class="a-mono">webhooks.endpoints</code>, not a URL — the
-                        managed path is the one this build delivers on.
-                    </Hint>
-                </Field>
+                @WebhookFields
                 break;
             case HookBuilder.Email:
-                <div class="a-field-row">
-                    <Field Label="Template" For="hook-template">
-                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-template"
-                                      Class="a-mono" autocomplete="off" Placeholder="work_order_completed"
-                                      Value="_hook.Template" ValueChanged="text => _hook.Template = text ?? string.Empty" />
-                    </Field>
-                    <Field Label="To" For="hook-to">
-                        <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-to"
-                                      Class="a-mono" autocomplete="off" Placeholder="{{new.contact_email}}"
-                                      Value="_hook.To" ValueChanged="text => _hook.To = text ?? string.Empty" />
-                    </Field>
-                </div>
+                @EmailFields
                 break;
         }
+    </text>;
+
+    /// <summary>A reject's message.</summary>
+    private RenderFragment RejectFields => @<text>
+        <Field Label="Refuse with" For="hook-reject">
+            <ChildContent>
+                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-reject" autocomplete="off"
+                              aria-describedby="hook-reject-hint" MaxLength="500" Placeholder="A completed work order cannot be reopened."
+                              Value="Current.RejectMessage" ValueChanged="text => Current.RejectMessage = text ?? string.Empty" />
+            </ChildContent>
+            <Hint>
+                Becomes the <code class="a-mono">detail</code> of the RFC 7807 problem the caller
+                reads, so write it for them rather than for the log.
+            </Hint>
+        </Field>
+    </text>;
+
+    /// <summary>A mutate's rows: each a field, a value or an expression, and the box that value takes (spec §4.3).</summary>
+    private RenderFragment MutateFields => @<text>
+        @for (var index = 0; index < Current.MutateRows.Count; index++)
+        {
+            var row = Current.MutateRows[index];
+            var i = index;
+            var fit = MutateFit(row);
+            <div class="a-stack" role="group" aria-label="@($"Patched field {i + 1}")" data-testid="hook-mutate-row">
+                <div class="a-field-row">
+                    <Field Label="@($"Field {i + 1}")" LabelId="@($"hook-mutate-field-{i}-label")">
+                        <MudSelect @ref="_selects[FieldSelectId(i)]" T="string" Variant="Variant.Outlined" Value="row.Field" ValueChanged="chosen => ChooseMutateFieldAsync(i, chosen)"
+                                   aria-labelledby="@($"hook-mutate-field-{i}-label")" Class="a-mono"
+                                   data-testid="@($"hook-mutate-field-{i}")">
+                            @foreach (var target in MutateTargets(row))
+                            {
+                                <MudSelectItem Value="@target">@TargetLabel(target)</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </Field>
+                    <Field Label="@($"Field {i + 1} takes")" LabelId="@($"hook-mutate-mode-{i}-label")">
+                        <ChipGroup TValue="string" Items="_mutateModes" Selected="[ModeWord(row)]"
+                                   aria-labelledby="@($"hook-mutate-mode-{i}-label")" data-testid="@($"hook-mutate-mode-{i}")"
+                                   SelectedChanged="modes => ChooseMutateMode(i, modes[0])" />
+                    </Field>
+                </div>
+                @MutateValue(row, i, fit)
+                @if (Current.MutateRows.Count > 1)
+                {
+                    <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="@($"hook-mutate-remove-{i}")"
+                                aria-label="@($"Remove patched field {i + 1}")" OnClick="_ => RemoveMutateRow(i)">Remove</AlvoButton>
+                }
+            </div>
+        }
+        <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="hook-mutate-add" OnClick="AddMutateRow">Add a field</AlvoButton>
+    </text>;
+
+    /// <summary>The box a row's field and mode take: CEL, a declared value, true/false, or typed text — then why it does not fit.</summary>
+    /// <param name="row">The row.</param>
+    /// <param name="i">Its index.</param>
+    /// <param name="fit">Its <see cref="MutateFit"/>, computed once for the row's render.</param>
+    private RenderFragment MutateValue(MutateRow row, int i, string? fit) => @<text>
+        @if (row.Mode == MutateMode.Expression)
+        {
+            <Field Label="@($"Set field {i + 1} to")" For="@MutateValueId(i)">
+                <ChildContent>
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="@MutateValueId(i)" Class="a-mono"
+                                  autocomplete="off" Placeholder="now()" aria-describedby="@ExpressionDescribedBy(i, fit)"
+                                  Value="row.Text" ValueChanged="text => TypeMutateText(i, text)" />
+                    @Findings(MutateValueId(i))
+                </ChildContent>
+                <Hint>A CEL expression in the Mutate profile, stored as <code class="a-mono">{"$cel": "…"}</code>.</Hint>
+            </Field>
+        }
+        else if (FieldOf(row) is { Type: FieldType.Enum } choice)
+        {
+            @* A labelled group's Field draws no hint id, so the hint is drawn here with one the select can point at. *@
+            <Field Label="@($"Set field {i + 1} to")" LabelId="@($"{MutateValueId(i)}-label")">
+                <MudSelect @ref="_selects[MutateValueId(i)]" T="string" Variant="Variant.Outlined" Value="row.Text"
+                           ValueChanged="text => ChooseMutateValueAsync(i, text)"
+                           aria-labelledby="@($"{MutateValueId(i)}-label")" aria-describedby="@LiteralDescribedBy(i, fit)"
+                           Class="a-mono" Disabled="row.Empty" data-testid="@MutateValueId(i)">
+                    @foreach (var value in choice.EnumValues ?? Array.Empty<string>())
+                    {
+                        <MudSelectItem Value="@value">@value</MudSelectItem>
+                    }
+                </MudSelect>
+                <span class="a-hint" id="@($"{MutateValueId(i)}-hint")">@MutateLiteral.Hint(choice)</span>
+            </Field>
+        }
+        else if (FieldOf(row) is { Type: FieldType.Boolean })
+        {
+            <Field Label="@($"Set field {i + 1} to")" LabelId="@($"{MutateValueId(i)}-label")">
+                <ChipGroup TValue="string" Items="_flags" Selected="FlagSelected(row)"
+                           aria-labelledby="@($"{MutateValueId(i)}-label")" aria-describedby="@FitDescribedBy(i, fit)"
+                           data-testid="@MutateValueId(i)" SelectedChanged="flags => TypeMutateText(i, flags[0])" />
+            </Field>
+        }
+        else if (FieldOf(row) is { Type: FieldType.Json } json)
+        {
+            <p class="a-note" data-testid="@($"hook-mutate-json-{i}")">
+                '@json.Name' is a json field, and this build converts no literal into one. Write an expression@(json.Required ? "." : ", or set it to empty.")
+            </p>
+        }
+        else
+        {
+            @*
+                No numeric inputmode, even for a number: iOS's decimal and numeric keypads have no minus sign, so a negative
+                literal could not be typed at all. The hint says what the box takes (a deviation from spec §4.3's inputmode).
+            *@
+            <Field Label="@($"Set field {i + 1} to")" For="@MutateValueId(i)">
+                <ChildContent>
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="@MutateValueId(i)" Class="a-mono"
+                                  autocomplete="off" Disabled="row.Empty"
+                                  aria-describedby="@LiteralDescribedBy(i, fit)" Value="row.Text" ValueChanged="text => TypeMutateText(i, text)" />
+                </ChildContent>
+                <Hint>@(FieldOf(row) is { } declared ? MutateLiteral.Hint(declared) : "Choose the field first.")</Hint>
+            </Field>
+        }
+        @Fit(i, fit)
+        @if (row.Mode == MutateMode.Literal && FieldOf(row) is { Required: false })
+        {
+            <MudCheckBox T="bool" Value="row.Empty" ValueChanged="on => SetMutateEmpty(i, on)" Label="Set to empty"
+                         data-testid="@($"hook-mutate-empty-{i}")" />
+        }
+    </text>;
+
+    /// <summary>Why a row cannot be written, under its box and after its hint (spec §3.8) — from the moment it opens.</summary>
+    private static RenderFragment Fit(int i, string? fit) => @<text>
+        @if (fit is not null)
+        {
+            <p class="a-field__problem" id="@($"{MutateValueId(i)}-fit")" data-testid="@($"hook-mutate-fit-{i}")">@fit</p>
+        }
+    </text>;
+
+    /// <summary>A webhook's endpoint, picked from the working copy, and its optional payload (spec §4.4, §4.5).</summary>
+    private RenderFragment WebhookFields => @<text>
+        <Field Label="Endpoint" LabelId="hook-endpoint-label">
+            <ChildContent>
+                <MudSelect @ref="_selects[EndpointSelectId]" T="string" Variant="Variant.Outlined" Value="Current.Endpoint"
+                           ValueChanged="ChooseEndpointAsync"
+                           aria-labelledby="hook-endpoint-label" aria-describedby="hook-endpoint-hint" Class="a-mono"
+                           data-testid="hook-endpoint" Disabled="@(_endpoints.Count == 0)">
+                    @foreach (var choice in _endpoints)
+                    {
+                        <MudSelectItem Value="@choice.Name">@choice.Label</MudSelectItem>
+                    }
+                </MudSelect>
+            </ChildContent>
+            <Hint><span id="hook-endpoint-hint" data-testid="hook-endpoint-hint">@EndpointHint</span></Hint>
+        </Field>
+        <Field Label="Payload (optional)" For="hook-payload">
+            <ChildContent>
+                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-payload" Class="a-mono" Lines="4"
+                              autocomplete="off" spellcheck="false" Placeholder="[&quot;{{new.order_number}}&quot;, {{new.total}}]"
+                              aria-describedby="@PayloadDescribedBy" Value="Current.Payload" ValueChanged="TypePayload" />
+                @PayloadNotes
+                @Findings("hook-payload")
+            </ChildContent>
+            <Hint>
+                Left empty, the endpoint receives the CloudEvents envelope: the whole row, <code class="a-mono">hidden</code>
+                fields included. A payload is JSON around <code class="a-mono">{{…}}</code> placeholders over
+                <code class="a-mono">new</code>, <code class="a-mono">old</code>, <code class="a-mono">event</code> and
+                <code class="a-mono">@@user.id</code> — in quotes for text (<code class="a-mono">"{{new.order_number}}"</code>),
+                bare for a value (<code class="a-mono">[{{new.total}}]</code>). This build reads a <code class="a-mono">{</code>
+                or <code class="a-mono">}</code> outside a placeholder as JSONata and refuses it, so an object payload is
+                refused today — write an array.
+                @ChordHint.Of(_editing is null ? "adds the hook to the working copy" : "saves the hook to the working copy")
+            </Hint>
+        </Field>
+    </text>;
+
+    /// <summary>What the payload box says without asking the server: too long, or not checked until an endpoint is declared.</summary>
+    private RenderFragment PayloadNotes => @<text>
+        @if (Current.Payload.Length > HookBuilder.MaxPayloadLength)
+        {
+            <p class="a-field__problem" id="hook-payload-length" data-testid="hook-payload-length">
+                This payload is @Current.Payload.Length characters; a payload holds at most @HookBuilder.MaxPayloadLength.
+            </p>
+        }
+        else if (Current.Payload.Length > 0 && !EndpointDeclared)
+        {
+            <p class="a-hint" id="hook-payload-pending" data-testid="hook-payload-pending">Checked once a declared endpoint is chosen.</p>
+        }
+    </text>;
+
+    /// <summary>An email's template, picked from the working copy, and its recipient, checked as typed (spec §4.2, §4.4).</summary>
+    private RenderFragment EmailFields => @<text>
+        <Field Label="Template" LabelId="hook-template-label">
+            <ChildContent>
+                <MudSelect @ref="_selects[TemplateSelectId]" T="string" Variant="Variant.Outlined" Value="Current.Template"
+                           ValueChanged="ChooseTemplateAsync"
+                           aria-labelledby="hook-template-label" aria-describedby="hook-template-hint" Class="a-mono"
+                           data-testid="hook-template" Disabled="@(_templates.Count == 0)">
+                    @foreach (var choice in _templates)
+                    {
+                        <MudSelectItem Value="@choice.Name">@choice.Label</MudSelectItem>
+                    }
+                </MudSelect>
+            </ChildContent>
+            <Hint><span id="hook-template-hint" data-testid="hook-template-hint">@TemplateHint</span></Hint>
+        </Field>
+        <Field Label="To" For="hook-to">
+            <ChildContent>
+                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-to" Class="a-mono" autocomplete="off"
+                              Placeholder="{{new.contact_email}}" aria-describedby="@Described("hook-to")"
+                              Value="Current.To" ValueChanged="TypeTo" />
+                @Findings("hook-to")
+            </ChildContent>
+            <Hint>
+                One address, or a <code class="a-mono">{{…}}</code> placeholder such as
+                <code class="a-mono">{{new.contact_email}}</code>, on one line. Checked once a declared template is chosen.
+            </Hint>
+        </Field>
     </text>;
 }

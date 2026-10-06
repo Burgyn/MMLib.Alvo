@@ -1,0 +1,177 @@
+﻿@*
+    Declares or edits one webhook endpoint in the working copy (spec §4.8, §6.1). The statement comes first, above the
+    fields, in the warning tone — it is what an operator must read before a destination receives a record (§6.3): the
+    build's own sentence verbatim, then the facts the build does not publish yet. The name is fixed in an edit: a hook
+    names the endpoint by it.
+*@
+@inject ISnackbar Snackbar
+
+<AlvoEditor TestId="endpoint-editor" Title="@(Editing is null ? "New endpoint" : $"Edit endpoint {Editing}")"
+            SubmitText="@(Editing is null ? "Add to the working copy" : "Save to the working copy")" SubmitTestId="endpoint-save"
+            Subtitle="It joins the working copy. A hook's webhook action names it; nothing is delivered until you apply."
+            Dirty="Dirty" OnSubmit="SaveAsync" OnClose="OnClose">
+    <AlvoAlert Tone="AlvoAlert.AlertTone.Warning" Title="@IntegrationStatement.Title" TestId="endpoint-statement">
+        @if (Warning is { Length: > 0 })
+        {
+            <p data-testid="endpoint-statement-build">@Warning</p>
+        }
+        <p>@IntegrationStatement.HiddenFields</p>
+        <p>@IntegrationStatement.PrivateDestinations</p>
+        <p>@IntegrationStatement.NoRedelivery</p>
+    </AlvoAlert>
+    @RefusalPanel.Of(_refusal, "That endpoint could not be saved")
+
+    @if (Editing is null)
+    {
+        <Field Label="Name" For="endpoint-name" Required="true">
+            <ChildContent>
+                <MudTextField @ref="_nameBox" T="string" Variant="Variant.Outlined" Immediate="true" id="endpoint-name" Class="a-mono"
+                              autocomplete="off" spellcheck="false" Placeholder="billing-system" aria-required="true"
+                              Error="@_fields.Has(EndpointDraft.NameField)"
+                              aria-describedby="@_fields.DescribedBy(EndpointDraft.NameField, "endpoint-name-hint")"
+                              Value="_draft.Name" ValueChanged="TypeName" />
+                @_fields.Under(EndpointDraft.NameField, () => _nameBox!.FocusAsync())
+            </ChildContent>
+            <Hint>Lower case letters, digits and dashes, such as <code class="a-mono">billing-system</code>. A hook's webhook action names it.</Hint>
+        </Field>
+    }
+    else
+    {
+        <Field Label="Name">
+            <ChildContent><span class="a-mono" data-testid="endpoint-name-fixed">@Editing</span></ChildContent>
+            <Hint>A hook names the endpoint by it, so it is not renamed here.</Hint>
+        </Field>
+    }
+
+    <Field Label="URL" For="endpoint-url" Required="true">
+        <ChildContent>
+            <MudTextField @ref="_urlBox" T="string" Variant="Variant.Outlined" Immediate="true" id="endpoint-url" Class="a-mono"
+                          autocomplete="off" spellcheck="false" Placeholder="https://billing.example/hooks/alvo" aria-required="true"
+                          Error="@_fields.Has(EndpointDraft.UrlField)"
+                          aria-describedby="@_fields.DescribedBy(EndpointDraft.UrlField, "endpoint-url-hint")"
+                          Value="_draft.Url" ValueChanged="TypeUrl" />
+            @_fields.Under(EndpointDraft.UrlField, () => _urlBox!.FocusAsync())
+        </ChildContent>
+        <Hint>
+            An absolute <code class="a-mono">https</code> URL; plain <code class="a-mono">http</code> only for a loopback host —
+            localhost, 127.0.0.1, [::1]. Checked here as the apply checks it once a hook posts to this endpoint.
+        </Hint>
+    </Field>
+
+    <Field Label="Secret name" For="endpoint-secret" Required="true">
+        <ChildContent>
+            <MudTextField @ref="_secretBox" T="string" Variant="Variant.Outlined" Immediate="true" id="endpoint-secret" Class="a-mono"
+                          autocomplete="off" spellcheck="false" Placeholder="billing-system-signing-key" aria-required="true"
+                          Error="@_fields.Has(EndpointDraft.SecretField)"
+                          aria-describedby="@_fields.DescribedBy(EndpointDraft.SecretField, "endpoint-secret-hint")"
+                          Value="_draft.SecretRef" ValueChanged="TypeSecret" />
+            @_fields.Under(EndpointDraft.SecretField, () => _secretBox!.FocusAsync())
+        </ChildContent>
+        <Hint>@IntegrationStatement.SecretHint</Hint>
+    </Field>
+
+    <Field Label="Description (optional)" For="endpoint-description">
+        <ChildContent>
+            <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="endpoint-description" autocomplete="off"
+                          aria-describedby="endpoint-description-hint" Value="_draft.Description" ValueChanged="TypeDescription" />
+        </ChildContent>
+        <Hint>For whoever reads the descriptor; this build does not read it.</Hint>
+    </Field>
+</AlvoEditor>
+
+@code {
+    private readonly FieldRefusals _fields = new();
+    private readonly RefusalState<string> _refusal = new();
+    private EndpointDraft _draft = new();
+    private string _opened = string.Empty;
+    private MudTextField<string>? _nameBox;
+    private MudTextField<string>? _urlBox;
+    private MudTextField<string>? _secretBox;
+
+    /// <summary>The endpoint being edited, or <see langword="null"/> for a new one.</summary>
+    [Parameter]
+    public string? Editing { get; set; }
+
+    /// <summary>The build's own sentence about the <c>webhooks</c> block, verbatim from <c>capabilities.warned</c>.</summary>
+    [Parameter]
+    public string? Warning { get; set; }
+
+    /// <summary>Raised with the endpoint's name once it is in the working copy.</summary>
+    [Parameter]
+    public EventCallback<string> OnSaved { get; set; }
+
+    /// <summary>Raised when the sheet closes without saving.</summary>
+    [Parameter]
+    public EventCallback OnClose { get; set; }
+
+    /// <summary>The working copy the declaration is written into — cascaded, so its model stays internal.</summary>
+    [CascadingParameter]
+    private WorkingCopy? Copy { get; set; }
+
+    /// <inheritdoc />
+    protected override void OnInitialized()
+    {
+        /* The first declaration of the name, as IntegrationRows.ByName reads it — so the sheet opens the row it was opened from. */
+        if (Editing is { } name && Copy is { } copy
+            && DescriptorLens.Endpoints(copy.Json).FirstOrDefault(pair => pair.Key == name) is { Key: not null } declared)
+        {
+            _draft = EndpointDraft.From(declared.Key, declared.Value);
+        }
+
+        _opened = Snapshot();
+    }
+
+    private bool Dirty => Snapshot() != _opened;
+
+    private string Snapshot() => string.Join('\n', _draft.Name, _draft.Url, _draft.SecretRef, _draft.Description);
+
+    private void TypeName(string? text)
+    {
+        _draft.TypeName(text ?? string.Empty);
+        _fields.Clear(EndpointDraft.NameField);
+    }
+
+    private void TypeUrl(string? text)
+    {
+        _draft.Url = text ?? string.Empty;
+        _fields.Clear(EndpointDraft.UrlField);
+    }
+
+    private void TypeSecret(string? text)
+    {
+        _draft.TypeSecret(text ?? string.Empty);
+        _fields.Clear(EndpointDraft.SecretField);
+    }
+
+    private void TypeDescription(string? text) => _draft.Description = text ?? string.Empty;
+
+    /// <summary>Refuses at the field what the apply would refuse, then writes the declaration and says so — the name only.</summary>
+    private async Task SaveAsync()
+    {
+        if (Copy is not { } copy)
+        {
+            return;
+        }
+
+        var refusals = _draft.Refusals([.. DescriptorLens.Endpoints(copy.Json).Select(pair => pair.Key)], Editing is not null);
+        if (refusals.Count > 0)
+        {
+            _fields.RefuseAll(refusals);
+            return;
+        }
+
+        var name = Editing ?? _draft.Name.Trim();
+        if (!copy.DeclareEndpoint(name, _draft.Url.Trim(), _draft.SecretRef.Trim(), _draft.Description.Trim(), Editing is not null))
+        {
+            _refusal.Show(Overtaken(name));
+            return;
+        }
+
+        Snackbar.Confirm(Editing is null ? StagedWords.Added("Endpoint", name) : StagedWords.Saved("Endpoint", name));
+        await OnSaved.InvokeAsync(name);
+    }
+
+    private string Overtaken(string name) => Editing is null
+        ? $"An endpoint named '{name}' was declared in the working copy while this sheet was open. Nothing was saved; choose another name."
+        : $"The endpoint '{name}' is no longer declared in the working copy. Nothing was saved.";
+}

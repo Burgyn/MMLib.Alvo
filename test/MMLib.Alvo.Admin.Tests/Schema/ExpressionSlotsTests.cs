@@ -4,6 +4,7 @@ using MMLib.Alvo.Admin.Components.Schema;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Management;
+using MMLib.Alvo.Schema;
 using NSubstitute;
 using System.Security.Claims;
 using System.Text.Json.Nodes;
@@ -88,109 +89,49 @@ public class ExpressionSlotsTests
 
     private const string WithHooks = """{"entities":{"orders":{"fields":{"total":{"type":"decimal"}},"hooks":{"beforeCreate":[{"action":{"reject":"no"}}]}},"bare":{"fields":{}},"a/b":{"fields":{}}}}""";
 
-    private static JsonObject Reject() => new() { ["reject"] = "stop" };
-
-    private static JsonObject Mutate(string field) => new() { ["mutate"] = new JsonObject { [field] = new JsonObject { ["$cel"] = "old" } } };
+    private static readonly Dictionary<string, FieldSchema> _total = new(StringComparer.Ordinal)
+    {
+        ["total"] = new() { Name = "total", Type = FieldType.Decimal },
+    };
 
     [Fact]
-    public void A_hook_condition_lands_after_the_hooks_already_at_that_point()
+    public void A_mutate_field_with_a_slash_is_escaped_in_the_hook_pointer()
     {
-        var (json, path) = ExpressionSlots.ForHookCondition(WithHooks, "orders", "beforeCreate", Reject(), "new.total > 1")!.Value;
+        var hook = new HookBuilder { Kind = HookBuilder.Mutate, MutateRows = { new MutateRow("a/b", MutateMode.Expression, "1") } };
 
-        path.ShouldBe("/entities/orders/hooks/beforeCreate/1/condition");
-        var list = JsonNode.Parse(json)!["entities"]!["orders"]!["hooks"]!["beforeCreate"]!.AsArray();
-        list.Count.ShouldBe(2);
-        list[1]!["condition"]!.GetValue<string>().ShouldBe("new.total > 1");
-        list[1]!["action"]!["reject"]!.GetValue<string>().ShouldBe("stop");
-    }
-
-    [Fact]
-    public void A_hook_at_a_point_with_none_is_the_first_and_creates_the_hooks_object()
-    {
-        var (json, path) = ExpressionSlots.ForHookCondition(WithHooks, "bare", "afterUpdate", Reject(), "true")!.Value;
-
-        path.ShouldBe("/entities/bare/hooks/afterUpdate/0/condition");
-        JsonNode.Parse(json)!["entities"]!["bare"]!["hooks"]!["afterUpdate"]!.AsArray().Count.ShouldBe(1);
-    }
-
-    [Fact]
-    public void A_hook_candidate_leaves_the_working_text_and_the_action_untouched_and_is_independent()
-    {
-        var action = Reject();
-        var (first, _) = ExpressionSlots.ForHookCondition(WithHooks, "bare", "afterUpdate", action, "first")!.Value;
-        var (second, _) = ExpressionSlots.ForHookCondition(WithHooks, "bare", "afterUpdate", action, "second")!.Value;
-
-        first.ShouldNotContain("second");
-        second.ShouldNotContain("first");
-        action.ToJsonString().ShouldBe("""{"reject":"stop"}""");
-        WithHooks.ShouldNotContain("afterUpdate");
-    }
-
-    [Fact]
-    public void A_slash_in_the_entity_name_is_escaped_in_the_hook_pointer()
-    {
-        var (_, path) = ExpressionSlots.ForHookCondition(WithHooks, "a/b", "beforeCreate", Reject(), "true")!.Value;
-
-        path.ShouldBe("/entities/a~1b/hooks/beforeCreate/0/condition");
-    }
-
-    [Fact]
-    public void A_hook_on_an_unknown_entity_or_in_text_that_is_not_a_descriptor_has_nothing_to_check()
-    {
-        ExpressionSlots.ForHookCondition(WithHooks, "missing", "beforeCreate", Reject(), "true").ShouldBeNull();
-        ExpressionSlots.ForHookCondition("not json", "orders", "beforeCreate", Reject(), "true").ShouldBeNull();
-    }
-
-    [Fact]
-    public void A_mutate_value_lands_under_the_patched_field_with_the_typed_source_and_no_condition()
-    {
-        var (json, path) = ExpressionSlots.ForMutateValue(
-            WithHooks, "orders", "beforeUpdate", Mutate("total"), "total", "now()")!.Value;
-
-        path.ShouldBe("/entities/orders/hooks/beforeUpdate/0/action/mutate/total");
-        var hook = JsonNode.Parse(json)!["entities"]!["orders"]!["hooks"]!["beforeUpdate"]![0]!;
-        hook["action"]!["mutate"]!["total"]!["$cel"]!.GetValue<string>().ShouldBe("now()");
-        hook["condition"].ShouldBeNull(
-            "the before-hook compiler stops at a condition that does not compile, so the value is checked without it");
-    }
-
-    [Fact]
-    public void A_mutate_field_with_a_slash_is_escaped_and_the_action_is_not_modified()
-    {
-        var action = Mutate("a/b");
-        var (_, path) = ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", action, "a/b", "1")!.Value;
+        var (_, path) = ExpressionSlots.ForHook(
+            WithHooks, "orders", "beforeUpdate", null, hook.CandidateHook(null), "action", "mutate", "a/b")!.Value;
 
         path.ShouldBe("/entities/orders/hooks/beforeUpdate/0/action/mutate/a~1b");
-        action["mutate"]!["a/b"]!["$cel"]!.GetValue<string>().ShouldBe("old");
-    }
-
-    [Theory]
-    [InlineData("")]
-    [InlineData("  ")]
-    public void A_mutate_value_with_no_field_named_yet_has_nothing_to_check(string field)
-        => ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", Mutate("x"), field, "1").ShouldBeNull();
-
-    [Fact]
-    public void A_mutate_value_of_an_action_that_is_not_that_mutate_has_nothing_to_check()
-    {
-        ExpressionSlots.ForMutateValue(WithHooks, "orders", "beforeUpdate", Reject(), "total", "1").ShouldBeNull();
-        ExpressionSlots.ForMutateValue(WithHooks, "missing", "beforeUpdate", Mutate("total"), "total", "1").ShouldBeNull();
     }
 
     /// <summary>
-    /// Add keys the mutate by the field's text as typed, so the check must too: a trimmed <c>status</c> found no
-    /// <c>mutate["status "]</c>, so the check stayed silent while Apply refused <c>'status ' is not a field</c>.
+    /// The value is checked in a hook without its condition (slice B design D4): the before-hook compiler stops at a
+    /// condition that does not compile and never reaches the value. And the check must key the mutate exactly as Add
+    /// stages it: when the two disagreed (Add kept <c>total </c> as typed, the check trimmed it), the check found no such
+    /// key and stayed silent while Apply refused the hook. Add stages the trimmed name, so the candidate carries it too;
+    /// the slot is asked for through <see cref="HookBuilder.MutateSlot"/>, the call the tab makes, never trimmed by hand.
     /// </summary>
     [Fact]
-    public void The_form_s_mutate_value_is_placed_under_the_field_as_add_keys_it_untrimmed()
+    public void The_form_s_mutate_value_is_placed_without_the_condition_under_the_key_add_stages()
     {
-        var hook = new HookBuilder { Kind = HookBuilder.Mutate, MutateField = "total ", MutateValue = "1" };
+        var hook = new HookBuilder
+        {
+            Kind = HookBuilder.Mutate,
+            Condition = "new.total ==",
+            Fields = _total,
+            MutateRows = { new MutateRow("total ", MutateMode.Expression, "1") },
+        };
 
-        var (json, path) = ExpressionSlots.ForMutateValue(WithHooks, "orders", hook, "1")!.Value;
+        var (json, path) = ExpressionSlots.ForHook(
+            WithHooks, "orders", hook.Point, null, hook.CandidateHook(null), HookBuilder.MutateSlot(hook.MutateRows[0]))!.Value;
 
-        path.ShouldEndWith("/action/mutate/total ");
-        hook.Build(out _)!["mutate"]!.AsObject().ContainsKey("total ").ShouldBeTrue("what Add would stage");
-        JsonNode.Parse(json)!["entities"]!["orders"]!["hooks"]![hook.Point]!.AsArray()[^1]!["action"]!["mutate"]!["total "].ShouldNotBeNull();
+        hook.Build(out var refusal).ShouldNotBeNull(refusal)["mutate"]!.AsObject().Select(pair => pair.Key)
+            .ShouldBe(["total"], "what Add would stage");
+        path.ShouldEndWith("/action/mutate/total");
+        var placed = JsonNode.Parse(json)!["entities"]!["orders"]!["hooks"]![hook.Point]!.AsArray()[^1]!;
+        placed["action"]!["mutate"]!["total"].ShouldNotBeNull();
+        placed["condition"].ShouldBeNull("a broken condition in the candidate would hide every problem in the value");
     }
 
     [Fact]
@@ -267,7 +208,7 @@ public class ExpressionSlotsTests
     [InlineData(HookBuilder.Mutate)]
     public void The_hook_draft_of_an_unfinished_form_is_the_same_kind_with_stand_ins(string kind)
     {
-        var hook = new HookBuilder { Kind = kind, MutateField = "total" };
+        var hook = new HookBuilder { Kind = kind, MutateRows = { new MutateRow("total", MutateMode.Expression, string.Empty) } };
 
         hook.Draft().ContainsKey(kind).ShouldBeTrue();
         if (kind == HookBuilder.Mutate)
@@ -300,11 +241,12 @@ public class ExpressionSlotsTests
             management, people: null, Substitute.For<IAlvoAdminCallerResolver>(), authentication,
             Substitute.For<IAlvoContextAccessor>());
         var check = new ExpressionCheck { DebounceOverride = TimeSpan.Zero };
-        var hook = new HookBuilder { Kind = HookBuilder.Mutate, MutateField = "total" };
+        var hook = new HookBuilder { Kind = HookBuilder.Mutate, MutateRows = { new MutateRow("total", MutateMode.Expression, string.Empty) } };
 
         await check.SubmitAsync("hook-condition", "new.total > 1", async (source, ct) =>
         {
-            var slot = ExpressionSlots.ForHookCondition(copy.Json, "orders", "beforeCreate", hook.Draft(), source)!.Value;
+            var slot = ExpressionSlots.ForHook(
+                copy.Json, "orders", "beforeCreate", null, HookPatch.Apply(null, source, hook.Draft()), "condition")!.Value;
             return await gateway.CheckExpressionAsync(slot.Json, slot.Path, source, ct);
         });
         await check.SubmitAsync("hook-condition", string.Empty, (_, _) => Task.FromResult<ManagementExpressionVerdict?>(null));

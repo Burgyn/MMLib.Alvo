@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Admin.Components.Schema;
 using MMLib.Alvo.Schema;
+using System.Text.Json;
 
 namespace MMLib.Alvo.Admin.Tests.Schema;
 
@@ -93,6 +94,20 @@ public class PendingSchemaTests
     public void Nullability_is_derived_from_required_when_it_is_not_declared(string declared, bool nullable)
         => PendingSchema.Read("""{"entities":{"t":{"fields":{"f":""" + declared + "}}}}", "t")!.Fields.Single()
             .Nullable.ShouldBe(nullable);
+
+    /// <summary>
+    /// A type is read by its name only: a number is not an enum ordinal, a comma list is not a flags combination, and
+    /// padding is not trimmed — each falls back to <see cref="FieldType.String"/>, never to a value no member names.
+    /// </summary>
+    [Theory]
+    [InlineData("3")]
+    [InlineData("42")]
+    [InlineData("-1")]
+    [InlineData("string,text")]
+    [InlineData(" integer ")]
+    public void A_type_that_is_not_a_member_name_falls_back_to_string(string type)
+        => PendingSchema.Read("""{"entities":{"t":{"fields":{"f":{"type":""" + JsonSerializer.Serialize(type) + "}}}}}", "t")!
+            .Fields[0].Type.ShouldBe(FieldType.String);
 
     [Fact]
     public void A_cel_default_is_not_a_literal_and_is_left_out_as_the_mapper_leaves_it_out()

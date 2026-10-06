@@ -315,6 +315,29 @@ public sealed class ExpressionSlotCheckTests
     }
 
     [Fact]
+    public void A_webhook_payload_slot_is_spliced_as_text_and_judged_as_apply_judges_it()
+    {
+        var descriptor = DescriptorWithAfterHooks().ToJsonString();
+        const string pointer = "/entities/orders/hooks/afterCreate/0/action/payload";
+
+        ExpressionSlotCheck.Check(Validator(), descriptor, pointer, "[{{new.total}}]").Where(IsError).ShouldBeEmpty();
+        ExpressionSlotCheck.Check(Validator(), descriptor, pointer, "{\"id\": \"{{new.id}}\"}").Where(IsError)
+            .ShouldHaveSingleItem("a brace outside a placeholder is raw JSONata to this build (JsonataSlot), refused at apply")
+            .Message.ShouldContain(UnhonouredFeatures.RawJsonata.Consequence);
+    }
+
+    [Fact]
+    public void An_email_to_slot_is_spliced_as_text_and_more_than_one_recipient_is_refused()
+    {
+        var descriptor = DescriptorWithAfterHooks().ToJsonString();
+        const string pointer = "/entities/orders/hooks/afterCreate/1/action/to";
+
+        ExpressionSlotCheck.Check(Validator(), descriptor, pointer, "ops@example.com").Where(IsError).ShouldBeEmpty();
+        ExpressionSlotCheck.Check(Validator(), descriptor, pointer, "ops@example.com, sales@example.com").Where(IsError)
+            .ShouldHaveSingleItem().Message.ShouldContain("mailbox");
+    }
+
+    [Fact]
     public void A_mutate_value_the_schema_refuses_above_the_slot_is_reported_at_the_slot_not_as_not_judged()
     {
         var finding = ExpressionSlotCheck.Check(
@@ -438,6 +461,20 @@ public sealed class ExpressionSlotCheckTests
             }),
         };
 
+        return descriptor;
+    }
+
+    private static JsonObject DescriptorWithAfterHooks()
+    {
+        var descriptor = Descriptor();
+        descriptor["webhooks"] = JsonNode.Parse("""{"endpoints":{"desk":{"url":"https://example.com/hook","secretRef":"desk-key"}}}""");
+        descriptor["templates"] = JsonNode.Parse("""{"done":{"subject":"Done","body":"Order done."}}""");
+        descriptor["entities"]!["orders"]!["hooks"] = JsonNode.Parse(
+            """
+            {"afterCreate":[
+              {"action":{"type":"webhook","endpoint":"desk","payload":"[{{new.total}}]"}},
+              {"action":{"type":"email","template":"done","to":"ops@example.com"}}]}
+            """);
         return descriptor;
     }
 

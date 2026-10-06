@@ -57,6 +57,15 @@ public static class AlvoAdminServiceCollectionExtensions
     /// in the host's endpoints and hands over the bare token instead, with one sentence saying the host has no
     /// set-password page — never a link to a form that posts nowhere.
     /// </para>
+    /// <para>
+    /// <b>It raises the circuit's receive limit, for every circuit in the process.</b> While
+    /// <see cref="AlvoAdminOptions.Enabled"/> is <see langword="true"/>, SignalR's <c>MaximumReceiveMessageSize</c> for
+    /// the Blazor circuit hub goes from 32 KB to 2 MiB, so a realistic descriptor can be pasted into Import. That hub is
+    /// shared: an embedding host's own server-interactive circuits get the same limit, and it applies to a connection
+    /// before anyone has signed in, so a client can make the server buffer up to 2 MiB per message. A host that allows
+    /// more, or no limit, keeps its own; a lower limit it sets <i>after</i> this call wins, at the price of large
+    /// pastes being refused at the box.
+    /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into.</param>
     /// <param name="configure">Configures the dashboard.</param>
@@ -72,7 +81,10 @@ public static class AlvoAdminServiceCollectionExtensions
             options.Configure(configure);
         }
 
-        services.AddRazorComponents().AddInteractiveServerComponents();
+        /* SignalR's default 32 KB receive limit is under a realistic descriptor, and a box over it closed the circuit
+           without a word (#316). ImportLimit says why 2 MiB, and what raising it costs; CircuitReceiveLimit raises it
+           only while the dashboard is enabled. */
+        CircuitReceiveLimit.Register(services.AddRazorComponents().AddInteractiveServerComponents());
         services.AddCascadingAuthenticationState();
 
         /* AuthorizeRouteView asks IAuthorizationService on every in-circuit navigation, and a

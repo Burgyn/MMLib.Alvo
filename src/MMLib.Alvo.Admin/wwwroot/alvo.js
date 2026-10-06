@@ -371,6 +371,58 @@
     }
   };
 
+  /* --- A box with a ceiling ----------------------------------------------
+     A server-interactive box sends its whole text to the circuit on every
+     input, and the circuit closes on a message over its receive limit —
+     without a word, the box empty (#316). A box that carries
+     data-alvo-max-chars and data-alvo-max-bytes is therefore measured here,
+     on the window in the capture phase, ahead of the framework's own listener
+     on the document: an input over either ceiling is stopped before the
+     circuit hears of it, the box gets back the text the circuit last heard,
+     and alvo:oversized carries "<characters> <bytes as sent>" to the screen,
+     which draws the refusal. Bytes are counted as the text travels: JSON-
+     escaped, UTF-8 encoded (ImportLimit says why both).
+     ---------------------------------------------------------------------- */
+
+  const heard = new WeakMap();
+  const encoder = new TextEncoder();
+
+  const ceilingOf = (target) =>
+    (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) && target.dataset.alvoMaxChars !== undefined
+      ? { chars: Number(target.dataset.alvoMaxChars), bytes: Number(target.dataset.alvoMaxBytes) }
+      : null;
+
+  /* An escaped UTF-16 unit is at most six bytes (\u0000), so a short text needs no encoding to be known small. Above
+     about 338,000 characters (the byte ceiling over six) every input pays a JSON.stringify and a TextEncoder pass over
+     the whole text — milliseconds at the ceiling, and only in a box this large, which is pasted into rather than typed. */
+  const sentBytes = (text, ceiling) =>
+    text.length * 6 + 2 <= ceiling ? 0 : encoder.encode(JSON.stringify(text)).length;
+
+  const onBoxFocus = (event) => {
+    if (ceilingOf(event.target) && !heard.has(event.target)) {
+      heard.set(event.target, event.target.value);
+    }
+  };
+
+  const guardCeiling = (event) => {
+    const box = event.target;
+    const ceiling = ceilingOf(box);
+    if (!ceiling) {
+      return;
+    }
+
+    const text = box.value;
+    const bytes = sentBytes(text, ceiling.bytes);
+    if (text.length <= ceiling.chars && bytes <= ceiling.bytes) {
+      heard.set(box, text);
+      return;
+    }
+
+    event.stopImmediatePropagation();
+    box.value = heard.get(box) ?? '';
+    emit('oversized', { value: `${text.length} ${bytes || encoder.encode(JSON.stringify(text)).length}` });
+  };
+
   /* --- Tab strip names ---------------------------------------------------
      MudTabs puts its own attributes on its outer frame and draws role=tablist a
      level inside, where no parameter reaches, so the strip would lose the name
@@ -391,6 +443,9 @@
   document.addEventListener('keydown', onHandleKey);
   document.addEventListener('dblclick', onHandleDoubleClick);
   document.addEventListener('focusin', onHandleFocus);
+  window.addEventListener('focusin', onBoxFocus, true);
+  window.addEventListener('input', guardCeiling, true);
+  window.addEventListener('change', guardCeiling, true);
 
   window.alvo = { toggleTheme, toggleDensity, resolvedTheme, nameTablist };
 })();
