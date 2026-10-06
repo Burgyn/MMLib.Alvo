@@ -58,6 +58,7 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
 
         await HookEditInPlaceScenarios.OnWriteAsync(session, "service_orders");
         await HookEditInPlaceScenarios.OpenEditAsync(session, "afterUpdate", 0);
+        await Mode(session, "Text").WaitForAsync();
         (await Mode(session, "Text").CountAsync()).ShouldBe(1, "a bare boolean is not a row (spec D5)");
         (await session.Page.InputValueAsync("input#hook-condition")).ShouldContain("new.notify_customer");
     }

@@ -11,37 +11,19 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// Data API write whose stored value is the function's result.
 /// </summary>
 /// <remarks>
-/// It walks the embedded-host sample's README ("In the dashboard") and asserts the strings that paragraph quotes — read from
-/// the README itself, so a reworded screen or a reworded README fails here rather than drifting apart (ruling S).
+/// It asserts the strings the embedded-host sample's README ("In the dashboard") quotes; <see cref="HostFunctionReadmeTests"/>
+/// reads them from the README itself, so a reworded screen or a reworded README fails rather than drifting apart (ruling S).
 /// </remarks>
 /// <param name="world">The sample's world on the shipped host, with two host functions, and a browser.</param>
 public sealed class HostFunctionScenarios(HostFunctionWorld world) : IClassFixture<HostFunctionWorld>
 {
     /// <summary>What the README's "In the dashboard" paragraph quotes, each exactly as the screen draws it.</summary>
-    private const string Disclosure = "Functions you can call here";
-    private const string HostBadge = "this host";
-    private const string BuiltInBadge = "built-in";
-    private const string InsertLabel = "Insert";
-    private const string Signature = "normalizeVin(vin: String) -> String";
-    private const string InsertedCall = "normalizeVin(new.vin)";
-
-    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task The_readme_quotes_the_strings_this_scenario_asserts()
-    {
-        var readme = await File.ReadAllTextAsync(
-            Path.Combine(RepositoryRoot.Find(), "samples", "MMLib.Alvo.Samples.EmbeddedHost", "README.md"), TestContext.Current.CancellationToken);
-        var paragraph = readme[readme.IndexOf("**In the dashboard.**", StringComparison.Ordinal)..];
-        paragraph = paragraph[..paragraph.IndexOf("\n\n", StringComparison.Ordinal)];
-
-        foreach (var bold in new[] { Disclosure, HostBadge, BuiltInBadge, InsertLabel })
-        {
-            paragraph.ShouldContain($"**{bold}**");
-        }
-
-        paragraph.ShouldContain($"`{Signature}`");
-        paragraph.ShouldContain($"`{InsertedCall}`");
-        readme.ShouldContain(HostFunctionWorld.NormalizeVinSummary, Case.Sensitive, "the summary the README registers is the one the world registers");
-    }
+    internal const string Disclosure = "Functions you can call here";
+    internal const string HostBadge = "this host";
+    internal const string BuiltInBadge = "built-in";
+    internal const string InsertLabel = "Insert";
+    internal const string Signature = "normalizeVin(vin: String) -> String";
+    internal const string InsertedCall = "normalizeVin(new.vin)";
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task A_host_function_is_offered_inserted_applied_and_stores_its_result()
@@ -56,14 +38,15 @@ public sealed class HostFunctionScenarios(HostFunctionWorld world) : IClassFixtu
         text.ShouldContain(Signature);
         text.ShouldContain(HostFunctionWorld.NormalizeVinSummary);
         text.ShouldContain(HostBadge);
+        text.ShouldNotContain(BuiltInBadge, Case.Sensitive, "a host function carries one badge, never both");
         (await list.GetByTestId("fn-trim").InnerTextAsync()).ShouldContain(BuiltInBadge);
         var insert = list.GetByTestId("fn-insert-normalizeVin");
         (await insert.InnerTextAsync()).Trim().ShouldBe(InsertLabel);
         await insert.ClickAsync();
 
         await FunctionOfferScenarios.WaitForValueAsync(session, "hook-mutate-value-0", InsertedCall);
+        /* The recorded verdict on exactly the inserted text is the proof: a clean check draws no sentence to wait out. */
         (await world.CheckedAsync(InsertedCall)).Findings.ShouldBeEmpty("the build knows the host's function");
-        await session.Page.GetByTestId("check-hook-mutate-value-0").WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
         await AddHookAsync(session);
         await ApplyAsync(session, "Normalise VINs as vehicles are created");

@@ -57,6 +57,7 @@ public sealed class HostFunctionWorld : RecordingWorld
         .AddCelFunction("shout", (string value) => value + "!", MarkupSummary);
 
     /// <summary>The sample's own <c>NormalizeVin</c>: its parameter is named <c>vin</c>, which the signature shows.</summary>
+    /// <remarks>Must mirror <c>SampleHost.NormalizeVin</c> (samples/MMLib.Alvo.Samples.EmbeddedHost) exactly.</remarks>
     private static string NormalizeVin(string vin) =>
         new string([.. vin.Where(char.IsAsciiLetterOrDigit).Select(char.ToUpperInvariant)]);
 }
