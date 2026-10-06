@@ -40,6 +40,22 @@ internal static class DescriptorEdits
         return Write(root);
     }
 
+    /// <summary>Adds a <c>beforeUpdate</c> hook whose <c>mutate</c> writes a JSON <c>null</c> into one field.</summary>
+    /// <param name="descriptorJson">The descriptor to edit.</param>
+    /// <param name="entity">The entity to add the hook to.</param>
+    /// <param name="field">The field the hook empties.</param>
+    internal static string AddNullMutateHook(string descriptorJson, string entity, string field)
+    {
+        var root = JsonNode.Parse(descriptorJson)!.AsObject();
+        var mutate = new JsonObject { [field] = null };
+        root["entities"]![entity]!.AsObject()["hooks"] = new JsonObject
+        {
+            ["beforeUpdate"] = new JsonArray(new JsonObject { ["action"] = new JsonObject { ["mutate"] = mutate } }),
+        };
+
+        return Write(root);
+    }
+
     /// <summary>The pointer of the rule <see cref="AddOwnerComparison"/> writes, where its warning lands.</summary>
     internal const string OwnerComparisonRule = "/entities/shifts/rules/update";
 
