@@ -11,8 +11,8 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// function list offered beside them, and a write through the HTTP Data API stores what they compute.
 /// </summary>
 /// <remarks>
-/// Nothing here edits the working copy, so the scenarios share one world in any order. The expressions are pinned as the
-/// README's "Hook functions" table quotes them.
+/// Nothing here edits the working copy, so the scenarios share one world in any order. The expressions are pinned exactly
+/// as the descriptor declares them; the README's "Hook functions" table quotes the same text.
 /// </remarks>
 /// <param name="world">The bike-workshop demo on the shipped host, with a dev key, and a browser.</param>
 public sealed class DemoFunctionScenarios(DemoFunctionWorld world) : IClassFixture<DemoFunctionWorld>
