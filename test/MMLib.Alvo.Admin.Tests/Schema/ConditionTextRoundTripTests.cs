@@ -44,8 +44,8 @@ public sealed partial class ConditionTextRoundTripTests
     private static readonly string[] _tokens =
     [
         "new.", "old.", " && ", " || ", " == ", " != ", " < ", " <= ", " > ", " >= ", "true", "false", "@user.id", "@user.roles",
-        "has(", "!has(", "changed(", "!(", "'manager'", "'gold'", "'open'", "0", "1.5", "99999999999999999999",
-        .. _scope.Fields.Select(field => field.Name), "nope",
+        "has(", "!has(", "changed(", "!(", "startsWith(", "endsWith(", "contains(", ", ", "''", "'manager'", "'gold'", "'open'", "0",
+        "1.5", "99999999999999999999", .. _scope.Fields.Select(field => field.Name), "nope",
     ];
 
     /// <summary>
@@ -165,8 +165,12 @@ public sealed partial class ConditionTextRoundTripTests
                 ? random.Next(100_000).ToString(CultureInfo.InvariantCulture)
                 : $"{random.Next(1000).ToString(CultureInfo.InvariantCulture)}.{random.Next(100).ToString(CultureInfo.InvariantCulture)}",
             ConditionFieldKind.Choice => field.Values[random.Next(field.Values.Count)],
-            _ => string.Concat(Enumerable.Range(0, random.Next(0, 13)).Select(_ => _pieces[random.Next(_pieces.Length)])),
+            _ => string.Concat(Enumerable.Range(0, random.Next(MinimumPieces(spec), 13)).Select(_ => _pieces[random.Next(_pieces.Length)])),
         };
+
+    /// <summary>A text test needs a value (an empty one is refused, so it is no condition the form writes); equality may be empty.</summary>
+    private static int MinimumPieces(OperatorSpec spec)
+        => spec.Operator is ConditionOperator.StartsWith or ConditionOperator.EndsWith or ConditionOperator.Contains ? 1 : 0;
 
     /// <summary>
     /// One change: the text read at another point, a token swapped for another, or one character inserted or removed.

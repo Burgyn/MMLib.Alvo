@@ -257,6 +257,40 @@ public sealed class HooksEditorAgreementTests
         membership.Right.ShouldBeOfType<CelContextRef>().Value.ShouldBe(CelContextValue.UserRoles);
     }
 
+    /// <summary>
+    /// A hostile value in a text test (starts with, ends with, contains) is read by the real parser as one call of the
+    /// standard function over the field and exactly the value — no closing parenthesis or joiner a value brings in escapes
+    /// the literal — and apply accepts the condition.
+    /// </summary>
+    /// <param name="value">The value typed.</param>
+    [Theory]
+    [InlineData("' || true || '")]
+    [InlineData("x') || ('y")]
+    [InlineData("x'), true || contains(new.f, '")]
+    [InlineData("\\' || true || \\'")]
+    [InlineData("a\" || true || \"b")]
+    [InlineData("line\nbreak")]
+    [InlineData("čaj 中文")]
+    [InlineData("می‌خ \U0001F468‍\U0001F469")]
+    [InlineData("{v} {r} {f} {n}")]
+    public void A_hostile_value_stays_one_literal_of_one_text_test(string value)
+    {
+        foreach (var (relation, function) in (ReadOnlySpan<(ConditionOperator, string)>)
+                 [(ConditionOperator.StartsWith, "startsWith"), (ConditionOperator.EndsWith, "endsWith"), (ConditionOperator.Contains, "contains")])
+        {
+            var cel = ConditionText.Row(new ConditionRow(relation, RowImage.New, "f", ConditionFieldKind.Text, value));
+
+            var call = CelParser.Parse(cel).ShouldBeOfType<CelCall>(cel);
+            call.Name.ShouldBe(function);
+            call.Arguments.Count.ShouldBe(2, cel);
+            call.Arguments[0].ShouldBeOfType<CelFieldRef>().FieldName.ShouldBe("f");
+            var literal = call.Arguments[1].ShouldBeOfType<CelLiteral>();
+            literal.Type.ShouldBe(CelValueType.String);
+            literal.Value.ShouldBe(value);
+            ConditionErrors(Probe("string"), cel).ShouldBeEmpty(cel);
+        }
+    }
+
     [Fact]
     public void The_template_sheet_knows_exactly_the_roots_an_email_resolves()
         => TemplateDraft.Roots.ShouldBe(TemplatePlaceholder.Roots);

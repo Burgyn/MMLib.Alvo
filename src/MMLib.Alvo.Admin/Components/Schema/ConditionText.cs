@@ -238,11 +238,21 @@ internal static partial class ConditionText
     private static string? RowRefusal(ConditionRow row) => ConditionTable.Of(row.Operator).Operand switch
     {
         OperandKind.Literal when row.Kind == ConditionFieldKind.Number => NumberRefusal(row.Value),
+        OperandKind.Literal when row.Value.Length == 0 && IsTextTest(row.Operator)
+            => $"Every text {ConditionTable.Of(row.Operator).Words} nothing; write the text it {ConditionTable.Of(row.Operator).Words}.",
         OperandKind.Literal => SpellingRefusal(row.Value),
         OperandKind.Role when row.Value.Length == 0 => "Choose a role.",
         OperandKind.Role => SpellingRefusal(row.Value),
         _ => null,
     };
+
+    /// <summary>
+    /// Whether a relation is a text test (<c>startsWith</c>, <c>endsWith</c>, <c>contains</c>): every text passes one with an
+    /// empty value, so the form asks for a value rather than write a condition that always holds.
+    /// </summary>
+    /// <param name="relation">The relation.</param>
+    private static bool IsTextTest(ConditionOperator relation)
+        => relation is ConditionOperator.StartsWith or ConditionOperator.EndsWith or ConditionOperator.Contains;
 
     /// <summary>Why a number box's value cannot be written, or <see langword="null"/>.</summary>
     /// <remarks>The range is <c>CelParser</c>'s: a whole number is read as a <c>long</c>, one with a point as a <c>decimal</c>.</remarks>

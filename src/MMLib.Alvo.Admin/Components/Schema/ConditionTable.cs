@@ -78,6 +78,15 @@ internal enum ConditionOperator
 
     /// <summary><c>!('r' in @user.roles)</c>.</summary>
     LacksRole,
+
+    /// <summary><c>startsWith(f, v)</c> — the cel-spec standard function; false when the field is empty.</summary>
+    StartsWith,
+
+    /// <summary><c>endsWith(f, v)</c> — the cel-spec standard function; false when the field is empty.</summary>
+    EndsWith,
+
+    /// <summary><c>contains(f, v)</c> — the cel-spec standard function; false when the field is empty.</summary>
+    Contains,
 }
 
 /// <summary>Which image of the row a condition reads: the one being written, or the one before the write.</summary>
@@ -154,6 +163,7 @@ internal static class ConditionTable
     public const int MaxConditionLength = 2000;
 
     private static readonly ConditionFieldKind[] _compared = [ConditionFieldKind.Text, ConditionFieldKind.Choice, ConditionFieldKind.Number];
+    private static readonly ConditionFieldKind[] _text = [ConditionFieldKind.Text];
     private static readonly ConditionFieldKind[] _number = [ConditionFieldKind.Number];
     private static readonly ConditionFieldKind[] _flag = [ConditionFieldKind.Flag];
     private static readonly ConditionFieldKind[] _identity = [ConditionFieldKind.Identity];
@@ -171,6 +181,9 @@ internal static class ConditionTable
         new(ConditionOperator.Is, "is", "{f} == {v}", OperandKind.Literal, _compared, false, false, false, "false: an empty value equals nothing"),
         new(ConditionOperator.IsNot, "is not (and has a value)", "{f} != {v}", OperandKind.Literal, _compared, false, false, false, "false: every comparison with an empty value is false, != included"),
         new(ConditionOperator.IsNotOrEmpty, "is not, or is empty", "!({f} == {v})", OperandKind.Literal, _compared, true, false, false, "true"),
+        new(ConditionOperator.StartsWith, "starts with", "startsWith({f}, {v})", OperandKind.Literal, _text, false, false, false, "false: a test of an empty value is empty, and an empty condition does not fire"),
+        new(ConditionOperator.EndsWith, "ends with", "endsWith({f}, {v})", OperandKind.Literal, _text, false, false, false, "false: a test of an empty value is empty, and an empty condition does not fire"),
+        new(ConditionOperator.Contains, "contains", "contains({f}, {v})", OperandKind.Literal, _text, false, false, false, "false: a test of an empty value is empty, and an empty condition does not fire"),
         new(ConditionOperator.Less, "is less than", "{f} < {v}", OperandKind.Literal, _number, false, false, false, "false"),
         new(ConditionOperator.LessOrEqual, "is at most", "{f} <= {v}", OperandKind.Literal, _number, false, false, false, "false"),
         new(ConditionOperator.Greater, "is more than", "{f} > {v}", OperandKind.Literal, _number, false, false, false, "false"),

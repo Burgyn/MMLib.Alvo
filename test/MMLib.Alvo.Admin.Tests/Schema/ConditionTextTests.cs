@@ -25,6 +25,31 @@ public class ConditionTextTests
     public void A_row_is_written_in_its_canonical_cel(object relation, object image, string field, object kind, string value, string cel)
         => ConditionText.Row(new ConditionRow((ConditionOperator)relation, (RowImage)image, field, (ConditionFieldKind)kind, value)).ShouldBe(cel);
 
+    /// <summary>A text test writes the cel-spec standard function, its value quoted with the lexer's escapes.</summary>
+    [Theory]
+    [InlineData(ConditionOperator.StartsWith, "code", "WTU", "startsWith(new.code, 'WTU')")]
+    [InlineData(ConditionOperator.EndsWith, "email", "@example.com", "endsWith(new.email, '@example.com')")]
+    [InlineData(ConditionOperator.Contains, "note", "it's", "contains(new.note, 'it\\'s')")]
+    public void A_text_test_row_writes_the_standard_function(object relation, string field, string value, string cel)
+        => ConditionText.Row(new ConditionRow((ConditionOperator)relation, RowImage.New, field, ConditionFieldKind.Text, value)).ShouldBe(cel);
+
+    /// <summary>An empty value makes a text test that every text passes, so the row asks for one instead.</summary>
+    [Theory]
+    [InlineData(ConditionOperator.StartsWith, "starts with nothing")]
+    [InlineData(ConditionOperator.EndsWith, "ends with nothing")]
+    [InlineData(ConditionOperator.Contains, "contains nothing")]
+    public void A_text_test_needs_a_value(object relation, string says)
+        => ConditionText.Refusal(Single(new ConditionRow((ConditionOperator)relation, RowImage.New, "note", ConditionFieldKind.Text, string.Empty)))
+            .ShouldNotBeNull().ShouldContain(says);
+
+    [Fact]
+    public void A_text_test_with_a_value_is_accepted_and_a_hostile_one_refused_as_any_literal_is()
+    {
+        ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.Contains, RowImage.New, "note", ConditionFieldKind.Text, "x"))).ShouldBeNull();
+        ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.StartsWith, RowImage.New, "note", ConditionFieldKind.Text, "admin\u202E")))
+            .ShouldNotBeNull().ShouldContain("text mode");
+    }
+
     [Fact]
     public void Every_relation_of_the_table_is_written_by_its_format_alone()
     {
