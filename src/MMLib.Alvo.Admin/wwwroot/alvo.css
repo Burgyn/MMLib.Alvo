@@ -1564,7 +1564,7 @@
      sans one beside it.
      --------------------------------------------------------------------------- */
   .a-input,
-  /* prototype-only: the design prototype's textarea; the dashboard's are MudTextField. */
+  /* prototype-only: the design prototype's textarea; the dashboard's are MudTextField, but for Import's (textarea.a-input). */
   .a-textarea,
   /* prototype-only: the design prototype's native select; the dashboard's pickers are MudSelect. */
   .a-select {
@@ -1615,6 +1615,12 @@
   /* prototype-only */
   textarea.a-textarea {
     min-height: 84px;
+    resize: vertical;
+  }
+
+  /* The dashboard's one native textarea, the Import box (Transfer.razor says why it cannot be the library's): drawn as
+     a native input, and dragged taller like the library's own. */
+  textarea.a-input {
     resize: vertical;
   }
 

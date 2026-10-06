@@ -36,7 +36,7 @@ public sealed partial class FieldConventionTests
     /// command palette's search-and-go line, which is not a form field (§3.8).
     /// </summary>
     private static readonly string[] _nativeControlsAllowed =
-        ["Shell/SignIn.razor", "Shell/SetPassword.razor", "Data/RecordForm.razor", "Shell/CommandPalette.razor"];
+        ["Shell/SignIn.razor", "Shell/SetPassword.razor", "Data/RecordForm.razor", "Shell/CommandPalette.razor", "Schema/Transfer.razor"];
 
     [Fact]
     public void No_library_input_names_itself_or_carries_its_own_hint_or_density()

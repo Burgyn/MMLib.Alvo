@@ -371,56 +371,93 @@
     }
   };
 
-  /* --- A box with a ceiling ----------------------------------------------
+  /* --- The import box --------------------------------------------------
      A server-interactive box sends its whole text to the circuit on every
-     input, and the circuit closes on a message over its receive limit —
-     without a word, the box empty (#316). A box that carries
-     data-alvo-max-chars and data-alvo-max-bytes is therefore measured here,
-     on the window in the capture phase, ahead of the framework's own listener
-     on the document: an input over either ceiling is stopped before the
-     circuit hears of it, the box gets back the text the circuit last heard,
-     and alvo:oversized carries "<characters> <bytes as sent>" to the screen,
-     which draws the refusal. Bytes are counted as the text travels: JSON-
-     escaped, UTF-8 encoded (ImportLimit says why both).
+     input, and the circuit's hub takes 32 KB a message (#316). A box that
+     carries data-alvo-streamed therefore never sends its text over the
+     circuit: its input and change events are stopped here, on the window in
+     the capture phase, ahead of the framework's own listener on the document,
+     and the circuit hears only alvo:measured, "<lines> <1 when it holds more
+     than whitespace, else 0>". The text travels once, on submit, as a stream
+     the page asks for (streamOf), which Blazor carries in chunks.
+
+     A box that also carries data-alvo-max-chars refuses an input over it:
+     the box gets back its last text within the ceiling, and alvo:oversized
+     carries the paste's character count to the screen, which draws the
+     refusal. A submit over it is refused the same way, and streams nothing. One UTF-16 unit is at most three UTF-8 bytes, so the character
+     ceiling bounds the stream's bytes too (ImportLimit says why).
      ---------------------------------------------------------------------- */
 
-  const heard = new WeakMap();
-  const encoder = new TextEncoder();
+  const withinCeiling = new WeakMap();
 
-  const ceilingOf = (target) =>
-    (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) && target.dataset.alvoMaxChars !== undefined
-      ? { chars: Number(target.dataset.alvoMaxChars), bytes: Number(target.dataset.alvoMaxBytes) }
-      : null;
+  const isStreamed = (target) =>
+    (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) && target.dataset.alvoStreamed !== undefined;
 
-  /* An escaped UTF-16 unit is at most six bytes (\u0000), so a short text needs no encoding to be known small. Above
-     about 338,000 characters (the byte ceiling over six) every input pays a JSON.stringify and a TextEncoder pass over
-     the whole text — milliseconds at the ceiling, and only in a box this large, which is pasted into rather than typed. */
-  const sentBytes = (text, ceiling) =>
-    text.length * 6 + 2 <= ceiling ? 0 : encoder.encode(JSON.stringify(text)).length;
+  const maxCharsOf = (box) => (box.dataset.alvoMaxChars === undefined ? Infinity : Number(box.dataset.alvoMaxChars));
+
+  const lineCount = (text) => {
+    if (text.length === 0) {
+      return 0;
+    }
+
+    let lines = 1;
+    for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) {
+      lines += 1;
+    }
+
+    return lines;
+  };
+
+  const measureBox = (box) => `${lineCount(box.value)} ${/\S/.test(box.value) ? 1 : 0}`;
+
+  const refuseOversized = (length) => emit('oversized', { value: String(length) });
 
   const onBoxFocus = (event) => {
-    if (ceilingOf(event.target) && !heard.has(event.target)) {
-      heard.set(event.target, event.target.value);
+    if (isStreamed(event.target) && !withinCeiling.has(event.target)) {
+      withinCeiling.set(event.target, event.target.value);
     }
   };
 
-  const guardCeiling = (event) => {
+  const guardStreamedBox = (event) => {
     const box = event.target;
-    const ceiling = ceilingOf(box);
-    if (!ceiling) {
-      return;
-    }
-
-    const text = box.value;
-    const bytes = sentBytes(text, ceiling.bytes);
-    if (text.length <= ceiling.chars && bytes <= ceiling.bytes) {
-      heard.set(box, text);
+    if (!isStreamed(box)) {
       return;
     }
 
     event.stopImmediatePropagation();
-    box.value = heard.get(box) ?? '';
-    emit('oversized', { value: `${text.length} ${bytes || encoder.encode(JSON.stringify(text)).length}` });
+    if (box.value.length > maxCharsOf(box)) {
+      const length = box.value.length;
+      box.value = withinCeiling.get(box) ?? '';
+      refuseOversized(length);
+      return;
+    }
+
+    withinCeiling.set(box, box.value);
+    emit('measured', { value: measureBox(box) });
+  };
+
+  const streamedBox = (id) => {
+    const box = document.getElementById(id);
+    return isStreamed(box) ? box : null;
+  };
+
+  /* What the page reads once its subscription is up, so an input made before it was is not missed. */
+  const measureOf = (id) => {
+    const box = streamedBox(id);
+    return box ? measureBox(box) : null;
+  };
+
+  /* The box's text as it is now, for the page to read as a stream (the framework wraps what this answers in a stream
+     reference). Empty for a box that is gone, or over its ceiling, which is refused here instead: the page reads an empty
+     text as nothing to import. */
+  const streamOf = (id) => {
+    const box = streamedBox(id);
+    if (box && box.value.length > maxCharsOf(box)) {
+      refuseOversized(box.value.length);
+    }
+
+    const text = box && box.value.length <= maxCharsOf(box) ? box.value : '';
+    return new Blob([text], { type: 'text/plain;charset=utf-8' });
   };
 
   /* --- Tab strip names ---------------------------------------------------
@@ -444,8 +481,8 @@
   document.addEventListener('dblclick', onHandleDoubleClick);
   document.addEventListener('focusin', onHandleFocus);
   window.addEventListener('focusin', onBoxFocus, true);
-  window.addEventListener('input', guardCeiling, true);
-  window.addEventListener('change', guardCeiling, true);
+  window.addEventListener('input', guardStreamedBox, true);
+  window.addEventListener('change', guardStreamedBox, true);
 
-  window.alvo = { toggleTheme, toggleDensity, resolvedTheme, nameTablist };
+  window.alvo = { toggleTheme, toggleDensity, resolvedTheme, nameTablist, measureOf, streamOf };
 })();

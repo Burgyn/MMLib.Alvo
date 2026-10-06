@@ -43,23 +43,27 @@
         <ChildContent>
             @RefusalPanel.Of(_refusal, "The apply would refuse this descriptor", "descriptor-invalid")
 
-            @* No browser maxlength: the library's default (524,288) cut a longer paste short without a word. alvo.js measures
-               the box against ImportLimit instead, and refuses what is over it in place (#316). *@
+            @* The box never sends its text over the circuit (#316). It is a native textarea with no handler and no binding,
+               because Blazor sends an input's whole value with every event dispatched from it (its EventFieldInfo), a focus
+               or a key included, so a library box would send it on every keystroke whatever it bound. alvo.js stops its
+               input events and tells the circuit only its measure (data-alvo-streamed); the page reads the text on submit
+               as a stream (ImportStream). It is drawn as every native box is (a-input), and it has no maxlength: the
+               library's default (524,288) once cut a longer paste short without a word, so alvo.js measures it against
+               ImportLimit instead and refuses what is over it in place. *@
             @* A form, so Ctrl/Cmd+Enter is alvo.js's one chord (data-alvo-chord-submit), as in every multi-line box. *@
             @* data-copy-loaded: the gate's own condition, so an end-to-end scenario waits on what the submit checks. *@
             <form class="a-stack" data-alvo-chord-submit novalidate @onsubmit="Import"
                   data-copy-loaded="@(ImportGate.Loaded(_descriptor, _problem) ? "true" : "false")">
-                <Field Label="Descriptor JSON" For="import-json">
+                <Field Label="Descriptor JSON" For="@BoxId">
                     <ChildContent>
-                        <MudTextField T="string" Variant="Variant.Outlined" Lines="12" Immediate="true" id="import-json"
-                                      Class="a-mono" spellcheck="false" aria-describedby="import-json-hint"
-                                      data-alvo-max-chars="@ImportLimit.MaxChars" data-alvo-max-bytes="@ImportLimit.MaxSentBytes" MaxLength="int.MaxValue"
-                                      Value="_pasted" ValueChanged="Pasted" />
+                        <textarea class="a-input a-mono" id="@BoxId" rows="12" spellcheck="false" autocomplete="off"
+                                  aria-describedby="import-json-hint" data-alvo-streamed
+                                  data-alvo-max-chars="@ImportLimit.MaxChars"></textarea>
                     </ChildContent>
                     <Hint>@ImportHint</Hint>
                 </Field>
 
-                <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" Disabled="@(!ImportGate.Ready(_descriptor, _problem, _pasted))"
+                <AlvoButton Tone="AlvoButton.ButtonTone.Primary" Submit="true" Disabled="@(!ImportGate.Offered(_descriptor, _problem, _measure.Filled))"
                             data-testid="import-run">
                     Load it into the working copy
                 </AlvoButton>
@@ -75,6 +79,9 @@
              OnConfirm="ReplaceConfirmed" OnCancel="() => _replacing = false" />
 
 @code {
+    /// <summary>The box's element id: what alvo.js streams and measures.</summary>
+    private const string BoxId = "import-json";
+
     /// <summary>
     /// This operator's working copy, resolved from the store rather than injected.
     /// </summary>
@@ -87,12 +94,20 @@
     private readonly ComponentLifetime _lifetime = new();
     private ManagementDescriptor? _descriptor;
     private AdminProblem? _problem;
-    private string _pasted = string.Empty;
     private readonly RefusalState<string> _refusal = new();
-    private IAsyncDisposable? _oversized;
+    private readonly List<IAsyncDisposable> _subscriptions = [];
+
+    /// <summary>What the box says it holds, which is all the circuit hears of it until a submit reads its text.</summary>
+    private BoxMeasure _measure = BoxMeasure.Empty;
+
+    /// <summary>The text the last submit read, kept while the question before replacing unapplied edits is asked.</summary>
+    private string _read = string.Empty;
 
     /// <summary>Whether the refusal on show is the one for a paste over the limit, which the next edit clears.</summary>
     private bool _oversizeShown;
+
+    /// <summary>Whether a submit is reading the box's text, so a second chord meanwhile does nothing.</summary>
+    private bool _reading;
 
     /// <summary>Whether the page has been disposed, so a subscription that arrives afterwards is given back at once.</summary>
     private bool _disposed;
@@ -120,47 +135,55 @@
     {
         if (firstRender)
         {
-            var subscription = await Interop.SubscribeAsync("oversized", OnOversized);
-            if (_disposed)
-            {
-                await subscription.DisposeAsync();
-            }
-            else
-            {
-                _oversized = subscription;
-            }
+            await KeepAsync(await Interop.SubscribeAsync("oversized", OnOversized));
+            await KeepAsync(await Interop.SubscribeAsync("measured", OnMeasured));
+            await OnMeasured(await Interop.MeasureOfAsync(BoxId));
+        }
+    }
+
+    private async Task KeepAsync(IAsyncDisposable subscription)
+    {
+        if (_disposed)
+        {
+            await subscription.DisposeAsync();
+        }
+        else
+        {
+            _subscriptions.Add(subscription);
         }
     }
 
     /// <summary>
-    /// A paste alvo.js stopped at the box, over what one circuit message may carry: refused in place, naming the limit,
-    /// where the circuit would otherwise have closed without a word (<see cref="ImportLimit"/>, #316).
+    /// A paste alvo.js stopped at the box, over the character ceiling: refused in place, naming the limit
+    /// (<see cref="ImportLimit"/>, #316).
     /// </summary>
-    /// <remarks>Focus stays in the box, which holds the text the circuit last heard, so the paste can be tried again at once.</remarks>
-    /// <param name="measured">What alvo.js measured: characters, then bytes as sent.</param>
+    /// <remarks>Focus stays in the box, which holds its last text within the ceiling, so the paste can be tried again at once.</remarks>
+    /// <param name="measured">What alvo.js measured: the paste's characters.</param>
     private Task OnOversized(string? measured) => InvokeAsync(() =>
     {
-        ShowOversized(measured);
+        ShowOversized(ImportLimit.Refusal(measured));
         StateHasChanged();
     });
 
-    private void ShowOversized(string? measured)
+    private void ShowOversized(string refusal)
     {
-        _refusal.Show(ImportLimit.Refusal(measured), fromPress: false, title: "That paste is too large to import here");
+        _refusal.Show(refusal, fromPress: false, title: "That paste is too large to import here");
         _oversizeShown = true;
     }
 
-    /// <summary>The box's text, as the circuit heard it; an edit clears a refusal that only said the last paste was too large.</summary>
-    /// <param name="text">The new text.</param>
-    private void Pasted(string? text)
+    /// <summary>What the box holds now, as alvo.js measured it; an edit clears a refusal that only said the last paste was too large.</summary>
+    /// <param name="measured">"&lt;lines&gt; &lt;filled&gt;" (<see cref="BoxMeasure"/>), or <see langword="null"/> when the box or the circuit is gone.</param>
+    private Task OnMeasured(string? measured) => measured is null ? Task.CompletedTask : InvokeAsync(() =>
     {
-        _pasted = text ?? string.Empty;
+        _measure = BoxMeasure.Parse(measured);
         if (_oversizeShown)
         {
             _refusal.Show(null);
             _oversizeShown = false;
         }
-    }
+
+        StateHasChanged();
+    });
 
     private async Task DownloadAsync()
     {
@@ -171,9 +194,14 @@
     }
 
     /// <summary>
-    /// Loads a pasted descriptor, after refusing the names the frozen schema cannot carry.
+    /// Reads the box's text, then loads it after refusing the names the frozen schema cannot carry.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// The text is read here, as a stream, and not before: the box never sends it over the circuit (<see cref="ImportStream"/>).
+    /// Reading it at the moment of the submit is also what makes a chord pressed straight after a paste import what was
+    /// pasted.
+    /// </para>
     /// <para>
     /// A copy that holds unapplied edits is asked about first (<see cref="CopyReplacement"/>); a clean one is replaced
     /// at once. The text is checked before the question, so nobody is asked to discard their edits for a paste that
@@ -189,30 +217,57 @@
     /// loaded or failed to load (<see cref="ImportGate"/>) — is refused here as well.
     /// </para>
     /// </remarks>
-    private Task Import()
+    private async Task Import()
     {
-        if (!ImportGate.Ready(_descriptor, _problem, _pasted) || _replacing)
+        if (!ImportGate.Loaded(_descriptor, _problem) || _replacing || _reading)
         {
-            return Task.CompletedTask;
+            return;
         }
 
-        /* Defence in depth: alvo.js stops a longer paste at the box, but a text that reached the circuit some other way is
-           still refused here, in the same words. */
-        if (_pasted.Length > ImportLimit.MaxChars)
+        _reading = true;
+        try
         {
-            ShowOversized(ImportLimit.Measure(_pasted));
-            return Task.CompletedTask;
+            if (await ReadBoxAsync() is { } text)
+            {
+                Judge(text);
+            }
+        }
+        finally
+        {
+            _reading = false;
+        }
+    }
+
+    /// <summary>The box's text, or <see langword="null"/> when there is nothing to import or it was refused for its size.</summary>
+    private async Task<string?> ReadBoxAsync()
+    {
+        await using var stream = await Interop.StreamOfAsync(BoxId);
+        if (stream is null)
+        {
+            return null;
         }
 
+        var read = await ImportStream.ReadAsync(stream, _lifetime.Token);
+        if (read.Refusal is not null)
+        {
+            ShowOversized(read.Refusal);
+            return null;
+        }
+
+        return ImportGate.Ready(_descriptor, _problem, read.Text!) ? read.Text : null;
+    }
+
+    private void Judge(string text)
+    {
         _oversizeShown = false;
-
-        _refusal.Show(DescriptorNames.FirstRefusal(_pasted)
-            ?? (CopyReplacement.IsObject(_pasted) ? null : "That is not a JSON object."));
+        _refusal.Show(DescriptorNames.FirstRefusal(text)
+            ?? (CopyReplacement.IsObject(text) ? null : "That is not a JSON object."));
         if (_refusal.Shown)
         {
-            return Task.CompletedTask;
+            return;
         }
 
+        _read = text;
         if (Copy.IsDirty)
         {
             _replacing = true;
@@ -221,8 +276,6 @@
         {
             Load();
         }
-
-        return Task.CompletedTask;
     }
 
     /// <summary>The operator chose to lose the staged edits for the pasted descriptor.</summary>
@@ -232,10 +285,10 @@
         Load();
     }
 
-    /// <summary>Loads the pasted descriptor, already checked, into the copy and opens its plan.</summary>
+    /// <summary>Loads the text the submit read, already checked, into the copy and opens its plan.</summary>
     private void Load()
     {
-        if (!Copy.Replace(_pasted))
+        if (!Copy.Replace(_read))
         {
             _refusal.Show("That is not a JSON object.");
             return;
@@ -245,14 +298,14 @@
     }
 
     /// <summary>
-    /// The shortcut, which nothing else on the page names, and the size of what the circuit holds: the count is drawn
-    /// from the server's copy of the text, so it is also where a newline typed into it shows it arrived.
+    /// The shortcut, which nothing else on the page names, and the size of the box as it told the circuit: the count is
+    /// drawn from the box's own measure, so it is also where a newline typed into it shows the circuit heard it.
     /// </summary>
     private string ImportHint
     {
         get
         {
-            var lines = _pasted.Length == 0 ? 0 : _pasted.Count(c => c == '\n') + 1;
+            var lines = _measure.Lines;
             var size = lines == 1 ? "1 line" : $"{lines.ToString(CultureInfo.InvariantCulture)} lines";
             return $"{ChordHint.Of("loads it")} {size}, of at most {ImportLimit.MaxChars.ToString("N0", CultureInfo.InvariantCulture)} characters.";
         }
@@ -262,9 +315,9 @@
     {
         _disposed = true;
         _lifetime.Dispose();
-        if (_oversized is not null)
+        foreach (var subscription in _subscriptions)
         {
-            await _oversized.DisposeAsync();
+            await subscription.DisposeAsync();
         }
     }
 }
