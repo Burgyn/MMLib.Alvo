@@ -271,7 +271,8 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
         await editor.GetByTestId("hook-add").ClickAsync();
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
-        (await session.Page.Locator("#hook-beforeCreate-0").InnerTextAsync()).ShouldContain("new.color == ''");
+        /* The demo's bikes declare two beforeCreate hooks (frame number, rack tag), so the new one is the third. */
+        (await session.Page.Locator("#hook-beforeCreate-2").InnerTextAsync()).ShouldContain("new.color == ''");
     }
 
     /// <summary>The widest row — an update's field, its image chips, a relation, a value and the empty-field hint — fits 375 px.</summary>
@@ -316,8 +317,9 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
         await editor.GetByTestId("hook-add").ClickAsync();
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
-        (await session.Page.Locator("#hook-beforeCreate-0").InnerTextAsync()).ShouldContain("endsWith(new.email, '@example.com')");
-        await HookEditInPlaceScenarios.OpenEditAsync(session, "beforeCreate", 0);
+        /* The demo's customers already refuse the workshop's own address at beforeCreate #0, so the new hook is #1. */
+        (await session.Page.Locator("#hook-beforeCreate-1").InnerTextAsync()).ShouldContain("endsWith(new.email, '@example.com')");
+        await HookEditInPlaceScenarios.OpenEditAsync(session, "beforeCreate", 1);
         await Mode(session, "Guided").WaitForAsync();
         (await Mode(session, "Guided").CountAsync()).ShouldBe(1, "the canonical text test reads back as a row");
         (await Combobox(session, "Condition 1 operator").InnerTextAsync()).ShouldContain("ends with");
@@ -342,7 +344,7 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
     internal static Task ReadoutAsync(AdminSession session, string condition)
         => session.Page.GetByTestId("hook-condition-readout").Filter(new() { HasTextString = condition }).WaitForAsync();
 
-    private static ILocator Mode(AdminSession session, string name)
+    internal static ILocator Mode(AdminSession session, string name)
         => session.Page.GetByTestId("hook-condition-mode").GetByRole(AriaRole.Radio, new() { Name = name, Exact = true, Checked = true });
 
     internal static ILocator Combobox(AdminSession session, string name)

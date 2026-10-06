@@ -24,32 +24,17 @@ public sealed class HostFunctionWorld : RecordingWorld
     /// <summary>A summary carrying markup, which the editor must render as text.</summary>
     internal const string MarkupSummary = "Adds <b>bold</b> emphasis: an exclamation mark at the end.";
 
-    private const string KeyId = "e2e-functions";
-    private const string KeySecret = "4f1d9c2b7a6e5d3c8b0a9f8e7d6c5b4a";
+    private static readonly DevKey _key = new("e2e-functions", "4f1d9c2b7a6e5d3c8b0a9f8e7d6c5b4a");
 
     /// <inheritdoc/>
     protected override string Descriptor => Descriptors.VehicleRegistry;
 
     /// <summary>A client of the HTTP Data API, authenticated with this world's dev key.</summary>
     /// <returns>The client; the caller disposes it.</returns>
-    public HttpClient Api()
-    {
-        var client = new HttpClient { BaseAddress = new Uri(BaseAddress) };
-        client.DefaultRequestHeaders.Add("X-Alvo-Api-Key", $"{KeyId}.{KeySecret}");
-        return client;
-    }
+    public HttpClient Api() => _key.Client(BaseAddress);
 
     /// <inheritdoc/>
-    protected override void Configure(IDictionary<string, string?> settings)
-    {
-        settings["Alvo:Auth:DevKeys:0:KeyId"] = KeyId;
-        settings["Alvo:Auth:DevKeys:0:Secret"] = KeySecret;
-        settings["Alvo:Auth:DevKeys:0:User"] = "5eed0000-0000-4000-8000-0000000000f1";
-        settings["Alvo:Auth:DevKeys:0:Roles:0"] = "authenticated";
-        settings["Alvo:Auth:DevKeys:0:Roles:1"] = "admin";
-        settings["Alvo:Auth:DevKeys:0:Scopes:0"] = "*:read";
-        settings["Alvo:Auth:DevKeys:0:Scopes:1"] = "*:write";
-    }
+    protected override void Configure(IDictionary<string, string?> settings) => _key.Configure(settings);
 
     /// <inheritdoc/>
     protected override void Configure(IAlvoBuilder alvo) => alvo
