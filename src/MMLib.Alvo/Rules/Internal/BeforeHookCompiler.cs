@@ -93,6 +93,9 @@ internal static class BeforeHookCompiler
 
     private static readonly BeforeHookPoint _beforeDelete = new("beforeDelete", HasPreImage: true, HasPostImage: false);
 
+    /// <summary>The value an absent or JSON-null mutate entry is read as: the null literal it was written as.</summary>
+    private static readonly ValueOrExpr _nullLiteral = ValueOrExpr.FromLiteral(JsonElement.Parse("null"));
+
     private const string ConditionSlot = "condition";
     private const string MutateSlot = "mutate";
 
@@ -308,8 +311,6 @@ internal static class BeforeHookCompiler
             ? CompileMutationExpression(field, value.Expression!, target, point, slot, scope)
             : CompileMutationLiteral(field, value.Literal, target, slot, scope);
     }
-
-    private static readonly ValueOrExpr _nullLiteral = ValueOrExpr.FromLiteral(JsonDocument.Parse("null").RootElement);
 
     /// <summary>
     /// The field a mutation writes: it has to exist on the entity, and it must not be one the framework

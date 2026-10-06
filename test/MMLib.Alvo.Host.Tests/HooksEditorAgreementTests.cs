@@ -143,7 +143,8 @@ public sealed class HooksEditorAgreementTests
         MutateLiteral.TryValue(new MutateRow("f", MutateMode.Literal, string.Empty) { Empty = true }, field, out _, out var refusal)
             .ShouldBeFalse();
         refusal.ShouldNotBeNullOrWhiteSpace();
-        MutateErrors(descriptor, value: null).ShouldNotBeEmpty("a null for a required field is refused at apply (C1 Ruling V)");
+        MutateErrors(descriptor, value: null)
+            .ShouldContain(e => e.Message.Contains("required"), "a null for a required field is refused at apply, for being required (C1 Ruling V)");
     }
 
     /// <summary>
@@ -158,6 +159,14 @@ public sealed class HooksEditorAgreementTests
         ConditionText.Refusal(new GuidedCondition(true, [row])).ShouldNotBeNull().ShouldContain("text mode");
         ConditionErrors(Probe("integer"), "new.f < -5").ShouldBeEmpty("slice D admits arithmetic, and so a negated literal, in a condition");
     }
+
+    /// <summary>
+    /// Slice D admits <c>lowerAscii</c> over any String in a condition, not only in a mutate value: a case-folded
+    /// comparison written in the condition's text mode is one apply accepts.
+    /// </summary>
+    [Fact]
+    public void A_case_folded_comparison_in_a_condition_is_accepted_at_apply() =>
+        ConditionErrors(Probe("string"), "lowerAscii(new.f) == 'a'").ShouldBeEmpty("lowerAscii is callable in a condition since slice D Task 2");
 
     /// <summary>A value the guided condition quotes is read back by the real lexer as exactly that value, in one literal.</summary>
     /// <param name="value">The value typed.</param>
