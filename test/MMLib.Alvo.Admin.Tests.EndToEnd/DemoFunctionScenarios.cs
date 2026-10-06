@@ -26,6 +26,10 @@ public sealed class DemoFunctionScenarios(DemoFunctionWorld world) : IClassFixtu
     internal const string WorkshopAddress = "endsWith(new.email, '@velo-dielna.example')";
     internal const string AWeekOrLonger = "new.days >= 7";
 
+    /// <summary>The guided operators those conditions open with, as the dashboard words them.</summary>
+    internal const string EndsWith = "ends with";
+    internal const string AtLeast = "is at least";
+
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task The_bike_hooks_open_with_their_calls_and_the_functions_they_use_are_offered()
     {
@@ -61,14 +65,14 @@ public sealed class DemoFunctionScenarios(DemoFunctionWorld world) : IClassFixtu
         await GuidedConditionScenarios.Mode(session, "Guided").WaitForAsync();
         await GuidedConditionScenarios.ReadoutAsync(session, WorkshopAddress);
         (await session.Page.GetByTestId("hook-condition-readout").InnerTextAsync()).ShouldBe(WorkshopAddress);
-        (await GuidedConditionScenarios.Combobox(session, "Condition 1 operator").InnerTextAsync()).ShouldContain("ends with");
+        (await GuidedConditionScenarios.Combobox(session, "Condition 1 operator").InnerTextAsync()).ShouldContain(EndsWith);
         await CloseAsync(session);
 
         await HookEditInPlaceScenarios.OnWriteAsync(session, "rentals");
         await HookEditInPlaceScenarios.OpenEditAsync(session, "beforeCreate", 0);
         await GuidedConditionScenarios.Mode(session, "Guided").WaitForAsync();
         await GuidedConditionScenarios.ReadoutAsync(session, AWeekOrLonger);
-        (await GuidedConditionScenarios.Combobox(session, "Condition 1 operator").InnerTextAsync()).ShouldContain("is at least");
+        (await GuidedConditionScenarios.Combobox(session, "Condition 1 operator").InnerTextAsync()).ShouldContain(AtLeast);
         await FunctionOfferScenarios.WaitForValueAsync(session, "hook-mutate-value-0", WeekRate);
         await CloseAsync(session);
         session.AssertConsoleClean();
@@ -90,6 +94,12 @@ public sealed class DemoFunctionScenarios(DemoFunctionWorld world) : IClassFixtu
         });
         bike.GetProperty("frame_number").GetString().ShouldBe("KS25SPI30M00042", "trimmed, without spaces, in capitals");
         bike.GetProperty("rack_tag").GetString().ShouldBe("KELLYS KS25SPI30M00042", "the second hook sees the first one's frame number");
+        using var tagged = await api.PostAsJsonAsync(
+            "/api/bikes",
+            new { customer_id = customer, brand = "Kellys", model = "Spider 30", category = "mtb_hardtail", frame_number = "KS25SPI30M00099", rack_tag = "MINE" },
+            TestContext.Current.CancellationToken);
+        tagged.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity, "rack_tag is read-only to a caller, though the hook writes it");
+        (await tagged.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).ShouldContain("rack_tag");
 
         var recoloured = await PatchAsync(api, $"/api/bikes/{Id(bike)}", new { color = "black" });
         recoloured.GetProperty("frame_number").GetString().ShouldBe("KS25SPI30M00042", "an update that leaves the frame number alone keeps it");
@@ -109,8 +119,11 @@ public sealed class DemoFunctionScenarios(DemoFunctionWorld world) : IClassFixtu
             deposit = 300.0m,
         }));
         var week = await RentAsync(api, fleet, customer, days: 7, startsInDays: 10);
-        week.GetProperty("daily_rate").GetDecimal().ShouldBe(39.38m, "45 less an eighth is 39.375, rounded to the cent away from zero");
+        week.GetProperty("daily_rate").GetDecimal().ShouldBe(39.38m, "45 less an eighth is 39.375, rounded to the cent");
         week.GetProperty("price").GetDecimal().ShouldBe(275.66m);
+        var stored = await api.GetFromJsonAsync<JsonElement>($"/api/rentals/{Id(week)}", TestContext.Current.CancellationToken);
+        stored.GetProperty("daily_rate").GetDecimal().ShouldBe(39.38m, "stored, not only answered");
+        stored.GetProperty("price").GetDecimal().ShouldBe(275.66m);
         var weekend = await RentAsync(api, fleet, customer, days: 2, startsInDays: 20);
         weekend.GetProperty("daily_rate").GetDecimal().ShouldBe(45.0m, "under a week the condition does not fire");
 

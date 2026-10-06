@@ -286,8 +286,9 @@
         },
         "rack_tag": {
           "type": "string",
-          "description": "The tag hung on the bike in the rack: the brand in capitals, then the frame number. Written once by the before-create hook as the bike is registered; at most 40 + 1 + 32 characters, so it always fits.",
-          "maxLength": 80
+          "description": "The tag hung on the bike in the rack: the brand in capitals, then the frame number. Written once by the before-create hook as the bike is registered, and read-only to every caller; at most 40 + 1 + 32 characters, so it always fits.",
+          "maxLength": 80,
+          "readOnly": true
         }
       },
       "rules": {

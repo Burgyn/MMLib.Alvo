@@ -178,10 +178,13 @@ public sealed class HookEditInPlaceScenarios(BikeWorkshopWorld world) : IClassFi
         await session.AssertNoHorizontalScrollAsync();
     }
 
+    /// <summary>The entity tab that lists its hooks.</summary>
+    internal const string OnWriteTab = "On write";
+
     internal static async Task OnWriteAsync(AdminSession session, string entity)
     {
         await session.GoAsync($"/schema/{entity}");
-        await session.OpenTabAsync("On write");
+        await session.OpenTabAsync(OnWriteTab);
     }
 
     internal static async Task<ILocator> OpenEditAsync(AdminSession session, string point, int position)
