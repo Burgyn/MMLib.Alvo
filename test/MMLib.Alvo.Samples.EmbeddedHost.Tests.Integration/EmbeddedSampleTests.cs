@@ -328,8 +328,14 @@ public class EmbeddedSampleTests
                 ct);
 
             vehicle.StatusCode.ShouldBe(HttpStatusCode.Created);
-            (await vehicle.Content.ReadFromJsonAsync<JsonObject>(ct))!["vin"]!.GetValue<string>()
-                .ShouldBe("1HGCM82633A004352", "the descriptor's mutate called the sample's normalizeVin");
+            var created = (await vehicle.Content.ReadFromJsonAsync<JsonObject>(ct))!;
+            created["vin"]!.GetValue<string>().ShouldBe("1HGCM82633A004352", "the descriptor's mutate called the sample's normalizeVin");
+
+            // The 201 echoes the candidate; reading the row back proves the patched value is what was stored.
+            using var stored = await agent.GetAsync($"/api/alvo/vehicles/{created["id"]!.GetValue<Guid>()}", ct);
+            stored.StatusCode.ShouldBe(HttpStatusCode.OK);
+            (await stored.Content.ReadFromJsonAsync<JsonObject>(ct))!["vin"]!.GetValue<string>()
+                .ShouldBe("1HGCM82633A004352", "the mutated VIN is the one persisted, not only the one echoed");
 
             var listed = (await sample.AsBootstrapAdmin(_administrator).GetCelFunctionsAsync("vehicle-registry", ct)).Functions
                 .Single(function => function.Name == "normalizeVin");

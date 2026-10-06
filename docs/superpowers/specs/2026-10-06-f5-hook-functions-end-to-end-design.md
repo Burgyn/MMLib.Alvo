@@ -163,6 +163,8 @@ real need): `substring(new.title, 0, math.least(size(new.title), 40))`.
 | `_+_` (a present operand that is neither, Ruling P) | `an operand is neither a text nor a number` |
 | `_==_`, `_!=_`, `_<_`, `_<=_`, `_>_`, `_>=_` (two present operands that cannot be compared, Ruling Q) | `the operands cannot be compared` |
 | `!_` (a present operand that is no Bool, Ruling Q) | `the operand is not a Bool` |
+| `_&&_`, `_\|\|_`, `_?_:_` (a present operand that is no Bool, Ruling R) | `the operand is not a Bool` |
+| `<condition>` (a present non-Bool as the whole condition, Ruling R) | `the hook's condition evaluated to a present value that is not a Bool` |
 | `math.abs`, `replace` | unchanged from C1 |
 
 No reason carries a value from the row (C1 §6: "text Alvo wrote, never the host's", and never the caller's data).
@@ -190,7 +192,8 @@ failed: the divisor is zero. Nothing was written." (`AlvoExceptionHandler.Functi
   value of an unexpected CLR type — throws (§5.5) instead of answering `null` (arithmetic, `+`) or `false` (a comparison,
   `!`): `false` there is a reject that never fires. The same holds for every other Boolean position (Ruling R): either
   operand of `&&` or `||`, a ternary's condition, and a condition's own value (`new.flag` as the whole condition) throw
-  on a present non-Bool, under CEL's overload name (`_&&_`, `_||_`, `_?_:_`) or `condition`. `&&` and `||` keep their
+  on a present non-Bool, under CEL's overload name (`_&&_`, `_||_`, `_?_:_`) or, for the whole condition, `<condition>` —
+  a token no CEL identifier can be, so it neither reads as a function nor collides with one a host registers. `&&` and `||` keep their
   left-to-right short-circuit for a real Bool, so `false && x` never reads `x` — stricter than CEL's commutative error
   absorption, never looser. The HTTP binder types every value (`FieldClrType`), so only an embedded caller's own record
   can hold one. A **null** operand still answers as before (`null`; a comparison `false`; `!null` `true`; `null` in a

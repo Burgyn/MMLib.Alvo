@@ -110,7 +110,7 @@ internal static class CelInterpreter
         try
         {
             var state = new EvalState(current, previous, context, failClosed: FailsClosed(expression));
-            return Truth(Evaluate(expression.Root, state), "condition", state.FailClosed, "the condition's value is not a Bool");
+            return Truth(Evaluate(expression.Root, state), WholeCondition, state.FailClosed, WholeConditionReason);
         }
 #pragma warning disable CA1031
         catch (Exception failure) when (failure is not CelFunctionException)
@@ -119,6 +119,16 @@ internal static class CelInterpreter
             return false;
         }
     }
+
+    /// <summary>
+    /// The name a present non-Bool as the whole condition fails under. No operator is at fault, so it is a token no CEL
+    /// identifier can be: a plain <c>condition</c> reads as a function of that name in "The CEL function '…' failed",
+    /// and could collide with one a host registers.
+    /// </summary>
+    internal const string WholeCondition = "<condition>";
+
+    /// <summary>Why <see cref="WholeCondition"/> failed — it names no value.</summary>
+    internal const string WholeConditionReason = "the hook's condition evaluated to a present value that is not a Bool";
 
     /// <summary>
     /// Evaluates a field-mask flag (<c>hidden</c>/<c>readOnly</c>) — a context-only Rule-profile
@@ -429,7 +439,7 @@ internal static class CelInterpreter
     /// reject that never fires.
     /// </summary>
     /// <param name="value">The evaluated operand.</param>
-    /// <param name="name">CEL's overload name for the position (<c>_&amp;&amp;_</c>), or <c>condition</c> for the whole.</param>
+    /// <param name="name">CEL's overload name for the position (<c>_&amp;&amp;_</c>), or <see cref="WholeCondition"/> for the whole.</param>
     /// <param name="failClosed">Whether this is the hook path, read once from the profile.</param>
     /// <param name="reason">Why, for the caller — it names no value.</param>
     /// <exception cref="CelFunctionException"><paramref name="failClosed"/> is set and the value is present and no Bool.</exception>

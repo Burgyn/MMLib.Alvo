@@ -150,11 +150,19 @@ public sealed class CelHookComparisonTests
     }
 
     /// <summary>A bare field as the whole condition is the last Boolean position: the condition's own value.</summary>
+    /// <remarks>
+    /// No operator is at fault, so the failure is named <c>&lt;condition&gt;</c>, a token no CEL identifier can be: a
+    /// plain <c>condition</c> would read as a function of that name in "The CEL function '…' failed", and could collide
+    /// with one a host registers.
+    /// </remarks>
     [Theory]
     [InlineData("true")]
     [InlineData(1L)]
     public void A_present_non_bool_as_the_whole_condition_fails_closed(object value) =>
-        ShouldFailClosed(() => Condition("new.active", ("active", value)), "condition", "the condition's value is not a Bool");
+        ShouldFailClosed(
+            () => Condition("new.active", ("active", value)),
+            "<condition>",
+            "the hook's condition evaluated to a present value that is not a Bool");
 
     /// <summary>
     /// A ternary's condition, on either hook profile. Defensive: the ternary compiles in <see cref="CelProfile.Computed"/>
@@ -172,6 +180,10 @@ public sealed class CelHookComparisonTests
     public void A_ternary_off_the_hook_path_did_not_move()
     {
         Ternary(CelProfile.Computed, "true").ShouldBe("off");
+
+        // The Rule row enters through EvaluateMutation, the only entry point that returns a branch's value (a Rule's own,
+        // EvaluatePredicate, answers a Bool, and 'on'/'off' is not one). That is sound because the gate reads only the
+        // expression's profile (CelHookArithmetic.FailsClosed), never the entry point: Rule is off the hook path here too.
         Ternary(CelProfile.Rule, "true").ShouldBe("off");
     }
 
@@ -207,16 +219,25 @@ public sealed class CelHookComparisonTests
         Condition(source, ("active", true)).ShouldBe(expected);
 
     /// <summary>
-    /// Rule did not move: the same shapes over the same present non-Bool still read it as <see langword="false"/> in a
-    /// Rule — Ruling R, like Ruling Q, is the hook path's alone.
+    /// Rule and Access did not move: the same shapes over the same present non-Bool still read it as
+    /// <see langword="false"/> — Ruling R, like Ruling Q, is the hook path's alone. The Access rows are the Rule tree
+    /// re-labelled, as in <see cref="UncomparableOffTheHookPath"/>.
     /// </summary>
     [Theory]
-    [InlineData("active && true", false)]
-    [InlineData("active || false", false)]
-    [InlineData("active", false)]
-    public void A_rule_over_a_non_bool_in_a_boolean_position_did_not_move(string source, bool expected) =>
-        CelInterpreter.EvaluatePredicate(Compile(source, CelProfile.Rule), CelFixtures.Row(("active", "true")), previous: null, AlvoContext.Anonymous)
-            .ShouldBe(expected);
+    [InlineData(CelProfile.Rule, "active && true")]
+    [InlineData(CelProfile.Rule, "true && active")]
+    [InlineData(CelProfile.Rule, "active || false")]
+    [InlineData(CelProfile.Rule, "false || active")]
+    [InlineData(CelProfile.Rule, "active")]
+    [InlineData(CelProfile.Access, "active && true")]
+    [InlineData(CelProfile.Access, "true && active")]
+    [InlineData(CelProfile.Access, "active || false")]
+    [InlineData(CelProfile.Access, "false || active")]
+    [InlineData(CelProfile.Access, "active")]
+    public void A_rule_or_access_over_a_non_bool_in_a_boolean_position_did_not_move(CelProfile profile, string source) =>
+        CelInterpreter.EvaluatePredicate(
+            Relabel(Compile(source, CelProfile.Rule), profile), CelFixtures.Row(("active", "true")), previous: null, AlvoContext.Anonymous)
+            .ShouldBeFalse();
 
     /// <summary><c>active ? 'on' : 'off'</c>, compiled where a ternary compiles and evaluated as <paramref name="profile"/>.</summary>
     private static object? Ternary(CelProfile profile, object? active)
