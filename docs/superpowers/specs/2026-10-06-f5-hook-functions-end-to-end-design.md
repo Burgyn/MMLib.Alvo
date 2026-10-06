@@ -672,7 +672,13 @@ null policy C1 already pinned (a null argument makes the call null; a condition 
 ## 19. As built
 
 Branch `feat/hook-functions`, cut from `feat/cel-functions` @ `3a3c31f` (C1), with B (`feat/hooks-editor`) merged twice
-(`7a0d5d5` at B's Task 21, `3967817` at B's final fixes `eeb88e7`). Verified on 2026-10-06 at `1671cb8` (plan Task 18).
+(`7a0d5d5` at B's Task 21, `3967817` at B's final fixes `eeb88e7`). The first merge was clean; the second had one
+append/append conflict in `src/MMLib.Alvo.Admin/wwwroot/admin.js` (D's `caret`/`selectRange` and B's
+`streamOf`/`measureOf`, both appended after `utcOffsetMinutes`), resolved by keeping both (final review M5). The #317
+hotfix, `fix/cel-date-operand` (#321), is merged in as `8cc9f84`: D's `internal TryToDateTimeOffset` is kept, #321's
+date tests were a subset of D's, and its date-vs-date PATCH fact replaced D's stored-date update fact, so the storage
+path is proven once, on both engines. Verified on 2026-10-06 at `1671cb8` (plan Task 18); the final fix wave
+(Ruling Z-D) follows it.
 
 **Commits** (`git log --first-parent 3a3c31f..HEAD`, oldest first; the C1 commits below `3a3c31f` are not D's):
 
@@ -697,6 +703,7 @@ Branch `feat/hook-functions`, cut from `feat/cel-functions` @ `3a3c31f` (C1), wi
 | 16b — bike-workshop demo (Ruling O) | `d94cf25`, `e1283ee`, `c42725f` |
 | 17 — docs | `380bf61`, `b072675` |
 | 18 — review carry-overs, R-16, this section | `1671cb8`, and the commit that adds this section |
+| final fix wave (Ruling Z-D): merge #321, Ruling Y-D, I1–I3, M2–M5, plan-guard finding 1 | `8cc9f84`, `f5e28f0`, `0bad5e9`, `d798f58`, `00d61f5`, `563d4a3`, `957b471`, `61af6b6`, and the commit that corrects the merge note above |
 
 **Deviations from the plan, each with its ruling** (the controller's ledger holds the full text):
 
