@@ -104,7 +104,26 @@ public sealed class CelBuiltInFunctionTests
     {
         var source = $"replace(name, 'a', '{new string('b', 1100)}')";
 
-        Should.Throw<CelFunctionException>(() => Evaluate(source, ("name", new string('a', 1000)))).FunctionName.ShouldBe("replace");
+        var failure = Should.Throw<CelFunctionException>(() => Evaluate(source, ("name", new string('a', 1000))));
+
+        failure.FunctionName.ShouldBe("replace");
+        failure.Reason.ShouldBe("its result would pass the 1,048,576 characters a text may grow to here");
+        failure.InnerException!.Message.ShouldContain("1,100,000", Case.Sensitive, "the length is for the log");
+    }
+
+    /// <summary>
+    /// The caller-facing reason carries no length derived from the data (final review M4): one oversized request would
+    /// otherwise reveal a hidden or <c>old.</c> field's exact length.
+    /// </summary>
+    [Fact]
+    public void A_capped_replace_names_no_length_derived_from_the_data()
+    {
+        var source = $"replace(name, 'a', '{new string('b', 1100)}')";
+
+        var failure = Should.Throw<CelFunctionException>(() => Evaluate(source, ("name", new string('a', 1001))));
+
+        failure.Message.ShouldNotContain("1,101,100");
+        failure.Reason!.ShouldNotContain("1,101,100");
     }
 
     [Fact]

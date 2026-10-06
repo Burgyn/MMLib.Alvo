@@ -25,6 +25,20 @@ internal static partial class CelBuiltInFunctions
     /// </summary>
     internal const int MaxTextLength = 1_048_576;
 
+    /// <summary>
+    /// The failure of a text that would grow past <see cref="MaxTextLength"/> — <c>replace</c>, or a join on the hook
+    /// path. The caller-facing reason names the cap only: the length is derived from the data, so one oversized request
+    /// would reveal a hidden or <c>old.</c> field's exact length (final review M4). The length rides on the inner
+    /// exception, which the write path logs and never shows.
+    /// </summary>
+    /// <param name="functionName">The function or overload that would grow the text.</param>
+    /// <param name="length">The length the result would have had.</param>
+    internal static CelFunctionException TextCapExceeded(string functionName, long length) => new(
+        functionName,
+        string.Create(CultureInfo.InvariantCulture, $"its result would pass the {MaxTextLength:N0} characters a text may grow to here"),
+        new InvalidOperationException(string.Create(
+            CultureInfo.InvariantCulture, $"The result of '{functionName}' would have been {length:N0} characters.")));
+
     /// <summary>The characters <c>trim</c> removes: the four the CEL lexer can escape or type (spec deviation F5).</summary>
     private const string AsciiWhitespace = " \t\n\r";
 
@@ -94,9 +108,7 @@ internal static partial class CelBuiltInFunctions
         var grown = (long)text.Length + ((long)Occurrences(text, search) * (replacement.Length - search.Length));
         if (replacement.Length > search.Length && grown > MaxTextLength)
         {
-            throw new CelFunctionException("replace", string.Create(
-                CultureInfo.InvariantCulture,
-                $"its result would be {grown:N0} characters, over the {MaxTextLength:N0} a text may grow to here"));
+            throw TextCapExceeded("replace", grown);
         }
 
         return text.Replace(search, replacement, StringComparison.Ordinal);

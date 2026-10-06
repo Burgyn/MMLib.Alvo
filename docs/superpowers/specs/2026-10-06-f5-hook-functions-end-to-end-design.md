@@ -158,7 +158,7 @@ real need): `substring(new.title, 0, math.least(size(new.title), 40))`.
 | `_+_`, `_-_`, `_*_`, `-_` (Int) | `the result is outside the range of an Int` |
 | `_+_`, `_-_`, `_*_`, `_/_` (Decimal) | `the result is outside the range of a Decimal` |
 | `_/_` | `the divisor is zero`; Int `/` of the smallest Int by `-1`: `the result is outside the range of an Int` |
-| `_+_` (join, Mutate) | `its result would be N characters, over the 1,048,576 a text may grow to here` (R-2) |
+| `_+_` (join, Mutate) | `its result would pass the 1,048,576 characters a text may grow to here` (R-2; the length N is logged, never shown — final review M4, and `replace` likewise) |
 | `_-_`, `_*_`, `_/_`, `-_` (a present operand that is no number, Ruling P) | `an operand is not an Int or a Decimal` |
 | `_+_` (a present operand that is neither, Ruling P) | `an operand is neither a text nor a number` |
 | `_==_`, `_!=_`, `_<_`, `_<=_`, `_>_`, `_>=_` (two present operands that cannot be compared, Ruling Q) | `the operands cannot be compared` |

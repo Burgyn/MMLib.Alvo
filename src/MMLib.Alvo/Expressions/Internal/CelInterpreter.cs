@@ -380,9 +380,7 @@ internal static class CelInterpreter
         var length = (long)left.Length + right.Length;
         if (failClosed && length > CelBuiltInFunctions.MaxTextLength)
         {
-            throw new CelFunctionException("_+_", string.Create(
-                CultureInfo.InvariantCulture,
-                $"its result would be {length:N0} characters, over the {CelBuiltInFunctions.MaxTextLength:N0} a text may grow to here"));
+            throw CelBuiltInFunctions.TextCapExceeded("_+_", length);
         }
 
         return string.Concat(left, right);

@@ -88,7 +88,8 @@ public sealed class CelMutateConcatenationTests
         var failure = Should.Throw<CelFunctionException>(() => Mutate("name + name", ("name", new string('a', 600_000))));
 
         failure.FunctionName.ShouldBe("_+_");
-        failure.Reason.ShouldBe("its result would be 1,200,000 characters, over the 1,048,576 a text may grow to here");
+        failure.Reason.ShouldBe("its result would pass the 1,048,576 characters a text may grow to here");
+        failure.InnerException!.Message.ShouldContain("1,200,000", Case.Sensitive, "the length is for the log");
     }
 
     [Fact]
