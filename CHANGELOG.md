@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CEL functions in hook conditions and before-hook `mutate` values** (slice C1). A host registers
+  a typed C# function at startup with `AddCelFunction(name, delegate, summary)` on the Alvo builder.
+  A descriptor's hook conditions and `mutate` values call it by name, and so can the built-ins. C1
+  brought five (`replace`, `trim`, `size`, `abs`, `round`); slice D, below, widens the set to 19 and
+  renames the last two to `math.abs` and `math.round` (see *Changed (breaking)*). Apply refuses an unknown name, a wrong argument count
+  or a type mismatch, and Rules and computed fields refuse calls for now. A function that throws, or
+  an argument that does not fit its parameter, rolls the write back with the new problem type
+  `function-failed` (HTTP 500), and the host's own message is never echoed. `GET
+  {m}/projects/{p}/cel/functions` (Viewer) and `IAlvoManagement.GetCelFunctionsAsync` list every
+  callable function with its signature, summary, provenance and profiles, and the schema assistant
+  gains the `get_cel_functions` tool. A host function runs inside the write's transaction with no
+  time budget or `CancellationToken` yet (#309).
+
 - **A literal `field.default` is honoured** (#113's literal half). A field declaring
   `"default": false` / `"normal"` / `1` now emits a column `DEFAULT` in the generated DDL on both
   engines, and any write that composes a whole row — a create, and both branches of `PUT` — fills in
@@ -43,6 +56,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     address refused on a customer with `endsWith`.
 
 ### Changed (breaking)
+
+- **`IAlvoManagement` gains `GetCelFunctionsAsync`** (slice C1). A caller is unaffected. An
+  implementer or decorator of the interface must add the member, for example by delegating to the
+  inner instance.
 
 - **`MapAlvoDataApi()` now returns `IEndpointConventionBuilder` instead of `IEndpointRouteBuilder`**
   (#182), so a host can attach `RequireRateLimiting`, an authorization policy, output caching or a
