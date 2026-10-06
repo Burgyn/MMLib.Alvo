@@ -175,7 +175,7 @@ present value that is not a Bool. Nothing was written." (`<condition>` stays the
 
 ### 5.6 Operators in hook slots (D-6, D-7)
 
-| Operator | Profiles after D | Operands → result | Null | Fails closed (Condition, Mutate only) |
+| Operator | Profiles after D | Operands → result (Condition, Mutate; Computed below) | Null | Fails closed (Condition, Mutate only) |
 |---|---|---|---|---|
 | `+ - *` | Computed, **Condition, Mutate** | Int, Int → Int (checked 64-bit); any Decimal → Decimal | a null operand → null (unchanged) | Int overflow; Decimal overflow |
 | `/` | Computed, **Condition, Mutate** | Int, Int → Int, **truncated toward zero** (`7 / 2` = `3`, `-7 / 2` = `-3`); any Decimal → Decimal (28 significant digits) | null → null | divisor zero (Int or Decimal); smallest Int `/ -1` |
@@ -188,7 +188,11 @@ present value that is not a Bool. Nothing was written." (`<condition>` stays the
   today, so no generated column and no rule changes behaviour.
 * **Int vs Decimal at run time** is decided by the operands' CLR values (a record's Integer column arrives as an
   integral type, a literal `2` as `long`): two integral operands take the checked `long` path, anything else the
-  `decimal` path. In Computed the `decimal` path stays for every operand pair, as today.
+  `decimal` path. In Computed the `decimal` path stays for every operand pair, as today: the table's Int cells are
+  Condition and Mutate only. A computed `7 / 2` is `3.5`, an Int product past 64 bits widens into a decimal instead of
+  overflowing, and a null operand, a zero divisor or a decimal overflow answers `null`. The type checker still types a
+  computed `Int / Int` as Int, so the declared type and the value disagree — tracked as
+  [#322](https://github.com/Burgyn/MMLib.Alvo/issues/322), not changed by D (plan-guard D finding 1).
 * **A present operand that is no number, no text or no flag** (controller Rulings P, Q and R). On the fail-closed path a
   *present* operand an operator cannot take — a NaN, infinite or out-of-range double, a string in a numeric field, a
   value of an unexpected CLR type — throws (§5.5) instead of answering `null` (arithmetic, `+`) or `false` (a comparison,

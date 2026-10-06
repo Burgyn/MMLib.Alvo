@@ -229,13 +229,18 @@ or `Computed`. Slice D's design records, per function, what each engine needs fo
 
 Since slice D, arithmetic is legal in `Condition` and `Mutate`, and string `+` in `Mutate` (D-6, D-7):
 
-| Operator | Profiles | Operands → result | Null | Fails closed (`Condition`, `Mutate` only) |
+| Operator | Profiles | Operands → result (`Condition`, `Mutate`; `Computed` below) | Null | Fails closed (`Condition`, `Mutate` only) |
 |---|---|---|---|---|
 | `+ - *` | Computed, Condition, Mutate | Int, Int → Int (checked 64-bit); any Decimal → Decimal | a null operand → null | Int overflow; Decimal overflow |
 | `/` | Computed, Condition, Mutate | Int, Int → Int, **truncated toward zero** (`7 / 2` = `3`, `-7 / 2` = `-3`); any Decimal → Decimal (28 significant digits) | null → null | a zero divisor (Int or Decimal); the smallest Int `/ -1` |
 | unary `-` | Computed, Condition, Mutate | Int → Int; Decimal → Decimal | null → null | `-` of the smallest Int |
 | string `+` | Computed, Mutate | String, String → String; no implicit conversion (write `string(x)`) | **Mutate: null → null** (deviation 34); Computed: an operand that may be null is refused at compile | never for two texts, unless the result would pass 1,048,576 characters (R-2); a present operand that is no text and no number fails (Ruling P); a stored value over `maxLength` is refused by Ruling V |
 
+- **`Computed` keeps its own arithmetic; the Int cells above are `Condition` and `Mutate` only.** A computed field's
+  interpreter puts every operand pair on the `decimal` path — the path its SQL rendering agrees with — so `7 / 2` is
+  `3.5`, an Int product past 64 bits widens into a decimal instead of overflowing, unary `-` is decimal too, and a null
+  operand, a zero divisor or a decimal overflow answers `null`. The type checker still types `Int / Int` as Int there,
+  so the declared type and the value disagree: tracked as [#322](https://github.com/Burgyn/MMLib.Alvo/issues/322).
 - **Only the hook profiles fail closed.** One predicate, `CelHookArithmetic.FailsClosed`, sets the interpreter's
   fail-closed flag from the compiled expression's profile. `Computed` and a `Rule` keep answering `null` on overflow
   and division by zero, exactly as before, so no generated column and no rule changed behaviour. In a hook, `null`
