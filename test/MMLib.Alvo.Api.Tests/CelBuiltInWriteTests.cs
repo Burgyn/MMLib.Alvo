@@ -3,7 +3,11 @@ using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Api.Tests;
 
-/// <summary>The built-ins of spec §5, evaluated by the Data API's own write path.</summary>
+/// <summary>The built-ins of spec §5, evaluated by the Data API's own write path, on SQLite.</summary>
+/// <remarks>
+/// The two facts that read values back out of storage — an integer division over <c>old.</c> and a money rounding into a
+/// narrow decimal — run on every engine instead, in <c>DataApiEngineTests.HookArithmetic.cs</c> (final review M3).
+/// </remarks>
 public sealed class CelBuiltInWriteTests
 {
     private static TestApiKey Writer { get; } = new("frames-writer", ["writer"], ["frames:read", "frames:write"]);
@@ -26,20 +30,6 @@ public sealed class CelBuiltInWriteTests
     }
 
     [Fact]
-    public async Task A_mutate_rounds_money_to_cents_and_prefixes_a_code()
-    {
-        await using var world = await StartAsync();
-
-        using var created = await world.SendAsync(HttpMethod.Post, "/api/frames", Writer,
-            body: new JsonObject { ["code"] = " wtu 1 ", ["price"] = 10.25m });
-
-        created.StatusCode.ShouldBe(HttpStatusCode.Created);
-        var row = await created.ReadJsonObjectAsync();
-        row["gross"]!.GetValue<decimal>().ShouldBe(12.30m, "10.25 * 1.2 = 12.300, rounded to cents");
-        row["tag"]!.GetValue<string>().ShouldBe("FR-WTU 1");
-    }
-
-    [Fact]
     public async Task A_null_operand_leaves_the_value_null_and_the_condition_quiet()
     {
         await using var world = await StartAsync();
@@ -50,27 +40,6 @@ public sealed class CelBuiltInWriteTests
         var row = await created.ReadJsonObjectAsync();
         row["gross"].ShouldBeNull("null price, null gross");
         row["tag"].ShouldBeNull("null code, null tag");
-    }
-
-    /// <summary>
-    /// The HTTP binder hands the interpreter an integer field as a whole number, so <c>/</c> truncates (pre-flight
-    /// F9-1): 21 / 2 is 10, not 10.5, and the <c>&gt; 10</c> reject stays quiet.
-    /// </summary>
-    [Fact]
-    public async Task An_integer_division_over_http_truncates_toward_zero()
-    {
-        await using var world = await StartAsync();
-
-        using var created = await world.SendAsync(HttpMethod.Post, "/api/frames", Writer,
-            body: new JsonObject { ["ratio"] = 21, ["divisor"] = 2 });
-
-        created.StatusCode.ShouldBe(HttpStatusCode.Created, "21 / 2 is 10 between integers, which is not over 10");
-
-        using var refused = await world.SendAsync(HttpMethod.Post, "/api/frames", Writer,
-            body: new JsonObject { ["ratio"] = 22, ["divisor"] = 2 });
-
-        refused.StatusCode.ShouldBe(HttpStatusCode.Forbidden, "22 / 2 is 11, over 10");
-        (await refused.Content.ReadAsStringAsync(TestContext.Current.CancellationToken)).ShouldContain("The ratio is too high.");
     }
 
     /// <summary>The fail-open spec D-7 closes: a zero divisor in a reject condition refuses the write, never skips the reject.</summary>

@@ -2,7 +2,7 @@
   "$schema": "https://alvo.dev/schema/v1/project.json",
   "apiVersion": "alvo.dev/v1",
   "name": "built-in-functions",
-  "description": "One entity whose before-hooks use the built-in functions and the hook operators of slice D: a text test and an integer division gate a reject, a mutate normalises, cuts, prefixes and rounds the written values, and an update's mutate takes a substring past the end of short data. The Data API's own write path must evaluate all of them, refuse on a reject, and fail the write closed on a data-dependent failure.",
+  "description": "One entity whose before-hooks use the built-in functions and the hook operators of slice D: a text test and an integer division gate a reject, a mutate normalises, cuts, prefixes and rounds the written values, an update's reject divides the stored ratio, and an update's mutate takes a substring past the end of short data. The Data API's own write path must evaluate all of them, refuse on a reject, and fail the write closed on a data-dependent failure.",
   "auth": {
     "providers": ["local"],
     "roles": ["writer"]
@@ -19,7 +19,7 @@
         "tag": { "type": "string", "maxLength": 40 },
         "owner_email": { "type": "string", "maxLength": 160, "format": "email" },
         "price": { "type": "decimal", "precision": 10, "scale": 2 },
-        "gross": { "type": "decimal", "precision": 10, "scale": 2 },
+        "gross": { "type": "decimal", "precision": 6, "scale": 2 },
         "ratio": { "type": "integer" },
         "divisor": { "type": "integer" }
       },
@@ -52,6 +52,10 @@
           }
         ],
         "beforeUpdate": [
+          {
+            "condition": "old.ratio / new.divisor > 10",
+            "action": { "reject": "The stored ratio is too high for this divisor." }
+          },
           { "action": { "mutate": { "label": { "$cel": "substring(new.code, 20)" } } } }
         ]
       }
