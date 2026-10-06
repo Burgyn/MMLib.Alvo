@@ -327,14 +327,16 @@ beforeDelete, afterUpdate, afterDelete.
 | is less than / at most / more than / at least | `<` `<=` `>` `>=` | Number | image points | false |
 | is true / is false | `new.f == true` / `new.f == false` | Flag | image points | false (empty is neither) |
 | has a value / is empty | `has(new.f)` / `!has(new.f)` | every kind, **nullable only** | image points | defines it |
+| starts with / ends with / contains *(added by slice D, E9)* | `startsWith(new.f, 'v')` / `endsWith(new.f, 'v')` / `contains(new.f, 'v')` | Text | image points | false — a test of an empty value is empty, and an empty condition does not fire; an empty `v` is refused in the form; case-sensitive |
 | changed | `changed(f)` | all but Json | beforeUpdate, afterUpdate | unverified for empty→value (the interpreter's `changed` arm decides; not asserted) |
 | is the person writing | `new.f == @user.id` | Identity | image points | false; an after-hook needing an actor the event lacks is not selected (`AfterHookCompiler.ActorRead`) |
 | The person writing has the role / does not | `'r' in @user.roles` / `!('r' in @user.roles)` | — | **before-points only** (`HonoursTheEnvelope` refuses `@user.roles` after) | false / true |
 
 Not offered (text mode only): string relational (refused outside Computed, `CelTypeChecker.cs:639-645`); negative
-numbers (unary `-` is Computed-only, `CelTypeChecker.cs:389-398`); `== null` (refused, `:629-636`); timestamp or uuid
-literals (no literal syntax; `Cannot compare`); field-to-field comparisons; `@tenant.id`; function calls (the functions
-slice may add them — §10); a mix of `&&` and `||`. Text literals use only the escapes `\\ \' \n \r \t`
+numbers (unary `-` was Computed-only when this was written, `CelTypeChecker.cs:389-398`; since slice D apply admits
+it in a condition, and the rows still withhold it as their own strictness — a shape they do not read back); `== null` (refused, `:629-636`); timestamp or uuid
+literals (no literal syntax; `Cannot compare`); field-to-field comparisons; `@tenant.id`; function calls (slice D added
+the three text tests above; every other call stays text-only — §10); a mix of `&&` and `||`. Text literals use only the escapes `\\ \' \n \r \t`
 (`CelLexer.cs:198-218`); a value with another control character is refused in the form. Numbers are
 `(0|[1-9][0-9]*)(\.[0-9]+)?`, written as typed.
 
@@ -475,7 +477,7 @@ All five were answered by the maintainer (Ruling B). The answers are recorded in
 
 Remove endpoint/template; publish the egress/DLQ/hidden sentences from the core; enum membership at apply; object
 payload classification; a `Position` caret for the check (slice A deferral); field-to-field rows in the guided form;
-functions in the guided table once Condition admits calls (slice C).
+functions in the guided table once Condition admits calls (slice C) (delivered by slice D: [design](2026-10-06-f5-hook-functions-end-to-end-design.md)).
 
 ## 17. As built
 
@@ -591,7 +593,8 @@ Controller rulings and implementation findings:
 - **Ruling M. No numeric `inputmode` on the mutate number boxes**, a deviation from §4.3, which said "number/decimal
   with `inputmode`". iOS's numeric and decimal keypads have no minus key, and a mutate literal may be negative. Cost: a
   full keyboard on a phone for numbers. The guided condition's number box keeps `inputmode="decimal"`, because the rows
-  refuse a negative number anyway (§7.1).
+  refuse a negative number anyway (§7.1) — since slice D a strictness of the form's own, not of apply, which now admits
+  unary `-` in a condition.
 - **The row text and the §5.1 guard come from one writer (Task 8).** The tab draws each hook with
   `WorkingCopy.Readable` rather than options of its own. Two option sets written separately could drift and then refuse
   every in-place edit, silently.

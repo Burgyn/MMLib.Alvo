@@ -169,7 +169,9 @@ real need): `substring(new.title, 0, math.least(size(new.title), 40))`.
 
 No reason carries a value from the row (C1 §6: "text Alvo wrote, never the host's", and never the caller's data).
 An operator's failure names it by CEL's own overload name (`_/_`), so the problem detail reads "The CEL function '_/_'
-failed: the divisor is zero. Nothing was written." (`AlvoExceptionHandler.FunctionFailedDetail`, unchanged).
+failed: the divisor is zero. Nothing was written." (`AlvoExceptionHandler.FunctionFailedDetail`, unchanged). A whole
+condition's failure names no function, so its detail is the reason as a sentence: "The hook's condition evaluated to a
+present value that is not a Bool. Nothing was written." (`<condition>` stays the logged name; plan Task 17.)
 
 ### 5.6 Operators in hook slots (D-6, D-7)
 
@@ -507,6 +509,7 @@ administrator the test registers), and `POST /api/alvo/vehicles` with `vin: "1hg
 | C2 SQL for the new built-ins | every §5 row has its note; `RenderFunction` returns `null` for any name an engine cannot reproduce, so that name stays Condition/Mutate-only on that engine |
 | Function offering in Rules / Computed (after C2) | extract the `HooksTab` fragment into a component, profile-parameterized |
 | A filter box over a long host list | additive in the fragment |
+| A negated guided text test ("does not end with"; the bike-workshop demo's README review, Task 17) | a `ConditionTable` row whose canonical text guards the empty field — `has(new.f) && !endsWith(new.f, 'v')` — so it reads as meant (§10 says why a bare `!endsWith` does not); additive, the recognizer and the conformance fact read the table |
 | A custom standalone image with host functions | a public `AlvoHost` seam when a packable host exists to carry it |
 
 Foreclosed deliberately: two spellings of one function (no `abs` alias beside `math.abs`); a guided row per host function.

@@ -50,20 +50,21 @@ Dates are relative to today, so the demo never looks stale. Its `$comment` expla
 
 ## Hook functions
 
-Four before-hooks call the built-in CEL functions. Each one is written the way the dashboard draws it, so it opens in
-place in the hook editor, never read-only:
+Four rules, in six before-hooks, call the built-in CEL functions. Each hook is written the way the dashboard draws it,
+so it opens in place in the hook editor, never read-only:
 
 | Hook | What it computes | In the seed |
 |---|---|---|
-| `bikes` `beforeCreate` #0 and `beforeUpdate` #0 | `frame_number` = `upperAscii(replace(trim(new.frame_number), ' ', ''))` — trimmed, without spaces, in capitals, so one bike cannot be registered twice under two spellings | three bikes are posted as `cny23gr7sl04512`, `GNT 21TL 2C1 180447` and ` hai24trk6m00176 `, and stored as `CNY23GR7SL04512`, `GNT21TL2C1180447` and `HAI24TRK6M00176` |
-| `bikes` `beforeCreate` #1 | `rack_tag` = `upperAscii(new.brand) + ' ' + new.frame_number` — the tag hung on the bike in the rack. It runs after #0, so it sees the cleaned frame number. A brand is at most 40 characters and a frame number 32, so the tag always fits its 80 | every bike, as in `TREK WTU312C4471T` |
+| `bikes` `beforeCreate` #0 and `beforeUpdate` #0 | `frame_number` = `upperAscii(replace(trim(new.frame_number), ' ', ''))` — trimmed, without spaces, in capitals, so one bike cannot be registered twice under two spellings. The field's `maxLength: 32` is measured on the payload, before the hook cleans it, so a frame number padded past 32 characters is refused with 422 even if it would fit afterwards | three bikes are posted as `cny23gr7sl04512`, `GNT 21TL 2C1 180447` and ` hai24trk6m00176 `, and stored as `CNY23GR7SL04512`, `GNT21TL2C1180447` and `HAI24TRK6M00176` |
+| `bikes` `beforeCreate` #1 | `rack_tag` = `upperAscii(new.brand) + ' ' + new.frame_number` — the tag hung on the bike in the rack. It runs after #0, so it sees the cleaned frame number. A brand is at most 40 characters and a frame number 32, so the tag always fits its 80. The field is `readOnly`: a caller who sends a `rack_tag` is refused with 422, and the hook still writes it | every bike, as in `TREK WTU312C4471T` |
 | `rentals` `beforeCreate` #0, when `new.days >= 7` | `daily_rate` = `math.round(new.daily_rate * 0.875, 2)` — a week or longer gets an eighth off. Without the rounding, 45 × 0.875 = 39.375 has three decimals, and the field's `scale: 2` would refuse the write | the week-long reservation of `RENT-002`: posted at 45.00 a day, stored at 39.38, a price of 275.66 |
-| `customers` `beforeCreate` #0 and `beforeUpdate` #0, when `endsWith(new.email, '@velo-dielna.example')` | `reject` — the workshop's own address on a customer would send the "your bike is ready" notices back to the workshop. A customer without an e-mail passes, because a test of an empty value does not fire | no seeded customer trips it; see below |
+| `customers` `beforeCreate` #0 and `beforeUpdate` #0, when `endsWith(new.email, '@velo-dielna.example')` | `reject` — the workshop's own address on a customer would send the "your bike is ready" notices back to the workshop. A customer without an e-mail passes, because a test of an empty value does not fire. The test is case-sensitive, so `DIELNA@VELO-DIELNA.EXAMPLE` passes too; `endsWith(lowerAscii(new.email), '@velo-dielna.example')` in text mode would catch it, at the cost of the guided row | no seeded customer trips it; see below |
 
 **See it in the dashboard.** Open **Schema**, pick `bikes`, `rentals` or `customers`, and open the **On write** tab.
 **Edit** on a hook opens it in place. The `rentals` and `customers` conditions open as guided rows: *days is at least 7*,
-and *email ends with @velo-dielna.example*. A mutate expression box has **Functions you can call here** beside it, the
-list of the built-ins its slot admits, each with a **built-in** badge and an **Insert** button. The stored values are on
+and *email ends with @velo-dielna.example*. Under a mutate expression box, and under the condition in text mode, a
+folded **Functions you can call here** lists the built-ins that slot admits, each with its signature, a **built-in**
+badge and an **Insert** button that writes the call at the caret. The stored values are on
 the **Data** pages of `bikes` and `rentals`.
 
 **The refusal.** The seeder posts each entity as one batch, in one transaction, so it cannot carry a row that is meant
@@ -91,7 +92,8 @@ Each of these is declared in the schema and **refused at apply** by this build (
 - a `$cel` `default` — the `mutate` hook stamps `completed_at` instead of a `now()` default.
 - `rollup.where` — so there is no "open orders" count on a bike, only a count of all of them.
 - `entity.softDelete` — deletion is guarded by a before-hook instead.
-- `function`, `http.call` and `entity.update` actions, JSONata payloads, `email.data`, `bodyFile`.
+- the `function` action type (an after-hook that runs a script — not the CEL functions above), the `http.call` and
+  `entity.update` actions, JSONata payloads, `email.data`, `bodyFile`.
 
 Also left out on purpose:
 

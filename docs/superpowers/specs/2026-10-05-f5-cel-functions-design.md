@@ -497,7 +497,7 @@ functions; `DateOnly`; reword `UnhonouredSubsystems`' "functions" warning so it 
 `mutate` of a possibly-null function result into a `required` field refused at apply (since Ruling V such a null is
 refused at write time as the hook's 403; an apply-time refusal would be earlier still); X14's two mitigations — an
 analyzer over `AddCelFunction` delegates and a `CancellationToken`-aware delegate shape with a framework budget (#309); the dashboard offering
-functions (slice B); #85.
+functions (slice B) (delivered by slice D: [design](2026-10-06-f5-hook-functions-end-to-end-design.md)); #85.
 
 ## 17. As built
 

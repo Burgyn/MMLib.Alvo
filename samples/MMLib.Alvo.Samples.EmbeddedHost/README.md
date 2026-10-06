@@ -164,7 +164,7 @@ dotnet run --project samples/MMLib.Alvo.Samples.EmbeddedHost -- \
 Create an owner as in [Try both](#try-both), then a vehicle with a lower-case VIN:
 
 ```bash
-curl -s -XPOST localhost:5199/api/alvo/vehicles \
+curl -si -XPOST localhost:5199/api/alvo/vehicles \
   -H "Content-Type: application/json" -H "X-Alvo-Api-Key: $KEY" \
   -d '{"vin":"1hgcm82633a004352","plate":"BA-777AB","make":"Skoda","model":"Fabia",
        "year":2020,"owner_id":"<the owner id>"}'
@@ -240,7 +240,7 @@ Alvo cannot check these. They are your promise, and breaking one breaks writes, 
 
 The full contract — reserved names, overload resolution, how null and failure behave, and why a host function is
 trusted code — is in [`docs/architecture/cel.md`, "Host functions"][cel-host]; the builder-side view is in
-`docs/architecture/extensibility.md`, "Registering a CEL function".
+[`docs/architecture/extensibility.md`, "Registering a CEL function"](../../docs/architecture/extensibility.md#registering-a-cel-function).
 
 ### Why the shared descriptor stays hook-free
 

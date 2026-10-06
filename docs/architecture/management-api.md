@@ -71,13 +71,14 @@ write, so any project whose history ever held a looser block would otherwise be 
 ## Why `cel/functions` is Viewer and project-scoped
 
 `GET {m}/projects/{project}/cel/functions` lists every function a descriptor may call on this instance, one entry
-per overload (`abs` over an `Int` and over a `Decimal` are two entries), with parameters, result, nullability and
+per overload (`math.abs` over an `Int` and over a `Decimal` are two entries), with parameters, result, nullability and
 the profiles each compiles in. It is Viewer because it discloses only the names and summaries a host developer
 chose to register — the same class of information `capabilities` already reveals about the build. The catalog is
 per instance, not per project; the route is project-scoped for symmetry with `cel/check` and so that per-project
 visibility stays possible without a route change. The answer is an object, `{ "functions": [ … ] }`, so a catalog
 version or a documentation link can be added later without breaking a client. A registered function's name and
 summary are therefore visible to every Viewer: put no secrets or internal-only wording in them.
+The hook editor reads it to offer functions under a mutate value and a condition (slice D).
 
 ## Why `cel/check` is not the dry run, and why it is Developer
 

@@ -25,6 +25,9 @@ combinations are refused at apply: a delete has no `new.`, a create no `old.`.
 - refused: `quantity * unit_price` `now()`
 <!-- /gen:cel-condition -->
 
+The dashboard draws `startsWith`, `endsWith` or `contains` over a text field and a literal as a guided row. The tests
+are case-sensitive: compare `lowerAscii(new.<field>)` to ignore case.
+
 A `mutate` value is a field, a literal, arithmetic (`+ - * /`, unary `-`), `+` joining two strings, or a call to
 one of these built-in functions (all may nest), and nothing more: no `@user` or `@tenant`. A number joins through
 `string()`: `'#' + string(new.quantity)`. Every function takes any value of
@@ -35,18 +38,23 @@ toward zero; an overflow or a division by zero refuses the write, in a `mutate` 
 `contains` `endsWith` `int` `lowerAscii` `math.abs` `math.ceil` `math.floor` `math.greatest` `math.least` `math.round` `now` `replace` `size` `startsWith` `string` `substring` `timestamp` `trim` `upperAscii`
 <!-- /gen:mutate-functions -->
 
+A `substring` past the end fails the write, so to fit a field's `maxLength`, cut:
+`substring(new.description, 0, math.least(size(new.description), 40))`. A value derived from other fields of the row
+belongs in a computed field, which stays true on every write; a `mutate` stamps it once.
+
 An embedded host may register its own functions; they work in a `condition` and a `mutate` and nowhere else. Call
 `get_cel_functions` for this host's list with each function's parameters and result — never assume one exists. A
 function whose meaning changes gets a new name (`vatRate` stays, `vatRate2` is new). Alvo's tenant filter does not
 reach inside a function: one that reads stored data must take the tenant as a parameter and filter by it.
 
 <!-- gen:cel-mutate -->
-- allowed: `now()` `lowerAscii(new.description)` `new.unit_price` `'part'` `trim(new.description)` `quantity * 2.0`
+- allowed: `now()` `lowerAscii(new.description)` `new.unit_price` `'part'` `trim(new.description)` `quantity * 2.0` `upperAscii(trim(new.description))` `math.round(new.unit_price * 1.2, 2)` `'#' + upperAscii(new.description)` `startsWith(new.description, 'Brake')`
 - refused: `new.quantity > 0.0` `'admin' in @user.roles` `changed(quantity)`
 <!-- /gen:cel-mutate -->
 
-A `mutate` value cannot compare. For a flag decided by a comparison, let the `condition` compare and the `mutate`
-write the literal, with a second hook for the opposite case.
+A `mutate` value has no comparison operator (a text test such as `startsWith` is a call, and may fill a boolean
+field). For a flag decided by a comparison, let the `condition` compare and the `mutate` write the literal, with a
+second hook for the opposite case.
 
 Adding a hook depends on what the entity already has:
 
