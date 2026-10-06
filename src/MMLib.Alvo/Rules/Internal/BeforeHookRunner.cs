@@ -176,10 +176,11 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
     /// <b>A function or operator failure is not collapsed.</b> A <see cref="CelProfile.Condition"/> tree can call a
     /// CEL function and compute with <c>+ - * /</c>, and those are the constructs whose failure is reachable — a
     /// function that refuses its argument, an overflow, a zero divisor (spec §5.6): <c>CelInterpreter.EvaluatePredicate</c>
-    /// lets the failure escape, so the write is refused (fail closed) instead of the hook silently not firing. Everything
-    /// else in the tree still cannot throw — the node switch ends in <c>_ =&gt; null</c> and every comparison
-    /// funnels through a <c>TryNormalize</c> that answers <see langword="false"/> — so the open direction remains
-    /// only for the two-valued null rule above.
+    /// lets the failure escape, so the write is refused (fail closed) instead of the hook silently not firing. The same
+    /// holds for a <em>present</em> operand nothing can take (controller Rulings P, Q and R): a comparison, <c>!</c>,
+    /// <c>&amp;&amp;</c>, <c>||</c>, a ternary's condition or the whole condition over a value it cannot compare or that
+    /// is no Bool throws on this path instead of answering <see langword="false"/>. A <em>null</em> operand still
+    /// answers as before, so the open direction remains only for the two-valued null rule above.
     /// </para>
     /// <para>
     /// <b>The obligation deviation 84 recorded is now discharged:</b> admitting a construct that can throw into

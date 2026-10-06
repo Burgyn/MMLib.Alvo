@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
 
 namespace MMLib.Alvo.Api.Tests;
@@ -144,6 +145,16 @@ public class AlvoExceptionHandlerTests
             + "internals says nothing about it anyway");
         logs.Records.ShouldContain(LogLevel.Warning);
     }
+
+    /// <summary>
+    /// A function's failure is named as a function, an operator's by CEL's overload name, and a whole condition that
+    /// evaluated to no Bool as the condition — never as a "CEL function" called <c>&lt;condition&gt;</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("_/_", "the divisor is zero", "The CEL function '_/_' failed: the divisor is zero. Nothing was written.")]
+    [InlineData(CelInterpreter.WholeCondition, CelInterpreter.WholeConditionReason, "The hook's condition evaluated to a present value that is not a Bool. Nothing was written.")]
+    public void A_function_failure_detail_names_what_failed(string name, string reason, string detail) =>
+        AlvoExceptionHandler.FunctionFailedDetail(new CelFunctionException(name, reason)).ShouldBe(detail);
 
     /// <summary>
     /// Invokes the handler exactly the way <c>ExceptionHandlerMiddleware</c> does: the matched endpoint

@@ -157,11 +157,18 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
     }
 
     /// <summary>The caller-facing sentence for a function failure.</summary>
+    /// <remarks>
+    /// A whole condition that evaluated to no Bool (<see cref="CelInterpreter.WholeCondition"/>) is no function, so its
+    /// reason, which already names the condition, is the sentence.
+    /// </remarks>
     /// <param name="failure">The failure.</param>
     /// <returns>The detail text.</returns>
-    internal static string FunctionFailedDetail(CelFunctionException failure) => failure.Reason is { } reason
-        ? $"The CEL function '{failure.FunctionName}' failed: {reason}. Nothing was written."
-        : $"The CEL function '{failure.FunctionName}' failed while this write was evaluated, so nothing was written. Its own error is in the server log.";
+    internal static string FunctionFailedDetail(CelFunctionException failure) => failure.Reason switch
+    {
+        { } reason when failure.FunctionName == CelInterpreter.WholeCondition => $"{char.ToUpperInvariant(reason[0])}{reason[1..]}. Nothing was written.",
+        { } reason => $"The CEL function '{failure.FunctionName}' failed: {reason}. Nothing was written.",
+        null => $"The CEL function '{failure.FunctionName}' failed while this write was evaluated, so nothing was written. Its own error is in the server log.",
+    };
 
     /// <summary>
     /// Answers a request the server refused before Alvo could read it, at the status the server chose.
