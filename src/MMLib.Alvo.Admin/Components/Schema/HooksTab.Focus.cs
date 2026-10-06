@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.Logging;
-using MudBlazor;
+﻿using MudBlazor;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
@@ -9,47 +8,7 @@ public partial class HooksTab
     /// <summary>The sheet's selects by id — the mutate rows', the pickers' — for <see cref="RefocusSelectAsync"/>.</summary>
     private readonly Dictionary<string, MudSelect<string>> _selects = new(StringComparer.Ordinal);
 
-    /// <summary>
-    /// Gives focus back to a select once its choice is drawn: the library closes its list and swaps its box for the one
-    /// that shows the value, and focus, left on the list's option, fell to <c>&lt;body&gt;</c> — outside the sheet, where
-    /// Escape no longer reaches it (measured in a browser; a select inside a dialog is new here, spec §11).
-    /// </summary>
-    /// <remarks>
-    /// Through the select's own <c>FocusAsync</c>, not a selector over the library's markup. Not awaited: the library
-    /// awaits this handler before it draws the value, so focus is asked for once the handler has returned and the
-    /// current work has run (<see cref="Task.Yield"/>). A re-choice of the value shown raises no value change and so never
-    /// runs this; focus stays on the select without it, which <c>AdminSession.ChooseAgainAsync</c> pins (ruling O).
-    /// </remarks>
+    /// <summary>Gives focus back to a select once its choice is drawn (<see cref="SelectFocus"/>).</summary>
     /// <param name="id">The select's id in <see cref="_selects"/>.</param>
-    private Task RefocusSelectAsync(string id)
-    {
-        if (_selects.TryGetValue(id, out var select))
-        {
-            _ = FocusWhenDrawnAsync(select);
-        }
-
-        return Task.CompletedTask;
-    }
-
-    /// <summary>Focuses the select after the current render. Never throws: focus is a courtesy, and this runs unobserved.</summary>
-    /// <remarks>
-    /// Everything is caught and logged at Debug rather than filtered: the library's <c>FocusAsync</c> already swallows a
-    /// select or circuit that went away in between, so what is left to arrive here is not foreseeable by type, and an
-    /// unobserved fault of a fire-and-forget call would otherwise vanish.
-    /// </remarks>
-    private async Task FocusWhenDrawnAsync(MudSelect<string> select)
-    {
-        await Task.Yield();
-        try
-        {
-            await select.FocusAsync();
-        }
-        catch (Exception ex)
-        {
-            RefocusFailed(Logger, ex);
-        }
-    }
-
-    [LoggerMessage(EventId = 22, Level = LogLevel.Debug, Message = "Handing focus back to a select on the hook sheet failed")]
-    private static partial void RefocusFailed(ILogger logger, Exception exception);
+    private Task RefocusSelectAsync(string id) => SelectFocus.AfterChoice(_selects, id, Logger);
 }

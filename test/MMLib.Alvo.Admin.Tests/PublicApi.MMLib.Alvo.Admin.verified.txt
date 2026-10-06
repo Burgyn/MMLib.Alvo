@@ -690,6 +690,22 @@ namespace MMLib.Alvo.Admin.Components.Schema
         public MMLib.Alvo.Schema.EntitySchema Entity { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
+    public class ConditionBuilder : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public ConditionBuilder() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Entity { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Point { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Value { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> ValueChanged { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
+    }
     public class DescriptorDiff : Microsoft.AspNetCore.Components.ComponentBase
     {
         public DescriptorDiff() { }

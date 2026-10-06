@@ -283,7 +283,7 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
 
         await session.Page.GetByTestId("hook-points")
             .GetByRole(AriaRole.Radio, new() { Name = "beforeUpdate", Exact = true }).ClickAsync();
-        await session.Page.FillAsync("#hook-condition", "old.status == 'completed'");
+        await session.TypeConditionAsync("old.status == 'completed'");
         await session.Page.FillAsync("#hook-reject", "A completed work order cannot be reopened.");
         await session.Page.ClickAsync("[data-testid='hook-add']");
 
@@ -483,7 +483,7 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.GetByTestId("hook-new").ClickAsync();
 
         await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeUpdate", Exact = true }).ClickAsync();
-        await session.Page.FillAsync("#hook-condition", "old.status == 'completed' && new.status != 'completed'");
+        await session.TypeConditionAsync("old.status == 'completed' && new.status != 'completed'");
         await session.Page.FillAsync("#hook-reject", "A completed work order cannot be reopened.");
         await session.Page.ClickAsync("[data-testid='hook-add']");
 
@@ -513,7 +513,7 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.GetByTestId("hook-new").ClickAsync();
 
         await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeUpdate", Exact = true }).ClickAsync();
-        await session.Page.FillAsync("#hook-condition", "old.status == 'completed' && new.status != 'completed'");
+        await session.TypeConditionAsync("old.status == 'completed' && new.status != 'completed'");
         await session.Page.FillAsync("#hook-reject", "A completed work order cannot be reopened.");
         await session.Page.ClickAsync("[data-testid='hook-add']");
 

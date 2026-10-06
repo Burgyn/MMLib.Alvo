@@ -53,10 +53,14 @@ public sealed partial class PatternLanguageTests
     /// or an editor's, whose fields a component with an <c>AlvoEditor</c> draws), unless it is a search over a list,
     /// which is named by an <c>aria-label</c> saying what it filters or searches and has nothing to submit (§3.8).
     /// </summary>
+    /// <remarks>
+    /// A component drawn only inside editors (the guided condition's rows, inside the hook sheet) is in the editor's form
+    /// too: every component that draws its tag must itself draw an <c>AlvoEditor</c>, so one drawn anywhere else fails.
+    /// </remarks>
     [Fact]
     public void Every_single_line_box_is_in_a_form_Enter_submits()
         => Components()
-            .Where(file => !file.Source.Contains("<AlvoEditor", StringComparison.Ordinal))
+            .Where(file => !file.Source.Contains("<AlvoEditor", StringComparison.Ordinal) && !DrawnOnlyInEditors(file.Name))
             .SelectMany(file => TagsAt(file.Source, "MudTextField")
                 .Where(tag => !tag.Attributes.ContainsKey("Lines") && !IsSearch(tag.Attributes) && !InsideForm(file.Source, tag.Index))
                 .Select(tag => $"{file.Name}: {tag.Attributes.GetValueOrDefault("id") ?? "(no id)"}"))
@@ -79,6 +83,16 @@ public sealed partial class PatternLanguageTests
         => attributes.GetValueOrDefault("aria-label") is { } name
            && (name.StartsWith("Filter ", StringComparison.Ordinal) || name.StartsWith("@($\"Search ", StringComparison.Ordinal)
                || name.StartsWith("Search ", StringComparison.Ordinal));
+
+    /// <summary>Whether a component is drawn somewhere, and only by components that draw an <c>AlvoEditor</c>.</summary>
+    private static bool DrawnOnlyInEditors(string name)
+    {
+        var tag = $"<{Path.GetFileNameWithoutExtension(name)}";
+        var drawers = Components()
+            .Where(file => file.Name != name && Regex.IsMatch(file.Source, $@"{Regex.Escape(tag)}(?=[\s/>])"))
+            .ToList();
+        return drawers.Count > 0 && drawers.All(file => file.Source.Contains("<AlvoEditor", StringComparison.Ordinal));
+    }
 
     /// <summary>Whether a <c>&lt;form</c> opened before <paramref name="index"/> is not closed by then.</summary>
     private static bool InsideForm(string source, int index)

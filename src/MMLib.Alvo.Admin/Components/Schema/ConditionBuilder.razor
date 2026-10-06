@@ -1,0 +1,305 @@
+﻿@*
+    The guided form of a hook condition (spec §4.6, §7; ruling B7): rows of field, operator and value that write ordinary
+    CEL through ConditionText. ConditionTable decides what each row may offer — its fields, relations and images come from
+    ConditionTable.For, ForWriter and ImagesAt and nowhere else, so the conformance proof over those (Host.Tests,
+    GuidedConditionConformanceTests) holds for this form too. cel/check and the apply judge the text it writes — the parent
+    shows that text (the Expression readout) and the switch to text mode. A row is written once it has what its relation
+    needs; until then it is not part of the condition, which the readout shows.
+
+    A refused row is never written (ruling Q-B): while ConditionText.Refusal has something to say, the refusal is shown
+    here and the parent keeps the last condition the rows could write.
+
+    The selects carry no ToStringFunc: without one, the library draws the chosen item's own content in the box ("is at
+    most", "The person writing"), which is what a screen reader and a scenario read; with one the box read empty
+    (measured).
+*@
+@inject ILogger<ConditionBuilder> Logger
+
+<Field Label="Match" LabelId="condition-joiner-label">
+    <ChipGroup TValue="string" Items="_joiners" Selected="[_all ? AllWord : AnyWord]" aria-labelledby="condition-joiner-label"
+               data-testid="condition-joiner" SelectedChanged="words => ChooseJoinerAsync(words[0])" />
+</Field>
+
+@for (var index = 0; index < _rows.Count; index++)
+{
+    var row = _rows[index];
+    var i = index;
+    <div class="a-stack" role="group" aria-label="@($"Condition {i + 1}")" data-testid="condition-row">
+        <div class="a-field-row">
+            <Field Label="@($"Condition {i + 1} field")" LabelId="@($"{FieldId(i)}-label")">
+                <MudSelect @ref="_selects[FieldId(i)]" T="string" Variant="Variant.Outlined" Value="row.Field"
+                           ValueChanged="field => ChooseFieldAsync(i, field)"
+                           aria-labelledby="@($"{FieldId(i)}-label")" Class="a-mono" data-testid="@FieldId(i)">
+                    @if (ConditionTable.ForWriter(Point).Count > 0)
+                    {
+                        <MudSelectItem Value="@ConditionTable.Writer">@WriterWords</MudSelectItem>
+                    }
+                    @foreach (var field in OfferedFields)
+                    {
+                        <MudSelectItem Value="@field.Name">@field.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </Field>
+            @if (ShowsImage(row))
+            {
+                <Field Label="@($"Condition {i + 1} reads")" LabelId="@($"condition-{i}-image-label")">
+                    <ChipGroup TValue="string" Items="ImageWords" Selected="[WordOf(row.Image)]"
+                               aria-labelledby="@($"condition-{i}-image-label")" data-testid="@($"condition-{i}-image")"
+                               SelectedChanged="words => ChooseImageAsync(i, words[0])" />
+                </Field>
+            }
+            <Field Label="@($"Condition {i + 1} operator")" LabelId="@($"{OperatorId(i)}-label")">
+                <MudSelect @ref="_selects[OperatorId(i)]" T="string" Variant="Variant.Outlined" Value="row.Operator?.ToString()"
+                           ValueChanged="op => ChooseOperatorAsync(i, op)"
+                           aria-labelledby="@($"{OperatorId(i)}-label")" data-testid="@OperatorId(i)"
+                           Disabled="@(row.Field.Length == 0)">
+                    @foreach (var spec in OperatorsFor(row))
+                    {
+                        <MudSelectItem Value="@spec.Operator.ToString()">@spec.Words</MudSelectItem>
+                    }
+                </MudSelect>
+            </Field>
+            @ValueInput(row, i)
+        </div>
+        @if (row.Operator is { } relation && row.Field != ConditionTable.Writer)
+        {
+            <span class="a-hint">When the field is empty, this row is @ConditionTable.Of(relation).WhenEmpty.</span>
+        }
+        <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="@($"condition-{i}-remove")"
+                    aria-label="@($"Remove condition {i + 1}")" OnClick="_ => RemoveRowAsync(i)">Remove</AlvoButton>
+    </div>
+}
+<AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="condition-add" OnClick="AddRow">Add a condition</AlvoButton>
+@if (ConditionText.Refusal(Condition()) is { } refusal)
+{
+    <p class="a-field__problem" id="condition-refusal" data-testid="condition-refusal">@refusal</p>
+}
+
+@code {
+    private const string AllWord = "all";
+    private const string AnyWord = "any";
+    private const string NowWord = "now";
+    private const string BeforeWord = "before";
+    private const string WriterWords = "The person writing";
+    private static readonly string[] _joiners = [AllWord, AnyWord];
+    private readonly List<Draft> _rows = [];
+    private readonly Dictionary<string, MudSelect<string>> _selects = new(StringComparer.Ordinal);
+    private ConditionScope _scope = new([], []);
+    private bool _all = true;
+    private string? _emitted;
+    private string? _point;
+
+    /// <summary>The hook point, which decides what a row may offer.</summary>
+    [Parameter, EditorRequired]
+    public string Point { get; set; } = "beforeCreate";
+
+    /// <summary>The entity whose fields the rows name.</summary>
+    [Parameter, EditorRequired]
+    public string Entity { get; set; } = string.Empty;
+
+    /// <summary>The condition's CEL; read as rows when it is exactly what the rows write.</summary>
+    [Parameter]
+    public string Value { get; set; } = string.Empty;
+
+    /// <summary>Raised with the CEL the rows write, after every change the rows can write without a refusal.</summary>
+    [Parameter]
+    public EventCallback<string> ValueChanged { get; set; }
+
+    /// <summary>The working copy the fields and roles are read from — cascaded, so its model stays internal.</summary>
+    [CascadingParameter]
+    private WorkingCopy? Copy { get; set; }
+
+    /// <summary>
+    /// Reads the scope, and the rows again when the condition came from elsewhere (an edit opened, text switched back) or
+    /// the point moved — a draft built for one point may offer what another lacks, so it is not carried across.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        _scope = Copy is { } copy
+            ? ConditionScope.From(PendingSchema.Read(copy.Json, Entity), DescriptorLens.DeclaredRoles(copy.Json))
+            : new ConditionScope([], []);
+        if ((Value != _emitted || Point != _point) && ConditionText.Recognize(Value, Point, _scope) is { } condition)
+        {
+            _all = condition.All;
+            _rows.Clear();
+            _rows.AddRange(condition.Rows.Select(Draft.Of));
+        }
+
+        _emitted = Value;
+        _point = Point;
+    }
+
+    private static string FieldId(int i) => $"condition-{i}-field";
+
+    private static string OperatorId(int i) => $"condition-{i}-operator";
+
+    private static string ValueId(int i) => $"condition-{i}-value";
+
+    private IEnumerable<ConditionField> OfferedFields
+        => _scope.Fields.Where(candidate => ConditionTable.For(Point, candidate.Kind, candidate.Nullable).Count > 0);
+
+    private IReadOnlyList<OperatorSpec> OperatorsFor(Draft row) => row.Field == ConditionTable.Writer
+        ? ConditionTable.ForWriter(Point)
+        : _scope.Field(row.Field) is { } field ? ConditionTable.For(Point, field.Kind, field.Nullable) : [];
+
+    /// <summary>The images this point has, as the chips name them — from the table, never a fixed pair.</summary>
+    private string[] ImageWords => [.. ConditionTable.ImagesAt(Point).Select(WordOf)];
+
+    private static string WordOf(RowImage image) => image == RowImage.New ? NowWord : BeforeWord;
+
+    private bool ShowsImage(Draft row)
+        => row.Field.Length > 0 && row.Field != ConditionTable.Writer && row.Operator != ConditionOperator.Changed
+           && ConditionTable.ImagesAt(Point).Count > 1;
+
+    private static OperandKind OperandOf(Draft row) => row.Operator is { } relation ? ConditionTable.Of(relation).Operand : OperandKind.None;
+
+    private void AddRow() => _rows.Add(new Draft { Image = ConditionTable.ImagesAt(Point).FirstOrDefault() });
+
+    private Task RemoveRowAsync(int index)
+    {
+        _rows.RemoveAt(index);
+        return EmitAsync();
+    }
+
+    private Task ChooseJoinerAsync(string word)
+    {
+        _all = word == AllWord;
+        return EmitAsync();
+    }
+
+    /// <summary>A new field takes its first allowed relation and an empty value.</summary>
+    private async Task ChooseFieldAsync(int index, string? field)
+    {
+        var row = _rows[index];
+        row.Field = field ?? string.Empty;
+        row.Operator = OperatorsFor(row).FirstOrDefault()?.Operator;
+        row.Value = string.Empty;
+        await EmitAsync();
+        await SelectFocus.AfterChoice(_selects, FieldId(index), Logger);
+    }
+
+    private Task ChooseImageAsync(int index, string word)
+    {
+        _rows[index].Image = word == NowWord ? RowImage.New : RowImage.Old;
+        return EmitAsync();
+    }
+
+    private async Task ChooseOperatorAsync(int index, string? relation)
+    {
+        _rows[index].Operator = Enum.TryParse<ConditionOperator>(relation, out var parsed) ? parsed : null;
+        await EmitAsync();
+        await SelectFocus.AfterChoice(_selects, OperatorId(index), Logger);
+    }
+
+    private Task TypeValueAsync(int index, string? value)
+    {
+        _rows[index].Value = value ?? string.Empty;
+        return EmitAsync();
+    }
+
+    private async Task ChooseValueAsync(int index, string? value)
+    {
+        await TypeValueAsync(index, value);
+        await SelectFocus.AfterChoice(_selects, ValueId(index), Logger);
+    }
+
+    /// <summary>
+    /// Writes the rows as CEL and hands it to the parent, which checks it — unless the rows are refused (ruling Q-B): then
+    /// nothing is handed on, the parent keeps the last condition the rows could write, and the refusal is shown here.
+    /// </summary>
+    private Task EmitAsync()
+    {
+        var condition = Condition();
+        if (ConditionText.Refusal(condition) is not null)
+        {
+            return Task.CompletedTask;
+        }
+
+        _emitted = ConditionText.Generate(condition);
+        return ValueChanged.InvokeAsync(_emitted);
+    }
+
+    /// <summary>The rows that have what their relation needs, as a condition.</summary>
+    private GuidedCondition Condition() => new(_all, [.. _rows.Select(ToRow).OfType<ConditionRow>()]);
+
+    private ConditionRow? ToRow(Draft row)
+    {
+        if (row.Operator is not { } relation)
+        {
+            return null;
+        }
+
+        var operand = ConditionTable.Of(relation).Operand;
+        if (operand == OperandKind.Role)
+        {
+            return row.Value.Length == 0 ? null : new ConditionRow(relation, RowImage.New, ConditionTable.Writer, ConditionFieldKind.Text, row.Value);
+        }
+
+        if (_scope.Field(row.Field) is not { } field
+            || (operand == OperandKind.Literal && field.Kind != ConditionFieldKind.Text && row.Value.Length == 0))
+        {
+            return null;
+        }
+
+        var image = relation == ConditionOperator.Changed ? RowImage.New : row.Image;
+        return new ConditionRow(relation, image, field.Name, field.Kind, operand == OperandKind.Literal ? row.Value : string.Empty);
+    }
+
+    /// <summary>The value box a row's relation takes: a role, a declared value, or typed text.</summary>
+    private RenderFragment ValueInput(Draft row, int i) => @<text>
+        @switch (OperandOf(row))
+        {
+            case OperandKind.Role:
+                <Field Label="@($"Condition {i + 1} role")" LabelId="@($"{ValueId(i)}-label")">
+                    <MudSelect @ref="_selects[ValueId(i)]" T="string" Variant="Variant.Outlined" Value="row.Value"
+                               ValueChanged="value => ChooseValueAsync(i, value)"
+                               aria-labelledby="@($"{ValueId(i)}-label")" Class="a-mono" data-testid="@ValueId(i)">
+                        @foreach (var role in _scope.Roles)
+                        {
+                            <MudSelectItem Value="@role">@role</MudSelectItem>
+                        }
+                    </MudSelect>
+                </Field>
+                break;
+            case OperandKind.Literal when _scope.Field(row.Field) is { Kind: ConditionFieldKind.Choice } choice:
+                <Field Label="@($"Condition {i + 1} value")" LabelId="@($"{ValueId(i)}-label")">
+                    <MudSelect @ref="_selects[ValueId(i)]" T="string" Variant="Variant.Outlined" Value="row.Value"
+                               ValueChanged="value => ChooseValueAsync(i, value)"
+                               aria-labelledby="@($"{ValueId(i)}-label")" Class="a-mono" data-testid="@ValueId(i)">
+                        @foreach (var value in choice.Values)
+                        {
+                            <MudSelectItem Value="@value">@value</MudSelectItem>
+                        }
+                    </MudSelect>
+                </Field>
+                break;
+            case OperandKind.Literal:
+                <Field Label="@($"Condition {i + 1} value")" For="@ValueId(i)">
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="@ValueId(i)" Class="a-mono"
+                                  autocomplete="off" InputMode="@(_scope.Field(row.Field)?.Kind == ConditionFieldKind.Number ? InputMode.@decimal : InputMode.text)"
+                                  Value="row.Value" ValueChanged="value => TypeValueAsync(i, value)" />
+                </Field>
+                break;
+        }
+    </text>;
+
+    /// <summary>One row as the form holds it while it is being built.</summary>
+    private sealed class Draft
+    {
+        /// <summary>Gets or sets the field, or <see cref="ConditionTable.Writer"/>.</summary>
+        public string Field { get; set; } = string.Empty;
+
+        /// <summary>Gets or sets the relation, once the field allows one.</summary>
+        public ConditionOperator? Operator { get; set; }
+
+        /// <summary>Gets or sets the image read.</summary>
+        public RowImage Image { get; set; } = RowImage.New;
+
+        /// <summary>Gets or sets the value, unquoted.</summary>
+        public string Value { get; set; } = string.Empty;
+
+        /// <summary>A recognized row, as a draft.</summary>
+        /// <param name="row">The row.</param>
+        public static Draft Of(ConditionRow row) => new() { Field = row.Field, Operator = row.Operator, Image = row.Image, Value = row.Value };
+    }
+}

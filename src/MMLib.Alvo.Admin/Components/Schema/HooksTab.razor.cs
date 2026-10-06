@@ -114,12 +114,14 @@ public partial class HooksTab
         ReadPickers();
         EnsureMutateRow();
         _adding = true;
+        SettleConditionMode();
     }
 
     /// <summary>Switches the point, which may switch the kind (<see cref="HookBuilder.Choose"/>).</summary>
     private void Choose(string point)
     {
         Current.Choose(point);
+        KeepConditionModeFitting();
         _refusal.Clear();
         CheckAll();
     }

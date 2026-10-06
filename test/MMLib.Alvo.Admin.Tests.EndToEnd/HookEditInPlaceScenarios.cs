@@ -47,7 +47,7 @@ public sealed class HookEditInPlaceScenarios(BikeWorkshopWorld world) : IClassFi
         (await editor.GetByTestId("hook-save").InnerTextAsync()).ShouldBe("Save to the working copy");
         (await editor.GetByTestId("hook-point-fixed").InnerTextAsync()).ShouldBe("beforeCreate");
         (await editor.GetByTestId("hook-points").CountAsync()).ShouldBe(0, "an opened hook keeps its point (spec D1)");
-        (await session.Page.InputValueAsync("#hook-condition")).ShouldBe("new.quantity <= 0");
+        (await session.Page.GetByTestId("hook-condition-readout").InnerTextAsync()).ShouldBe("new.quantity <= 0");
 
         await session.WaitForFocusInsideAsync("hook-editor");
         await session.Page.Keyboard.PressAsync("Escape");
@@ -67,9 +67,10 @@ public sealed class HookEditInPlaceScenarios(BikeWorkshopWorld world) : IClassFi
         await session.Page.Keyboard.PressAsync("Escape");
         await editor.GetByTestId("editor-discard-question").WaitForAsync();
         await editor.GetByTestId("editor-keep").ClickAsync();
-        /* Focus is back on the form's first control — the condition, since Edit draws no point chips — before the next
-           Escape: pressed while Keep editing still had focus, it would only press Keep editing again. */
-        await session.WaitForFocusOnAsync("hook-condition");
+        /* Focus is back on the form's first control — the condition's mode switch, since Edit draws no point chips — before
+           the next Escape: pressed while Keep editing still had focus, it would only press Keep editing again. The switch's
+           chips carry no id, so the wait is for focus inside it. */
+        await session.WaitForFocusInsideAsync("hook-condition-mode");
 
         await session.Page.Keyboard.PressAsync("Escape");
         await editor.GetByTestId("editor-discard-question").WaitForAsync();

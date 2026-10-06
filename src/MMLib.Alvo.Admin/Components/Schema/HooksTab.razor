@@ -198,15 +198,21 @@ else
     /// <summary>The box is described by its hint, and by the sentence under it while it has one.</summary>
     private string Described(string id) => _check.DescribedBy(id) is { } check ? $"{id}-hint {check}" : $"{id}-hint";
 
-    /// <summary>The condition box (plan Task 19 adds the guided rows and the switch).</summary>
+    /// <summary>The condition: guided rows that write CEL, or the CEL itself — one switch between them (spec §4.6).</summary>
+    /// <remarks>
+    /// The rows get the working copy through a cascade set here: the sheet's content renders inside the dialog provider,
+    /// which a cascade from the entity screen does not reach (<see cref="AlvoEditor"/>).
+    /// </remarks>
     private RenderFragment ConditionField => @<text>
-        <Field Label="Only when (optional)" For="hook-condition">
+        <Field Label="Only when (optional)" LabelId="hook-condition-mode-label">
             <ChildContent>
-                <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-condition" Class="a-mono"
-                              autocomplete="off" Placeholder="@Current.Example" aria-describedby="@ConditionDescribedBy"
-                              Value="Current.Condition" ValueChanged="TypeCondition" />
-                @ConditionLength
-                @Findings("hook-condition")
+                <ChipGroup TValue="string" Items="_conditionModes" Selected="[_guided ? GuidedWord : TextWord]"
+                           aria-labelledby="hook-condition-mode-label" data-testid="hook-condition-mode"
+                           SelectedChanged="modes => ChooseConditionMode(modes[0])" />
+                @if (_conditionNote is { } note)
+                {
+                    <p class="a-hint" data-testid="hook-condition-note">@note</p>
+                }
             </ChildContent>
             <Hint>
                 <span data-testid="hook-condition-hint">
@@ -215,6 +221,36 @@ else
                 </span>
             </Hint>
         </Field>
+        @if (_guided)
+        {
+            <CascadingValue Value="Copy">
+                <ConditionBuilder Point="@Current.Point" Entity="@Entity" Value="@Current.Condition" ValueChanged="TypeCondition" />
+            </CascadingValue>
+            <Field Label="Expression">
+                <ChildContent>
+                    <code class="a-mono" id="hook-condition" data-testid="hook-condition-readout"
+                          aria-describedby="@_check.DescribedBy("hook-condition")">@(Current.Condition.Length == 0 ? "(none: the hook runs on every write)" : Current.Condition)</code>
+                    @ConditionLength
+                    @Findings("hook-condition")
+                </ChildContent>
+            </Field>
+        }
+        else
+        {
+            <Field Label="Condition (CEL)" For="hook-condition">
+                <ChildContent>
+                    <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-condition" Class="a-mono"
+                                  autocomplete="off" Placeholder="@Current.Example" aria-describedby="@ConditionDescribedBy"
+                                  Value="Current.Condition" ValueChanged="TypeCondition" />
+                    @ConditionLength
+                    @Findings("hook-condition")
+                </ChildContent>
+                <Hint>
+                    What the guided rows write, as text. Anything the rows cannot say — a function, a field compared with a
+                    field, a mix of all and any — is written here.
+                </Hint>
+            </Field>
+        }
     </text>;
 
     /// <summary>Said under the condition when it is longer than a condition may be, without asking the server (spec §4.6).</summary>

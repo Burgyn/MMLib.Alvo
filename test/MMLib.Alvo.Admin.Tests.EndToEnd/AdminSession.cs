@@ -135,10 +135,18 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
         await WaitForFocusInsideAsync(testId).ConfigureAwait(false);
     }
 
-    /// <summary>Types a hook condition as CEL into the open hook sheet.</summary>
-    /// <remarks>One place for every scenario: the guided form (plan Task 19) puts a mode switch in front of the box.</remarks>
+    /// <summary>Types a hook condition as CEL: switches the condition to text mode first, which the guided form is not.</summary>
+    /// <remarks>
+    /// One place for every scenario. The text box appears a round trip after the switch is pressed; the fill waits for it
+    /// (<c>input#</c>, since the guided form's readout carries the same id).
+    /// </remarks>
     /// <param name="condition">The CEL.</param>
-    public Task TypeConditionAsync(string condition) => Page.FillAsync("#hook-condition", condition);
+    public async Task TypeConditionAsync(string condition)
+    {
+        await Page.GetByTestId("hook-condition-mode").GetByRole(AriaRole.Radio, new() { Name = "Text", Exact = true })
+            .ClickAsync().ConfigureAwait(false);
+        await Page.FillAsync("input#hook-condition", condition).ConfigureAwait(false);
+    }
 
     /// <summary>Waits for the snackbar that says <paramref name="text"/>.</summary>
     /// <remarks>
