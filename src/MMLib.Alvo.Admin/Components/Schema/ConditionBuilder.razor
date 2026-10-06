@@ -127,14 +127,16 @@
     /// the point moved — a draft built for one point may offer what another lacks, so it is not carried across.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A point change therefore discards an unfinished draft: the rows are read back from the condition, which holds only
     /// the finished ones. When that condition does not fit the new point, the sheet switches to text instead.
-    /// </remarks>
+    /// </para>
     /// <para>
     /// It also attaches this form to the sheet's gate (ruling S-B) — here, and with no <c>Dispose</c>, because either an
     /// <c>OnInitialized</c> or an <c>IDisposable</c> would grow this public type's surface (spec §14). The sheet asks the
     /// gate only while it draws the rows, and the rows drawn next attach over these, so a form gone is never asked.
     /// </para>
+    /// </remarks>
     protected override void OnParametersSet()
     {
         _ask ??= FirstRefusalOrUnfinished;
@@ -272,6 +274,11 @@
     {
         for (var index = 0; index < _rows.Count; index++)
         {
+            if (Gone(_rows[index]))
+            {
+                return $"Condition {index + 1} names a field that no longer exists.";
+            }
+
             if (Unfinished(_rows[index]))
             {
                 return $"Condition {index + 1} needs a value.";
@@ -294,9 +301,17 @@
         _ => false,
     };
 
+    /// <summary>
+    /// A row naming a field the working copy no longer declares — removed in another tab while this sheet was open. It is
+    /// not written, so without this it would drop out of the condition unsaid.
+    /// </summary>
+    private bool Gone(Draft row)
+        => row.Field.Length > 0 && row.Field != ConditionTable.Writer && _scope.Field(row.Field) is null;
+
     /// <summary>Why one row cannot be written, or <see langword="null"/> — also when it is not written yet.</summary>
     private string? RowRefusal(Draft row)
-        => ToRow(row) is { } written ? ConditionText.Refusal(new GuidedCondition(true, [written])) : null;
+        => Gone(row) ? "This field no longer exists in the working copy."
+            : ToRow(row) is { } written ? ConditionText.Refusal(new GuidedCondition(true, [written])) : null;
 
     /// <summary>The rows that have what their relation needs, as a condition.</summary>
     private GuidedCondition Condition() => new(_all, [.. _rows.Select(ToRow).OfType<ConditionRow>()]);
