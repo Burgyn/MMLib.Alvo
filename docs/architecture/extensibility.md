@@ -262,7 +262,10 @@ filter does not reach inside — so give it the tenant as an argument: in a
 tenant-scoped row), because a mutate cannot read `@tenant` or `@user` (the refusal's
 wording is tracked in #310). A function that throws refuses the write with
 `500 …/errors/function-failed`, naming the function and never your exception text
-(that goes to the log).
+(that goes to the log). So throw on a present input you cannot answer for: a `null`
+return makes the call `null`, a condition over `null` does not fire, and a `reject`
+gated on the function would let that input through. Keep `null` for an input that
+really has no value.
 
 Where it shows up: `GET {m}/projects/{p}/cel/functions` lists it with provenance
 `Host`; the dashboard's hook editor offers it under the mutate value box and the

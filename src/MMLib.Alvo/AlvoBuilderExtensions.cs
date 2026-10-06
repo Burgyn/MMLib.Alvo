@@ -60,8 +60,10 @@ public static class AlvoBuilderExtensions
     /// on the caller: a Data API write is rolled back and answers HTTP 500 <c>…/errors/function-failed</c> naming the
     /// function; an in-process <c>IAlvoData</c> caller (a host endpoint, the dashboard) receives an exception and nothing
     /// is written (the dashboard shows its generic fault); in an after-hook condition the after-hook is dropped and a
-    /// Warning is logged. Return <see langword="null"/> or <see langword="false"/> on input the function cannot handle
-    /// rather than throwing: every throw is a 500 and an Error log entry per request.
+    /// Warning is logged. So <b>throw</b> on a present input the function cannot answer for: a <see langword="null"/>
+    /// return makes the call <see langword="null"/>, a condition over <see langword="null"/> does not fire, and a
+    /// <c>reject</c> gated on the function would let that input through. Keep <see langword="null"/> for an input that
+    /// really has no value.
     /// </para>
     /// <para>
     /// <b>What the function throws is logged whole</b> — its message and stack trace, at Error for a write and at

@@ -329,8 +329,14 @@ framework budget (#309) — are follow-ups (spec §5.8, X14).
 - **The host's exception is logged, never shown.** What a function throws — message and stack trace — is logged at
   Error for a write and at Warning for an after-hook condition. Never put caller data (a field's value, an argument)
   in an exception message: it lands in every log sink the host ships to.
-- **Prefer null to a throw.** A host function should answer `null` (or `false`) on input it cannot handle rather than
-  throw: every throw is a 500 and an Error log entry, once per request.
+- **Throw when you cannot answer; return `null` only when there is no value.** When a host function cannot produce a
+  value for an input that is present — a VIN it cannot parse, a rate it cannot find — it should **throw**. A throw is
+  `function-failed` and a rollback: the write fails closed. A `null` is not a refusal: the call evaluates to `null`, and
+  a condition over `null` does not fire, so a `reject` gated on `isBlockedVin(new.vin)` would let a malformed VIN
+  through — the fail-open shape the hook profiles refuse for operators. Keep `null` for "the input really has no
+  value" (a null argument, an optional lookup with no entry), where storing `null` from a mutate is the right answer.
+  The price of a throw is a 500 and an Error log entry per request, and that is the point: a bad input is visible
+  instead of quietly passing a guard. A defect inside Alvo's own evaluation of a hook fails the same way (Ruling Y-D).
 - **Versioning.** A function whose meaning changes gets a new name (`vatRate` stays, `vatRate2` is new): a descriptor
   holds names, not versions. Removing or renaming a registered function makes a stored descriptor that calls it fail
   the apply at boot — refused as calling an unknown function.

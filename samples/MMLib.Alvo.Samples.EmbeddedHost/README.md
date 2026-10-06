@@ -232,8 +232,11 @@ Alvo cannot check these. They are your promise, and breaking one breaks writes, 
   entity pass the row's own tenant: `vatRate(new.tenant_id, new.category)`, which works in a condition and in a
   mutate alike. `normalizeVin` reads nothing but its argument, so it needs no tenant.
 - **No caller data in exceptions.** What a function throws, message and stack trace, is logged at Error. Never put a
-  field's value or an argument into an exception message: it lands in every log sink the host ships to. Better still,
-  **prefer `null` to a throw** on input you cannot handle: every throw is a 500 and a log entry, once per request.
+  field's value or an argument into an exception message: it lands in every log sink the host ships to.
+- **Throw when you cannot answer; return `null` only when there is no value.** On a present input you cannot handle,
+  throw: the write fails closed with `function-failed` and rolls back. Returning `null` instead makes the call `null`,
+  and a condition over `null` does not fire, so a `reject` gated on your function would let the bad input through.
+  Keep `null` for an input that really has no value.
 - **Versioned by name.** A descriptor stores names, not versions. If a function's meaning changes, register it under a
   new name (`vatRate2`) and keep the old one. Removing a function that a stored descriptor still calls makes the next
   boot refuse that descriptor.
