@@ -32,12 +32,13 @@ public partial class HooksTab
         try
         {
             var functions = await Gateway.CelFunctionsAsync(CancellationToken.None);
-            if (_lifetime.Ended || functions.Count == 0)
+            if (_lifetime.Ended)
             {
                 return;
             }
 
-            _offered = new()
+            // An empty answer clears what an earlier one offered: a list the deployment no longer gives is not kept.
+            _offered = functions.Count == 0 ? [] : new()
             {
                 [CelProfile.Mutate] = FunctionOffer.For(functions, CelProfile.Mutate),
                 [CelProfile.Condition] = FunctionOffer.For(functions, CelProfile.Condition),
@@ -56,7 +57,11 @@ public partial class HooksTab
 
     private IReadOnlyList<OfferedFunction> Offered(CelProfile profile) => _offered.GetValueOrDefault(profile) ?? [];
 
-    /// <summary>Inserts into a mutate row's expression, with <c>new.{field}</c> first when the box is empty and the type fits.</summary>
+    /// <summary>Inserts into a mutate row's expression, with <c>new.{field}</c> first when the box is blank and the type fits.</summary>
+    /// <remarks>
+    /// The row is held by reference across the caret's round trip and found again after it: a row removed meanwhile
+    /// takes no text, and one that moved takes it at its new index rather than writing into the row now at the old one.
+    /// </remarks>
     private async Task InsertIntoMutateAsync(int index, OfferedFunction function)
     {
         if (index >= Current.MutateRows.Count)
@@ -64,12 +69,17 @@ public partial class HooksTab
             return;
         }
 
-        var id = MutateValueId(index);
         var row = Current.MutateRows[index];
-        var first = row.Text.Length == 0 ? FunctionOffer.FirstArgument(function, Current.Point, FieldOf(row)) : null;
-        var inserted = await InsertAsync(id, row.Text, FunctionOffer.Template(function, first));
-        TypeMutateText(index, inserted.Text);
-        await SelectInsertedAsync(id, inserted);
+        var first = string.IsNullOrWhiteSpace(row.Text) ? FunctionOffer.FirstArgument(function, Current.Point, FieldOf(row)) : null;
+        var inserted = await InsertAsync(MutateValueId(index), row.Text, FunctionOffer.Template(function, first));
+        var now = Current.MutateRows.IndexOf(row);
+        if (now < 0)
+        {
+            return;
+        }
+
+        TypeMutateText(now, inserted.Text);
+        await SelectInsertedAsync(MutateValueId(now), inserted);
     }
 
     /// <summary>Inserts into the condition; only its text mode offers the list.</summary>

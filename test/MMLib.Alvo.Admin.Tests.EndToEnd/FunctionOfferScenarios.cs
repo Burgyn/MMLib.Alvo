@@ -26,7 +26,7 @@ public sealed class FunctionOfferScenarios(RecordingWorld world) : IClassFixture
         await WaitForValueAsync(session, "hook-mutate-value-0", "replace(new.work_notes, search, replacement)");
         await session.WaitForFocusOnAsync("hook-mutate-value-0");
         (await Selection(session)).ShouldBe("search");
-        await AssertCheckKeepsFocusAsync(session, "hook-mutate-value-0", "search");
+        await AssertCheckKeepsFocusAsync(world, session, "hook-mutate-value-0", "replace(new.work_notes, search, replacement)", "search");
         await session.Page.Keyboard.TypeAsync("'-'");
         await WaitForValueAsync(session, "hook-mutate-value-0", "replace(new.work_notes, '-', replacement)");
         session.AssertConsoleClean();
@@ -39,7 +39,7 @@ public sealed class FunctionOfferScenarios(RecordingWorld world) : IClassFixture
         await NewHookAsync(session, "customers", "beforeCreate", "reject");
         await TextModeAsync(session);
         await session.Page.FillAsync("input#hook-condition", " > 3");
-        await session.Page.FocusAsync("#hook-condition");
+        await session.Page.FocusAsync("input#hook-condition");
         await session.Page.Keyboard.PressAsync("Home");
 
         var list = await OpenListAsync(session, "hook-condition");
@@ -49,7 +49,7 @@ public sealed class FunctionOfferScenarios(RecordingWorld world) : IClassFixture
         await WaitForValueAsync(session, "hook-condition", "size(text) > 3");
         await session.WaitForFocusOnAsync("hook-condition");
         (await Selection(session)).ShouldBe("text");
-        await AssertCheckKeepsFocusAsync(session, "hook-condition", "text");
+        await AssertCheckKeepsFocusAsync(world, session, "hook-condition", "size(text) > 3", "text");
         await session.Page.Keyboard.TypeAsync("new.last_name");
 
         await WaitForValueAsync(session, "hook-condition", "size(new.last_name) > 3");
@@ -61,9 +61,17 @@ public sealed class FunctionOfferScenarios(RecordingWorld world) : IClassFixture
     /// Spec AC 4: the inserted placeholder is not a field, so the live check speaks — within 3 s — and focus and the
     /// selection stay where Insert put them. A check that took focus would make the operator click back before typing.
     /// </summary>
-    internal static async Task AssertCheckKeepsFocusAsync(AdminSession session, string inputId, string selected)
+    /// <remarks>
+    /// The check asserted is the one on the <paramref name="inserted"/> text, and its sentence must name the
+    /// <paramref name="selected"/> placeholder: a sentence left over from an earlier text in the same box would otherwise
+    /// satisfy the wait before the inserted text's check ever ran, and the focus assertion would prove nothing.
+    /// </remarks>
+    internal static async Task AssertCheckKeepsFocusAsync(
+        RecordingWorld world, AdminSession session, string inputId, string inserted, string selected)
     {
-        await session.Page.GetByTestId($"check-{inputId}").First.WaitForAsync(new() { Timeout = 3_000 });
+        await world.CheckedAsync(inserted);
+        await session.Page.GetByTestId($"check-{inputId}").Filter(new() { HasText = selected }).First
+            .WaitForAsync(new() { Timeout = 3_000 });
 
         (await session.Page.EvaluateAsync<string>("() => document.activeElement?.id ?? ''")).ShouldBe(inputId, "the check sentence never takes focus");
         (await Selection(session)).ShouldBe(selected, "nor the selection");
