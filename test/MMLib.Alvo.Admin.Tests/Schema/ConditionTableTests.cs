@@ -23,6 +23,16 @@ public class ConditionTableTests
     [InlineData(FieldType.Json, ConditionFieldKind.Json)]
     public void A_field_type_has_one_kind(FieldType type, object kind) => ConditionTable.KindOf(type).ShouldBe((ConditionFieldKind)kind);
 
+    /// <summary>The rows whose CEL names no image are exactly the ones the form asks no image for (review Minor 5).</summary>
+    [Fact]
+    public void Only_changed_and_the_role_rows_read_no_image()
+        => ConditionTable.Rows.Where(spec => !spec.ReadsImage).Select(spec => spec.Operator)
+            .ShouldBe([ConditionOperator.Changed, ConditionOperator.HasRole, ConditionOperator.LacksRole]);
+
+    [Fact]
+    public void A_row_reads_an_image_exactly_when_its_format_names_one()
+        => ConditionTable.Rows.ShouldAllBe(spec => spec.ReadsImage == spec.Format.Contains("{f}", StringComparison.Ordinal));
+
     [Fact]
     public void Every_declared_field_type_has_a_kind()
         => Enum.GetValues<FieldType>().ShouldAllBe(type => Enum.IsDefined(ConditionTable.KindOf(type)));

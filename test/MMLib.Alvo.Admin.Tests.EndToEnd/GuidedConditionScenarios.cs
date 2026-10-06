@@ -109,11 +109,12 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
     }
 
     /// <summary>
-    /// Ruling Q-B: a refused row never reaches the condition. What a number box was given is not syntax, and the hook saved
-    /// keeps the last condition the rows could write — never the refused text.
+    /// Ruling Q-B and S-B: a refused row never reaches the condition, and the sheet will not add the hook while one is on
+    /// screen — the refusal is said in the sheet's panel, the readout keeps the last condition the rows could write, and
+    /// nothing is staged.
     /// </summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
-    public async Task A_refused_row_never_reaches_the_saved_condition()
+    public async Task A_refused_row_keeps_the_sheet_open_and_stages_nothing()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await HookEditInPlaceScenarios.OnWriteAsync(session, "parts");
@@ -127,24 +128,74 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
 
         await session.Page.GetByTestId("condition-refusal").WaitForAsync();
         (await session.Page.GetByTestId("hook-condition-readout").InnerTextAsync()).ShouldBe("new.stock_quantity == 0");
+        (await session.Page.GetAttributeAsync("#condition-0-value", "aria-describedby") ?? string.Empty)
+            .ShouldContain("condition-0-refusal", Case.Sensitive, "the box is described by the refusal under it");
         await session.Page.FillAsync("#hook-reject", "Out of stock.");
         var editor = session.Dialog("hook-editor");
         await editor.GetByTestId("hook-add").ClickAsync();
-        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
-        var saved = await session.Page.Locator("#hook-beforeCreate-0").InnerTextAsync();
-        saved.ShouldContain("new.stock_quantity == 0");
-        saved.ShouldNotContain("||");
+        var panel = editor.GetByTestId("error-panel");
+        await panel.WaitForAsync();
+        (await panel.InnerTextAsync()).ShouldContain("not a number");
+        (await editor.IsVisibleAsync()).ShouldBeTrue("the sheet stays open with what was typed");
+        (await session.Page.Locator("#hook-beforeCreate-0").CountAsync()).ShouldBe(0, "nothing is staged");
     }
 
+    /// <summary>
+    /// A row with a field and a relation that takes a value, but no value given, is not a condition the operator wrote:
+    /// the sheet refuses to add it rather than adding a hook that runs on every write (review I1).
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task An_unfinished_row_keeps_the_sheet_open_and_says_which()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await HookEditInPlaceScenarios.OnWriteAsync(session, "technicians");
+        await OpenNewAsync(session);
+        await session.Page.GetByTestId("condition-add").ClickAsync();
+        await session.ChooseAsync(Combobox(session, "Condition 1 field"), "hourly_rate");
+        await session.Page.FillAsync("#hook-reject", "No.");
+        var editor = session.Dialog("hook-editor");
+
+        await editor.GetByTestId("hook-add").ClickAsync();
+
+        var panel = editor.GetByTestId("error-panel");
+        await panel.WaitForAsync();
+        (await panel.InnerTextAsync()).ShouldContain("Condition 1 needs a value");
+        (await session.Page.Locator("#hook-beforeCreate-0").CountAsync()).ShouldBe(0, "nothing is staged");
+    }
+
+    /// <summary>Removing a row keeps focus in the sheet, so Escape still closes it (review I2).</summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Removing_a_row_keeps_focus_in_the_sheet()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await HookEditInPlaceScenarios.OnWriteAsync(session, "rental_fleet");
+        await OpenNewAsync(session);
+        await session.Page.GetByTestId("condition-add").ClickAsync();
+        await session.Page.GetByTestId("condition-add").ClickAsync();
+        var remove = session.Page.GetByTestId("condition-1-remove");
+
+        await remove.FocusAsync();
+        await session.Page.Keyboard.PressAsync("Enter");
+        await remove.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.WaitForFocusOnTestIdAsync("condition-add");
+
+        await session.Page.Keyboard.PressAsync("Escape");
+        await session.Dialog("hook-editor").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+    }
+
+    /// <summary>The widest row — an update's field, its image chips, a relation, a value and the empty-field hint — fits 375 px.</summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task The_guided_rows_fit_a_phone()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken, 375);
         await HookEditInPlaceScenarios.OnWriteAsync(session, "customers");
         await OpenNewAsync(session);
+        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeUpdate", Exact = true }).ClickAsync();
         await session.Page.GetByTestId("condition-add").ClickAsync();
         await session.ChooseAsync(Combobox(session, "Condition 1 field"), "first_name");
+        await session.Page.GetByTestId("condition-0-image").WaitForAsync();
+        await session.Page.FillAsync("#condition-0-value", "Ann");
         await session.Page.GetByTestId("condition-add").ClickAsync();
         await session.Page.GetByTestId("condition-row").Nth(1).WaitForAsync();
 

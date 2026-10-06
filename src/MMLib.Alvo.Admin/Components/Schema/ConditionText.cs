@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Schema;
+﻿using MMLib.Alvo.Admin.Internal;
+using MMLib.Alvo.Schema;
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -62,9 +63,43 @@ internal sealed record ConditionScope(IReadOnlyList<ConditionField> Fields, IRea
                 .Select(field => new ConditionField(field.Name, ConditionTable.KindOf(field.Type), field.Nullable, field.EnumValues ?? Array.Empty<string>()))],
         roles);
 
+    private static ScopeRead? _last;
+
+    /// <summary>
+    /// The scope of one entity in a working copy, or an empty one without a copy — the one place the form and the sheet
+    /// build it.
+    /// </summary>
+    /// <remarks>
+    /// The last one read is kept by (descriptor text, entity): a render asks again on every pass, and the descriptor is
+    /// parsed only when the text or the entity changed. The cache holds one immutable entry, swapped whole, so circuits
+    /// sharing it never see half of one.
+    /// </remarks>
+    /// <param name="copy">The working copy, or <see langword="null"/>.</param>
+    /// <param name="entity">The entity.</param>
+    public static ConditionScope Of(WorkingCopy? copy, string entity)
+    {
+        if (copy is null)
+        {
+            return new ConditionScope([], []);
+        }
+
+        var json = copy.Json;
+        if (_last is { } last && last.Entity == entity && (ReferenceEquals(last.Json, json) || last.Json == json))
+        {
+            return last.Scope;
+        }
+
+        var scope = From(PendingSchema.Read(json, entity), DescriptorLens.DeclaredRoles(json));
+        _last = new ScopeRead(json, entity, scope);
+        return scope;
+    }
+
     /// <summary>The field by name, or <see langword="null"/>.</summary>
     /// <param name="name">The name.</param>
     public ConditionField? Field(string name) => Fields.FirstOrDefault(field => string.Equals(field.Name, name, StringComparison.Ordinal));
+
+    /// <summary>One scope read, with what it was read from.</summary>
+    private sealed record ScopeRead(string Json, string Entity, ConditionScope Scope);
 }
 
 /// <summary>
@@ -174,11 +209,11 @@ internal static partial class ConditionText
 
     private static ConditionRow NormalizeRow(ConditionRow row)
     {
-        var operand = ConditionTable.Of(row.Operator).Operand;
-        var imageless = operand == OperandKind.Role || row.Operator == ConditionOperator.Changed;
+        var spec = ConditionTable.Of(row.Operator);
+        var operand = spec.Operand;
         return row with
         {
-            Image = imageless ? RowImage.New : row.Image,
+            Image = spec.ReadsImage ? row.Image : RowImage.New,
             Kind = operand == OperandKind.Role ? ConditionFieldKind.Text : row.Kind,
             Value = operand == OperandKind.None ? string.Empty : row.Value,
         };

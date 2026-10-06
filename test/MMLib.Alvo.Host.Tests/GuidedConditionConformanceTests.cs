@@ -75,7 +75,7 @@ public sealed class GuidedConditionConformanceTests
         }
 
         TestContext.Current.TestOutputHelper?.WriteLine($"{checkedCount} guided conditions checked against the real validator.");
-        checkedCount.ShouldBeGreaterThanOrEqualTo(400, "the probe covers every kind at every point, with hostile and boundary values");
+        checkedCount.ShouldBeGreaterThanOrEqualTo(700, "the probe covers every kind at every point, with hostile and boundary values");
         failures.ShouldBeEmpty();
     }
 
@@ -152,7 +152,7 @@ public sealed class GuidedConditionConformanceTests
 
     private static IEnumerable<ConditionRow> Rows(OperatorSpec spec, ConditionField field, string point)
     {
-        IReadOnlyList<RowImage> images = spec.Operator == ConditionOperator.Changed ? [RowImage.New] : ConditionTable.ImagesAt(point);
+        IReadOnlyList<RowImage> images = spec.ReadsImage ? ConditionTable.ImagesAt(point) : [RowImage.New];
         foreach (var image in images)
         {
             foreach (var value in Samples(spec, field))

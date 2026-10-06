@@ -113,6 +113,10 @@ internal enum OperandKind
 /// <param name="UpdateOnly">Whether it is offered only where a write has both images.</param>
 /// <param name="BeforeOnly">Whether it is offered only before the commit (an event envelope carries no roles).</param>
 /// <param name="WhenEmpty">What it evaluates to when the field is empty — the hint the form shows.</param>
+/// <param name="ReadsImage">
+/// Whether its CEL names an image (<c>new.</c> or <c>old.</c>); <c>changed</c> and the role rows do not, so the form asks for
+/// none and the generator writes none.
+/// </param>
 internal sealed record OperatorSpec(
     ConditionOperator Operator,
     string Words,
@@ -122,7 +126,8 @@ internal sealed record OperatorSpec(
     bool NullableOnly,
     bool UpdateOnly,
     bool BeforeOnly,
-    string WhenEmpty);
+    string WhenEmpty,
+    bool ReadsImage = true);
 
 /// <summary>
 /// The one table of what the guided condition may write: operator × field kind × point × canonical CEL × null semantics.
@@ -173,10 +178,10 @@ internal static class ConditionTable
         new(ConditionOperator.IsFalse, "is false", "{f} == false", OperandKind.None, _flag, false, false, false, "false: empty is neither true nor false"),
         new(ConditionOperator.HasValue, "has a value", "has({f})", OperandKind.None, _every, true, false, false, "false"),
         new(ConditionOperator.IsEmpty, "is empty", "!has({f})", OperandKind.None, _every, true, false, false, "true"),
-        new(ConditionOperator.Changed, "changed", "changed({n})", OperandKind.None, _changeable, false, true, false, "decided by the build"),
+        new(ConditionOperator.Changed, "changed", "changed({n})", OperandKind.None, _changeable, false, true, false, "decided by the build", ReadsImage: false),
         new(ConditionOperator.IsTheWriter, "is the person writing", "{f} == @user.id", OperandKind.None, _identity, false, false, false, "false"),
-        new(ConditionOperator.HasRole, "has the role", "{r} in @user.roles", OperandKind.Role, _none, false, false, true, "false"),
-        new(ConditionOperator.LacksRole, "does not have the role", "!({r} in @user.roles)", OperandKind.Role, _none, false, false, true, "true"),
+        new(ConditionOperator.HasRole, "has the role", "{r} in @user.roles", OperandKind.Role, _none, false, false, true, "false", ReadsImage: false),
+        new(ConditionOperator.LacksRole, "does not have the role", "!({r} in @user.roles)", OperandKind.Role, _none, false, false, true, "true", ReadsImage: false),
     ];
 
     /// <summary>The row of one relation.</summary>

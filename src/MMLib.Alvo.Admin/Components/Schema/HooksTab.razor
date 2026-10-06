@@ -201,7 +201,8 @@ else
     /// <summary>The condition: guided rows that write CEL, or the CEL itself — one switch between them (spec §4.6).</summary>
     /// <remarks>
     /// The rows get the working copy through a cascade set here: the sheet's content renders inside the dialog provider,
-    /// which a cascade from the entity screen does not reach (<see cref="AlvoEditor"/>).
+    /// which a cascade from the entity screen does not reach (<see cref="AlvoEditor"/>). The gate the submit asks goes the
+    /// same way (ruling S-B).
     /// </remarks>
     private RenderFragment ConditionField => @<text>
         <Field Label="Only when (optional)" LabelId="hook-condition-mode-label">
@@ -224,7 +225,9 @@ else
         @if (_guided)
         {
             <CascadingValue Value="Copy">
-                <ConditionBuilder Point="@Current.Point" Entity="@Entity" Value="@Current.Condition" ValueChanged="TypeCondition" />
+                <CascadingValue Value="_conditionGate" IsFixed="true">
+                    <ConditionBuilder Point="@Current.Point" Entity="@Entity" Value="@Current.Condition" ValueChanged="TypeCondition" />
+                </CascadingValue>
             </CascadingValue>
             <Field Label="Expression">
                 <ChildContent>

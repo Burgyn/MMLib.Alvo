@@ -233,8 +233,18 @@ public partial class HooksTab
     private int CountAt(string point) => Declared(Hooks.FirstOrDefault(declared => declared.Key == point).Value ?? "[]").Count;
 
     /// <summary>The primary action: adds the new hook, or saves the edited one.</summary>
+    /// <remarks>
+    /// The guided rows are asked first (ruling S-B): a refused or unfinished row stops Add and Save alike — the button, Enter
+    /// and the chord all come here — and is said in the sheet's panel, so nothing the operator did not write is staged.
+    /// </remarks>
     private async Task SubmitAsync()
     {
+        if (ConditionRefusal is { } refusal)
+        {
+            _refusal.Show(refusal);
+            return;
+        }
+
         if (_editing is { } editing)
         {
             SaveEdit(editing);
