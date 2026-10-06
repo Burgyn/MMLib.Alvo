@@ -93,7 +93,7 @@ internal static class BeforeHookCompiler
 
     private static readonly BeforeHookPoint _beforeDelete = new("beforeDelete", HasPreImage: true, HasPostImage: false);
 
-    /// <summary>The value an absent or JSON-null mutate entry is read as: the null literal it was written as.</summary>
+    /// <summary>The value a JSON-null mutate entry is read as: the null literal it was written as.</summary>
     private static readonly ValueOrExpr _nullLiteral = ValueOrExpr.FromLiteral(JsonElement.Parse("null"));
 
     private const string ConditionSlot = "condition";

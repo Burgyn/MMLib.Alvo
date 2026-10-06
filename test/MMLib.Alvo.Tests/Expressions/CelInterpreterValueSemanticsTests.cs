@@ -72,7 +72,7 @@ public class CelInterpreterValueSemanticsTests
     /// throw is wrapped as a function failure that rolls the write back, with the original kept for the log.
     /// </summary>
     [Fact]
-    public void A_mutation_that_throws_rolls_the_write_back_rather_than_storing_null()
+    public void A_mutation_that_throws_fails_closed_as_a_function_failure_rather_than_storing_null()
     {
         var failure = Should.Throw<CelFunctionException>(() => CelInterpreter.EvaluateMutation(
             MutateExpression(MembershipAgainstAFieldValue), AlvoRecord.Empty, null, DateTimeOffset.UnixEpoch));

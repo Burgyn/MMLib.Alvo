@@ -677,7 +677,9 @@ append/append conflict in `src/MMLib.Alvo.Admin/wwwroot/admin.js` (D's `caret`/`
 `streamOf`/`measureOf`, both appended after `utcOffsetMinutes`), resolved by keeping both (final review M5). The #317
 hotfix, `fix/cel-date-operand` (#321), is merged in as `8cc9f84`: D's `internal TryToDateTimeOffset` is kept, #321's
 date tests were a subset of D's, and its date-vs-date PATCH fact replaced D's stored-date update fact, so the storage
-path is proven once, on both engines. Verified on 2026-10-06 at `1671cb8` (plan Task 18); the final fix wave
+path is proven once, on both engines. `36cfbd9` merges C1's own CHANGELOG entries, rewording C1's bullet so it says
+D widens the five built-ins to 19 and renames `abs`/`round`. `4a3ef1f` merges the #326 hotfix (#329): D's compiler,
+validator facts and CHANGELOG entry win, and #329's HTTP fact (`ManagementApplyTests`) is kept. Verified on 2026-10-06 at `1671cb8` (plan Task 18); the final fix wave
 (Ruling Z-D) follows it.
 
 **Commits** (`git log --first-parent 3a3c31f..HEAD`, oldest first; the C1 commits below `3a3c31f` are not D's):
@@ -703,7 +705,7 @@ path is proven once, on both engines. Verified on 2026-10-06 at `1671cb8` (plan 
 | 16b — bike-workshop demo (Ruling O) | `d94cf25`, `e1283ee`, `c42725f` |
 | 17 — docs | `380bf61`, `b072675` |
 | 18 — review carry-overs, R-16, this section | `1671cb8`, and the commit that adds this section |
-| final fix wave (Ruling Z-D): merge #321, Ruling Y-D, I1–I3, M2–M5, plan-guard finding 1 | `8cc9f84`, `f5e28f0`, `0bad5e9`, `d798f58`, `00d61f5`, `563d4a3`, `957b471`, `61af6b6`, and the commit that corrects the merge note above |
+| final fix wave (Ruling Z-D): merge #321, Ruling Y-D, I1–I3, M2–M5, plan-guard finding 1 | `8cc9f84`, `f5e28f0`, `0bad5e9`, `d798f58`, `00d61f5`, `563d4a3`, `957b471`, `61af6b6`, `10d23eb`; merges `36cfbd9` (C1 changelog) and `4a3ef1f` (#329) |
 
 **Deviations from the plan, each with its ruling** (the controller's ledger holds the full text):
 
