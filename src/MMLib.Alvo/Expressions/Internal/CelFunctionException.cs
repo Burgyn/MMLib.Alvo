@@ -48,6 +48,20 @@ internal sealed class CelFunctionException : Exception
         Reason = reason;
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CelFunctionException"/> class for a defect the interpreter caught on
+    /// the fail-closed path (Ruling Y-D): Alvo's own reason for the caller, the original exception for the log.
+    /// </summary>
+    /// <param name="functionName">The token the defect is reported under.</param>
+    /// <param name="reason">Why, in Alvo's own words — safe to show the caller, so it never carries a row's value.</param>
+    /// <param name="failure">What was thrown; kept for the log, never shown to the caller.</param>
+    internal CelFunctionException(string functionName, string reason, Exception failure)
+        : base($"The CEL function '{functionName}' failed: {reason}.", failure)
+    {
+        FunctionName = functionName;
+        Reason = reason;
+    }
+
     /// <summary>Gets the failed function's name.</summary>
     public string FunctionName { get; }
 

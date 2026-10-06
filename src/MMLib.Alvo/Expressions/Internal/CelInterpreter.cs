@@ -71,7 +71,9 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// <para>
 /// A <see cref="CelFunctionException"/> escapes <see cref="EvaluatePredicate"/> and <see cref="EvaluateMutation"/>
 /// on purpose — a function failure fails closed, and so does an operator's overflow or zero divisor in a hook profile
-/// (<see cref="CelHookArithmetic"/>, spec §5.6); every other surprise still collapses as before: no other exception
+/// (<see cref="CelHookArithmetic"/>, spec §5.6). On that same fail-closed path an exception nothing anticipated — a
+/// defect — is wrapped as one too (Ruling Y-D), so it rolls the write back rather than switching a <c>reject</c> off.
+/// Outside the hook profiles every other surprise still collapses as before: no other exception
 /// escapes <see cref="EvaluatePredicate"/> or <see cref="EvaluateScalar"/> for
 /// any well-typed <see cref="CompiledExpression"/> and any <see cref="AlvoRecord"/>, including one
 /// whose values are of an unexpected CLR type (a nested dictionary, an array, a
@@ -116,7 +118,7 @@ internal static class CelInterpreter
         catch (Exception failure) when (failure is not CelFunctionException)
 #pragma warning restore CA1031
         {
-            return false;
+            return FailsClosed(expression) ? throw HookDefect(failure) : false;
         }
     }
 
@@ -129,6 +131,15 @@ internal static class CelInterpreter
 
     /// <summary>Why <see cref="WholeCondition"/> failed — it names no value.</summary>
     internal const string WholeConditionReason = "the hook's condition evaluated to a present value that is not a Bool";
+
+    /// <summary>
+    /// The name an unexpected exception on the fail-closed path is wrapped under (Ruling Y-D). It is a defect, not a
+    /// function's failure, so — like <see cref="WholeCondition"/> — it is a token no CEL identifier can be.
+    /// </summary>
+    internal const string HookEvaluation = "<hook>";
+
+    /// <summary>Why <see cref="HookEvaluation"/> failed — it names no value; the original is the exception's inner one.</summary>
+    internal const string HookEvaluationReason = "an internal error occurred while evaluating the hook";
 
     /// <summary>
     /// Evaluates a field-mask flag (<c>hidden</c>/<c>readOnly</c>) — a context-only Rule-profile
@@ -216,15 +227,17 @@ internal static class CelInterpreter
     /// the caller's business whether writing it is allowed.
     /// </returns>
     /// <remarks>
-    /// <b>A <see cref="CelFunctionException"/> escapes on purpose — a function failure fails closed; every other
-    /// surprise still collapses to <see langword="null"/> as before.</b> The two are otherwise indistinguishable to a
+    /// <b>A <see cref="CelFunctionException"/> escapes on purpose — a function failure fails closed, and so does any
+    /// other exception, wrapped as one (Ruling Y-D).</b> The two are otherwise indistinguishable to a
     /// caller, and the create path turns a <see langword="null"/> patch value into an <em>absent</em> key, so a
     /// reachable failure swallowed here would silently store a column default instead of refusing the write. Apart
     /// from a catalogued function, an operator's overflow, division by zero or present non-number operand (spec §5.6,
     /// Ruling P) and a join past the text cap (preflight S-2) — each a <see cref="CelFunctionException"/> — nothing in a
     /// <see cref="CelProfile.Mutate"/> tree can throw: the profile admits literals, field references, calls,
     /// arithmetic and joins; <see cref="Evaluate"/>'s node switch ends in <c>_ =&gt; null</c>; and <c>now()</c> reads a
-    /// value the caller already bound. The remaining <c>catch</c> is defence-in-depth, as <see cref="EvaluatePredicate"/>'s is.
+    /// value the caller already bound. The remaining <c>catch</c> is defence-in-depth, as <see cref="EvaluatePredicate"/>'s is,
+    /// and on this path it rethrows what it meets as a <see cref="CelFunctionException"/> rather than answering
+    /// <see langword="null"/>.
     /// </remarks>
     public static object? EvaluateMutation(
         CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, DateTimeOffset now)
@@ -241,7 +254,7 @@ internal static class CelInterpreter
         catch (Exception failure) when (failure is not CelFunctionException)
 #pragma warning restore CA1031
         {
-            return null;
+            return FailsClosed(expression) ? throw HookDefect(failure) : null;
         }
     }
 
@@ -251,6 +264,16 @@ internal static class CelInterpreter
     /// the type checker's literal-zero-divisor refusal reads too.
     /// </summary>
     private static bool FailsClosed(CompiledExpression expression) => CelHookArithmetic.FailsClosed(expression.Profile);
+
+    /// <summary>
+    /// Wraps an exception the defence-in-depth catch met on the fail-closed path (Ruling Y-D, final review M1). Such an
+    /// exception is a defect — every reachable failure is already a <see cref="CelFunctionException"/> — and answering
+    /// <see langword="false"/> would switch a <c>reject</c> off silently, <see langword="null"/> would store a column
+    /// default. The write rolls back as <c>function-failed</c> instead; the caller reads only
+    /// <see cref="HookEvaluationReason"/>, and the original rides along as the inner exception the write path logs.
+    /// </summary>
+    /// <param name="failure">What was thrown.</param>
+    private static CelFunctionException HookDefect(Exception failure) => new(HookEvaluation, HookEvaluationReason, failure);
 
     private static object? Evaluate(CelNode node, in EvalState state) => node switch
     {

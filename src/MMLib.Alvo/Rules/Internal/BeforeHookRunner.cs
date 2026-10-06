@@ -180,7 +180,9 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
     /// holds for a <em>present</em> operand nothing can take (controller Rulings P, Q and R): a comparison, <c>!</c>,
     /// <c>&amp;&amp;</c>, <c>||</c>, a ternary's condition or the whole condition over a value it cannot compare or that
     /// is no Bool throws on this path instead of answering <see langword="false"/>. A <em>null</em> operand still
-    /// answers as before, so the open direction remains only for the two-valued null rule above.
+    /// answers as before, so the open direction remains only for the two-valued null rule above. A defect inside the
+    /// interpreter is no exception to this: its defence-in-depth catch rethrows what it meets on this path as a function
+    /// failure rather than answering <see langword="false"/> (Ruling Y-D).
     /// </para>
     /// <para>
     /// <b>The obligation deviation 84 recorded is now discharged:</b> admitting a construct that can throw into
