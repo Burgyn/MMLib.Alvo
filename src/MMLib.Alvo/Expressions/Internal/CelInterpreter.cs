@@ -33,7 +33,8 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// <b><c>changed(f)</c>.</b> <see langword="false"/> when there is no previous row (a create
 /// changes nothing); otherwise it compares the previous and current values of <c>f</c> with a
 /// null-safe equality distinct from the comparison null rule above — <see langword="null"/> versus
-/// <see langword="null"/> is unchanged, <see langword="null"/> versus a value is changed.
+/// <see langword="null"/> is unchanged, <see langword="null"/> versus a value is changed. Two present
+/// values it cannot compare fail closed on the hook path, the only profile <c>changed</c> compiles in.
 /// </para>
 /// <para>
 /// <b>Numeric widening.</b> A record's values arrive weakly typed, so a numeric comparison widens
@@ -449,7 +450,7 @@ internal static class CelInterpreter
             return false;
         }
 
-        return !ValuesEqual(state.Previous[changed.FieldName], state.Current[changed.FieldName]);
+        return !ValuesEqual(state.Previous[changed.FieldName], state.Current[changed.FieldName], state.FailClosed);
     }
 
     private static bool AsBoolean(object? value) => value is true;
@@ -532,7 +533,13 @@ internal static class CelInterpreter
         _ => "_>=_",
     }, "the operands cannot be compared");
 
-    private static bool ValuesEqual(object? left, object? right)
+    /// <summary>
+    /// <c>changed(f)</c>'s null-safe equality. Two present values it cannot normalise read as unequal — "changed" — off
+    /// the hook path; on it they fail closed (final review M2), because <c>!changed(f)</c> would otherwise be
+    /// <see langword="false"/> and a reject gated on it would never fire.
+    /// </summary>
+    /// <exception cref="CelFunctionException"><paramref name="failClosed"/> is set and the two present values cannot be compared.</exception>
+    private static bool ValuesEqual(object? left, object? right, bool failClosed)
     {
         if (left is null && right is null)
         {
@@ -544,8 +551,12 @@ internal static class CelInterpreter
             return false;
         }
 
-        return TryNormalize(left, right, out var normalizedLeft, out var normalizedRight)
-            && ValuesEqualCore(normalizedLeft, normalizedRight);
+        if (!TryNormalize(left, right, out var normalizedLeft, out var normalizedRight))
+        {
+            return failClosed ? throw new CelFunctionException("changed", "the old and new values cannot be compared") : false;
+        }
+
+        return ValuesEqualCore(normalizedLeft, normalizedRight);
     }
 
     private static bool ValuesEqualCore(object left, object right) => (left, right) switch

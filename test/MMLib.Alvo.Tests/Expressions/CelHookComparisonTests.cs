@@ -239,6 +239,35 @@ public sealed class CelHookComparisonTests
             Relabel(Compile(source, CelProfile.Rule), profile), CelFixtures.Row(("active", "true")), previous: null, AlvoContext.Anonymous)
             .ShouldBeFalse();
 
+    /// <summary>Old and new values <c>changed(f)</c> cannot compare: present, and of no kind a comparison normalises.</summary>
+    public static TheoryData<object> UncomparablePairs => new()
+    {
+        double.NaN,
+        double.PositiveInfinity,
+        1e30,
+        new object(),
+    };
+
+    /// <summary>
+    /// <c>changed(f)</c> over two present values it cannot compare used to read as changed, so <c>!changed(f)</c> was
+    /// <see langword="false"/> — a reject gated on it never fired (final review M2). On the hook path it fails closed.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(UncomparablePairs))]
+    public void Changed_over_an_uncomparable_pair_fails_closed(object value) =>
+        ShouldFailClosed(
+            () => ConditionOnUpdate("!changed(price)", ("price", value), ("price", value)),
+            "changed",
+            "the old and new values cannot be compared");
+
+    /// <summary>A null on either side is still an ordinary answer: null to a value is a change, null to null is not.</summary>
+    [Fact]
+    public void Changed_over_a_null_still_answers()
+    {
+        ConditionOnUpdate("changed(price)", ("price", null), ("price", double.NaN)).ShouldBeTrue();
+        ConditionOnUpdate("changed(price)", ("price", null), ("price", null)).ShouldBeFalse();
+    }
+
     /// <summary><c>active ? 'on' : 'off'</c>, compiled where a ternary compiles and evaluated as <paramref name="profile"/>.</summary>
     private static object? Ternary(CelProfile profile, object? active)
     {
@@ -260,6 +289,10 @@ public sealed class CelHookComparisonTests
 
     private static bool Condition(string source, params (string Field, object? Value)[] row) =>
         CelInterpreter.EvaluatePredicate(Compile(source, CelProfile.Condition), CelFixtures.Row(row), previous: null, AlvoContext.Anonymous);
+
+    private static bool ConditionOnUpdate(string source, (string Field, object? Value) old, (string Field, object? Value) current) =>
+        CelInterpreter.EvaluatePredicate(
+            Compile(source, CelProfile.Condition), CelFixtures.Row(current), CelFixtures.Row(old), AlvoContext.Anonymous);
 
     private static object? Mutate(string source, params (string Field, object? Value)[] row) =>
         CelInterpreter.EvaluateMutation(

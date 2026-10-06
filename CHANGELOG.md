@@ -110,8 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Hook arithmetic, comparisons and Boolean positions fail closed** (slice D, Rulings P–R and Y-D). In a before-hook
   `condition` or `mutate` value — and only there — an Int or Decimal overflow, a zero divisor, or a *present* operand an
-  operator cannot take (a value of an unexpected CLR type, a non-Bool where a Bool is needed) used to answer `null` or
-  `false`, and in a `reject` condition that `false` meant the reject silently never fired. It now refuses the write:
+  operator cannot take (a value of an unexpected CLR type, a non-Bool where a Bool is needed, two such values under
+  `changed(f)`) used to answer `null` or `false`, and in a `reject` condition that `false` meant the reject silently never fired. It now refuses the write:
   HTTP **500 `function-failed`** with nothing written, as a failing function does (an in-process `IAlvoData` caller
   receives an exception; an after-hook condition drops its hook with a Warning). An exception nothing anticipated inside
   the interpreter fails the same way, under a constant detail, with the original logged at Error. A **null** operand
