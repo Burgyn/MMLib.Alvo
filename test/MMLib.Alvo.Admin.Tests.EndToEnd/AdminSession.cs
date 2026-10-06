@@ -668,6 +668,28 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
             1, $"{Page.Url} scrolls sideways by {overflow}px — {culprit}");
     }
 
+    /// <summary>
+    /// Fails when the open editor sheet scrolls sideways, or reaches past the window's edge.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="AssertNoHorizontalScrollAsync"/> measures the document and <c>main.a-content</c>. A sheet is a dialog
+    /// outside both, with its own scroll container (<c>.a-editor__body</c>, <c>overflow: auto</c>), so content wider
+    /// than a phone scrolled the sheet while that check stayed green (spec §9.5). It fails, too, when no sheet is open:
+    /// a check that measured nothing must not pass.
+    /// </remarks>
+    public async Task AssertSheetFitsAsync()
+    {
+        await SettleAsync().ConfigureAwait(false);
+        var overflow = await Page.EvaluateAsync<int>(
+            "() => { const body = document.querySelector('.a-editor__body'), sheet = document.querySelector('.a-editor');"
+            + " if (!body || !sheet) return -1;"
+            + " return Math.max(body.scrollWidth - body.clientWidth,"
+            + "   Math.ceil(sheet.getBoundingClientRect().right - window.innerWidth)); }").ConfigureAwait(false);
+
+        overflow.ShouldNotBe(-1, "no editor sheet is open, so there was nothing to measure");
+        overflow.ShouldBeLessThanOrEqualTo(1, "the editor sheet scrolls sideways at this width");
+    }
+
     /// <summary>Fails when the visible shell has nothing in it.</summary>
     /// <remarks>
     /// The cheap guard against the failure this suite exists for: a caught exception that renders
