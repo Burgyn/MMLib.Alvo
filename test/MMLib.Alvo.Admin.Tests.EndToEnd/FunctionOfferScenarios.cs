@@ -64,13 +64,16 @@ public sealed class FunctionOfferScenarios(RecordingWorld world) : IClassFixture
     /// <remarks>
     /// The check asserted is the one on the <paramref name="inserted"/> text, and its sentence must name the
     /// <paramref name="selected"/> placeholder: a sentence left over from an earlier text in the same box would otherwise
-    /// satisfy the wait before the inserted text's check ever ran, and the focus assertion would prove nothing.
+    /// satisfy the wait before the inserted text's check ever ran, and the focus assertion would prove nothing. The
+    /// placeholder is matched as the check quotes it (<c>'search'</c>), never as a bare substring of the sentence.
     /// </remarks>
     internal static async Task AssertCheckKeepsFocusAsync(
         RecordingWorld world, AdminSession session, string inputId, string inserted, string selected)
     {
         await world.CheckedAsync(inserted);
-        await session.Page.GetByTestId($"check-{inputId}").Filter(new() { HasText = selected }).First
+        /* The placeholder as the check names it, quoted ("'text' is not a field of entity ..."): a bare substring would let a
+           sentence that merely holds the word, such as one about a "text" or a "context", satisfy the wait. */
+        await session.Page.GetByTestId($"check-{inputId}").Filter(new() { HasTextString = $"'{selected}'" }).First
             .WaitForAsync(new() { Timeout = 3_000 });
 
         (await session.Page.EvaluateAsync<string>("() => document.activeElement?.id ?? ''")).ShouldBe(inputId, "the check sentence never takes focus");

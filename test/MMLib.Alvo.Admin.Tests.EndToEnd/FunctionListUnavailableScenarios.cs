@@ -32,6 +32,12 @@ public sealed class FunctionListUnavailableScenarios(FunctionsRefusedWorld world
         var editor = session.Dialog("hook-editor");
         await editor.GetByTestId("hook-add").ClickAsync();
         await editor.WaitForAsync(new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
+
+        /* The sheet closing proves only that it closed: the hook must be on the On write tab, staged, with its expression. */
+        var row = session.Page.Locator("#hook-beforeCreate-0");
+        await row.WaitForAsync();
+        (await row.GetByTestId("hook-staged").CountAsync()).ShouldBe(1, "the hook just added is the staged one");
+        (await row.InnerTextAsync()).ShouldContain("trim(new.name)");
         session.AssertConsoleClean();
     }
 }
