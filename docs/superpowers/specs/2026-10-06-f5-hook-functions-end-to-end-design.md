@@ -385,8 +385,8 @@ A CEL expression in the Mutate profile, stored as {"$cel": "…"}.
 
 **The template** is `name(p1, p2, …)` from the overload with the most parameters (first in catalog order on a tie).
 **Mutate prefill:** in a mutate row, when the box is empty, the row has a field, the point has a `new.` image (every
-point a mutate is offered at) and the first parameter's type accepts the field's CEL type (`CelFieldType.Of`, with
-Int→Decimal widening), the first argument is `new.{field}` instead of its parameter name — so a one-parameter function
+point a mutate is offered at) and **some overload's** first parameter type accepts the field's CEL type
+(`CelFieldType.Of`, with Int→Decimal widening; Ruling W-D, §16), the first argument is `new.{field}` instead of its parameter name — so a one-parameter function
 inserts a complete, checkable call (`normalizeFrameNumber(new.frame_number)`) and the next placeholder, if any, is
 selected. `now` inserts `now()` with the caret after it.
 
@@ -613,6 +613,13 @@ text-growing function is #323.
 From the brief and house rules: **E3** (no receiver syntax, though the brief asked to consider it), **E6** (operators in hook slots are in, fail-closed — but
 no comparison or ternary in Mutate, no `%`), **E7** (`matches` and accessors deferred, though listed as prior art
 to consider), **E10** (no public host seam; registration after `AddAlvo`'s callback), **E12** (no eval case).
+
+From the Task 10 review: **W-D** — the mutate prefill (§9.2) asks whether *any* overload's first parameter accepts the
+row's field, not only the overload the template spells. `math.ceil`'s template spells its Int overload (the first of
+equal length), yet a Decimal row inserts `math.ceil(new.price)`, which binds the Decimal overload. Reason: the
+template's overload is a tie-break for spelling the placeholders, not a statement of what the function takes; asking it
+alone left every Int/Decimal pair unprefilled for a Decimal field. Host.Tests `FunctionOfferAgreementTests` compiles
+every prefilled call. Cost if wrong: cosmetic.
 
 From the product spec: none new. `baas-analyza.md` §3.3's "null-safe operators, not silent reject" is honoured by the
 null policy C1 already pinned (a null argument makes the call null; a condition reading null does not fire).

@@ -1,5 +1,6 @@
 ﻿using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Schema;
+using System.Diagnostics;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
@@ -9,8 +10,17 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /// <param name="Summary">The one-sentence summary — host-authored text for a host function, rendered as text.</param>
 /// <param name="IsHost">Whether the embedding host registered it.</param>
 /// <param name="Parameters">The parameters of the overload with the most, which the insert template spells.</param>
+/// <param name="FirstParameterTypes">
+/// The first parameter's type in each overload that has one, distinct, in overload order — what decides whether a row's
+/// field can be the first argument (Ruling W-D), since the template's overload is only one of them.
+/// </param>
 internal sealed record OfferedFunction(
-    string Name, IReadOnlyList<string> Signatures, string Summary, bool IsHost, IReadOnlyList<CelFunctionParameter> Parameters);
+    string Name,
+    IReadOnlyList<string> Signatures,
+    string Summary,
+    bool IsHost,
+    IReadOnlyList<CelFunctionParameter> Parameters,
+    IReadOnlyList<CelValueType> FirstParameterTypes);
 
 /// <summary>A text to write and the range in it to select next.</summary>
 /// <param name="Text">The text.</param>
@@ -51,8 +61,13 @@ internal static class FunctionOffer
     /// <param name="function">The function.</param>
     /// <param name="firstArgument">A ready first argument (<c>new.field</c>), or <see langword="null"/>.</param>
     /// <returns>The template and its selection.</returns>
+    /// <remarks>
+    /// A parameterless function never takes a first argument: <see cref="FirstArgument"/> answers <see langword="null"/>
+    /// for one, so a caller passing an argument anyway has a bug — it would be dropped, not written.
+    /// </remarks>
     public static Insertion Template(OfferedFunction function, string? firstArgument)
     {
+        Debug.Assert(firstArgument is null || function.Parameters.Count > 0, "A parameterless function never takes a first argument.");
         var arguments = function.Parameters
             .Select((parameter, index) => index == 0 && firstArgument is not null ? firstArgument : parameter.Name)
             .ToList();
@@ -69,14 +84,19 @@ internal static class FunctionOffer
 
     /// <summary>
     /// <c>new.{field}</c> when a mutate row's field can be the function's first argument: the point has a <c>new.</c>
-    /// image and the first parameter takes the field's CEL type (an Int also fills a Decimal, C1 F7).
+    /// image and some overload's first parameter takes the field's CEL type (an Int also fills a Decimal, C1 F7).
     /// </summary>
+    /// <remarks>
+    /// Any overload decides, not only the one the template spells (Ruling W-D, a deviation from spec §9.2): the template
+    /// of <c>math.ceil</c> spells its Int overload, yet a Decimal field gets <c>math.ceil(new.price)</c>, which binds the
+    /// Decimal one. Host.Tests <c>FunctionOfferAgreementTests</c> compiles every such prefilled call.
+    /// </remarks>
     /// <param name="function">The function.</param>
     /// <param name="point">The hook's point.</param>
     /// <param name="field">The row's field, or <see langword="null"/> when none is chosen.</param>
     /// <returns>The argument, or <see langword="null"/>.</returns>
     public static string? FirstArgument(OfferedFunction function, string point, FieldSchema? field) =>
-        field is not null && ConditionTable.HasNew(point) && function.Parameters is [var first, ..] && Takes(first.Type, CelFieldType.Of(field))
+        field is not null && ConditionTable.HasNew(point) && function.FirstParameterTypes.Any(type => Takes(type, CelFieldType.Of(field)))
             ? $"new.{field.Name}"
             : null;
 
@@ -99,7 +119,12 @@ internal static class FunctionOffer
         var first = overloads.First();
         var longest = overloads.MaxBy(overload => overload.Parameters.Count)!;
         return new OfferedFunction(
-            overloads.Key, [.. overloads.Select(Signature)], first.Summary, first.Provenance == CelFunctionProvenance.Host, longest.Parameters);
+            overloads.Key,
+            [.. overloads.Select(Signature)],
+            first.Summary,
+            first.Provenance == CelFunctionProvenance.Host,
+            longest.Parameters,
+            [.. overloads.Where(overload => overload.Parameters.Count > 0).Select(overload => overload.Parameters[0].Type).Distinct()]);
     }
 
     private static string Parameter(CelFunctionParameter parameter) => $"{parameter.Name}: {parameter.Type}{Nullable(parameter.AcceptsNull)}";

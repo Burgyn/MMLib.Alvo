@@ -22,34 +22,40 @@ public class FunctionOfferTests
 
     private static readonly IReadOnlyList<CelFunctionInfo> _catalog =
     [
+        Info("math.ceil", CelValueType.Int, CelFunctionProvenance.BuiltIn, _both, ("x", CelValueType.Int)),
+        Info("math.ceil", CelValueType.Decimal, CelFunctionProvenance.BuiltIn, _both, ("x", CelValueType.Decimal)),
         Info("math.round", CelValueType.Int, CelFunctionProvenance.BuiltIn, _both, ("x", CelValueType.Int)),
         Info("math.round", CelValueType.Decimal, CelFunctionProvenance.BuiltIn, _both, ("x", CelValueType.Decimal)),
         Info("now", CelValueType.Timestamp, CelFunctionProvenance.BuiltIn, [CelProfile.Mutate]),
         Info("normalizeFrameNumber", CelValueType.String, CelFunctionProvenance.Host, _both, ("value", CelValueType.String)),
         Info("substring", CelValueType.String, CelFunctionProvenance.BuiltIn, _both, ("text", CelValueType.String), ("start", CelValueType.Int)),
         Info("substring", CelValueType.String, CelFunctionProvenance.BuiltIn, _both, ("text", CelValueType.String), ("start", CelValueType.Int), ("end", CelValueType.Int)),
+        Info("tax", CelValueType.Decimal, CelFunctionProvenance.BuiltIn, _both, ("amount", CelValueType.Decimal)),
+        Info("weekday", CelValueType.String, CelFunctionProvenance.BuiltIn, _both, ("day", CelValueType.Int)),
     ];
+
+    private static OfferedFunction Offered(string name) => FunctionOffer.For(_catalog, CelProfile.Mutate).Single(f => f.Name == name);
 
     [Fact]
     public void A_profile_is_offered_its_functions_one_row_per_name_in_name_order()
     {
-        FunctionOffer.For(_catalog, CelProfile.Mutate).Select(f => f.Name).ShouldBe(["math.round", "normalizeFrameNumber", "now", "substring"]);
-        FunctionOffer.For(_catalog, CelProfile.Condition).Select(f => f.Name).ShouldBe(["math.round", "normalizeFrameNumber", "substring"]);
+        FunctionOffer.For(_catalog, CelProfile.Mutate).Select(f => f.Name).ShouldBe(["math.ceil", "math.round", "normalizeFrameNumber", "now", "substring", "tax", "weekday"]);
+        FunctionOffer.For(_catalog, CelProfile.Condition).Select(f => f.Name).ShouldBe(["math.ceil", "math.round", "normalizeFrameNumber", "substring", "tax", "weekday"]);
     }
 
     [Fact]
     public void A_row_lists_every_overload_and_says_whether_the_host_wrote_it()
     {
-        var round = FunctionOffer.For(_catalog, CelProfile.Mutate)[0];
+        var round = Offered("math.round");
         round.Signatures.ShouldBe(["math.round(x: Int) -> Int", "math.round(x: Decimal) -> Decimal"]);
         round.IsHost.ShouldBeFalse();
-        FunctionOffer.For(_catalog, CelProfile.Mutate)[1].IsHost.ShouldBeTrue();
+        Offered("normalizeFrameNumber").IsHost.ShouldBeTrue();
     }
 
     [Fact]
     public void The_template_has_every_parameter_of_the_longest_overload_and_selects_the_first()
     {
-        var substring = FunctionOffer.For(_catalog, CelProfile.Mutate)[3];
+        var substring = Offered("substring");
 
         FunctionOffer.Template(substring, firstArgument: null).ShouldBe(new Insertion("substring(text, start, end)", 10, 4));
     }
@@ -57,7 +63,7 @@ public class FunctionOfferTests
     [Fact]
     public void A_first_argument_fills_the_first_place_and_the_next_placeholder_is_selected()
     {
-        var substring = FunctionOffer.For(_catalog, CelProfile.Mutate)[3];
+        var substring = Offered("substring");
 
         FunctionOffer.Template(substring, "new.title").ShouldBe(new Insertion("substring(new.title, start, end)", 21, 5));
     }
@@ -65,8 +71,8 @@ public class FunctionOfferTests
     [Fact]
     public void A_complete_call_leaves_the_caret_after_it()
     {
-        var normalize = FunctionOffer.For(_catalog, CelProfile.Mutate)[1];
-        var now = FunctionOffer.For(_catalog, CelProfile.Mutate)[2];
+        var normalize = Offered("normalizeFrameNumber");
+        var now = Offered("now");
 
         FunctionOffer.Template(normalize, "new.frame_number").ShouldBe(new Insertion("normalizeFrameNumber(new.frame_number)", 38, 0));
         FunctionOffer.Template(now, null).ShouldBe(new Insertion("now()", 5, 0));
@@ -78,7 +84,7 @@ public class FunctionOfferTests
     [InlineData(FieldType.String, "beforeDelete", null)]
     public void The_first_argument_is_the_row_s_field_only_when_its_type_fits_and_the_point_has_new(FieldType type, string point, string? expected)
     {
-        var normalize = FunctionOffer.For(_catalog, CelProfile.Mutate)[1];
+        var normalize = Offered("normalizeFrameNumber");
 
         FunctionOffer.FirstArgument(normalize, point, new FieldSchema { Name = "code", Type = type }).ShouldBe(expected);
     }
@@ -86,7 +92,7 @@ public class FunctionOfferTests
     [Fact]
     public void No_field_chosen_gives_no_first_argument()
     {
-        var normalize = FunctionOffer.For(_catalog, CelProfile.Mutate)[1];
+        var normalize = Offered("normalizeFrameNumber");
 
         FunctionOffer.FirstArgument(normalize, "beforeCreate", field: null).ShouldBeNull();
     }
@@ -94,31 +100,30 @@ public class FunctionOfferTests
     [Fact]
     public void A_function_without_parameters_takes_no_first_argument()
     {
-        var now = FunctionOffer.For(_catalog, CelProfile.Mutate)[2];
+        var now = Offered("now");
 
         FunctionOffer.FirstArgument(now, "beforeCreate", new FieldSchema { Name = "at", Type = FieldType.DateTime }).ShouldBeNull();
     }
 
     [Fact]
-    public void An_int_field_fills_a_decimal_parameter()
-    {
-        var round = FunctionOffer.For(_catalog, CelProfile.Mutate)[0] with
-        {
-            Parameters = [new CelFunctionParameter { Name = "x", Type = CelValueType.Decimal, AcceptsNull = false }],
-        };
-
-        FunctionOffer.FirstArgument(round, "beforeCreate", new FieldSchema { Name = "qty", Type = FieldType.Integer }).ShouldBe("new.qty");
-    }
+    public void An_int_field_fills_a_decimal_parameter() =>
+        FunctionOffer.FirstArgument(Offered("tax"), "beforeCreate", new FieldSchema { Name = "qty", Type = FieldType.Integer }).ShouldBe("new.qty");
 
     [Fact]
-    public void A_decimal_field_does_not_fill_an_int_parameter()
-    {
-        var round = FunctionOffer.For(_catalog, CelProfile.Mutate)[0] with
-        {
-            Parameters = [new CelFunctionParameter { Name = "x", Type = CelValueType.Int, AcceptsNull = false }],
-        };
+    public void A_decimal_field_does_not_fill_an_int_parameter() =>
+        FunctionOffer.FirstArgument(Offered("weekday"), "beforeCreate", new FieldSchema { Name = "price", Type = FieldType.Decimal }).ShouldBeNull();
 
-        FunctionOffer.FirstArgument(round, "beforeCreate", new FieldSchema { Name = "price", Type = FieldType.Decimal }).ShouldBeNull();
+    /// <summary>
+    /// Ruling W-D: the template spells the longest overload, <c>math.ceil(x: Int)</c> here, but the Decimal overload takes
+    /// a Decimal field — so any overload's first parameter decides, not only the template's.
+    /// </summary>
+    [Fact]
+    public void A_decimal_field_fills_a_function_whose_other_overload_takes_a_decimal()
+    {
+        var ceil = Offered("math.ceil");
+
+        ceil.FirstParameterTypes.ShouldBe([CelValueType.Int, CelValueType.Decimal]);
+        FunctionOffer.FirstArgument(ceil, "beforeCreate", new FieldSchema { Name = "price", Type = FieldType.Decimal }).ShouldBe("new.price");
     }
 
     [Fact]
