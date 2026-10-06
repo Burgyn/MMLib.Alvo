@@ -61,8 +61,8 @@ public class DescriptorValidatorTests
         DescriptorValidator.UnknownRefFix("products", []).ShouldBe("Point 'entity' at 'users', or add an entity named 'products'.");
 
     /// <summary>
-    /// A JSON <c>null</c> mutate value on an optional field is the empty value the schema admits and the dashboard's "Set to
-    /// empty" writes. System.Text.Json never hands a <c>null</c> token to <c>ValueOrExprConverter</c>, so the map held a
+    /// A JSON <c>null</c> mutate value on an optional field is the empty value the schema admits, as a hand- or agent-written
+    /// descriptor may hold it. System.Text.Json never hands a <c>null</c> token to <c>ValueOrExprConverter</c>, so the map held a
     /// null entry and the before-hook compiler threw — a 500 from every management route, not a finding (#326).
     /// </summary>
     [Fact]

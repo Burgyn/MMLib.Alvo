@@ -575,7 +575,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **A before-hook `"mutate": {"f": null}` is judged, not thrown on** (#326). The schema admits a JSON
-  `null` mutate value — it is what the dashboard's "Set to empty" writes — but System.Text.Json never
+  `null` mutate value — a hand- or agent-written descriptor may hold one — but System.Text.Json never
   hands a `null` token to a converter, so the entry reached the before-hook compiler as a null and a
   `NullReferenceException` escaped the validator: apply, its dry run and every management route that
   validates answered 500. The entry is now read as the null literal it was written as, so the rule
