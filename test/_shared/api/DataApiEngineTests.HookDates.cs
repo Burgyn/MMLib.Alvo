@@ -9,10 +9,12 @@ namespace MMLib.Alvo.Api.Tests;
 /// </summary>
 /// <remarks>
 /// Run on every engine because the storage differs: a create's <c>new.due</c> comes from the request, while an
-/// update's <c>old.due</c> is read back out of storage — a <c>date</c> column on PostgreSQL, text on SQLite. What the
-/// interpreter receives does not differ: the typed EF model materialises <c>old.due</c> as a <see cref="DateOnly"/> on
-/// both engines. Before #317 the interpreter could not compare a <see cref="DateOnly"/> with an instant at all, answered
-/// <c>false</c>, and every such reject was silently switched off. A date compares as midnight UTC of its day.
+/// update's <c>old</c> image is read back out of storage — a <c>date</c> column on PostgreSQL, text on SQLite. Before
+/// #317 the interpreter could not compare a <see cref="DateOnly"/> with an instant at all, answered <c>false</c>, and
+/// every such reject was silently switched off. A date compares as midnight UTC of its day. These facts cover a date
+/// against a <c>timestamp()</c> literal and against a datetime field; the storage path — a date read back out of the
+/// engine on update — is <see cref="A_before_hook_reject_over_a_date_refuses_a_patch_that_moves_the_date"/>'s (#321),
+/// so it is not proven twice.
 /// </remarks>
 public abstract partial class DataApiEngineTests
 {
@@ -56,29 +58,7 @@ public abstract partial class DataApiEngineTests
         }
     }
 
-    [Fact]
-    public async Task A_reject_gated_on_a_stored_date_refuses_an_update_on_every_engine()
-    {
-        await using var world = await StartHookDatesAsync();
-        using var created = await world.SendAsync(
-            HttpMethod.Post, "/api/shipments", _shipmentsWriter, body: new JsonObject { ["due"] = "2026-06-01", ["note"] = "kept" });
-        created.StatusCode.ShouldBe(HttpStatusCode.Created, await created.ReadTextAsync());
-        var id = (await created.ReadJsonObjectAsync())["id"]!.GetValue<Guid>();
-
-        using var refused = await world.SendAsync(
-            HttpMethod.Patch, $"/api/shipments/{id}", _shipmentsWriter, body: new JsonObject { ["note"] = "changed" });
-
-        var text = await refused.ReadTextAsync();
-        refused.StatusCode.ShouldBe(HttpStatusCode.Forbidden, text);
-        text.ShouldContain("A shipment due before 2027 is frozen.");
-        using var read = await world.SendAsync(HttpMethod.Get, $"/api/shipments/{id}", _shipmentsWriter);
-        (await read.ReadJsonObjectAsync())["note"]!.GetValue<string>().ShouldBe("kept");
-    }
-
     private Task<AlvoApiWorld> StartHookDatesAsync() =>
-        AlvoApiWorld.FromDescriptorPathAsync(
-            Path.Combine(RepositoryRoot.Find(), "test", "MMLib.Alvo.Api.Tests", "descriptors", "hook-dates.alvo.json"),
-            [_shipmentsWriter],
-            new AlvoApiWorldSetup(MapAlvoProblemDetails: true),
-            Engine);
+        AlvoApiWorld.FromDescriptorAsync(
+            "hook-dates.alvo.json", [_shipmentsWriter], new AlvoApiWorldSetup(MapAlvoProblemDetails: true), Engine);
 }
