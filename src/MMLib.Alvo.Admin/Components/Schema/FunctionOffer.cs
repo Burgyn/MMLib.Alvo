@@ -90,6 +90,12 @@ internal static class FunctionOffer
     /// Any overload decides, not only the one the template spells (Ruling W-D, a deviation from spec §9.2): the template
     /// of <c>math.ceil</c> spells its Int overload, yet a Decimal field gets <c>math.ceil(new.price)</c>, which binds the
     /// Decimal one. Host.Tests <c>FunctionOfferAgreementTests</c> compiles every such prefilled call.
+    /// <para>
+    /// That suite covers the built-ins only. A host function whose overloads differ in arity — <c>f(x: Decimal)</c> beside
+    /// <c>f(a: Int, b: Int)</c> — prefills a Decimal field into the longer template, <c>f(new.price, b)</c>, which binds no
+    /// overload. The cost is cosmetic: the operator still has a placeholder to replace, and the live check (<c>cel/check</c>)
+    /// says the call matches no overload before anything is applied.
+    /// </para>
     /// </remarks>
     /// <param name="function">The function.</param>
     /// <param name="point">The hook's point.</param>

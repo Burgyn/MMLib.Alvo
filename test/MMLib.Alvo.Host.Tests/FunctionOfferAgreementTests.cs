@@ -10,6 +10,15 @@ public sealed class FunctionOfferAgreementTests
 {
     public static TheoryData<string> BuiltIns() => [.. CelFunctionCatalog.BuiltIns.Names];
 
+    /// <summary>
+    /// A literal pin beside the derived theories: the real catalog's <c>math.round</c> spells its two-parameter overload, and
+    /// Insert selects <c>x</c> — the theories below would still pass if the template lost <c>digits</c> everywhere at once.
+    /// </summary>
+    [Fact]
+    public void The_math_round_template_spells_x_and_digits_and_selects_x() =>
+        FunctionOffer.Template(Offered("math.round", CelProfile.Mutate), firstArgument: null)
+            .ShouldBe(new Insertion("math.round(x, digits)", 11, 1));
+
     [Fact]
     public void The_dashboard_writes_every_signature_as_the_core_does() =>
         CelFunctionCatalog.BuiltIns.Functions.ShouldAllBe(function => FunctionOffer.Signature(function.Describe()) == function.Signature());

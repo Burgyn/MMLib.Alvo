@@ -137,14 +137,10 @@ internal static class CelNames
     /// <summary>A bare name that is not a call or a namespace, or a member of <c>new</c>/<c>old</c>.</summary>
     private static bool IsColumn(string cel, int at, int end)
     {
-        /* A name followed by '.' is a namespace (math.round) or an image (new., old.), never a column: Alvo has no other
-           dotted field path (cel.md deviation 8), so renaming it could only rewrite a call (spec §13). */
-        if (NextNonSpace(cel, end) == '.')
-        {
-            return false;
-        }
-
-        if (NextNonSpace(cel, end) == '(')
+        /* A name followed by '(' is a call; one followed by '.' is a namespace (math.round) or an image (new., old.), never
+           a column: Alvo has no other dotted field path (cel.md deviation 8), so renaming it could only rewrite a call
+           (spec §13). */
+        if (NextNonSpace(cel, end) is '.' or '(')
         {
             return false;
         }
