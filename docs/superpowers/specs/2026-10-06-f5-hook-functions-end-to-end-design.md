@@ -667,7 +667,92 @@ null policy C1 already pinned (a null argument makes the call null; a condition 
 
 ## 19. As built
 
-(To be written when the slice lands: commits, deviations from the plan, measured numbers.)
+Branch `feat/hook-functions`, cut from `feat/cel-functions` @ `3a3c31f` (C1), with B (`feat/hooks-editor`) merged twice
+(`7a0d5d5` at B's Task 21, `3967817` at B's final fixes `eeb88e7`). Verified on 2026-10-06 at `1671cb8` (plan Task 18).
+
+**Commits** (`git log --first-parent 3a3c31f..HEAD`, oldest first; the C1 commits below `3a3c31f` are not D's):
+
+| Plan task | Commits |
+|---|---|
+| spec + plan | `b7c8ca8`; demo amendment (Ruling O) `f875d1f` |
+| 1 — namespaced `math.*` | `76c1492` |
+| 2 — `lowerAscii`/`upperAscii` built-ins | `071d90a`, `1b89d10` |
+| 3 — text built-ins | `3a41419`, `0d0585e` |
+| 4 — math built-ins | `3c51843`, `29e0cf7`, `d1810f1` |
+| 5 — conversions, date operand (S-1) | `c5ddc60`, `850ada0`, `32d41bb`, `c29d1f0` |
+| 6 — apply-time constant check | `ad2d3e2`, `06f96f1` |
+| 7 — hook arithmetic fails closed | `f8a2aca`, `6d143a2` |
+| 8 — string `+` in Mutate | `02fe7d2`, `796529a` (Ruling P) |
+| 9 — over HTTP | `12b89d1`, `4ecb502` (Ruling Q) |
+| 16 — embedded sample | `f94103d`, `8793364` (Ruling R) |
+| 0 — merge B | `7a0d5d5`, `5f99e66`, `f665c95`, `3150326`, `7447d54` |
+| 10, 11 — catalog in the dashboard | `f84bcda`, `e505425`, `9a44d10`, `e837845` |
+| 12, 13 — offer and insert, layout, refusal | `1ff465e`, `3967817`, `225f236`, `c16641e`, `56a0be2` |
+| 14 — guided text operators | `533146f`, `0b01df7` |
+| 15 — host function end to end | `71c7a91`, `8fdfcd8` |
+| 16b — bike-workshop demo (Ruling O) | `d94cf25`, `e1283ee`, `c42725f` |
+| 17 — docs | `380bf61`, `b072675` |
+| 18 — review carry-overs, R-16, this section | `1671cb8`, and the commit that adds this section |
+
+**Deviations from the plan, each with its ruling** (the controller's ledger holds the full text):
+
+* **Order (Ruling J).** The core tasks (1–9, 16) ran on a branch from C1 in parallel with B; Task 0 became "merge
+  `feat/hooks-editor`" and ran once B finished. The merge had no conflicts.
+* **`%` and Double deferred (Ruling K, D-7)** — §5.6 "Not in D".
+* **Preflight rulings R-1…R-16 adopted verbatim (Ruling L).** R-16 (optional) landed in `1671cb8`:
+  `SqlPredicateRenderer` refuses `CelProfile.Condition` at both entry points, as it refuses Mutate and Access. Before,
+  `new.total > 5.0` compiled for Condition rendered to SQL through the predicate entry point; only `changed` and
+  `old.` were refused, by node kind. No product path renders a condition, so nothing that worked stops working. The
+  node-kind guard fact now builds its `CelChanged` tree in the Rule profile.
+* **S-1 fixed in Task 5 (Ruling M):** a `date` operand compares as midnight UTC, so a date reject fires. The same
+  fail-open was on `main`: #317, hotfix PR #321. The SQLite midnight disagreement is #318.
+* **Literal zero divisor refused at apply (Ruling N, S-3)** — §5.6.
+* **Fail-closed widened to every operator position (Rulings P, Q, R).** On the hook path, a present operand that
+  arithmetic, a comparison, `!`, `&&`, `||`, a ternary's condition or the whole condition cannot take throws instead
+  of answering `null` or `false` (§5.5, §5.6). Rule and Access do not move. Their `!` residual is #324.
+* **The whole-condition failure is named `<condition>` (Task 0 carry-over).** Its problem detail is a constant
+  sentence (`AlvoExceptionHandler.FunctionFailedDetail`, `1671cb8`). An embedded caller's `Exception.Message` keeps
+  "The CEL function '<condition>' failed: …", as `CelFunctionException`'s remarks now say.
+* **A null mutate value is read as the null literal (`5f99e66`).** It was found at the B merge and is also on `main`
+  (#326). `AutomationAction.Payload` carries the same latent null, which becomes reachable once `entity.update` is
+  honoured.
+* **Prefill on any overload (Ruling W-D)** — a deviation from §9.2. A Decimal row gets `math.ceil(new.price)`.
+* **A test fix folded into the next task (Ruling X-D):** Task 12's focus-check Important was fixed in `225f236`.
+* **The bike-workshop demo (Ruling O, plan Task 16b).** The maintainer asked for it; it was not in the plan. Its
+  README's dashboard strings are pinned by `BikeWorkshopReadmeTests` and `HostFunctionReadmeTests` (Ruling S).
+* **S-2 residual** — the cumulative text growth inside one mutate value is #323 (§16).
+
+**Measured numbers.**
+
+* **Catalog:** 19 names, 32 overloads (`CelFunctionCatalogTests`). `CelReferenceDocTests` now holds cel.md to both
+  the names and each row's signature count.
+* **Corpus** (`CelAcceptanceBaseline.jsonl`, 1,235 rows, against `3a3c31f`): **296 rows moved, 0 unexplained**. Of
+  these, 24 name `lowerAscii` (Task 2); 249 carried the arithmetic gate, 20 the negation gate and 3 the
+  concatenation gate. 272 = Task 7's 269 + Task 8's 51 − 48 rows both touched, exactly AC 2's bound. The row order
+  and set are unchanged. `MaxSourceLength` 2,000, `MaxDepth` 32 and `MaxTreeDepth` 128 are unchanged.
+* **Guided-condition conformance:** 854 conditions checked, up from 758 (2 text fields × 3 operators × 8 slots × 2
+  samples = 96 more). The floor is still 700, with 0 failures. Round trip: 2,000 cases, 0 failures.
+* **Skill:** `alvo-descriptor-hooks/SKILL.md` is 5,958 bytes (cap 6,144). `AlwaysInContextBudget` is 22,758,
+  unchanged.
+* **Public API:** each `PublicApi.*.verified.txt` equals B's tip or C1's tip byte for byte. D adds no line.
+* **`examples/vehicle-registry/vehicles.alvo.json`:** byte-identical to `3a3c31f` and to B's merge base.
+* **Admin e2e:** 429 of 429 passed, twice (8 m 53 s and 8 m 51 s). D's eight new classes hold 13 tests, which take
+  14.0 s summed: FunctionOffer 3.1 s, HostFunction 2.8 s, FunctionListLayout 2.4 s, DemoFunction 2.3 s,
+  BuiltInCondition 2.0 s, FunctionListUnavailable 1.4 s, and the two README pins 0.0 s.
+* **Rings:** ring0 8,862 tests (8,854 passed, 8 skipped). In ring2, all six integration projects were affected and
+  passed: Samples.EmbeddedHost 11, Sqlite 1, Api 41, PostgreSql 345, Host 2, Api.Invariants 84. Vacuum scored 100/100.
+  The first ring2 run lost one PostgreSql test to a connection failure (`Received unknown response H for
+  SSLRequest`), raised by Npgsql before any Alvo code ran. The re-run was green.
+* `dotnet build -c Release`: 0 warnings. `docker build -f src/MMLib.Alvo.Host/Dockerfile .`: succeeded.
+  `gen-prototype-fixtures --check`: up to date. `check-brief-freshness`: OK. `test-hooks`: 42 of 42 passed.
+
+**Not run.**
+
+* **`scripts/eval-assistant` was not run, because no model is configured.** No `ALVO_EVAL_API_KEY`, no
+  `ALVO_DEMO_AI_*` or `Alvo__Ai__*`, and nothing listens on localhost:11434 or :1234. This matters because the hooks
+  skill's function names and examples changed (`abs` → `math.abs`, new built-ins, joins; E12). Run it before
+  release and publish the table in `docs/assistant-evals.md`.
+* Mutation runs post-merge on `main`, as for every PR.
 
 ## 20. Decision log (rulings on the validation verdict of 2026-10-06)
 
