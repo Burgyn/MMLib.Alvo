@@ -36,4 +36,12 @@ public sealed class ImportGateTests
     [InlineData("  \n ")]
     public void A_blank_box_is_not_imported(string pasted)
         => ImportGate.Ready(_loaded, problem: null, pasted).ShouldBeFalse();
+
+    [Fact]
+    public void The_button_offers_an_import_by_what_the_box_says_it_holds()
+    {
+        ImportGate.Offered(_loaded, problem: null, filled: true).ShouldBeTrue();
+        ImportGate.Offered(_loaded, problem: null, filled: false).ShouldBeFalse();
+        ImportGate.Offered(descriptor: null, problem: null, filled: true).ShouldBeFalse();
+    }
 }

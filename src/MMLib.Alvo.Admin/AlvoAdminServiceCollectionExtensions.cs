@@ -58,13 +58,12 @@ public static class AlvoAdminServiceCollectionExtensions
     /// set-password page — never a link to a form that posts nowhere.
     /// </para>
     /// <para>
-    /// <b>It raises the circuit's receive limit, for every circuit in the process.</b> While
-    /// <see cref="AlvoAdminOptions.Enabled"/> is <see langword="true"/>, SignalR's <c>MaximumReceiveMessageSize</c> for
-    /// the Blazor circuit hub goes from 32 KB to 2 MiB, so a realistic descriptor can be pasted into Import. That hub is
-    /// shared: an embedding host's own server-interactive circuits get the same limit, and it applies to a connection
-    /// before anyone has signed in, so a client can make the server buffer up to 2 MiB per message. A host that allows
-    /// more, or no limit, keeps its own; a lower limit it sets <i>after</i> this call wins, at the price of large
-    /// pastes being refused at the box.
+    /// <b>It leaves the circuit's receive limit alone.</b> SignalR's <c>MaximumReceiveMessageSize</c> for the Blazor
+    /// circuit hub stays at its own 32 KB, or whatever the host set: that hub is shared with an embedding host's own
+    /// server-interactive circuits and applies to a connection before anyone has signed in, so the dashboard does not
+    /// widen it. Import takes a realistic descriptor all the same, because its text never travels in a circuit message:
+    /// the page reads it on submit as a stream from the browser (<c>IJSStreamReference</c>), carried in chunks under
+    /// the hub's limit and bounded by the box's own ceiling (#316).
     /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into.</param>
@@ -81,10 +80,7 @@ public static class AlvoAdminServiceCollectionExtensions
             options.Configure(configure);
         }
 
-        /* SignalR's default 32 KB receive limit is under a realistic descriptor, and a box over it closed the circuit
-           without a word (#316). ImportLimit says why 2 MiB, and what raising it costs; CircuitReceiveLimit raises it
-           only while the dashboard is enabled. */
-        CircuitReceiveLimit.Register(services.AddRazorComponents().AddInteractiveServerComponents());
+        services.AddRazorComponents().AddInteractiveServerComponents();
         services.AddCascadingAuthenticationState();
 
         /* AuthorizeRouteView asks IAuthorizationService on every in-circuit navigation, and a

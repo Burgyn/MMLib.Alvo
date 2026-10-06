@@ -21,7 +21,7 @@ public sealed class TransferScenarios(AdminWorld world) : IClassFixture<AdminWor
         await session.Page.GetByText("1 line,").WaitForAsync();
         await session.Page.Keyboard.PressAsync("Enter");
 
-        /* The line count is drawn from the circuit's copy of the text, so two lines is the Enter handled there. */
+        /* The line count is drawn from the measure the box tells the circuit, so two lines is the Enter heard there. */
         await session.Page.GetByText("2 lines,").WaitForAsync();
         (await session.Page.InputValueAsync("#import-json")).ShouldContain("\n");
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0, "Enter alone does not import");
@@ -120,14 +120,15 @@ public sealed class ImportOverEditsScenarios(AdminWorld world) : IClassFixture<A
 }
 
 /// <summary>
-/// A realistic descriptor imports whole, and a paste over what one circuit message may carry is refused in place, naming
-/// the limit — never a circuit that closes without a word (#316).
+/// A realistic descriptor imports whole, streamed rather than sent in a circuit message, and a paste over the box's ceiling
+/// is refused in place, naming the limit — at the box, and by the server for a client that went around the box — never by a
+/// circuit that closes without a word (#316, Ruling U-B).
 /// </summary>
 /// <remarks>Its own world: the whole-example import replaces the operator's working copy.</remarks>
 /// <param name="world">The running host and browser.</param>
 public sealed class ImportSizeScenarios(BikeWorkshopWorld world) : IClassFixture<BikeWorkshopWorld>
 {
-    /// <summary>The whole bike-workshop example, prose included: over SignalR's default 32 KB once it is sent.</summary>
+    /// <summary>The whole bike-workshop example, prose included: over SignalR's default 32 KB, which the hub keeps.</summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task The_whole_bike_workshop_example_imports_through_the_box()
     {
@@ -137,7 +138,14 @@ public sealed class ImportSizeScenarios(BikeWorkshopWorld world) : IClassFixture
         var text = descriptor.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
         text.Length.ShouldBeGreaterThan(32 * 1024, "the scenario is the size that used to close the circuit");
 
-        await session.ImportByChordAsync(text);
+        await session.GoToImportAsync();
+        await session.Page.FillAsync("#import-json", text);
+        /* A click in the box dispatches from it: were any ancestor to handle it, Blazor would send the box's whole text with
+           the event, and a message this size would close the circuit before the chord below could import anything. */
+        await session.Page.Locator("#import-json").ClickAsync();
+        (await session.Page.InputValueAsync("#import-json")).ShouldBe(text);
+        await session.Page.Locator("#import-json").PressAsync("Meta+Enter");
+        await session.WaitForImportedAsync();
 
         await session.WaitForPlanAsync();
         (await session.Content.InnerTextAsync()).ShouldContain("The whole example, through the box.");
@@ -145,9 +153,9 @@ public sealed class ImportSizeScenarios(BikeWorkshopWorld world) : IClassFixture
     }
 
     /// <summary>
-    /// Over the character ceiling, and under it but over the bytes it takes as sent: each refused at the box, the box
-    /// given back what the circuit last heard, the circuit still there to hear the next keystroke, and the refusal gone
-    /// with the next edit.
+    /// Over the character ceiling: refused at the box, the box given back its last text within the ceiling, the circuit
+    /// still there to hear the next keystroke, and the refusal gone with the next edit. A paste of over 2 MiB in UTF-8 and
+    /// under the character ceiling, which the old circuit-message limit refused, is now let through: the stream carries it.
     /// </summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task A_paste_over_the_limit_is_refused_in_place_and_the_circuit_stays()
@@ -162,11 +170,41 @@ public sealed class ImportSizeScenarios(BikeWorkshopWorld world) : IClassFixture
         var refusal = session.Page.GetByTestId("error-panel");
         await refusal.GetByText("1,100,019 characters", new() { Exact = false }).WaitForAsync();
         (await refusal.InnerTextAsync()).ShouldContain("up to 1,000,000 characters");
-        (await session.Page.InputValueAsync("#import-json")).ShouldBe("{", "the box holds what the circuit last heard");
+        (await session.Page.InputValueAsync("#import-json")).ShouldBe("{", "the box keeps its last text within the ceiling");
 
-        await session.Page.FillAsync("#import-json", new string('漢', 700_000));
-        await refusal.GetByText("700,000 characters", new() { Exact = false }).WaitForAsync();
-        (await refusal.InnerTextAsync()).ShouldContain("1,984 KB");
+        await session.Page.FillAsync("#import-json", new string('漢', 700_000) + "\n");
+        await session.Page.GetByText("2 lines,").WaitForAsync();
+        await refusal.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        (await session.Page.InputValueAsync("#import-json")).Length.ShouldBe(700_001, "2.1 MB as UTF-8, and under the character ceiling");
+
+        await session.Page.FillAsync("#import-json", "{\n\n}");
+        await session.Page.GetByText("3 lines,").WaitForAsync();
+        session.Page.Url.ShouldEndWith("/transfer");
+        session.AssertConsoleClean();
+    }
+
+    /// <summary>
+    /// A client that goes around the box's own ceiling (here, the attribute alvo.js reads it from removed) is refused by the
+    /// server on submit: by characters once the text is read, and by bytes from the stream's declared length, before a byte
+    /// is read. Each refusal is in place, the circuit stays, and the next edit clears it.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_paste_that_went_around_the_box_is_refused_by_the_server_by_characters_and_by_bytes()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await session.GoToImportAsync();
+        await session.Page.Locator("#import-json").EvaluateAsync("box => box.removeAttribute('data-alvo-max-chars')");
+        var refusal = session.Page.GetByTestId("error-panel");
+
+        await session.Page.FillAsync("#import-json", "{\"description\": \"" + new string('x', 1_100_000) + "\"}");
+        await session.Page.GetByTestId("import-run").ClickAsync();
+        await refusal.GetByText("1,100,019 characters", new() { Exact = false }).WaitForAsync();
+        (await refusal.InnerTextAsync()).ShouldContain("up to 1,000,000 characters");
+
+        await session.Page.FillAsync("#import-json", new string('漢', 1_100_000));
+        await refusal.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        await session.Page.GetByTestId("import-run").ClickAsync();
+        await refusal.GetByText("That paste is 3,223 KB and was not loaded.", new() { Exact = false }).WaitForAsync();
 
         await session.Page.FillAsync("#import-json", "{\n}");
         await session.Page.GetByText("2 lines,").WaitForAsync();
@@ -182,8 +220,8 @@ public sealed class ImportSizeScenarios(BikeWorkshopWorld world) : IClassFixture
 public sealed class LargeImportScenarios(BikeWorkshopWorld world) : IClassFixture<BikeWorkshopWorld>
 {
     /// <summary>
-    /// A descriptor far past SignalR's own 64 KB buffer and still under both ceilings — about 700 KB as sent — reaches the
-    /// circuit whole: the raised limit carries what the box lets through (review I2).
+    /// A descriptor far past SignalR's 32 KB message limit, which the hub keeps, and still under the box's ceiling — about
+    /// 680 KB — reaches the circuit whole: the stream carries what the box lets through (review I2, Ruling U-B).
     /// </summary>
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task A_descriptor_of_hundreds_of_kilobytes_imports_through_the_box()
@@ -197,7 +235,7 @@ public sealed class LargeImportScenarios(BikeWorkshopWorld world) : IClassFixtur
 
         await session.Page.FillAsync("#import-json", text);
         await session.Page.GetByText("1 line,").WaitForAsync();
-        (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0, "under both ceilings, nothing is refused");
+        (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0, "under the ceiling, nothing is refused");
         await session.Page.Locator("#import-json").PressAsync("Meta+Enter");
 
         await session.WaitForImportedAsync();

@@ -84,6 +84,9 @@
     private readonly RefusalState<string> _refusal = new();
     private EndpointDraft _draft = new();
     private string _opened = string.Empty;
+
+    /// <summary>The declaration as this sheet drew it when it opened: what the save guards against (Ruling V-B).</summary>
+    private string? _drawn;
     private MudTextField<string>? _nameBox;
     private MudTextField<string>? _urlBox;
     private MudTextField<string>? _secretBox;
@@ -111,11 +114,13 @@
     /// <inheritdoc />
     protected override void OnInitialized()
     {
-        /* The first declaration of the name, as IntegrationRows.ByName reads it — so the sheet opens the row it was opened from. */
-        if (Editing is { } name && Copy is { } copy
-            && DescriptorLens.Endpoints(copy.Json).FirstOrDefault(pair => pair.Key == name) is { Key: not null } declared)
+        /* One read of the copy: the fields are drawn from the very text the save's guard compares, so no write can land
+           between the two and leave the sheet showing one declaration while it guards another. */
+        if (Editing is { } name && Copy?.EndpointAsDrawn(name) is { } drawn)
         {
-            _draft = EndpointDraft.From(declared.Key, declared.Value);
+            using var declared = JsonDocument.Parse(drawn);
+            _draft = EndpointDraft.From(name, declared.RootElement);
+            _drawn = drawn;
         }
 
         _opened = Snapshot();
@@ -161,9 +166,9 @@
         }
 
         var name = Editing ?? _draft.Name.Trim();
-        if (!copy.DeclareEndpoint(name, _draft.Url.Trim(), _draft.SecretRef.Trim(), _draft.Description.Trim(), Editing is not null))
+        if (!copy.DeclareEndpoint(name, _draft.Url.Trim(), _draft.SecretRef.Trim(), _draft.Description.Trim(), Editing is not null, _drawn))
         {
-            _refusal.Show(Overtaken(name));
+            _refusal.Show(Overtaken(copy, name));
             return;
         }
 
@@ -171,7 +176,17 @@
         await OnSaved.InvokeAsync(name);
     }
 
-    private string Overtaken(string name) => Editing is null
-        ? $"An endpoint named '{name}' was declared in the working copy while this sheet was open. Nothing was saved; choose another name."
-        : $"The endpoint '{name}' is no longer declared in the working copy. Nothing was saved.";
+    /// <summary>Why the save was refused: a name taken meanwhile, the endpoint gone, or changed since the sheet opened.</summary>
+    private string Overtaken(WorkingCopy copy, string name)
+    {
+        if (Editing is null)
+        {
+            return $"An endpoint named '{name}' was declared in the working copy while this sheet was open. Nothing was saved; choose another name.";
+        }
+
+        return copy.EndpointAsDrawn(name) is null
+            ? $"The endpoint '{name}' is no longer declared in the working copy. Nothing was saved."
+            : $"The endpoint '{name}' changed in the working copy after you opened it — in another tab, by the assistant or by an import. "
+              + "Nothing was saved. Close this editor and open the endpoint again.";
+    }
 }

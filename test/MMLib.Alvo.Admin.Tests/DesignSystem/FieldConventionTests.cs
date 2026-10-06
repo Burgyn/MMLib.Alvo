@@ -30,13 +30,22 @@ public sealed partial class FieldConventionTests
 
     private static readonly string[] _refused = ["Label", "HelperText", "Margin", "Dense", "@attributes"];
 
+    private static readonly string[] _nativeControls = ["input", "textarea", "select"];
+
     /// <summary>
     /// The native controls the rule allows, by file: the static sign-in and set-password pages, whose inputs cannot be
     /// the library's (D10); the record form's reference combobox, which is Alvo's for its <c>aria-activedescendant</c> (D7); the
-    /// command palette's search-and-go line, which is not a form field (§3.8).
+    /// command palette's search-and-go line, which is not a form field (§3.8); and Import's one <c>&lt;textarea</c>, because
+    /// a streamed import's box must have no binding a library box would send its text over the circuit with (#316).
     /// </summary>
-    private static readonly string[] _nativeControlsAllowed =
-        ["Shell/SignIn.razor", "Shell/SetPassword.razor", "Data/RecordForm.razor", "Shell/CommandPalette.razor"];
+    private static readonly Dictionary<string, string[]> _nativeControlsAllowed = new(StringComparer.Ordinal)
+    {
+        ["Shell/SignIn.razor"] = _nativeControls,
+        ["Shell/SetPassword.razor"] = _nativeControls,
+        ["Data/RecordForm.razor"] = _nativeControls,
+        ["Shell/CommandPalette.razor"] = _nativeControls,
+        ["Schema/Transfer.razor"] = ["textarea"],
+    };
 
     [Fact]
     public void No_library_input_names_itself_or_carries_its_own_hint_or_density()
@@ -72,9 +81,11 @@ public sealed partial class FieldConventionTests
     [Fact]
     public void A_native_control_is_drawn_only_where_the_library_cannot_draw_one()
         => Components()
-            .Where(file => !_nativeControlsAllowed.Contains(file.Name))
-            .Where(file => NativeControl().IsMatch(file.Source))
-            .Select(file => file.Name)
+            .SelectMany(file => NativeControl().Matches(file.Source)
+                .Select(control => control.Groups[1].Value)
+                .Where(control => !_nativeControlsAllowed.GetValueOrDefault(file.Name, []).Contains(control))
+                .Select(control => $"{file.Name}: <{control}"))
+            .Distinct()
             .ShouldBeEmpty("an <input>, <textarea> or <select> in markup is a second look (spec §3.8)");
 
     [Fact]

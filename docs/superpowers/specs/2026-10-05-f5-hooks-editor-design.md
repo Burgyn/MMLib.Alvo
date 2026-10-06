@@ -266,7 +266,12 @@ their own copy (`WorkingCopyStore` keys by user); the later apply is refused by 
 `webhooks.endpoints.{name} = {url, secretRef, description?}` (schema order), creating `webhooks`/`endpoints` as needed;
 an edit patches the existing object in place. `DeclareTemplate(name, subject, body, editing)` writes
 `templates.{name} = {subject?, body}`. Both refuse (return `false`) a new name that exists or an edited name that does not
-— re-checked under the gate, since another tab may have declared it meanwhile.
+— re-checked under the gate, since another tab may have declared it meanwhile. An edit also acts only on what it named, as §5.1 does
+for hooks (Ruling V-B, final review I1): the sheet keeps the declaration as it drew it when it opened
+(`EndpointAsDrawn`/`TemplateAsDrawn`, through `WorkingCopy.Readable`), passes it as `drawn`, and the writer refuses under
+the gate when the declaration now reads otherwise. The sheet stays open with "The endpoint '{name}' changed in the working
+copy after you opened it — … Nothing was saved. Close this editor and open the endpoint again." Without it, a URL another
+tab or the assistant changed was silently put back by an edit of the description.
 
 ## 6. Endpoint and template declaration rules
 
@@ -374,6 +379,8 @@ is. A table cell that apply refuses would show its refusal under the readout —
   stay on the refusal panels (`RefusalPlaces`), and `RefusalPlacementScenarios` stays exhaustive.
 * Claim a destination is reachable, or that a delivery is signed or projected (§6.3).
 * Put an endpoint URL in a snackbar, a log line or an error sentence (names only).
+* Show the credentials a URL carries before its host: the Integrations list masks the userinfo
+  (`https://***@host/…`, `UrlCredentials.Masked`, final review M7); the edit box holds the real value it edits.
 * Evaluate any expression in the dashboard: the guided form generates text; the core judges it (`cel/check`, apply).
 * Write a hook shape it cannot draw, or drop one (§5.2, `A_hook_the_editor_cannot_draw_survives_beside_it` extended to
   edits).
@@ -472,15 +479,16 @@ functions in the guided table once Condition admits calls (slice C).
 
 ## 17. As built
 
-> **Maintainer decision before merge: the 2 MiB circuit receive limit (#316).** This slice fixes #316 (a large paste
-> into Import silently dropped the circuit) by raising the Blazor circuit hub's `MaximumReceiveMessageSize` from
-> SignalR's 32 KB to 2 MiB while the dashboard is enabled (`CircuitReceiveLimit`, `ImportLimit`). The limit belongs to
-> the one `ComponentHub` that every server-interactive circuit in the process shares, an embedding host's own included,
-> and it **applies to a `/_blazor` connection before sign-in**. A client can therefore make the server buffer up to
-> 2 MiB per message instead of 32 KB, which Microsoft's guidance names as a denial-of-service risk. Bounded: raised only
-> while `AlvoAdminOptions.Enabled`, only ever raised (a host's own larger limit, or none, is kept), and stated in
-> `AddAlvoAdmin`'s public docs. **The trade-off is for the maintainer to accept.** The alternative is a chunked upload
-> (JS interop or a file input), which keeps 32 KB but is a larger change than #316 asked for.
+> **#316: streamed over `IJSStreamReference`; the hub keeps 32 KB; no pre-auth exposure.** A large paste into Import
+> silently dropped the circuit, because a server-interactive box sends its whole text in a circuit message and the hub
+> takes 32 KB. The Import box's text now never travels in a circuit message: it is a native textarea with no Blazor
+> handler (Blazor sends an input's value with *every* event dispatched from it, so a library box would send it on any
+> key or focus), alvo.js stops its input events and tells the circuit only `"<lines> <filled>"`, and on submit the page
+> reads the text as a stream (`DotNet.createJSStreamReference` over a `Blob`, read through
+> `IJSStreamReference.OpenReadStreamAsync`, `ImportStream`) bounded by `ImportLimit.MaxStreamBytes` (1,000,000 characters
+> × 3 UTF-8 bytes + 4 KB). `AddAlvoAdmin` no longer touches `HubOptions`, so no maintainer decision is needed
+> (Ruling U-B, which supersedes Ruling N's mechanism: the earlier 2 MiB raise of `MaximumReceiveMessageSize`,
+> `CircuitReceiveLimit`, is deleted, and `ImportLimitTests` pins that the limit is not raised).
 
 ### Commits
 
@@ -511,6 +519,8 @@ the merge, grouped by plan task. A task's first commit often carries the previou
 | 18 | `481a742`, `f9a156a` | `GuidedConditionConformanceTests` |
 | 19 | `356f9a6`, `2d89bf7`, `df75f30` | `ConditionBuilder`, the guided rows; the `ConditionGate` |
 | 20 | `e680b8e`, and the docs commit that adds this section | the Task 19 re-review carry-overs; `todo-admin.md`, `management-api.md`, this section |
+| 21 | `02da171`, `c965138` | the Task 20 review; the gone-field message |
+| final | the three commits of the final fix wave | Ruling U-B (streamed import); Ruling V-B (endpoint/template edit guard, I1); final review M1–M7 |
 
 The core (`src/MMLib.Alvo`) moved by one line: `AlvoManagementService.MaxCheckedDescriptorChars` went from private to
 internal, so that a Host.Tests fact can hold `ImportLimit.MaxChars` to it. Abstractions and Management contracts are
@@ -593,14 +603,27 @@ Controller rulings and implementation findings:
 - **No `ToStringFunc` on the guided selects (Task 19).** With one, the library drew the chosen value only into a hidden
   input, so the combobox read empty to a screen reader and to the scenarios (measured).
 - **Ruling N: #316 is fixed in this slice** (Task 11), instead of left as a follow-up. Large pasted imports dropped the
-  circuit and made the e2e suite flaky. Besides the 2 MiB limit in the decision box above:
-  - alvo.js refuses an oversized paste at the box, in place, by characters and by bytes.
-  - `Transfer.Import` re-checks the size on the server.
-  - MudBlazor's default `maxlength=524288` turned out to be a second silent cut. It is lifted, so the guard is the only
-    limit.
+  circuit and made the e2e suite flaky.
+  - **Its mechanism is superseded (Ruling U-B, final fix wave).** Task 11 raised the circuit hub's receive limit to
+    2 MiB. Plan-guard found that it silently raised a host's own lower limit, applied before sign-in on every
+    standalone image, and re-sent up to 2 MiB per keystroke through `Immediate`. The import is now streamed (the box
+    above), and the raise, `CircuitReceiveLimit` and its tests are deleted.
+  - alvo.js refuses a paste over the character ceiling at the box, in place, and a submit over it streams nothing. The
+    byte refusal at the box is gone: one UTF-16 unit is at most three UTF-8 bytes, so the character ceiling bounds the
+    stream's bytes, and the byte ceiling is the server's, checked on the stream's declared length before a byte is read.
+    `ImportSizeScenarios` drives both server refusals with the box's ceiling attribute removed.
+  - `Transfer.Import` re-checks the character count on what it read.
+  - MudBlazor's default `maxlength=524288` turned out to be a second silent cut. The box is now a native textarea with
+    no `maxlength` at all, so the guard is the only limit. It is drawn as a native box (`a-input`); `FieldConventionTests`
+    allows it as it allows the sign-in page's, and the chord rule counts it as a multi-line box.
   - The `Importable()` cut-downs of the bike-workshop example the e2e suite imported are reverted.
   - `Transfer`'s public surface moved from `IDisposable` to `IAsyncDisposable`, plus `OnAfterRenderAsync`, to dispose
-    its JS subscription.
+    its JS subscriptions (now two: `oversized` and `measured`). The streamed import does not change it further.
+- **Ruling V-B. The endpoint and template edits are guarded like a hook edit (final fix wave, final review I1).** §5.5
+  first re-checked only that the declaration still existed, so an edit wrote every field from the draft taken when the
+  sheet opened and could silently undo another tab's URL. The writers now take the declaration as drawn and refuse a
+  mismatch in place (§5.5). Pinned by one unit fact per writer (`WorkingCopyIntegrationTests`) and by
+  `IntegrationEditOvertakenScenarios` (two sessions, one per kind; proved by sabotage: both fail with the guard removed).
 - **Import is refused until the working copy is loaded (Task 12).** An import sent earlier was a silent no-op. This is
   `ImportGate`. The page draws `data-copy-loaded`, which the scenarios wait on.
 - **"Not checked yet" names `…/action`, not `…/action/payload` (Task 11).** The schema's `$defs/action` is a `oneOf`, so
@@ -627,6 +650,22 @@ Controller rulings and implementation findings:
   in a form Enter submits" scanned one file at a time, and `ConditionBuilder`'s value box sits in the hook sheet's form,
   one component up. The test now counts a component as inside a form when every component that draws its tag also
   draws an `AlvoEditor`.
+- **Final review minors (final fix wave).**
+  - **M1. `EndpointEditor` and `TemplateEditor` each carry `protected override void OnInitialized()`**, which §14 did not
+    list. It is forced by the generator, not chosen: a Razor component is public, so any lifecycle override it writes is
+    public API. It loads the declaration, and since Ruling V-B the declaration as drawn, once per sheet, when the sheet
+    opens. Moving it to `OnParametersSet` behind a first-time flag would be an override all the same (T-B weighed the
+    same trade for `ConditionBuilder`, which had a parameter-driven reason to read in `OnParametersSet`; these sheets do
+    not). Accepted as two members of the PublicApi baseline.
+  - **M4. `ConditionScope.Of` caches on the working copy** (`WorkingCopy.ConditionScopes`), not in a process-wide static:
+    one operator's descriptor text is never pinned or compared on behalf of another, and it goes with the copy.
+  - **M5. A row is revealed by its id as a quoted attribute selector** (`RevealOnRender.ById`): an imported endpoint
+    named `a"b` made `#endpoint-a"b` a selector the browser refused, and the error ended the circuit. A refused selector
+    is now also caught and logged at Debug. `ImportedNameRevealScenarios` pins it with exactly that name.
+  - **M6. A role row whose role left `auth.roles` while the sheet was open blocks the save** through the `ConditionGate`
+    ("Condition N names a role that is no longer declared."), as a gone field does. `GuidedRoleGoneScenarios`.
+  - **M7.** See §8: the list masks a URL's userinfo. The query string is shown as written (the review left it optional,
+    and a query is where a reader tells two endpoints on one host apart).
 - **Focus.** Keep editing in the Edit sheet returns focus to the first control. That is now the condition's Guided/Text
   switch, not `#hook-condition` (§9: "the first editable field after the fixed point"). Removing a guided row focuses
   the Remove of the row that took its place, or Add a condition (review I2). Both are pinned by e2e.
@@ -652,7 +691,8 @@ Controller rulings and implementation findings:
 - **e2e scenarios per class** (new in this slice): `HookEditInPlaceScenarios` 8, `HookShapeScenarios` 1,
   `MutateEditingScenarios` 8, `MutateOpenScenarios` 1, `HookPickerScenarios` 6, `UndeclaredReferenceScenarios` 1,
   `IntegrationsScenarios` 9, `TemplateDeclarationScenarios` 5, `GuidedConditionScenarios` 12 methods (13 cases),
-  `ImportSizeScenarios` 2, `LargeImportScenarios` 1. That is 55 cases. `ExpressionCheckScenarios` stays at 10, with
+  `ImportSizeScenarios` 3, `LargeImportScenarios` 1, and from the final fix wave `IntegrationEditOvertakenScenarios` 2,
+  `GuidedRoleGoneScenarios` 1, `ImportedNameRevealScenarios` 1. That is 60 cases. `ExpressionCheckScenarios` stays at 10, with
   its mutate scenarios ported to row ids.
 
 ### What the facts found
@@ -682,4 +722,5 @@ Controller rulings and implementation findings:
 - A `Position` caret for the check (slice A deferral); field-to-field rows in the guided form; functions in the guided
   table once Condition admits calls (slice C).
 
-#316 was filed during this slice and is fixed by it (`f3bfd87`), so it leaves the list when the PR merges.
+#316 was filed during this slice and is fixed by it (`f3bfd87`, streamed in the final fix wave), so it leaves the list
+when the PR merges.

@@ -279,6 +279,11 @@
                 return $"Condition {index + 1} names a field a condition can no longer read.";
             }
 
+            if (RoleGone(_rows[index]))
+            {
+                return $"Condition {index + 1} names a role that is no longer declared.";
+            }
+
             if (Unfinished(_rows[index]))
             {
                 return $"Condition {index + 1} needs a value.";
@@ -308,9 +313,18 @@
     private bool Gone(Draft row)
         => row.Field.Length > 0 && row.Field != ConditionTable.Writer && _scope.Field(row.Field) is null;
 
+    /// <summary>
+    /// A role row naming a role <c>auth.roles</c> no longer declares — removed while this sheet was open (final review M6).
+    /// The rows offer only declared roles and <c>Recognize</c> refuses an undeclared one on open, but apply judges the text,
+    /// not the roles list, so without this the row would stage a role nothing grants.
+    /// </summary>
+    private bool RoleGone(Draft row)
+        => OperandOf(row) == OperandKind.Role && row.Value.Length > 0 && !_scope.Roles.Contains(row.Value, StringComparer.Ordinal);
+
     /// <summary>Why one row cannot be written, or <see langword="null"/> — also when it is not written yet.</summary>
     private string? RowRefusal(Draft row)
         => Gone(row) ? "This field no longer exists in the working copy."
+            : RoleGone(row) ? "This role is no longer declared in the working copy."
             : ToRow(row) is { } written ? ConditionText.Refusal(new GuidedCondition(true, [written])) : null;
 
     /// <summary>The rows that have what their relation needs, as a condition.</summary>
@@ -326,7 +340,7 @@
         var operand = ConditionTable.Of(relation).Operand;
         if (operand == OperandKind.Role)
         {
-            return row.Value.Length == 0 ? null : new ConditionRow(relation, RowImage.New, ConditionTable.Writer, ConditionFieldKind.Text, row.Value);
+            return row.Value.Length == 0 || RoleGone(row) ? null : new ConditionRow(relation, RowImage.New, ConditionTable.Writer, ConditionFieldKind.Text, row.Value);
         }
 
         if (_scope.Field(row.Field) is not { } field || (operand == OperandKind.Literal && !row.ValueGiven))

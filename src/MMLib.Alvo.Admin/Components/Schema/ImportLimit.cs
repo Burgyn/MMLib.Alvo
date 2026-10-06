@@ -1,12 +1,9 @@
 ﻿using System.Globalization;
-using System.Text;
-using System.Text.Encodings.Web;
-using System.Text.Json;
 
 namespace MMLib.Alvo.Admin.Components.Schema;
 
 /// <summary>
-/// How much text the Import box takes, and how much one circuit message may carry so that it can (#316).
+/// How much text the Import box takes, and how many bytes the stream that carries it to the server may hold (#316).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -14,6 +11,16 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /// closes a connection whose message is over <c>MaximumReceiveMessageSize</c>: 32 KB by default, under the full
 /// bike-workshop example (31.6 KB raw, more once escaped). The circuit then closed without a word, the box came back
 /// empty and the form posted natively.
+/// </para>
+/// <para>
+/// <b>The text never travels in a circuit message.</b> The box is a native textarea with no handler, since Blazor sends
+/// an input's whole value with every event dispatched from it; alvo.js stops its input events, and tells the circuit only
+/// its line count and whether it holds anything (<see cref="BoxMeasure"/>). On submit the page asks for a stream over the
+/// box's text (a <c>Blob</c>, which the framework wraps with <c>DotNet.createJSStreamReference</c>) and reads it through
+/// <c>IJSStreamReference</c> (<see cref="ImportStream"/>), which Blazor carries in chunks under the hub's limit. So the circuit hub keeps SignalR's
+/// own 32 KB, for an embedding host's circuits and for a <c>/_blazor</c> connection before sign-in alike:
+/// <c>AddAlvoAdmin</c> raises nothing. This replaced a raise of that limit to 2 MiB (Ruling N's mechanism, superseded by
+/// Ruling U-B), which let any client make the server buffer 2 MiB per message before signing in.
 /// </para>
 /// <para>
 /// <b>The number is the framework's own descriptor ceiling.</b> Neither the analysis nor the spec sets a size for a
@@ -24,24 +31,16 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /// holds the two to one number. That is about thirty times the largest example.
 /// </para>
 /// <para>
-/// <b>The circuit's limit is sized from it.</b> The text travels JSON-escaped and UTF-8 encoded, so a Latin-script
-/// descriptor costs at most two bytes a character ('"' as <c>\"</c>, 'č' as two bytes): 2 MiB carries the character
-/// ceiling with room for the event's own envelope. Text dearer than that (control characters, scripts at three bytes a
-/// character) meets <see cref="MaxSentBytes"/> first, which alvo.js measures exactly as it would be sent.
+/// <b>The stream's ceiling is sized from it.</b> A <c>Blob</c> encodes the box's text as UTF-8, and one UTF-16 unit is at
+/// most three UTF-8 bytes (a surrogate pair is four bytes for two units, a lone surrogate becomes U+FFFD's three), so a
+/// text within <see cref="MaxChars"/> is always within <see cref="MaxStreamBytes"/>. The byte ceiling therefore never
+/// refuses what the box let through: it is the server's own bound on what it reads from a client that did not go through
+/// the box, checked against the stream's declared length before a byte is read.
 /// </para>
 /// <para>
-/// <b>What the raise costs, and who pays it.</b> The limit belongs to the one circuit hub (<c>ComponentHub</c>) every
-/// server-interactive circuit in the process shares, an embedding host's own included, and it applies to a
-/// <c>/_blazor</c> connection before anyone has signed in: <c>[Authorize]</c> acts on a page inside the circuit, not on
-/// the connection. So a client can make the server buffer up to 2 MiB per message instead of 32 KB, which Microsoft's
-/// guidance names as a denial-of-service risk. Taken deliberately, as a recorded deviation for the maintainer to accept;
-/// bounded by <see cref="Internal.CircuitReceiveLimit"/>, which raises it only while the dashboard is enabled and never
-/// lowers a host's own larger limit (a lower one set before <c>AddAlvoAdmin</c> is raised; one set after it wins).
-/// </para>
-/// <para>
-/// <b>Refused at the box, never by the connection.</b> alvo.js stops an input over either ceiling before the circuit
-/// hears of it, gives the box back the text the circuit last heard, and raises <c>alvo:oversized</c>; the Import screen
-/// draws <see cref="Refusal"/> in its place.
+/// <b>Refused at the box first.</b> alvo.js stops an input over the character ceiling, gives the box back its last text
+/// within it, and raises <c>alvo:oversized</c>; it refuses a submit over it the same way, and streams nothing. The
+/// Import screen draws <see cref="Refusal(string?)"/> in its place. The server re-checks both ceilings on what it reads.
 /// </para>
 /// </remarks>
 internal static class ImportLimit
@@ -49,43 +48,41 @@ internal static class ImportLimit
     /// <summary>The most characters the box takes: the expression check's descriptor ceiling.</summary>
     public const int MaxChars = 1_000_000;
 
-    /// <summary>What one circuit message may carry, set on the dashboard's hub by <c>AddAlvoAdmin</c>.</summary>
-    public const long CircuitReceiveBytes = 2 * 1024 * 1024;
+    /// <summary>The most UTF-8 bytes one UTF-16 unit of the box's text encodes to.</summary>
+    public const int MaxUtf8BytesPerChar = 3;
 
-    /// <summary>What the circuit's message adds around the box's text: the event's descriptor and the call's framing.</summary>
-    public const long EnvelopeBytes = 64 * 1024;
+    /// <summary>Room above the exact bound, so the ceiling is never the thing a correct paste meets.</summary>
+    public const long StreamSlackBytes = 4 * 1024;
 
-    /// <summary>The most bytes the box's text may take as sent — JSON-escaped and UTF-8 encoded.</summary>
-    public const long MaxSentBytes = CircuitReceiveBytes - EnvelopeBytes;
-
-    /* Close to JSON.stringify, which leaves non-ASCII as itself: the count is for a sentence, not a gate. */
-    private static readonly JsonSerializerOptions _escaping = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    /// <summary>The most bytes the server reads from the stream that carries the box's text.</summary>
+    public const long MaxStreamBytes = ((long)MaxChars * MaxUtf8BytesPerChar) + StreamSlackBytes;
 
     /// <summary>The refusal for a paste alvo.js stopped, with what it measured.</summary>
-    /// <param name="measured">"&lt;characters&gt; &lt;bytes as sent&gt;", as <c>alvo:oversized</c> carries it; anything else is not repeated.</param>
-    /// <returns>A sentence that names the paste's size, both ceilings, and what to do instead.</returns>
+    /// <param name="measured">The paste's character count, as <c>alvo:oversized</c> carries it; anything else is not repeated.</param>
+    /// <returns>A sentence that names the paste's size, the ceiling, and what to do instead.</returns>
     public static string Refusal(string? measured)
-    {
-        var parts = (measured ?? string.Empty).Split(' ');
-        var size = parts.Length == 2
-                   && long.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out var chars)
-                   && long.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var bytes)
-            ? $"That paste is {chars.ToString("N0", CultureInfo.InvariantCulture)} characters, {Kilobytes(bytes)} as sent, and was not loaded. "
-            : "That paste was not loaded. ";
+        => Refusal(
+            long.TryParse(measured, NumberStyles.None, CultureInfo.InvariantCulture, out var chars) ? chars : null,
+            bytes: null);
 
-        return size
-            + $"The import box takes up to {MaxChars.ToString("N0", CultureInfo.InvariantCulture)} characters and {Kilobytes(MaxSentBytes)} "
-            + "as sent — the most the schema editors' live check reads. Apply a larger descriptor through the Management API or the CLI.";
-    }
+    /// <summary>The refusal for a paste over a ceiling, naming whatever of its size is known.</summary>
+    /// <param name="chars">Its characters, when they were counted.</param>
+    /// <param name="bytes">Its bytes as streamed, when they were known.</param>
+    /// <returns>A sentence that names the paste's size, the ceiling, and what to do instead.</returns>
+    public static string Refusal(long? chars, long? bytes)
+        => Size(chars, bytes)
+           + $"The import box takes up to {MaxChars.ToString("N0", CultureInfo.InvariantCulture)} characters — the most the "
+           + "schema editors' live check reads. Apply a larger descriptor through the Management API or the CLI.";
 
-    /// <summary>What alvo.js would have measured for <paramref name="text"/>: its characters, then its bytes JSON-escaped and UTF-8 encoded.</summary>
-    /// <param name="text">A text that reached the circuit.</param>
-    /// <returns>"&lt;characters&gt; &lt;bytes&gt;", as <see cref="Refusal"/> reads it.</returns>
-    public static string Measure(string text)
+    private static string Size(long? chars, long? bytes) => (chars, bytes) switch
     {
-        var bytes = Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(text, _escaping));
-        return string.Create(CultureInfo.InvariantCulture, $"{text.Length} {bytes}");
-    }
+        ({ } c, { } b) => $"That paste is {Characters(c)}, {Kilobytes(b)}, and was not loaded. ",
+        ({ } c, null) => $"That paste is {Characters(c)} and was not loaded. ",
+        (null, { } b) => $"That paste is {Kilobytes(b)} and was not loaded. ",
+        _ => "That paste was not loaded. ",
+    };
+
+    private static string Characters(long chars) => $"{chars.ToString("N0", CultureInfo.InvariantCulture)} characters";
 
     private static string Kilobytes(long bytes)
         => $"{Math.Round(bytes / 1024d, MidpointRounding.AwayFromZero).ToString("N0", CultureInfo.InvariantCulture)} KB";

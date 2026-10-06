@@ -371,3 +371,17 @@ export function selectRange(id, start, length, text) {
   };
   attempt();
 }
+
+/**
+ * A streamed box's text as a Blob, which the framework hands .NET as a stream for the page to read on submit
+ * (`ImportStream`): the one way the Import box's text reaches the circuit. Empty when the box is gone, or over its
+ * ceiling — refused at the box by alvo.js instead.
+ */
+export function streamOf(id) {
+  return window.alvo?.streamOf(id) ?? new Blob([]);
+}
+
+/** A streamed box's "<lines> <filled>", read once the page's subscription to `alvo:measured` is up. */
+export function measureOf(id) {
+  return window.alvo?.measureOf(id) ?? null;
+}

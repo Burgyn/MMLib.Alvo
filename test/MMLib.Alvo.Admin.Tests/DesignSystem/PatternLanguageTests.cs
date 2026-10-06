@@ -149,7 +149,8 @@ public sealed partial class PatternLanguageTests
     [Fact]
     public void Every_multi_line_box_submits_by_the_chord_and_says_so()
         => Components()
-            .Where(file => Tags(file.Source, "MudTextField").Any(tag => tag.ContainsKey("Lines")))
+            .Where(file => Tags(file.Source, "MudTextField").Any(tag => tag.ContainsKey("Lines"))
+                || file.Source.Contains("<textarea", StringComparison.Ordinal))
             .Select(file => (file.Name, Source: file.Source + CodeBehind(file.Name)))
             .Where(file => !(file.Source.Contains("data-alvo-chord-submit", StringComparison.Ordinal)
                     || file.Source.Contains("<AlvoEditor", StringComparison.Ordinal))

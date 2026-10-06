@@ -1,4 +1,5 @@
 ﻿using Microsoft.Playwright;
+using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
@@ -290,22 +291,63 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
     }
 
     /// <summary>Opens the New hook sheet and waits until it holds focus, so no later key or list lands outside it.</summary>
-    private static async Task OpenNewAsync(AdminSession session)
+    internal static async Task OpenNewAsync(AdminSession session)
     {
         await session.Page.GetByTestId("hook-new").ClickAsync();
         await session.WaitForFocusInsideAsync("hook-editor", FocusScope.Dialog);
     }
 
     /// <summary>Waits for the readout to show <paramref name="condition"/>: the rows hand it to the sheet a round trip later.</summary>
-    private static Task ReadoutAsync(AdminSession session, string condition)
+    internal static Task ReadoutAsync(AdminSession session, string condition)
         => session.Page.GetByTestId("hook-condition-readout").Filter(new() { HasTextString = condition }).WaitForAsync();
 
     private static ILocator Mode(AdminSession session, string name)
         => session.Page.GetByTestId("hook-condition-mode").GetByRole(AriaRole.Radio, new() { Name = name, Exact = true, Checked = true });
 
-    private static ILocator Combobox(AdminSession session, string name)
+    internal static ILocator Combobox(AdminSession session, string name)
         => session.Page.GetByRole(AriaRole.Combobox, new() { Name = name, Exact = true });
 
     private static ILocator Option(AdminSession session, string name)
         => session.Page.GetByRole(AriaRole.Option, new() { Name = name, Exact = true });
+}
+
+/// <summary>
+/// A role row whose role left <c>auth.roles</c> while the sheet was open is not staged: the gate names the row, as it does
+/// for a field that left the copy (ruling S-B; final review M6).
+/// </summary>
+/// <remarks>Its own world: the other tab replaces the working copy by an import, which needs a copy with no edits.</remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class GuidedRoleGoneScenarios(BikeWorkshopWorld world) : IClassFixture<BikeWorkshopWorld>
+{
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_role_row_whose_role_was_removed_elsewhere_keeps_the_sheet_open()
+    {
+        await using var editing = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await using var other = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await HookEditInPlaceScenarios.OnWriteAsync(editing, "service_orders");
+        await GuidedConditionScenarios.OpenNewAsync(editing);
+        await editing.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeUpdate", Exact = true }).ClickAsync();
+        await editing.Page.GetByTestId("condition-add").ClickAsync();
+        await editing.ChooseAsync(GuidedConditionScenarios.Combobox(editing, "Condition 1 field"), "The person writing");
+        await editing.ChooseAsync(GuidedConditionScenarios.Combobox(editing, "Condition 1 role"), "reception");
+        await GuidedConditionScenarios.ReadoutAsync(editing, "'reception' in @user.roles");
+        await editing.Page.FillAsync("#hook-reject", "No.");
+
+        var withoutReception = JsonNode.Parse(Descriptors.BikeWorkshop)!.AsObject();
+        withoutReception["auth"]!["roles"] = new JsonArray("manager", "technician");
+        await other.ImportByChordAsync(withoutReception.ToJsonString());
+        /* The role's going reaches the editing circuit on its own time: the row turns refused in place once it has. */
+        var refusal = editing.Page.GetByTestId("condition-refusal");
+        await refusal.WaitForAsync();
+        (await refusal.InnerTextAsync()).ShouldContain("This role is no longer declared in the working copy.");
+
+        var editor = editing.Dialog("hook-editor");
+        await editor.GetByTestId("hook-add").ClickAsync();
+
+        var panel = editor.GetByTestId("error-panel");
+        await panel.WaitForAsync();
+        (await panel.InnerTextAsync()).ShouldContain("Condition 1 names a role that is no longer declared.");
+        (await editor.IsVisibleAsync()).ShouldBeTrue("nothing is staged, and the sheet stays open");
+        editing.AssertConsoleClean();
+    }
 }

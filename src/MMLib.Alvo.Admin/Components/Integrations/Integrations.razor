@@ -108,7 +108,7 @@
 
         @if (_reveal is { } revealed)
         {
-            @RevealOnRender.On($"#{revealed}", _reveals)
+            @RevealOnRender.ById(revealed, _reveals)
         }
     }
 </div>
@@ -236,7 +236,7 @@
                                 aria-label="@($"Edit endpoint {row.Name}")" OnClick="_ => EditEndpoint(row.Name)">Edit</AlvoButton>
                 }
             </div>
-            <span class="a-mono a-integration-url">@row.Url</span>
+            <span class="a-mono a-integration-url">@UrlCredentials.Masked(row.Url)</span>
             <span class="a-hint">secretRef <code class="a-mono">@row.SecretRef</code> — declared, and not read by this build.</span>
         </ListRow>
     </text>;

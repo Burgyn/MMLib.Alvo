@@ -87,6 +87,55 @@ public class WorkingCopyIntegrationTests
     }
 
     [Fact]
+    public void An_edit_acts_only_on_the_endpoint_it_drew_and_a_url_changed_meanwhile_is_kept()
+    {
+        var copy = Copy(WithEndpoint);
+        var drawn = copy.EndpointAsDrawn("rental-desk");
+        copy.DeclareEndpoint("rental-desk", "https://new.example/hook", "rental-desk-signing-key", null, editing: true).ShouldBeTrue();
+        var overtaken = copy.Json;
+
+        copy.DeclareEndpoint("rental-desk", "http://127.0.0.1:5081/h", "rental-desk-signing-key", "Only the description", editing: true, drawn)
+            .ShouldBeFalse();
+
+        copy.Json.ShouldBe(overtaken);
+        Node(copy)["webhooks"]!["endpoints"]!["rental-desk"]!["url"]!.GetValue<string>().ShouldBe("https://new.example/hook");
+    }
+
+    [Fact]
+    public void An_edit_of_the_endpoint_as_it_was_drawn_is_written()
+    {
+        var copy = Copy(WithEndpoint);
+
+        copy.DeclareEndpoint("rental-desk", "http://127.0.0.1:5081/h", "rental-desk-signing-key", "Desk", editing: true,
+            copy.EndpointAsDrawn("rental-desk")).ShouldBeTrue();
+
+        Node(copy)["webhooks"]!["endpoints"]!["rental-desk"]!["description"]!.GetValue<string>().ShouldBe("Desk");
+    }
+
+    [Fact]
+    public void An_edit_acts_only_on_the_template_it_drew()
+    {
+        var copy = Copy("""{ "apiVersion": "alvo.dev/v1", "name": "x", "entities": {}, "templates": { "ready": { "body": "Hello" } } }""");
+        var drawn = copy.TemplateAsDrawn("ready");
+        copy.DeclareTemplate("ready", null, "Changed elsewhere", editing: true).ShouldBeTrue();
+        var overtaken = copy.Json;
+
+        copy.DeclareTemplate("ready", "A subject", "Hello", editing: true, drawn).ShouldBeFalse();
+        copy.Json.ShouldBe(overtaken);
+
+        copy.DeclareTemplate("ready", "A subject", "Changed elsewhere", editing: true, copy.TemplateAsDrawn("ready")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Nothing_declared_draws_as_nothing()
+    {
+        var copy = Copy(WithEndpoint);
+
+        copy.EndpointAsDrawn("ghost").ShouldBeNull();
+        copy.TemplateAsDrawn("ghost").ShouldBeNull();
+    }
+
+    [Fact]
     public void A_declaration_is_a_pending_edit()
     {
         var copy = Copy(WithEndpoint);
