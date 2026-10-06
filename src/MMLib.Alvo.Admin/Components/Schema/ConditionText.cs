@@ -236,7 +236,7 @@ internal static partial class ConditionText
         if (!NumberLiteral().IsMatch(value))
         {
             return $"'{value}' is not a number a condition can hold: write digits, with a point for a decimal, such as 12 or 4.5. "
-                + "A negative number cannot be written in a condition in this build.";
+                + "These rows do not write a negative number: switch to text mode to compare with one, such as new.quantity < -5.";
         }
 
         var fits = value.Contains('.', StringComparison.Ordinal)

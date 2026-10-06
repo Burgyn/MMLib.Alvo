@@ -141,7 +141,8 @@ internal sealed record OperatorSpec(
 /// <para>
 /// <b>It decides what to offer, never what is valid.</b> The live <c>cel/check</c> and the apply judge the text written.
 /// Narrower than apply on purpose: no after-commit image the point lacks, no string relational, no negative number, no
-/// literal for a moment or an id — each of those is either refused by the core or meaningless, and stays in text mode.
+/// literal for a moment or an id — each of those is refused by the core, meaningless, or (a negative number, which apply
+/// admits since hook arithmetic) a shape the rows do not read back, and stays in text mode.
 /// </para>
 /// </remarks>
 internal static class ConditionTable

@@ -18,8 +18,9 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /// (<c>HooksEditorAgreementTests</c>).
 /// </para>
 /// <para>
-/// <b>An enum literal must be a declared value.</b> Apply refuses a non-member too once #308 lands (it did not when this
-/// was written, spec §11); the form refuses it as typed, so the operator learns it at the box rather than at apply.
+/// <b>An enum literal must be a declared value.</b> Apply refuses a non-member too since #308 (it did not when this was
+/// written, spec §11; <c>HooksEditorAgreementTests.A_literal_the_row_refuses_for_a_facet_apply_refuses_too</c>); the form
+/// refuses it as typed, so the operator learns it at the box rather than at apply.
 /// </para>
 /// </remarks>
 internal static class MutateLiteral

@@ -122,6 +122,21 @@ public class ConditionTextTests
         => ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.Is, RowImage.New, "quantity", ConditionFieldKind.Number, value)))
             .ShouldNotBeNull().ShouldContain(says);
 
+    /// <summary>
+    /// A negative number is the rows' own narrowing, not the core's: apply has accepted <c>new.quantity &lt; -5</c> since
+    /// slice D admitted arithmetic in a condition, so the refusal sends the writer to text mode instead of saying the build
+    /// cannot (<c>HooksEditorAgreementTests.A_negative_number_the_rows_refuse_is_one_apply_accepts_in_text</c>).
+    /// </summary>
+    [Fact]
+    public void A_negative_number_is_refused_as_the_rows_choice_and_sent_to_text_mode()
+    {
+        var refusal = ConditionText.Refusal(Single(new ConditionRow(ConditionOperator.Is, RowImage.New, "quantity", ConditionFieldKind.Number, "-5")))
+            .ShouldNotBeNull();
+
+        refusal.ShouldContain("text mode");
+        refusal.ShouldNotContain("in this build");
+    }
+
     [Theory]
     [InlineData("0")]
     [InlineData("12")]

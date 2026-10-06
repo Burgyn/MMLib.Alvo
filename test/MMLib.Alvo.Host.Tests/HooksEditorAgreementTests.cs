@@ -50,8 +50,8 @@ public sealed class HooksEditorAgreementTests
 
     /// <summary>A literal the row accepts for a field of each type is one apply accepts for that field.</summary>
     /// <remarks>
-    /// The enum row holds a declared value, so it passes before and after #308 makes apply refuse a non-member; the fact
-    /// that both refuse one is added once #308 is on this branch (preflight C7).
+    /// The enum row holds a declared value, so it passes before and after #308 makes apply refuse a non-member; that both
+    /// refuse a non-member is <see cref="A_literal_the_row_refuses_for_a_facet_apply_refuses_too"/> (preflight C7).
     /// </remarks>
     [Theory]
     [InlineData("integer", "3")]
@@ -96,8 +96,8 @@ public sealed class HooksEditorAgreementTests
     /// </summary>
     /// <remarks>
     /// <c>TryGetDateTimeOffset</c> reads <c>2026-10-05</c> as midnight, so the row and apply both accept it today. #308
-    /// tightens apply's literal checks: slice D re-runs this fact first once #308 is on this branch, and if apply then
-    /// refuses the text, <c>MutateLiteral</c> follows apply and this fact's expected answer changes with it.
+    /// tightened apply's literal checks; slice D re-ran this fact first once #308 was on its branch, and apply still
+    /// accepts the text. If apply ever refuses it, <c>MutateLiteral</c> follows apply and this fact's answer changes with it.
     /// </remarks>
     [Fact]
     public void A_date_with_no_time_typed_for_a_datetime_is_accepted_by_the_row_and_by_apply_today()
@@ -109,6 +109,54 @@ public sealed class HooksEditorAgreementTests
             .ShouldBeTrue(refusal);
         MutateErrors(descriptor, JsonValue.Create("2026-10-05")).ShouldBeEmpty(
             "if apply now refuses a date-only datetime literal, MutateLiteral follows apply (preflight W1)");
+    }
+
+    /// <summary>
+    /// Pre-flight C7, owed once C1's facet check (#308) reached this branch: an enum literal outside its values is refused
+    /// by the mutate row and by apply alike.
+    /// </summary>
+    /// <param name="type">The probe field's type.</param>
+    /// <param name="literal">The literal typed into the row.</param>
+    [Theory]
+    [InlineData("enum", "bogus")]
+    [InlineData("enum", "Open")]
+    public void A_literal_the_row_refuses_for_a_facet_apply_refuses_too(string type, string literal)
+    {
+        var descriptor = Probe(type);
+        var field = HookFields.Declared(descriptor, "probe")["f"];
+
+        MutateLiteral.TryValue(new MutateRow("f", MutateMode.Literal, literal), field, out _, out var refusal).ShouldBeFalse();
+        refusal.ShouldNotBeNullOrWhiteSpace();
+        MutateErrors(descriptor, JsonValue.Create(literal)).ShouldNotBeEmpty("apply refuses a value outside the enum's declared values since #308");
+    }
+
+    /// <summary>
+    /// Pre-flight C7: a hook that sets a required field to empty is refused by the row and by apply alike — apply writes
+    /// a JSON <c>null</c> into the mutate map and refuses it there, before any write.
+    /// </summary>
+    [Fact]
+    public void Setting_a_required_field_to_empty_is_refused_by_the_row_and_by_apply()
+    {
+        var descriptor = Probe("string", required: true);
+        var field = HookFields.Declared(descriptor, "probe")["f"];
+
+        MutateLiteral.TryValue(new MutateRow("f", MutateMode.Literal, string.Empty) { Empty = true }, field, out _, out var refusal)
+            .ShouldBeFalse();
+        refusal.ShouldNotBeNullOrWhiteSpace();
+        MutateErrors(descriptor, value: null).ShouldNotBeEmpty("a null for a required field is refused at apply (C1 Ruling V)");
+    }
+
+    /// <summary>
+    /// The guided rows refuse a negative number by their own choice (B3: the client may be stricter only when it says so):
+    /// apply accepts the same comparison written in text, which is where the rows' refusal sends the writer.
+    /// </summary>
+    [Fact]
+    public void A_negative_number_the_rows_refuse_is_one_apply_accepts_in_text()
+    {
+        var row = new ConditionRow(ConditionOperator.Less, RowImage.New, "f", ConditionFieldKind.Number, "-5");
+
+        ConditionText.Refusal(new GuidedCondition(true, [row])).ShouldNotBeNull().ShouldContain("text mode");
+        ConditionErrors(Probe("integer"), "new.f < -5").ShouldBeEmpty("slice D admits arithmetic, and so a negated literal, in a condition");
     }
 
     /// <summary>A value the guided condition quotes is read back by the real lexer as exactly that value, in one literal.</summary>
@@ -255,9 +303,14 @@ public sealed class HooksEditorAgreementTests
         return literal.Value;
     }
 
-    private static string Probe(string type)
+    private static string Probe(string type, bool required = false)
     {
         var field = new JsonObject { ["type"] = type };
+        if (required)
+        {
+            field["required"] = true;
+        }
+
         if (type == "decimal")
         {
             field["precision"] = 18;
@@ -284,6 +337,21 @@ public sealed class HooksEditorAgreementTests
             ["beforeUpdate"] = new JsonArray(new JsonObject
             {
                 ["action"] = new JsonObject { ["mutate"] = new JsonObject { ["f"] = value?.DeepClone() } },
+            }),
+        };
+
+        return [.. Errors(root.ToJsonString()).Where(error => error.Path.Contains("/hooks/beforeUpdate/0", StringComparison.Ordinal))];
+    }
+
+    private static List<DescriptorValidationError> ConditionErrors(string descriptor, string condition)
+    {
+        var root = JsonNode.Parse(descriptor)!;
+        root["entities"]!["probe"]!["hooks"] = new JsonObject
+        {
+            ["beforeUpdate"] = new JsonArray(new JsonObject
+            {
+                ["condition"] = condition,
+                ["action"] = new JsonObject { ["reject"] = "probe" },
             }),
         };
 
