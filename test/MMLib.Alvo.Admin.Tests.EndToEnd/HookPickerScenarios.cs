@@ -39,9 +39,11 @@ public sealed class HookPickerScenarios(BikeWorkshopWorld world) : IClassFixture
         var finding = session.Page.GetByTestId("check-hook-payload").First;
         await finding.WaitForAsync(new() { Timeout = 3_000 });
         (await finding.InnerTextAsync()).ShouldContain("JSONata transformations are not evaluated yet");
+        await ShouldKeepFocusAsync(session, "hook-payload");
 
         await session.Page.FillAsync("#hook-payload", "[\"{{old.id}}\"]");
         await finding.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 3_000 });
+        await ShouldKeepFocusAsync(session, "hook-payload");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -60,9 +62,11 @@ public sealed class HookPickerScenarios(BikeWorkshopWorld world) : IClassFixture
         var finding = session.Page.GetByTestId("check-hook-to").First;
         await finding.WaitForAsync(new() { Timeout = 3_000 });
         (await finding.InnerTextAsync()).ShouldContain("not exactly one mailbox");
+        await ShouldKeepFocusAsync(session, "hook-to");
 
         await session.Page.FillAsync("#hook-to", "ops@example.com");
         await finding.WaitForAsync(new() { State = WaitForSelectorState.Detached, Timeout = 3_000 });
+        await ShouldKeepFocusAsync(session, "hook-to");
     }
 
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
@@ -113,6 +117,10 @@ public sealed class HookPickerScenarios(BikeWorkshopWorld world) : IClassFixture
 
     private static ILocator Option(AdminSession session, string name)
         => session.Page.GetByRole(AriaRole.Option, new() { Name = name, Exact = true });
+
+    /// <summary>A check sentence arriving under a box leaves focus in the box (spec §12 criterion 3).</summary>
+    private static async Task ShouldKeepFocusAsync(AdminSession session, string id)
+        => (await session.Page.EvaluateAsync<string>("document.activeElement?.id ?? ''")).ShouldBe(id);
 }
 
 /// <summary>
