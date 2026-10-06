@@ -148,9 +148,9 @@ reachable and the dashboard says why · **gap** = not reachable and nothing says
 | `access.admin/developer/viewer` | Access → management levels | read | Same sentence, same page, same problem. |
 | `entities` | Schema, Entity | edit | See 5b and 5c. |
 | `automation` | Automations (nav) | said | "Not yet", from `capabilities`. Right. |
-| `templates` | Integrations | read | Served as stored, with the build's warning. Right for now. |
+| `templates` | Integrations | **edit** | Declared and edited from the dashboard (subject and body); the build's warning verbatim; bodyFile refused, never offered (#276). |
 | `formats` | nowhere | **gap** | Named validation formats. `field.format` has no control either (5c), so a project's own formats are unreachable from both ends at once. |
-| `webhooks.endpoints` | Integrations | read | As `templates`. |
+| `webhooks.endpoints` | Integrations | **edit** | Declared and edited behind the build's "unsigned" statement; secretRef is a name (#276). |
 | `functions` | Functions (nav) | said | "Not yet". Right. |
 
 ### 5b. Entity-level facets
@@ -165,7 +165,7 @@ reachable and the dashboard says why · **gap** = not reachable and nothing says
 | `audit` | written once, by "Add entity" | partial | As `tenancy`. The Fields tab does show the managed columns that result. |
 | `fields` | Fields tab | edit | See 5c. |
 | `rules` | Rules tab | edit | |
-| `hooks` | On write tab | **edit** | Item 3, done. All six points; the tab now also reads `capabilities` and names the three refused action types. |
+| `hooks` | On write tab | **edit** | Item 3, done. All six points; the tab now also reads `capabilities` and names the three refused action types. Edit in place, mutate literals and several fields, endpoint/template pickers, a payload box and a guided condition (#276). |
 | `realtime` | nowhere | **gap** | |
 | `indexes` | Indexes tab | **edit** | Item 1, done. |
 
@@ -466,15 +466,15 @@ Entity.razor.cs, `PS` PendingSchema.cs, `WC*` WorkingCopy.*.cs (all `Admin/Compo
 
 | Key | Build | Dashboard | When it meets one | Evidence |
 |---|---|---|---|---|
-| `beforeCreate` / `beforeUpdate` / `beforeDelete` / `afterCreate` / `afterUpdate` / `afterDelete` (6) | honoured | edit ×6 — add and remove only, no edit in place | existing entries rendered raw, removable | HookBuilder.cs:38; WC.Hooks:20,70 |
+| `beforeCreate` / `beforeUpdate` / `beforeDelete` / `afterCreate` / `afterUpdate` / `afterDelete` (6) | honoured | edit ×6 — add, edit in place (keeps the position), remove | an undrawable hook is read-only with its reason, kept | HooksTab.Edit.cs; WC.Hooks ReplaceHook |
 | before `condition` | honoured | edit | — | HookBuilder.cs:93 |
 | before `reject` | honoured | edit | — | HookBuilder.cs:174 |
-| before `mutate.<f>` literal | honoured | gap — every value is wrapped in `$cel` | existing literal shown raw | BHC:298-300,392; HookBuilder.cs:177 |
-| before `mutate.<f>.$cel` | honoured (not under `beforeDelete`) | edit — one field per hook, field name free text | multi-field mutate shown raw | BHC:267; HookBuilder.cs:34,79 |
+| before `mutate.<f>` literal | honoured | edit — a value its type holds, checked as typed | — | MutateLiteral.cs |
+| before `mutate.<f>.$cel` | honoured (not under `beforeDelete`) | edit — several fields, field picked from the writable ones | — | HooksTab.Mutate.cs |
 | after `condition` | honoured | edit | — | |
-| `webhook.endpoint` | honoured | edit (free text; endpoints themselves unauthorable) | — | AHC:246 |
-| `webhook.payload` | `{{…}}` template honoured; raw JSONata refused | gap — §3 withheld it as "refused"; only raw JSONata is | JSONata refusal rendered nowhere | AHC:243,379,384 |
-| `email.template` | honoured | edit (free text; templates unauthorable) | — | AHC:297 |
+| `webhook.endpoint` | honoured | edit (picker over the working copy, pending included) | an undeclared name is kept, labelled | HooksTab.Pickers.cs |
+| `webhook.payload` | `{{…}}` template honoured; raw JSONata refused | edit — {{…}} payload, judged live by cel/check; raw JSONata gets the build's refusal | — | HooksTab.Pickers.cs |
+| `email.template` | honoured | edit (picker; a bodyFile template is not offered) | — | HooksTab.Pickers.cs |
 | `email.to` | honoured | edit | — | |
 | `email.data` | refused | said (Integrations "why no button" only) | not on the On-write tab | UF:210; AHC:306; Integrations.razor:71-77 |
 | `function.name` / `.input` (2) | refused | said ×2 (On-write tab) | — | AHC:226; HooksTab.razor.cs:86 |
@@ -493,13 +493,13 @@ Entity.razor.cs, `PS` PendingSchema.cs, `WC*` WorkingCopy.*.cs (all `Admin/Compo
 | `.delivery` | warned | said | — | AutomationRule.cs:25 |
 | `.actions[]` (all 5 shapes) | warned; per-type refusals apply to after-hooks only | said | — | AHC:226 is the only caller |
 | `x-*` | preserved | gap | preserved | |
-| `templates.<t>.subject` | honoured for after-hook email; warned for automation | read (Integrations raw) | — | AHC:297; EventActionExecutor.cs:106 |
-| `templates.<t>.body` | same | read | — | same |
+| `templates.<t>.subject` | honoured for after-hook email; warned for automation | edit (Integrations) | — | TemplateEditor.razor |
+| `templates.<t>.body` | same | edit (Integrations) | — | TemplateEditor.razor |
 | `templates.<t>.bodyFile` | refused when an after-hook references it, else warned | read (raw) | refusal (`bodyFile`) dropped by the Integrations prefix filter | UF:229; AHC:344; Integrations.razor:71-77 |
 | `formats.<f>.pattern` | honoured | gap | preserved | Map:128-153; RecordValidator.cs:195 |
 | `formats.<f>.description` | ignored (unverified — no reader found) | gap | preserved | |
-| `webhooks.endpoints.<n>.url` | honoured for after-hooks | read (Integrations raw) | — | AHC:246 |
-| `.secretRef` | warned — not read, no HMAC | said (Integrations warning) | — | US:138-143 |
+| `webhooks.endpoints.<n>.url` | honoured for after-hooks | edit (Integrations; https or loopback http; secretRef a SecretName) | — | EndpointEditor.razor |
+| `.secretRef` | warned — not read, no HMAC | edit (Integrations; https or loopback http; secretRef a SecretName) | — | EndpointEditor.razor |
 | `.description` | ignored (unverified) | read (raw) | — | |
 | `functions.<f>.script` | warned | said (Functions page, Overview) | — | US:145; NotYet.razor:57 |
 | `.trigger.http.route` | warned | said | — | |
@@ -519,7 +519,7 @@ Entity.razor.cs, `PS` PendingSchema.cs, `WC*` WorkingCopy.*.cs (all `Admin/Compo
 | Create / roles / tenant / disable / credential token | same port | reached | Access.razor, PersonRow.razor |
 | API keys | `IApiKeyStore` is Find/Touch only | said (Settings) — nothing to reach | IApiKeyStore.cs:10,16 |
 | Remove an entity | `WorkingCopy.RemoveEntity` | **gap** — written, **no caller** (the §5f `Discard` pattern again) | WC.Entities:93 |
-| Edit a hook in place | — | gap — remove + re-add, which also moves it to the end of an ordered list | WC.Hooks:20-51 |
+| Edit a hook in place | — | edit — keeps its place, guarded by what the screen drew | WC.Hooks ReplaceHook |
 | Data API list: PostgREST filters, multi-sort, `select` | `GET /api/{e}` | partial — `ilike` over string fields only, one sort column, no projection | GridQuery.cs Search/Sort |
 | `POST …/query` | DataApiEndpoints.cs:335 | gap | |
 | `PUT` replace | DataApiEndpoints.cs:543 | gap (PATCH only) | DataGateway.cs:119-124 |
@@ -626,11 +626,12 @@ Already filed and not repeated: **#265** (`onDelete`), **#266** done, **#267** (
     carry a version (DataGateway.cs:123,130). Then the lesser gaps: structured filters beyond `ilike`,
     multi-sort, batch, replace.
     **Done** in `0b8ed3c`: on an audited entity the record editor's Save and the grid's Delete send the `updated_at` the record was opened with as the port's `AlvoPrecondition` (`RecordVersion`, the value `/api` takes as `If-Match`); a write that lost to another writer — a stale version, or a record deleted meanwhile — is refused in place, "This record changed since you opened it", with Reload: in the editor it reads the record again and reopens it as it is now (focus back on the form's first field), on the grid it reads the page again and gives focus to the row. Never a snackbar, never a silent overwrite. An unaudited entity's editor says once that the last write wins there (no version is sent, since the port would refuse one). Pinned by `RecordVersionTests` and `RecordConflictScenarios` (another writer changes the row through the data port while the editor or the delete confirm is open). The lesser gaps (structured filters, multi-sort, select, `POST …/query`, `PUT` replace, batch → #200) are not offered and not sentenced on the grid: it has no help surface to carry one line, so B4.3 was skipped under ruling 5.
-26. **Hooks are half-authorable.** No edit in place; mutate literals and multi-field mutate not offered;
+26. ✅ **Hooks are half-authorable.** No edit in place; mutate literals and multi-field mutate not offered;
     `{{…}}` webhook `payload` withheld as if refused; endpoint, template and mutate field are free text
     while endpoints and templates cannot be declared here at all — so a webhook/email hook cannot be
     completed from the dashboard alone. Probably pickers over declared names, and 13/#271's panel.
     **Deferred → [#276](https://github.com/Burgyn/MMLib.Alvo/issues/276)**, by the maintainer's scope ruling of 27 Sep.
+    **Done** in #276 (slice B, `docs/superpowers/specs/2026-10-05-f5-hooks-editor-design.md`): edit in place keeping the position (guarded, re-found by what the screen drew; an undrawable hook is read-only with its reason); a mutate patches several fields, each a value its type holds or an expression; endpoint and template pickers over the working copy; a `{{…}}` payload judged by cel/check; endpoints and templates declared and edited on Integrations behind the build's "unsigned" statement; a guided condition that writes canonical CEL, with a text switch. Removing an endpoint or a template is a follow-up.
 27. ✅ **Keys the build ignores without a word** — `auth.providers`, `realtime`, `branding`, project
     `description`, `formats.*.description`. Extends #271/#268: the core should warn (they belong in
     `UnhonouredSubsystems` or a sibling), and the dashboard then renders that warning like the others.

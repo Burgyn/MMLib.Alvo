@@ -137,6 +137,15 @@ schema-valid with a placeholder in it.
 splices, it does not create. The dashboard materialises a draft hook or field on a clone of the working copy
 before it asks, so the working copy itself is never dirtied by a check.
 
+**String slots that are not CEL.** The splice writes a bare string at any pointer that is not a mutate value, so the
+dashboard also asks about a webhook `payload` and an email `to` (`/entities/<e>/hooks/<point>/<i>/action/payload`,
+`…/action/to`): the after-hook compiler reports the `JSONata`, JSON-rendering, placeholder and mail-header refusals at
+those paths — the build's own sentence, not a copy of its classifier in the dashboard (hooks editor spec, B4 deviation).
+Pinned by `ExpressionSlotCheckTests.A_webhook_payload_slot_is_spliced_as_text_and_judged_as_apply_judges_it` and
+`An_email_to_slot_is_spliced_as_text_and_more_than_one_recipient_is_refused`. Two limits the dashboard states rather than
+hides: an undeclared endpoint or template stops the compiler before the slot (nothing is reported), and so does a failing
+condition — so an action slot is asked about in a hook without its condition (hooks editor spec D4).
+
 **What it deliberately does not do.**
 
 * No `cel/scope`: its only consumer is completion or a field dropdown, which is a later slice.

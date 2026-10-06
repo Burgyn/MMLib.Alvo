@@ -129,12 +129,14 @@ Set field 1 to  [2026-10-05T12:00:00Z      ]   □ Set to empty          [Remove
   not among them, labelled "(not offered)". A field chosen twice is refused at submit ("'x' is patched twice").
 * **Write a value | an expression** `ChipGroup`. Expression → CEL box, live `cel/check` under it (key
   `hook-mutate-value-{i}`). Value → the input the field type takes: text box (string/text, empty string allowed;
-  number/decimal with `inputmode`; date/datetime; uuid/ref), a `MudSelect` of declared values (enum), `true`/`false`
+  number/decimal as a plain text box — no numeric `inputmode`, Ruling M in §17; date/datetime; uuid/ref), a `MudSelect` of declared values (enum), `true`/`false`
   chips (boolean); **json takes no literal** ("A json field takes no literal value here — this build converts none. Write
   an expression, or set it to empty."). "Set to empty" (`MudCheckBox`) only on a field that is not `required`.
 * The fit sentence is computed locally on each render (`MutateLiteral.TryValue`) and is focus-free; at submit the same
-  refusal goes to the editor's `ErrorPanel` with focus. **Stricter than apply** in one place: an enum literal must be a
-  declared value — apply converts it as a plain string (`BeforeHookCompiler.cs:437`; reported as a finding, §11).
+  refusal goes to the editor's `ErrorPanel` with focus. An enum literal must be a declared value. When this was written
+  that was **stricter than apply**, which converts it as a plain string (`BeforeHookCompiler.cs:437`; the finding in
+  §11). The maintainer ruled it a core bug: #308, fixed on the sibling branch `feat/cel-functions`, after which apply
+  refuses a non-member too and the two agree (§17).
 * `beforeDelete` offers no mutate (unchanged). One row minimum; Remove on a row only when there are two or more.
 
 ### 4.4 Endpoint and template pickers
@@ -331,8 +333,12 @@ slice may add them — §10); a mix of `&&` and `||`. Text literals use only the
 (`CelLexer.cs:198-218`); a value with another control character is refused in the form. Numbers are
 `(0|[1-9][0-9]*)(\.[0-9]+)?`, written as typed.
 
-**After-hook images are narrower than apply** (unverified that apply refuses `old.` at afterCreate — no phase check was
-found in `AfterHookCompiler`): the form does not offer them; the conformance fact records that apply accepts them.
+**After-hook images are narrower than apply** (measured by the conformance fact): apply **accepts** `old.` at
+afterCreate and `new.` at afterDelete, and `changed(f)` at afterCreate and afterDelete. Only the before-points have a
+phase rule for `changed`. The form offers none of these, and
+`GuidedConditionConformanceTests.What_the_table_withholds_after_the_commit_apply_still_accepts` pins that apply still
+accepts them. Apply's laxness is a core defect, filed as #325: such a filter reads an image the event lacks, so it passes
+every event without a word.
 
 ### 7.2 Generator
 
@@ -399,10 +405,13 @@ focus returns to the trigger (the row's Edit, which still exists — the row kee
 
 * **Finding (core): an enum mutate is not checked for membership at apply** — `BeforeHookCompiler.Convert` maps enum to
   `String` (`:435-437`) and `Fits` compares types only, so `mutate: {status: "bogus"}` (literal or `{"$cel":
-  "'bogus'"}`) applies; what the write does then is unverified. The form only offers declared values. Needs a core issue.
+  "'bogus'"}`) applies; what the write does then is unverified. The form only offers declared values. **Ruled:** filed as
+  #308 (a before-hook mutate writes values that break the field's own facets) and fixed on `feat/cel-functions`, not on
+  this branch (§17).
 * **Finding (core): object payloads are refused** as raw JSONata by the classifier's no-bare-brace clause
   (`JsonataSlot.cs:62`, `JsonataSlotTests.cs:16,42`); the hint tells the truth and an array works. Relaxing it is a
-  core classification change the classifier's own remarks anticipate.
+  core classification change the classifier's own remarks anticipate. **Ruled:** this slice ships arrays only, and
+  object payloads are #311 (§17).
 * MudSelect inside `AlvoEditor` (a `MudDialog`) is new on this dashboard (the only select today is on a page,
   `Rules.razor:34`); the first task that adds one writes its e2e first.
 * `HooksTab` grows; the guided rows are their own component to keep it reviewable (PublicApi grows, §14).
@@ -453,6 +462,8 @@ reaches them by cascade. No Abstractions or Management change.
 4. Removing an endpoint/template from the dashboard (refused while a hook references it) — next slice?
 5. Should Edit be able to move a hook to another point (D1)?
 
+All five were answered by the maintainer (Ruling B). The answers are recorded in §17.
+
 ## 16. Follow-ups
 
 Remove endpoint/template; publish the egress/DLQ/hidden sentences from the core; enum membership at apply; object
@@ -461,15 +472,214 @@ functions in the guided table once Condition admits calls (slice C).
 
 ## 17. As built
 
-(To be written when the slice lands: commits, deviations from the plan, measured numbers.)
+> **Maintainer decision before merge: the 2 MiB circuit receive limit (#316).** This slice fixes #316 (a large paste
+> into Import silently dropped the circuit) by raising the Blazor circuit hub's `MaximumReceiveMessageSize` from
+> SignalR's 32 KB to 2 MiB while the dashboard is enabled (`CircuitReceiveLimit`, `ImportLimit`). The limit belongs to
+> the one `ComponentHub` that every server-interactive circuit in the process shares, an embedding host's own included,
+> and it **applies to a `/_blazor` connection before sign-in**. A client can therefore make the server buffer up to
+> 2 MiB per message instead of 32 KB, which Microsoft's guidance names as a denial-of-service risk. Bounded: raised only
+> while `AlvoAdminOptions.Enabled`, only ever raised (a host's own larger limit, or none, is kept), and stated in
+> `AddAlvoAdmin`'s public docs. **The trade-off is for the maintainer to accept.** The alternative is a chunked upload
+> (JS interop or a file input), which keeps 32 KB but is a larger change than #316 asked for.
 
-Deviations recorded as they were made:
+### Commits
 
-- **Task 8, a condition edit asks the condition box only** (pre-flight C4). The merged slice-A code re-asked every box on
-  a condition edit (`CheckBoth()`), so no answer was shown against an older form. Under D4 no action slot's candidate
-  carries the condition, so that reason no longer holds; and the guided condition (§7) calls the same handler on every row
-  change, where re-asking every box would cost 3 + N checks per click. An e2e assertion pins that the mutate value's flag
-  stays as it was across a condition edit.
-- **Task 8, the row text and the §5.1 guard come from one writer.** The tab draws each hook with `WorkingCopy.Readable`
-  rather than options of its own, because two separately written option sets that drifted would refuse every in-place
-  edit, silently.
+Base `e8e301a`, the tip of `feat/expression-check` merged in at `6acf89e` (pre-flight C6: not the plan's `0527bb9`,
+which would list slice A's five fixes as this slice's work). `git log --oneline --first-parent e8e301a..HEAD`, without
+the merge, grouped by plan task. A task's first commit often carries the previous task's review.
+
+| Task | Commits | What |
+|---|---|---|
+| — | `f2dc527` | this design and its plan |
+| 1 | `d9e8dce` | `ConditionTable`: what a condition may say, where, and what it means when the field is empty |
+| 2 | `06bae0f`, `1cff533` | `DescriptorLens` reads endpoints, templates and the hooks that use them; an unknown field type is refused, points compared ordinally |
+| 3 | `206babb`, `c777109` | `WorkingCopy.ReplaceHook` guarded by the drawn text; `HookShape.Undrawable` |
+| 4 | `59e1fde`, `ef6cbac` | `MutateLiteral` (checked as apply converts), `MutateRow`, `HookFields` |
+| 5 | `4da2e3f`, `68adeec` | `HookPatch.Apply` keeps the author's key order |
+| 6 | `96cc4e1`, `1da3763` | `HookBuilder` opens a declared hook, several mutate rows, a payload |
+| 7 | `3b0517e`, `0ff0359` | `ExpressionSlots.ForHook` places an edited hook; core pins that `cel/check` judges the payload and `to` |
+| 8 | `78573e3`, `616725d` | Edit in place, refused in place when another tab overtook it |
+| 9 | `f6156d8`, `b891613` | mutate rows: a literal or an expression per field, several fields |
+| 10 | `7b5074a` | endpoint and template pickers; the payload box judged live |
+| 11 | `47b9849`, `f3bfd87`, `f82ee2a`, `eb247d2`, `17e0972`, `fb119b8` | `EndpointDraft`, `TemplateDraft`, `IntegrationStatement`; #316 fixed (Ruling N) |
+| 12 | `d40c0ca`, `464fea8` | `DeclareEndpoint`/`DeclareTemplate`, `IntegrationRows`; Import refused until the copy is loaded |
+| 13 | `5bad399`, `46957fb`, `3c3f311` | Integrations reads the working copy; New/Edit endpoint |
+| 14 | `42ba9cb`, `719b8c5` | New/Edit template |
+| 15 | `348c659`, `906ad08` | `HooksEditorAgreementTests` |
+| 16 | `47f2c83`, `8eeda4a`, `acc57af` | `ConditionText.Generate` |
+| 17 | `06cfa39`, `4c43dca` | `ConditionText.Recognize` and the round trip |
+| 18 | `481a742`, `f9a156a` | `GuidedConditionConformanceTests` |
+| 19 | `356f9a6`, `2d89bf7`, `df75f30` | `ConditionBuilder`, the guided rows; the `ConditionGate` |
+| 20 | `e680b8e`, and the docs commit that adds this section | the Task 19 re-review carry-overs; `todo-admin.md`, `management-api.md`, this section |
+
+The core (`src/MMLib.Alvo`) moved by one line: `AlvoManagementService.MaxCheckedDescriptorChars` went from private to
+internal, so that a Host.Tests fact can hold `ImportLimit.MaxChars` to it. Abstractions and Management contracts are
+unchanged.
+
+### The maintainer's answers to §15 (Ruling B)
+
+1. **Enum membership at apply.** Filed now as a core issue, **#308** ("A before-hook mutate writes values that break the
+   field's own facets (enum, maxLength, format)"), and fixed on the sibling branch `feat/cel-functions`. This slice stays
+   stacked on `feat/expression-check`, not on `feat/cel-functions` (Ruling A), so #308's fix is **not on this branch**.
+   §4.3's "stricter than apply" and §11 bullet 1 are reworded to say so. Until the two meet, the form refuses a
+   non-member and apply here does not. Once they meet, they agree.
+2. **Object payloads.** Arrays only in this slice. Object payloads are **#311** ("Hook payloads: accept a JSON object,
+   not only an array"). §11 bullet 2 records it, and the payload hint already says "write an array".
+3. **The three dashboard-owned statement sentences** (§6.3) stay pinned in Admin, each held to a core fact by
+   `HooksEditorAgreementTests`. They are not published from the core before this ships.
+4. **Removing an endpoint or a template** goes to the next slice.
+5. **Edit does not move a hook** to another point. D1 stands.
+
+### Deviations from the plan, with their reasons
+
+Pre-flight conflicts and defects (Ruling C, Ruling D):
+
+- **C1. The trimming `ForMutateValue` overload is deleted.** Slice A's `33c1a16` checked the mutate value under the key
+  exactly as Add staged it. Add now stages the trimmed key, so the check trims too. The rewritten
+  `ExpressionSlotsTests` fact pins the principle: the key the check places is the key `Build` stages. An untrimmed
+  port would have silently reopened that bug.
+- **C2. The two merged mutate scenarios are ported to row ids.** The flag-goes scenario uses the null path rows still
+  have: row 1, with an empty field, takes key `hook-mutate-value-0` after row 0 is removed. Dropping them would have lost
+  the only e2e for `7450adc`.
+- **C3.** Task 19's stale line list was replaced by its own grep guard. The fills were at 77, 83, 124, 132 and 230.
+- **C4. A condition edit asks the condition box only (Task 8).** The merged slice-A code re-asked every box on a
+  condition edit (`CheckBoth()`), so no answer was shown against an older form. Under D4 no action slot's candidate
+  carries the condition, so that reason no longer holds. The guided condition (§7) calls the same handler on every row
+  change, where re-asking every box would cost 3 + N checks per click. An e2e assertion pins that the mutate value's
+  flag stays as it was across a condition edit. The handler is `HooksTab.TypeCondition`, which is narrower than
+  `CheckBoth()`.
+- **C5.** `ForHookCondition`, `ForMutateValue` and `WithHook` are deleted, because nothing in `src` called them after
+  Task 8. Their tests that still said something new moved to `ForHook`.
+- **C7.** The fact "an enum literal outside its values is refused by the row and still accepted by apply" is deleted:
+  #308 would have turned it red with no product defect. `A_literal_the_mutate_row_accepts_is_one_apply_accepts` gains
+  an `("enum", "open")` row, which holds before and after #308. A fact that **both refuse** `"bogus"` (and `null` on a
+  required field) is owed once #308 is on this branch.
+- **C8.** §4.3, §11 and §15 are reworded for #308 and #311, as above.
+- **D1.** The vacuous apostrophe fact became a guard fact through the product's own serializer. Proved by sabotage: it
+  failed with `JavaScriptEncoder.Default` swapped in.
+- **D2.** The tautological one-character property became an oracle that does not use `Recognize`'s final compare: every
+  row read is one the table offers at that point. Proved by sabotaging six legality checks one at a time. Each failed.
+- **D3.** The statement fact asserts "no delivery is signed", not just "signed".
+- **D4, D5.** Shared helpers: `HooksTab.ActionSlot`, `DescriptorLens.TextOf` and `DescriptorLens.HasBodyFile`.
+- **D6.** `CandidateHook(original)` has no `withCondition` parameter (Ruling I).
+- **D7.** The interim `FirstRow` getter was accepted. It was removed in Task 9.
+- **D8.** The redundant `DescriptorLens` fact is folded into the first one.
+
+Controller rulings and implementation findings:
+
+- **Ruling F.** The condition-sense kind is `ConditionFieldKind`. The existing `FieldKind {Supplied, Rollup, Computed}`
+  keeps its name, because renaming it touches 76 unrelated sites. **Ruling G.** A public theory types an internal enum
+  or array parameter as `object` and casts it inside the test (CS0051).
+- **Ruling H.** `DescriptorLens.IntegrationUse` is `internal`, because a public type may not live in an internal
+  namespace (architecture rule).
+- **`PendingSchema.Type` reads a type by member name only (Task 4).** `Enum.TryParse` accepted `"3"` as `Decimal` and
+  `"42"` as an undefined value that would make `ConditionTable.KindOf` throw. A numeric type string, which the schema
+  rejects anyway, now reads as unreadable (`string`).
+- **Ruling L. A decimal literal is written as typed.** A declared `1e2` saves byte-unchanged rather than becoming `100`.
+  Spellings that are not JSON numbers (`.5`, `5.`, `+1`) are refused. Apply sees only JSON numbers, so agreement is
+  unaffected.
+- **Ruling M. No numeric `inputmode` on the mutate number boxes**, a deviation from §4.3, which said "number/decimal
+  with `inputmode`". iOS's numeric and decimal keypads have no minus key, and a mutate literal may be negative. Cost: a
+  full keyboard on a phone for numbers. The guided condition's number box keeps `inputmode="decimal"`, because the rows
+  refuse a negative number anyway (§7.1).
+- **The row text and the §5.1 guard come from one writer (Task 8).** The tab draws each hook with
+  `WorkingCopy.Readable` rather than options of its own. Two option sets written separately could drift and then refuse
+  every in-place edit, silently.
+- **A `MudSelect` choice inside the sheet lost focus to `<body>` (Task 9, measured).** Escape then no longer reached the
+  sheet. Every select in the sheet refocuses itself after a choice, through the `SelectFocus` helper that `HooksTab` and
+  `ConditionBuilder` share. **Ruling O:** the extra guarded refocus on close (`OpenChanged`) was dropped, because the
+  loss it guarded did not reproduce and its pins could not fail. `AdminSession.ChooseAgainAsync` stays as the
+  regression pin.
+- **No `ToStringFunc` on the guided selects (Task 19).** With one, the library drew the chosen value only into a hidden
+  input, so the combobox read empty to a screen reader and to the scenarios (measured).
+- **Ruling N: #316 is fixed in this slice** (Task 11), instead of left as a follow-up. Large pasted imports dropped the
+  circuit and made the e2e suite flaky. Besides the 2 MiB limit in the decision box above:
+  - alvo.js refuses an oversized paste at the box, in place, by characters and by bytes.
+  - `Transfer.Import` re-checks the size on the server.
+  - MudBlazor's default `maxlength=524288` turned out to be a second silent cut. It is lifted, so the guard is the only
+    limit.
+  - The `Importable()` cut-downs of the bike-workshop example the e2e suite imported are reverted.
+  - `Transfer`'s public surface moved from `IDisposable` to `IAsyncDisposable`, plus `OnAfterRenderAsync`, to dispose
+    its JS subscription.
+- **Import is refused until the working copy is loaded (Task 12).** An import sent earlier was a silent no-op. This is
+  `ImportGate`. The page draws `data-copy-loaded`, which the scenarios wait on.
+- **"Not checked yet" names `…/action`, not `…/action/payload` (Task 11).** The schema's `$defs/action` is a `oneOf`, so
+  the validator reports any failure inside a webhook action on the action itself.
+- **Ruling Q-B.** A refused guided row is never handed to the sheet. The readout keeps the last condition the rows
+  could write.
+- **R-B. `Recognize` also requires `Refusal(condition) == null` (Task 17).** Without that, a text holding U+202E, a tag
+  character, a raw control character, an over-large number, or more than 2,000 characters would open as rows that the
+  form then refuses and Q-B never emits. With it, rows exist exactly when the form would write them. Accepted by the
+  controller.
+- **Ruling S-B. A refused or unfinished guided row blocks Add/Save.** It never silently saves the older condition. The
+  sheet asks the rows through a cascaded internal `ConditionGate` at the moment of the submit (pull, not push: a pushed
+  refusal would outlive the rows on a switch to text) and shows the answer in its `ErrorPanel`. Nothing is staged.
+  - A draft carries `ValueGiven`, so a field chosen with no value given is "Condition N needs a value". An empty text
+    compared on purpose (`new.f == ''`) stays writable.
+  - Added in Task 20: a row whose field has left the working copy (removed in another tab while the sheet was open) was
+    quietly dropped from the condition. It now blocks with "Condition N names a field that no longer exists." and is
+    refused in place.
+- **T-B. The gate has no `Detach` and no `Dispose`.** `ConditionBuilder` attaches in `OnParametersSet` and never
+  detaches. `IDisposable` or an `OnInitialized` override would have grown the public component's surface (measured on
+  the PublicApi baseline). The sheet asks the gate only while it draws the rows, and the rows drawn next attach over
+  the old ones, so a form that is gone is never asked. Accepted, to keep the PublicApi baseline unchanged.
+- **`PatternLanguageTests.DrawnOnlyInEditors`, a sanctioned extension (Task 19).** The rule "every single-line box is
+  in a form Enter submits" scanned one file at a time, and `ConditionBuilder`'s value box sits in the hook sheet's form,
+  one component up. The test now counts a component as inside a form when every component that draws its tag also
+  draws an `AlvoEditor`.
+- **Focus.** Keep editing in the Edit sheet returns focus to the first control. That is now the condition's Guided/Text
+  switch, not `#hook-condition` (§9: "the first editable field after the fixed point"). Removing a guided row focuses
+  the Remove of the row that took its place, or Add a condition (review I2). Both are pinned by e2e.
+- **W1.** A date-only `datetime` literal (`2026-10-05`) is accepted by the row and by apply today. Its own fact says so,
+  and it is to be re-run first once #308 is on this branch (Ruling E).
+- **Additions beyond the plan:**
+  - lexer round-trip facts for quoted values in `HooksEditorAgreementTests`;
+  - number-box facts: a box holding anything but a number writes no operator of its own;
+  - a probe-validity theory, so the conformance fact cannot pass on a probe that fails early;
+  - refusal rows that assert the core's message fragment;
+  - the acceptance direction counts every Error the validator reports, not only the hook's;
+  - the three merged scenarios that typed into the old free-text `#hook-endpoint` are ported (Task 10).
+
+### Measured
+
+- **Round trip** (`ConditionTextRoundTripTests`, CsCheck): 2,000 cases for `Recognize(Generate(c)) == c`, and 2,000 for
+  the mutation oracle, both 0 failures. In the oracle, each outcome (read, refused) must exceed 1 % of the cases run.
+- **Conformance** (`GuidedConditionConformanceTests`): **758** guided conditions checked against the real validator,
+  every one accepted. Task 18 measured 478; Task 19 added a ref field and the boundary values `''`,
+  `9223372036854775807` and a 28-digit decimal. The floor is ≥ 700. The 4 refusal classes are confirmed refused with
+  their own core messages, in 8 rows: `old.` at beforeCreate; `new.` at beforeDelete; `changed` at beforeCreate and at
+  beforeDelete; a role row at afterCreate, at afterUpdate, and at afterDelete (`HasRole`, `LacksRole`).
+- **e2e scenarios per class** (new in this slice): `HookEditInPlaceScenarios` 8, `HookShapeScenarios` 1,
+  `MutateEditingScenarios` 8, `MutateOpenScenarios` 1, `HookPickerScenarios` 6, `UndeclaredReferenceScenarios` 1,
+  `IntegrationsScenarios` 9, `TemplateDeclarationScenarios` 5, `GuidedConditionScenarios` 12 methods (13 cases),
+  `ImportSizeScenarios` 2, `LargeImportScenarios` 1. That is 55 cases. `ExpressionCheckScenarios` stays at 10, with
+  its mutate scenarios ported to row ids.
+
+### What the facts found
+
+- **Agreement** (`HooksEditorAgreementTests`): no new finding.
+  - The endpoint URL rule agrees with `ResolveTarget`. It holds only for an endpoint a hook references, since apply
+    checks no other, and the client trims.
+  - The literal fit agrees with apply on probes with no facets. #308 adds facet checks (maxLength, format, precision,
+    required-null), and for those the row stays silent until apply (B3 "checked on apply").
+  - Template roots equal `TemplatePlaceholder.Roots`.
+  - The statement's claims hold against the core: "no delivery is signed"; `hidden` fields included; the allowed
+    networks setting admits nothing by default.
+  - The enum finding of §11 is #308.
+- **Conformance:** no cell of the table was refused, so nothing was narrowed. One finding: **the after-points are laxer
+  than the table.** Apply accepts `old.` at afterCreate, `new.` at afterDelete, and `changed(f)` at both. The form
+  never offers them, `What_the_table_withholds_after_the_commit_apply_still_accepts` pins that apply still accepts them,
+  and the core defect is **#325** (§7.1).
+
+### Follow-ups still open
+
+- Remove an endpoint or a template (Q4, the next slice).
+- Publish the egress, DLQ and `hidden` sentences from the core. Q3 keeps them pinned in Admin for now.
+- Enum membership at apply, **#308**. It is fixed on `feat/cel-functions`. When that reaches this code, add the
+  both-refuse fact (C7) and re-run W1.
+- Object payloads, **#311**.
+- After-hook conditions that read an image the point lacks, **#325** (new, core).
+- A `Position` caret for the check (slice A deferral); field-to-field rows in the guided form; functions in the guided
+  table once Condition admits calls (slice C).
+
+#316 was filed during this slice and is fixed by it (`f3bfd87`), so it leaves the list when the PR merges.
