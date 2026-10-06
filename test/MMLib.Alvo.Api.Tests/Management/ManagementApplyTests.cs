@@ -288,6 +288,26 @@ public class ManagementApplyTests
     }
 
     /// <summary>
+    /// A hook that mutates a required field to JSON <c>null</c> is the validator's 422 at the mutate slot — on a
+    /// preview too — never the 500 a null map entry used to throw out of the before-hook compiler (#326).
+    /// </summary>
+    [Fact]
+    public async Task A_null_mutate_on_a_required_field_is_refused_at_its_slot_rather_than_thrown()
+    {
+        await using var world = await ManagedFleet.StartAsync([_dev]);
+        var sent = DescriptorEdits.AddNullMutateHook(await CurrentAsync(world), entity: "vehicles", field: "plate");
+
+        var response = await ApplyAsync(world, sent, ifMatch: "\"1\"", query: "?dryRun=true");
+
+        response.StatusCode.ShouldBe(HttpStatusCode.UnprocessableEntity);
+        (await response.ReadProblemTypeAsync()).ShouldBe(AlvoProblemTypes.Validation);
+        var violation = (await response.ReadJsonObjectAsync())["violations"]!.AsArray().ShouldHaveSingleItem()!;
+        violation["pointer"]!.GetValue<string>().ShouldBe("/entities/vehicles/hooks/beforeUpdate/0/action/mutate/plate");
+        violation["message"]!.GetValue<string>().ShouldContain("required");
+        (await RevisionAsync(world)).ShouldBe(1);
+    }
+
+    /// <summary>
     /// A blank <c>descriptorJson</c> is the named 422, not a 500.
     /// </summary>
     /// <remarks>
