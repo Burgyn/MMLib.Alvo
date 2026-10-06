@@ -150,6 +150,12 @@ public class AdminWorld : IAsyncLifetime
            scripted agent in front of the real one without a second host. */
         Configure(builder.Services);
 
+        /* The second seam: the host developer's own registrations — a CEL function (spec §11.1). The shipped host has
+           already called AddAlvo, so this adds to its collection exactly as AddAlvo's callback would have: every
+           IAlvoBuilder extension used here only adds services (C1's CelFunctionsWorld registers the same way). It is a
+           test-side adapter, not a seam of AlvoHost: the container has no C# extension point, and gains none here. */
+        Configure(new AlvoServices(builder.Services));
+
         _app = await AlvoHost.BuildAsync(builder).ConfigureAwait(false);
         await _app.StartAsync().ConfigureAwait(false);
 
@@ -173,6 +179,13 @@ public class AdminWorld : IAsyncLifetime
     /// </remarks>
     /// <param name="services">The host's service collection, after the host registered its own.</param>
     protected virtual void Configure(IServiceCollection services)
+    {
+    }
+
+    /// <summary>Registers this world's own Alvo extensions — a host's CEL functions — on the shipped host.</summary>
+    /// <remarks>Empty by default, so the ordinary suite runs exactly what the container runs, which knows built-ins only.</remarks>
+    /// <param name="alvo">The shipped host's Alvo builder.</param>
+    protected virtual void Configure(IAlvoBuilder alvo)
     {
     }
 
@@ -325,5 +338,12 @@ public class AdminWorld : IAsyncLifetime
         var port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
         probe.Stop();
         return port;
+    }
+
+    /// <summary>The shipped host's service collection, as the builder <c>AddAlvo</c> hands its callback.</summary>
+    private sealed class AlvoServices(IServiceCollection services) : IAlvoBuilder
+    {
+        /// <inheritdoc/>
+        public IServiceCollection Services { get; } = services;
     }
 }
