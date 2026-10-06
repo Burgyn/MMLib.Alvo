@@ -342,3 +342,32 @@ export async function copyText(text) {
 export function utcOffsetMinutes() {
   return -new Date().getTimezoneOffset();
 }
+
+/**
+ * The caret of a text box as [start, end] — kept by the input after a button takes focus — or null when the box is
+ * not on the page. Insert writes a function call there (spec §9.2).
+ */
+export function caret(id) {
+  const box = document.getElementById(id);
+  return box && typeof box.selectionStart === 'number' ? [box.selectionStart, box.selectionEnd] : null;
+}
+
+/**
+ * Focuses a text box and selects a range in it: the placeholder an inserted call asks the operator to replace. Only
+ * once the box holds `text`, the value the range was computed in — the sheet is drawn by the dialog provider, so the
+ * render that wrote the value may reach the page after this call. Polled on a timer like `focusFirstOnceClosed`, and
+ * given up after two seconds: a box that never holds the text (the operator typed on) is left as it is.
+ */
+export function selectRange(id, start, length, text) {
+  const deadline = Date.now() + 2000;
+  const attempt = () => {
+    const box = document.getElementById(id);
+    if (box && box.value === text) {
+      box.focus();
+      box.setSelectionRange(start, start + length);
+    } else if (Date.now() < deadline) {
+      setTimeout(attempt, 20);
+    }
+  };
+  attempt();
+}

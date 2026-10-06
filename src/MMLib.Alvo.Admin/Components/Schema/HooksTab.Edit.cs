@@ -29,6 +29,7 @@ public partial class HooksTab
         _editing = new Editing(point, position, json, original, builder, builder.Fingerprint());
         _writable = WritableFields();
         ReadPickers();
+        LoadFunctions();
         SettleConditionMode();
         _refusal.Clear();
         CheckAll();

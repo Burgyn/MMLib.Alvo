@@ -15,6 +15,7 @@
     One sheet adds and edits (spec §4.2): an edit keeps the hook's place in its point's ordered list,
     and a hook the editor cannot draw whole has no Edit at all — it is kept as it is (§5.2).
 *@
+@using MMLib.Alvo.Expressions
 @inject AdminInterop Interop
 @inject ManagementGateway Gateway
 @inject ILogger<HooksTab> Logger
@@ -195,6 +196,51 @@ else
         }
     </text>;
 
+    /// <summary>The functions a CEL box may call, under it: signatures, summary, provenance and Insert (spec §9.1).</summary>
+    /// <remarks>
+    /// Folded, after the box's check sentence, and drawn only once the catalog is read: it never takes focus, so a list
+    /// arriving while the operator types moves nothing under the caret. A summary is the host's text, drawn as text.
+    /// </remarks>
+    private RenderFragment FunctionList(string inputId, string boxLabel, CelProfile profile, Func<OfferedFunction, Task> insert) => @<text>
+        @if (Offered(profile) is { Count: > 0 } offered)
+        {
+            <details class="a-disclosure" data-testid="@($"fn-list-{inputId}")">
+                <summary>Functions you can call here (@offered.Count)</summary>
+                <p class="a-section__sub">
+                    A built-in works in every Alvo build; a host function exists only in this host, and an import into another
+                    build refuses it. Insert writes the call with its parameter names — replace each with a field or a value;
+                    the check under the box says what is still wrong.
+                </p>
+                @foreach (var function in offered)
+                {
+                    <ListRow class="a-fn__row" data-testid="@($"fn-{function.Name}")">
+                        <span class="a-listrow__rest a-listrow__rest--stacked">
+                            @foreach (var signature in function.Signatures)
+                            {
+                                @* The arrow and the result never part: a hyphen is a line-break opportunity, and "->" was split after its "-". *@
+                                var arrow = signature.LastIndexOf(" -> ", StringComparison.Ordinal);
+                                @if (arrow < 0)
+                                {
+                                    <code class="a-mono a-fn__signature">@signature</code>
+                                }
+                                else
+                                {
+                                    <code class="a-mono a-fn__signature">@signature[..arrow] <span class="a-fn__result">@signature[(arrow + 1)..]</span></code>
+                                }
+                            }
+                            <span class="a-section__sub">@function.Summary</span>
+                        </span>
+                        <span class="a-fn__actions">
+                            <span class="@(function.IsHost ? "a-badge a-badge--accent" : "a-badge")">@(function.IsHost ? "this host" : "built-in")</span>
+                            <AlvoButton Tone="AlvoButton.ButtonTone.Ghost" Small="true" data-testid="@($"fn-insert-{function.Name}")"
+                                        aria-label="@($"Insert {function.Name} into {boxLabel}")" OnClick="_ => insert(function)">Insert</AlvoButton>
+                        </span>
+                    </ListRow>
+                }
+            </details>
+        }
+    </text>;
+
     /// <summary>The box is described by its hint, and by the sentence under it while it has one.</summary>
     private string Described(string id) => _check.DescribedBy(id) is { } check ? $"{id}-hint {check}" : $"{id}-hint";
 
@@ -253,6 +299,7 @@ else
                     field, a mix of all and any — is written here.
                 </Hint>
             </Field>
+            @FunctionList(ConditionInputId, "Condition (CEL)", CelProfile.Condition, InsertIntoConditionAsync)
         }
     </text>;
 
@@ -352,6 +399,7 @@ else
                 </ChildContent>
                 <Hint>A CEL expression in the Mutate profile, stored as <code class="a-mono">{"$cel": "…"}</code>.</Hint>
             </Field>
+            @FunctionList(MutateValueId(i), $"Set field {i + 1} to", CelProfile.Mutate, function => InsertIntoMutateAsync(i, function))
         }
         else if (FieldOf(row) is { Type: FieldType.Enum } choice)
         {

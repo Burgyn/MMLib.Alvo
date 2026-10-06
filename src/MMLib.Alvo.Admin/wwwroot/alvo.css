@@ -1816,6 +1816,46 @@
     margin-bottom: var(--space-3);
   }
 
+  /* A function row (spec §9.1): the signatures and the summary take their column's whole width. Left at their content
+     width inside a flex column, an `overflow-wrap: anywhere` signature could shrink to a character per line — the defect
+     AssertNoVerticalTextAsync exists for — so the column stretches them and holds min-width: 0. */
+  .a-fn__row > .a-listrow__rest {
+    min-width: 0;
+    align-items: stretch;
+  }
+
+  .a-fn__signature {
+    display: block;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  /* The arrow and the result type, kept on one line: a hyphen is a break opportunity, and `->` broke after its `-`. */
+  .a-fn__result {
+    white-space: nowrap;
+  }
+
+  .a-fn__actions {
+    display: flex;
+    flex: none;
+    gap: var(--space-2);
+    align-items: center;
+  }
+
+  /* At the phone width every list row stacks (the `.a-listrow` rule further down, which also aligns its items to their
+     start); a function row stretches its items instead, so the signature keeps the row's width and the badge and
+     Insert share one line, Insert at the end. Two classes, so the later one-class rule does not win. */
+  @media (max-width: 720px) {
+    .a-listrow.a-fn__row {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .a-fn__actions {
+      justify-content: space-between;
+    }
+  }
+
   .a-code-key { color: var(--accent); }
   .a-code-str { color: var(--ok-fg); }
 

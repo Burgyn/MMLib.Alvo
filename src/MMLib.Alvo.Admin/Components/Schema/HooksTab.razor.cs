@@ -112,6 +112,7 @@ public partial class HooksTab
         _refusal.Clear();
         _writable = WritableFields();
         ReadPickers();
+        LoadFunctions();
         EnsureMutateRow();
         _adding = true;
         SettleConditionMode();
