@@ -224,7 +224,7 @@ internal sealed partial class AdminInterop(IJSRuntime js, ILogger<AdminInterop> 
     }
 
     /// <summary>The three ways a circuit that has gone reports itself; see the remarks.</summary>
-    private static bool IsDisconnect(Exception exception)
+    internal static bool IsDisconnect(Exception exception)
         => exception is JSDisconnectedException or ObjectDisposedException or OperationCanceledException;
 
     [LoggerMessage(EventId = 3, Level = LogLevel.Error,

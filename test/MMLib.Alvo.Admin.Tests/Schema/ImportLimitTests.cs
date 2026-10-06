@@ -1,5 +1,7 @@
 ﻿using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
 using MMLib.Alvo.Admin.Components.Schema;
@@ -82,7 +84,7 @@ public sealed class ImportLimitTests
     [Fact]
     public async Task A_stream_within_both_ceilings_is_read_as_utf8()
     {
-        var read = await ImportStream.ReadAsync(StreamOver("{\"description\": \"č漢\"}"), TestContext.Current.CancellationToken);
+        var read = await ImportStream.ReadAsync(StreamOver("{\"description\": \"č漢\"}"), NullLogger.Instance, TestContext.Current.CancellationToken);
 
         read.Refusal.ShouldBeNull();
         read.Text.ShouldBe("{\"description\": \"č漢\"}");
@@ -93,7 +95,7 @@ public sealed class ImportLimitTests
     {
         var stream = new FakeStream([], ImportLimit.MaxStreamBytes + 1);
 
-        var read = await ImportStream.ReadAsync(stream, TestContext.Current.CancellationToken);
+        var read = await ImportStream.ReadAsync(stream, NullLogger.Instance, TestContext.Current.CancellationToken);
 
         read.Text.ShouldBeNull();
         read.Refusal!.ShouldContain("2,934 KB");
@@ -106,7 +108,7 @@ public sealed class ImportLimitTests
     {
         var stream = StreamOver("{}");
 
-        await ImportStream.ReadAsync(stream, TestContext.Current.CancellationToken);
+        await ImportStream.ReadAsync(stream, NullLogger.Instance, TestContext.Current.CancellationToken);
 
         stream.OpenedWith.ShouldBe(ImportLimit.MaxStreamBytes);
     }
@@ -114,7 +116,7 @@ public sealed class ImportLimitTests
     [Fact]
     public async Task A_stream_over_the_character_ceiling_is_refused_naming_its_size()
     {
-        var read = await ImportStream.ReadAsync(StreamOver(new string('x', ImportLimit.MaxChars + 1)), TestContext.Current.CancellationToken);
+        var read = await ImportStream.ReadAsync(StreamOver(new string('x', ImportLimit.MaxChars + 1)), NullLogger.Instance, TestContext.Current.CancellationToken);
 
         read.Text.ShouldBeNull();
         read.Refusal!.ShouldContain("1,000,001 characters");
@@ -126,8 +128,44 @@ public sealed class ImportLimitTests
     {
         var text = new string('x', ImportLimit.MaxChars);
 
-        (await ImportStream.ReadAsync(StreamOver(text), TestContext.Current.CancellationToken)).Text.ShouldBe(text);
+        (await ImportStream.ReadAsync(StreamOver(text), NullLogger.Instance, TestContext.Current.CancellationToken)).Text.ShouldBe(text);
     }
+
+    [Fact]
+    public async Task A_stream_that_cannot_be_opened_is_refused_in_place_and_logged_at_warning()
+    {
+        var logger = new RecordingLogger();
+
+        var read = await ImportStream.ReadAsync(new FailingStream(open: new InvalidOperationException("pipe broke")), logger, TestContext.Current.CancellationToken);
+
+        read.Text.ShouldBeNull();
+        read.Unreadable.ShouldBeTrue();
+        read.Refusal.ShouldBe("That paste could not be read. Try again, or import a smaller descriptor.");
+        logger.Entries.ShouldHaveSingleItem().Level.ShouldBe(LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task A_stream_that_fails_part_way_is_refused_in_place_and_its_text_is_not_logged()
+    {
+        var logger = new RecordingLogger();
+
+        var read = await ImportStream.ReadAsync(new FailingStream(read: new IOException("reset")), logger, TestContext.Current.CancellationToken);
+
+        read.Unreadable.ShouldBeTrue();
+        var entry = logger.Entries.ShouldHaveSingleItem();
+        entry.Level.ShouldBe(LogLevel.Warning);
+        entry.Message.ShouldNotContain("secret-paste");
+    }
+
+    [Fact]
+    public async Task A_read_cancelled_because_the_page_went_is_not_refused_but_cancelled()
+        => await Should.ThrowAsync<OperationCanceledException>(
+            () => ImportStream.ReadAsync(new FailingStream(open: new OperationCanceledException()), NullLogger.Instance, TestContext.Current.CancellationToken));
+
+    [Fact]
+    public async Task A_read_over_a_circuit_that_has_gone_is_not_refused_but_reported_as_gone()
+        => await Should.ThrowAsync<JSDisconnectedException>(
+            () => ImportStream.ReadAsync(new FailingStream(open: new JSDisconnectedException("gone")), NullLogger.Instance, TestContext.Current.CancellationToken));
 
     [Theory]
     [InlineData("3 1", 3, true)]
@@ -176,5 +214,70 @@ public sealed class ImportLimitTests
         }
 
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    /// <summary>A browser stream whose open, or whose read after a first chunk of the paste, throws.</summary>
+    private sealed class FailingStream(Exception? open = null, Exception? read = null) : IJSStreamReference
+    {
+        public const string Prefix = "{\"secret-paste\": ";
+
+        public long Length => 64;
+
+        public ValueTask<Stream> OpenReadStreamAsync(long maxAllowedSize = 512000, CancellationToken cancellationToken = default)
+            => open is not null ? ValueTask.FromException<Stream>(open) : ValueTask.FromResult<Stream>(new BrokenStream(read!));
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    /// <summary>A stream that hands out <see cref="FailingStream.Prefix"/>, then throws.</summary>
+    private sealed class BrokenStream(Exception failure) : MemoryStream(Encoding.UTF8.GetBytes(FailingStream.Prefix))
+    {
+        private bool _served;
+
+        public override int Read(byte[] buffer, int offset, int count) => Serve(() => base.Read(buffer, offset, count));
+
+        public override int Read(Span<byte> buffer)
+        {
+            if (_served)
+            {
+                throw failure;
+            }
+
+            _served = true;
+            return base.Read(buffer);
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(Serve(() => base.Read(buffer.Span)));
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => Task.FromResult(Serve(() => base.Read(buffer, offset, count)));
+
+        private int Serve(Func<int> read)
+        {
+            if (_served)
+            {
+                throw failure;
+            }
+
+            _served = true;
+            return read();
+        }
+    }
+
+    private sealed record LogEntry(LogLevel Level, string Message);
+
+    private sealed class RecordingLogger : ILogger
+    {
+        public List<LogEntry> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            => Entries.Add(new LogEntry(logLevel, formatter(state, exception) + exception));
     }
 }

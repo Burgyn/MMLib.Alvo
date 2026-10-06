@@ -138,7 +138,14 @@ public sealed class ImportSizeScenarios(BikeWorkshopWorld world) : IClassFixture
         var text = descriptor.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
         text.Length.ShouldBeGreaterThan(32 * 1024, "the scenario is the size that used to close the circuit");
 
-        await session.ImportByChordAsync(text);
+        await session.GoToImportAsync();
+        await session.Page.FillAsync("#import-json", text);
+        /* A click in the box dispatches from it: were any ancestor to handle it, Blazor would send the box's whole text with
+           the event, and a message this size would close the circuit before the chord below could import anything. */
+        await session.Page.Locator("#import-json").ClickAsync();
+        (await session.Page.InputValueAsync("#import-json")).ShouldBe(text);
+        await session.Page.Locator("#import-json").PressAsync("Meta+Enter");
+        await session.WaitForImportedAsync();
 
         await session.WaitForPlanAsync();
         (await session.Content.InnerTextAsync()).ShouldContain("The whole example, through the box.");

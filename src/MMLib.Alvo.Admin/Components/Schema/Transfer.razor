@@ -238,7 +238,7 @@
         }
     }
 
-    /// <summary>The box's text, or <see langword="null"/> when there is nothing to import or it was refused for its size.</summary>
+    /// <summary>The box's text, or <see langword="null"/> when there is nothing to import, or it was refused for its size or because the stream failed.</summary>
     private async Task<string?> ReadBoxAsync()
     {
         await using var stream = await Interop.StreamOfAsync(BoxId);
@@ -247,7 +247,14 @@
             return null;
         }
 
-        var read = await ImportStream.ReadAsync(stream, _lifetime.Token);
+        var read = await ImportStream.ReadAsync(stream, Logger, _lifetime.Token);
+        if (read.Unreadable)
+        {
+            _oversizeShown = false;
+            _refusal.Show(read.Refusal, title: "That paste could not be read");
+            return null;
+        }
+
         if (read.Refusal is not null)
         {
             ShowOversized(read.Refusal);

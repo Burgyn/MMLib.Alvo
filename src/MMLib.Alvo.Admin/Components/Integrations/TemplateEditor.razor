@@ -104,12 +104,13 @@
     /// <inheritdoc />
     protected override void OnInitialized()
     {
-        /* The first declaration of the name, as IntegrationRows.ByName reads it — so the sheet opens the row it was opened from. */
-        if (Editing is { } name && Copy is { } copy
-            && DescriptorLens.Templates(copy.Json).FirstOrDefault(pair => pair.Key == name) is { Key: not null } declared)
+        /* One read of the copy: the fields are drawn from the very text the save's guard compares, so no write can land
+           between the two and leave the sheet showing one declaration while it guards another. */
+        if (Editing is { } name && Copy?.TemplateAsDrawn(name) is { } drawn)
         {
-            _draft = TemplateDraft.From(declared.Key, declared.Value);
-            _drawn = copy.TemplateAsDrawn(name);
+            using var declared = JsonDocument.Parse(drawn);
+            _draft = TemplateDraft.From(name, declared.RootElement);
+            _drawn = drawn;
         }
 
         _opened = Snapshot();
