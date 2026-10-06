@@ -197,3 +197,78 @@ public sealed class IntegrationsScenarios(BikeWorkshopWorld world) : IClassFixtu
         return session.Dialog("endpoint-editor");
     }
 }
+
+/// <summary>
+/// An endpoint or a template edited in one tab while another changed it is refused in place, not written over what the
+/// other tab saved (spec §5.5, Ruling V-B; final review I1) — the guard the hook sheet has (§5.1).
+/// </summary>
+/// <remarks>Its own world: each scenario changes a seeded declaration that other classes read.</remarks>
+/// <param name="world">The running host and browser.</param>
+public sealed class IntegrationEditOvertakenScenarios(BikeWorkshopWorld world) : IClassFixture<BikeWorkshopWorld>
+{
+    private const string Overtaken = "changed in the working copy after you opened it";
+
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task An_endpoint_whose_url_another_tab_changed_is_not_saved_over_it()
+    {
+        await using var editing = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await using var other = await world.SignInAsync(TestContext.Current.CancellationToken);
+        var editor = await OpenEditAsync(editing, "endpoint", "rental-desk");
+        await editing.Page.FillAsync("#endpoint-description", "Only the description");
+
+        var elsewhere = await OpenEditAsync(other, "endpoint", "rental-desk");
+        await other.Page.FillAsync("#endpoint-url", "https://new.example/hook");
+        await elsewhere.GetByTestId("endpoint-save").ClickAsync();
+        await elsewhere.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        var row = editing.Page.Locator("#endpoint-rental-desk");
+        await row.GetByText("https://new.example/hook", new() { Exact = true }).WaitForAsync();
+
+        await editor.GetByTestId("endpoint-save").ClickAsync();
+
+        await RefusedInPlaceAsync(editing, editor);
+        var listed = await row.InnerTextAsync();
+        listed.ShouldContain("https://new.example/hook", Case.Sensitive, "the URL the other tab saved is untouched");
+        listed.ShouldNotContain("127.0.0.1:5081");
+        listed.ShouldNotContain("Only the description");
+    }
+
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_template_whose_subject_another_tab_changed_is_not_saved_over_it()
+    {
+        await using var editing = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await using var other = await world.SignInAsync(TestContext.Current.CancellationToken);
+        var editor = await OpenEditAsync(editing, "template", "express-order-received");
+        await editing.Page.FillAsync("#template-body", "Only the body.");
+
+        var elsewhere = await OpenEditAsync(other, "template", "express-order-received");
+        await other.Page.FillAsync("#template-subject", "Changed in the other tab");
+        await elsewhere.GetByTestId("template-save").ClickAsync();
+        await elsewhere.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        var row = editing.Page.Locator("#template-express-order-received");
+        await row.GetByText("Changed in the other tab", new() { Exact = true }).WaitForAsync();
+
+        await editor.GetByTestId("template-save").ClickAsync();
+
+        await RefusedInPlaceAsync(editing, editor);
+        (await row.GetByText("Changed in the other tab", new() { Exact = true }).CountAsync())
+            .ShouldBe(1, "the subject the other tab saved is untouched");
+    }
+
+    private static async Task<ILocator> OpenEditAsync(AdminSession session, string kind, string name)
+    {
+        await session.GoAsync("/integrations");
+        await session.Page.Locator($"#{kind}-{name} [data-testid='{kind}-edit']").ClickAsync();
+        await session.WaitForFocusInsideAsync($"{kind}-editor", FocusScope.Dialog);
+        return session.Dialog($"{kind}-editor");
+    }
+
+    private static async Task RefusedInPlaceAsync(AdminSession session, ILocator editor)
+    {
+        var refusal = editor.GetByTestId("error-panel");
+        await refusal.GetByText(Overtaken, new() { Exact = false }).WaitForAsync();
+        (await refusal.InnerTextAsync()).ShouldContain("Nothing was saved");
+        await session.WaitForFocusInsideAsync("error-panel");
+        (await editor.IsVisibleAsync()).ShouldBeTrue("the sheet stays open with what was typed");
+        session.AssertConsoleClean();
+    }
+}

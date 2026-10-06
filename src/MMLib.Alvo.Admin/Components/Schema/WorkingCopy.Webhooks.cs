@@ -11,7 +11,10 @@ internal sealed partial class WorkingCopy
     /// <remarks>
     /// <para>
     /// <b>Re-checked under the gate</b> (spec §5.5): a new name another tab declared meanwhile, or an edited one it removed,
-    /// is refused rather than overwritten or created. A block of the wrong shape (<c>webhooks</c> or <c>endpoints</c> not an
+    /// is refused rather than overwritten or created. An edit also acts only on what it named, as <see cref="ReplaceHook"/>
+    /// does (§5.1, Ruling V-B): given the endpoint as the sheet drew it when it opened (<see cref="EndpointAsDrawn"/>), it
+    /// is refused when the declaration now reads otherwise — a URL another tab or the assistant changed meanwhile would
+    /// otherwise be put back without a word, and the URL is where the whole row is posted. A block of the wrong shape (<c>webhooks</c> or <c>endpoints</c> not an
     /// object) is left for the apply to refuse; replacing it would silently drop what the author wrote.
     /// </para>
     /// <para>
@@ -24,8 +27,10 @@ internal sealed partial class WorkingCopy
     /// <param name="secretRef">The name the signing secret will be stored under — never a secret.</param>
     /// <param name="description">The description, or blank for none.</param>
     /// <param name="editing">Whether an existing endpoint is edited.</param>
+    /// <param name="drawn">For an edit, the endpoint as the sheet drew it when it opened; <see langword="null"/> checks only that it exists.</param>
     /// <returns><see langword="true"/> when it was written.</returns>
-    public bool DeclareEndpoint(string name, string url, string secretRef, string? description, bool editing) => Edit(root =>
+    public bool DeclareEndpoint(string name, string url, string secretRef, string? description, bool editing, string? drawn = null)
+        => Edit(root =>
     {
         if (!Settable(root["webhooks"]) || (root["webhooks"] is JsonObject webhooks && !Settable(webhooks["endpoints"])))
         {
@@ -33,7 +38,7 @@ internal sealed partial class WorkingCopy
         }
 
         var current = (root["webhooks"]?["endpoints"] as JsonObject)?[name];
-        if ((current is not null) != editing || (editing && current is not JsonObject))
+        if ((current is not null) != editing || (editing && current is not JsonObject) || ChangedSinceDrawn(current, drawn))
         {
             return false;
         }
@@ -49,6 +54,20 @@ internal sealed partial class WorkingCopy
 
         return true;
     });
+
+    /// <summary>
+    /// The endpoint <paramref name="name"/> as an editor draws it — the text <see cref="DeclareEndpoint"/>'s guard compares —
+    /// or <see langword="null"/> when nothing declares it.
+    /// </summary>
+    /// <param name="name">The endpoint's key.</param>
+    public string? EndpointAsDrawn(string name)
+        => Read(() => _working?["webhooks"]?["endpoints"]?[name] is { } endpoint ? Readable(endpoint, "{}") : null);
+
+    /// <summary>Whether a declaration an edit opened now reads otherwise than it did — never for a guard not given.</summary>
+    /// <param name="current">The declaration in the copy now.</param>
+    /// <param name="drawn">The declaration as the sheet drew it, or <see langword="null"/>.</param>
+    private static bool ChangedSinceDrawn(JsonNode? current, string? drawn)
+        => drawn is not null && !string.Equals(Readable(current, "{}"), drawn, StringComparison.Ordinal);
 
     /// <summary>Whether a block may be written into: absent, or an object.</summary>
     private static bool Settable(JsonNode? node) => node is null or JsonObject;

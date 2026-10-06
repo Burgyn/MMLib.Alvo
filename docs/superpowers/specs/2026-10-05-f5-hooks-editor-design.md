@@ -266,7 +266,12 @@ their own copy (`WorkingCopyStore` keys by user); the later apply is refused by 
 `webhooks.endpoints.{name} = {url, secretRef, description?}` (schema order), creating `webhooks`/`endpoints` as needed;
 an edit patches the existing object in place. `DeclareTemplate(name, subject, body, editing)` writes
 `templates.{name} = {subject?, body}`. Both refuse (return `false`) a new name that exists or an edited name that does not
-— re-checked under the gate, since another tab may have declared it meanwhile.
+— re-checked under the gate, since another tab may have declared it meanwhile. An edit also acts only on what it named, as §5.1 does
+for hooks (Ruling V-B, final review I1): the sheet keeps the declaration as it drew it when it opened
+(`EndpointAsDrawn`/`TemplateAsDrawn`, through `WorkingCopy.Readable`), passes it as `drawn`, and the writer refuses under
+the gate when the declaration now reads otherwise. The sheet stays open with "The endpoint '{name}' changed in the working
+copy after you opened it — … Nothing was saved. Close this editor and open the endpoint again." Without it, a URL another
+tab or the assistant changed was silently put back by an edit of the description.
 
 ## 6. Endpoint and template declaration rules
 
@@ -612,6 +617,11 @@ Controller rulings and implementation findings:
   - The `Importable()` cut-downs of the bike-workshop example the e2e suite imported are reverted.
   - `Transfer`'s public surface moved from `IDisposable` to `IAsyncDisposable`, plus `OnAfterRenderAsync`, to dispose
     its JS subscriptions (now two: `oversized` and `measured`). The streamed import does not change it further.
+- **Ruling V-B. The endpoint and template edits are guarded like a hook edit (final fix wave, final review I1).** §5.5
+  first re-checked only that the declaration still existed, so an edit wrote every field from the draft taken when the
+  sheet opened and could silently undo another tab's URL. The writers now take the declaration as drawn and refuse a
+  mismatch in place (§5.5). Pinned by one unit fact per writer (`WorkingCopyIntegrationTests`) and by
+  `IntegrationEditOvertakenScenarios` (two sessions, one per kind; proved by sabotage: both fail with the guard removed).
 - **Import is refused until the working copy is loaded (Task 12).** An import sent earlier was a silent no-op. This is
   `ImportGate`. The page draws `data-copy-loaded`, which the scenarios wait on.
 - **"Not checked yet" names `…/action`, not `…/action/payload` (Task 11).** The schema's `$defs/action` is a `oneOf`, so
