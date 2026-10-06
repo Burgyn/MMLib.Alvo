@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Components.Authorization;
 using MMLib.Alvo.Admin.Internal;
 using MMLib.Alvo.Auth;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Management;
 using NSubstitute;
 using System.Security.Claims;
@@ -144,6 +145,66 @@ public class ManagementGatewayCacheTests
         new HttpRequestException("down"),
         new OperationCanceledException(),
     ];
+
+    [Fact]
+    public async Task One_screen_reads_the_function_catalog_once_and_a_navigation_reads_it_again()
+    {
+        var navigation = new TestNavigation();
+        using var gateway = Gateway(navigation, out var management);
+        management.GetCelFunctionsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(new ManagementCelFunctions { Functions = [Function("trim")] });
+
+        (await gateway.CelFunctionsAsync(Ct)).Single().Name.ShouldBe("trim");
+        await gateway.CelFunctionsAsync(Ct);
+        await management.Received(1).GetCelFunctionsAsync("default", Arg.Any<CancellationToken>());
+
+        await navigation.GoToAsync("http://alvo.test/admin/schema");
+        await gateway.CelFunctionsAsync(Ct);
+        await management.Received(2).GetCelFunctionsAsync("default", Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [MemberData(nameof(ExpectedCatalogFailures))]
+    public async Task A_catalog_that_cannot_be_asked_answers_empty_and_is_asked_again_next_time(Exception failure)
+    {
+        using var gateway = Gateway(new TestNavigation(), out var management);
+        management.GetCelFunctionsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(
+                _ => throw failure,
+                _ => new ManagementCelFunctions { Functions = [Function("trim")] });
+
+        (await gateway.CelFunctionsAsync(Ct)).ShouldBeEmpty();
+        (await gateway.CelFunctionsAsync(Ct)).ShouldHaveSingleItem("a failure to ask caches nothing");
+    }
+
+    [Fact]
+    public async Task A_catalog_read_that_hits_a_bug_propagates()
+    {
+        using var gateway = Gateway(new TestNavigation(), out var management);
+        management.GetCelFunctionsAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<Task<ManagementCelFunctions>>(_ => throw new InvalidOperationException("bug"));
+
+        await Should.ThrowAsync<InvalidOperationException>(() => gateway.CelFunctionsAsync(Ct).AsTask());
+    }
+
+    public static TheoryData<Exception> ExpectedCatalogFailures() =>
+    [
+        new ManagementRequestException("refused"),
+        new ManagementForbiddenException(),
+        new HttpRequestException("down"),
+        new OperationCanceledException(),
+    ];
+
+    private static CelFunctionInfo Function(string name) => new()
+    {
+        Name = name,
+        Parameters = [],
+        Result = CelValueType.String,
+        ResultMayBeNull = false,
+        Summary = string.Empty,
+        Provenance = CelFunctionProvenance.BuiltIn,
+        Profiles = [CelProfile.Mutate],
+    };
 
     [Fact]
     public async Task A_disposed_gateway_no_longer_follows_the_circuit()
