@@ -467,8 +467,8 @@ Entity.razor.cs, `PS` PendingSchema.cs, `WC*` WorkingCopy.*.cs (all `Admin/Compo
 | Key | Build | Dashboard | When it meets one | Evidence |
 |---|---|---|---|---|
 | `beforeCreate` / `beforeUpdate` / `beforeDelete` / `afterCreate` / `afterUpdate` / `afterDelete` (6) | honoured | edit ×6 — add, edit in place (keeps the position), remove | an undrawable hook is read-only with its reason, kept | HooksTab.Edit.cs; WC.Hooks ReplaceHook |
-| before `condition` | honoured | edit | — | HookBuilder.cs:93 |
-| before `reject` | honoured | edit | — | HookBuilder.cs:174 |
+| before `condition` | honoured | edit | — | `HookBuilder.Condition`, written by `HookPatch.Apply` |
+| before `reject` | honoured | edit | — | `HookBuilder.RejectMessage`, refused blank by `HookBuilder.Missing` |
 | before `mutate.<f>` literal | honoured | edit — a value its type holds, checked as typed | — | MutateLiteral.cs |
 | before `mutate.<f>.$cel` | honoured (not under `beforeDelete`) | edit — several fields, field picked from the writable ones | — | HooksTab.Mutate.cs |
 | after `condition` | honoured | edit | — | |
@@ -476,8 +476,8 @@ Entity.razor.cs, `PS` PendingSchema.cs, `WC*` WorkingCopy.*.cs (all `Admin/Compo
 | `webhook.payload` | `{{…}}` template honoured; raw JSONata refused | edit — {{…}} payload, judged live by cel/check; raw JSONata gets the build's refusal | — | HooksTab.Pickers.cs |
 | `email.template` | honoured | edit (picker; a bodyFile template is not offered) | — | HooksTab.Pickers.cs |
 | `email.to` | honoured | edit | — | |
-| `email.data` | refused | said (On-write tab and Integrations "What this build refuses") | — | UF:210; AHC:306; RefusalPlaces.cs:63; HooksTab.razor.cs:79; Integrations.razor:82-96 |
-| `function.name` / `.input` (2) | refused | said ×2 (On-write tab) | — | AHC:226; HooksTab.razor.cs:86 |
+| `email.data` | refused | said (On-write tab and Integrations "What this build refuses") | — | UF:210; AHC:306; RefusalPlaces.cs:63; `HooksTab.HookRefusals`; Integrations "What this build refuses" panel |
+| `function.name` / `.input` (2) | refused | said ×2 (On-write tab) | — | AHC:226; `HooksTab.HookRefusals` |
 | `entity.update.entity` / `.recordId` / `.payload` (3) | refused | said ×3 | — | same |
 | `http.call.url` / `.method` / `.headersSecretRef` / `.payload` (4) | refused | said ×4 | — | same |
 
@@ -495,11 +495,11 @@ Entity.razor.cs, `PS` PendingSchema.cs, `WC*` WorkingCopy.*.cs (all `Admin/Compo
 | `x-*` | preserved | gap | preserved | |
 | `templates.<t>.subject` | honoured for after-hook email; warned for automation | edit (Integrations) | — | TemplateEditor.razor |
 | `templates.<t>.body` | same | edit (Integrations) | — | TemplateEditor.razor |
-| `templates.<t>.bodyFile` | refused when an after-hook references it, else warned | read (raw); never offered by the template picker | refusal (`bodyFile`) shown under the template's row and in "What this build refuses" | UF:229; AHC:344; RefusalPlaces.cs:64; Integrations.razor:142,269-272 |
+| `templates.<t>.bodyFile` | refused when an after-hook references it, else warned | read (raw); never offered by the template picker | refusal (`bodyFile`) shown under the template's row and in "What this build refuses" | UF:229; AHC:344; RefusalPlaces.cs:64; `Integrations.BodyFileRefusal`, under the template's row |
 | `formats.<f>.pattern` | honoured | gap | preserved | Map:128-153; RecordValidator.cs:195 |
 | `formats.<f>.description` | ignored (unverified — no reader found) | gap | preserved | |
-| `webhooks.endpoints.<n>.url` | honoured for after-hooks | edit (Integrations; https or loopback http; secretRef a SecretName) | — | EndpointEditor.razor |
-| `.secretRef` | warned — not read, no HMAC | edit (Integrations; https or loopback http; secretRef a SecretName) | — | EndpointEditor.razor |
+| `webhooks.endpoints.<n>.url` | honoured for after-hooks | edit (Integrations; https or loopback http; the list masks userinfo) | — | EndpointEditor.razor; `UrlCredentials.Masked` |
+| `.secretRef` | warned — not read, no HMAC | edit (Integrations; a SecretName, never a value) | — | EndpointEditor.razor |
 | `.description` | ignored (unverified) | edit (Integrations, optional) | — | EndpointEditor.razor:73-76 |
 | `functions.<f>.script` | warned | said (Functions page, Overview) | — | US:145; NotYet.razor:57 |
 | `.trigger.http.route` | warned | said | — | |

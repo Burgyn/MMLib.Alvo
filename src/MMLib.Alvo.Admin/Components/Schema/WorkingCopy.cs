@@ -103,6 +103,9 @@ internal sealed partial class WorkingCopy
     /// <summary>The revision the working copy was taken from.</summary>
     public int Revision { get; private set; }
 
+    /// <summary>The guided condition's last scope read off this copy (<see cref="ConditionScope.Of"/>).</summary>
+    internal ConditionScopeCache ConditionScopes { get; } = new();
+
     /// <summary>Whether a working copy has been loaded at all.</summary>
     public bool Loaded => _working is not null;
 

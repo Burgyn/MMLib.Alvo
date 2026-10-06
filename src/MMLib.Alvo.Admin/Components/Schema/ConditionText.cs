@@ -63,16 +63,15 @@ internal sealed record ConditionScope(IReadOnlyList<ConditionField> Fields, IRea
                 .Select(field => new ConditionField(field.Name, ConditionTable.KindOf(field.Type), field.Nullable, field.EnumValues ?? Array.Empty<string>()))],
         roles);
 
-    private static ScopeRead? _last;
-
     /// <summary>
     /// The scope of one entity in a working copy, or an empty one without a copy — the one place the form and the sheet
     /// build it.
     /// </summary>
     /// <remarks>
-    /// The last one read is kept by (descriptor text, entity): a render asks again on every pass, and the descriptor is
-    /// parsed only when the text or the entity changed. The cache holds one immutable entry, swapped whole, so circuits
-    /// sharing it never see half of one.
+    /// The last one read is kept on the copy itself (<see cref="WorkingCopy.ConditionScopes"/>), by (descriptor text,
+    /// entity): a render asks again on every pass, and the descriptor is parsed only when the text or the entity changed.
+    /// Per copy, not process-wide (final review M4): one operator's text is never pinned, or compared, on behalf of another,
+    /// and it goes when the copy does.
     /// </remarks>
     /// <param name="copy">The working copy, or <see langword="null"/>.</param>
     /// <param name="entity">The entity.</param>
@@ -83,20 +82,37 @@ internal sealed record ConditionScope(IReadOnlyList<ConditionField> Fields, IRea
             return new ConditionScope([], []);
         }
 
-        var json = copy.Json;
-        if (_last is { } last && last.Entity == entity && (ReferenceEquals(last.Json, json) || last.Json == json))
-        {
-            return last.Scope;
-        }
-
-        var scope = From(PendingSchema.Read(json, entity), DescriptorLens.DeclaredRoles(json));
-        _last = new ScopeRead(json, entity, scope);
-        return scope;
+        return copy.ConditionScopes.Of(copy.Json, entity);
     }
 
     /// <summary>The field by name, or <see langword="null"/>.</summary>
     /// <param name="name">The name.</param>
     public ConditionField? Field(string name) => Fields.FirstOrDefault(field => string.Equals(field.Name, name, StringComparison.Ordinal));
+
+}
+
+/// <summary>The last <see cref="ConditionScope"/> one working copy read, with what it was read from.</summary>
+/// <remarks>
+/// The entry is immutable and swapped whole, so two tabs of one operator, which share the copy, never see half of one.
+/// </remarks>
+internal sealed class ConditionScopeCache
+{
+    private ScopeRead? _last;
+
+    /// <summary>The scope of <paramref name="entity"/> in <paramref name="json"/>, read again only when either changed.</summary>
+    /// <param name="json">The copy's descriptor text.</param>
+    /// <param name="entity">The entity.</param>
+    public ConditionScope Of(string json, string entity)
+    {
+        if (_last is { } last && last.Entity == entity && (ReferenceEquals(last.Json, json) || last.Json == json))
+        {
+            return last.Scope;
+        }
+
+        var scope = ConditionScope.From(PendingSchema.Read(json, entity), DescriptorLens.DeclaredRoles(json));
+        _last = new ScopeRead(json, entity, scope);
+        return scope;
+    }
 
     /// <summary>One scope read, with what it was read from.</summary>
     private sealed record ScopeRead(string Json, string Entity, ConditionScope Scope);

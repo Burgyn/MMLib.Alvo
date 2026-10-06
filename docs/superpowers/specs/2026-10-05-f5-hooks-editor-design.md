@@ -379,6 +379,8 @@ is. A table cell that apply refuses would show its refusal under the readout —
   stay on the refusal panels (`RefusalPlaces`), and `RefusalPlacementScenarios` stays exhaustive.
 * Claim a destination is reachable, or that a delivery is signed or projected (§6.3).
 * Put an endpoint URL in a snackbar, a log line or an error sentence (names only).
+* Show the credentials a URL carries before its host: the Integrations list masks the userinfo
+  (`https://***@host/…`, `UrlCredentials.Masked`, final review M7); the edit box holds the real value it edits.
 * Evaluate any expression in the dashboard: the guided form generates text; the core judges it (`cel/check`, apply).
 * Write a hook shape it cannot draw, or drop one (§5.2, `A_hook_the_editor_cannot_draw_survives_beside_it` extended to
   edits).
@@ -648,6 +650,22 @@ Controller rulings and implementation findings:
   in a form Enter submits" scanned one file at a time, and `ConditionBuilder`'s value box sits in the hook sheet's form,
   one component up. The test now counts a component as inside a form when every component that draws its tag also
   draws an `AlvoEditor`.
+- **Final review minors (final fix wave).**
+  - **M1. `EndpointEditor` and `TemplateEditor` each carry `protected override void OnInitialized()`**, which §14 did not
+    list. It is forced by the generator, not chosen: a Razor component is public, so any lifecycle override it writes is
+    public API. It loads the declaration, and since Ruling V-B the declaration as drawn, once per sheet, when the sheet
+    opens. Moving it to `OnParametersSet` behind a first-time flag would be an override all the same (T-B weighed the
+    same trade for `ConditionBuilder`, which had a parameter-driven reason to read in `OnParametersSet`; these sheets do
+    not). Accepted as two members of the PublicApi baseline.
+  - **M4. `ConditionScope.Of` caches on the working copy** (`WorkingCopy.ConditionScopes`), not in a process-wide static:
+    one operator's descriptor text is never pinned or compared on behalf of another, and it goes with the copy.
+  - **M5. A row is revealed by its id as a quoted attribute selector** (`RevealOnRender.ById`): an imported endpoint
+    named `a"b` made `#endpoint-a"b` a selector the browser refused, and the error ended the circuit. A refused selector
+    is now also caught and logged at Debug. `ImportedNameRevealScenarios` pins it with exactly that name.
+  - **M6. A role row whose role left `auth.roles` while the sheet was open blocks the save** through the `ConditionGate`
+    ("Condition N names a role that is no longer declared."), as a gone field does. `GuidedRoleGoneScenarios`.
+  - **M7.** See §8: the list masks a URL's userinfo. The query string is shown as written (the review left it optional,
+    and a query is where a reader tells two endpoints on one host apart).
 - **Focus.** Keep editing in the Edit sheet returns focus to the first control. That is now the condition's Guided/Text
   switch, not `#hook-condition` (§9: "the first editable field after the fixed point"). Removing a guided row focuses
   the Remove of the row that took its place, or Add a condition (review I2). Both are pinned by e2e.
@@ -673,7 +691,8 @@ Controller rulings and implementation findings:
 - **e2e scenarios per class** (new in this slice): `HookEditInPlaceScenarios` 8, `HookShapeScenarios` 1,
   `MutateEditingScenarios` 8, `MutateOpenScenarios` 1, `HookPickerScenarios` 6, `UndeclaredReferenceScenarios` 1,
   `IntegrationsScenarios` 9, `TemplateDeclarationScenarios` 5, `GuidedConditionScenarios` 12 methods (13 cases),
-  `ImportSizeScenarios` 3, `LargeImportScenarios` 1. That is 56 cases. `ExpressionCheckScenarios` stays at 10, with
+  `ImportSizeScenarios` 3, `LargeImportScenarios` 1, and from the final fix wave `IntegrationEditOvertakenScenarios` 2,
+  `GuidedRoleGoneScenarios` 1, `ImportedNameRevealScenarios` 1. That is 60 cases. `ExpressionCheckScenarios` stays at 10, with
   its mutate scenarios ported to row ids.
 
 ### What the facts found

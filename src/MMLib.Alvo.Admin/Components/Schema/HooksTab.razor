@@ -125,7 +125,7 @@ else
 
 @if (_reveal is { } revealed)
 {
-    @RevealOnRender.On($"#{revealed}", _reveals)
+    @RevealOnRender.ById(revealed, _reveals)
 }
 
 @if (_adding || _editing is not null)
