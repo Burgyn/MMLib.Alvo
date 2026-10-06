@@ -156,16 +156,19 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
         await ProblemResultFactory.FunctionFailed(FunctionFailedDetail(failure)).ExecuteAsync(httpContext).ConfigureAwait(false);
     }
 
+    /// <summary>The caller-facing sentence for a whole condition that evaluated to no Bool.</summary>
+    private const string WholeConditionDetail = "The hook's condition evaluated to a present value that is not a Bool. Nothing was written.";
+
     /// <summary>The caller-facing sentence for a function failure.</summary>
     /// <remarks>
-    /// A whole condition that evaluated to no Bool (<see cref="CelInterpreter.WholeCondition"/>) is no function, so its
-    /// reason, which already names the condition, is the sentence.
+    /// A whole condition that evaluated to no Bool (<see cref="CelInterpreter.WholeCondition"/>) is no function, so it
+    /// answers a constant sentence that names the condition, whatever reason the exception carries.
     /// </remarks>
     /// <param name="failure">The failure.</param>
     /// <returns>The detail text.</returns>
     internal static string FunctionFailedDetail(CelFunctionException failure) => failure.Reason switch
     {
-        { } reason when failure.FunctionName == CelInterpreter.WholeCondition => $"{char.ToUpperInvariant(reason[0])}{reason[1..]}. Nothing was written.",
+        _ when failure.FunctionName == CelInterpreter.WholeCondition => WholeConditionDetail,
         { } reason => $"The CEL function '{failure.FunctionName}' failed: {reason}. Nothing was written.",
         null => $"The CEL function '{failure.FunctionName}' failed while this write was evaluated, so nothing was written. Its own error is in the server log.",
     };

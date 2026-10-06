@@ -227,7 +227,8 @@ generated route a CSRF target and is refused at startup.
 
 ## Registering a CEL function
 
-An embedded host can give its descriptor's hooks a function of its own. Register it where you call `AddAlvo`:
+An embedded host can give its descriptor's hooks a function of its own. Register it
+where you call `AddAlvo`:
 
 ```csharp
 builder.Services.AddAlvo(alvo => alvo
@@ -246,31 +247,40 @@ Then call it from a hook — a `condition`, or a before-hook `mutate` value:
   { "action": { "mutate": { "frame_number": { "$cel": "normalizeFrameNumber(new.frame_number)" } } } } ] }
 ```
 
-What the registration checks, at the call (an `ArgumentException`): the name (`^[a-z][a-zA-Z0-9_]*`, at most 64
-characters, not a built-in or a reserved CEL word), at most four parameters of `string long int decimal bool
-DateTimeOffset Guid` or their nullable forms, the same set for the result, no `Task`, `ref`, `out` or multicast delegate.
+What the registration checks, at the call (an `ArgumentException`): the name
+(`^[a-z][a-zA-Z0-9_]*`, at most 64 characters, not a built-in or a reserved CEL
+word), at most four parameters of `string long int decimal bool DateTimeOffset Guid`
+or their nullable forms, the same set for the result, no `Task`, `ref`, `out` or
+multicast delegate.
 
-What you promise, because Alvo cannot check it: the function is **pure, fast and thread-safe**. It runs inside the
-write's transaction, once per evaluation, on any request thread, with no time budget and no cancellation; it captures
-singletons only. A function that reads stored data must filter by the tenant itself — Alvo's tenant filter does not
-reach inside — so give it the tenant as an argument: in a `condition`, pass `@tenant.id`; in a `mutate`, pass
-`new.tenant_id` (a column of a tenant-scoped row), because a mutate cannot read `@tenant` or `@user` (the refusal's
-wording is tracked in #310). A function that throws refuses the write with `500 …/errors/function-failed`, naming the
-function and never your exception text (that goes to the log).
+What you promise, because Alvo cannot check it: the function is **pure, fast and
+thread-safe**. It runs inside the write's transaction, once per evaluation, on any
+request thread, with no time budget and no cancellation; it captures singletons only.
+A function that reads stored data must filter by the tenant itself — Alvo's tenant
+filter does not reach inside — so give it the tenant as an argument: in a
+`condition`, pass `@tenant.id`; in a `mutate`, pass `new.tenant_id` (a column of a
+tenant-scoped row), because a mutate cannot read `@tenant` or `@user` (the refusal's
+wording is tracked in #310). A function that throws refuses the write with
+`500 …/errors/function-failed`, naming the function and never your exception text
+(that goes to the log).
 
-Where it shows up: `GET {m}/projects/{p}/cel/functions` lists it with provenance `Host`; the dashboard's hook editor
-offers it under the mutate value box and the condition's text box, marked "this host"; the assistant's
-`get_cel_functions` tool lists it. It works in `condition` and `mutate` only — a rule or a computed field refuses it
-(store the value with a `mutate`, then compare the field). The standalone image and `alvo validate` know only the
-built-ins, so a descriptor that calls your function is portable only to hosts that register it. A function whose
-meaning changes gets a new name.
+Where it shows up: `GET {m}/projects/{p}/cel/functions` lists it with provenance
+`Host`; the dashboard's hook editor offers it under the mutate value box and the
+condition's text box, marked "this host"; the assistant's `get_cel_functions` tool
+lists it. It works in `condition` and `mutate` only — a rule or a computed field
+refuses it (store the value with a `mutate`, then compare the field). The standalone
+image and `alvo validate` know only the built-ins, so a descriptor that calls your
+function is portable only to hosts that register it. A function whose meaning changes
+gets a new name.
 
-A runnable registration is in the embedded sample: `samples/MMLib.Alvo.Samples.EmbeddedHost/SampleHost.cs` registers
-`normalizeVin`, and its README says why the shared `vehicles.alvo.json` never calls it.
+A runnable registration is in the embedded sample:
+`samples/MMLib.Alvo.Samples.EmbeddedHost/SampleHost.cs` registers `normalizeVin`, and
+its README says why the shared `vehicles.alvo.json` never calls it.
 
-The built-in functions and their exact semantics are in [cel.md](cel.md#built-in-functions). A value derived from other
-fields of the same row (a total, a full name) belongs in a **computed field**, which stays true on every write; a
-`mutate` stamps a value once, when its hook runs.
+The built-in functions and their exact semantics are in
+[cel.md](cel.md#built-in-functions). A value derived from other fields of the same
+row (a total, a full name) belongs in a **computed field**, which stays true on every
+write; a `mutate` stamps a value once, when its hook runs.
 
 ## Pitfalls (banned)
 

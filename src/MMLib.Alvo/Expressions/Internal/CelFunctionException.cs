@@ -8,6 +8,12 @@
 /// <see cref="Exception"/>; an after-hook condition drops the hook with a Warning. Internal: only the core throws it and
 /// names it — no public signature exposes the type.
 /// </summary>
+/// <remarks>
+/// <see cref="Exception.Message"/> always reads <c>The CEL function '…' failed…</c>, also for a whole hook condition that
+/// evaluated to no Bool, whose name is <c>&lt;condition&gt;</c> (<see cref="CelInterpreter.WholeCondition"/>). An embedded
+/// <c>IAlvoData</c> caller sees that wording as is; only the Data API's problem document rewords it, in
+/// <c>AlvoExceptionHandler.FunctionFailedDetail</c>.
+/// </remarks>
 #pragma warning disable RCS1194 // Deliberately no standard constructors: a function failure always names its function.
 internal sealed class CelFunctionException : Exception
 {

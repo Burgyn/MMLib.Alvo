@@ -15,11 +15,18 @@ public sealed partial class CelReferenceDocTests
         var section = doc[start..];
         section = section[..section.IndexOf("\n#### ", 5, StringComparison.Ordinal)];
 
-        var named = Row().Matches(section).Select(match => match.Groups["name"].Value).ToList();
+        var rows = Row().Matches(section).ToList();
+        var named = rows.Select(match => match.Groups["name"].Value).ToList();
 
         named.ShouldBe(CelFunctionCatalog.BuiltIns.Names);
+        rows.Select(match => $"{match.Groups["name"].Value}: {Signature().Count(match.Groups["signatures"].Value)}")
+            .ShouldBe(named.Select(name => $"{name}: {CelFunctionCatalog.BuiltIns.Overloads(name).Count}"),
+                "each row lists one backticked signature per overload the catalog holds");
     }
 
-    [GeneratedRegex(@"^\| `(?<name>[a-zA-Z.]+)` \|", RegexOptions.Multiline)]
+    [GeneratedRegex(@"^\| `(?<name>[a-zA-Z.]+)` \| (?<signatures>[^|]*) \|", RegexOptions.Multiline)]
     private static partial Regex Row();
+
+    [GeneratedRegex(@"`\(")]
+    private static partial Regex Signature();
 }

@@ -169,7 +169,7 @@ real need): `substring(new.title, 0, math.least(size(new.title), 40))`.
 
 No reason carries a value from the row (C1 §6: "text Alvo wrote, never the host's", and never the caller's data).
 An operator's failure names it by CEL's own overload name (`_/_`), so the problem detail reads "The CEL function '_/_'
-failed: the divisor is zero. Nothing was written." (`AlvoExceptionHandler.FunctionFailedDetail`, unchanged). A whole
+failed: the divisor is zero. Nothing was written." (`AlvoExceptionHandler.FunctionFailedDetail`, unchanged for operators). A whole
 condition's failure names no function, so its detail is the reason as a sentence: "The hook's condition evaluated to a
 present value that is not a Bool. Nothing was written." (`<condition>` stays the logged name; plan Task 17.)
 
@@ -180,7 +180,7 @@ present value that is not a Bool. Nothing was written." (`<condition>` stays the
 | `+ - *` | Computed, **Condition, Mutate** | Int, Int → Int (checked 64-bit); any Decimal → Decimal | a null operand → null (unchanged) | Int overflow; Decimal overflow |
 | `/` | Computed, **Condition, Mutate** | Int, Int → Int, **truncated toward zero** (`7 / 2` = `3`, `-7 / 2` = `-3`); any Decimal → Decimal (28 significant digits) | null → null | divisor zero (Int or Decimal); smallest Int `/ -1` |
 | unary `-` | Computed, **Condition, Mutate** | Int → Int; Decimal → Decimal | null → null | `-` of the smallest Int |
-| string `+` | Computed, **Mutate** | String, String → String; no implicit conversion (write `string(x)`) | **Mutate: null → null** (F18); Computed: an operand that may be null is still refused at compile (unchanged) | never (Ruling V refuses an overlong stored value with 403) |
+| string `+` | Computed, **Mutate** | String, String → String; no implicit conversion (write `string(x)`) | **Mutate: null → null** (F18); Computed: an operand that may be null is still refused at compile (unchanged) | never for two texts, unless the result would pass 1,048,576 characters (R-2); a present operand that is no text and no number fails (Ruling P); Ruling V refuses an overlong stored value with 403 |
 
 * **The flag.** `EvalState` gains `FailClosed`, set from `CompiledExpression.Profile is Condition or Mutate` through one
   predicate, `CelHookArithmetic.FailsClosed`, which the literal-zero-divisor refusal below reads too. Only those

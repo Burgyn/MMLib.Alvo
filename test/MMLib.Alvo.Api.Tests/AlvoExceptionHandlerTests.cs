@@ -153,6 +153,7 @@ public class AlvoExceptionHandlerTests
     [Theory]
     [InlineData("_/_", "the divisor is zero", "The CEL function '_/_' failed: the divisor is zero. Nothing was written.")]
     [InlineData(CelInterpreter.WholeCondition, CelInterpreter.WholeConditionReason, "The hook's condition evaluated to a present value that is not a Bool. Nothing was written.")]
+    [InlineData(CelInterpreter.WholeCondition, "", "The hook's condition evaluated to a present value that is not a Bool. Nothing was written.")]
     public void A_function_failure_detail_names_what_failed(string name, string reason, string detail) =>
         AlvoExceptionHandler.FunctionFailedDetail(new CelFunctionException(name, reason)).ShouldBe(detail);
 

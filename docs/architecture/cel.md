@@ -234,7 +234,7 @@ Since slice D, arithmetic is legal in `Condition` and `Mutate`, and string `+` i
 | `+ - *` | Computed, Condition, Mutate | Int, Int → Int (checked 64-bit); any Decimal → Decimal | a null operand → null | Int overflow; Decimal overflow |
 | `/` | Computed, Condition, Mutate | Int, Int → Int, **truncated toward zero** (`7 / 2` = `3`, `-7 / 2` = `-3`); any Decimal → Decimal (28 significant digits) | null → null | a zero divisor (Int or Decimal); the smallest Int `/ -1` |
 | unary `-` | Computed, Condition, Mutate | Int → Int; Decimal → Decimal | null → null | `-` of the smallest Int |
-| string `+` | Computed, Mutate | String, String → String; no implicit conversion (write `string(x)`) | **Mutate: null → null** (deviation 34); Computed: an operand that may be null is refused at compile | never (a stored value over `maxLength` is refused by Ruling V) |
+| string `+` | Computed, Mutate | String, String → String; no implicit conversion (write `string(x)`) | **Mutate: null → null** (deviation 34); Computed: an operand that may be null is refused at compile | never for two texts, unless the result would pass 1,048,576 characters (R-2); a present operand that is no text and no number fails (Ruling P); a stored value over `maxLength` is refused by Ruling V |
 
 - **Only the hook profiles fail closed.** One predicate, `CelHookArithmetic.FailsClosed`, sets the interpreter's
   fail-closed flag from the compiled expression's profile. `Computed` and a `Rule` keep answering `null` on overflow
