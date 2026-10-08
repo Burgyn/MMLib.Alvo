@@ -12,7 +12,8 @@ An entity's `hooks` hold lists under `beforeCreate`, `beforeUpdate` and `beforeD
 - `{"mutate": {"<field>": …}}` sets fields before the write: each value is a JSON literal or `{"$cel": "…"}`.
 
 A before-hook runs inside the write's transaction, with no network: it can refuse or change this row, and
-nothing else. A hook without a `condition` runs on every write of its kind.
+nothing else. A hook without a `condition` runs on every write of its kind, and never on a schedule: a timed job is
+`automation`, which this build does not run.
 
 The shape: `schema/project.schema.json#/$defs/beforeHookList`.
 
@@ -25,8 +26,7 @@ combinations are refused at apply: a delete has no `new.`, a create no `old.`.
 - refused: `quantity * unit_price` `now()`
 <!-- /gen:cel-condition -->
 
-The dashboard draws `startsWith`, `endsWith` or `contains` over a text field and a literal as a guided row. The tests
-are case-sensitive: compare `lowerAscii(new.<field>)` to ignore case.
+Text tests (`startsWith`, `endsWith`, `contains`) are case-sensitive: compare `lowerAscii(new.<field>)` to ignore case.
 
 A `mutate` value is a field, a literal, arithmetic (`+ - * /`, unary `-`), `+` joining two strings, or a call to
 one of these built-in functions (all may nest), and nothing more: no `@user` or `@tenant`. A number joins through
@@ -42,7 +42,8 @@ A `substring` past the end fails the write, so to fit a field's `maxLength`, cut
 `substring(new.description, 0, math.least(size(new.description), 40))`. A value derived from other fields of the row
 belongs in a computed field, which stays true on every write; a `mutate` stamps it once.
 
-An embedded host may register its own functions; they work in a `condition` and a `mutate` and nowhere else. Call
+An embedded host may register its own CEL functions, which compute a value and never run your code (the
+`function` action is refused); they work in a `condition` and a `mutate` and nowhere else. Call
 `get_cel_functions` for this host's list with each function's parameters and result — never assume one exists. A
 function whose meaning changes gets a new name (`vatRate` stays, `vatRate2` is new). Alvo's tenant filter does not
 reach inside a function: one that reads stored data must take the tenant as a parameter and filter by it.
