@@ -1,0 +1,54 @@
+---
+import Default from '@astrojs/starlight/components/PageTitle.astro';
+
+const { entry, sidebar } = Astro.locals.starlightRoute;
+const isSplash = entry.data.template === 'splash';
+const description = entry.data.description;
+
+type Item = (typeof sidebar)[number];
+const holdsCurrent = (item: Item): boolean =>
+  item.type === 'link' ? item.isCurrent : item.entries.some(holdsCurrent);
+const group = sidebar.find((item) => item.type === 'group' && holdsCurrent(item));
+---
+
+{isSplash ? <Default /> : (
+  <div class="alvo-page-title">
+    <nav aria-label="Breadcrumb" class="alvo-breadcrumb">
+      <a href="/MMLib.Alvo/start-here/why-alvo/">Docs</a>
+      {group && <><span aria-hidden="true">›</span><span>{group.label}</span></>}
+    </nav>
+    <Default />
+    {description && <p class="alvo-lead">{description}</p>}
+  </div>
+)}
+
+<style>
+  .alvo-breadcrumb {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 0.35em;
+    margin-top: 0.75rem;
+    font-size: 0.875rem;
+    color: var(--faint);
+  }
+  .alvo-breadcrumb a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 24px;
+    color: var(--faint);
+    text-decoration: none;
+  }
+  .alvo-breadcrumb a:hover { color: var(--text); text-decoration: underline; }
+  .alvo-page-title :global(h1) { margin-top: 0.5rem; }
+  .alvo-lead {
+    max-width: 640px;
+    margin: 12px 0 0;
+    font-size: 1.25rem;
+    line-height: 1.5;
+    color: var(--dim);
+  }
+  @media (max-width: 47.99rem) {
+    .alvo-lead { font-size: 1.125rem; }
+  }
+</style>

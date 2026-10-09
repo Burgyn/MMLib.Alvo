@@ -12,13 +12,14 @@ const shouldRenderSearch =
 
 const primary = [
   { label: 'Docs', href: '/MMLib.Alvo/start-here/why-alvo/' },
-  { label: 'Guides', href: '/MMLib.Alvo/guides/entities-and-fields/' },
+  { label: 'Reference', href: '/MMLib.Alvo/reference/' },
+  { label: 'Examples', href: '/MMLib.Alvo/examples/' },
+  { label: 'Roadmap', href: '/MMLib.Alvo/project/roadmap/' },
 ];
 
 const path = Astro.url.pathname;
-const section = (href: string) => href.split('/').slice(0, 3).join('/') + '/';
-const inSection = (href: string) => path.startsWith(section(href));
 const isSplash = Astro.locals.starlightRoute.entry.data.template === 'splash';
+const inSection = (href: string) => path.startsWith(href);
 const fallback = !isSplash && !primary.slice(1).some((link) => inSection(link.href));
 const current = (href: string, index: number) => {
   if (path === href) return 'page';

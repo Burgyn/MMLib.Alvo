@@ -163,11 +163,14 @@ starlight-theme-select select {
   box-shadow: none;
   padding: 0.6875rem;
 }
-.sl-menu-button:hover,
 .sl-menu-button:has(~ :popover-open),
 :root[data-theme='light'] .sl-menu-button:has(~ :popover-open) {
-  background-color: var(--panel2);
+  background-color: transparent;
   color: var(--text);
+}
+.sl-menu-button:hover,
+:root[data-theme='light'] .sl-menu-button:hover {
+  background-color: var(--panel2);
 }
 
 /* Code (U-S6): frames take --codeBg through Expressive Code styleOverrides in astro.config.mjs. */
@@ -313,9 +316,18 @@ nav.sidebar .sidebar-content > .md\:sl-hidden { order: -1; }
 }
 .mobile-preferences .social-icons a { min-height: 44px; text-decoration: none; }
 .mobile-preferences .social-icons a::after { content: 'GitHub' / ''; margin-inline-start: 8px; font-weight: 600; }
-.mobile-preferences starlight-theme-select select { width: 100%; font-weight: 600; text-align: center; text-align-last: center; }
+.mobile-preferences starlight-theme-select select {
+  width: 100%;
+  padding-inline: 12px 32px;
+  font-weight: 600;
+  text-align: center;
+  text-align-last: center;
+}
+.mobile-preferences starlight-theme-select .label-icon { display: none; }
+.mobile-preferences starlight-theme-select .caret { inset-inline-end: 12px; width: 14px; height: 14px; font-size: 14px; }
 
 /* Table of contents: 32px rows with a rail on desktop (≥ 24px, WCAG 2.5.8). */
+.right-sidebar { border-inline-start: 0; }
 .right-sidebar-panel { padding: 2.25rem 20px 40px 8px; }
 starlight-toc h2 {
   font-size: var(--text-sm);

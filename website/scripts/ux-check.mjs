@@ -186,6 +186,8 @@ async function keyboardFocus(page, path, fail) {
     if (document.querySelector(`.sl-markdown-content :is(${focusable})`)) return '.sl-markdown-content';
     return 'main';
   }, path);
+  await page.waitForFunction(() => !document.querySelector('.main-frame[inert]'));
+  await page.evaluate(() => document.activeElement?.blur());
   if (container === 'main') notes.add(`${path}: no focusable content in the article yet, the keyboard check lands in <main>`);
   for (let i = 0; i < 80; i++) {
     await page.keyboard.press('Tab');
