@@ -9,6 +9,19 @@ public class ProblemTypeNotesTests
     private static readonly string _root = RepositoryRoot.Find();
     private static readonly IReadOnlyDictionary<string, ProblemTypeNote> _notes = ProblemTypeNotes.Load(Path.Combine(_root, "website"));
 
+    private static readonly string _api = Path.Combine("MMLib.Alvo", "Api", "Internal");
+
+    private static readonly Dictionary<string, string[][]> _producers = new(StringComparer.Ordinal)
+    {
+        ["validation"] =
+        [
+            [_api, "PayloadViolations.cs"], [_api, "BatchViolations.cs"], [_api, "BoundedJsonBody.cs"], [_api, "ProblemResultFactory.cs"],
+        ],
+        ["malformed-query"] = [[_api, "QueryViolations.cs"], [_api, "BoundedJsonBody.cs"]],
+        ["forbidden"] = [["MMLib.Alvo.Data.EntityFrameworkCore", "Internal", "EfAlvoData.cs"]],
+        ["conflict"] = [[_api, "ProblemResultFactory.cs"]],
+    };
+
     [Fact]
     public void Every_slug_has_notes_and_every_note_is_a_slug() =>
         _notes.Keys.Order(StringComparer.Ordinal).ShouldBe(AlvoProblemTypes.All.Order(StringComparer.Ordinal));
@@ -45,13 +58,31 @@ public class ProblemTypeNotesTests
         _notes.Values.ShouldAllBe(note => note.Causes.Count > 0 && note.Fix.Length > 0 && note.Guides.Count > 0);
 
     [Fact]
-    public void Every_violation_code_is_emitted_by_the_source()
-    {
-        var source = string.Concat(Directory.EnumerateFiles(Path.Combine(_root, "src"), "*.cs", SearchOption.AllDirectories)
-            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
-            .Select(File.ReadAllText));
+    public void Every_violation_code_is_emitted_by_the_source() =>
+        _notes.SelectMany(n => n.Value.ViolationCodes).Distinct().ShouldAllBe(code => ProductSource.Emits(ProductSource.All, code));
 
-        _notes.SelectMany(n => n.Value.ViolationCodes).Distinct().ShouldAllBe(code => source.Contains($"\"{code}\"", StringComparison.Ordinal));
+    [Fact]
+    public void Every_slug_with_codes_has_its_producers_listed() =>
+        _notes.Where(n => n.Value.ViolationCodes.Count > 0).Select(n => n.Key).Order(StringComparer.Ordinal)
+            .ShouldBe(_producers.Keys.Order(StringComparer.Ordinal));
+
+    [Fact]
+    public void Every_violation_code_is_emitted_where_its_slug_is_produced()
+    {
+        foreach (var (slug, files) in _producers)
+        {
+            var source = string.Join('\n', files.Select(file => ProductSource.Read(file)));
+            _notes[slug].ViolationCodes.ShouldAllBe(code => ProductSource.Emits(source, code), $"slug '{slug}'");
+        }
+    }
+
+    [Fact]
+    public void Both_body_paths_publish_the_shared_bound_codes()
+    {
+        ProductSource.Read(_api, "PayloadViolations.cs").ShouldContain("BoundedJsonBody.CodeOf(");
+        ProductSource.Read(_api, "QueryViolations.cs").ShouldContain("BoundedJsonBody.CodeOf(");
+        ProductSource.Read(_api, "QueryBodyReader.cs").ShouldContain("QueryViolations.Body(");
+        ProductSource.Read(_api, "DataApiEndpoints.cs").ShouldContain("ProblemResultFactory.MalformedQuery(body.Violations)");
     }
 
     [Fact]

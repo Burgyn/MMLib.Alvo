@@ -25,8 +25,6 @@ internal static class OptionsKeys
 
     private static readonly HashSet<Type> _structuredScalars = [typeof(TimeSpan), typeof(Guid), typeof(DateTimeOffset), typeof(DateTime), typeof(Uri)];
 
-    private static readonly NullabilityInfoContext _nullability = new();
-
     internal static IReadOnlyList<ConfigurationKey> Walk(string section, Type type, XmlDocs docs)
     {
         var keys = new List<ConfigurationKey>();
@@ -83,11 +81,11 @@ internal static class OptionsKeys
         }
         else if (DictionaryValueType(type) is { } valueType)
         {
-            AddElement(keys, key + ":{name}", valueType, description, docs);
+            AddElement(keys, new Element(key + ":{name}", valueType, value), description, docs);
         }
         else if (ElementType(type) is { } elementType)
         {
-            AddElement(keys, key + ":{n}", elementType, description, docs);
+            AddElement(keys, new Element(key + ":{n}", elementType, value), description, docs);
         }
         else
         {
@@ -95,19 +93,29 @@ internal static class OptionsKeys
         }
     }
 
-    private static void AddElement(List<ConfigurationKey> keys, string key, Type elementType, string description, XmlDocs docs)
+    private static void AddElement(List<ConfigurationKey> keys, Element element, string description, XmlDocs docs)
     {
-        if (IsScalar(elementType))
+        if (IsScalar(element.Type))
         {
-            keys.Add(new ConfigurationKey(key, TypeLabel(elementType, nullableReference: false), EmptyCollection, description));
+            keys.Add(new ConfigurationKey(element.Key, TypeLabel(element.Type, nullableReference: false), CollectionDefault(element.Collection), description));
             return;
         }
 
-        WalkObject(keys, key, elementType, Create(elementType), docs);
+        WalkObject(keys, element.Key, element.Type, Create(element.Type), docs);
     }
 
+    internal static string CollectionDefault(object? collection) => collection switch
+    {
+        null => NoDefault,
+        System.Collections.IDictionary { Count: 0 } or System.Collections.ICollection { Count: 0 } => EmptyCollection,
+        System.Collections.IDictionary dictionary =>
+            string.Join(", ", dictionary.Keys.Cast<object>().Select(name => $"{name} = {DefaultOf(dictionary[name])}")),
+        System.Collections.IEnumerable items => string.Join(", ", items.Cast<object?>().Select(DefaultOf)),
+        _ => DefaultOf(collection),
+    };
+
     private static bool IsNullableReference(PropertyInfo property) =>
-        !property.PropertyType.IsValueType && _nullability.Create(property).ReadState == NullabilityState.Nullable;
+        !property.PropertyType.IsValueType && new NullabilityInfoContext().Create(property).ReadState == NullabilityState.Nullable;
 
     private static Type? DictionaryValueType(Type type) =>
         EnumerableInterfaces(type)
@@ -123,6 +131,8 @@ internal static class OptionsKeys
 
     private static IEnumerable<Type> EnumerableInterfaces(Type type) =>
         (type.IsInterface ? type.GetInterfaces().Prepend(type) : type.GetInterfaces()).Where(candidate => candidate.IsGenericType);
+
+    private sealed record Element(string Key, Type Type, object? Collection);
 
     private static object? Create(Type type) =>
         type.GetConstructor(Type.EmptyTypes) is not null ? Activator.CreateInstance(type) : null;

@@ -9,7 +9,7 @@ namespace MMLib.Alvo.DocsGen.Problems;
 internal sealed class ProblemTypesGenerator : IPageGenerator
 {
     private const string EveryHost = "every host";
-    private const string OptInHosts = "the standalone host; an embedded host only with `AddAlvoProblemDetails()`";
+    private const string OptInHosts = "the standalone host; an embedded host only with `AddAlvoProblemDetails()` and `UseExceptionHandler()`";
     private const string ManagementApi = "the Management API only, on any host that maps it — never a Data API route";
     private const string NoCodes = "none — this refusal carries no itemised reasons";
 

@@ -10,11 +10,11 @@ internal static class LimitTexts
         ["AlvoApiOptions.MaxPayloadDepth"] = "A body nested deeper is refused with `422` (`body-too-deep`).",
         ["AlvoApiOptions.MaxPayloadKeys"] = "A body carrying more property names, counted at every depth, is refused with `422` (`body-too-many-fields`). In a batch the count applies per row.",
         ["AlvoApiOptions.MaxBatchRows"] = "A batch with more rows is refused with `422 validation` (`batch-too-many-rows`) and nothing is written; split it into several batches.",
-        ["AlvoApiOptions.MaxIdempotencyKeyBytes"] = "A longer `Idempotency-Key`, measured in UTF-8 bytes, is refused rather than shortened, so two different keys never collapse into one. It can only be lowered.",
+        ["AlvoApiOptions.MaxIdempotencyKeyBytes"] = "A longer `Idempotency-Key`, measured in UTF-8 bytes, is refused with `422 malformed-query` (no violation code) rather than shortened, so two different keys never collapse into one. It can only be lowered.",
         ["AlvoFilter.MaxDepth"] = "A filter nested deeper is refused with `422 malformed-query` (`filter-too-deep`).",
         ["AlvoFilter.MaxTerms"] = "A filter with more comparisons and connectives in total is refused with `422 malformed-query` (`filter-too-wide`).",
         ["AlvoFilter.MaxInCandidates"] = "An `in` list with more values is refused with `422 malformed-query` (`too-many-in-candidates`).",
         ["AlvoAuthOptionsValidator.MinimumSecretLength"] = "A dev API key whose secret is shorter stops the host at start. `openssl rand -hex 16` produces exactly this length.",
-        ["CelParser.MaxDepth"] = "A CEL expression nested deeper (parentheses, ternaries, unary operators, function arguments) is refused when the descriptor is applied or the host boots with it, so it never runs.",
+        ["CelParser.MaxDepth"] = "A CEL expression nested deeper (parentheses, ternaries, unary operators, function arguments) is refused before it runs: a Management API apply answers `422 validation` (`descriptor`), and a host booting with it refuses to start.",
     };
 }

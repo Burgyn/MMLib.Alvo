@@ -36,6 +36,24 @@ public partial class LimitsTests
         _limits.ShouldAllBe(limit => !ContributorWording().IsMatch(limit.Description));
 
     [Fact]
+    public void Every_slug_a_limit_text_names_is_a_problem_type()
+    {
+        var slugs = LimitTexts.BySource.Values.SelectMany(text => StatusAndSlug().Matches(text)).Select(match => match.Groups["slug"].Value).ToList();
+
+        slugs.ShouldNotBeEmpty();
+        slugs.ShouldAllBe(slug => AlvoProblemTypes.All.Contains(slug));
+    }
+
+    [Fact]
+    public void Every_code_a_limit_text_names_is_emitted_by_the_source()
+    {
+        var codes = LimitTexts.BySource.Values.SelectMany(text => ParenthesisedCode().Matches(text)).Select(match => match.Groups["code"].Value).ToList();
+
+        codes.ShouldNotBeEmpty();
+        codes.ShouldAllBe(code => Problems.ProductSource.Emits(Problems.ProductSource.All, code));
+    }
+
+    [Fact]
     public void Only_the_api_options_have_a_configuration_key() =>
         _limits.Where(limit => limit.ConfigurationKey is not null).ShouldAllBe(limit => limit.ConfigurationKey!.StartsWith("Alvo:Api:", StringComparison.Ordinal));
 
@@ -46,4 +64,10 @@ public partial class LimitsTests
 
     [GeneratedRegex(@"§|\bPR ?\d|#\d|\bspec\b|\bdesign\b|\bissue\b|\bruling\b", RegexOptions.IgnoreCase)]
     private static partial Regex ContributorWording();
+
+    [GeneratedRegex(@"`\d{3} (?<slug>[a-z]+(?:-[a-z]+)*)`")]
+    private static partial Regex StatusAndSlug();
+
+    [GeneratedRegex(@"\(`(?<code>[a-z]+(?:-[a-z]+)*)`\)")]
+    private static partial Regex ParenthesisedCode();
 }

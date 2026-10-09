@@ -23,7 +23,7 @@
       "A `filter`, `order`, `select`, `limit`, `offset` or `after` parameter is malformed, repeated or contradicts another.",
       "A filter names a field that is unavailable to the caller, or uses an operator the field's type does not support.",
       "A filter is deeper, wider or lists more `in` candidates than the limits allow.",
-      "A query sent as a request body is not a JSON object, or carries more values than the limits allow."
+      "A query sent as a request body is not a JSON object, is not valid JSON, names a parameter twice, or is larger, deeper or wider than the limits allow."
     ],
     "fix": "Correct the parameter each violation names in its `pointer`; the shape is wrong, nothing is hidden.",
     "violationCodes": [
@@ -32,7 +32,8 @@
       "too-many-in-candidates", "filter-beyond-port-limits", "pattern-too-long", "invalid-page-size", "invalid-offset",
       "invalid-cursor", "conflicting-paging", "malformed-order", "repeated-sort-key", "malformed-select",
       "malformed-select-alias", "colliding-projection-key", "projection-too-wide", "too-many-select-entries",
-      "too-many-query-values", "unrepresentable-query-value", "repeated-parameter"
+      "too-many-query-values", "unrepresentable-query-value", "repeated-parameter",
+      "not-an-object", "malformed-json", "duplicate-field", "body-too-large", "body-too-deep", "body-too-many-fields"
     ],
     "guides": ["guides/read-data", "guides/handle-errors"],
     "needsProblemDetails": false
@@ -44,7 +45,7 @@
       "A Management API caller does not reach the project access level the route needs.",
       "In a batch, rows refused by policy or named twice are listed in `violations`, one entry per row."
     ],
-    "fix": "Change the request so the rules admit it, or call with a role the rules grant. The detail never says which rule refused.",
+    "fix": "Change the request so the rules admit it, or call with a role the rules grant. A rule's refusal never says which rule refused; a before-hook's `reject` puts its own message in `detail`, written for the caller.",
     "violationCodes": ["forbidden", "duplicate-row"],
     "guides": ["guides/access-rules", "guides/before-hooks", "guides/handle-errors"],
     "needsProblemDetails": false

@@ -74,13 +74,13 @@ public partial class ProblemTypesTests
             new Dictionary<string, ProblemTypeNote> { ["internal"] = _note with { ViolationCodes = [], NeedsProblemDetails = true } },
             _ => "Handle errors");
 
-        page.Content.ShouldContain("**Returned by:** the standalone host; an embedded host only with `AddAlvoProblemDetails()`");
+        page.Content.ShouldContain("**Returned by:** the standalone host; an embedded host only with `AddAlvoProblemDetails()` and `UseExceptionHandler()`");
         page.Content.ShouldContain("**Violation codes:** none — this refusal carries no itemised reasons");
     }
 
     [Theory]
     [InlineData(false, false, "every host")]
-    [InlineData(true, false, "the standalone host; an embedded host only with `AddAlvoProblemDetails()`")]
+    [InlineData(true, false, "the standalone host; an embedded host only with `AddAlvoProblemDetails()` and `UseExceptionHandler()`")]
     [InlineData(false, true, "the Management API only, on any host that maps it — never a Data API route")]
     public void Returned_by_is_per_slug(bool needsProblemDetails, bool managementApiOnly, string expected) =>
         ProblemTypesGenerator.ReturnedBy(_note with { NeedsProblemDetails = needsProblemDetails, ManagementApiOnly = managementApiOnly })

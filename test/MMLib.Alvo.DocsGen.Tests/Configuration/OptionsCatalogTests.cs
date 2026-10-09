@@ -90,6 +90,15 @@ public class OptionsCatalogTests
         OptionsCatalog.OverwrittenByTheStandaloneHost.Keys.ShouldAllBe(key => _sections.SelectMany(s => s.Keys).Any(k => k.Key == key));
     }
 
+    [Fact]
+    public void A_scalar_collection_default_is_read_from_the_instance()
+    {
+        OptionsKeys.CollectionDefault(new List<string>()).ShouldBe(OptionsKeys.EmptyCollection);
+        OptionsKeys.CollectionDefault(new List<string> { "10.0.0.0/8", "fd00::/8" }).ShouldBe("`10.0.0.0/8`, `fd00::/8`");
+        OptionsKeys.CollectionDefault(new Dictionary<string, string> { ["smtp"] = "x" }).ShouldBe("smtp = `x`");
+        OptionsKeys.CollectionDefault(null).ShouldBe(OptionsKeys.NoDefault);
+    }
+
     [Theory]
     [InlineData("Alvo:Api:DefaultPageSize", "7")]
     [InlineData("Alvo:Auth:HeaderName", "X-Docs-Probe-Key")]
