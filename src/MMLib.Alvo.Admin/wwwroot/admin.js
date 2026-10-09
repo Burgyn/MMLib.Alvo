@@ -278,34 +278,40 @@ export function followNewest(element) {
   }
 }
 
-/** Where `follow` last put each thread, to tell the page's own scroll from the operator's. */
-const followedTo = new WeakMap();
+/** Where each thread was last seen: put there by `follow`, or left there by the last scroll heard. */
+const lastTop = new WeakMap();
 
 /**
  * "Scrolled up" is remembered from the operator's own scrolling, not measured after the list grew: once the new
  * turn is in, every list is "not at the bottom", and a check made then would never follow.
  *
- * And only from a scroll that moved the list UP from where this put it. The scroll event of `follow`'s own
+ * And only from a scroll that moved the list UP from where it was last seen. The scroll event of `follow`'s own
  * `scrollTop` arrives a frame later, and a streamed turn redraws the thread in between: a new turn lengthens it, a
  * proposal under it shortens the box. Measured then, the page's own scroll read as "far from the bottom", turned
- * following off, and the thread stopped on an old turn with nobody having scrolled (the e2e scenario's flake).
+ * following off, and the thread stopped on an old turn with nobody having scrolled (the e2e scenario's flake). The
+ * direction is judged against every scroll heard, not only against `follow`'s: a position remembered from before the
+ * operator scrolled away and back would be stale, and a small scroll up from a longer list would not count.
  */
 function follow(element) {
   if (!element.dataset.alvoFollow) {
     element.dataset.alvoFollow = 'on';
+    lastTop.set(element, element.scrollTop);
     element.addEventListener('scroll', () => {
-      const gap = element.scrollHeight - element.scrollTop - element.clientHeight;
+      const top = element.scrollTop;
+      const gap = element.scrollHeight - top - element.clientHeight;
       if (gap < 48) {
         element.dataset.alvoFollow = 'on';
-      } else if (element.scrollTop < (followedTo.get(element) ?? 0) - 1) {
+      } else if (top < (lastTop.get(element) ?? 0) - 1) {
         element.dataset.alvoFollow = 'off';
       }
+
+      lastTop.set(element, top);
     }, { passive: true });
   }
 
   if (element.dataset.alvoFollow === 'on') {
     element.scrollTop = element.scrollHeight;
-    followedTo.set(element, element.scrollTop);
+    lastTop.set(element, element.scrollTop);
   }
 
   /* The height it last decided on, whether it followed or not: a list that grew and a thread that did not follow
