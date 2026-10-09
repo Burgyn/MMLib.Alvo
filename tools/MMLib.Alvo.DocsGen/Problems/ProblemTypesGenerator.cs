@@ -10,6 +10,7 @@ internal sealed class ProblemTypesGenerator : IPageGenerator
 {
     private const string EveryHost = "every host";
     private const string OptInHosts = "the standalone host; an embedded host only with `AddAlvoProblemDetails()`";
+    private const string ManagementApi = "the Management API only, on any host that maps it — never a Data API route";
     private const string NoCodes = "none — this refusal carries no itemised reasons";
 
     public Task<IReadOnlyList<GeneratedPage>> GenerateAsync(DocsGenContext context, CancellationToken ct)
@@ -46,7 +47,7 @@ internal sealed class ProblemTypesGenerator : IPageGenerator
         page.Append("\n## ").Append(Md.Code(type.Slug)).Append("\n\n")
             .Append("**Status:** ").Append(type.StatusLabel)
             .Append(" · **`type`:** ").Append(Md.Code(type.Uri))
-            .Append(" · **Returned by:** ").Append(note.NeedsProblemDetails ? OptInHosts : EveryHost).Append("\n\n")
+            .Append(" · **Returned by:** ").Append(ReturnedBy(note)).Append("\n\n")
             .Append(type.Meaning).Append("\n\n")
             .Append("**Causes**\n\n");
         foreach (var cause in note.Causes)
@@ -58,6 +59,11 @@ internal sealed class ProblemTypesGenerator : IPageGenerator
             .Append("**Violation codes:** ").Append(Codes(note.ViolationCodes)).Append("\n\n")
             .Append("**Guides:** ").Append(Guides(note.Guides, guideTitle)).Append('\n');
     }
+
+    internal static string ReturnedBy(ProblemTypeNote note) =>
+        note.NeedsProblemDetails ? OptInHosts
+        : note.ManagementApiOnly ? ManagementApi
+        : EveryHost;
 
     private static string Codes(IReadOnlyList<string> codes) =>
         codes.Count == 0 ? NoCodes : string.Join(", ", codes.Select(Md.Code));

@@ -5,6 +5,7 @@ using MMLib.Alvo.Data.PostgreSql;
 using MMLib.Alvo.Data.Sqlite;
 using MMLib.Alvo.DocsGen.CSharp;
 using MMLib.Alvo.DocsGen.Xml;
+using MMLib.Alvo.Host;
 using MMLib.Alvo.Identity;
 using MMLib.Alvo.Migrations;
 using System.Reflection;
@@ -36,6 +37,14 @@ internal static class OptionsCatalog
         typeof(AlvoAdminOptions),
     };
 
+    internal static IReadOnlyDictionary<string, string> OverwrittenByTheStandaloneHost { get; } = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["Alvo:Admin:Dashboard:DocsPath"] =
+            $"**The standalone host overwrites this** after binding: `{AlvoHost.ScalarPath}` when `Alvo:Docs:Enabled` is true, otherwise none. Set it only in an embedded host.",
+        ["Alvo:Admin:Dashboard:OpenApiPath"] =
+            $"**The standalone host overwrites this** after binding: `{AlvoHost.OpenApiDocumentPath}` when `Alvo:Docs:Enabled` is true, otherwise none. Set it only in an embedded host.",
+    };
+
     internal static IReadOnlyDictionary<Type, string> NotBoundFromConfiguration { get; } = new Dictionary<Type, string>
     {
         [typeof(AlvoOptions)] = "Configured in code with `Configure<AlvoOptions>`; no host binds it from configuration.",
@@ -64,8 +73,11 @@ internal static class OptionsCatalog
     private static ConfigurationSection Section(Type type, XmlDocs docs)
     {
         var name = SectionName(type);
-        return new ConfigurationSection(name, ScopeOf(type), type, OptionsKeys.Walk(name, type, docs));
+        return new ConfigurationSection(name, ScopeOf(type), type, [.. OptionsKeys.Walk(name, type, docs).Select(WithHostOverwrite)]);
     }
+
+    private static ConfigurationKey WithHostOverwrite(ConfigurationKey key) =>
+        OverwrittenByTheStandaloneHost.TryGetValue(key.Key, out var note) ? key with { Description = $"{key.Description} {note}" } : key;
 
     private static string ScopeOf(Type type) =>
         type.Assembly == ShippedAssemblies.Host ? HostScope

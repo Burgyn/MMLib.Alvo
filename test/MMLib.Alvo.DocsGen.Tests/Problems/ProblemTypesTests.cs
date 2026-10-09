@@ -78,6 +78,14 @@ public partial class ProblemTypesTests
         page.Content.ShouldContain("**Violation codes:** none — this refusal carries no itemised reasons");
     }
 
+    [Theory]
+    [InlineData(false, false, "every host")]
+    [InlineData(true, false, "the standalone host; an embedded host only with `AddAlvoProblemDetails()`")]
+    [InlineData(false, true, "the Management API only, on any host that maps it — never a Data API route")]
+    public void Returned_by_is_per_slug(bool needsProblemDetails, bool managementApiOnly, string expected) =>
+        ProblemTypesGenerator.ReturnedBy(_note with { NeedsProblemDetails = needsProblemDetails, ManagementApiOnly = managementApiOnly })
+            .ShouldBe(expected);
+
     [Fact]
     public void The_page_explains_the_uri_mapping() =>
         ProblemTypesGenerator.Render([], new Dictionary<string, ProblemTypeNote>(), _ => string.Empty).Content

@@ -19,6 +19,28 @@ public class ProblemTypeNotesTests
             .ShouldBe(["function-failed", "internal", "unreadable-request"]);
 
     [Fact]
+    public void Only_the_management_slugs_are_management_api_only() =>
+        _notes.Where(n => n.Value.ManagementApiOnly).Select(n => n.Key).Order(StringComparer.Ordinal)
+            .ShouldBe(["destructive-change", "precondition-required"]);
+
+    [Fact]
+    public void A_management_only_slug_is_produced_only_by_management_endpoints()
+    {
+        var sources = Directory.EnumerateFiles(Path.Combine(_root, "src"), "*.cs", SearchOption.AllDirectories)
+            .Where(path => !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+            .ToDictionary(path => path, File.ReadAllText);
+
+        foreach (var slug in _notes.Where(n => n.Value.ManagementApiOnly).Select(n => n.Key))
+        {
+            var call = $"ProblemResultFactory.{PascalCase(slug)}(";
+            var callers = sources.Where(source => source.Value.Contains(call, StringComparison.Ordinal)).Select(source => source.Key).ToList();
+
+            callers.ShouldNotBeEmpty();
+            callers.ShouldAllBe(path => path.Contains($"{Path.DirectorySeparatorChar}Management{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
+        }
+    }
+
+    [Fact]
     public void Every_note_has_a_cause_a_fix_and_a_guide() =>
         _notes.Values.ShouldAllBe(note => note.Causes.Count > 0 && note.Fix.Length > 0 && note.Guides.Count > 0);
 
@@ -40,6 +62,9 @@ public class ProblemTypeNotesTests
         _notes.SelectMany(n => n.Value.Guides).ShouldAllBe(slug =>
             File.Exists(Path.Combine(docs, slug + ".mdx")) || File.Exists(Path.Combine(docs, slug + ".md")));
     }
+
+    private static string PascalCase(string slug) =>
+        string.Concat(slug.Split('-').Select(part => char.ToUpperInvariant(part[0]) + part[1..]));
 
     [Fact]
     public void An_unknown_member_is_refused() =>

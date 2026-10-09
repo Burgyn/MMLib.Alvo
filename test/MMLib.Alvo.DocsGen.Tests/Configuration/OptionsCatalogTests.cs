@@ -76,6 +76,20 @@ public class OptionsCatalogTests
         _sections.Single(s => s.Name == "Alvo:Events").Scope.ShouldBe(OptionsCatalog.CoreScope);
     }
 
+    [Fact]
+    public void The_keys_the_standalone_host_overwrites_say_so()
+    {
+        var dashboard = _sections.Single(s => s.Name == "Alvo:Admin:Dashboard").Keys;
+        var host = File.ReadAllText(Path.Combine(RepositoryRoot.Find(), "src", "MMLib.Alvo.Host", "AlvoHost.cs"));
+
+        dashboard.Single(k => k.Key == "Alvo:Admin:Dashboard:DocsPath").Description.ShouldContain($"`{AlvoHost.ScalarPath}`");
+        dashboard.Single(k => k.Key == "Alvo:Admin:Dashboard:OpenApiPath").Description.ShouldContain($"`{AlvoHost.OpenApiDocumentPath}`");
+        dashboard.Single(k => k.Key == "Alvo:Admin:Dashboard:Enabled").Description.ShouldNotContain("overwrites");
+        host.ShouldContain("admin.DocsPath = options.Docs.Enabled ? ScalarPath : null;");
+        host.ShouldContain("admin.OpenApiPath = options.Docs.Enabled ? OpenApiDocumentPath : null;");
+        OptionsCatalog.OverwrittenByTheStandaloneHost.Keys.ShouldAllBe(key => _sections.SelectMany(s => s.Keys).Any(k => k.Key == key));
+    }
+
     [Theory]
     [InlineData("Alvo:Api:DefaultPageSize", "7")]
     [InlineData("Alvo:Auth:HeaderName", "X-Docs-Probe-Key")]

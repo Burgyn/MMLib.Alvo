@@ -39,23 +39,30 @@ internal static class LimitsCatalog
     private static Limit ApiOption(XmlDocs docs, string name, string property, string value)
     {
         var member = typeof(AlvoApiOptions).GetProperty(property)!;
-        return new Limit(name, value, $"{ApiSection}:{property}", Describe(docs, DocId.Of(member)), $"{nameof(AlvoApiOptions)}.{property}");
+        var source = $"{nameof(AlvoApiOptions)}.{property}";
+        return new Limit(name, value, $"{ApiSection}:{property}", Describe(docs, DocId.Of(member), source), source);
     }
 
-    private static Limit Member(XmlDocs docs, string name, PropertyInfo property) =>
-        new(name, Number(property.GetValue(null)!), null, Describe(docs, DocId.Of(property)), $"{property.DeclaringType!.Name}.{property.Name}");
+    private static Limit Member(XmlDocs docs, string name, PropertyInfo property)
+    {
+        var source = $"{property.DeclaringType!.Name}.{property.Name}";
+        return new(name, Number(property.GetValue(null)!), null, Describe(docs, DocId.Of(property), source), source);
+    }
 
-    private static Limit Member(XmlDocs docs, string name, FieldInfo field, string unit = "") =>
-        new(name, Number(field.GetRawConstantValue()!) + unit, null, Describe(docs, DocId.Of(field)), $"{field.DeclaringType!.Name}.{field.Name}");
+    private static Limit Member(XmlDocs docs, string name, FieldInfo field, string unit = "")
+    {
+        var source = $"{field.DeclaringType!.Name}.{field.Name}";
+        return new(name, Number(field.GetRawConstantValue()!) + unit, null, Describe(docs, DocId.Of(field), source), source);
+    }
 
     private static FieldInfo ConstantOf(Assembly assembly, string typeName, string fieldName) =>
         assembly.GetType(typeName, throwOnError: true)!.GetField(fieldName, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
         ?? throw new InvalidOperationException($"{typeName}.{fieldName} no longer exists; the limits page reads it.");
 
-    private static string Describe(XmlDocs docs, string docId) =>
-        docs.Summary(docId) is { Length: > 0 } summary
-            ? summary
-            : throw new InvalidOperationException($"{docId} has no XML <summary>; the limits page describes each limit from it.");
+    private static string Describe(XmlDocs docs, string docId, string source) =>
+        LimitTexts.BySource.TryGetValue(source, out var reader) ? reader
+        : docs.Summary(docId) is { Length: > 0 } summary ? summary
+        : throw new InvalidOperationException($"{docId} has neither a reader-facing text in LimitTexts nor an XML <summary>.");
 
     private static string Number(object value) => Convert.ToString(value, CultureInfo.InvariantCulture)!;
 

@@ -81,12 +81,13 @@
   },
   "precondition-required": {
     "causes": [
-      "A Management API apply or rollback carried no `If-Match`. Management API only."
+      "A Management API apply or rollback carried no `If-Match`."
     ],
     "fix": "Read the current revision and send it as `If-Match`.",
     "violationCodes": [],
     "guides": ["guides/apply-and-evolve"],
-    "needsProblemDetails": false
+    "needsProblemDetails": false,
+    "managementApiOnly": true
   },
   "idempotency-conflict": {
     "causes": [
@@ -109,12 +110,13 @@
   },
   "destructive-change": {
     "causes": [
-      "A Management API apply whose plan would discard data, sent without the destructive allowance. Management API only."
+      "A Management API apply whose plan would discard data, sent without the destructive allowance."
     ],
     "fix": "Resend with an explicit destructive allowance, or send a descriptor that keeps what the plan would drop.",
     "violationCodes": [],
     "guides": ["guides/apply-and-evolve"],
-    "needsProblemDetails": false
+    "needsProblemDetails": false,
+    "managementApiOnly": true
   },
   "unauthenticated": {
     "causes": [

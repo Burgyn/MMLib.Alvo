@@ -8,7 +8,8 @@ internal sealed record ProblemTypeNote(
     string Fix,
     IReadOnlyList<string> ViolationCodes,
     IReadOnlyList<string> Guides,
-    bool NeedsProblemDetails);
+    bool NeedsProblemDetails,
+    bool ManagementApiOnly = false);
 
 internal static class ProblemTypeNotes
 {
