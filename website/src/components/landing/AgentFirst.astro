@@ -31,7 +31,7 @@ const points = [
         <p class="alvo-agent__note">The descriptor it sends has one typo in a before-hook:</p>
         <JsonExcerpt code={typo} pointer="/entities/tickets/hooks/beforeCreate/0/action/mutate" frame="none" />
         <div class="alvo-agent__call">
-          <Exchange name="landing/agent-dry-run" form="http" steps={[1]} requestBody={false} fields={['type', 'violations']} compact wrap />
+          <Exchange name="landing/agent-dry-run" form="http" steps={[1]} requestBody={false} fields={['type', 'violations']} compact flow={false} wrap />
         </div>
       </div>
     </div>

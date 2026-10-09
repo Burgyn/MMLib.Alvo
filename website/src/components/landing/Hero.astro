@@ -27,9 +27,9 @@ const github = 'https://github.com/Burgyn/MMLib.Alvo';
         </a>
       </div>
       <div>
-        <p class="alvo-clone__label">Runs from source today — Docker is all you need</p>
+        <p class="alvo-clone__label">Runs from source today — Docker and git are all you need</p>
         <div class="alvo-clone__box">
-          <code tabindex="0" aria-label={`Command: ${clone}`}><span class="alvo-clone__prompt" aria-hidden="true">$ </span>{clone}</code>
+          <code title={clone}><span class="alvo-clone__prompt" aria-hidden="true">$ </span>{clone}</code>
           <button class="alvo-copy" type="button" data-copy={clone} aria-label="Copy the clone command">
             <svg class="alvo-copy__idle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>
             <svg class="alvo-copy__done" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5,12 10,17 19,7"></polyline></svg>
@@ -60,8 +60,8 @@ const github = 'https://github.com/Burgyn/MMLib.Alvo';
         <span class="alvo-pane__end alvo-pane__note">captured from a real run</span>
       </div>
       <div class="alvo-pane__body">
-        <Exchange name="landing/hero" form="http" steps={[0]} fields={['id', 'title', 'priority']} compact />
-        <Exchange name="landing/hero" form="http" steps={[1]} fields={['type', 'status', 'detail']} compact />
+        <Exchange name="landing/hero" form="http" steps={[0]} fields={['title', 'priority']} compact responseNote="← trimmed by the hook" />
+        <Exchange name="landing/hero" form="http" steps={[1]} fields={['type', 'detail']} compact requestNote="← no key: anonymous" />
       </div>
     </div>
     <span class="alvo-hero__connector" aria-hidden="true"></span>

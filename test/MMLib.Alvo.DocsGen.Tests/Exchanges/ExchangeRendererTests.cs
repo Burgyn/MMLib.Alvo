@@ -66,7 +66,7 @@ public class ExchangeRendererTests
 
         var page = ExchangeRenderer.Render(spec, await ExchangeRunner.RunAsync(spec, host, root, ct));
 
-        page.Content.ShouldNotContain(host.SecretOf("agent"));
-        page.Content.ShouldContain("agent.$ALVO_KEY_SECRET");
+        page.Content.ShouldNotContain(host.SecretOf("demo"));
+        page.Content.ShouldContain("demo.$ALVO_DEMO_KEY_SECRET");
     }
 }

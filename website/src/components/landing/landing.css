@@ -157,13 +157,13 @@ main:has(.alvo-landing) .content-panel > .sl-container > footer { display: none;
 .alvo-clone__box code {
   flex: 1;
   min-width: 0;
-  overflow-x: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
   padding: 0;
   background: transparent;
   font: inherit;
   color: var(--text);
-  scrollbar-width: none;
 }
 .alvo-clone__prompt { color: var(--faint); }
 .alvo-copy {
@@ -217,7 +217,20 @@ main:has(.alvo-landing) .content-panel > .sl-container > footer { display: none;
   padding-top: 16px;
   border-top: 1px dashed var(--alvo-code-border);
 }
-.alvo-exchange--compact .alvo-exchange__status { margin: 8px 0 6px; }
+.alvo-exchange--compact .alvo-exchange__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 8px 0 6px;
+}
+.alvo-exchange__request { position: relative; }
+.alvo-exchange__note {
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 13px;
+  color: var(--faint);
+}
+.alvo-exchange__note--request { position: absolute; top: 0; right: 0; line-height: 1.55; }
 .alvo-exchange--compact .alvo-status { font-size: 13px; }
 
 /* The descriptor → API connector: the seam between the panes, an accent line that sweeps once. */
@@ -331,8 +344,7 @@ main:has(.alvo-landing) .content-panel > .sl-container > footer { display: none;
 .alvo-diff { padding-block: 88px 24px; }
 .alvo-diff > .alvo-wrap > h2 { max-width: 760px; margin-bottom: 12px; }
 .alvo-diff .alvo-lede { max-width: 640px; margin-bottom: 36px; }
-.alvo-diff__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
-.alvo-diff__col { display: grid; gap: 20px; min-width: 0; }
+.alvo-diff__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
 .alvo-card {
   min-width: 0;
   display: flex;
@@ -361,14 +373,25 @@ main:has(.alvo-landing) .content-panel > .sl-container > footer { display: none;
 .alvo-proofbox > * + * { border-top: 1px dashed var(--alvo-code-border); }
 .alvo-proofbox__caption { font-size: 13px; color: var(--faint); font-family: var(--font-ibm-plex-mono); }
 .alvo-proofbox .alvo-exchange--compact .alvo-exchange__status { margin: 8px 0; }
-.alvo-shot-card {
-  margin-top: 6px;
-  border: 1px solid var(--border2);
-  border-radius: var(--radius-sm);
-  overflow: hidden;
-  aspect-ratio: 960 / 300;
+.alvo-proofline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
 }
-.alvo-shot-card img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+.alvo-proofline code {
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.alvo-proofline__verb { color: var(--accentInk); font-weight: 600; }
+.alvo-proofline .alvo-status { font-size: 13px; }
 
 /* Two ways to run it. */
 .alvo-ways { padding-block: 72px 88px; }
@@ -516,7 +539,8 @@ main:has(.alvo-landing) .content-panel > .sl-container > footer { display: none;
   .alvo-diff__grid { grid-template-columns: minmax(0, 1fr); }
   .alvo-proof { justify-content: flex-start; }
   .alvo-proof .alvo-proof__sep { display: none; }
-  .alvo-pane__note { display: none; }
+  .alvo-pane__note,
+  .alvo-exchange__note--request { display: none; }
   .alvo-how__grid, .alvo-dash .alvo-wrap { padding-block: 56px; }
   .alvo-diff, .alvo-agent { padding-block: 64px 24px; }
   .alvo-ways { padding-block: 48px 64px; }

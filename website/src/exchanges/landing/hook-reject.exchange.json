@@ -1,11 +1,11 @@
 {
   "descriptor": "website/src/snippets/landing/hook-reject.alvo.json",
   "keys": {
-    "agent": { "roles": ["authenticated"], "scopes": ["*:read", "*:write"] }
+    "demo": { "roles": ["authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_DEMO_KEY_SECRET" }
   },
   "steps": [
     {
-      "key": "agent",
+      "key": "demo",
       "method": "POST",
       "path": "/api/tickets",
       "body": { "title": "Help", "priority": "high" },

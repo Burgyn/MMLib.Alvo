@@ -28,3 +28,17 @@ export function requestLine(name: string, step: number): { method: string; targe
   const [method, target] = capturedStep(name, step).httpRequest.split('\n')[0].split(' ');
   return { method, target };
 }
+
+/** The narrowest line the landing panes hold without scrolling (13px mono in a half-width pane at 1024). */
+export const FlowLineWidth = 56;
+
+/**
+ * A JSON value in flow style, as the design draws a body: one line when it fits, else one member per line
+ * (`{"type":"…",` / ` "detail":"…"}`). Only line breaks change; the values are the captured ones.
+ */
+export function flowJson(value: unknown): string {
+  const line = JSON.stringify(value);
+  if (line.length <= FlowLineWidth || value === null || typeof value !== 'object' || Array.isArray(value)) return line;
+  const members = Object.entries(value as Record<string, unknown>).map(([key, member]) => `${JSON.stringify(key)}:${JSON.stringify(member)}`);
+  return `{${members.join(',\n ')}}`;
+}

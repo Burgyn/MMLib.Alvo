@@ -1,18 +1,33 @@
 ---
 import { Code } from '@astrojs/starlight/components';
 import { statusTone } from '../lib/status';
-import { capturedExchange, type CapturedStep } from '../lib/exchanges';
+import { capturedExchange, flowJson, type CapturedStep } from '../lib/exchanges';
 interface Props {
   name: string; steps?: number[]; form?: 'curl' | 'http'; fields?: string[];
-  /** One borderless pane: the request, the status, then the response body alone (no titles, no response headers). */
+  /**
+   * One borderless pane: the request line and its headers (no Content-Type), the body, a status pill, then the
+   * response body alone. Bodies are written in flow style (one line, or one member per line) unless flow={false}.
+   */
   compact?: boolean;
+  flow?: boolean;
+  /** false shows the status and the response only. */
+  request?: boolean;
   /** false drops the request body (a long one shown elsewhere); the request line and headers stay. */
   requestBody?: boolean;
+  /** A prose label beside the request (not part of the captured text). */
+  requestNote?: string;
+  /** A prose label beside the status (not part of the captured text). */
+  responseNote?: string;
   wrap?: boolean;
 }
-const { name, steps, form = 'curl', fields, compact = false, requestBody = true, wrap } = Astro.props;
+const {
+  name, steps, form = 'curl', fields, compact = false, request: showRequest = true, requestBody = true,
+  requestNote, responseNote, wrap,
+} = Astro.props;
+const flow = Astro.props.flow ?? compact;
 if (!name) throw new Error('Exchange: the "name" prop is required');
 if (!requestBody && form === 'curl') throw new Error(`Exchange: "${name}" can drop the request body only in the http form`);
+if (flow && !compact) throw new Error(`Exchange: "${name}" can write flow-style bodies only in the compact form`);
 const exchange = capturedExchange(name);
 if (steps && steps.length === 0) throw new Error(`Exchange: "${name}" was given an empty steps list`);
 const chosen = (steps ?? exchange.steps.map((_, i) => i)).map((i) => {
@@ -23,25 +38,43 @@ const pick = (step: CapturedStep, f: string) => {
   if (!step.responseBody || !(f in step.responseBody)) throw new Error(`Exchange: "${name}" has no response field "${f}"`);
   return [f, step.responseBody[f]];
 };
-const body = (step: CapturedStep) => fields ? JSON.stringify(Object.fromEntries(fields.map((f) => pick(step, f))), null, 2) : null;
+const projection = (step: CapturedStep) => (fields ? Object.fromEntries(fields.map((f) => pick(step, f))) : null);
 const head = (message: string) => message.split('\n\n')[0];
 const tail = (message: string) => message.split('\n\n').slice(1).join('\n\n');
+const written = (text: string) => {
+  if (!flow || !text.trim()) return text;
+  try { return flowJson(JSON.parse(text)); } catch { return text; }
+};
+const compactRequest = (step: CapturedStep) => {
+  const lines = head(step.httpRequest).split('\n').filter((line) => !/^Content-Type:/i.test(line));
+  lines[0] = lines[0].replace(/ HTTP\/1\.1$/, '');
+  const body = requestBody ? tail(step.httpRequest) : '';
+  return body ? `${lines.join('\n')}\n\n${written(body)}` : lines.join('\n');
+};
 const request = (step: CapturedStep) => {
   if (form === 'curl') return step.curl;
-  const message = requestBody ? step.httpRequest : head(step.httpRequest);
-  return compact ? message.replace(/ HTTP\/1\.1$/m, '') : message;
+  if (compact) return compactRequest(step);
+  return requestBody ? step.httpRequest : head(step.httpRequest);
 };
 const response = (step: CapturedStep) => {
-  const projected = body(step);
-  if (compact) return projected ?? tail(step.httpResponse);
-  return projected ? head(step.httpResponse) + '\n\n' + projected : step.httpResponse;
+  const projected = projection(step);
+  if (compact) return projected ? (flow ? flowJson(projected) : JSON.stringify(projected, null, 2)) : written(tail(step.httpResponse));
+  return projected ? head(step.httpResponse) + '\n\n' + JSON.stringify(projected, null, 2) : step.httpResponse;
 };
 const frame = compact ? 'none' : undefined;
 ---
 {chosen.map((step) => (
   <div class:list={['alvo-exchange', { 'alvo-exchange--compact': compact }]}>
-    <Code code={request(step)} lang={form === 'curl' ? 'sh' : 'http'} title={compact ? undefined : 'Request'} frame={frame} wrap={wrap} />
-    <p class="alvo-exchange__status"><span class={`alvo-status alvo-status--${statusTone(step.status)}`}>{step.status} {step.reason}</span></p>
+    {showRequest && (
+      <div class="alvo-exchange__request">
+        <Code code={request(step)} lang={form === 'curl' ? 'sh' : 'http'} title={compact ? undefined : 'Request'} frame={frame} wrap={wrap} />
+        {requestNote && <span class="alvo-exchange__note alvo-exchange__note--request">{requestNote}</span>}
+      </div>
+    )}
+    <p class="alvo-exchange__status">
+      <span class={`alvo-status alvo-status--${statusTone(step.status)}`}>{step.status} {step.reason}</span>
+      {responseNote && <span class="alvo-exchange__note">{responseNote}</span>}
+    </p>
     {response(step) && <Code code={response(step)} lang={compact ? 'json' : 'http'} title={compact ? undefined : 'Response'} frame={frame} wrap={wrap} />}
   </div>
 ))}

@@ -22,10 +22,10 @@ const typeRuleTypo = async (page) => {
   await page.getByTestId('check-rule-list').first().waitFor();
 };
 const crops = [
-  { name: 'rules-editor', route: '/admin/schema/service_orders', viewport: { width: 1440, height: 900 }, clip: { width: 960, height: 600 }, prepare: typeRuleTypo },
+  // 1200 wide, so the dashboard's content region is no wider than the 960px crop (at 1440 it is ~1200 and
+  // the crop cut the editor's right edge and its live check).
+  { name: 'rules-editor', route: '/admin/schema/service_orders', viewport: { width: 1200, height: 900 }, clip: { width: 960, height: 600 }, prepare: typeRuleTypo, from: 'Who may do what' },
   { name: 'rules-editor-phone', route: '/admin/schema/service_orders', viewport: { width: 390, height: 844 }, clip: { width: 390, height: 520 }, prepare: typeRuleTypo, from: 'Who may do what' },
-  { name: 'data-browser', route: '/admin/data/service_orders', viewport: { width: 1440, height: 900 }, clip: { width: 960, height: 600 } },
-  { name: 'history', route: '/admin/history', viewport: { width: 1440, height: 900 }, clip: { width: 960, height: 600 } },
 ];
 const readmeCrops = new Set(['rules-editor']);
 

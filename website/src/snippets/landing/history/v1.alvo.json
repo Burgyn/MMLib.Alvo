@@ -6,8 +6,12 @@
     "providers": ["local"],
     "roles": ["admin"]
   },
+  "access": {
+    "admin": "'admin' in @user.roles"
+  },
   "entities": {
     "tickets": {
+      "audit": true,
       "fields": {
         "title": { "type": "string", "required": true,
                    "maxLength": 120 },
@@ -22,13 +26,9 @@
         "delete": "'admin' in @user.roles"
       },
       "hooks": {
-        "beforeCreate": [
-          { "action": { "mutate": {
-            "title": { "$cel": "trim(new.title)" }
-          } } },
-          { "condition": "new.priority == 'high' && size(new.title) < 10",
-            "action": { "reject": "A high-priority ticket needs a descriptive title." } }
-        ]
+        "beforeCreate": [{ "action": { "mutate": {
+          "title": { "$cel": "trim(new.title)" }
+        } } }]
       }
     }
   }

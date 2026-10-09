@@ -6,8 +6,12 @@
     "providers": ["local"],
     "roles": ["admin"]
   },
+  "access": {
+    "admin": "'admin' in @user.roles"
+  },
   "entities": {
     "tickets": {
+      "audit": true,
       "fields": {
         "title": { "type": "string", "required": true,
                    "maxLength": 120 },
