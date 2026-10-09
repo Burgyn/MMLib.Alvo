@@ -5,6 +5,7 @@ import { unified } from '@astrojs/markdown-remark';
 import starlight from '@astrojs/starlight';
 import { ExpressiveCodeTheme } from '@astrojs/starlight/expressive-code';
 import starlightLinksValidator from 'starlight-links-validator';
+import starlightOpenAPI, { openAPISidebarGroups } from 'starlight-openapi';
 import rehypeMermaid from 'rehype-mermaid';
 import { remarkMermaidPre } from './plugins/remark-mermaid-pre.mjs';
 import { rehypeTableWrap } from './plugins/rehype-table-wrap.mjs';
@@ -85,7 +86,16 @@ export default defineConfig({
         Banner: './src/components/Banner.astro',
         PageTitle: './src/components/PageTitle.astro',
       },
-      plugins: [starlightLinksValidator()],
+      plugins: [
+        starlightOpenAPI([
+          {
+            base: 'reference/data-api',
+            schema: './src/generated/openapi/data-api.json',
+            sidebar: { label: 'Data API — example (vehicle-registry)' },
+          },
+        ]),
+        starlightLinksValidator({ exclude: ['/MMLib.Alvo/reference/data-api/'] }),
+      ],
       sidebar: [
         { label: 'Start here', items: [
           page('Why Alvo', 'start-here/why-alvo'),
@@ -139,10 +149,14 @@ export default defineConfig({
         { label: 'Reference', collapsed: true, items: [
           page('Overview', 'reference'),
           { label: 'Descriptor schema', collapsed: true, items: [{ autogenerate: { directory: 'reference/descriptor' } }] },
+          page('CEL functions', 'reference/cel-functions'),
           page('Problem types', 'reference/problem-types'),
           page('Data API conventions', 'data-api/conventions'),
+          ...openAPISidebarGroups,
+          page('Management API', 'reference/management-api'),
           page('Configuration keys', 'reference/configuration'),
           page('Limits and budgets', 'reference/limits'),
+          page('Capabilities in this build', 'reference/capabilities'),
         ] },
         { label: 'Project', collapsed: true, items: [
           page('Roadmap and status', 'project/roadmap'),

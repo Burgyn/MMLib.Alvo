@@ -9,7 +9,7 @@ internal sealed class ReferenceIndexGenerator : IPageGenerator
     private const string IndexFile = "index.md";
 
     public Task<IReadOnlyList<GeneratedPage>> GenerateAsync(DocsGenContext context, CancellationToken ct) =>
-        Task.FromResult<IReadOnlyList<GeneratedPage>>([Render(Scan(context.Paths.ReferenceDir))]);
+        Task.FromResult<IReadOnlyList<GeneratedPage>>([Render(Listed(context.Paths.ReferenceDir))]);
 
     internal static GeneratedPage Render(IEnumerable<(string Slug, string Title, string Summary)> pages)
     {
@@ -22,10 +22,23 @@ internal sealed class ReferenceIndexGenerator : IPageGenerator
         return new GeneratedPage(OutputRoot.Reference, IndexFile, body.ToString());
     }
 
-    internal static IReadOnlyList<(string Slug, string Title, string Summary)> Scan(string referenceDir) =>
+    private static readonly (string Slug, string Title, string Summary, int Order)[] _routePages =
     [
-        .. PageFiles(referenceDir)
-            .Select(file => (Slug: SlugOf(referenceDir, file), Front: Frontmatter.Read(file)))
+        ("data-api", "Data API — example (vehicle-registry)",
+            "The Data API generated from the vehicle-registry example descriptor; every descriptor produces its own at `GET /openapi/v1.json`.", 4),
+    ];
+
+    internal static IReadOnlyList<(string Slug, string Title, string Summary)> Scan(string referenceDir) => Ordered(FilePages(referenceDir));
+
+    internal static IReadOnlyList<(string Slug, string Title, string Summary)> Listed(string referenceDir) =>
+        Ordered(FilePages(referenceDir).Concat(_routePages.Select(page => (page.Slug, new Frontmatter(page.Title, page.Summary, page.Order)))));
+
+    private static IEnumerable<(string Slug, Frontmatter Front)> FilePages(string referenceDir) =>
+        PageFiles(referenceDir).Select(file => (SlugOf(referenceDir, file), Frontmatter.Read(file)));
+
+    private static List<(string Slug, string Title, string Summary)> Ordered(IEnumerable<(string Slug, Frontmatter Front)> pages) =>
+    [
+        .. pages
             .OrderBy(page => page.Front.Order)
             .ThenBy(page => page.Front.Title, StringComparer.Ordinal)
             .Select(page => (page.Slug, page.Front.Title, page.Front.Description)),

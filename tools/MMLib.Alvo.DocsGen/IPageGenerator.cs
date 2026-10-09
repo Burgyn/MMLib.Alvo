@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.DocsGen;
+﻿using MMLib.Alvo.DocsGen.Host;
+
+namespace MMLib.Alvo.DocsGen;
 
 internal interface IPageGenerator
 {
@@ -8,4 +10,6 @@ internal interface IPageGenerator
 internal sealed class DocsGenContext(DocsGenPaths paths)
 {
     internal DocsGenPaths Paths { get; } = paths;
+
+    internal Lazy<Task<HostSnapshot>> Host { get; } = new(() => HostCapture.CaptureAsync(paths.RepoRoot, CancellationToken.None));
 }

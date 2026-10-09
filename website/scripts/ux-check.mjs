@@ -1,7 +1,7 @@
 import { chromium } from 'playwright';
 import { withPreview } from './preview-server.mjs';
 
-const pages = ['/', '/start-here/quick-start/'];
+const pages = ['/', '/start-here/quick-start/', '/reference/cel-functions/', '/reference/data-api/operations/ownerslist/'];
 const viewports = [[390, 844], [768, 1024], [1024, 768], [1280, 800], [1440, 900]];
 const themes = ['light', 'dark'];
 const roadmap = '/MMLib.Alvo/project/roadmap/';
@@ -128,10 +128,10 @@ async function phoneDocsLayout(page, path, fail) {
     notes.add(`${path}: no code frame yet, the copy-button check waits for its content`);
     return;
   }
-  const copy = page.locator('.expressive-code .copy button').first();
+  const copy = page.locator('.expressive-code .copy button').filter({ visible: true }).first();
   const box = await copy.boundingBox();
   const inside = box && box.x >= 0 && box.x + box.width <= 390;
-  if (!inside) fail(`the first code frame's copy button lies outside the viewport (${JSON.stringify(box)})`);
+  if (!inside) fail(`the first visible code frame's copy button lies outside the viewport (${JSON.stringify(box)})`);
 }
 
 async function sidebarPane(page, fail) {

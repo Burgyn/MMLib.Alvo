@@ -12,18 +12,26 @@ const shouldRenderSearch =
 
 const primary = [
   { label: 'Docs', href: '/MMLib.Alvo/start-here/why-alvo/' },
-  { label: 'Reference', href: '/MMLib.Alvo/reference/' },
+  { label: 'Reference', href: '/MMLib.Alvo/reference/', group: 'Reference' },
   { label: 'Examples', href: '/MMLib.Alvo/examples/' },
   { label: 'Roadmap', href: '/MMLib.Alvo/project/roadmap/' },
 ];
 
+const { entry, sidebar } = Astro.locals.starlightRoute;
 const path = Astro.url.pathname;
-const isSplash = Astro.locals.starlightRoute.entry.data.template === 'splash';
-const inSection = (href: string) => path.startsWith(href);
-const fallback = !isSplash && !primary.slice(1).some((link) => inSection(link.href));
-const current = (href: string, index: number) => {
-  if (path === href) return 'page';
-  if (inSection(href) || (index === 0 && fallback)) return 'true';
+const isSplash = entry.data.template === 'splash';
+
+type Item = (typeof sidebar)[number];
+const holdsCurrent = (item: Item): boolean =>
+  item.type === 'link' ? item.isCurrent : item.entries.some(holdsCurrent);
+const currentGroup = sidebar.find((item) => item.type === 'group' && holdsCurrent(item))?.label;
+type Link = (typeof primary)[number];
+const inSection = (link: Link) =>
+  path.startsWith(link.href) || ('group' in link && link.group === currentGroup);
+const fallback = !isSplash && !primary.slice(1).some(inSection);
+const current = (link: Link, index: number) => {
+  if (path === link.href) return 'page';
+  if (inSection(link) || (index === 0 && fallback)) return 'true';
   return undefined;
 };
 ---
@@ -34,7 +42,7 @@ const current = (href: string, index: number) => {
   </div>
   <nav aria-label="Primary" class="alvo-primary-nav print:hidden">
     {primary.map((link, index) => (
-      <a href={link.href} aria-current={current(link.href, index)}>{link.label}</a>
+      <a href={link.href} aria-current={current(link, index)}>{link.label}</a>
     ))}
   </nav>
   <div class="sl-flex print:hidden alvo-search">

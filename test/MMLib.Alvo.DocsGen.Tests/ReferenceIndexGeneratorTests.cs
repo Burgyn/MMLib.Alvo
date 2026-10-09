@@ -24,6 +24,18 @@ public class ReferenceIndexGeneratorTests
     }
 
     [Fact]
+    public void The_data_api_is_listed_beside_the_pages_on_disk()
+    {
+        var reference = Directory.CreateTempSubdirectory("docsgen-reference-").FullName;
+        File.WriteAllText(Path.Combine(reference, "limits.md"), "---\ntitle: \"Limits and budgets\"\ndescription: \"Every limit.\"\nsidebar:\n  order: 9\n---\n");
+        File.WriteAllText(Path.Combine(reference, "problem-types.md"), "---\ntitle: \"Problem types\"\ndescription: \"Every type.\"\nsidebar:\n  order: 3\n---\n");
+
+        var slugs = ReferenceIndexGenerator.Listed(reference).Select(page => page.Slug);
+
+        slugs.ShouldBe(["problem-types", "data-api", "limits"]);
+    }
+
+    [Fact]
     public void Renders_one_link_per_page()
     {
         var page = ReferenceIndexGenerator.Render([("problem-types", "Problem types", "Every type.")]);

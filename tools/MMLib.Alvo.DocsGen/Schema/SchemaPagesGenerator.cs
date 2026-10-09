@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Nodes;
+﻿using MMLib.Alvo.DocsGen.Host;
+using System.Text.Json.Nodes;
 
 namespace MMLib.Alvo.DocsGen.Schema;
 
@@ -16,7 +17,8 @@ internal sealed class SchemaPagesGenerator : IPageGenerator
         }
 
         var titles = new GuideTitles(context.Paths.DocsDir);
-        return SchemaReferenceRenderer.Render(schema, titles.TitleOf);
+        var snapshot = await context.Host.Value.WaitAsync(ct).ConfigureAwait(false);
+        return CapabilitiesRenderer.WithAsides(SchemaReferenceRenderer.Render(schema, titles.TitleOf), snapshot.Capabilities);
     }
 
     internal static string SchemaPath(DocsGenPaths paths) => Path.Combine(paths.RepoRoot, "schema", "project.schema.json");

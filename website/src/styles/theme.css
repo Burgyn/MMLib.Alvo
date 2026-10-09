@@ -232,6 +232,9 @@ starlight-theme-select select {
   background-color: var(--danger-bg);
 }
 
+/* starlight-openapi's "required" marker reads --sl-color-red, which misses AA on our panels; the danger tone passes. */
+.sl-openapi-key-name { --sl-color-red: var(--danger-fg); }
+
 /* Status (U-S8): the one status-colour map, driven by statusTone() in src/lib/status.ts. */
 .alvo-status {
   display: inline-flex;

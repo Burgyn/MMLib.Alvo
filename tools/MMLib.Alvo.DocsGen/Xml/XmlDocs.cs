@@ -29,6 +29,9 @@ internal sealed class XmlDocs
 
     internal bool Has(string docId) => _members.ContainsKey(docId);
 
+    internal string? FirstIdStartingWith(string prefix) =>
+        _members.Keys.Where(id => id.StartsWith(prefix, StringComparison.Ordinal)).Order(StringComparer.Ordinal).FirstOrDefault();
+
     internal string Summary(string docId) => Child(docId, "summary");
 
     internal string Returns(string docId) => Child(docId, "returns");

@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.DocsGen.Configuration;
+using MMLib.Alvo.DocsGen.Host;
 using MMLib.Alvo.DocsGen.Limits;
 using MMLib.Alvo.DocsGen.Problems;
 using MMLib.Alvo.DocsGen.Schema;
@@ -14,6 +15,7 @@ internal static class DocsGenRun
         new ProblemTypesGenerator(),
         new ConfigurationGenerator(),
         new LimitsGenerator(),
+        new HostPagesGenerator(),
         new ReferenceIndexGenerator(),
     ];
 
