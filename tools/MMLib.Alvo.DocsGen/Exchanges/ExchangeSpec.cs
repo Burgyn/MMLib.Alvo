@@ -13,6 +13,7 @@ internal sealed record ExchangeStep(
     string Path,
     JsonNode? Body,
     string? BodyFile,
+    string? BodyFileAs,
     IReadOnlyDictionary<string, string> Headers,
     string? ContentType,
     int Expect,
@@ -25,7 +26,7 @@ internal sealed record ExchangeSpec(string Name, string Descriptor, IReadOnlyDic
     private static readonly (string Header, string Member)[] _ownedHeaders = [("X-Alvo-Api-Key", "key"), ("Content-Type", "contentType")];
     private static readonly string[] _keyMembers = ["roles", "scopes", "tenant", "secretVariable"];
     private static readonly string[] _stepMembers =
-        ["key", "method", "path", "body", "bodyFile", "headers", "contentType", "expect", "expectType", "showHeaders"];
+        ["key", "method", "path", "body", "bodyFile", "bodyFileAs", "headers", "contentType", "expect", "expectType", "showHeaders"];
 
     internal static ExchangeSpec Parse(string name, string json)
     {
@@ -65,9 +66,10 @@ internal sealed record ExchangeSpec(string Name, string Descriptor, IReadOnlyDic
             var headers = Headers(step["headers"]);
             RefuseOwnedHeaders(headers, where);
             RefuseContentTypeWithoutBody(step, where);
+            RefuseBodyFileAsWithoutBodyFile(step, where);
             return new ExchangeStep(
                 key, String(step, "method", where).ToUpperInvariant(), String(step, "path", where),
-                step["body"]?.DeepClone(), step["bodyFile"]?.GetValue<string>(), headers,
+                step["body"]?.DeepClone(), step["bodyFile"]?.GetValue<string>(), step["bodyFileAs"]?.GetValue<string>(), headers,
                 step["contentType"]?.GetValue<string>(), Required(step, "expect", where).GetValue<int>(),
                 step["expectType"]?.GetValue<string>(), Strings(step["showHeaders"]));
         }
@@ -88,6 +90,14 @@ internal sealed record ExchangeSpec(string Name, string Descriptor, IReadOnlyDic
             if (step["contentType"] is not null && step["body"] is null && step["bodyFile"] is null)
             {
                 throw Fail($"{where} sets 'contentType' but sends no 'body' or 'bodyFile'");
+            }
+        }
+
+        private void RefuseBodyFileAsWithoutBodyFile(JsonObject step, string where)
+        {
+            if (step["bodyFileAs"] is not null && step["bodyFile"] is null)
+            {
+                throw Fail($"{where} sets 'bodyFileAs' but names no 'bodyFile'");
             }
         }
 

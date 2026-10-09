@@ -47,6 +47,13 @@ public class ExchangeSpecTests
             """)).Message.ShouldBe("fixture/nobody: step 0 sets 'contentType' but sends no 'body' or 'bodyFile'");
 
     [Fact]
+    public void A_body_file_member_without_a_body_file_is_refused() =>
+        Should.Throw<InvalidOperationException>(() => ExchangeSpec.Parse("fixture/noFile", """
+            { "descriptor": "d.alvo.json", "keys": {},
+              "steps": [ { "method": "PUT", "path": "/api/x", "bodyFileAs": "descriptorJson", "expect": 200 } ] }
+            """)).Message.ShouldBe("fixture/noFile: step 0 sets 'bodyFileAs' but names no 'bodyFile'");
+
+    [Fact]
     public void A_missing_expectation_throws() =>
         Should.Throw<InvalidOperationException>(() => ExchangeSpec.Parse("fixture/missing", """
             { "descriptor": "d.alvo.json", "keys": {}, "steps": [ { "method": "GET", "path": "/api/x" } ] }

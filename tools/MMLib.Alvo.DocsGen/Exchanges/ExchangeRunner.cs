@@ -72,9 +72,13 @@ internal static class ExchangeRunner
             return step.Body.ToJsonString(ExchangeRenderer.Compact);
         }
 
-        return step.BodyFile is null
-            ? null
-            : (await File.ReadAllTextAsync(Path.Combine(repoRoot, step.BodyFile), ct).ConfigureAwait(false)).TrimEnd();
+        if (step.BodyFile is null)
+        {
+            return null;
+        }
+
+        var text = (await File.ReadAllTextAsync(Path.Combine(repoRoot, step.BodyFile), ct).ConfigureAwait(false)).TrimEnd();
+        return step.BodyFileAs is null ? text : new JsonObject { [step.BodyFileAs] = text }.ToJsonString(ExchangeRenderer.Compact);
     }
 
     private static async Task<CapturedResponse> SendAsync(BootedHost host, ExchangeStep step, CapturedRequest request, CancellationToken ct)
