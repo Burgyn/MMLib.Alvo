@@ -204,7 +204,10 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
             $"{world.BaseAddress}{AlvoAdmin.SignOutEndpoint}");
         byGet.Ok.ShouldBeFalse("a GET to the sign-out endpoint was accepted");
 
-        await session.Page.GotoAsync($"{world.BaseAddress}{AlvoAdmin.BasePath}");
+        /* GoAsync, which waits for the circuit and the shell: the account menu is a library menu the circuit opens, and a
+           click on the prerendered button before the circuit is up opens nothing (it timed out on CI waiting for the
+           Sign out item a click had never asked for). */
+        await session.GoAsync(string.Empty);
         session.Page.Url.ShouldEndWith(AlvoAdmin.BasePath);
 
         await session.Page.GetByTestId("account-menu").ClickAsync();
