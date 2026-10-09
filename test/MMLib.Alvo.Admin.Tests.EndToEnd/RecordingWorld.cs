@@ -25,17 +25,34 @@ public class RecordingWorld : AdminWorld
     protected override void Configure(IServiceCollection services) =>
         ManagementDecorator.Around(services, shipped => new Watching(shipped, this));
 
-    /// <summary>The first verdict the dashboard was given for <paramref name="source"/>, waiting up to ten seconds for it.</summary>
+    /// <summary>The first verdict the dashboard was given for <paramref name="source"/>, waiting up to a minute for it.</summary>
+    /// <remarks>
+    /// A minute, the browser context's own timeout, rather than the ten seconds this waited: one CI run failed here with
+    /// every other wait in the suite allowed six times as long. And it says which sources the dashboard did ask about, so
+    /// a check that was never asked (a lost keystroke) is told apart from one asked about other text (a box reset).
+    /// </remarks>
     /// <param name="source">The exact expression text.</param>
     /// <returns>The verdict.</returns>
-    public Task<ManagementExpressionVerdict> CheckedAsync(string source) => Check(source).Task.WaitAsync(TimeSpan.FromSeconds(10));
+    public async Task<ManagementExpressionVerdict> CheckedAsync(string source)
+    {
+        try
+        {
+            return await Check(source).Task.WaitAsync(TimeSpan.FromSeconds(60));
+        }
+        catch (TimeoutException timeout)
+        {
+            var asked = _checks.Where(check => check.Value.Task.IsCompleted).Select(check => $"'{check.Key}'");
+            throw new TimeoutException(
+                $"The dashboard never checked '{source}'. It checked: {string.Join(", ", asked)}.", timeout);
+        }
+    }
 
     /// <summary>Waits until more than <paramref name="seen"/> function-list requests have finished.</summary>
     /// <param name="seen">The count read before the step that should ask.</param>
     /// <returns>A task that completes once the request has finished.</returns>
     public async Task FunctionListAnsweredAsync(int seen)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(10);
+        var deadline = DateTime.UtcNow.AddSeconds(60);
         while (FunctionListsAnswered <= seen)
         {
             DateTime.UtcNow.ShouldBeLessThan(deadline, "the dashboard never asked for the function list");
