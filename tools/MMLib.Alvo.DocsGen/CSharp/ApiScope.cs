@@ -23,6 +23,9 @@ internal static class ApiScope
         "IAlvoContextResolver",
         "IAlvoContextAccessor",
         "IAlvoAdminCallerResolver",
+        "AlvoAdmin",
+        "AlvoAdminAssets",
+        "AlvoAdminClaims",
         "AlvoProblemTypes",
     };
 

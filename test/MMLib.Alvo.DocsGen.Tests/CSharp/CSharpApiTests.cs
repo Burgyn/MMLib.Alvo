@@ -1,6 +1,7 @@
 ﻿using MMLib.Alvo.DocsGen.CSharp;
 using MMLib.Alvo.DocsGen.Xml;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 namespace MMLib.Alvo.DocsGen.Tests.CSharp;
@@ -77,6 +78,19 @@ public class CSharpApiTests
         names.ShouldNotContain(name => name.StartsWith("get_", StringComparison.Ordinal) || name.StartsWith("set_", StringComparison.Ordinal));
         names.ShouldNotContain(nameof(ToString));
         names.ShouldNotContain(nameof(GetHashCode));
+    }
+
+    [Fact]
+    public void The_admin_surface_named_in_the_package_boundary_is_in_scope()
+    {
+        var text = Regex.Replace(File.ReadAllText(Path.Combine(RepositoryRoot.Find(), "docs", "architecture", "package-boundary.md")), @"\s+", " ");
+        var start = text.IndexOf("The surface a host is meant to use is", StringComparison.Ordinal);
+        var end = text.IndexOf("that register and map the dashboard", start, StringComparison.Ordinal);
+        var named = Regex.Matches(text[start..end], "`([A-Za-z]+)`").Select(match => match.Groups[1].Value).ToList();
+        var admin = ShippedPackages.All.Single(p => p.Package == "MMLib.Alvo.Admin").Assembly;
+
+        named.ShouldNotBeEmpty();
+        named.ShouldBeSubsetOf(ApiScope.TypesOf(admin).Select(type => type.Name));
     }
 
     [Fact]
