@@ -1,0 +1,39 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "hero",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["admin"]
+  },
+  "entities": {
+    "tickets": {
+      "fields": {
+        "title": {
+          "type": "string",
+          "required": true,
+          "maxLength": 120
+        },
+        "priority": {
+          "type": "enum",
+          "values": ["low", "normal", "high"],
+          "default": "normal"
+        }
+      },
+      "rules": {
+        "list": "'authenticated' in @user.roles",
+        "get": "'authenticated' in @user.roles",
+        "create": "'authenticated' in @user.roles",
+        "update": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      },
+      "hooks": {
+        "beforeCreate": [
+          {
+            "action": { "mutate": { "title": { "$cel": "trim(new.title)" } } }
+          }
+        ]
+      }
+    }
+  }
+}

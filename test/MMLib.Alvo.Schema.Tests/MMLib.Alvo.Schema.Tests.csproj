@@ -31,4 +31,8 @@
     <None Include="meta-schema/**/*.json" CopyToOutputDirectory="PreserveNewest" LinkBase="meta-schema" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/docs/DocsSnippets.cs" Link="_shared/DocsSnippets.cs" />
+  </ItemGroup>
+
 </Project>

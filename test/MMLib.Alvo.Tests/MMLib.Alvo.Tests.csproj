@@ -17,4 +17,8 @@
     <EmbeddedResource Include="Expressions/CelAcceptanceBaseline.jsonl" LogicalName="MMLib.Alvo.Tests.Expressions.CelAcceptanceBaseline.jsonl" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="$(MSBuildThisFileDirectory)../_shared/docs/DocsSnippets.cs" Link="_shared/DocsSnippets.cs" />
+  </ItemGroup>
+
 </Project>
