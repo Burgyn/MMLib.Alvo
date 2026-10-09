@@ -65,6 +65,59 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
         (await Thread(session).EvaluateAsync<double>("e => e.scrollTop")).ShouldBe(0, "the thread stayed where the operator put it");
     }
 
+    /// <summary>
+    /// The page's own scroll to the newest turn is not the operator scrolling up, even when the thread grows before the
+    /// browser delivers it. The browser delivers a scroll a frame after <c>scrollTop</c> is set, and a streamed turn
+    /// redraws the thread in between; measured then, the gap read as an operator's scroll and following stopped with
+    /// nobody having scrolled — the race that made the scenario above fail one CI run in three.
+    /// </summary>
+    /// <remarks>
+    /// Driven through the module's own <c>followNewest</c> rather than by asking questions, because the redraw has to
+    /// land in that one frame on every run, and a turn streamed from the circuit lands there only sometimes.
+    /// </remarks>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task A_turn_drawn_before_the_follow_scroll_is_delivered_does_not_stop_the_following()
+    {
+        await using var session = await OpenAsync(TestContext.Current.CancellationToken, height: 560);
+        await AskAsync(session, "add an invoices entity");
+        await WaitForTurnToEndAsync(session, turns: 2);
+        await WaitForFollowDecisionAsync(session);
+
+        var follow = await Thread(session).EvaluateAsync<string>(
+            """
+            async (thread, module) => {
+              const { followNewest } = await import(module);
+              const scrolled = () => Promise.race([
+                new Promise(done => thread.addEventListener('scroll', done, { once: true })),
+                new Promise(done => setTimeout(done, 2000))]);
+              const turn = () => {
+                const probe = document.createElement('div');
+                probe.style.height = '200px';
+                probe.style.flex = 'none';
+                thread.append(probe);
+              };
+
+              /* At the bottom, following, as an operator who has not scrolled leaves it. */
+              turn();
+              let delivered = scrolled();
+              thread.scrollTop = thread.scrollHeight;
+              await delivered;
+              if (thread.dataset.alvoFollow !== 'on') return `not following before the probe: ${thread.dataset.alvoFollow}`;
+
+              /* A turn lands; the follow scrolls to it; the next turn is drawn before that scroll is delivered. */
+              turn();
+              delivered = scrolled();
+              followNewest(thread);
+              requestAnimationFrame(turn);
+              await delivered;
+              return thread.dataset.alvoFollow;
+            }
+            """,
+            AlvoAdminAssets.Module);
+
+        follow.ShouldBe("on", "nobody scrolled: the thread grew under the page's own scroll");
+    }
+
     [Fact(Timeout = AdminWorld.ScenarioTimeout)]
     public async Task The_pane_is_a_labelled_non_modal_region_as_tall_as_the_window_and_announces_turns()
     {
@@ -299,11 +352,24 @@ public sealed class AssistantKeyboardScenarios(AssistantWorld world) : IClassFix
     private static Task WaitForFollowDecisionAsync(AdminSession session)
         => WaitForThreadAsync(session, "e => e.dataset.alvoFollowedAt === String(e.scrollHeight)");
 
-    /// <summary>Waits, with the page's timeout, until <paramref name="predicate"/> holds for the thread.</summary>
+    /// <summary>
+    /// Waits, with the page's timeout, until <paramref name="predicate"/> holds for the thread, and says where the thread
+    /// stood when it did not: "timed out" alone cannot tell a follow that never ran from one that decided not to.
+    /// </summary>
     private static async Task WaitForThreadAsync(AdminSession session, string predicate)
     {
         var thread = await Thread(session).ElementHandleAsync();
-        await session.Page.WaitForFunctionAsync($"e => ({predicate})(e)", thread);
+        try
+        {
+            await session.Page.WaitForFunctionAsync($"e => ({predicate})(e)", thread);
+        }
+        catch (TimeoutException timeout)
+        {
+            var state = await thread.EvaluateAsync<string>(
+                "e => `scrollTop ${e.scrollTop}, scrollHeight ${e.scrollHeight}, clientHeight ${e.clientHeight}, "
+                + "follow ${e.dataset.alvoFollow}, decided at ${e.dataset.alvoFollowedAt}`");
+            throw new TimeoutException($"The thread never satisfied {predicate}: {state}.", timeout);
+        }
     }
 
     private static ILocator Turns(AdminSession session)
