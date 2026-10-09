@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import { AxeBuilder } from '@axe-core/playwright';
 import { withPreview } from './preview-server.mjs';
 
-const pages = ['/', '/start-here/quick-start/', '/guides/access-rules/', '/reference/problem-types/', '/reference/cel-functions/', '/reference/data-api/', '/reference/data-api/operations/ownerslist/', '/reference/csharp/mmlib-alvo/'];
+const pages = ['/', '/start-here/quick-start/', '/guides/access-rules/', '/reference/problem-types/', '/reference/cel-functions/', '/reference/data-api/', '/reference/data-api/operations/ownerslist/', '/reference/csharp/mmlib-alvo/', '/examples/', '/project/changelog/', '/project/license/'];
 const themes = ['light', 'dark'];
 
 await withPreview(async (baseUrl) => {

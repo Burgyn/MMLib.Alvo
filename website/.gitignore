@@ -5,6 +5,7 @@ src/content/docs/reference/
 src/generated/
 src/content/docs/project/changelog.md
 src/content/docs/project/contributing.md
+src/content/docs/examples.md
 public/llms.txt
 public/llms-full.txt
 public/schema/

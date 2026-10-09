@@ -137,6 +137,7 @@ export default defineConfig({
           page('The admin dashboard', 'guides/admin-dashboard'),
           page('The schema assistant', 'guides/schema-assistant'),
         ] },
+        page('Examples', 'examples'),
         { label: 'Concepts', collapsed: true, items: [
           page('The project descriptor', 'concepts/descriptor'),
           page('CEL in Alvo', 'concepts/cel'),

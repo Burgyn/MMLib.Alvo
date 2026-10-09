@@ -1,9 +1,12 @@
 ﻿using MMLib.Alvo.DocsGen.Configuration;
 using MMLib.Alvo.DocsGen.CSharp;
+using MMLib.Alvo.DocsGen.Examples;
 using MMLib.Alvo.DocsGen.Exchanges;
 using MMLib.Alvo.DocsGen.Host;
 using MMLib.Alvo.DocsGen.Limits;
+using MMLib.Alvo.DocsGen.Llms;
 using MMLib.Alvo.DocsGen.Problems;
+using MMLib.Alvo.DocsGen.Repo;
 using MMLib.Alvo.DocsGen.Schema;
 
 namespace MMLib.Alvo.DocsGen;
@@ -20,7 +23,10 @@ internal static class DocsGenRun
         new HostPagesGenerator(),
         new ExchangesGenerator(),
         new CSharpApiGenerator(),
+        new RepoPagesGenerator(),
+        new ExamplesGenerator(),
         new ReferenceIndexGenerator(),
+        new LlmsGenerator(),
     ];
 
     internal static async Task<int> RunAsync(DocsGenPaths paths, IReadOnlyList<IPageGenerator> generators, CancellationToken ct)

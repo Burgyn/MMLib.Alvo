@@ -44,6 +44,14 @@ Reference descriptors validated against `schema/project.schema.json`
   a rollup), `count`/`sum` rollups, `hidden`/`readOnly` as CEL, before-hooks (`reject` and `mutate`),
   `email` and `webhook` after-hooks, `access` levels and role-differentiated rules. `scripts/demo-admin`
   starts the host over it and seeds realistic data from `bike-workshop/seed/` through the public API.
+- **`field-service/`** — **applies as it stands.** The runnable complex demo (see `field-service/README.md`)
+  and the fixture the `test/teapie-field-service` end-to-end suite drives: a multi-tenant field-service
+  dispatch backend over three entities — `regions` (`tenancy: global`, shared reference data) and the
+  tenant-scoped `customers` and `work_orders`. It exercises `tenancy`, `audit` on one entity and its
+  absence on another (so `If-Match` is honoured on one and refused with 412 on the other), `hidden` and
+  `readOnly` fields, role-differentiated and row-level rules, an operation with no rule at all, `ref` with
+  `onDelete: restrict`, one field of each type, and built-in and declared `formats`. Its own stack is
+  `docker-compose.field-service.yml`, with one dev key per role and tenant.
 - **`_negative/`** — descriptors that MUST be rejected, each proving one
   constraint (unknown property, `decimal` missing `scale`, the reserved
   `users` entity name, a wrong `apiVersion`). The test asserts they fail with

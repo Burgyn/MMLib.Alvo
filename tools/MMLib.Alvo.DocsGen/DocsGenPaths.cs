@@ -14,6 +14,9 @@ internal sealed record DocsGenPaths(string RepoRoot, string SiteRoot, string Ref
     [
         Path.Combine(PublicDir, "llms.txt"),
         Path.Combine(PublicDir, "llms-full.txt"),
+        Path.Combine(DocsDir, "examples.md"),
+        Path.Combine(DocsDir, "project", "changelog.md"),
+        Path.Combine(DocsDir, "project", "contributing.md"),
     ];
 
     internal string RootOf(OutputRoot root) => root switch
