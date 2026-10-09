@@ -1,10 +1,21 @@
-﻿using MMLib.Alvo.DocsGen.Schema;
+﻿using MMLib.Alvo.DocsGen.Configuration;
+using MMLib.Alvo.DocsGen.Limits;
+using MMLib.Alvo.DocsGen.Problems;
+using MMLib.Alvo.DocsGen.Schema;
 
 namespace MMLib.Alvo.DocsGen;
 
 internal static class DocsGenRun
 {
-    internal static IReadOnlyList<IPageGenerator> Generators { get; } = [new SchemaPagesGenerator(), new SchemaFileGenerator()];
+    internal static IReadOnlyList<IPageGenerator> Generators { get; } =
+    [
+        new SchemaPagesGenerator(),
+        new SchemaFileGenerator(),
+        new ProblemTypesGenerator(),
+        new ConfigurationGenerator(),
+        new LimitsGenerator(),
+        new ReferenceIndexGenerator(),
+    ];
 
     internal static async Task<int> RunAsync(DocsGenPaths paths, IReadOnlyList<IPageGenerator> generators, CancellationToken ct)
     {

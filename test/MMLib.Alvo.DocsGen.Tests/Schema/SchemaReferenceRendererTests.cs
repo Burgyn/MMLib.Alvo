@@ -28,7 +28,7 @@ public class SchemaReferenceRendererTests
     {
         var pages = SchemaReferenceRenderer.Render(SchemaFixture.Load());
 
-        pages.Select(page => page.RelativePath).ShouldBe(["index.md", "descriptor/index.md", "descriptor/items.md"]);
+        pages.Select(page => page.RelativePath).ShouldBe(["descriptor/index.md", "descriptor/items.md"]);
         pages.ShouldAllBe(page => page.Root == OutputRoot.Reference);
         var index = Page(pages, "descriptor/index.md");
         index.ShouldContain("### `name`");

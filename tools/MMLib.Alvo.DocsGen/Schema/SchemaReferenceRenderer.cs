@@ -20,7 +20,7 @@ internal static partial class SchemaReferenceRenderer
     {
         var walker = new SchemaWalker(schema);
         var guides = new GuideLine(guideTitle);
-        var pages = new List<GeneratedPage> { ReferenceIndex(), DescriptorIndex(walker, guides) };
+        var pages = new List<GeneratedPage> { DescriptorIndex(walker, guides) };
         var keys = walker.TopLevelKeys;
         var extraPages = 0;
         for (var index = 0; index < keys.Count; index++)
@@ -51,13 +51,6 @@ internal static partial class SchemaReferenceRenderer
     {
         var name = guideSlug[(guideSlug.LastIndexOf('/') + 1)..].Replace('-', ' ');
         return char.ToUpperInvariant(name[0]) + name[1..];
-    }
-
-    private static GeneratedPage ReferenceIndex()
-    {
-        var body = Md.Frontmatter("Reference", "Generated from the code: every page in this section is produced by tools/MMLib.Alvo.DocsGen at build time.", 0)
-            + $"- [Descriptor schema]({SiteLinks.Page("reference/descriptor")}) — every key of the project descriptor, generated from `schema/project.schema.json`.\n";
-        return new GeneratedPage(OutputRoot.Reference, "index.md", body);
     }
 
     private static GeneratedPage DescriptorIndex(SchemaWalker walker, GuideLine guides)

@@ -139,7 +139,10 @@ export default defineConfig({
         { label: 'Reference', collapsed: true, items: [
           page('Overview', 'reference'),
           { label: 'Descriptor schema', collapsed: true, items: [{ autogenerate: { directory: 'reference/descriptor' } }] },
+          page('Problem types', 'reference/problem-types'),
           page('Data API conventions', 'data-api/conventions'),
+          page('Configuration keys', 'reference/configuration'),
+          page('Limits and budgets', 'reference/limits'),
         ] },
         { label: 'Project', collapsed: true, items: [
           page('Roadmap and status', 'project/roadmap'),

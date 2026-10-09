@@ -34,6 +34,10 @@ internal static partial class Md
         return collapsed.Contains('`', StringComparison.Ordinal) ? $"`` {collapsed} ``" : $"`{collapsed}`";
     }
 
+    internal static string MarkdownCell(string markdown) =>
+        string.Join(' ', markdown.Split((char[])['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Replace("|", @"\|", StringComparison.Ordinal);
+
     internal static string CodeCell(string value) => Code(value).Replace("|", @"\|", StringComparison.Ordinal);
 
     internal static string Anchor(string id) => $"<a id=\"{id}\"></a>";
