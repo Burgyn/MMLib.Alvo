@@ -1,0 +1,13 @@
+---
+import { Code } from '@astrojs/starlight/components';
+interface Props { code: string; from: string; to: string; lang?: string; title?: string }
+const { code, from, to, lang = 'csharp', title } = Astro.props;
+const lines = code.replace(/\r\n/g, '\n').split('\n');
+const start = lines.findIndex((line) => line.includes(from));
+const end = start < 0 ? -1 : lines.findIndex((line, i) => i >= start && line.includes(to));
+if (start < 0 || end < 0) throw new Error(`SourceExcerpt: anchors not found (from "${from}", to "${to}")`);
+const slice = lines.slice(start, end + 1);
+const indent = Math.min(...slice.filter((l) => l.trim()).map((l) => l.match(/^ */)[0].length));
+const excerpt = slice.map((l) => l.slice(indent)).join('\n');
+---
+<Code code={excerpt} lang={lang} title={title} />

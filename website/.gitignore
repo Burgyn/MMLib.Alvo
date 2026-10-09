@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.astro/
+src/content/docs/reference/
+src/generated/
+src/content/docs/project/changelog.md
+src/content/docs/project/contributing.md
+public/llms.txt
+public/llms-full.txt
+.lighthouse/

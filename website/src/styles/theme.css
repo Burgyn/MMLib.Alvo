@@ -1,0 +1,39 @@
+/* Alvo docs theme. Every colour is an admin design token from
+   src/MMLib.Alvo.Admin/wwwroot/alvo.css (@layer tokens), mapped onto Starlight's
+   --sl-* scale. Starlight's default :root is dark; [data-theme='light'] is light. */
+
+:root {
+  --sl-font: var(--font-public-sans);
+  --sl-font-mono: var(--font-ibm-plex-mono);
+  --sl-content-width: 46rem;
+  --sl-color-accent-low: #12241a;   /* --accentText dark */
+  --sl-color-accent: #39e991;       /* --accent dark */
+  --sl-color-accent-high: #39e991;  /* --accentInk dark */
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #e8eaf0;       /* --text */
+  --sl-color-gray-2: #e8eaf0;
+  --sl-color-gray-3: #9aa0b8;       /* --dim */
+  --sl-color-gray-4: #8b92ab;       /* --faint */
+  --sl-color-gray-5: #3b3e52;       /* --border2 */
+  --sl-color-gray-6: #262833;       /* --panel */
+  --sl-color-gray-7: #1e2029;       /* --bg */
+  --sl-color-black: #1e2029;        /* --bg */
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #e7f2ec;   /* --accentSoft composited on white */
+  --sl-color-accent: #0f7a48;       /* --accent light */
+  --sl-color-accent-high: #0b653b;  /* --accentInk light */
+  --sl-color-white: #1c1e26;        /* --text */
+  --sl-color-gray-1: #1c1e26;
+  --sl-color-gray-2: #353946;
+  --sl-color-gray-3: #5f6577;       /* --dim */
+  --sl-color-gray-4: #6b7180;       /* --faint */
+  --sl-color-gray-5: #d3d7e0;       /* --border2 */
+  --sl-color-gray-6: #e8eaef;       /* --border */
+  --sl-color-gray-7: #f7f8fa;       /* --bg */
+  --sl-color-black: #ffffff;        /* --panel */
+}
+
+.sl-markdown-content :is(p, li, blockquote) { max-width: 70ch; }
+.sl-markdown-content code { font-variant-ligatures: none; }
