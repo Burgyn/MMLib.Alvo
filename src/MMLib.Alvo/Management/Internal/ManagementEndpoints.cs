@@ -57,6 +57,7 @@ internal static class ManagementEndpoints
         MapRevision(group);
         MapSchema(group);
         MapCapabilities(group);
+        MapCelFunctions(group);
         MapPolicySimulation(group);
         MapExpressionCheck(group);
         MapApply(group);
@@ -258,6 +259,18 @@ internal static class ManagementEndpoints
                 (string project, IAlvoManagement management, CancellationToken ct) =>
                     Answer(() => management.GetCapabilitiesAsync(project, ct))),
             new ManagementRoute(nameof(IAlvoManagement.GetCapabilitiesAsync), ManagementOperation.GetCapabilities));
+
+    /// <summary>
+    /// <c>GET {prefix}/projects/{project}/cel/functions</c> — <see cref="IAlvoManagement.GetCelFunctionsAsync"/>.
+    /// </summary>
+    /// <param name="group">The group to map into.</param>
+    private static void MapCelFunctions(RouteGroupBuilder group) =>
+        Gate(
+            group.MapGet(
+                "/projects/{project}/cel/functions",
+                (string project, IAlvoManagement management, CancellationToken ct) =>
+                    Answer(() => management.GetCelFunctionsAsync(project, ct))),
+            new ManagementRoute(nameof(IAlvoManagement.GetCelFunctionsAsync), ManagementOperation.GetCelFunctions));
 
     /// <summary>
     /// <c>POST {prefix}/projects/{project}/policy/simulate</c> —

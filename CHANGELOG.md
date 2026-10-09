@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CEL functions in hook conditions and before-hook `mutate` values** (slice C1). A host registers
+  a typed C# function at startup with `AddCelFunction(name, delegate, summary)` on the Alvo builder.
+  A descriptor's hook conditions and `mutate` values call it by name, and so can five built-ins:
+  `replace`, `trim`, `size`, `abs` and `round`. Apply refuses an unknown name, a wrong argument count
+  or a type mismatch, and Rules and computed fields refuse calls for now. A function that throws, or
+  an argument that does not fit its parameter, rolls the write back with the new problem type
+  `function-failed` (HTTP 500), and the host's own message is never echoed. `GET
+  {m}/projects/{p}/cel/functions` (Viewer) and `IAlvoManagement.GetCelFunctionsAsync` list every
+  callable function with its signature, summary, provenance and profiles, and the schema assistant
+  gains the `get_cel_functions` tool. A host function runs inside the write's transaction with no
+  time budget or `CancellationToken` yet (#309).
+
 - **A literal `field.default` is honoured** (#113's literal half). A field declaring
   `"default": false` / `"normal"` / `1` now emits a column `DEFAULT` in the generated DDL on both
   engines, and any write that composes a whole row — a create, and both branches of `PUT` — fills in
@@ -24,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `field.default` as wholly refused — only its `$cel` half.
 
 ### Changed (breaking)
+
+- **`IAlvoManagement` gains `GetCelFunctionsAsync`** (slice C1). A caller is unaffected. An
+  implementer or decorator of the interface must add the member, for example by delegating to the
+  inner instance.
 
 - **`MapAlvoDataApi()` now returns `IEndpointConventionBuilder` instead of `IEndpointRouteBuilder`**
   (#182), so a host can attach `RequireRateLimiting`, an authorization policy, output caching or a
@@ -75,6 +91,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read-only, omitting it as missing — while the published OpenAPI document described a create the API
   would not accept. An expression-valued `readOnly` is unaffected: it is legal for one role and
   impossible for another, and the request-time half below answers that caller.
+
+- **A before-hook `mutate` value must honour its target field's facets** (#308, Ruling V). Two
+  changes for descriptors already stored. **At apply:** a `mutate` *literal* outside the field's
+  `maxLength`, enum `values`, `format` or decimal precision/scale — or a `null` into a `required`
+  field — is now refused, so a host booting from a stored descriptor that carries one **fails the
+  boot-time apply** instead of starting. Before, the same literal was stored silently on SQLite and
+  failed every firing as an anonymous `500` on PostgreSQL, so the descriptor never worked on both
+  engines; refusing it at boot, before 1.0, trades a start that used to succeed for one answer on
+  every engine, named at the hook's pointer. **At write time:** a *computed* value outside the facets
+  refuses the write as the hook's `403 forbidden` (a per-row refusal in a batch) where SQLite used to
+  store it with a `201`. The check runs once on the final patch, so a later hook may still repair an
+  earlier one's value; the refusal names the field and facet only when the descriptor does not flag
+  the field `hidden`.
 
 - **Alvo applies the descriptor on boot by default, and the host no longer applies anything itself.**
   The boot sequence runs as part of the host lifecycle, before the server binds: it loads and

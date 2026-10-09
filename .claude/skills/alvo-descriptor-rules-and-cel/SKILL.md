@@ -30,6 +30,9 @@ What a rule may contain:
 A rule compares and combines with `&&`, `||` and `!`. It has no arithmetic, no `old.`/`new.` and no `changed()`: those
 belong to hooks and computed fields, each in its own skill.
 
+No function call works in a rule in this build — not `trim`, not a host function: a rule filters in SQL. To filter by a
+normalised value, write it into a field with a before-hook `mutate` and compare that field.
+
 Keep the grants an operation already has unless the request removes them: add a clause with `||` rather than
 replacing the rule. Before a `replace` of a rule, `test` its current value.
 

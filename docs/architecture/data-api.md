@@ -975,9 +975,9 @@ one document-wide list of every classification Alvo can mint, not a per-operatio
 
 Problem documents are RFC 9457, media type `application/problem+json`, with an Alvo `violations` array.
 Every `type` is `https://alvo.dev/errors/<slug>`; the slugs are exactly `AlvoProblemTypes.All`, and the
-table below is that list. Two of them — `unreadable-request` and `internal` — are emitted only by
+table below is that list. Three of them — `unreadable-request`, `internal` and `function-failed` — are emitted only by
 `AlvoExceptionHandler`, so only a host that called `AddAlvoProblemDetails()` can produce one, which is
-why neither is documented on any operation.
+why none is documented on any operation.
 
 | Status | Slug | Means |
 |---|---|---|
@@ -986,7 +986,7 @@ why neither is documented on any operation.
 | 204 | — | deleted, no body |
 | 304 | — | `If-None-Match` covers the current version (read-one of an audited entity only) |
 | 401 | `unauthenticated` | a credential **was** presented and cannot be used |
-| 403 | `forbidden` | a policy refused the operation — one slug for every policy refusal |
+| 403 | `forbidden` | a policy refused the operation — one slug for every policy refusal, including a before-hook's: a `reject` that fired, or a `mutate` value its target field's declared facets refuse (Ruling V — measured on the final patch after the whole hook chain; the detail names the hook that last wrote the field, the field and the facet, never the value, and for a field the descriptor flags `hidden` statically or per role names no field, facet or limit (Ruling X); SQLite and PostgreSQL answer alike) |
 | 403 | `out-of-scope` | the presented key's scopes do not cover this entity and operation |
 | 404 | `not-found` | the row is absent **or** the caller's policy excludes it, indistinguishably |
 | 409 | `idempotency-conflict` | the key was reused for a different request |
@@ -999,6 +999,7 @@ why neither is documented on any operation.
 | 428 | `precondition-required` | **Management API only** — the write requires `If-Match` and carried none |
 | 413, 408, 400 | `unreadable-request` | the **web server** refused the request before Alvo read it (a body over `MaxRequestBodySize`, one arriving too slowly, one whose framing broke) — same opt-in as `internal`, and likewise documented on no operation |
 | 500 | `internal` | an invariant Alvo relies on is broken — **only** in a host that called `AddAlvoProblemDetails()`; no endpoint produces it and no operation documents it |
+| 500 | `function-failed` | a CEL function failed while a write was evaluated (a host function threw, a built-in refused, or a present argument did not fit its parameter's type) — nothing was written; the detail names the function, never the host's exception text; same opt-in as `internal` |
 
 **Two rows are marked *Management API only*, and they are in this table because the sentence above is
 exact.** The slugs are `AlvoProblemTypes.All`, one catalogue for the whole framework — so the Management

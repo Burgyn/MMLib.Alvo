@@ -26,20 +26,21 @@ internal static class CelTree
         CelBinary binary => [binary.Left, binary.Right],
         CelConditional conditional => [conditional.Condition, conditional.WhenTrue, conditional.WhenFalse],
         CelHas has => [has.Field],
-        CelCall call => call.Argument is null ? [] : [call.Argument],
+        CelCall call => call.Arguments,
         _ => throw new InvalidOperationException(
             $"'{node.GetType().Name}' is not a known CEL node kind; its subtree cannot be walked."),
     };
 }
 
 /// <summary>
-/// A call to one of the two functions the <see cref="CelProfile.Mutate"/> profile allow-lists —
-/// <c>lowerAscii(field)</c> and <c>now()</c>. Legal in no other profile, and never rendered to SQL.
+/// A function call: one of the two legacy calls with their own grammar (<c>lowerAscii(field)</c>, <c>now()</c>) or a
+/// function from the <c>CelFunctionCatalog</c>. Legal only where the type checker's profile gates allow it, and never
+/// rendered to SQL in this slice.
 /// </summary>
 /// <remarks>
 /// <para>
 /// The node is deliberately <see langword="internal"/> while the rest of the <see cref="CelNode"/>
-/// hierarchy is public: the allow-list is closed at two entries, so nothing outside the core has a
+/// hierarchy is public: the function catalog is the core's own, so nothing outside the core has a
 /// reason to pattern-match this kind, and keeping it internal means the published AST does not grow a
 /// case every out-of-repo walker would have to learn. It still derives from the public
 /// <see cref="CelNode"/>, so <c>CompiledExpression.Root</c> can carry one; an external walker sees an
@@ -55,12 +56,9 @@ internal static class CelTree
 /// naming <see cref="LowerAscii"/>.
 /// </para>
 /// </remarks>
-/// <param name="Name">The function's CEL spelling — always <see cref="LowerAscii"/> or <see cref="Now"/>.</param>
-/// <param name="Argument">
-/// The single argument, or <see langword="null"/> for a nullary function (<see cref="Now"/>). The
-/// arity is fixed per name by the parser, so a walker may switch on <see cref="Name"/> and trust it.
-/// </param>
-internal sealed record CelCall(string Name, CelNode? Argument) : CelNode
+/// <param name="Name">The function's CEL spelling.</param>
+/// <param name="Arguments">Every argument, in source order; empty for a nullary call such as <see cref="Now"/>.</param>
+internal sealed record CelCall(string Name, IReadOnlyList<CelNode> Arguments) : CelNode
 {
     /// <summary>The ASCII-only lower-case fold, <c>lowerAscii(field)</c>: folds <c>A</c>–<c>Z</c> and nothing else.</summary>
     public const string LowerAscii = "lowerAscii";
@@ -71,4 +69,17 @@ internal sealed record CelCall(string Name, CelNode? Argument) : CelNode
     /// uses), so two evaluations inside one write can never disagree.
     /// </summary>
     public const string Now = "now";
+
+    /// <summary>
+    /// The call's result type as the type checker resolved it; <see cref="CelValueType.Null"/> on a tree straight
+    /// from the parser, which knows names but not types.
+    /// </summary>
+    public CelValueType ResultType { get; init; } = CelValueType.Null;
+
+    /// <summary>
+    /// The overload the type checker bound, which the interpreter invokes; <see langword="null"/> before checking and
+    /// for <see cref="LowerAscii"/>/<see cref="Now"/>, which are evaluated by name. Binding it into the tree is what
+    /// keeps the interpreter and <c>BeforeHookRunner</c> free of any catalog or container dependency.
+    /// </summary>
+    public CelFunction? Function { get; init; }
 }

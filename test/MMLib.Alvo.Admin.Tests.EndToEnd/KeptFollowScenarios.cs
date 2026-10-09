@@ -103,6 +103,10 @@ public sealed class HeldApplyWorld : AdminWorld
         public Task<ManagementCapabilities> GetCapabilitiesAsync(string project, CancellationToken ct = default)
             => inner.GetCapabilitiesAsync(project, ct);
 
+        /// <inheritdoc/>
+        public Task<ManagementCelFunctions> GetCelFunctionsAsync(string project, CancellationToken ct = default)
+            => inner.GetCelFunctionsAsync(project, ct);
+
         public Task<ManagementPolicyVerdict> SimulatePolicyAsync(
             string project, ManagementPolicySimulation simulation, CancellationToken ct = default)
             => inner.SimulatePolicyAsync(project, simulation, ct);

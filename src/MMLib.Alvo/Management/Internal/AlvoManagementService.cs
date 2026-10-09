@@ -5,6 +5,7 @@ using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
@@ -43,6 +44,7 @@ namespace MMLib.Alvo.Management.Internal;
 /// The validator apply runs, resolved from DI so a check's answer is the apply's own verdict on the same
 /// descriptor rather than a second opinion that could drift from it.
 /// </param>
+/// <param name="functions">The CEL functions this instance knows; what <see cref="GetCelFunctionsAsync"/> lists.</param>
 /// <param name="roles">The declared role catalog a simulated caller's role names are resolved through.</param>
 /// <param name="data">The registered data port, or <see langword="null"/> when the host registered none.</param>
 /// <param name="versions">
@@ -91,6 +93,7 @@ internal sealed partial class AlvoManagementService(
     ISchemaRegistry schemaRegistry,
     IPolicyEngine policies,
     IDescriptorValidator validator,
+    CelFunctionCatalog functions,
     IRoleCatalogProvider roles,
     IAlvoData? data,
     IDescriptorVersionStore? versions,
@@ -196,6 +199,15 @@ internal sealed partial class AlvoManagementService(
         EnsureServed(project);
 
         return Task.FromResult(CapabilityReport.Project());
+    }
+
+    /// <inheritdoc/>
+    public Task<ManagementCelFunctions> GetCelFunctionsAsync(string project, CancellationToken ct = default)
+    {
+        EnsureMayPerform(ManagementOperation.GetCelFunctions);
+        EnsureServed(project);
+
+        return Task.FromResult(new ManagementCelFunctions { Functions = functions.Describe() });
     }
 
     /// <inheritdoc/>

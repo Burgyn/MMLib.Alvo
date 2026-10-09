@@ -32,7 +32,8 @@ proposes it** — see *`Mutate`, the fourth profile* below for where the two dif
 | String concatenation (`+` over two strings) | ✗ | ✓ | ✗ | ✗ | ✗ |
 | Ternary conditional | ✗ | ✓ | ✗ | ✗ | ✗ |
 | `changed(field)` | ✗ | ✗ | ✓ | ✗ | ✗ |
-| Allow-listed function call (`lowerAscii`, `now`) | ✗ | ✗ | ✗ | ✓ | ✗ |
+| Legacy call (`lowerAscii(field)`, `now()`) | ✗ | ✗ | ✗ | ✓ | ✗ |
+| Catalogued function call (built-ins and host functions; each function's own profiles narrow this ceiling) | ✗ | ✗ | ✓ | ✓ | ✗ |
 
 **Note the row that split.** `@user` and `@tenant` were one row (`@user`/`@tenant` context ref)
 because no profile had ever wanted one without the other. `Access` does, so the row is two rows and
@@ -72,7 +73,7 @@ is legal.
   evaluate to a value a field can hold: any scalar **or** a `Bool`, which is the one profile with no
   constraint at all on the result shape — a `boolean` column is a legitimate `mutate` target, and
   that is exactly the case `Computed` has to reject because a generated column cannot hold
-  "predicate" as a value. The only profile that admits a function call. See the next section.
+  "predicate" as a value. Admits a function call, as does `Condition` for the catalogued functions. See the next section.
 - **Access** — a management-access level (`access.admin` / `access.developer` / `access.viewer`).
   Must evaluate to `Bool`. Sees `@user` and **nothing else**: no row, so no field reference of
   either state and no `has()`/`changed()`; and no `@tenant`, because an access level is
@@ -132,11 +133,20 @@ place nothing could reach them, and an unreachable refusal is one no test can ho
 moment somebody proposes rendering a `Mutate` expression to SQL, the two-valued fold and the
 `==`/`!=` collation caveat both come back into scope.
 
-### The function allow-list has exactly two entries
+### The function catalog
 
-`Mutate` is the only profile where an identifier followed by `(` is anything but a syntax error
-(deviation 7), and it admits exactly two names — positive and closed, on `_allowedProfiles`' own
-principle that a name missing from the list compiles in no profile rather than in every one:
+A function call is the one construct whose legality is decided twice: by the profile ceiling in the table above, and
+by the function's own list of profiles (*the two gates*). Both must admit the profile, so a function can narrow the
+ceiling and never widen it. The catalog (`CelFunctionCatalog`, internal to the core) holds the two legacy calls, the
+five built-ins and whatever a host registered with `AddCelFunction`; the parser, the type checker and the interpreter
+are given the same instance, so apply and `cel/check` cannot disagree about what a name means. Design and rationale:
+[the CEL functions design](../superpowers/specs/2026-10-05-f5-cel-functions-design.md).
+
+#### The two legacy calls
+
+Outside the catalog an identifier followed by `(` is a syntax error (deviation 7). The legacy pair keep their
+own grammar, byte for byte, and stay `Mutate`-only — positive and closed, on `_allowedProfiles`' own principle that a
+name missing from the list compiles in no profile rather than in every one:
 
 | Call | Result type | What it is |
 |---|---|---|
@@ -166,6 +176,96 @@ limitation: Postgres's `now()` is *transaction-start* time while SQLite's `CURRE
 second-precision *text*, so rendering it would let two engines answer differently for one descriptor.
 `@now` was considered and rejected — it would widen the closed `@`-context set and be its first
 memberless context reference.
+
+#### The five built-ins
+
+Condition and Mutate in C1, interpreter only (SQL translation is slice C2, which must produce the same answers). Every
+argument is non-nullable, so a null argument makes the call null; nothing is culture-sensitive.
+
+| Function | Signature | Semantics |
+|---|---|---|
+| `replace` | `(text: String, search: String, replacement: String) -> String` | every non-overlapping occurrence, left to right, ordinal; an empty `search` returns `text`; a result that would grow the text past 1,048,576 characters fails closed |
+| `trim` | `(text: String) -> String` | removes U+0020, U+0009, U+000A, U+000D from both ends, nothing else |
+| `size` | `(text: String) -> Int` | Unicode code points |
+| `abs` | `(x: Int) -> Int`, `(x: Decimal) -> Decimal` | magnitude, same type; the minimum `Int` fails closed |
+| `round` | `(x: Int) -> Int`, `(x: Decimal) -> Decimal` | nearest whole number, halves away from zero; the `Int` overload is the identity |
+
+#### Host functions
+
+`AddCelFunction(name, delegate, summary?)` registers a function from host code, validated eagerly (an
+`ArgumentException` at the call). The limits, stated so they are not read as oversights:
+
+| Limit | Consequence |
+|---|---|
+| name `^[a-z][a-zA-Z0-9_]*\z`, at most 64 characters, not reserved | the reserved set is `has changed now in true false null`, `old`, `new`, CEL's macros, keywords and standard type and function names, and every built-in |
+| at most 4 parameters of `string long int decimal bool DateTimeOffset Guid` (and nullable forms); same result set | no `DateOnly` yet; no async, `ref`, `out`, `params` or multicast delegate |
+| singleton closure, no DI scope | a function cannot use a scoped service |
+| synchronous, no `CancellationToken`, no timeout | a slow function holds the write's transaction; it must be thread-safe |
+| embedded only | the standalone image and `alvo validate` refuse a host-function name as unknown |
+| `Condition` and `Mutate` only | refused in `Rule`, `Computed` and `Access`, with the recipe: store the value in a field with a `mutate`, compare that field |
+
+**Trust.** A host function is host code. The descriptor author — an operator or an agent — can call only what the host
+exposed and still cannot express a network call; the host developer who registered the code can, and already owns the
+process. Purity, speed and thread-safety are by contract, not enforced (spec §5.8). **This narrows a product-spec
+guarantee, deliberately:** `alvo-specifikacia.md` §1.2 promises before-hooks a time budget and a network ban enforced
+by an analyzer or structurally for both faces, C# included, and `baas-analyza.md` §2.7 a `CancellationToken` the
+framework enforces. For a host function there is **no time budget, no `CancellationToken` and no analyzer** — host
+code is trusted code (the embedded host's own process, §2.7's in-process trust model). The descriptor author's face
+has no millisecond budget and no `CancellationToken` either; it needs neither, because it can express no I/O and its
+work is bounded by the descriptor. Trust does not remove the budget: §2.7 keeps it even for fully trusted csx, as a
+liveness guarantee — a before-hook runs while the row's locks are held — so a slow host function is an open gap, not
+a covered case. The open mitigations — an analyzer over registered delegates, and a token-aware delegate shape with a
+framework budget (#309) — are follow-ups (spec §5.8, X14).
+
+#### Resolution, null and failure
+
+- **Overloads** are resolved by arity then argument types; an `Int` argument may bind a `Decimal` parameter
+  (deviation 22), nothing else converts.
+- **Null.** A null argument for a non-nullable parameter makes the call null without invoking the body; a nullable
+  parameter receives the null. A **present** argument that does not convert to the parameter's CLR type (an `Int` past
+  `int`'s range for an `int` parameter, a fraction for an `Int` one, a text that is no `Guid`) is never read as null —
+  null would make a `reject` condition `false` and let the write through — it fails the call closed, the reason naming
+  the parameter and its type (`an argument does not fit parameter 'n' (Int32)`), never the value.
+- **Failure fails closed.** A function that throws aborts evaluation as a `CelFunctionException`, which the
+  interpreter's catch-alls let through. In a before-hook condition or `mutate` the write is refused and the
+  transaction rolls back; what the caller sees depends on who wrote: a **Data API** request answers HTTP 500
+  `function-failed`, naming the function and carrying no exception text; an **in-process `IAlvoData` caller** (a host
+  endpoint, the dashboard) receives an exception (the internal type surfaces as a plain `Exception`; the dashboard shows
+  its generic fault). An **after-hook condition** is already post-commit, so the after-hook is dropped and a Warning is
+  logged.
+- **A `mutate` value honours its field's facets** (Ruling V, #308). Whatever produced it — a literal, a field copy,
+  `replace`, a host function — the value a before-hook writes is measured by the same checks a caller's payload passes:
+  `maxLength` (code points), enum membership, `format`, decimal precision and scale (an `Int` widened into a `decimal`
+  field is measured as that decimal), and `required` (a null into a required field). A literal that breaks one is
+  refused at apply; a computed value that breaks one refuses the write **as the hook's refusal** — the family a `reject`
+  uses: HTTP 403 `forbidden` (a per-row refusal in a batch, an `AlvoAuthorizationException` in process), nothing
+  written, the detail naming the hook's pointer, the field and the facet, never the value. **A field the descriptor
+  flags `hidden`** — a static `true` or a per-role expression, the rule the OpenAPI document uses to leave an optional
+  field's name out, applied more strictly (Ruling X) — is not named: its refusal names the hook's pointer only ("computed a value one of the fields it writes
+  cannot hold"), with no field, facet or limit, because a refusal naming a field the caller never sent and cannot see
+  would disclose that it exists and how wide it is. (The text only stops naming it: a caller-driven value
+  copied into a hidden field still makes 403-versus-201 an oracle for its facets — owned by the descriptor author.) **The check runs once, on the final patch** after the whole hook
+  chain (Ruling W): a later hook may shorten or replace what an earlier one wrote, and the refusal names the hook that
+  last wrote the field. Measured in the core before
+  any driver sees the patch, so SQLite (no length enforcement) and PostgreSQL (`varchar(n)`) give the same answer. Not
+  422 — that tells the caller to fix a field of *their* payload, and the field may be one they never sent; not
+  `function-failed` — the same overrun is reachable with no function at all.
+- **Tenancy does not reach inside a function.** Alvo's tenant predicate filters what *Alvo* reads; a host function
+  that reads stored data itself (a lookup table, a rate per tenant) must take the tenant as a parameter and filter by
+  it. On a tenant-scoped entity pass the row's own `new.tenant_id`, which works in a `condition` and in a `mutate`
+  alike — the tenant scope has already admitted it before any hook runs. `@tenant.id` works in a `condition` only: the
+  `Mutate` profile refuses it (its refusal message is tracked in #310). One that closes over a store and reads it unfiltered is a
+  cross-tenant read Alvo cannot see.
+- **The host's exception is logged, never shown.** What a function throws — message and stack trace — is logged at
+  Error for a write and at Warning for an after-hook condition. Never put caller data (a field's value, an argument)
+  in an exception message: it lands in every log sink the host ships to.
+- **Prefer null to a throw.** A host function should answer `null` (or `false`) on input it cannot handle rather than
+  throw: every throw is a 500 and an Error log entry, once per request.
+- **Versioning.** A function whose meaning changes gets a new name (`vatRate` stays, `vatRate2` is new): a descriptor
+  holds names, not versions. Removing or renaming a registered function makes a stored descriptor that calls it fail
+  the apply at boot — refused as calling an unknown function.
+- **Discovery.** `GET …/cel/functions` (`IAlvoManagement.GetCelFunctionsAsync`, Viewer) lists one entry per overload as
+  `{ "functions": [...] }`; the assistant reads it through its `get_cel_functions` tool.
 
 ### The profile is narrower than the design addendum's table, deliberately
 
@@ -440,7 +540,7 @@ of a standard:
    of them as a value, with a "use an equality chain instead" fix suggestion when `[` appears where a
    value is expected.
 7. **No comprehension macros** (`all`, `exists`, `exists_one`, `map`, `filter`) — any identifier
-   immediately followed by `(` other than `has`/`changed` is refused, with a suggestion to move the
+   immediately followed by `(` that is neither `has`/`changed` nor a catalogued function is refused, with a suggestion to move the
    logic into a hook instead.
 8. **No nested field access beyond exactly one level of `old.`/`new.`** — real CEL supports
    arbitrary `a.b.c`-style navigation; Alvo's row model is flat, so a bare identifier is always
@@ -480,8 +580,28 @@ renumbering would silently repoint every citation:
     memberless member. It is a **bound instant** rather than a clock read, and never rendered to SQL
     — both stated above.
 
-Neither is admitted outside `Mutate`, so narrowing 7 stands unchanged for every other profile: an
-identifier followed by `(` other than `has`/`changed` is still a syntax error there.
+The legacy pair is admitted in `Mutate` only; the catalogued functions (built-ins and host functions) are admitted in
+`Condition` and `Mutate`, each within its own profile list. Narrowing 7 stands for every other profile and every other
+name: an identifier followed by `(` that is neither `has`/`changed` nor a catalogued function is still a syntax error.
+
+**Added by the function catalog** (spec §11):
+
+17. **`trim`, `replace`, `abs` and `round` take the global call shape** — cel-go spells `trim`/`replace` as receiver
+    macros and `abs`/`round` under `math.`; Alvo adopts the names and semantics and not the shape, as for `lowerAscii`
+    (15). The receiver and namespace spellings are refused with the global form as the fix. (`size` is conformant.)
+18. **Null in, null out** — a null argument makes the call null where CEL has no matching overload; SQL parity, and the
+    `lowerAscii` precedent.
+19. **A failing call aborts evaluation** — CEL's error values and commutative `&&`/`||` absorption are not modelled, so
+    `f(x) && false` fails closed rather than answering `false`.
+20. **`trim` removes four ASCII characters** (space, tab, line feed, carriage return) where cel-go removes Unicode
+    whitespace — SQL parity, and those are the escapes the lexer has.
+21. **`replace` with an empty search returns the text** where cel-go inserts between code points — SQL parity.
+22. **`Int` may bind a `Decimal` parameter** — CEL has no implicit conversion; Alvo's comparisons already widen
+    numerics, so a call does the same.
+23. **`round` sends ties away from zero** (cel-go `math.round`), the `Int` overload is the identity, and the `Decimal`
+    overload stays `Decimal` rather than `double`.
+24. **Host function names are narrower than CEL identifiers** and reserve CEL's standard names — a name an agent trained
+    on CEL reads as syntax is refused at registration, which costs nothing.
 
 **Residual caveat, not a narrowing:** the string-collation caveat on `==`/`!=` documented above — it
 is a real divergence *risk* between the two backends under a non-default collation, not a construct

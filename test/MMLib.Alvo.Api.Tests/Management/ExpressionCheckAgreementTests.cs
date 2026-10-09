@@ -69,6 +69,8 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("rule", Orders + "/rules/delete", "[1, 2, 3]"),
         ("rule", Orders + "/rules/list", new string('a', 2001)),
         ("rule", Orders + "/rules/list", new string('a', 2000)),
+        ("rule", Orders + "/rules/list", "normalizePhone(note) == 'x'"),
+        ("rule", Orders + "/rules/get", "trim(note) == 'x'"),
         ("beforeHook", BeforeCreate, "new.quantity > 0"),
         ("beforeHook", BeforeCreate, "old.status == 'open'"),
         ("beforeHook", BeforeUpdate, "old.status == 'open' && new.status == 'closed'"),
@@ -77,6 +79,10 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("beforeHook", BeforeUpdate, "'dispatcher' in @user.roles"),
         ("beforeHook", BeforeCreate, "@tenant.id == 'x'"),
         ("beforeHook", BeforeCreate, "{}"),
+        ("beforeHook", BeforeCreate, "normalizePhone(new.note) == '1'"),
+        ("beforeHook", BeforeCreate, "size(new.title) > 3"),
+        ("beforeHook", BeforeCreate, "trim(old.note) == 'x'"),
+        ("beforeHook", BeforeUpdate, "normalisePhone(new.note) == 'x'"),
         ("afterHook", AfterCreate, "new.quantity > 5"),
         ("afterHook", AfterCreate, "@tenant.id == 'x'"),
         ("afterHook", AfterCreate, "'dispatcher' in @user.roles"),
@@ -84,6 +90,15 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("afterHook", AfterCreate, "old.status == 'open'"),
         ("afterHook", AfterCreate, "new.quantity >"),
         ("afterHook", AfterCreate, "null"),
+        ("afterHook", AfterCreate, "normalizePhone(new.note) == 'x'"),
+        ("afterHook", AfterCreate, "size(new.note) > 3"),
+        ("afterHook", AfterCreate, "isMe(@user.id)"),
+        ("afterHook", AfterCreate, "isMe(@tenant.id)"),
+        ("afterHook", AfterCreate, "yes(isMe(@tenant.id))"),
+        ("afterHook", AfterCreate, "yes('owner' in @user.roles)"),
+        ("afterHook", AfterCreate, "!yes('owner' in @user.roles)"),
+        ("afterHook", AfterCreate, "new.quantity > 1 && yes('owner' in @user.roles)"),
+        ("beforeHook", BeforeCreate, "isMe(@user.id)"),
         ("mutate", Mutate + "note", "'closed'"),
         ("mutate", Mutate + "closed_at", "now()"),
         ("mutate", Mutate + "quantity", "'abc'"),
@@ -94,6 +109,11 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("mutate", Mutate + "note", "@user.roles"),
         ("mutate", Mutate + "quantity", ""),
         ("mutate", Mutate + "note", new string('a', 2001)),
+        ("mutate", Mutate + "note", "normalizePhone(new.note)"),
+        ("mutate", Mutate + "note", "trim(replace(new.title, '-', ' '))"),
+        ("mutate", Mutate + "note", "normalizePhone(new.note, new.note)"),
+        ("mutate", Mutate + "quantity", "abs(new.quantity)"),
+        ("mutate", Mutate + "quantity", "round(new.price)"),
         ("computed", Computed, "quantity * price"),
         ("computed", Computed, "quantity * price > 10"),
         ("computed", Computed, "(quantity + 1) * 2 > price"),
@@ -106,6 +126,8 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         ("computed", Computed, "quantity == 1 ? price : price * 2"),
         ("computed", Computed, "'x'"),
         ("computed", Computed, new string('a', 2001)),
+        ("computed", Computed, "normalizePhone(note)"),
+        ("computed", Computed, "round(price)"),
     ];
 
     /// <summary>For every case, the check's error set equals apply's, restricted to the slot.</summary>
@@ -198,6 +220,55 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
         refused.Result.Errors.ShouldNotBeEmpty("apply refuses the whole descriptor");
         verdict.IsValid.ShouldBeFalse();
         verdict.Findings.Single().Message.ShouldStartWith("Not checked yet");
+    }
+
+    /// <summary>A host function in a rule is refused once, with the recipe that works — not with a misleading operand error.</summary>
+    /// <returns>A task that completes when the check has answered.</returns>
+    [Fact]
+    public async Task A_host_function_in_a_rule_is_refused_once_with_the_mutate_recipe()
+    {
+        var management = fixture.Management();
+        var current = await WorkingCopyAsync(management);
+
+        var verdict = await management.CheckExpressionAsync(
+            Project, new ManagementExpressionCheck(current.DescriptorJson, Orders + "/rules/list", "normalizePhone(note) == 'x'"), Ct);
+
+        var finding = verdict.Findings.ShouldHaveSingleItem();
+        finding.Message.ShouldStartWith("'normalizePhone(...)' is not available in the Rule profile; it is available in Condition and Mutate.");
+        finding.FixSuggestion.ShouldNotBeNull().ShouldContain("before-hook mutate");
+    }
+
+    /// <summary>
+    /// Agreement is not correctness (both sides share the validator), so pin what an after-hook refuses and why:
+    /// a call reads exactly what its arguments read, so the refusal names the one context value inside it.
+    /// </summary>
+    /// <param name="source">The after-hook condition.</param>
+    /// <param name="refusedFor">The one context value the refusal names, or null when the condition is valid.</param>
+    /// <returns>A task that completes when the check has answered.</returns>
+    [Theory]
+    [InlineData("normalizePhone(new.note) == 'x'", null)]
+    [InlineData("size(new.note) > 3", null)]
+    [InlineData("isMe(@user.id)", null)]
+    [InlineData("isMe(@tenant.id)", "@tenant.id")]
+    [InlineData("yes(isMe(@tenant.id))", "@tenant.id")]
+    [InlineData("yes('owner' in @user.roles)", "@user.roles")]
+    [InlineData("!yes('owner' in @user.roles)", "@user.roles")]
+    [InlineData("new.quantity > 1 && yes('owner' in @user.roles)", "@user.roles")]
+    public async Task An_after_hook_call_reads_only_the_context_its_arguments_name(string source, string? refusedFor)
+    {
+        var management = fixture.Management();
+        var current = await WorkingCopyAsync(management);
+
+        var verdict = await management.CheckExpressionAsync(
+            Project, new ManagementExpressionCheck(current.DescriptorJson, AfterCreate, source), Ct);
+
+        var messages = string.Join(" | ", verdict.Findings.Select(f => f.Message));
+        verdict.IsValid.ShouldBe(refusedFor is null, messages);
+        var reason = verdict.Findings.Where(f => f.Severity == DescriptorValidationSeverity.Error).ToList();
+        if (refusedFor is not null)
+        {
+            reason.ShouldHaveSingleItem(messages).Message.ShouldStartWith($"This after-hook condition reads '{refusedFor}'");
+        }
     }
 
     private static void BreakElsewhere(JsonNode root, string breakage)
@@ -347,7 +418,14 @@ public sealed class ExpressionCheckAgreementTests(ExpressionCheckAgreementTests.
             _world = await AlvoApiWorld.FromDescriptorAsync(
                 "expression-agreement.alvo.json",
                 [],
-                new AlvoApiWorldSetup(MapBeforePriming: true, MapManagementApi: true));
+                new AlvoApiWorldSetup(
+                    MapBeforePriming: true,
+                    MapManagementApi: true,
+                    ConfigureServicesAfterAlvo: services =>
+                    {
+                        CelFunctionsWorld.Register(services, phone => phone);
+                        CelFunctionsWorld.RegisterContextProbes(services);
+                    }));
 
         /// <inheritdoc/>
         public async ValueTask DisposeAsync()

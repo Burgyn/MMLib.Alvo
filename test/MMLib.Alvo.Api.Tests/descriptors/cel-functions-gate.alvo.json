@@ -1,0 +1,33 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "cel-functions-gate",
+  "description": "One entity whose before-create reject is gated by a host function over an integer field: tooMany(new.qty), registered with an int parameter. An Int that does not fit the parameter must fail the write closed, never read as a false condition that lets the row through.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["writer"]
+  },
+  "access": {
+    "viewer": "'writer' in @user.roles"
+  },
+  "entities": {
+    "orders": {
+      "description": "An order whose quantity a host function gates.",
+      "fields": {
+        "qty": { "type": "integer" }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      },
+      "hooks": {
+        "beforeCreate": [
+          { "condition": "tooMany(new.qty)", "action": { "reject": "too many" } }
+        ]
+      }
+    }
+  }
+}

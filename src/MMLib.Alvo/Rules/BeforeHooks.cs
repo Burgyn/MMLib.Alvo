@@ -99,4 +99,9 @@ internal sealed record CompiledBeforeHook(
 /// <param name="Field">The field this mutation writes; known to exist on the entity and to be caller-writable.</param>
 /// <param name="Expression">The compiled value expression, or <see langword="null"/> when the value is a literal.</param>
 /// <param name="Value">The literal value, already in the target field's own representation.</param>
-internal sealed record CompiledMutation(string Field, CompiledExpression? Expression, object? Value);
+/// <param name="Target">
+/// The field with its declared facets: a literal is measured against them at apply, an expression's result at
+/// every write the hook fires on (Ruling V).
+/// </param>
+internal sealed record CompiledMutation(
+    string Field, CompiledExpression? Expression, object? Value, Internal.MutationTarget Target);

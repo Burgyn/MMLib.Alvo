@@ -41,6 +41,9 @@ internal enum ManagementOperation
     /// <summary>Read what this build honours, warns about and refuses.</summary>
     GetCapabilities,
 
+    /// <summary>Read the CEL functions a descriptor may call: built-ins and host registrations.</summary>
+    GetCelFunctions,
+
     /// <summary>Read the build, mode, engine and startup mode.</summary>
     GetInfo,
 

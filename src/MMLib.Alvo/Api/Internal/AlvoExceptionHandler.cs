@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using MMLib.Alvo.Expressions.Internal;
 
 namespace MMLib.Alvo.Api.Internal;
 
@@ -81,6 +82,12 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
             return;
         }
 
+        if (FunctionFailure(exception) is { } function)
+        {
+            await AnswerFunctionFailureAsync(httpContext, function).ConfigureAwait(false);
+            return;
+        }
+
         if (!ClientDisconnected(httpContext, exception))
         {
             Failed(logger, exception, httpContext.Request.Method, httpContext.Request.Path.Value);
@@ -88,6 +95,73 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
 
         await ProblemResultFactory.Internal().ExecuteAsync(httpContext).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Finds a CEL function's failure in <paramref name="exception"/> or in what wraps it — a reflection, aggregate or
+    /// storage wrapper must not turn a fail-closed refusal into an anonymous <c>internal</c>.
+    /// </summary>
+    /// <remarks>
+    /// Walks <see cref="Exception.InnerException"/> and every member of an <see cref="AggregateException"/>, to a
+    /// bounded depth so a cyclic or absurdly deep graph cannot hang the handler. Scoped by
+    /// <see cref="FailedInsideAlvo"/>: a host's own endpoint that calls <c>IAlvoData</c> and lets the failure
+    /// escape gets the host's own 500, never this document.
+    /// </remarks>
+    /// <param name="exception">The failure the pipeline raised.</param>
+    /// <returns>The function failure, or <see langword="null"/>.</returns>
+    internal static CelFunctionException? FunctionFailure(Exception exception) => FunctionFailure(exception, MaxWrapperDepth);
+
+    private static CelFunctionException? FunctionFailure(Exception? exception, int depth)
+    {
+        if (exception is CelFunctionException function)
+        {
+            return function;
+        }
+
+        if (exception is null || depth == 0)
+        {
+            return null;
+        }
+
+        return Children(exception).Select(child => FunctionFailure(child, depth - 1)).FirstOrDefault(found => found is not null);
+    }
+
+    /// <summary>What <paramref name="exception"/> wraps: every member of an aggregate, otherwise its inner exception.</summary>
+    /// <param name="exception">The wrapper.</param>
+    private static IEnumerable<Exception> Children(Exception exception)
+    {
+        if (exception is AggregateException aggregate)
+        {
+            foreach (var member in aggregate.InnerExceptions)
+            {
+                yield return member;
+            }
+        }
+        else if (exception.InnerException is { } inner)
+        {
+            yield return inner;
+        }
+    }
+
+    private const int MaxWrapperDepth = 16;
+
+    /// <summary>
+    /// Answers a CEL function's failure: logged at Error with the host's exception (its stack is the operator's), and a
+    /// <c>function-failed</c> document that names the function and never the host's text.
+    /// </summary>
+    /// <param name="httpContext">The failed request's context.</param>
+    /// <param name="failure">The function's failure.</param>
+    private async Task AnswerFunctionFailureAsync(HttpContext httpContext, CelFunctionException failure)
+    {
+        FunctionFailed(logger, failure.InnerException ?? failure, failure.FunctionName, httpContext.Request.Method, httpContext.Request.Path.Value);
+        await ProblemResultFactory.FunctionFailed(FunctionFailedDetail(failure)).ExecuteAsync(httpContext).ConfigureAwait(false);
+    }
+
+    /// <summary>The caller-facing sentence for a function failure.</summary>
+    /// <param name="failure">The failure.</param>
+    /// <returns>The detail text.</returns>
+    internal static string FunctionFailedDetail(CelFunctionException failure) => failure.Reason is { } reason
+        ? $"The CEL function '{failure.FunctionName}' failed: {reason}. Nothing was written."
+        : $"The CEL function '{failure.FunctionName}' failed while this write was evaluated, so nothing was written. Its own error is in the server log.";
 
     /// <summary>
     /// Answers a request the server refused before Alvo could read it, at the status the server chose.
@@ -148,6 +222,15 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
     /// <param name="path">The failed request's path.</param>
     [LoggerMessage(Level = LogLevel.Error, Message = "Alvo failed to handle {Method} {Path}.")]
     private static partial void Failed(ILogger logger, Exception exception, string method, string? path);
+
+    /// <summary>The function-failure record, with the host's exception attached.</summary>
+    /// <param name="logger">The logger this handler writes through.</param>
+    /// <param name="exception">The host's exception, or the built-in's refusal.</param>
+    /// <param name="function">The failed function's name.</param>
+    /// <param name="method">The failed request's HTTP method.</param>
+    /// <param name="path">The failed request's path.</param>
+    [LoggerMessage(Level = LogLevel.Error, Message = "The CEL function {Function} failed during {Method} {Path}; the write was rolled back.")]
+    private static partial void FunctionFailed(ILogger logger, Exception exception, string function, string method, string? path);
 
     /// <summary>The client-fault record: no exception, and a level nobody is paged by.</summary>
     /// <param name="logger">The logger this handler writes through.</param>

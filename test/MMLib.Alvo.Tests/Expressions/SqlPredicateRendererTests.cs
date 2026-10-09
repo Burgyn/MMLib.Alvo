@@ -470,7 +470,7 @@ public class SqlPredicateRendererTests
     }
 
     private static CelCall LowerAsciiOfTitle =>
-        new(CelCall.LowerAscii, new CelFieldRef("title", CelValueType.String, CelRecordState.Current));
+        new(CelCall.LowerAscii, [new CelFieldRef("title", CelValueType.String, CelRecordState.Current)]);
 
     private static CompiledExpression MutateExpression(CelNode root, CelValueType resultType = CelValueType.String) =>
         new(root, CelProfile.Mutate, resultType, "lowerAscii(title)", CelFixtures.Orders);

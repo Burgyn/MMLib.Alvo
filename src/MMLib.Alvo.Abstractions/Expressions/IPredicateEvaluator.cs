@@ -19,7 +19,8 @@ public interface IPredicateEvaluator
     /// semantics — the null rule, short-circuiting, <c>changed(...)</c>, numeric widening — are
     /// exactly those the core's CEL interpreter documents, and the differential suite proves this
     /// evaluator and <see cref="IPredicateRenderer"/> never disagree on any well-typed expression
-    /// and row.
+    /// and row. An expression that calls a CEL function which fails throws (an internal, fail-closed type) rather
+    /// than answering <see langword="false"/>.
     /// </summary>
     /// <param name="expression">The compiled Rule or Condition expression.</param>
     /// <param name="current">

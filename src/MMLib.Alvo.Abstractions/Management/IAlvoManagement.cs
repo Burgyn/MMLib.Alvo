@@ -115,6 +115,21 @@ public interface IAlvoManagement
     Task<ManagementCapabilities> GetCapabilitiesAsync(string project, CancellationToken ct = default);
 
     /// <summary>
+    /// Every CEL function a descriptor may call on this instance — the built-ins and the host's registrations — one
+    /// entry per overload, with parameters, result, nullability and the profiles each compiles in.
+    /// </summary>
+    /// <remarks>
+    /// The list is the instance's: a host function exists only in the host that registered it, so a descriptor that
+    /// calls one is refused as an unknown function by the standalone image and the CLI. Read it before writing a call.
+    /// </remarks>
+    /// <param name="project">The project name.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The functions, ordered by name, in an envelope that can grow additively.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
+    /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
+    Task<ManagementCelFunctions> GetCelFunctionsAsync(string project, CancellationToken ct = default);
+
+    /// <summary>
     /// Answers what a named caller may do to an entity — <b>by calling the same <c>IPolicyEngine</c>
     /// production calls</b>, never a copy of it.
     /// </summary>

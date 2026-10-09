@@ -101,6 +101,7 @@ internal static class ManagementSetup
             provider.GetRequiredService<Schema.ISchemaRegistry>(),
             provider.GetRequiredService<Rules.IPolicyEngine>(),
             provider.GetRequiredService<Descriptor.IDescriptorValidator>(),
+            provider.GetRequiredService<Expressions.Internal.CelFunctionCatalog>(),
             provider.GetRequiredService<IRoleCatalogProvider>(),
             provider.GetService<Data.IAlvoData>(),
             provider.GetService<Migrations.IDescriptorVersionStore>(),

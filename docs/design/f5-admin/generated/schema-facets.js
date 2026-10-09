@@ -113,7 +113,8 @@ export const SCHEMA_FACETS = {
       "Unauthenticated": "unauthenticated",
       "UnreadableRequest": "unreadable-request",
       "UnsupportedMediaType": "unsupported-media-type",
-      "Internal": "internal"
+      "Internal": "internal",
+      "FunctionFailed": "function-failed"
     }
   }
 };
