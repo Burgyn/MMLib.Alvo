@@ -614,6 +614,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A descriptor that relied, knowingly or not, on such a guard never firing will now see writes refused. SQLite still
   differs from PostgreSQL for a date compared with a datetime at exactly midnight UTC of the same day (#318).
 
+- **A before-hook `"mutate": {"f": null}` is judged, not thrown on** (#326). The schema admits a JSON
+  `null` mutate value — a hand- or agent-written descriptor may hold one — but System.Text.Json never
+  hands a `null` token to a converter, so the entry reached the before-hook compiler as a null and a
+  `NullReferenceException` escaped the validator: apply, its dry run and every management route that
+  validates answered 500. The entry is now read as the null literal it was written as, so the rule
+  the literal path already had applies — refused at the mutate slot on a `required` field, accepted
+  (the field is emptied) on an optional one.
+
 - **The OpenAPI document's advertised origin carries the request's path base** (#130) — and it always
   did. `Microsoft.AspNetCore.OpenApi` builds `servers[0].url` from the request's scheme, host **and
   `PathBase`**, per request rather than once per document name, so a client resolving a path key
