@@ -157,6 +157,7 @@ export default defineConfig({
           page('Configuration keys', 'reference/configuration'),
           page('Limits and budgets', 'reference/limits'),
           page('Capabilities in this build', 'reference/capabilities'),
+          { label: 'C# API', collapsed: true, items: [{ autogenerate: { directory: 'reference/csharp' } }] },
         ] },
         { label: 'Project', collapsed: true, items: [
           page('Roadmap and status', 'project/roadmap'),

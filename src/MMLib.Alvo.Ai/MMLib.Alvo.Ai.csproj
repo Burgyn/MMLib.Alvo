@@ -14,6 +14,10 @@
     Both dependency families are MIT and first-party Microsoft, so neither touches the licensing
     bans in alvo-dotnet-conventions.
   -->
+  <PropertyGroup>
+    <Description>The Alvo schema assistant: an agent that reads a project and proposes a descriptor change, and cannot apply one.</Description>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="../MMLib.Alvo.Abstractions/MMLib.Alvo.Abstractions.csproj" />
   </ItemGroup>

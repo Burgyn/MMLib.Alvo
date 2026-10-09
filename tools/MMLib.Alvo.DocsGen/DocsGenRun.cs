@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.DocsGen.Configuration;
+using MMLib.Alvo.DocsGen.CSharp;
 using MMLib.Alvo.DocsGen.Exchanges;
 using MMLib.Alvo.DocsGen.Host;
 using MMLib.Alvo.DocsGen.Limits;
@@ -18,6 +19,7 @@ internal static class DocsGenRun
         new LimitsGenerator(),
         new HostPagesGenerator(),
         new ExchangesGenerator(),
+        new CSharpApiGenerator(),
         new ReferenceIndexGenerator(),
     ];
 

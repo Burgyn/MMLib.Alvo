@@ -5,6 +5,10 @@
        project (MMLib.Alvo.Data.PostgreSql.Tests.Integration) covers the provider
        contract itself. Packable like every other shipped Data.* provider. -->
   <PropertyGroup>
+    <Description>The PostgreSQL driver for Alvo, registered with UsePostgreSql.</Description>
+  </PropertyGroup>
+
+  <PropertyGroup>
     <!-- EF1001: NpgsqlDatabaseModelFactory is design-time-only and [EntityFrameworkInternal].
          PostgreSqlMigrationServices constructs it directly (deliberate, see its ctor comment) to
          avoid a Microsoft.EntityFrameworkCore.Design dependency in a shipped provider package. -->

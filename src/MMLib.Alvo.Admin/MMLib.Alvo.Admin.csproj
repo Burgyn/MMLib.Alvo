@@ -1,5 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
 
+  <PropertyGroup>
+    <Description>The Alvo admin dashboard: server-interactive Blazor components and the design system they ship with.</Description>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- What earns this package (package-boundary.md rule (a)) is now both halves of the argument.
          The first is the Razor Class Library boundary: an RCL's wwwroot is published as static web

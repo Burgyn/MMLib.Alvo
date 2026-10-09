@@ -18,3 +18,9 @@ internal static class ShippedAssemblies
 
     internal static Assembly Host => typeof(MMLib.Alvo.Host.AlvoHost).Assembly;
 }
+
+internal static class ShippedPackages
+{
+    internal static IReadOnlyList<(string Package, Assembly Assembly)> All { get; } =
+        [.. ShippedAssemblies.All.Select(assembly => (assembly.GetName().Name!, assembly))];
+}
