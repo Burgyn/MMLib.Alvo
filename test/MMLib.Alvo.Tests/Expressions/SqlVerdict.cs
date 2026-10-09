@@ -441,7 +441,7 @@ internal static class SqlTriLogic
     }
 
     /// <summary>
-    /// Normalizes <see cref="DateTime"/>/<see cref="DateTimeOffset"/> to a comparable instant, treating
+    /// Normalizes <see cref="DateTime"/>/<see cref="DateTimeOffset"/>/<see cref="DateOnly"/> (midnight UTC) to a comparable instant, treating
     /// an unspecified-kind <see cref="DateTime"/> as UTC — the same convention
     /// <c>CelInterpreter</c> documents, so both sides of the differential test model the identical
     /// (deliberately chosen, machine-independent) rule rather than two arbitrary ones that happen to
@@ -453,6 +453,9 @@ internal static class SqlTriLogic
         {
             case DateTimeOffset dto:
                 result = dto;
+                return true;
+            case DateOnly date:
+                result = new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
                 return true;
             case DateTime dt:
                 result = dt.Kind == DateTimeKind.Unspecified

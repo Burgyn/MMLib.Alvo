@@ -66,6 +66,7 @@
 
   <ItemGroup>
     <Content Include="descriptors/*.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(MSBuildThisFileDirectory)../_shared/api/descriptors/*.json" Link="descriptors/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

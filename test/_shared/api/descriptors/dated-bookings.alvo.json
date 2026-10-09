@@ -1,0 +1,34 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "dated-bookings",
+  "description": "One entity with a date field guarded by a before-hook reject over that date. It exists so the engine-sensitive API suite can prove a date guard fires on every engine: a date column reaches the hook as the engine's own date shape, and a comparison the interpreter cannot normalise answers false, so the reject would never fire (issue #317).",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["admin"]
+  },
+  "entities": {
+    "bookings": {
+      "description": "A booking whose start day, once set, cannot be moved.",
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 },
+        "starts_on": { "type": "date", "required": true }
+      },
+      "rules": {
+        "list": "'admin' in @user.roles",
+        "get": "'admin' in @user.roles",
+        "create": "'admin' in @user.roles",
+        "update": "'admin' in @user.roles",
+        "delete": "'admin' in @user.roles"
+      },
+      "hooks": {
+        "beforeUpdate": [
+          {
+            "condition": "new.starts_on != old.starts_on",
+            "action": { "reject": "A booking's start day cannot be moved. Cancel it and book again." }
+          }
+        ]
+      }
+    }
+  }
+}

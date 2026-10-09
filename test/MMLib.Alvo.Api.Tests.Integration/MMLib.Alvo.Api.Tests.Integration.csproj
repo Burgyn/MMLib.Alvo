@@ -56,6 +56,7 @@
        statement about one suite rather than about two suites that have drifted apart. -->
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)../_shared/api/*.cs" Link="_shared/%(Filename)%(Extension)" />
+    <Content Include="$(MSBuildThisFileDirectory)../_shared/api/descriptors/*.json" Link="descriptors/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
