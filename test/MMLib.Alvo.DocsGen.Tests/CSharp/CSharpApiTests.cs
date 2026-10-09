@@ -123,6 +123,28 @@ public class CSharpApiTests
     }
 
     [Fact]
+    public void Remarks_render_as_a_paragraph_under_the_summary()
+    {
+        var (package, assembly) = ShippedPackages.All.Single(p => p.Package == "MMLib.Alvo.Identity");
+
+        var identity = CSharpApiGenerator.RenderPackage(package, assembly, _docs, 12).Content;
+
+        var summary = identity.IndexOf("The DI key the cookie", StringComparison.Ordinal);
+        var remarks = identity.IndexOf("**Keyed, and that is a security decision rather than a composition style.**", StringComparison.Ordinal);
+        summary.ShouldBeGreaterThan(0);
+        remarks.ShouldBeGreaterThan(summary);
+        identity[summary..remarks].ShouldContain("\n\n");
+    }
+
+    [Fact]
+    public void The_identity_constants_are_in_scope()
+    {
+        var identity = ShippedPackages.All.Single(p => p.Package == "MMLib.Alvo.Identity").Assembly;
+
+        ApiScope.TypesOf(identity).Select(type => type.Name).ShouldContain("AlvoIdentity");
+    }
+
+    [Fact]
     public void A_package_without_host_facing_types_says_so()
     {
         var page = CSharpApiGenerator.RenderPackage("Fixture", "A fixture package.", [], XmlDocs.Parse("<doc><members/></doc>"), 20);

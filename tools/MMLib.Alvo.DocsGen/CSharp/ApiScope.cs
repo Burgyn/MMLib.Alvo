@@ -26,6 +26,7 @@ internal static class ApiScope
         "AlvoAdmin",
         "AlvoAdminAssets",
         "AlvoAdminClaims",
+        "AlvoIdentity",
         "AlvoProblemTypes",
     };
 

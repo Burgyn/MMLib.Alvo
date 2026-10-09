@@ -36,6 +36,8 @@ internal sealed class XmlDocs
 
     internal string Returns(string docId) => Child(docId, "returns");
 
+    internal string Remarks(string docId) => Child(docId, "remarks");
+
     internal string Param(string docId, string name) =>
         _members.TryGetValue(docId, out var member)
         && member.Elements("param").FirstOrDefault(param => (string?)param.Attribute("name") == name) is { } element
