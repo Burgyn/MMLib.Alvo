@@ -66,7 +66,7 @@
     "dynamicEntities": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Governance for runtime, user-defined entities (the dynamic schema-registry driver). End-users create record types at runtime via the Management API into metadata tables — they are NOT declared under `entities`. This block is how the host expresses the security policy and limits over that whole class. The store itself is F7.",
+      "description": "Governance for runtime, user-defined entities (the dynamic schema-registry driver). End-users create record types at runtime via the Management API into metadata tables — they are NOT declared under `entities`. This block is how the host expresses the security policy and limits over that whole class. The store itself is planned and not in this build.",
       "properties": {
         "enabled": {
           "type": "boolean",
@@ -363,7 +363,8 @@
       ],
       "properties": {
         "$cel": {
-          "$ref": "#/$defs/cel"
+          "$ref": "#/$defs/cel",
+          "description": "A CEL expression whose result becomes the value, in place of a JSON literal (e.g. now(), @user.id)."
         }
       },
       "description": "A tagged CEL expression in a value position, distinguishing it unambiguously from a JSON literal."

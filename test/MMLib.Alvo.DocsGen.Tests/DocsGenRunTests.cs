@@ -18,6 +18,19 @@ public class DocsGenRunTests
         (await File.ReadAllTextAsync(Path.Combine(paths.ReferenceDir, "kept.md"), TestContext.Current.CancellationToken)).ShouldBe("fresh");
     }
 
+    [Fact]
+    public async Task An_owned_directory_outside_the_site_is_refused()
+    {
+        var site = Directory.CreateTempSubdirectory("docsgen-run-").FullName;
+        var keep = Path.Combine(site, "keep.md");
+        await File.WriteAllTextAsync(keep, "keep", TestContext.Current.CancellationToken);
+        var paths = new DocsGenPaths(RepositoryRoot.Find(), site, site);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => DocsGenRun.RunAsync(paths, [], TestContext.Current.CancellationToken));
+
+        File.Exists(keep).ShouldBeTrue();
+    }
+
     private sealed class FixedGenerator(params GeneratedPage[] pages) : IPageGenerator
     {
         public Task<IReadOnlyList<GeneratedPage>> GenerateAsync(DocsGenContext context, CancellationToken ct) =>

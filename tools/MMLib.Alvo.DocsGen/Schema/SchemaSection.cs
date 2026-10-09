@@ -15,7 +15,7 @@ internal static class SchemaSection
         }
 
         page.Append("- **Type:** ").Append(Md.Code(key.Type)).Append('\n')
-            .Append("- **Required:** ").Append(key.Required ? "yes" : "no").Append('\n');
+            .Append("- **Required:** ").Append(key.RequiredDetail ?? (key.Required ? "yes" : "no")).Append('\n');
         AppendFacts(page, key);
         page.Append('\n');
     }

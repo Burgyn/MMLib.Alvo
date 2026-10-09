@@ -62,5 +62,10 @@ public class SchemaReferenceRendererTests
         functions.ShouldContain("**Not in this build:** see [What works today](/MMLib.Alvo/start-here/what-works-today/).");
     }
 
+    [Fact]
+    public void A_variant_only_requirement_is_qualified_on_the_page() =>
+        Page(SchemaReferenceRenderer.Render(SchemaWalkerTests.Parse(SchemaWalkerTests.Alternatives)), "descriptor/action.md")
+            .ShouldContain("- **Required:** yes (in its variant)");
+
     private static string Page(IReadOnlyList<GeneratedPage> pages, string path) => pages.Single(page => page.RelativePath == path).Content;
 }

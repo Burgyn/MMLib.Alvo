@@ -54,6 +54,27 @@ public partial class RealSchemaTests
     }
 
     [Fact]
+    public void Every_in_page_link_targets_an_anchor_on_the_same_page()
+    {
+        foreach (var page in DescriptorPages())
+        {
+            var anchors = AnchorId().Matches(page.Content).Select(match => match.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+            var dangling = InPageLink().Matches(page.Content).Select(match => match.Groups[1].Value).Where(target => !anchors.Contains(target)).ToList();
+
+            dangling.ShouldBeEmpty(page.RelativePath);
+        }
+    }
+
+    [Fact]
+    public void Value_expressions_do_not_read_as_conditions()
+    {
+        var keys = Blocks().SelectMany(_walker.KeysOf).Where(key => key.Path.EndsWith(".$cel", StringComparison.Ordinal)).ToList();
+
+        keys.ShouldNotBeEmpty();
+        keys.ShouldAllBe(key => !key.Description.StartsWith("Condition", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void No_page_exceeds_the_key_section_cap()
     {
         var oversized = DescriptorPages()
@@ -81,6 +102,9 @@ public partial class RealSchemaTests
 
     [GeneratedRegex("<a id=\"([^\"]+)\"></a>")]
     private static partial Regex AnchorId();
+
+    [GeneratedRegex(@"\]\(#([^)]+)\)")]
+    private static partial Regex InPageLink();
 
     [GeneratedRegex("^### ", RegexOptions.Multiline)]
     private static partial Regex KeySection();

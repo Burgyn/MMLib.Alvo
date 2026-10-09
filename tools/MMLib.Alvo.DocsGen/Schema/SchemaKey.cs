@@ -10,4 +10,5 @@ internal sealed record SchemaKey(
     string? Default,
     string? Pattern,
     IReadOnlyList<string> Notes,
-    bool IsConstant = false);
+    bool IsConstant = false,
+    string? RequiredDetail = null);

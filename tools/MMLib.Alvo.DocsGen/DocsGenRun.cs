@@ -21,6 +21,7 @@ internal static class DocsGenRun
 
     private static void ClearOwnedOutputs(DocsGenPaths paths)
     {
+        RefuseOwnedDirectoriesOutsideTheSite(paths);
         foreach (var directory in paths.OwnedDirectories.Where(Directory.Exists))
         {
             Directory.Delete(directory, recursive: true);
@@ -29,6 +30,17 @@ internal static class DocsGenRun
         foreach (var file in paths.OwnedFiles.Where(File.Exists))
         {
             File.Delete(file);
+        }
+    }
+
+    private static void RefuseOwnedDirectoriesOutsideTheSite(DocsGenPaths paths)
+    {
+        var site = Path.TrimEndingDirectorySeparator(Path.GetFullPath(paths.SiteRoot)) + Path.DirectorySeparatorChar;
+        var outside = paths.OwnedDirectories.Where(directory => !Path.GetFullPath(directory).StartsWith(site, StringComparison.Ordinal)).ToList();
+        if (outside.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Refusing to clear {string.Join(", ", outside)}: every generated directory must lie inside the site root '{paths.SiteRoot}'.");
         }
     }
 
