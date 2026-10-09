@@ -203,6 +203,126 @@ internal static class DescriptorLens
             .ToDictionary(field => field.Name, field => field.Value.Clone(), StringComparer.Ordinal);
     }
 
+    /// <summary>The webhook endpoints a descriptor declares, by name, in its own order.</summary>
+    /// <remarks>
+    /// Read from the working copy by the pickers and Integrations (spec B5), so a declaration staged a minute ago is
+    /// offered. A block of the wrong shape reads as none: the apply is the authority that refuses it.
+    /// </remarks>
+    /// <param name="descriptorJson">The descriptor, applied or working.</param>
+    /// <returns>Name to declaration, cloned to outlive the parse.</returns>
+    public static IReadOnlyList<KeyValuePair<string, JsonElement>> Endpoints(string descriptorJson)
+    {
+        using var document = Parse(descriptorJson);
+        return document is not null
+            && document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.TryGetProperty("webhooks", out var webhooks)
+            && webhooks.ValueKind == JsonValueKind.Object
+            && webhooks.TryGetProperty("endpoints", out var endpoints)
+                ? Declarations(endpoints)
+                : [];
+    }
+
+    /// <summary>The message templates a descriptor declares, by name, in its own order — a <c>bodyFile</c> one included.</summary>
+    /// <param name="descriptorJson">The descriptor, applied or working.</param>
+    /// <returns>Name to declaration, cloned to outlive the parse.</returns>
+    public static IReadOnlyList<KeyValuePair<string, JsonElement>> Templates(string descriptorJson)
+    {
+        using var document = Parse(descriptorJson);
+        return document is not null
+            && document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.TryGetProperty("templates", out var templates)
+                ? Declarations(templates)
+                : [];
+    }
+
+    /// <summary>One after-hook that posts to an endpoint or sends a template.</summary>
+    /// <param name="Kind"><c>endpoint</c> or <c>template</c>.</param>
+    /// <param name="Name">The declaration it names.</param>
+    /// <param name="Entity">The entity the hook is on.</param>
+    /// <param name="Point">The hook point.</param>
+    /// <param name="Position">Its position within the point.</param>
+    internal sealed record IntegrationUse(string Kind, string Name, string Entity, string Point, int Position);
+
+    /// <summary>Every hook action that names an endpoint or a template, entity by entity.</summary>
+    /// <remarks>
+    /// Hooks only: an <c>automation</c> rule's action names an endpoint too, but no rule is evaluated in this build, so it
+    /// delivers nothing and counting it would call an endpoint used that receives nothing.
+    /// </remarks>
+    /// <param name="descriptorJson">The descriptor, applied or working.</param>
+    /// <returns>The uses, in the descriptor's own order.</returns>
+    public static IReadOnlyList<IntegrationUse> IntegrationUses(string descriptorJson)
+    {
+        using var document = Parse(descriptorJson);
+        if (document is null
+            || document.RootElement.ValueKind != JsonValueKind.Object
+            || !document.RootElement.TryGetProperty("entities", out var entities)
+            || entities.ValueKind != JsonValueKind.Object)
+        {
+            return [];
+        }
+
+        return [.. entities.EnumerateObject().SelectMany(entity => UsesOf(entity.Name, entity.Value))];
+    }
+
+    /// <summary>Whether a template declaration reads its body from a file, which this build refuses to send.</summary>
+    /// <param name="template">One template's declaration.</param>
+    /// <returns><see langword="true"/> when it is an object with a <c>bodyFile</c> key, whatever its value.</returns>
+    internal static bool HasBodyFile(JsonElement template)
+        => template.ValueKind == JsonValueKind.Object && template.TryGetProperty("bodyFile", out _);
+
+    /// <summary>One property's text, or nothing when the owner is not an object or the property is not a string.</summary>
+    /// <param name="owner">The object to read.</param>
+    /// <param name="name">The property.</param>
+    /// <returns>The string value, or <see langword="null"/>.</returns>
+    internal static string? TextOf(JsonElement owner, string name)
+        => owner.ValueKind == JsonValueKind.Object
+           && owner.TryGetProperty(name, out var value)
+           && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static List<KeyValuePair<string, JsonElement>> Declarations(JsonElement block)
+        => block.ValueKind == JsonValueKind.Object
+            ? [.. block.EnumerateObject().Select(pair => new KeyValuePair<string, JsonElement>(pair.Name, pair.Value.Clone()))]
+            : [];
+
+    private static IEnumerable<IntegrationUse> UsesOf(string entity, JsonElement declared)
+    {
+        if (declared.ValueKind != JsonValueKind.Object
+            || !declared.TryGetProperty("hooks", out var hooks)
+            || hooks.ValueKind != JsonValueKind.Object)
+        {
+            yield break;
+        }
+
+        foreach (var point in hooks.EnumerateObject().Where(point => point.Value.ValueKind == JsonValueKind.Array))
+        {
+            var position = 0;
+            foreach (var hook in point.Value.EnumerateArray())
+            {
+                if (UseOf(entity, point.Name, position++, hook) is { } use)
+                {
+                    yield return use;
+                }
+            }
+        }
+    }
+
+    private static IntegrationUse? UseOf(string entity, string point, int position, JsonElement hook)
+    {
+        if (hook.ValueKind != JsonValueKind.Object || !hook.TryGetProperty("action", out var action))
+        {
+            return null;
+        }
+
+        if (TextOf(action, "endpoint") is { } endpoint)
+        {
+            return new IntegrationUse("endpoint", endpoint, entity, point, position);
+        }
+
+        return TextOf(action, "template") is { } template ? new IntegrationUse("template", template, entity, point, position) : null;
+    }
+
     private static JsonValueKind KindOf(JsonElement field, string key)
         => field.ValueKind == JsonValueKind.Object && field.TryGetProperty(key, out var value)
             ? value.ValueKind

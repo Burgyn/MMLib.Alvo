@@ -96,6 +96,54 @@ internal sealed partial class WorkingCopy
     });
 
     /// <summary>
+    /// Replaces the hook at one position of one point with an edited one, keeping its place in the ordered list.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Guarded by the one entry, not the whole list</b> (spec §5.1): an unrelated hook appended to the same point by
+    /// another tab must not refuse an edit, and two identical entries are indistinguishable, so replacing either writes the
+    /// same document. <see cref="RemoveHook"/> guards the list because a removal shifts every entry after it; a replace
+    /// shifts nothing.
+    /// </para>
+    /// <para>
+    /// <b>What is written is the caller's patched node</b> (<c>HookPatch</c>), cloned so the caller's object stays its own.
+    /// This writer never rebuilds a hook: a shape the editor cannot draw never reaches it (<c>HookShape</c>).
+    /// </para>
+    /// </remarks>
+    /// <param name="entity">The entity.</param>
+    /// <param name="point">The hook point.</param>
+    /// <param name="position">The hook's position within that point.</param>
+    /// <param name="expectedHook">The hook as the screen drew it (indented, relaxed encoder).</param>
+    /// <param name="hook">The edited hook.</param>
+    /// <returns><see langword="true"/> when it was written.</returns>
+    public bool ReplaceHook(string entity, string point, int position, string expectedHook, JsonObject hook)
+    {
+        ArgumentNullException.ThrowIfNull(hook);
+
+        return Edit(root =>
+        {
+            if (HookList(root, entity, point) is not { } list
+                || position < 0
+                || position >= list.Count
+                || !string.Equals(Readable(list[position], "{}"), expectedHook, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            list[position] = hook.DeepClone();
+            return true;
+        });
+    }
+
+    /// <summary>One point's hook list, when every container on the way to it is the shape the schema declares.</summary>
+    private static JsonArray? HookList(JsonObject root, string entity, string point)
+        => root["entities"] is JsonObject entities
+           && entities[entity] is JsonObject declared
+           && declared["hooks"] is JsonObject hooks
+               ? hooks[point] as JsonArray
+               : null;
+
+    /// <summary>
     /// The hooks an entity declares in the working copy: hook point to the raw JSON of its list.
     /// </summary>
     /// <remarks>

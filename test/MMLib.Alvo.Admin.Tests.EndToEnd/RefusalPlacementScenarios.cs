@@ -95,7 +95,7 @@ public sealed class PendingSoftDeleteScenarios(AdminWorld world) : IClassFixture
     public async Task A_pending_entity_declaring_soft_delete_says_the_apply_refuses_it()
     {
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
-        await session.GoAsync("/transfer");
+        await session.GoToImportAsync();
         await session.Page.FillAsync("#import-json", WithSoftDeletedArchive());
         await session.Page.GetByTestId("import-run").ClickAsync();
         await session.Page.WaitForURLAsync("**/changes");

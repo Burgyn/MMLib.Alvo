@@ -64,6 +64,21 @@ internal sealed partial class AdminInterop(IJSRuntime js, ILogger<AdminInterop> 
     public Task DownloadAsync(string name, string text)
         => QuietlyAsync(module => module.InvokeVoidAsync("download", name, text));
 
+    /// <summary>A stream over the text of the streamed box <paramref name="id"/>; see <c>streamOf</c> in admin.js.</summary>
+    /// <param name="id">The box's element id.</param>
+    /// <returns>
+    /// The stream — empty when the box is gone or over its ceiling (refused at the box instead) — or
+    /// <see langword="null"/> when the circuit has gone.
+    /// </returns>
+    public Task<IJSStreamReference?> StreamOfAsync(string id)
+        => QuietlyAsync<IJSStreamReference?>(module => module.InvokeAsync<IJSStreamReference?>("streamOf", id));
+
+    /// <summary>What the streamed box <paramref name="id"/> holds now, as <c>alvo:measured</c> says it; see <c>measureOf</c>.</summary>
+    /// <param name="id">The box's element id.</param>
+    /// <returns>"&lt;lines&gt; &lt;filled&gt;", or <see langword="null"/> when the box or the circuit is gone.</returns>
+    public Task<string?> MeasureOfAsync(string id)
+        => QuietlyAsync<string?>(module => module.InvokeAsync<string?>("measureOf", id));
+
     /// <summary>Copies <paramref name="text"/> to the clipboard; see <c>copyText</c> in admin.js.</summary>
     public Task CopyAsync(string text) => QuietlyAsync(module => module.InvokeVoidAsync("copyText", text));
 
@@ -209,7 +224,7 @@ internal sealed partial class AdminInterop(IJSRuntime js, ILogger<AdminInterop> 
     }
 
     /// <summary>The three ways a circuit that has gone reports itself; see the remarks.</summary>
-    private static bool IsDisconnect(Exception exception)
+    internal static bool IsDisconnect(Exception exception)
         => exception is JSDisconnectedException or ObjectDisposedException or OperationCanceledException;
 
     [LoggerMessage(EventId = 3, Level = LogLevel.Error,

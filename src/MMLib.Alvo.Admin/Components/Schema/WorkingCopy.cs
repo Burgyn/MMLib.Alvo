@@ -70,10 +70,14 @@ internal sealed partial class WorkingCopy
     /// operator exactly like that. Unreadable rather than wrong, which is the worse kind of display bug:
     /// nothing fails, and the screen quietly stops being about the descriptor the author wrote. Safe here
     /// because <c>CodeBlock</c> HTML-encodes before it highlights.
+    /// <para>
+    /// Internal rather than private for one reader: the On write tab draws each hook with it, because
+    /// <see cref="ReplaceHook"/> compares what the screen drew against exactly this text.
+    /// </para>
     /// </remarks>
     /// <param name="node">The fragment, or <see langword="null"/>.</param>
     /// <param name="empty">What an absent fragment reads as.</param>
-    private static string Readable(JsonNode? node, string empty) =>
+    internal static string Readable(JsonNode? node, string empty) =>
         node?.ToJsonString(_pretty) ?? empty;
 
     /// <summary>
@@ -98,6 +102,9 @@ internal sealed partial class WorkingCopy
 
     /// <summary>The revision the working copy was taken from.</summary>
     public int Revision { get; private set; }
+
+    /// <summary>The guided condition's last scope read off this copy (<see cref="ConditionScope.Of"/>).</summary>
+    internal ConditionScopeCache ConditionScopes { get; } = new();
 
     /// <summary>Whether a working copy has been loaded at all.</summary>
     public bool Loaded => _working is not null;
