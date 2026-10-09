@@ -423,6 +423,7 @@ public sealed class ProblemDetailsTests
         }
 
         reached.Add(await InternalSlugAnsweredByAFaultingStoreAsync());
+        reached.Add(await FunctionFailedSlugAnsweredByAThrowingHostFunctionAsync());
         reached.Add(await UnreadableSlugAnsweredByABodyTheServerRefusesAsync());
         reached.Add(await UnsupportedMediaTypeSlugAnsweredByANonJsonBodyAsync(world));
         reached.AddRange(await ManagementSlugsAnsweredByTheDescriptorWriteAsync());
@@ -482,6 +483,18 @@ public sealed class ProblemDetailsTests
 
     /// <summary>A caller <c>managed-fleet</c>'s <c>access</c> block admits at <c>developer</c>.</summary>
     private static readonly TestApiKey _developer = new("problems-dev", ["dispatcher"], ["*:write"]);
+
+    /// <summary>
+    /// The <c>function-failed</c> slug's probe: its own world, because only a host that registered a throwing CEL
+    /// function can produce it.
+    /// </summary>
+    private static async Task<string> FunctionFailedSlugAnsweredByAThrowingHostFunctionAsync()
+    {
+        await using var world = await CelFunctionsWorld.StartAsync(_ => throw new InvalidOperationException("probe"));
+
+        return await SlugAnsweredByAsync(
+            world, new Probe(HttpMethod.Post, "/api/contacts", CelFunctionsWorld.Writer, new JsonObject { ["phone"] = "x" }));
+    }
 
     /// <summary>
     /// The <c>internal</c> slug's probe. It needs a <em>second</em> world, because the store it drives faults
@@ -655,6 +668,7 @@ public sealed class ProblemDetailsTests
         ProblemResultFactory.ScopeRefused(),
         ProblemResultFactory.Unauthenticated("X-Alvo-Api-Key"),
         ProblemResultFactory.Internal(),
+        ProblemResultFactory.FunctionFailed("A CEL function failed."),
         ProblemResultFactory.Unreadable(StatusCodes.Status413PayloadTooLarge),
         ProblemResultFactory.UnsupportedMediaType(HttpMethods.Post),
         ProblemResultFactory.PreconditionRequired("send If-Match"),

@@ -149,7 +149,23 @@ internal sealed record EntityPolicy(
     IReadOnlyDictionary<string, FieldMask> Hidden,
     IReadOnlyDictionary<string, FieldMask> ReadOnly,
     EntityAfterHooks AfterHooks,
-    EntityBeforeHooks BeforeHooks);
+    EntityBeforeHooks BeforeHooks)
+{
+    /// <summary>
+    /// Every field <paramref name="flags"/> carries a flag for — a static <see langword="true"/> or a per-caller
+    /// expression alike — independent of what any one caller's mask resolves to.
+    /// </summary>
+    /// <remarks>
+    /// The one place "the descriptor flags this field" is spelled, for the two readers that have no caller: the
+    /// OpenAPI document (<c>SchemaComponentBuilder</c> leaves a hidden field's name out) and a before-hook's facet
+    /// refusal, which must not name a field the document leaves out (Ruling X). A name published for the callers who
+    /// may read it is published to the callers who may not, so a per-role flag counts as much as a static one.
+    /// </remarks>
+    /// <param name="flags">The compiled <see cref="Hidden"/> or <see cref="ReadOnly"/> flags of one entity.</param>
+    /// <returns>The flagged field names, compared ordinally.</returns>
+    internal static IReadOnlySet<string> Flagged(IReadOnlyDictionary<string, FieldMask> flags) =>
+        flags.Keys.ToHashSet(StringComparer.Ordinal);
+}
 
 /// <summary>
 /// One entity's compiled <c>after*</c> hooks, one list per hook point.

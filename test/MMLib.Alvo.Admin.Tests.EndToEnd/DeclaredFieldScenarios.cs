@@ -111,7 +111,7 @@ public sealed class StagedFieldRefusalScenarios(AdminWorld world) : IClassFixtur
     /// </summary>
     private static async Task StageAsync(AdminSession session, string descriptor)
     {
-        await session.GoAsync("/transfer");
+        await session.GoToImportAsync();
         await session.Page.FillAsync("#import-json", descriptor);
         await session.Page.GetByTestId("import-run").ClickAsync();
 

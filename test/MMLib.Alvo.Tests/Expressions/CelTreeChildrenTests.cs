@@ -46,7 +46,7 @@ public class CelTreeChildrenTests
         (nameof(CelBinary), new CelBinary(CelBinaryOperator.Equal, _title, _literal), [_title, _literal]),
         (nameof(CelConditional), new CelConditional(_title, _other, _literal), [_title, _other, _literal]),
         (nameof(CelHas), new CelHas(_title), [_title]),
-        (nameof(CelCall), new CelCall(CelCall.LowerAscii, _title), [_title]),
+        (nameof(CelCall), new CelCall(CelCall.LowerAscii, [_title]), [_title]),
     ];
 
     public static TheoryData<string, CelNode, CelNode[]> EveryKind()
@@ -75,7 +75,7 @@ public class CelTreeChildrenTests
     /// </summary>
     [Fact]
     public void A_nullary_call_reports_no_children()
-        => CelTree.Children(new CelCall(CelCall.Now, null)).ShouldBeEmpty();
+        => CelTree.Children(new CelCall(CelCall.Now, [])).ShouldBeEmpty();
 
     /// <summary>
     /// And the theory above covers <b>every</b> kind the two assemblies define, which is the fact that makes

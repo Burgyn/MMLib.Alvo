@@ -32,7 +32,7 @@ namespace MMLib.Alvo.Api.Tests;
 /// are <c>SqliteDataApiTests</c> (ring0, no Docker) and <c>DataApiOnPostgresTests</c> (ring2, Testcontainers).
 /// </para>
 /// </remarks>
-public abstract class DataApiEngineTests
+public abstract partial class DataApiEngineTests
 {
     private static readonly TestApiKey _admin = new("admin-key", ["admin", "authenticated"], ["*:read", "*:write"]);
 

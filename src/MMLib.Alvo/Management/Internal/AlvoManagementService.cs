@@ -4,6 +4,8 @@ using MMLib.Alvo.Ai;
 using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Migrations;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
@@ -38,6 +40,11 @@ namespace MMLib.Alvo.Management.Internal;
 /// the simulator's answer identical to production's by construction; a second evaluator would agree until
 /// the day one of them was edited.
 /// </param>
+/// <param name="validator">
+/// The validator apply runs, resolved from DI so a check's answer is the apply's own verdict on the same
+/// descriptor rather than a second opinion that could drift from it.
+/// </param>
+/// <param name="functions">The CEL functions this instance knows; what <see cref="GetCelFunctionsAsync"/> lists.</param>
 /// <param name="roles">The declared role catalog a simulated caller's role names are resolved through.</param>
 /// <param name="data">The registered data port, or <see langword="null"/> when the host registered none.</param>
 /// <param name="versions">
@@ -85,6 +92,8 @@ internal sealed partial class AlvoManagementService(
     AlvoBootState boot,
     ISchemaRegistry schemaRegistry,
     IPolicyEngine policies,
+    IDescriptorValidator validator,
+    CelFunctionCatalog functions,
     IRoleCatalogProvider roles,
     IAlvoData? data,
     IDescriptorVersionStore? versions,
@@ -193,6 +202,15 @@ internal sealed partial class AlvoManagementService(
     }
 
     /// <inheritdoc/>
+    public Task<ManagementCelFunctions> GetCelFunctionsAsync(string project, CancellationToken ct = default)
+    {
+        EnsureMayPerform(ManagementOperation.GetCelFunctions);
+        EnsureServed(project);
+
+        return Task.FromResult(new ManagementCelFunctions { Functions = functions.Describe() });
+    }
+
+    /// <inheritdoc/>
     public Task<ManagementPolicyVerdict> SimulatePolicyAsync(
         string project, ManagementPolicySimulation simulation, CancellationToken ct = default)
     {
@@ -204,6 +222,55 @@ internal sealed partial class AlvoManagementService(
             simulation.Entity, Operation(simulation.Operation), Caller(simulation.Caller));
 
         return Task.FromResult(Verdict(decision));
+    }
+
+    /// <inheritdoc/>
+    public Task<ManagementExpressionVerdict> CheckExpressionAsync(
+        string project, ManagementExpressionCheck request, CancellationToken ct = default)
+    {
+        EnsureMayPerform(ManagementOperation.CheckExpression);
+        EnsureServed(project);
+        EnsureCheckable(request);
+
+        return Task.FromResult(new ManagementExpressionVerdict(
+            ExpressionSlotCheck.Check(validator, request.DescriptorJson, request.Path, request.Source)));
+    }
+
+    /// <summary>
+    /// The most descriptor text a check will parse: the dashboard calls this on every keystroke. Internal, not private,
+    /// so Host.Tests can hold the dashboard's Import box (<c>ImportLimit.MaxChars</c>) to the same number.
+    /// </summary>
+    internal const int MaxCheckedDescriptorChars = 1_000_000;
+
+    /// <summary>The longest expression a check takes: the schema's own ceiling is 2,000, and an editor needs no more.</summary>
+    private const int MaxCheckedSourceChars = 8_000;
+
+    /// <summary>The longest slot pointer a check takes: real ones are under 150 characters.</summary>
+    private const int MaxCheckedPathChars = 1_024;
+
+    private static void EnsureCheckable(ManagementExpressionCheck? request)
+    {
+        if (request is null || request.DescriptorJson is null || request.Path is null || request.Source is null)
+        {
+            throw new ManagementRequestException(
+                "A check needs a 'descriptorJson', a 'path' and a 'source'. Send all three: the answer is about one "
+                + "expression in one descriptor, and a missing part would be answered as a pass.");
+        }
+
+        EnsureWithin("descriptorJson", request.DescriptorJson, MaxCheckedDescriptorChars,
+            "Send the project's own descriptor; a check is not an apply and takes no more than one.");
+        EnsureWithin("source", request.Source, MaxCheckedSourceChars,
+            "Send the one expression being edited; the schema refuses a rule source over 2,000 characters anyway.");
+        EnsureWithin("path", request.Path, MaxCheckedPathChars,
+            "Send the RFC 6901 pointer of one slot, for example '/entities/orders/rules/list'.");
+    }
+
+    private static void EnsureWithin(string name, string value, int cap, string instead)
+    {
+        if (value.Length > cap)
+        {
+            throw new ManagementRequestException($"The '{name}' is over {cap:N0} characters. {instead}");
+        }
     }
 
     /// <inheritdoc/>

@@ -46,6 +46,7 @@ namespace MMLib.Alvo.Api
         public const string Conflict = "conflict";
         public const string DestructiveChange = "destructive-change";
         public const string Forbidden = "forbidden";
+        public const string FunctionFailed = "function-failed";
         public const string IdempotencyConflict = "idempotency-conflict";
         public const string Internal = "internal";
         public const string MalformedQuery = "malformed-query";
@@ -201,6 +202,7 @@ namespace Microsoft.Extensions.DependencyInjection
 {
     public static class AlvoBuilderExtensions
     {
+        public static MMLib.Alvo.IAlvoBuilder AddCelFunction(this MMLib.Alvo.IAlvoBuilder builder, string name, System.Delegate function, string? summary = null) { }
         public static MMLib.Alvo.IAlvoBuilder FromDescriptor(this MMLib.Alvo.IAlvoBuilder builder, string path) { }
         public static MMLib.Alvo.IAlvoBuilder UseSchemaPrefix(this MMLib.Alvo.IAlvoBuilder builder, string prefix) { }
     }

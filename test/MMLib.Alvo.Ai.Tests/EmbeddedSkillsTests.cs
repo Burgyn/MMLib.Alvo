@@ -118,7 +118,7 @@ public sealed class EmbeddedSkillsTests
         await DrainAsync(model);
 
         var tools = model.Options[0].ShouldNotBeNull().Tools.ShouldNotBeNull();
-        management.Count.ShouldBe(6);
+        management.Count.ShouldBe(7);
         tools.Select(tool => tool.Name).ShouldBe([.. management, .. _readTools], ignoreOrder: true);
         tools.ShouldAllBe(tool => !(tool is ApprovalRequiredAIFunction));
     }

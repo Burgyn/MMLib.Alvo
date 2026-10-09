@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.AI;
 using MMLib.Alvo.Ai.Internal;
 using MMLib.Alvo.Descriptor;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Migrations;
 
@@ -28,17 +29,17 @@ public sealed class ManagementToolsTests
 
     private static CancellationToken Ct => TestContext.Current.CancellationToken;
 
-    /// <summary>The model can call exactly these six tools, and nothing else.</summary>
+    /// <summary>The model can call exactly these seven tools, and nothing else.</summary>
     /// <remarks>
     /// Equality rather than "does not contain apply": a seventh tool somebody adds is a capability the model gains,
     /// and a test that only looked for forbidden names would pass for every one nobody thought to forbid.
     /// </remarks>
     [Fact]
-    public void The_tool_set_is_exactly_the_four_reads_and_the_two_dry_runs() =>
+    public void The_tool_set_is_exactly_the_five_reads_and_the_two_dry_runs() =>
         ManagementTools.For(Substitute.For<IAlvoManagement>(), Project).Functions
             .Select(tool => tool.Name)
             .OrderBy(name => name, StringComparer.Ordinal)
-            .ShouldBe(["check_change", "get_capabilities", "get_descriptor", "get_revisions", "get_schema", "propose_change"]);
+            .ShouldBe(["check_change", "get_capabilities", "get_cel_functions", "get_descriptor", "get_revisions", "get_schema", "propose_change"]);
 
     /// <summary>
     /// Both tools that reach the apply path always ask for a dry run, and never for destruction.
@@ -674,6 +675,44 @@ public sealed class ManagementToolsTests
         management.GetSchemaAsync(Project, Arg.Any<CancellationToken>()).Throws(new ManagementForbiddenException());
 
         (await InvokeAsync(management, "get_schema", [])).ShouldContain("forbidden");
+    }
+
+    /// <summary>The functions tool reads through the management port, with the operator's authority and the project's name.</summary>
+    [Fact]
+    public async Task The_functions_tool_answers_with_what_the_management_port_lists()
+    {
+        var management = Substitute.For<IAlvoManagement>();
+        management.GetCelFunctionsAsync(Project, Arg.Any<CancellationToken>()).Returns(new ManagementCelFunctions
+        {
+            Functions =
+            [
+                new CelFunctionInfo
+                {
+                    Name = "vatRate",
+                    Parameters = [new CelFunctionParameter { Name = "country", Type = CelValueType.String, AcceptsNull = false }],
+                    Result = CelValueType.Decimal,
+                    ResultMayBeNull = false,
+                    Summary = "The VAT rate of a country.",
+                    Provenance = CelFunctionProvenance.Host,
+                    Profiles = [CelProfile.Condition, CelProfile.Mutate],
+                },
+            ],
+        });
+
+        var answer = await InvokeAsync(management, "get_cel_functions", []);
+
+        answer.ShouldContain("vatRate");
+        answer.ShouldContain("country");
+    }
+
+    /// <summary>A viewer-less caller is told so, not crashed.</summary>
+    [Fact]
+    public async Task A_forbidden_caller_is_reported_by_the_functions_tool_too()
+    {
+        var management = Substitute.For<IAlvoManagement>();
+        management.GetCelFunctionsAsync(Project, Arg.Any<CancellationToken>()).Throws(new ManagementForbiddenException());
+
+        (await InvokeAsync(management, "get_cel_functions", [])).ShouldContain("forbidden");
     }
 
     /// <summary>And a read that raced an apply reports it rather than ending the turn.</summary>

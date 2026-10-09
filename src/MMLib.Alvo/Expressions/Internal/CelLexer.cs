@@ -21,11 +21,33 @@ internal static class CelLexer
 
         while (SkipWhitespace(source, ref position))
         {
+            var start = position;
             tokens.Add(ReadToken(source, ref position));
+            EnsureAdvanced(start, position);
         }
 
         tokens.Add(new CelToken(CelTokenKind.EndOfInput, string.Empty, position));
         return tokens;
+    }
+
+    /// <summary>
+    /// The lexer's one progress invariant (#244): every token consumes at least one character. Without it a reader
+    /// that returned a token without moving would make <see cref="Tokenize"/> re-read the same character forever,
+    /// appending a token each pass — a hang that exhausts memory before any wall clock intervenes, now reachable over
+    /// HTTP through <c>cel/check</c>. No source string reaches the throw today; it is the fail-loud backstop.
+    /// </summary>
+    /// <param name="start">The position the step started at.</param>
+    /// <param name="end">The position the step left the reader at.</param>
+    /// <exception cref="CelSyntaxException"><paramref name="end"/> is not past <paramref name="start"/>.</exception>
+    internal static void EnsureAdvanced(int start, int end)
+    {
+        if (end <= start)
+        {
+            throw new CelSyntaxException(
+                $"The expression could not be read past position {start}: the reader made no progress there.",
+                start,
+                "This is a defect in Alvo's CEL reader, not in the expression; report it with the expression attached.");
+        }
     }
 
     private static bool SkipWhitespace(string source, ref int position)

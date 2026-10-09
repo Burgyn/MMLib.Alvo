@@ -41,11 +41,17 @@ internal enum ManagementOperation
     /// <summary>Read what this build honours, warns about and refuses.</summary>
     GetCapabilities,
 
+    /// <summary>Read the CEL functions a descriptor may call: built-ins and host registrations.</summary>
+    GetCelFunctions,
+
     /// <summary>Read the build, mode, engine and startup mode.</summary>
     GetInfo,
 
     /// <summary>Evaluate a policy for a simulated caller. Writes nothing.</summary>
     SimulatePolicy,
+
+    /// <summary>Check one expression against the validator apply uses. Reads nothing stored.</summary>
+    CheckExpression,
 
     /// <summary>Apply a descriptor — including a <c>?dryRun=true</c> plan, which discloses the same thing.</summary>
     ApplyDescriptor,

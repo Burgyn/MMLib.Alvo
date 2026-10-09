@@ -1,4 +1,5 @@
-﻿using MMLib.Alvo.Data;
+﻿using MMLib.Alvo.Api;
+using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Expressions.Internal;
 
@@ -95,6 +96,7 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
         DateTimeOffset now)
     {
         var patch = new Dictionary<string, object?>(StringComparer.Ordinal);
+        var writers = new Dictionary<string, (CompiledBeforeHook Hook, CompiledMutation Mutation)>(StringComparer.Ordinal);
         var current = candidate;
 
         foreach (var hook in hooks)
@@ -105,15 +107,48 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
             }
 
             EnsureNotRejected(hook);
-            foreach (var (field, value) in Mutations(hook, current, previous, now))
+            foreach (var mutation in hook.Mutations)
             {
-                patch[field] = value;
+                patch[mutation.Field] = Value(mutation, current, previous, now);
+                writers[mutation.Field] = (hook, mutation);
             }
 
             current = Patched(current, patch);
         }
 
+        EnsureEveryValueFits(patch, writers);
         return patch;
+    }
+
+    /// <summary>
+    /// Refuses the write when a value the chain would store breaks its target field's declared facets — measured once,
+    /// on the final patch, and blamed on the hook whose value that is (Ruling V, #308; Ruling W).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Measured here, in the core, before any driver applies the patch</b>, so every engine answers the same: SQLite
+    /// enforces no length and would store the value, PostgreSQL's <c>varchar(n)</c> would refuse it as an anonymous
+    /// 500. The checks are the payload validator's own (<see cref="MutationTarget.Violation"/>).
+    /// </para>
+    /// <para>
+    /// <b>The final patch, not each hook's output (Ruling W).</b> A later hook may repair what an earlier one wrote —
+    /// shorten it, or replace it — and the list reads as the pipeline an author wrote, so only the value that would
+    /// actually be stored is measured. An intermediate value is never stored, and before Ruling V both engines stored
+    /// the repaired one. The refusal names the hook that last wrote the field, because its value is the one refused.
+    /// </para>
+    /// </remarks>
+    private static void EnsureEveryValueFits(
+        Dictionary<string, object?> patch,
+        Dictionary<string, (CompiledBeforeHook Hook, CompiledMutation Mutation)> writers)
+    {
+        foreach (var (field, value) in patch)
+        {
+            var (hook, mutation) = writers[field];
+            if (mutation.Target.Violation(value) is { } violation)
+            {
+                throw Refusal(hook, mutation, violation);
+            }
+        }
     }
 
     /// <summary>
@@ -138,23 +173,17 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
     /// reads as its stored value, so the collapse never stands in for "the caller did not mention it".
     /// </para>
     /// <para>
-    /// <b>The unreachable half is the caught exception, and its direction is defence-in-depth rather than a
-    /// live decision.</b> Nothing in a <see cref="CelProfile.Condition"/> tree can throw:
-    /// <c>CelInterpreter.Evaluate</c>'s node switch ends in <c>_ =&gt; null</c>, every comparison funnels
-    /// through a <c>TryNormalize</c> that answers <see langword="false"/> rather than converting
-    /// unsuccessfully, and the profile admits no arithmetic — the one family that could overflow. That is the
-    /// property `CelInterpreter`'s own remarks assert for any well-typed expression and any record, including
-    /// one whose stored value is of an unexpected CLR type. So no input reaches the <c>catch</c>, and a
-    /// fail-closed entry point for this one caller would be a change to the security core that <b>no fact
-    /// could discriminate</b> — which is the shape this repository requires a killing mutant for.
+    /// <b>A function failure is not collapsed.</b> A <see cref="CelProfile.Condition"/> tree can call a CEL
+    /// function, and a function is the one construct whose failure is reachable: <c>CelInterpreter.EvaluatePredicate</c>
+    /// lets it escape, so the write is refused (fail closed) instead of the hook silently not firing. Everything
+    /// else in the tree still cannot throw — the node switch ends in <c>_ =&gt; null</c> and every comparison
+    /// funnels through a <c>TryNormalize</c> that answers <see langword="false"/> — so the open direction remains
+    /// only for the two-valued null rule above.
     /// </para>
     /// <para>
-    /// <b>The obligation this creates, which is the real answer.</b> The argument above is a property of the
-    /// profile's grammar, not a guarantee of the interpreter's signature. Admitting arithmetic into
-    /// <see cref="CelProfile.Condition"/> — or any construct that can throw — makes the open direction
-    /// <em>reachable</em>, and at that moment a <c>reject</c> gate needs its own fail-closed evaluation and
-    /// this paragraph is what should be re-read. Recorded as deviation 84 so it is a decision on the record
-    /// rather than an inherited default.
+    /// <b>The obligation deviation 84 recorded is now discharged:</b> admitting a construct that can throw into
+    /// <see cref="CelProfile.Condition"/> was the trigger it named, and the answer is that the exception is not
+    /// swallowed by this gate, so a <c>reject</c> gate cannot be bypassed by making its condition fail.
     /// </para>
     /// </remarks>
     private static bool Fires(
@@ -181,10 +210,38 @@ internal sealed class BeforeHookRunner : IBeforeHookRunner
         }
     }
 
-    private static IEnumerable<KeyValuePair<string, object?>> Mutations(
-        CompiledBeforeHook hook, AlvoRecord candidate, AlvoRecord? previous, DateTimeOffset now) =>
-        hook.Mutations.Select(mutation => new KeyValuePair<string, object?>(
-            mutation.Field, Value(mutation, candidate, previous, now)));
+    /// <summary>
+    /// The refusal for a value that breaks its target field's facets, in the family a hook's own <c>reject</c> uses.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>One rule, whatever produced the value</b> — a literal (already measured at apply), a field copy, a built-in
+    /// such as <c>replace</c>, or a host function: the descriptor's hook would store a value its own field refuses, so
+    /// the hook refuses the write, in the family a <c>reject</c> uses (<see cref="AlvoAuthorizationException"/>, HTTP
+    /// 403 <c>forbidden</c>, a per-row refusal in a batch). Not a 422: that tells the caller to fix a field of their
+    /// payload, and the field named here may be one they never sent. Not <c>function-failed</c>: that is a function
+    /// body that failed, and the same overrun is reachable with no function at all.
+    /// </para>
+    /// <para>
+    /// <b>The message names the hook's pointer, the field and the facet, never the value</b>: the value may be the
+    /// caller's own text grown by <c>replace</c>, or whatever a host function returned. The pointer and the field are
+    /// descriptor-authored — the argument <see cref="EnsureNotRejected"/> makes for the <c>reject</c> text.
+    /// </para>
+    /// <para>
+    /// <b>Unless the field is hidden (Ruling X).</b> For a target the descriptor carries any <c>hidden</c> flag for,
+    /// the message names no field, no facet and no limit: the data API never publishes a hidden field's name, and a
+    /// refusal naming it — for a field the caller never sent — would disclose that it exists and how wide it is. The
+    /// hook's pointer is still named, as a <c>reject</c>'s refusal names it: it locates the descriptor rule that refused
+    /// and says nothing about the row's shape.
+    /// </para>
+    /// </remarks>
+    private static AlvoAuthorizationException Refusal(
+        CompiledBeforeHook hook, CompiledMutation mutation, AlvoViolation violation) =>
+        new(mutation.Target.Disclosable
+            ? $"The before-hook at '{hook.Path}' computed a value for '{mutation.Field}' that breaks the "
+                + $"'{violation.Code}' facet the field declares: {violation.Message} Nothing was written."
+            : $"The before-hook at '{hook.Path}' computed a value one of the fields it writes cannot hold. "
+                + "Nothing was written.");
 
     /// <summary>
     /// One mutation's value: the compiled expression evaluated against the candidate, or the literal the

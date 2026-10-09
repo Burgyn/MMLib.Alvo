@@ -1,4 +1,5 @@
 ﻿using MMLib.Alvo.Admin.Components.Schema;
+using MMLib.Alvo.Schema;
 
 namespace MMLib.Alvo.Admin.Tests.Schema;
 
@@ -50,7 +51,7 @@ public class HookBuilderTests
     [InlineData("email", "An email names a template and who it goes to.")]
     public void An_action_missing_what_the_schema_requires_is_refused(string kind, string refusal)
     {
-        var hook = new HookBuilder { Kind = kind, MutateField = "status", Template = "done" };
+        var hook = new HookBuilder { Kind = kind, MutateRows = { new MutateRow("status", MutateMode.Expression, string.Empty) }, Template = "done" };
 
         hook.Build(out var said).ShouldBeNull();
         said.ShouldBe(refusal);
@@ -71,8 +72,15 @@ public class HookBuilderTests
 
     [Fact]
     public void A_mutate_stores_its_value_as_cel()
-        => Built(new HookBuilder { Kind = HookBuilder.Mutate, MutateField = "completed_on", MutateValue = "now()" })
-            .ShouldBe("""{"mutate":{"completed_on":{"$cel":"now()"}}}""");
+        => Built(new HookBuilder
+        {
+            Kind = HookBuilder.Mutate,
+            MutateRows = { new MutateRow("completed_on", MutateMode.Expression, "now()") },
+            Fields = new Dictionary<string, FieldSchema>(StringComparer.Ordinal)
+            {
+                ["completed_on"] = new() { Name = "completed_on", Type = FieldType.DateTime },
+            },
+        }).ShouldBe("""{"mutate":{"completed_on":{"$cel":"now()"}}}""");
 
     [Fact]
     public void A_webhook_names_its_endpoint()

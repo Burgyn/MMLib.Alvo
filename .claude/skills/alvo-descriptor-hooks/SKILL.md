@@ -21,19 +21,25 @@ on update and delete; `changed(<field>)`, true when an update changes the field,
 combinations are refused at apply: a delete has no `new.`, a create no `old.`.
 
 <!-- gen:cel-condition -->
-- allowed: `new.quantity <= 0.0` `old.unit_price != new.unit_price` `changed(unit_price)` `'technician' in @user.roles`
+- allowed: `new.quantity <= 0.0` `old.unit_price != new.unit_price` `changed(unit_price)` `'technician' in @user.roles` `size(new.description) > 3`
 - refused: `quantity * unit_price` `now()` `lowerAscii(description)`
 <!-- /gen:cel-condition -->
 
-A `mutate` value is a field, a literal, or a call to one of these functions, and nothing more: no `@user` or `@tenant`,
-no arithmetic, no joins.
+A `mutate` value is a field, a literal, or a call to one of these built-in functions (calls may nest), and nothing
+more: no `@user` or `@tenant`, no arithmetic, no joins. `lowerAscii` takes a field only; the others take any value
+of the right type, and a null argument makes the value null.
 
 <!-- gen:mutate-functions -->
-`lowerAscii` `now`
+`abs` `lowerAscii` `now` `replace` `round` `size` `trim`
 <!-- /gen:mutate-functions -->
 
+An embedded host may register its own functions; they work in a `condition` and a `mutate` and nowhere else. Call
+`get_cel_functions` for this host's list with each function's parameters and result — never assume one exists. A
+function whose meaning changes gets a new name (`vatRate` stays, `vatRate2` is new). Alvo's tenant filter does not
+reach inside a function: one that reads stored data must take the tenant as a parameter and filter by it.
+
 <!-- gen:cel-mutate -->
-- allowed: `now()` `lowerAscii(new.description)` `new.unit_price` `'part'`
+- allowed: `now()` `lowerAscii(new.description)` `new.unit_price` `'part'` `trim(new.description)`
 - refused: `quantity * 2.0` `new.quantity > 0.0` `'admin' in @user.roles` `changed(quantity)`
 <!-- /gen:cel-mutate -->
 

@@ -189,10 +189,7 @@ internal static class RecordValidator
         List<AlvoViolation> violations,
         List<FieldSchema> references)
     {
-        var violation = TooLong(field, value)
-            ?? OutsideDecimalBounds(field, value)
-            ?? OutsideEnumValues(field, value)
-            ?? FailedFormat(field, value, request.Formats);
+        var violation = FacetViolation(field, value, request.Formats);
 
         if (violation is not null)
         {
@@ -205,6 +202,26 @@ internal static class RecordValidator
             references.Add(field);
         }
     }
+
+    /// <summary>
+    /// The first of a non-null value's declared-facet refusals — <c>maxLength</c>, decimal scale and precision,
+    /// enum membership, <c>format</c> — or <see langword="null"/> when the value honours every facet.
+    /// </summary>
+    /// <remarks>
+    /// <b>The one definition of "a value fits its field", and it has two consumers on purpose:</b> a caller's
+    /// payload (this type) and a before-hook's <c>mutate</c> result (<c>MutationTarget</c>, Ruling V). A hook
+    /// that wrote what a caller may not would make the facets a request-layer courtesy instead of a property of
+    /// the stored row, and two copies of the checks would drift on exactly the edge cases (code points, trailing
+    /// zeros, a format timeout) the remarks below argue.
+    /// </remarks>
+    /// <param name="field">The declared field.</param>
+    /// <param name="value">The value, in the field's own CLR representation.</param>
+    /// <param name="formats">The compiled formats the field's <c>format</c> resolves against.</param>
+    internal static AlvoViolation? FacetViolation(FieldSchema field, object value, FormatCatalog formats) =>
+        TooLong(field, value)
+        ?? OutsideDecimalBounds(field, value)
+        ?? OutsideEnumValues(field, value)
+        ?? FailedFormat(field, value, formats);
 
     /// <summary>
     /// Whether the value overruns the field's declared <c>maxLength</c>, measured in <b>Unicode code

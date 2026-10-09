@@ -88,6 +88,10 @@ run** before merge — not the checklist alone.
   network calls; if a before-hook needs one, that's a sign the logic belongs
   on a different rung (see `alvo-architecture-rules`'s computed/rollup/hook
   ladder).
+  A host-registered CEL function (`AddCelFunction`) is host code: the descriptor
+  author still cannot express a network call, the host developer can — verify
+  any such function is synchronous, fast and side-effect-free, and that no new
+  runner dependency appeared (spec 2026-10-05 §5.8).
 
 ## Close every review with this
 

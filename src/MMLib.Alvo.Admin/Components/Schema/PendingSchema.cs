@@ -216,9 +216,15 @@ internal static class PendingSchema
     /// A default rather than a refusal, because this is a renderer: a field whose type the schema
     /// does not admit is a descriptor the apply rejects, and the preview says so precisely. Failing
     /// here would replace that explanation with a blank screen.
+    /// <para>
+    /// By name only: <c>Enum.TryParse</c> also reads <c>"3"</c> as an ordinal and <c>"42"</c> as a value no member
+    /// names, and a reader downstream (<c>ConditionTable.KindOf</c>) throws on an undefined one.
+    /// </para>
     /// </remarks>
     private static FieldType Type(string? declared)
-        => Enum.TryParse<FieldType>(declared, ignoreCase: true, out var type) ? type : FieldType.String;
+        => Enum.GetValues<FieldType>().FirstOrDefault(
+            type => string.Equals(type.ToString(), declared, StringComparison.OrdinalIgnoreCase),
+            FieldType.String);
 
     private static RefSchema? Reference(JsonElement field)
         => String(field, "entity") is { Length: > 0 } target

@@ -1,0 +1,57 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "cel-functions",
+  "description": "One entity (with an after-create webhook, so a committed create leaves an outbox row) whose before-create hook writes a host function's result: normalizePhone(new.phone) into phone_normalized. Every world over this descriptor registers normalizePhone, or the descriptor is refused as calling an unknown function — which is the embedded-only property the fixture exists to exercise.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["writer"]
+  },
+  "access": {
+    "viewer": "'writer' in @user.roles"
+  },
+  "webhooks": {
+    "endpoints": {
+      "desk": {
+        "url": "http://127.0.0.1:5081/hooks/desk",
+        "secretRef": "desk-signing-key"
+      }
+    }
+  },
+  "entities": {
+    "contacts": {
+      "description": "A contact; its phone is normalised by the host as it is written.",
+      "fields": {
+        "phone": { "type": "string", "maxLength": 40 },
+        "phone_normalized": { "type": "string", "maxLength": 40 }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      },
+      "hooks": {
+        "beforeCreate": [
+          {
+            "action": {
+              "mutate": {
+                "phone_normalized": { "$cel": "normalizePhone(new.phone)" }
+              }
+            }
+          }
+        ],
+        "afterCreate": [
+          { "action": { "type": "webhook", "endpoint": "desk" } }
+        ],
+        "beforeUpdate": [
+          { "condition": "normalizePhone(new.phone) == 'never-matches'", "action": { "reject": "update gate" } }
+        ],
+        "beforeDelete": [
+          { "condition": "normalizePhone(old.phone) == 'never-matches'", "action": { "reject": "delete gate" } }
+        ]
+      }
+    }
+  }
+}

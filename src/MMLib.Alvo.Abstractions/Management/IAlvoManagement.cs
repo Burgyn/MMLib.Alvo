@@ -115,6 +115,21 @@ public interface IAlvoManagement
     Task<ManagementCapabilities> GetCapabilitiesAsync(string project, CancellationToken ct = default);
 
     /// <summary>
+    /// Every CEL function a descriptor may call on this instance — the built-ins and the host's registrations — one
+    /// entry per overload, with parameters, result, nullability and the profiles each compiles in.
+    /// </summary>
+    /// <remarks>
+    /// The list is the instance's: a host function exists only in the host that registered it, so a descriptor that
+    /// calls one is refused as an unknown function by the standalone image and the CLI. Read it before writing a call.
+    /// </remarks>
+    /// <param name="project">The project name.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The functions, ordered by name, in an envelope that can grow additively.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
+    /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
+    Task<ManagementCelFunctions> GetCelFunctionsAsync(string project, CancellationToken ct = default);
+
+    /// <summary>
     /// Answers what a named caller may do to an entity — <b>by calling the same <c>IPolicyEngine</c>
     /// production calls</b>, never a copy of it.
     /// </summary>
@@ -134,6 +149,29 @@ public interface IAlvoManagement
     /// </exception>
     Task<ManagementPolicyVerdict> SimulatePolicyAsync(
         string project, ManagementPolicySimulation simulation, CancellationToken ct = default);
+
+    /// <summary>
+    /// Answers what applying would say about <b>one</b> expression — by running the validator apply runs on the
+    /// descriptor with the candidate spliced in, never a second opinion.
+    /// </summary>
+    /// <remarks>
+    /// It is not a dry-run apply: that is all-or-nothing, tied to a revision and plans a migration, so it cannot
+    /// answer per keystroke and one bad expression elsewhere would mask this one. It reads no store, no revision
+    /// and no runtime — only the descriptor the caller sends. A candidate that does not compile is an answer
+    /// (a finding), not an exception.
+    /// </remarks>
+    /// <param name="project">The project name.</param>
+    /// <param name="request">The descriptor, the slot's pointer and the candidate expression.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The findings at or under the slot.</returns>
+    /// <exception cref="ManagementForbiddenException">The caller does not reach this operation's level.</exception>
+    /// <exception cref="ManagementProjectNotFoundException">This instance does not serve that project.</exception>
+    /// <exception cref="ManagementRequestException">
+    /// The request cannot be answered as sent: no body, a descriptor over the size cap or not JSON, or a pointer
+    /// to a slot the descriptor does not contain.
+    /// </exception>
+    Task<ManagementExpressionVerdict> CheckExpressionAsync(
+        string project, ManagementExpressionCheck request, CancellationToken ct = default);
 
     /// <summary>
     /// Applies a descriptor — <b>the one write path to a project's configuration.</b>

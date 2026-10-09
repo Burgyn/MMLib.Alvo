@@ -109,10 +109,14 @@ internal sealed class AlvoApiWorld : IAsyncDisposable
     /// suite writes each of its sixteen to a temp directory, and the alternative would be to pollute a
     /// shipped fixture folder with files whose only author is a seed.
     /// </remarks>
+    /// <param name="engine">The engine the world runs on; SQLite by default.</param>
     internal static Task<AlvoApiWorld> FromDescriptorPathAsync(
-        string descriptorPath, IReadOnlyList<TestApiKey>? keys = null, AlvoApiWorldSetup? setup = null) =>
+        string descriptorPath,
+        IReadOnlyList<TestApiKey>? keys = null,
+        AlvoApiWorldSetup? setup = null,
+        AlvoApiEngine? engine = null) =>
         StartAsync(
-            descriptorPath, keys ?? [], setup ?? new AlvoApiWorldSetup(), SqliteApiEngine.Instance);
+            descriptorPath, keys ?? [], setup ?? new AlvoApiWorldSetup(), engine ?? SqliteApiEngine.Instance);
 
     private static async Task<AlvoApiWorld> StartAsync(
         string descriptorPath, IReadOnlyList<TestApiKey> keys, AlvoApiWorldSetup setup, AlvoApiEngine engine)

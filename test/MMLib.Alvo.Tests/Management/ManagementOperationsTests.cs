@@ -52,6 +52,7 @@ public class ManagementOperationsTests
             ManagementOperation.GetRevision,
             ManagementOperation.GetSchema,
             ManagementOperation.GetCapabilities,
+            ManagementOperation.GetCelFunctions,
             ManagementOperation.GetInfo,
             ManagementOperation.SimulatePolicy,
         ]);
@@ -63,9 +64,9 @@ public class ManagementOperationsTests
     /// for it would let a viewer read a plan over a descriptor they may not write.
     /// </summary>
     [Fact]
-    public void A_developer_may_write_configuration()
+    public void A_developer_may_write_configuration_and_check_what_writing_it_would_say()
         => OperationsRequiring(ManagementLevel.Developer).ShouldBe(
-            [ManagementOperation.ApplyDescriptor, ManagementOperation.RollbackRevision]);
+            [ManagementOperation.CheckExpression, ManagementOperation.ApplyDescriptor, ManagementOperation.RollbackRevision]);
 
     /// <summary>
     /// "Settings" is named rather than left to reading: it is the set <c>developer</c> is excluded from
@@ -85,12 +86,12 @@ public class ManagementOperationsTests
         ]);
 
     /// <summary>
-    /// The surface is fourteen operations. A count rather than a comment, so adding a fifteenth fails
+    /// The surface is sixteen operations. A count rather than a comment, so adding a seventeenth fails
     /// here until somebody decides its level — which is the decision this table exists to force.
     /// </summary>
     [Fact]
-    public void The_management_surface_is_fourteen_operations()
-        => Enum.GetValues<ManagementOperation>().Length.ShouldBe(14);
+    public void The_management_surface_is_sixteen_operations()
+        => Enum.GetValues<ManagementOperation>().Length.ShouldBe(16);
 
     [Fact]
     public void The_levels_are_ordered_so_the_highest_match_is_the_greatest_value()

@@ -20,6 +20,80 @@ public class DescriptorValidatorTests
     }
 
     /// <summary>
+    /// A facet the schema accepts but the typed parse cannot hold (a <c>maxLength</c> beyond <c>int</c>) is a finding
+    /// with a fix, never a thrown parse error — which the management routes would render as a 500 to the caller.
+    /// </summary>
+    [Fact]
+    public void A_facet_the_typed_parse_cannot_hold_is_a_finding_not_an_exception()
+    {
+        var json = """
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "tasks": { "fields": { "title": { "type": "string", "maxLength": 3000000000 } } } } }
+        """;
+
+        var result = Should.NotThrow(() => _validator.Validate(json));
+
+        var refusal = result.Errors.ShouldHaveSingleItem();
+        refusal.Severity.ShouldBe(DescriptorValidationSeverity.Error);
+        refusal.Path.ShouldBe("#/entities/tasks/fields/title/maxLength");
+        refusal.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    /// <summary>The five places a lone UTF-16 surrogate can hide, as descriptor text (the escape is the raw JSON text).</summary>
+    public static TheoryData<string> LoneSurrogateAt() => ["entity-key", "field-key", "role", "description", "extension"];
+
+    /// <summary>The descriptor JSON with a lone surrogate escape at <paramref name="where"/>.</summary>
+    private static string WithLoneSurrogate(string compactJson, string where) => where switch
+    {
+        "entity-key" => compactJson.Replace("\"entities\":{", "\"entities\":{\"\\ud800\":{\"fields\":{\"a\":{\"type\":\"string\"}}},", StringComparison.Ordinal),
+        "field-key" => compactJson.Replace("\"fields\":{", "\"fields\":{\"\\ud800\":{\"type\":\"string\"},", StringComparison.Ordinal),
+        "role" => compactJson.Replace("\"roles\":[", "\"roles\":[\"\\ud800\",", StringComparison.Ordinal),
+        "description" => compactJson.Replace("\"description\":\"", "\"description\":\"\\udc00", StringComparison.Ordinal),
+        _ => compactJson.Replace("\"entities\":{", "\"x-a\":\"\\ud800\",\"entities\":{", StringComparison.Ordinal),
+    };
+
+    /// <summary>
+    /// A lone surrogate is text no UTF-8 document can carry; Corvus and System.Text.Json throw on it deep inside the
+    /// passes, which every management route rendered as a 500. It is a finding with an accurate fix.
+    /// </summary>
+    /// <param name="where">Which kind of text carries it.</param>
+    [Theory]
+    [MemberData(nameof(LoneSurrogateAt))]
+    public void A_lone_surrogate_is_a_finding_about_unicode_not_an_exception(string where)
+    {
+        var json = WithLoneSurrogate(
+            """{"apiVersion":"alvo.dev/v1","name":"demo","auth":{"roles":["clerk"]},"description":"","entities":{"tasks":{"fields":{"title":{"type":"string"}}}}}""",
+            where);
+
+        var refusal = Should.NotThrow(() => _validator.Validate(json)).Errors.ShouldHaveSingleItem();
+
+        refusal.Message.ShouldContain("not valid Unicode");
+        refusal.FixSuggestion!.ShouldNotContain("smaller", Case.Insensitive);
+    }
+
+    /// <summary>System.Text.Json's path syntax becomes an RFC 6901 pointer, behind the schema pass's leading <c>#</c>.</summary>
+    /// <param name="jsonPath">What <c>JsonException.Path</c> carries.</param>
+    /// <param name="expected">The fragment-form pointer.</param>
+    [Theory]
+    [InlineData("$", "#/")]
+    [InlineData("$.entities.tasks.fields.title.maxLength", "#/entities/tasks/fields/title/maxLength")]
+    [InlineData("$.entities['a.b/c'].x", "#/entities/a.b~1c/x")]
+    [InlineData("$['a~b']", "#/a~0b")]
+    [InlineData("$.entities.o.hooks.beforeCreate[0].action", "#/entities/o/hooks/beforeCreate/0/action")]
+    [InlineData("$.a[1][2].b", "#/a/1/2/b")]
+    public void A_json_path_becomes_an_rfc_6901_pointer(string jsonPath, string expected) =>
+        DescriptorValidator.PointerOf(jsonPath).ShouldBe(expected);
+
+    [Fact]
+    public void An_unreadable_value_inside_an_array_element_is_found_under_its_slot()
+    {
+        var refusal = DescriptorValidator.Unrepresentable(new System.Text.Json.JsonException(
+            "x", "$.entities.orders.hooks.beforeCreate[0].action.mutate.status", null, null));
+
+        refusal.Path.ShouldBe("#/entities/orders/hooks/beforeCreate/0/action/mutate/status");
+    }
+
+    /// <summary>
     /// A ref to an entity the descriptor does not declare is pointed at the ones it does, first: a model that named
     /// the target by the operator's word ("products") is steered to the existing entity ("parts") before it is told it
     /// could add one — which would otherwise duplicate what the project already has (RCA, spec §8.2).

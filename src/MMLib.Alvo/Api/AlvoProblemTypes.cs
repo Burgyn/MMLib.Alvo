@@ -166,6 +166,15 @@ public static class AlvoProblemTypes
     /// </remarks>
     public const string Internal = "internal";
 
+    /// <summary>A CEL function failed while the write was evaluated, so nothing was written (500).</summary>
+    /// <remarks>
+    /// Distinct from <see cref="Internal"/> because the failing party is a function — host code registered with
+    /// <c>AddCelFunction</c>, or a built-in that refused (an overflow, a result too long) — not an Alvo invariant. The
+    /// detail names the function (descriptor-authored) and, for a built-in, Alvo's own reason; never the host's
+    /// exception text, which is the log's. Emitted only by <c>AlvoExceptionHandler</c>.
+    /// </remarks>
+    public const string FunctionFailed = "function-failed";
+
     /// <summary>
     /// Every slug this catalogue declares. Enumerated rather than discovered by reflection so a fact can
     /// assert the catalogue and the code agree without the assertion being satisfied by its own subject.
@@ -186,6 +195,7 @@ public static class AlvoProblemTypes
         UnreadableRequest,
         UnsupportedMediaType,
         Internal,
+        FunctionFailed,
     ];
 
     /// <summary>The full problem <c>type</c> URI for one slug.</summary>

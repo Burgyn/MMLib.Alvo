@@ -219,10 +219,7 @@ internal sealed class AlvoDocumentTransformer(
                 + "descriptor apply, so this is a framework invariant rather than a configuration error.");
         }
 
-        return new EntityView(
-            found,
-            policy.Hidden.Keys.ToHashSet(StringComparer.Ordinal),
-            policy.ReadOnly.Keys.ToHashSet(StringComparer.Ordinal));
+        return new EntityView(found, EntityPolicy.Flagged(policy.Hidden), EntityPolicy.Flagged(policy.ReadOnly));
     }
 
     /// <summary>One mapped Data API endpoint: its API description and the marker that identified it.</summary>

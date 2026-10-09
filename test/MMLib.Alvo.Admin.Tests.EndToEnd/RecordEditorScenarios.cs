@@ -241,6 +241,7 @@ public sealed class RecordEditorScenarios(AdminWorld world) : IClassFixture<Admi
     {
         await Row(session, reference).GetByRole(AriaRole.Button, new() { Name = "Edit", Exact = true }).ClickAsync();
         await session.Dialog("record-sheet").WaitForAsync();
+        await session.WaitForFocusInsideAsync("record-sheet", FocusScope.Dialog);
     }
 
     internal static async Task<ILocator> AskToDeleteAsync(AdminSession session, string reference)
@@ -249,6 +250,7 @@ public sealed class RecordEditorScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Dialog("record-sheet").GetByTestId("record-delete").ClickAsync();
         var confirm = session.Dialog("delete-record");
         await confirm.WaitForAsync();
+        await session.WaitForFocusInsideAsync("delete-record", FocusScope.Dialog);
         return confirm;
     }
 

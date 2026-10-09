@@ -1926,7 +1926,8 @@
               "https://alvo.dev/errors/unauthenticated",
               "https://alvo.dev/errors/unreadable-request",
               "https://alvo.dev/errors/unsupported-media-type",
-              "https://alvo.dev/errors/internal"
+              "https://alvo.dev/errors/internal",
+              "https://alvo.dev/errors/function-failed"
             ],
             "type": "string",
             "description": "The classification to branch on. Every value is listed here, so a client needs no prose: the namespace is `https://alvo.dev/errors/` and the slug names the kind of refusal.",

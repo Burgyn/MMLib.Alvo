@@ -368,7 +368,8 @@ public partial class Entity
     /// not a style.</b> The editor's facets were parsed from the declaration as it stood, so they carry
     /// whatever <c>renamedFrom</c> it already had; writing them under the new name would land that stale
     /// value on the renamed field, and <c>RenameField</c> would then read it as the origin. Facets first,
-    /// then the rename, and the origin is computed from a declaration that is current.
+    /// then the rename, and the origin is computed from a declaration that is current. The order lives in
+    /// <see cref="WorkingCopy.SaveField"/>, which the expression check's candidate runs too.
     /// </para>
     /// <para>
     /// <b>No navigation</b>, for <see cref="AddIndex"/>'s reason: fields are added in sets, and the preview
@@ -380,19 +381,13 @@ public partial class Entity
     {
         var editing = _editing;
 
-        if (editing is { Length: > 0 })
+        /* The same writer the expression check's candidate runs (ExpressionSlots.ForComputed). */
+        if (Copy.SaveField(EntityName, editing, added.Name, added.Facets) is { } uncarried)
         {
-            Copy.AddField(EntityName, editing, added.Facets);
-
-            if (!string.Equals(editing, added.Name, StringComparison.Ordinal))
-            {
-                Copy.RenameField(EntityName, editing, added.Name, out var uncarried);
-                _renameLeftovers = new(EntityName, editing, added.Name, uncarried);
-            }
+            _renameLeftovers = new(EntityName, editing!, added.Name, uncarried);
         }
-        else
+        else if (editing is not { Length: > 0 })
         {
-            Copy.AddField(EntityName, added.Name, added.Facets);
             _arrived = new Arrival(added.Name, _arrived.Attempt + 1);
         }
 

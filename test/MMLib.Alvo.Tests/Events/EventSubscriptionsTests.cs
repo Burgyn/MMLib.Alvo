@@ -5,6 +5,7 @@ using MMLib.Alvo.Descriptor;
 using MMLib.Alvo.Events;
 using MMLib.Alvo.Events.Internal;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
 using MMLib.Alvo.Schema;
 using MMLib.Alvo.Tests.Expressions;
@@ -125,6 +126,113 @@ public sealed class EventSubscriptionsTests : IDisposable
         line.Message.ShouldContain("/entities/deals/hooks/afterUpdate/0");
         line.Message.ShouldContain(@event.Id.ToString());
         line.Exception.ShouldNotBeNull();
+    }
+
+    /// <summary>
+    /// A CEL function that fails inside an after-hook condition drops the hook (the spec sanctions it: an event
+    /// consumer cannot refuse a write that already committed) but is <b>loud</b>: a Warning naming the hook, the
+    /// function and the event, carrying the host's exception — never the event's own record data.
+    /// </summary>
+    [Fact]
+    public void A_failing_cel_function_in_a_condition_drops_the_hook_and_warns_without_the_row()
+    {
+        var @event = Updated("won", "lead");
+
+        EventSubscriptions.Matching(
+            CatalogConditionedOnWinning, @event, new FailingFunctionEvaluator(), _logger).ShouldBeEmpty();
+
+        var line = _logger.Entries.ShouldHaveSingleItem();
+        line.Level.ShouldBe(LogLevel.Warning);
+        line.Message.ShouldContain("/entities/deals/hooks/afterUpdate/0");
+        line.Message.ShouldContain("normalizePhone");
+        line.Message.ShouldContain(@event.Id.ToString());
+        line.Message.ShouldNotContain("won");
+        line.Message.ShouldNotContain("lead");
+        line.Exception.ShouldBeOfType<InvalidOperationException>().Message.ShouldBe("the host broke");
+    }
+
+    /// <summary>
+    /// A registered host function in an after-hook condition runs for real: the hook is selected when the function
+    /// answers true on the record, and not when it answers false.
+    /// </summary>
+    /// <param name="note">The record's note.</param>
+    /// <param name="selected">Whether the hook fires.</param>
+    [Theory]
+    [InlineData("text", true)]
+    [InlineData("", false)]
+    public void A_host_function_in_a_condition_decides_whether_the_hook_fires(string note, bool selected)
+    {
+        var catalog = HostFunctionCatalog(TestCelFunctions.IsBlank, "!isBlank(new.note)");
+        var @event = Event("entity.deals.created", record: Record(("note", note)));
+
+        EventSubscriptions.Matching(catalog, @event, CelFixtures.Evaluator, _logger).Count.ShouldBe(selected ? 1 : 0, note);
+    }
+
+    /// <summary>
+    /// A host function that throws drops the hook and logs a Warning, through the real compiled condition and
+    /// the product's own evaluator.
+    /// </summary>
+    [Fact]
+    public void A_host_function_that_throws_in_a_condition_drops_the_hook_with_a_warning()
+    {
+        var boom = TestCelFunctions.Host(
+            "boom", CelValueType.Bool, _ => throw new InvalidOperationException("the host broke"),
+            TestCelFunctions.Parameter("s", CelValueType.String, nullable: true));
+        var catalog = HostFunctionCatalog(boom, "boom(new.note)");
+
+        EventSubscriptions.Matching(
+            catalog, Event("entity.deals.created", record: Record(("note", "x"))), CelFixtures.Evaluator, _logger)
+            .ShouldBeEmpty();
+
+        var line = _logger.Entries.ShouldHaveSingleItem();
+        line.Level.ShouldBe(LogLevel.Warning);
+        line.Message.ShouldContain("boom");
+        line.Message.ShouldNotContain("\"x\"");
+        line.Exception.ShouldBeOfType<InvalidOperationException>().Message.ShouldBe("the host broke");
+    }
+
+    /// <summary>
+    /// A call over <c>@user.id</c> reads that value, so an event that records no actor selects nothing — even for
+    /// a negated condition that would be true of the anonymous id. This is the row that fails if the gate cannot
+    /// see through the call: without the gate, <c>!isActor(@user.id)</c> is true for the reserved anonymous id.
+    /// </summary>
+    [Fact]
+    public void A_call_over_user_id_is_not_selected_when_the_event_records_no_actor()
+    {
+        var catalog = HostFunctionCatalog(IsActor, "!isActor(@user.id)");
+
+        EventSubscriptions.Matching(
+            catalog, Event("entity.deals.created", record: Record(("note", "x")), authId: null), CelFixtures.Evaluator, _logger)
+            .ShouldBeEmpty();
+        _logger.Entries.ShouldHaveSingleItem().Message.ShouldContain("@user.id");
+    }
+
+    /// <summary>A call over <c>@user.id</c> is judged against the envelope's actor.</summary>
+    /// <param name="condition">The condition.</param>
+    /// <param name="selected">Whether the hook fires for the actor.</param>
+    [Theory]
+    [InlineData("isActor(@user.id)", true)]
+    [InlineData("!isActor(@user.id)", false)]
+    public void A_call_over_user_id_is_judged_against_the_envelopes_actor(string condition, bool selected)
+    {
+        var catalog = HostFunctionCatalog(IsActor, condition);
+
+        EventSubscriptions.Matching(
+            catalog, Event("entity.deals.created", record: Record(("note", "x")), authId: Actor), CelFixtures.Evaluator, _logger)
+            .Count.ShouldBe(selected ? 1 : 0);
+    }
+
+    private static CelFunction IsActor { get; } = TestCelFunctions.Host(
+        "isActor", CelValueType.Bool, arguments => arguments[0]!.Equals(Guid.Parse(Actor)),
+        TestCelFunctions.Parameter("id", CelValueType.Uuid));
+
+    private static PolicyCatalog HostFunctionCatalog(CelFunction function, string condition)
+    {
+        var hooks = new EntityHooks { AfterCreate = [Hook(condition)] };
+        PolicyCatalog.TryBuild(Descriptor(hooks), Schema, TestCelFunctions.Compiler(function), out var catalog, out var errors)
+            .ShouldBeTrue($"expected a clean build, got: {string.Join("; ", errors.Select(e => $"{e.Path}: {e.Message}"))}");
+
+        return catalog!;
     }
 
     /// <summary>
@@ -312,6 +420,7 @@ public sealed class EventSubscriptionsTests : IDisposable
             new FieldSchema { Name = "id", Type = FieldType.Uuid },
             new FieldSchema { Name = "stage", Type = FieldType.Enum, EnumValues = ["lead", "won", "lost"] },
             new FieldSchema { Name = "owner_id", Type = FieldType.Uuid },
+            new FieldSchema { Name = "note", Type = FieldType.String, MaxLength = 200, Nullable = true },
         ],
     };
 
@@ -356,6 +465,14 @@ public sealed class EventSubscriptionsTests : IDisposable
 
     private static AlvoRecord Record(params (string Field, object? Value)[] values) =>
         new(values.ToDictionary(value => value.Field, value => value.Value, StringComparer.Ordinal));
+
+    /// <summary>An evaluator whose condition calls a CEL function that fails, as the interpreter reports it.</summary>
+    private sealed class FailingFunctionEvaluator : IPredicateEvaluator
+    {
+        public bool Evaluate(
+            CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, AlvoContext context) =>
+            throw new CelFunctionException("normalizePhone", isHost: true, new InvalidOperationException("the host broke"));
+    }
 
     /// <summary>
     /// An evaluator that fails on every expression — the only way to reach the fail-closed arm, since a condition

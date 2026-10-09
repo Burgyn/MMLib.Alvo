@@ -367,7 +367,7 @@ Two actions, both from the frozen schema, and nothing else is expressible in-tra
 | Action | Valid on | What it does | How the caller sees it |
 |---|---|---|---|
 | `reject` | all three points | refuses the write | `AlvoAuthorizationException` → **403** with the author's own text, and the hook's JSON pointer |
-| `mutate` | `beforeCreate`, `beforeUpdate` | rewrites fields of the row about to be written | nothing, except the stored row and the emitted event |
+| `mutate` | `beforeCreate`, `beforeUpdate` | rewrites fields of the row about to be written | nothing, except the stored row and the emitted event — unless the value the chain would store breaks its field's facets: then **403** with the hook's JSON pointer, naming the field and facet only when the field is not `hidden` (Ruling V, W, X — cel.md) |
 
 `mutate` is absent from `beforeDelete` because there is no row about to be written — the row is about to
 stop existing, so a patch has nowhere to land. It is refused at **apply**, not dropped at run time; the
@@ -464,8 +464,9 @@ There is no wall-clock budget and no cancellation token to carry one, and that i
 than an omission. **The bound is structural.** A hook is a fixed number of compiled CEL expressions —
 the count fixed by the descriptor at apply, never by the request — and the profiles they compile in
 (`Condition` for the gate, `Mutate` for the values) have no loop, no comprehension macro, no
-recursion, no user-defined function and no I/O. `Mutate`'s entire function allow-list is an ASCII fold
-over one string and a read of an instant the caller already bound. Each expression's tree is walked
+recursion, no user-defined function and no I/O. The built-in functions are pure and bounded (an ASCII fold, a trim, a bounded replace, a read of an instant the caller
+already bound). A function a *host* registers with `AddCelFunction` is host code and is not bounded by this grammar: the
+descriptor author still cannot express a loop or I/O, the host developer can, by contract (spec 2026-10-05 §5.8). Each expression's tree is walked
 once and its node count is bounded by its source length, which the frozen schema caps at 2000
 characters.
 

@@ -18,18 +18,18 @@ that declares the backend's entities, fields, rules and hooks.
 - `get_descriptor` — the descriptor as it is applied now, as a JSON object, with its `revision`.
 - `get_schema` — the resolved schema: entities, fields and facets as the descriptor became them.
 - `get_capabilities` — what this build honours and what it refuses, in the framework's own words.
+- `get_cel_functions` — the CEL functions this host knows.
 - `get_revisions` — the revision history: who applied what, when, and why.
 - `check_change` — dry-runs JSON Patch operations and files nothing; only for "would this work?" questions.
 - `propose_change` — the same dry run; a valid change becomes the proposal the operator reviews.
 - `load_skill` — loads one skill from the list at the end: the rules of one area of the descriptor.
-- `read_skill_resource` — reads a resource a loaded skill lists, such as a slice of the schema, by its name exactly
-  as listed.
+- `read_skill_resource` — reads a resource a loaded skill lists, by its name exactly as listed.
 
 ### Skills
 
-Before `check_change` or `propose_change` in an area, load that area's skill — in the same step as `get_descriptor`,
-so it costs no extra round. For "can Alvo …?", load `alvo-descriptor-capabilities-and-limits` and call
-`get_capabilities`. What a skill says outranks what you remember about Alvo or about other frameworks.
+Before `check_change` or `propose_change` in an area, load that area's skill — in the same step as `get_descriptor`.
+For "can Alvo …?", load `alvo-descriptor-capabilities-and-limits` and call `get_capabilities`. What a skill says
+outranks what you remember about Alvo or about other frameworks.
 
 A new entity spans several areas: load `alvo-descriptor-entities-and-fields` and `alvo-descriptor-rules-and-cel`
 (without `rules` nobody reaches it), and `alvo-descriptor-traits-and-tenancy` when it sets any trait, such as `audit`
