@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The docs generator's renderers over small fixtures, plus structural facts over the real schema and assemblies.
+       It maps to no shipped assembly, so it opts out of the shared architecture + public-API gate. -->
+  <PropertyGroup>
+    <AlvoSharedArchTests>false</AlvoSharedArchTests>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../tools/MMLib.Alvo.DocsGen/MMLib.Alvo.DocsGen.csproj" />
+  </ItemGroup>
+
+</Project>

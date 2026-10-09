@@ -33,11 +33,15 @@
     <Project Path="test/MMLib.Alvo.Data.PostgreSql.Tests.Integration/MMLib.Alvo.Data.PostgreSql.Tests.Integration.csproj" />
     <Project Path="test/MMLib.Alvo.Data.Sqlite.Tests.Integration/MMLib.Alvo.Data.Sqlite.Tests.Integration.csproj" />
     <Project Path="test/MMLib.Alvo.Data.Sqlite.Tests/MMLib.Alvo.Data.Sqlite.Tests.csproj" />
+    <Project Path="test/MMLib.Alvo.DocsGen.Tests/MMLib.Alvo.DocsGen.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Host.Tests.Integration/MMLib.Alvo.Host.Tests.Integration.csproj" />
     <Project Path="test/MMLib.Alvo.Host.Tests/MMLib.Alvo.Host.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Identity.Tests/MMLib.Alvo.Identity.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Samples.EmbeddedHost.Tests.Integration/MMLib.Alvo.Samples.EmbeddedHost.Tests.Integration.csproj" />
     <Project Path="test/MMLib.Alvo.Schema.Tests/MMLib.Alvo.Schema.Tests.csproj" />
     <Project Path="test/MMLib.Alvo.Tests/MMLib.Alvo.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/MMLib.Alvo.DocsGen/MMLib.Alvo.DocsGen.csproj" />
   </Folder>
 </Solution>

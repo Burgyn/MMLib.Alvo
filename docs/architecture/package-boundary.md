@@ -104,6 +104,14 @@
   breaking change to the seam breaks the sample in the same build instead of
   rotting until someone runs it. Details in
   [`extensibility.md`](./extensibility.md), *The runnable example*.
+- `tools/MMLib.Alvo.DocsGen` — the documentation site's generator: an `Exe` that writes the
+  site's reference section (the descriptor schema reference today) from the sources of truth, run
+  by `website`'s `prebuild`, with its output gitignored. **Not a package** — `IsPackable=false`
+  (`tools/Directory.Build.props`), in no package's dependency graph, run and never referenced, so
+  the (a)/(b)/(c) rule below is not engaged, by the same reasoning as `eval/MMLib.Alvo.Ai.Eval`. It
+  references `MMLib.Alvo.Host` so that it can boot the real composition. Its suite,
+  `test/MMLib.Alvo.DocsGen.Tests`, is an ordinary ring0 module. Design:
+  [`2026-10-09-f6-docs-site-design.md`](../superpowers/specs/2026-10-09-f6-docs-site-design.md).
 - `test/` — one `*.Tests` per shipped project (arch + public-API approval
   auto-linked), `MMLib.Alvo.Conventions.Tests` (solution-structure checks),
   `MMLib.Alvo.Api.Tests`, and the `*.Tests.Integration` projects

@@ -417,6 +417,7 @@
       ]
     },
     "fieldType": {
+      "description": "The field's storage and validation type. `decimal` needs `precision` and `scale`; `enum` needs `values`; `ref` needs `entity`.",
       "enum": [
         "string",
         "text",
@@ -896,6 +897,7 @@
     },
     "beforeHookList": {
       "type": "array",
+      "description": "Before-hooks, run in declaration order inside the write's transaction: each may `reject` the write or `mutate` the row about to be written (`mutate` is refused on `beforeDelete`). No network access.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -947,6 +949,7 @@
     },
     "afterHookList": {
       "type": "array",
+      "description": "After-hooks, delivered post-commit from the outbox with retries; a `condition` filters which writes trigger them.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -1079,7 +1082,8 @@
               "const": "webhook"
             },
             "endpoint": {
-              "$ref": "#/$defs/identifier"
+              "$ref": "#/$defs/identifier",
+              "description": "The name of an endpoint declared under the top-level `webhooks.endpoints`."
             },
             "payload": {
               "$ref": "#/$defs/jsonata"
@@ -1099,7 +1103,8 @@
               "const": "email"
             },
             "template": {
-              "$ref": "#/$defs/identifier"
+              "$ref": "#/$defs/identifier",
+              "description": "The name of a template declared in the top-level `templates` block."
             },
             "to": {
               "type": "string",
@@ -1122,7 +1127,8 @@
               "const": "function"
             },
             "name": {
-              "$ref": "#/$defs/identifier"
+              "$ref": "#/$defs/identifier",
+              "description": "The name of a function declared in the top-level `functions` block."
             },
             "input": {
               "$ref": "#/$defs/jsonata"
@@ -1142,7 +1148,8 @@
               "const": "entity.update"
             },
             "entity": {
-              "$ref": "#/$defs/identifier"
+              "$ref": "#/$defs/identifier",
+              "description": "The entity whose record is created or updated."
             },
             "recordId": {
               "type": "string",

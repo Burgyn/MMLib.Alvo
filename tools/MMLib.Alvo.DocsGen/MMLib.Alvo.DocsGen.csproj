@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Generates the documentation site's reference section from the sources of truth: the descriptor schema, the
+    shipped assemblies and their XML docs, and a real standalone host booted in-process. Run by website's
+    prebuild; its output is gitignored, so the reference cannot drift (F6 docs-site design §5.1).
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>MMLib.Alvo.DocsGen</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/MMLib.Alvo.Host/MMLib.Alvo.Host.csproj" />
+  </ItemGroup>
+
+</Project>

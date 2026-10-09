@@ -137,6 +137,8 @@ export default defineConfig({
           page('Glossary', 'concepts/glossary'),
         ] },
         { label: 'Reference', collapsed: true, items: [
+          page('Overview', 'reference'),
+          { label: 'Descriptor schema', collapsed: true, items: [{ autogenerate: { directory: 'reference/descriptor' } }] },
           page('Data API conventions', 'data-api/conventions'),
         ] },
         { label: 'Project', collapsed: true, items: [

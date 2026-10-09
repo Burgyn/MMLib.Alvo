@@ -7,5 +7,6 @@ src/content/docs/project/changelog.md
 src/content/docs/project/contributing.md
 public/llms.txt
 public/llms-full.txt
+public/schema/
 .lighthouse/
 src/styles/alvo-tokens.generated.css
