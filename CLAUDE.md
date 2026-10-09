@@ -86,7 +86,10 @@ compresses out. Violating one of these is a bug, not a style nit.
   `test-admin-e2e` (the dashboard's scenarios, a real browser over a real host) and
   `eval-assistant` (the schema assistant against a real model) — all four in no ring, see
   below — and `demo-admin`, which boots the dashboard over the seeded `examples/bike-workshop`
-  backend for demos and UX reviews.
+  backend for demos and UX reviews, and `docs-screenshots`, which boots that same demo on a private
+  port and regenerates the committed dashboard captures under `website/src/assets/screenshots/` and
+  `assets/screenshots/` — in no ring too: it binds a port and launches a browser, so run it on
+  demand after a dashboard change and commit the images.
 - `eval/` — `MMLib.Alvo.Ai.Eval`, the schema assistant's real-model eval, driven by
   `scripts/eval-assistant`; in no ring — built on the PR, never run there. Its graders' own suite,
   `test/MMLib.Alvo.Ai.Eval.Tests`, is an ordinary ring0 module.

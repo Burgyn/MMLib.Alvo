@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Regenerates the dashboard screenshots the site and the README show: boots scripts/demo-admin
+# (bike-workshop, seeded) on a private port and directory, captures fixed views in light and dark at
+# 1440x900, and stops the demo. IN NO RING: it binds a port and launches a browser; run it on demand
+# after a dashboard change, then commit the images.
+#
+# Requires: what scripts/demo-admin requires, plus Node 22 and `npm ci` in website/.
+set -euo pipefail
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+port="${ALVO_SCREENSHOT_PORT:-5097}"
+work="$(mktemp -d "${TMPDIR:-/tmp}/alvo-docs-screenshots.XXXXXX")"
+log="$work/demo.log"
+demo_pid=""
+
+stop() { if [ -n "$demo_pid" ]; then kill "$demo_pid" 2>/dev/null || true; wait "$demo_pid" 2>/dev/null || true; fi; rm -rf "$work"; }
+trap stop EXIT
+trap 'exit 130' INT TERM
+
+ALVO_DEMO_DIR="$work/demo" "$root/scripts/demo-admin" --port "$port" --no-ai >"$log" 2>&1 &
+demo_pid=$!
+
+for _ in $(seq 1 240); do
+  grep -q 'admin dashboard demo is up' "$log" && break
+  kill -0 "$demo_pid" 2>/dev/null || { echo "[docs-screenshots] demo-admin exited:" >&2; tail -n 40 "$log" >&2; exit 1; }
+  sleep 1
+done
+grep -q 'admin dashboard demo is up' "$log" || { echo "[docs-screenshots] demo did not come up in 240 s" >&2; exit 1; }
+
+(cd "$root/website" && npx playwright install chromium >/dev/null && node scripts/screenshots.mjs \
+  "http://127.0.0.1:$port" "$work/demo/bootstrap.pwd" "$root/website/src/assets/screenshots" "$root/assets/screenshots")
+echo "[docs-screenshots] OK"
