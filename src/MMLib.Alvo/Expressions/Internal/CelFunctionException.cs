@@ -8,6 +8,12 @@
 /// <see cref="Exception"/>; an after-hook condition drops the hook with a Warning. Internal: only the core throws it and
 /// names it — no public signature exposes the type.
 /// </summary>
+/// <remarks>
+/// <see cref="Exception.Message"/> always reads <c>The CEL function '…' failed…</c>, also for a whole hook condition that
+/// evaluated to no Bool, whose name is <c>&lt;condition&gt;</c> (<see cref="CelInterpreter.WholeCondition"/>). An embedded
+/// <c>IAlvoData</c> caller sees that wording as is; only the Data API's problem document rewords it, in
+/// <c>AlvoExceptionHandler.FunctionFailedDetail</c>.
+/// </remarks>
 #pragma warning disable RCS1194 // Deliberately no standard constructors: a function failure always names its function.
 internal sealed class CelFunctionException : Exception
 {
@@ -39,6 +45,20 @@ internal sealed class CelFunctionException : Exception
     {
         FunctionName = functionName;
         IsHost = isHost;
+        Reason = reason;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CelFunctionException"/> class for a defect the interpreter caught on
+    /// the fail-closed path (Ruling Y-D): Alvo's own reason for the caller, the original exception for the log.
+    /// </summary>
+    /// <param name="functionName">The token the defect is reported under.</param>
+    /// <param name="reason">Why, in Alvo's own words — safe to show the caller, so it never carries a row's value.</param>
+    /// <param name="failure">What was thrown; kept for the log, never shown to the caller.</param>
+    internal CelFunctionException(string functionName, string reason, Exception failure)
+        : base($"The CEL function '{functionName}' failed: {reason}.", failure)
+    {
+        FunctionName = functionName;
         Reason = reason;
     }
 

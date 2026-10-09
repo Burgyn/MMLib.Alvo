@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Components.Routing;
 using MMLib.Alvo.Admin.Components.History;
 using MMLib.Alvo.Auth;
 using MMLib.Alvo.Data;
+using MMLib.Alvo.Expressions;
 using MMLib.Alvo.Management;
 using MMLib.Alvo.Schema;
 
@@ -51,6 +52,7 @@ internal sealed class ManagementGateway(
     private readonly Slot<ManagementDescriptor> _descriptor = new();
     private readonly Slot<SchemaModel> _schema = new();
     private readonly Slot<ManagementCapabilities> _capabilities = new();
+    private readonly Slot<ManagementCelFunctions> _functions = new();
     private readonly Slot<ManagementInfo> _info = new();
     private readonly Slot<IReadOnlyList<ManagementProject>> _projects = new();
     private IDisposable? _following;
@@ -103,6 +105,27 @@ internal sealed class ManagementGateway(
         var project = await ProjectAsync(ct).ConfigureAwait(false);
         return await CachedAsync(_capabilities, () => management.GetCapabilitiesAsync(project, ct), ct)
             .ConfigureAwait(false);
+    }
+
+    /// <summary>Every CEL function a descriptor may call on this instance — built-ins and the host's (C1 <c>cel/functions</c>).</summary>
+    /// <remarks>
+    /// Cached like capabilities. A failure to ask answers an empty list and caches nothing: the editor then simply offers
+    /// no list, and a helper must never be the reason an operator cannot edit (as <see cref="CheckExpressionAsync"/>).
+    /// </remarks>
+    public async ValueTask<IReadOnlyList<CelFunctionInfo>> CelFunctionsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var project = await ProjectAsync(ct).ConfigureAwait(false);
+            var answer = await CachedAsync(_functions, () => management.GetCelFunctionsAsync(project, ct), ct)
+                .ConfigureAwait(false);
+            return answer.Functions;
+        }
+        catch (Exception ex) when (ex is ManagementRequestException or ManagementForbiddenException
+            or OperationCanceledException or HttpRequestException)
+        {
+            return [];
+        }
     }
 
     /// <summary>Build, mode, data provider and startup mode.</summary>
@@ -557,6 +580,7 @@ internal sealed class ManagementGateway(
         _descriptor.Value = null;
         _schema.Value = null;
         _capabilities.Value = null;
+        _functions.Value = null;
         _info.Value = null;
     }
 

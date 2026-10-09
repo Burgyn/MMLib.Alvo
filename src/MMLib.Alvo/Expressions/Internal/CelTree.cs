@@ -33,7 +33,7 @@ internal static class CelTree
 }
 
 /// <summary>
-/// A function call: one of the two legacy calls with their own grammar (<c>lowerAscii(field)</c>, <c>now()</c>) or a
+/// A function call: <c>now()</c>, the one legacy call with its own grammar, or a
 /// function from the <c>CelFunctionCatalog</c>. Legal only where the type checker's profile gates allow it, and never
 /// rendered to SQL in this slice.
 /// </summary>
@@ -60,8 +60,11 @@ internal static class CelTree
 /// <param name="Arguments">Every argument, in source order; empty for a nullary call such as <see cref="Now"/>.</param>
 internal sealed record CelCall(string Name, IReadOnlyList<CelNode> Arguments) : CelNode
 {
-    /// <summary>The ASCII-only lower-case fold, <c>lowerAscii(field)</c>: folds <c>A</c>–<c>Z</c> and nothing else.</summary>
+    /// <summary>The ASCII-only lower-case fold, <c>lowerAscii(text)</c>: folds <c>A</c>–<c>Z</c> and nothing else.</summary>
     public const string LowerAscii = "lowerAscii";
+
+    /// <summary>The ASCII-only upper-case fold, <c>upperAscii(text)</c>: folds <c>a</c>–<c>z</c> and nothing else.</summary>
+    public const string UpperAscii = "upperAscii";
 
     /// <summary>
     /// The write's own instant, <c>now()</c> — not a clock read. It resolves to the
@@ -78,7 +81,7 @@ internal sealed record CelCall(string Name, IReadOnlyList<CelNode> Arguments) : 
 
     /// <summary>
     /// The overload the type checker bound, which the interpreter invokes; <see langword="null"/> before checking and
-    /// for <see cref="LowerAscii"/>/<see cref="Now"/>, which are evaluated by name. Binding it into the tree is what
+    /// for <see cref="Now"/>, which is evaluated by name. Binding it into the tree is what
     /// keeps the interpreter and <c>BeforeHookRunner</c> free of any catalog or container dependency.
     /// </summary>
     public CelFunction? Function { get; init; }

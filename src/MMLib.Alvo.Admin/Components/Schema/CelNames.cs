@@ -12,7 +12,8 @@ namespace MMLib.Alvo.Admin.Components.Schema;
 /// bare name (<c>owner_id == @user.id</c>) or a member of a row image (<c>new.status</c>, <c>old.status</c>). A
 /// word-boundary replace also rewrites string literals — <c>'manager' in @user.roles</c> for a field called
 /// <c>manager</c> — and members of <c>@user</c>. So strings are copied whole, a name after <c>@</c> or after a
-/// member dot of anything but <c>new</c>/<c>old</c> is left alone, and a name followed by <c>(</c> is a function.
+/// member dot of anything but <c>new</c>/<c>old</c> is left alone, a name followed by <c>(</c> is a function, and a name
+/// followed by <c>.</c> is a namespace or an image (<c>math.round</c>, <c>new.</c>), never a column.
 /// </para>
 /// <para>
 /// <b>Declined rather than guessed</b> when the answer cannot be told from the text: a binding macro
@@ -133,10 +134,13 @@ internal static class CelNames
         return at + 1;
     }
 
-    /// <summary>A bare name that is not a call, or a member of <c>new</c>/<c>old</c>.</summary>
+    /// <summary>A bare name that is not a call or a namespace, or a member of <c>new</c>/<c>old</c>.</summary>
     private static bool IsColumn(string cel, int at, int end)
     {
-        if (NextNonSpace(cel, end) == '(')
+        /* A name followed by '(' is a call; one followed by '.' is a namespace (math.round) or an image (new., old.), never
+           a column: Alvo has no other dotted field path (cel.md deviation 8), so renaming it could only rewrite a call
+           (spec §13). */
+        if (NextNonSpace(cel, end) is '.' or '(')
         {
             return false;
         }

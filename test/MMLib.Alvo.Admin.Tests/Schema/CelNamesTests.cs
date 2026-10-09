@@ -54,4 +54,25 @@ public class CelNamesTests
     [InlineData("statuses", false)]
     public void A_declined_expression_may_still_be_named(string cel, bool names)
         => CelNames.MayName(cel, "status").ShouldBe(names);
+
+    [Theory]
+    [InlineData("math.round(new.math) > 1", "math.round(new.amount) > 1")]
+    [InlineData("math.round(math)", "math.round(amount)")]
+    [InlineData("math . round (math)", "math . round (amount)")]
+    [InlineData("math. round(math)", "math. round(amount)")]
+    [InlineData("'math.round(math)' == math", "'math.round(math)' == amount")]
+    public void A_namespace_before_a_dot_is_never_renamed_as_a_field(string cel, string renamed) =>
+        CelNames.Rename(cel, "math", "amount").ShouldBe(renamed);
+
+    /// <summary>A space after the dot does not make the name before it a column, nor the member after it one.</summary>
+    [Theory]
+    [InlineData("f. x", "f", "g", "f. x")]
+    [InlineData("f. x", "x", "y", "f. x")]
+    [InlineData("f == 'f.x(f)'", "f", "g", "g == 'f.x(f)'")]
+    public void A_name_beside_a_spaced_dot_or_inside_a_dotted_call_in_a_string_is_left_alone(string cel, string from, string to, string renamed) =>
+        CelNames.Rename(cel, from, to).ShouldBe(renamed);
+
+    [Fact]
+    public void A_function_member_after_the_namespace_is_never_renamed() =>
+        CelNames.Rename("math.round(new.round)", "round", "rounded").ShouldBe("math.round(new.rounded)");
 }

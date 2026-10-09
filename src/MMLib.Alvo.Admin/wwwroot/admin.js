@@ -344,6 +344,43 @@ export function utcOffsetMinutes() {
 }
 
 /**
+ * The caret of a text box as [start, end] — kept by the input after a button takes focus — or null when the box is
+ * not on the page. Insert writes a function call there (spec §9.2).
+ */
+export function caret(id) {
+  const box = document.getElementById(id);
+  return box && typeof box.selectionStart === 'number' ? [box.selectionStart, box.selectionEnd] : null;
+}
+
+/**
+ * Focuses a text box and selects a range in it: the placeholder an inserted call asks the operator to replace. Only
+ * once the box holds `text`, the value the range was computed in — the sheet is drawn by the dialog provider, so the
+ * render that wrote the value may reach the page after this call. Polled on a timer like `focusFirstOnceClosed`, and
+ * given up after two seconds: a box that never holds the text (the operator typed on) is left as it is. Given up, too,
+ * once focus is somewhere other than the Insert button, the page body (the button redrawn away) or the box itself:
+ * the operator has moved on, and a late selection must not pull focus back from where they went.
+ */
+export function selectRange(id, start, length, text) {
+  const deadline = Date.now() + 2000;
+  const attempt = () => {
+    const box = document.getElementById(id);
+    const active = document.activeElement;
+    const stillHere = !active || active === document.body || active === box
+      || active.matches('[data-testid^="fn-insert-"]');
+    if (!stillHere) {
+      return;
+    }
+    if (box && box.value === text) {
+      box.focus();
+      box.setSelectionRange(start, start + length);
+    } else if (Date.now() < deadline) {
+      setTimeout(attempt, 20);
+    }
+  };
+  attempt();
+}
+
+/**
  * A streamed box's text as a Blob, which the framework hands .NET as a stream for the page to read on submit
  * (`ImportStream`): the one way the Import box's text reaches the circuit. Empty when the box is gone, or over its
  * ceiling — refused at the box by alvo.js instead.

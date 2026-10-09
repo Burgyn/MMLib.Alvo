@@ -1,0 +1,42 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "hook-dates",
+  "description": "One entity whose before-hook rejects are gated on a date field compared with a timestamp() literal and with a datetime field, on create from the request. The update path, where the date is read back out of storage, is dated-bookings.alvo.json's. A date compares as midnight UTC of its day; a reject so gated must fire on every engine (pre-flight S-1 and F9-1, #317).",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["writer"]
+  },
+  "access": {
+    "viewer": "'writer' in @user.roles"
+  },
+  "entities": {
+    "shipments": {
+      "description": "A shipment with a due date and a ship-by instant.",
+      "fields": {
+        "note": { "type": "string", "maxLength": 40 },
+        "due": { "type": "date" },
+        "ship_by": { "type": "datetime" }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      },
+      "hooks": {
+        "beforeCreate": [
+          {
+            "condition": "new.due < timestamp('2026-01-01T00:00:00Z')",
+            "action": { "reject": "The due date is before 2026." }
+          },
+          {
+            "condition": "new.due > new.ship_by",
+            "action": { "reject": "The due date is after the ship-by time." }
+          }
+        ]
+      }
+    }
+  }
+}

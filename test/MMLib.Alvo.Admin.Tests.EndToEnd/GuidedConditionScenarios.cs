@@ -48,6 +48,7 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
         await HookEditInPlaceScenarios.OnWriteAsync(session, "order_lines");
         await HookEditInPlaceScenarios.OpenEditAsync(session, "beforeCreate", 0);
 
+        await Mode(session, "Guided").WaitForAsync();
         (await Mode(session, "Guided").CountAsync()).ShouldBe(1);
         (await session.Page.GetByTestId("hook-condition-readout").InnerTextAsync()).ShouldBe("new.quantity <= 0");
         (await Combobox(session, "Condition 1 operator").InnerTextAsync()).ShouldContain("is at most");
@@ -57,6 +58,7 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
 
         await HookEditInPlaceScenarios.OnWriteAsync(session, "service_orders");
         await HookEditInPlaceScenarios.OpenEditAsync(session, "afterUpdate", 0);
+        await Mode(session, "Text").WaitForAsync();
         (await Mode(session, "Text").CountAsync()).ShouldBe(1, "a bare boolean is not a row (spec D5)");
         (await session.Page.InputValueAsync("input#hook-condition")).ShouldContain("new.notify_customer");
     }
@@ -269,7 +271,8 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
         await editor.GetByTestId("hook-add").ClickAsync();
         await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
 
-        (await session.Page.Locator("#hook-beforeCreate-0").InnerTextAsync()).ShouldContain("new.color == ''");
+        /* The demo's bikes declare two beforeCreate hooks (frame number, rack tag), so the new one is the third. */
+        (await session.Page.Locator("#hook-beforeCreate-2").InnerTextAsync()).ShouldContain("new.color == ''");
     }
 
     /// <summary>The widest row — an update's field, its image chips, a relation, a value and the empty-field hint — fits 375 px.</summary>
@@ -290,6 +293,46 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
         await session.AssertNoHorizontalScrollAsync();
     }
 
+    /// <summary>
+    /// A text test is a guided row: "ends with" writes the cel-spec <c>endsWith</c>, the hook is added with it, it opens
+    /// again as the same row, and the apply plan has no error.
+    /// </summary>
+    [Fact(Timeout = AdminWorld.ScenarioTimeout)]
+    public async Task Ends_with_is_a_guided_row_that_writes_the_built_in()
+    {
+        await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
+        await HookEditInPlaceScenarios.OnWriteAsync(session, "customers");
+        await OpenNewAsync(session);
+        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeCreate", Exact = true }).ClickAsync();
+
+        await session.Page.GetByTestId("condition-add").ClickAsync();
+        await session.ChooseAsync(Combobox(session, "Condition 1 field"), "email");
+        await session.ChooseAsync(Combobox(session, "Condition 1 operator"), "ends with");
+        await session.Page.GetByRole(AriaRole.Textbox, new() { Name = "Condition 1 value", Exact = true }).FillAsync("@example.com");
+
+        await ReadoutAsync(session, "endsWith(new.email, '@example.com')");
+        (await session.Page.GetByTestId("hook-condition-readout").InnerTextAsync()).ShouldBe("endsWith(new.email, '@example.com')");
+        await session.Page.FillAsync("#hook-reject", "Use the customer's real email address.");
+        var editor = session.Dialog("hook-editor");
+        await editor.GetByTestId("hook-add").ClickAsync();
+        await editor.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+
+        /* The demo's customers already refuse the workshop's own address at beforeCreate #0, so the new hook is #1. */
+        (await session.Page.Locator("#hook-beforeCreate-1").InnerTextAsync()).ShouldContain("endsWith(new.email, '@example.com')");
+        await HookEditInPlaceScenarios.OpenEditAsync(session, "beforeCreate", 1);
+        await Mode(session, "Guided").WaitForAsync();
+        (await Mode(session, "Guided").CountAsync()).ShouldBe(1, "the canonical text test reads back as a row");
+        (await Combobox(session, "Condition 1 operator").InnerTextAsync()).ShouldContain("ends with");
+        await session.Page.Keyboard.PressAsync("Escape");
+        await session.Dialog("hook-editor").WaitForAsync(new() { State = WaitForSelectorState.Detached });
+
+        await session.GoAsync("/changes");
+        await session.WaitForPlanAsync();
+        await session.Page.Locator("#apply-reason").WaitForAsync();
+        (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(0);
+        session.AssertConsoleClean();
+    }
+
     /// <summary>Opens the New hook sheet and waits until it holds focus, so no later key or list lands outside it.</summary>
     internal static async Task OpenNewAsync(AdminSession session)
     {
@@ -301,7 +344,7 @@ public sealed class GuidedConditionScenarios(BikeWorkshopWorld world) : IClassFi
     internal static Task ReadoutAsync(AdminSession session, string condition)
         => session.Page.GetByTestId("hook-condition-readout").Filter(new() { HasTextString = condition }).WaitForAsync();
 
-    private static ILocator Mode(AdminSession session, string name)
+    internal static ILocator Mode(AdminSession session, string name)
         => session.Page.GetByTestId("hook-condition-mode").GetByRole(AriaRole.Radio, new() { Name = name, Exact = true, Checked = true });
 
     internal static ILocator Combobox(AdminSession session, string name)

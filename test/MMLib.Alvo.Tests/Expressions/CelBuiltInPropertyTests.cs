@@ -82,4 +82,32 @@ public sealed class CelBuiltInPropertyTests
 
         return built.ToString();
     }
+
+    [Fact]
+    public void Substring_agrees_with_a_code_point_list_for_every_range_inside_the_text() =>
+        Gen.String.SelectMany(text =>
+            {
+                var size = (int)CelBuiltInFunctions.SizeOf(text);
+                return Gen.Int[0, size].SelectMany(start => Gen.Int[start, size].Select(end => (text, start, end)));
+            })
+            .Sample(
+                sample =>
+                {
+                    var runes = sample.text.EnumerateRunes().Select(rune => rune.ToString()).ToList();
+                    var expected = string.Concat(runes.Skip(sample.start).Take(sample.end - sample.start));
+                    return SameCodePoints(CelBuiltInFunctions.SubstringText(sample.text, sample.start, sample.end), expected);
+                },
+                iter: Iterations);
+
+    [Fact]
+    public void String_then_timestamp_is_the_same_instant() =>
+        Gen.DateTimeOffset.Sample(value => CelBuiltInFunctions.TimestampOf(CelBuiltInFunctions.StringOf(value)) == value, iter: 2_000);
+
+    [Fact]
+    public void String_then_int_is_the_same_whole_number() =>
+        Gen.Long.Sample(value => CelBuiltInFunctions.IntOf(CelBuiltInFunctions.StringOf(value)) == value, iter: 2_000);
+
+    /// <summary>Equal by code point; <c>EnumerateRunes</c> maps a lone surrogate to U+FFFD on both sides, as <c>size</c> counts it.</summary>
+    private static bool SameCodePoints(string actual, string expected) =>
+        actual.EnumerateRunes().Select(rune => rune.Value).SequenceEqual(expected.EnumerateRunes().Select(rune => rune.Value));
 }

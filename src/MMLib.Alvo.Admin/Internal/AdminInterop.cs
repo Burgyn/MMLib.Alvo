@@ -82,6 +82,22 @@ internal sealed partial class AdminInterop(IJSRuntime js, ILogger<AdminInterop> 
     /// <summary>Copies <paramref name="text"/> to the clipboard; see <c>copyText</c> in admin.js.</summary>
     public Task CopyAsync(string text) => QuietlyAsync(module => module.InvokeVoidAsync("copyText", text));
 
+    /// <summary>The caret of the text box <paramref name="id"/> as <c>[start, end]</c>, or <see langword="null"/>.</summary>
+    /// <param name="id">The box's element id.</param>
+    /// <returns>The selection's two ends, in UTF-16 code units; <see langword="null"/> when the box is not on the page.</returns>
+    public Task<int[]?> CaretAsync(string id) => QuietlyAsync(module => module.InvokeAsync<int[]?>("caret", id));
+
+    /// <summary>
+    /// Focuses the text box <paramref name="id"/> and selects <paramref name="length"/> characters from
+    /// <paramref name="start"/>, once the box holds <paramref name="text"/>; see <c>selectRange</c> in admin.js.
+    /// </summary>
+    /// <param name="id">The box's element id.</param>
+    /// <param name="start">Where the selection starts, in UTF-16 code units.</param>
+    /// <param name="length">How long it is; 0 puts the caret at <paramref name="start"/>.</param>
+    /// <param name="text">The text the range is in: nothing is selected in a box that does not hold it.</param>
+    public Task SelectRangeAsync(string id, int start, int length, string text)
+        => QuietlyAsync(module => module.InvokeVoidAsync("selectRange", id, start, length, text));
+
     /// <summary>Says the keyboard map now has a listener; see <c>markKeyboardReady</c> in admin.js.</summary>
     public Task MarkKeyboardReadyAsync() => QuietlyAsync(module => module.InvokeVoidAsync("markKeyboardReady"));
 

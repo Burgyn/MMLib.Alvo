@@ -87,13 +87,15 @@ public class SqlPredicateRendererGuardTests
     /// <summary>
     /// A node the predicate path cannot render is refused by its node kind, and the refusal names it:
     /// <c>changed(...)</c> is legal in a hook condition and has no SQL at all, so an operator who sees
-    /// the failure has to be told which construct in the rule the renderer could not take.
+    /// the failure has to be told which construct in the rule the renderer could not take. The Condition profile
+    /// itself is refused before the walk (preflight R-16), so the tree is built by hand in the Rule profile to reach
+    /// the node arm.
     /// </summary>
     [Fact]
     public void An_unrenderable_node_is_refused_by_its_node_kind()
     {
         var refused = Should.Throw<NotSupportedException>(
-            () => _renderer.Render(CelFixtures.CompileCondition("changed(status)"), CelFixtures.Alice, _fields, "p"));
+            () => _renderer.Render(RuleExpression(new CelChanged("status")), CelFixtures.Alice, _fields, "p"));
 
         refused.Message.ShouldContain(nameof(CelChanged));
     }

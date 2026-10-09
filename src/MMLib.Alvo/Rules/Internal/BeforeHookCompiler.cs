@@ -293,8 +293,8 @@ internal static class BeforeHookCompiler
     /// <summary>Compiles one field's mutation, a literal or an expression, against the field it patches.</summary>
     /// <remarks>
     /// <b>A <see langword="null"/> <paramref name="value"/> is the JSON literal <c>null</c>.</b> System.Text.Json never hands
-    /// a <c>null</c> token to <c>ValueOrExprConverter</c>, so <c>"mutate": {"f": null}</c> — schema-valid, and what a hand-
-    /// or agent-written descriptor may hold — arrives as a null map entry despite the non-nullable dictionary type. It is
+    /// a <c>null</c> token to <c>ValueOrExprConverter</c>, so <c>"mutate": {"f": null}</c> — schema-valid, and what the
+    /// dashboard's "Set to empty" writes — arrives as a null map entry despite the non-nullable dictionary type. It is
     /// read as the null literal it was written as, so the literal path's own required/optional rule judges it.
     /// </remarks>
     private static CompiledMutation? CompileMutation(

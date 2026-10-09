@@ -67,10 +67,19 @@ public class CelInterpreterValueSemanticsTests
     public void A_computed_expression_that_throws_yields_null_rather_than_failing_the_write()
         => CelInterpreter.EvaluateScalar(ComputedExpression(MembershipAgainstAFieldValue), AlvoRecord.Empty).ShouldBeNull();
 
+    /// <summary>
+    /// A mutation fails closed instead (Ruling Y-D): <see langword="null"/> would store a column default, so the
+    /// throw is wrapped as a function failure that rolls the write back, with the original kept for the log.
+    /// </summary>
     [Fact]
-    public void A_mutation_that_throws_yields_null_rather_than_escaping_the_write_transaction()
-        => CelInterpreter.EvaluateMutation(
-            MutateExpression(MembershipAgainstAFieldValue), AlvoRecord.Empty, null, DateTimeOffset.UnixEpoch).ShouldBeNull();
+    public void A_mutation_that_throws_fails_closed_as_a_function_failure_rather_than_storing_null()
+    {
+        var failure = Should.Throw<CelFunctionException>(() => CelInterpreter.EvaluateMutation(
+            MutateExpression(MembershipAgainstAFieldValue), AlvoRecord.Empty, null, DateTimeOffset.UnixEpoch));
+
+        failure.FunctionName.ShouldBe(CelInterpreter.HookEvaluation);
+        failure.InnerException.ShouldBeOfType<NotSupportedException>();
+    }
 
     [Fact]
     public void A_ternary_takes_the_false_branch_when_its_condition_is_false()

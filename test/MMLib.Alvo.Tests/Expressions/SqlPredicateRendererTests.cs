@@ -469,6 +469,26 @@ public class SqlPredicateRendererTests
         refused.Message.ShouldContain(nameof(CelProfile.Mutate));
     }
 
+    /// <summary>
+    /// <see cref="CelProfile.Condition"/> is interpreter-only too (preflight R-16): a hook condition is evaluated in
+    /// memory, fails closed on arithmetic the interpreter checks, and has no product caller that renders it. Refusing the
+    /// profile at both entry points makes "condition arithmetic never meets SQL" structural, as it is for
+    /// <see cref="CelProfile.Mutate"/>, instead of holding only for the shapes (<c>changed</c>, <c>old.</c>) the walk
+    /// happens to refuse. The expression carries nothing the walk would refuse, so only the profile guard can throw.
+    /// </summary>
+    [Fact]
+    public void A_condition_expression_with_nothing_unrenderable_in_it_is_refused_at_both_entry_points()
+    {
+        var expression = CelFixtures.CompileCondition("new.total > 5.0");
+
+        var predicate = Should.Throw<NotSupportedException>(() => _renderer.Render(expression, CelFixtures.Alice, _fields));
+        var scalar = Should.Throw<NotSupportedException>(() => _renderer.Render(expression, _fields));
+
+        predicate.Message.ShouldContain(nameof(CelProfile.Condition));
+        predicate.Message.ShouldContain("never rendered to SQL");
+        scalar.Message.ShouldBe(predicate.Message);
+    }
+
     private static CelCall LowerAsciiOfTitle =>
         new(CelCall.LowerAscii, [new CelFieldRef("title", CelValueType.String, CelRecordState.Current)]);
 

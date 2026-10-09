@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using MMLib.Alvo.Api.Internal;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
 
 namespace MMLib.Alvo.Api.Tests;
@@ -146,6 +147,39 @@ public class AlvoExceptionHandlerTests
     }
 
     /// <summary>
+    /// A function's failure is named as a function, an operator's by CEL's overload name, and a whole condition that
+    /// evaluated to no Bool as the condition — never as a "CEL function" called <c>&lt;condition&gt;</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("_/_", "the divisor is zero", "The CEL function '_/_' failed: the divisor is zero. Nothing was written.")]
+    [InlineData(CelInterpreter.WholeCondition, CelInterpreter.WholeConditionReason, "The hook's condition evaluated to a present value that is not a Bool. Nothing was written.")]
+    [InlineData(CelInterpreter.WholeCondition, "", "The hook's condition evaluated to a present value that is not a Bool. Nothing was written.")]
+    [InlineData(CelInterpreter.HookEvaluation, CelInterpreter.HookEvaluationReason, "An internal error occurred while the hook was evaluated, so nothing was written. Its own error is in the server log.")]
+    public void A_function_failure_detail_names_what_failed(string name, string reason, string detail) =>
+        AlvoExceptionHandler.FunctionFailedDetail(new CelFunctionException(name, reason)).ShouldBe(detail);
+
+    /// <summary>
+    /// A defect the interpreter caught on a hook's fail-closed path (Ruling Y-D) answers <c>function-failed</c>, and the
+    /// original exception — not the wrapper — is what reaches the log at <see cref="LogLevel.Error"/>.
+    /// </summary>
+    [Fact]
+    public async Task A_hook_defect_is_answered_function_failed_and_logs_the_original()
+    {
+        var logs = new RecordingLoggerProvider();
+        var context = Context(aborted: false, _alvoEndpoint);
+        var original = new InvalidOperationException("a defect in a built-in");
+
+        await Handle(logs, context, new CelFunctionException(CelInterpreter.HookEvaluation, CelInterpreter.HookEvaluationReason, original));
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status500InternalServerError);
+        context.Response.Body.Position = 0;
+        var body = await new StreamReader(context.Response.Body).ReadToEndAsync(TestContext.Current.CancellationToken);
+        body.ShouldContain("function-failed");
+        body.ShouldNotContain(original.Message);
+        logs.Logged.ShouldContain((LogLevel.Error, original));
+    }
+
+    /// <summary>
     /// Invokes the handler exactly the way <c>ExceptionHandlerMiddleware</c> does: the matched endpoint
     /// recorded onto <see cref="IExceptionHandlerFeature"/>, and then cleared off the context.
     /// </summary>
@@ -209,12 +243,14 @@ public class AlvoExceptionHandlerTests
         return context;
     }
 
-    /// <summary>Every level the handler wrote at, which is the whole of what these facts read.</summary>
+    /// <summary>Every level the handler wrote at, and the exception it wrote with — the whole of what these facts read.</summary>
     private sealed class RecordingLoggerProvider : ILoggerProvider
     {
-        private readonly List<LogLevel> _records = [];
+        private readonly List<(LogLevel Level, Exception? Exception)> _records = [];
 
-        internal IReadOnlyList<LogLevel> Records
+        internal IReadOnlyList<LogLevel> Records => [.. Logged.Select(record => record.Level)];
+
+        internal IReadOnlyList<(LogLevel Level, Exception? Exception)> Logged
         {
             get
             {
@@ -231,11 +267,11 @@ public class AlvoExceptionHandlerTests
         {
         }
 
-        private void Record(LogLevel level)
+        private void Record(LogLevel level, Exception? exception)
         {
             lock (_records)
             {
-                _records.Add(level);
+                _records.Add((level, exception));
             }
         }
 
@@ -250,7 +286,7 @@ public class AlvoExceptionHandlerTests
                 EventId eventId,
                 TState state,
                 Exception? exception,
-                Func<TState, Exception?, string> formatter) => owner.Record(logLevel);
+                Func<TState, Exception?, string> formatter) => owner.Record(logLevel, exception);
         }
     }
 }

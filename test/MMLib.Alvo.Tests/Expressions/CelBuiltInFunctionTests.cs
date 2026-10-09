@@ -62,18 +62,18 @@ public sealed class CelBuiltInFunctionTests
     [InlineData(5L, 5L)]
     [InlineData(0L, 0L)]
     public void Abs_of_an_int_is_an_int(long value, long expected) =>
-        Evaluate("abs(qty)", ("qty", value)).ShouldBe(expected);
+        Evaluate("math.abs(qty)", ("qty", value)).ShouldBe(expected);
 
     [Fact]
     public void Abs_of_a_decimal_is_a_decimal() =>
-        Evaluate("abs(price)", ("price", -2.50m)).ShouldBe(2.50m);
+        Evaluate("math.abs(price)", ("price", -2.50m)).ShouldBe(2.50m);
 
     [Fact]
     public void Abs_of_the_smallest_int_fails_closed_with_a_reason()
     {
-        var failure = Should.Throw<CelFunctionException>(() => Evaluate("abs(qty)", ("qty", long.MinValue)));
+        var failure = Should.Throw<CelFunctionException>(() => Evaluate("math.abs(qty)", ("qty", long.MinValue)));
 
-        failure.FunctionName.ShouldBe("abs");
+        failure.FunctionName.ShouldBe("math.abs");
         failure.Reason.ShouldNotBeNullOrWhiteSpace();
     }
 
@@ -85,18 +85,18 @@ public sealed class CelBuiltInFunctionTests
     [InlineData("1.4999", "1")]
     [InlineData("2.4", "2")]
     public void Round_takes_halves_away_from_zero(string value, string expected) =>
-        Evaluate("round(price)", ("price", decimal.Parse(value, CultureInfo.InvariantCulture)))
+        Evaluate("math.round(price)", ("price", decimal.Parse(value, CultureInfo.InvariantCulture)))
             .ShouldBe(decimal.Parse(expected, CultureInfo.InvariantCulture));
 
     [Fact]
-    public void Round_of_an_int_is_the_int() => Evaluate("round(qty)", ("qty", 7L)).ShouldBe(7L);
+    public void Round_of_an_int_is_the_int() => Evaluate("math.round(qty)", ("qty", 7L)).ShouldBe(7L);
 
     [Theory]
     [InlineData("trim(name)")]
     [InlineData("size(name)")]
     [InlineData("replace(name, 'a', 'b')")]
-    [InlineData("abs(qty)")]
-    [InlineData("round(price)")]
+    [InlineData("math.abs(qty)")]
+    [InlineData("math.round(price)")]
     public void A_null_argument_makes_every_built_in_null(string source) => Evaluate(source).ShouldBeNull();
 
     [Fact]
@@ -104,7 +104,26 @@ public sealed class CelBuiltInFunctionTests
     {
         var source = $"replace(name, 'a', '{new string('b', 1100)}')";
 
-        Should.Throw<CelFunctionException>(() => Evaluate(source, ("name", new string('a', 1000)))).FunctionName.ShouldBe("replace");
+        var failure = Should.Throw<CelFunctionException>(() => Evaluate(source, ("name", new string('a', 1000))));
+
+        failure.FunctionName.ShouldBe("replace");
+        failure.Reason.ShouldBe("its result would pass the 1,048,576 characters a text may grow to here");
+        failure.InnerException!.Message.ShouldContain("1,100,000", Case.Sensitive, "the length is for the log");
+    }
+
+    /// <summary>
+    /// The caller-facing reason carries no length derived from the data (final review M4): one oversized request would
+    /// otherwise reveal a hidden or <c>old.</c> field's exact length.
+    /// </summary>
+    [Fact]
+    public void A_capped_replace_names_no_length_derived_from_the_data()
+    {
+        var source = $"replace(name, 'a', '{new string('b', 1100)}')";
+
+        var failure = Should.Throw<CelFunctionException>(() => Evaluate(source, ("name", new string('a', 1001))));
+
+        failure.Message.ShouldNotContain("1,101,100");
+        failure.Reason!.ShouldNotContain("1,101,100");
     }
 
     [Fact]
@@ -154,11 +173,24 @@ public sealed class CelBuiltInFunctionTests
     [Fact]
     public void Every_built_in_body_returns_exactly_its_declared_clr_type()
     {
-        var samples = new Dictionary<CelValueType, object> { [CelValueType.Int] = -3L, [CelValueType.Decimal] = -3.5m, [CelValueType.String] = " a " };
+        // Int is a position inside the String sample, so substring's body answers rather than fails closed; the two
+        // conversions that read their text get a text they accept, for the same reason.
+        var samples = new Dictionary<CelValueType, object>
+        {
+            [CelValueType.Int] = 1L,
+            [CelValueType.Decimal] = -3.5m,
+            [CelValueType.String] = " a ",
+            [CelValueType.Bool] = true,
+            [CelValueType.Uuid] = Guid.Empty,
+            [CelValueType.Timestamp] = DateTimeOffset.UnixEpoch,
+        };
+        var texts = new Dictionary<string, object> { ["int"] = "-7", ["timestamp"] = "2026-10-05T12:00:00Z" };
 
         foreach (var function in CelBuiltInFunctions.All.Where(f => !f.IsLegacy))
         {
-            var arguments = function.Parameters.Select(p => samples[p.Type]).ToArray();
+            var arguments = function.Parameters
+                .Select(p => p.Type == CelValueType.String && texts.TryGetValue(function.Name, out var text) ? text : samples[p.Type])
+                .ToArray();
             var result = function.Body!(arguments);
 
             result.ShouldBeOfType(CelBuiltInFunctions.ClrTypeOf(function.ResultType), function.Signature());

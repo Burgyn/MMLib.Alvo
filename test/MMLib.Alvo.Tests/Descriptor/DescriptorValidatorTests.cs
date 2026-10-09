@@ -39,6 +39,38 @@ public class DescriptorValidatorTests
         refusal.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
     }
 
+    /// <summary>
+    /// A JSON <c>null</c> mutate value on an optional field is the empty value the schema admits and the dashboard's "Set to
+    /// empty" writes. System.Text.Json never hands a <c>null</c> token to <c>ValueOrExprConverter</c>, so the map held a
+    /// null entry and the before-hook compiler threw — a 500 from every management route, not a finding.
+    /// </summary>
+    [Fact]
+    public void A_null_mutate_value_on_an_optional_field_is_accepted_rather_than_thrown_on()
+    {
+        var result = Should.NotThrow(() => _validator.Validate(WithNullMutate(required: false)));
+
+        result.Errors.Where(error => error.Severity == DescriptorValidationSeverity.Error).ShouldBeEmpty();
+    }
+
+    /// <summary>A JSON <c>null</c> mutate value on a required field is refused on its slot, as a null literal is.</summary>
+    [Fact]
+    public void A_null_mutate_value_on_a_required_field_is_refused_on_its_slot_rather_than_thrown_on()
+    {
+        var result = Should.NotThrow(() => _validator.Validate(WithNullMutate(required: true)));
+
+        var refusal = result.Errors.ShouldHaveSingleItem();
+        refusal.Path.ShouldBe("/entities/tasks/hooks/beforeUpdate/0/action/mutate/title");
+        refusal.Message.ShouldContain("required");
+        refusal.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    private static string WithNullMutate(bool required) => $$"""
+        { "apiVersion": "alvo.dev/v1", "name": "demo",
+          "entities": { "tasks": {
+            "fields": { "title": { "type": "string", "required": {{(required ? "true" : "false")}} } },
+            "hooks": { "beforeUpdate": [ { "action": { "mutate": { "title": null } } } ] } } } }
+        """;
+
     /// <summary>The five places a lone UTF-16 surrogate can hide, as descriptor text (the escape is the raw JSON text).</summary>
     public static TheoryData<string> LoneSurrogateAt() => ["entity-key", "field-key", "role", "description", "extension"];
 
@@ -133,38 +165,6 @@ public class DescriptorValidatorTests
     [Fact]
     public void An_unknown_ref_fix_with_no_declared_entity_offers_users_and_no_empty_list() =>
         DescriptorValidator.UnknownRefFix("products", []).ShouldBe("Point 'entity' at 'users', or add an entity named 'products'.");
-
-    /// <summary>
-    /// A JSON <c>null</c> mutate value on an optional field is the empty value the schema admits, as a hand- or agent-written
-    /// descriptor may hold it. System.Text.Json never hands a <c>null</c> token to <c>ValueOrExprConverter</c>, so the map held a
-    /// null entry and the before-hook compiler threw — a 500 from every management route, not a finding (#326).
-    /// </summary>
-    [Fact]
-    public void A_null_mutate_value_on_an_optional_field_is_accepted_rather_than_thrown_on()
-    {
-        var result = Should.NotThrow(() => _validator.Validate(WithNullMutate(required: false)));
-
-        result.Errors.Where(error => error.Severity == DescriptorValidationSeverity.Error).ShouldBeEmpty();
-    }
-
-    /// <summary>A JSON <c>null</c> mutate value on a required field is refused on its slot, as a null literal is.</summary>
-    [Fact]
-    public void A_null_mutate_value_on_a_required_field_is_refused_on_its_slot_rather_than_thrown_on()
-    {
-        var result = Should.NotThrow(() => _validator.Validate(WithNullMutate(required: true)));
-
-        var refusal = result.Errors.ShouldHaveSingleItem();
-        refusal.Path.ShouldBe("/entities/tasks/hooks/beforeUpdate/0/action/mutate/title");
-        refusal.Message.ShouldContain("required");
-        refusal.FixSuggestion.ShouldNotBeNullOrWhiteSpace();
-    }
-
-    private static string WithNullMutate(bool required) => $$"""
-        { "apiVersion": "alvo.dev/v1", "name": "demo",
-          "entities": { "tasks": {
-            "fields": { "title": { "type": "string", "required": {{(required ? "true" : "false")}} } },
-            "hooks": { "beforeUpdate": [ { "action": { "mutate": { "title": null } } } ] } } } }
-        """;
 
     [Fact]
     public void Schema_violation_is_a_structured_error()

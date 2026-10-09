@@ -12,7 +12,8 @@ An entity's `hooks` hold lists under `beforeCreate`, `beforeUpdate` and `beforeD
 - `{"mutate": {"<field>": …}}` sets fields before the write: each value is a JSON literal or `{"$cel": "…"}`.
 
 A before-hook runs inside the write's transaction, with no network: it can refuse or change this row, and
-nothing else. A hook without a `condition` runs on every write of its kind.
+nothing else. A hook without a `condition` runs on every write of its kind, and never on a schedule: a timed job is
+`automation`, which this build does not run.
 
 The shape: `schema/project.schema.json#/$defs/beforeHookList`.
 
@@ -21,30 +22,40 @@ on update and delete; `changed(<field>)`, true when an update changes the field,
 combinations are refused at apply: a delete has no `new.`, a create no `old.`.
 
 <!-- gen:cel-condition -->
-- allowed: `new.quantity <= 0.0` `old.unit_price != new.unit_price` `changed(unit_price)` `'technician' in @user.roles` `size(new.description) > 3`
-- refused: `quantity * unit_price` `now()` `lowerAscii(description)`
+- allowed: `new.quantity <= 0.0` `new.quantity * new.unit_price > 1000.0` `old.unit_price != new.unit_price` `changed(unit_price)` `'technician' in @user.roles` `size(new.description) > 3` `lowerAscii(new.description) == 'brake pads'` `startsWith(new.description, 'Brake')`
+- refused: `quantity * unit_price` `now()`
 <!-- /gen:cel-condition -->
 
-A `mutate` value is a field, a literal, or a call to one of these built-in functions (calls may nest), and nothing
-more: no `@user` or `@tenant`, no arithmetic, no joins. `lowerAscii` takes a field only; the others take any value
-of the right type, and a null argument makes the value null.
+Text tests (`startsWith`, `endsWith`, `contains`) are case-sensitive: compare `lowerAscii(new.<field>)` to ignore case.
+
+A `mutate` value is a field, a literal, arithmetic (`+ - * /`, unary `-`), `+` joining two strings, or a call to
+one of these built-in functions (all may nest), and nothing more: no `@user` or `@tenant`. A number joins through
+`string()`: `'#' + string(new.quantity)`. Every function takes any value of
+the right type, and a null argument or operand makes the value null. An Int divided by an Int stays an Int, cut
+toward zero; an overflow or a division by zero refuses the write, in a `mutate` and in a `condition` alike.
 
 <!-- gen:mutate-functions -->
-`abs` `lowerAscii` `now` `replace` `round` `size` `trim`
+`contains` `endsWith` `int` `lowerAscii` `math.abs` `math.ceil` `math.floor` `math.greatest` `math.least` `math.round` `now` `replace` `size` `startsWith` `string` `substring` `timestamp` `trim` `upperAscii`
 <!-- /gen:mutate-functions -->
 
-An embedded host may register its own functions; they work in a `condition` and a `mutate` and nowhere else. Call
+A `substring` past the end fails the write, so to fit a field's `maxLength`, cut:
+`substring(new.description, 0, math.least(size(new.description), 40))`. A value derived from other fields of the row
+belongs in a computed field, which stays true on every write; a `mutate` stamps it once.
+
+An embedded host may register its own CEL functions, which compute a value and never run your code (the
+`function` action is refused); they work in a `condition` and a `mutate` and nowhere else. Call
 `get_cel_functions` for this host's list with each function's parameters and result — never assume one exists. A
 function whose meaning changes gets a new name (`vatRate` stays, `vatRate2` is new). Alvo's tenant filter does not
 reach inside a function: one that reads stored data must take the tenant as a parameter and filter by it.
 
 <!-- gen:cel-mutate -->
-- allowed: `now()` `lowerAscii(new.description)` `new.unit_price` `'part'` `trim(new.description)`
-- refused: `quantity * 2.0` `new.quantity > 0.0` `'admin' in @user.roles` `changed(quantity)`
+- allowed: `now()` `lowerAscii(new.description)` `new.unit_price` `'part'` `trim(new.description)` `quantity * 2.0` `upperAscii(trim(new.description))` `math.round(new.unit_price * 1.2, 2)` `'#' + upperAscii(new.description)` `startsWith(new.description, 'Brake')`
+- refused: `new.quantity > 0.0` `'admin' in @user.roles` `changed(quantity)`
 <!-- /gen:cel-mutate -->
 
-A `mutate` value cannot compare. For a flag decided by a comparison, let the `condition` compare and the `mutate`
-write the literal, with a second hook for the opposite case.
+A `mutate` value has no comparison operator (a text test such as `startsWith` is a call, and may fill a boolean
+field). For a flag decided by a comparison, let the `condition` compare and the `mutate` write the literal, with a
+second hook for the opposite case.
 
 Adding a hook depends on what the entity already has:
 

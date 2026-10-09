@@ -48,7 +48,7 @@ public sealed class CelFunctionRegistrationTests
     [InlineData("now")]
     [InlineData("lowerAscii")]
     [InlineData("trim")]
-    [InlineData("abs")]
+    [InlineData("replace")]
     [InlineData("in")]
     [InlineData("true")]
     [InlineData("null")]
@@ -74,6 +74,27 @@ public sealed class CelFunctionRegistrationTests
     [InlineData("matches")]
     public void A_name_the_catalog_cannot_honour_is_refused_at_registration(string name) =>
         Should.Throw<ArgumentException>(() => Alvo().AddCelFunction(name, (string s) => s)).Message.ShouldContain(name.TrimEnd('\n'));
+
+    /// <summary>A built-in is refused as one before any other reason, so a host naming one hears what it collides with (D-14).</summary>
+    [Theory]
+    [InlineData("contains")]
+    [InlineData("startsWith")]
+    [InlineData("endsWith")]
+    [InlineData("int")]
+    [InlineData("string")]
+    [InlineData("timestamp")]
+    [InlineData("now")]
+    public void A_built_in_name_is_refused_as_a_built_in(string name) =>
+        Should.Throw<ArgumentException>(() => Alvo().AddCelFunction(name, (string s) => s)).Message
+            .ShouldStartWith($"'{name}' cannot name a host function: it is a built-in function.");
+
+    [Theory]
+    [InlineData("uint")]
+    [InlineData("matches")]
+    [InlineData("duration")]
+    public void A_standard_name_not_yet_built_is_refused_as_cel_syntax(string name) =>
+        Should.Throw<ArgumentException>(() => Alvo().AddCelFunction(name, (string s) => s)).Message
+            .ShouldStartWith($"'{name}' cannot name a host function: it is a standard CEL type or function name");
 
     [Fact]
     public void A_name_longer_than_sixty_four_characters_is_refused()
@@ -119,7 +140,7 @@ public sealed class CelFunctionRegistrationTests
     [InlineData("filter")]
     [InlineData("all")]
     [InlineData("replace")]
-    [InlineData("round")]
+    [InlineData("lowerAscii")]
     [InlineData("size")]
     [InlineData("false")]
     public void A_macro_or_built_in_name_is_refused(string name) =>
@@ -188,7 +209,7 @@ public sealed class CelFunctionRegistrationTests
         host.Parameters.ShouldHaveSingleItem().Name.ShouldBe("phone");
         described.Select(f => f.Name).ShouldBe(described.Select(f => f.Name).Order(StringComparer.Ordinal));
         described.Where(f => f.Provenance == CelFunctionProvenance.BuiltIn).Select(f => f.Name).Distinct()
-            .ShouldBe(["abs", "lowerAscii", "now", "replace", "round", "size", "trim"]);
+            .ShouldBe(CelFunctionCatalog.BuiltIns.Names);
     }
 
     private static Delegate Multicast()

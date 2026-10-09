@@ -168,6 +168,9 @@ public sealed class GuidedConditionConformanceTests
         {
             ConditionFieldKind.Number => ["12", "4.5", "9223372036854775807", "123456789012345678.9012345678"],
             ConditionFieldKind.Choice => ["it's"],
+            /* A text test refuses an empty value (every text starts with nothing), so its second sample is a call-breaking one. */
+            _ when spec.RefusesEmpty
+                => ["it's \\ \"quoted\"\n", "x') || ('y"],
             _ => ["it's \\ \"quoted\"\n", string.Empty],
         };
 

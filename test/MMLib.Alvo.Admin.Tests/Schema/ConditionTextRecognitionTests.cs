@@ -13,6 +13,7 @@ public class ConditionTextRecognitionTests
         new("discount", ConditionFieldKind.Number, true, []),
         new("title", ConditionFieldKind.Text, false, []),
         new("note", ConditionFieldKind.Text, true, []),
+        new("email", ConditionFieldKind.Text, true, []),
         new("notify_customer", ConditionFieldKind.Flag, true, []),
         new("owner_id", ConditionFieldKind.Identity, true, []),
         new("due_on", ConditionFieldKind.Moment, true, []),
@@ -33,6 +34,10 @@ public class ConditionTextRecognitionTests
     [InlineData("beforeUpdate", "new.title == 'line\\nbreak\\ttab\\\\'")]
     [InlineData("beforeUpdate", "new.title == 'a‍b' && new.note == 'می‌خواهم'")]
     [InlineData("beforeUpdate", "!(new.discount == 4.5) && new.discount > 0.01")]
+    [InlineData("beforeCreate", "startsWith(new.title, 'WTU')")]
+    [InlineData("beforeCreate", "endsWith(new.email, '@example.com')")]
+    [InlineData("beforeDelete", "contains(old.note, 'it\\'s, (really) && \\'quoted\\'')")]
+    [InlineData("afterUpdate", "!has(new.email) || endsWith(new.email, '.sk') || contains(old.title, ', ')")]
     public void A_canonical_condition_is_read_as_rows_that_write_it_back(string point, string text)
         => ConditionText.Generate(ConditionText.Recognize(text, point, _scope).ShouldNotBeNull()).ShouldBe(text);
 
@@ -77,6 +82,14 @@ public class ConditionTextRecognitionTests
     [InlineData("beforeUpdate", "new.title == 'open", "an unclosed quote")]
     [InlineData("beforeUpdate", "new.title == 'x' && ", "a dangling joiner")]
     [InlineData("beforeUpdate", "(new.title == 'x')", "parentheses the generator does not write")]
+    [InlineData("beforeCreate", "endsWith(new.email,'@x')", "not canonical spacing")]
+    [InlineData("beforeCreate", "endsWith(new.email, \"@x\")", "double quotes are not the generator's")]
+    [InlineData("beforeCreate", "endsWith(new.email, '')", "an empty text test (the form would refuse it)")]
+    [InlineData("beforeCreate", "startsWith(new.quantity, '1')", "a text test on a number")]
+    [InlineData("beforeCreate", "contains(new.status, 'ready')", "a text test on a choice")]
+    [InlineData("beforeCreate", "contains(new.note, 1)", "a bare number in a text test")]
+    [InlineData("beforeCreate", "!startsWith(new.note, 'x')", "a negated text test the rows do not write")]
+    [InlineData("beforeCreate", "startsWith(old.note, 'x')", "an image the point lacks")]
     public void A_text_the_generator_would_not_write_stays_text(string point, string text, string because)
         => ConditionText.Recognize(text, point, _scope).ShouldBeNull(because);
 

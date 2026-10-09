@@ -19,8 +19,12 @@ namespace MMLib.Alvo.Tests.Expressions;
 /// </remarks>
 public class CelProfileTests
 {
+    /// <summary>
+    /// A rule never computes (spec D-7 admits arithmetic in Computed and the two hook slots, never in a rule); a computed
+    /// field does.
+    /// </summary>
     [Fact]
-    public void Arithmetic_is_computed_only()
+    public void Arithmetic_is_refused_in_a_rule()
     {
         CelFixtures.Compiler.Compile("total + total", CelProfile.Rule, CelFixtures.Orders)
             .IsSuccess.ShouldBeFalse();

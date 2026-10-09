@@ -8,9 +8,9 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// once per test-host process, so a mutant inside one is invisible to every test (the #244 comment), and these sets
 /// are profile gates in the security core.
 /// </remarks>
-internal static class CelBuiltInFunctions
+internal static partial class CelBuiltInFunctions
 {
-    /// <summary>Gets the profile set of the two legacy calls.</summary>
+    /// <summary>Gets the profile set of <c>now()</c>, the one call left with its own grammar.</summary>
     internal static IReadOnlySet<CelProfile> MutateOnly => new HashSet<CelProfile> { CelProfile.Mutate };
 
     /// <summary>Gets the profile set of every in-process function in this slice — built-ins and host functions alike.</summary>
@@ -25,12 +25,33 @@ internal static class CelBuiltInFunctions
     /// </summary>
     internal const int MaxTextLength = 1_048_576;
 
+    /// <summary>
+    /// The failure of a text that would grow past <see cref="MaxTextLength"/> — <c>replace</c>, or a join on the hook
+    /// path. The caller-facing reason names the cap only: the length is derived from the data, so one oversized request
+    /// would reveal a hidden or <c>old.</c> field's exact length (final review M4). The length rides on the inner
+    /// exception, which the write path logs and never shows.
+    /// </summary>
+    /// <param name="functionName">The function or overload that would grow the text.</param>
+    /// <param name="length">The length the result would have had.</param>
+    internal static CelFunctionException TextCapExceeded(string functionName, long length) => new(
+        functionName,
+        string.Create(CultureInfo.InvariantCulture, $"its result would pass the {MaxTextLength:N0} characters a text may grow to here"),
+        new InvalidOperationException(string.Create(
+            CultureInfo.InvariantCulture, $"The result of '{functionName}' would have been {length:N0} characters.")));
+
     /// <summary>The characters <c>trim</c> removes: the four the CEL lexer can escape or type (spec deviation F5).</summary>
     private const string AsciiWhitespace = " \t\n\r";
 
     /// <summary>Gets every built-in overload.</summary>
     internal static IReadOnlyList<CelFunction> All =>
-        [LowerAscii, Now, Replace, Trim, Size, Abs(CelValueType.Int), Abs(CelValueType.Decimal), Round(CelValueType.Int), Round(CelValueType.Decimal)];
+        [
+            LowerAscii, UpperAscii, Now, Replace, Trim, Size, Abs(CelValueType.Int), Abs(CelValueType.Decimal), Round(CelValueType.Int), Round(CelValueType.Decimal),
+            RoundToDigits, Substring(withEnd: false), Substring(withEnd: true), Contains, StartsWith, EndsWith,
+            Ceil(CelValueType.Int), Ceil(CelValueType.Decimal), Floor(CelValueType.Int), Floor(CelValueType.Decimal),
+            Greatest(CelValueType.Int), Greatest(CelValueType.Decimal), Least(CelValueType.Int), Least(CelValueType.Decimal),
+            String(CelValueType.Int), String(CelValueType.Decimal), String(CelValueType.Bool), String(CelValueType.Uuid), String(CelValueType.Timestamp),
+            Int(CelValueType.Decimal), Int(CelValueType.String), Timestamp,
+        ];
 
     private static CelFunction Replace => InProcess(
         "replace", CelValueType.String,
@@ -48,14 +69,24 @@ internal static class CelBuiltInFunctions
         arguments => SizeOf((string)arguments[0]!), Parameter("text", CelValueType.String));
 
     private static CelFunction Abs(CelValueType type) => InProcess(
-        "abs", type, "The absolute value of x, of the same numeric type.",
+        "math.abs", type, "The absolute value of x, of the same numeric type.",
         arguments => type == CelValueType.Int ? (object)AbsInt((long)arguments[0]!) : Math.Abs((decimal)arguments[0]!),
         Parameter("x", type));
 
     private static CelFunction Round(CelValueType type) => InProcess(
-        "round", type, "x rounded to a whole number, halves away from zero (2.5 is 3, -2.5 is -3), of the same numeric type.",
+        "math.round", type, "Rounds x to a whole number, halves away from zero (2.5 is 3, -2.5 is -3), of the same numeric type.",
         arguments => type == CelValueType.Int ? arguments[0] : Math.Round((decimal)arguments[0]!, MidpointRounding.AwayFromZero),
         Parameter("x", type));
+
+    private static CelFunction LowerAscii => InProcess(
+        CelCall.LowerAscii, CelValueType.String,
+        "Folds A-Z to a-z and changes nothing else: accented and other non-ASCII letters stay as they are.",
+        arguments => LowerAsciiText((string)arguments[0]!), Parameter("text", CelValueType.String));
+
+    private static CelFunction UpperAscii => InProcess(
+        CelCall.UpperAscii, CelValueType.String,
+        "Folds a-z to A-Z and changes nothing else: accented and other non-ASCII letters stay as they are.",
+        arguments => UpperAsciiText((string)arguments[0]!), Parameter("text", CelValueType.String));
 
     private static CelFunction InProcess(
         string name, CelValueType result, string summary, Func<object?[], object?> body, params CelFunctionArgument[] parameters) =>
@@ -77,9 +108,7 @@ internal static class CelBuiltInFunctions
         var grown = (long)text.Length + ((long)Occurrences(text, search) * (replacement.Length - search.Length));
         if (replacement.Length > search.Length && grown > MaxTextLength)
         {
-            throw new CelFunctionException("replace", string.Create(
-                CultureInfo.InvariantCulture,
-                $"its result would be {grown:N0} characters, over the {MaxTextLength:N0} a text may grow to here"));
+            throw TextCapExceeded("replace", grown);
         }
 
         return text.Replace(search, replacement, StringComparison.Ordinal);
@@ -95,8 +124,36 @@ internal static class CelBuiltInFunctions
     /// <returns>The number of code points.</returns>
     internal static long SizeOf(string text) => text.EnumerateRunes().Count();
 
+    /// <summary><c>lowerAscii</c>: an explicit A–Z loop, never <c>ToLowerInvariant</c>, which folds non-ASCII letters too.</summary>
+    /// <param name="text">The text to fold.</param>
+    /// <returns>The folded text.</returns>
+    internal static string LowerAsciiText(string text) => Fold(text, 'A', 'Z', 'a' - 'A');
+
+    /// <summary><c>upperAscii</c>: an explicit a–z loop, never <c>ToUpperInvariant</c>.</summary>
+    /// <param name="text">The text to fold.</param>
+    /// <returns>The folded text.</returns>
+    internal static string UpperAsciiText(string text) => Fold(text, 'a', 'z', 'A' - 'a');
+
+    /// <summary>Shifts every character from <paramref name="from"/> to <paramref name="to"/> by <paramref name="shift"/>, and nothing else.</summary>
+    /// <remarks>
+    /// <b>The invariant-culture casing methods are not equivalent and must never replace this.</b> They fold every
+    /// non-ASCII letter they have a mapping for — <c>Ä</c>→<c>ä</c>, <c>Σ</c>→<c>σ</c>, and <c>ẞ</c>→<c>ß</c>, which no
+    /// reverse mapping recovers — and a stored value folded that way is a permanently wrong row. Which characters they
+    /// fold is also a runtime and ICU detail (<c>İ</c>, U+0130, is the famous trap); a positive range is an ASCII fold
+    /// on every runtime by construction.
+    /// </remarks>
+    private static string Fold(string text, char from, char to, int shift) =>
+        string.Create(text.Length, (text, from, to, shift), static (span, state) =>
+        {
+            for (var index = 0; index < state.text.Length; index++)
+            {
+                var character = state.text[index];
+                span[index] = character >= state.from && character <= state.to ? (char)(character + state.shift) : character;
+            }
+        });
+
     private static long AbsInt(long value) => value == long.MinValue
-        ? throw new CelFunctionException("abs", "the absolute value of the smallest Int is not an Int")
+        ? throw new CelFunctionException("math.abs", "the absolute value of the smallest Int is not an Int")
         : Math.Abs(value);
 
     private static int Occurrences(string text, string search)
@@ -109,11 +166,6 @@ internal static class CelBuiltInFunctions
 
         return count;
     }
-
-    private static CelFunction LowerAscii => new(
-        CelCall.LowerAscii, [Parameter("value", CelValueType.String)], CelValueType.String, ResultNullable: true,
-        "Folds A-Z to a-z in a field's text and changes nothing else; takes a field, never an expression.",
-        IsHost: false, MutateOnly, Body: null);
 
     private static CelFunction Now => new(
         CelCall.Now, [], CelValueType.Timestamp, ResultNullable: false,

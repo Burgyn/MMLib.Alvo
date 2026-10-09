@@ -6,7 +6,7 @@ namespace MMLib.Alvo.Tests.Expressions;
 
 /// <summary>
 /// A <c>date</c> column reaches the interpreter as a <see cref="DateOnly"/> on every write path, and a comparison over one
-/// must answer as the same calendar day at midnight UTC, never <see langword="false"/> because the
+/// must answer as the same calendar day at midnight UTC — the marshaller's rule — never <see langword="false"/> because the
 /// operand was not recognised. A <c>false</c> there is a reject that never fires (security risk S-1, fail-open).
 /// </summary>
 public sealed class CelDateOperandTests
@@ -22,9 +22,12 @@ public sealed class CelDateOperandTests
         ],
     };
 
+    private static CelFunction Cutoff => TestCelFunctions.Host(
+        "cutoff", CelValueType.Timestamp, _ => new DateTimeOffset(2026, 12, 1, 0, 0, 0, TimeSpan.Zero));
+
     private static bool Condition(string source, (string Field, object? Value)[] current, (string Field, object? Value)[]? previous = null)
     {
-        var compiled = CelFixtures.Compiler.Compile(source, CelProfile.Condition, _bookings);
+        var compiled = TestCelFunctions.Compiler(Cutoff).Compile(source, CelProfile.Condition, _bookings);
         compiled.IsSuccess.ShouldBeTrue(string.Join("; ", compiled.Errors.Select(error => error.Message)));
         return CelInterpreter.EvaluatePredicate(
             compiled.Expression!, CelFixtures.Row(current), previous is null ? null : CelFixtures.Row(previous), AlvoContext.Anonymous);
@@ -54,6 +57,10 @@ public sealed class CelDateOperandTests
         Condition("new.starts_on == new.stamped_at", [("starts_on", _october5), ("stamped_at", new DateTimeOffset(2026, 10, 5, 0, 0, 0, TimeSpan.Zero))])
             .ShouldBeTrue();
     }
+
+    [Fact]
+    public void A_date_compares_with_a_host_function_s_instant() =>
+        Condition("new.starts_on < cutoff()", [("starts_on", _october5)]).ShouldBeTrue();
 
     [Fact]
     public void Changed_is_false_for_a_date_left_as_it_was() =>

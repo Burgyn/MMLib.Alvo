@@ -78,7 +78,7 @@ internal static class CelParser
         /// culture-sensitive one that would rewrite a stored value beyond recovery.
         /// </summary>
         private const string LowerAsciiSuggestion =
-            "CEL spells a lower-case fold lowerAscii, and it folds A-Z only: write lowerAscii(field). A "
+            "CEL spells a lower-case fold lowerAscii, and it folds A-Z only: write lowerAscii(text). A "
             + "Unicode-wide fold also rewrites non-ASCII letters ('Ä' becomes 'ä', 'ẞ' becomes 'ß'), and a "
             + "stored value folded that way is permanently wrong.";
 
@@ -403,8 +403,24 @@ internal static class CelParser
                 return ParseCall(identifierToken);
             }
 
+            if (QualifiedName(identifierToken) is { } qualified)
+            {
+                _index += 2;
+                return ParseCatalogCall(qualified);
+            }
+
             return ResolveFieldReference(identifierToken);
         }
+
+        /// <summary>
+        /// <c>namespace.member</c> when the next three tokens are <c>. member (</c> and the catalog knows the dotted name
+        /// (spec §6.1). The catalog decides, never the grammar: <c>new.total</c>, a field named <c>math</c>, and an
+        /// uncatalogued <c>a.b(</c> all fall through to field resolution exactly as before.
+        /// </summary>
+        private string? QualifiedName(CelToken first) =>
+            Current.Kind == CelTokenKind.Dot && ReceiverCallName() is { } member && catalog.Contains($"{first.Text}.{member}")
+                ? $"{first.Text}.{member}"
+                : null;
 
         private CelFieldRef ParseFieldRefArgument() => ResolveFieldReference(Expect(CelTokenKind.Identifier));
 
@@ -419,7 +435,7 @@ internal static class CelParser
         }
 
         /// <summary>
-        /// The closed set of identifiers that may be followed by <c>(</c>: the three calls with their own grammar, then
+        /// The closed set of identifiers that may be followed by <c>(</c>: the two calls with their own grammar, then
         /// whatever the catalog knows. A <b>positive</b> list on purpose — a name missing from it is refused, so a
         /// function is unavailable until somebody catalogues it. Profiles are not decided here: the parser is
         /// profile-blind and the type checker gates every call.
@@ -427,9 +443,8 @@ internal static class CelParser
         private CelNode ParseCall(CelToken identifierToken) => identifierToken.Text switch
         {
             "changed" => ParseChangedCall(),
-            CelCall.LowerAscii => ParseLowerAsciiCall(),
             CelCall.Now => ParseNowCall(),
-            var name when catalog.Contains(name) => ParseCatalogCall(identifierToken),
+            var name when catalog.Contains(name) => ParseCatalogCall(name),
             _ => throw UnrecognizedFunction(identifierToken),
         };
 
@@ -437,12 +452,12 @@ internal static class CelParser
         /// Parses <c>name(argument, …)</c> for a catalogued function. Each argument is a whole expression parsed as one
         /// nested level, so call nesting counts against <see cref="MaxDepth"/>; arity is the type checker's question.
         /// </summary>
-        private CelCall ParseCatalogCall(CelToken nameToken)
+        private CelCall ParseCatalogCall(string name)
         {
             Expect(CelTokenKind.LeftParen);
             IReadOnlyList<CelNode> arguments = Current.Kind == CelTokenKind.RightParen ? [] : ParseArguments();
             Expect(CelTokenKind.RightParen);
-            return new CelCall(nameToken.Text, arguments);
+            return new CelCall(name, arguments);
         }
 
         private List<CelNode> ParseArguments()
@@ -466,6 +481,7 @@ internal static class CelParser
         {
             "lower" => LowerAsciiSuggestion,
             "all" or "exists" or "exists_one" or "map" or "filter" => MacroNotSupportedSuggestion,
+            var bare when catalog.Contains($"math.{bare}") => $"Did you mean 'math.{bare}'? " + KnownFunctionsList(),
             _ => KnownFunctionsSuggestion(name),
         };
 
@@ -474,9 +490,13 @@ internal static class CelParser
         {
             var closest = NameSuggestion.Closest(name, catalog.Names);
             var lead = closest is null ? string.Empty : $"Did you mean '{closest}'? ";
-            return lead + $"Known functions: {string.Join(", ", catalog.Names)}. A function a host registers with "
-                + "AddCelFunction exists only in that host; the standalone image and the CLI know the built-in ones only.";
+            return lead + KnownFunctionsList();
         }
+
+        /// <summary>Every known name, with no "did you mean" of its own, for a fix that already names the right one.</summary>
+        private string KnownFunctionsList() =>
+            $"Known functions: {string.Join(", ", catalog.Names)}. A function a host registers with "
+            + "AddCelFunction exists only in that host; the standalone image and the CLI know the built-in ones only.";
 
         private CelChanged ParseChangedCall()
         {
@@ -484,21 +504,6 @@ internal static class CelParser
             var fieldToken = Expect(CelTokenKind.Identifier);
             ExpectFieldArgumentEnd("changed");
             return new CelChanged(fieldToken.Text);
-        }
-
-        /// <summary>
-        /// Parses <c>lowerAscii(field)</c>. The argument is a field reference — optionally
-        /// <c>old.</c>/<c>new.</c>-qualified — and not an arbitrary expression, the same narrowing
-        /// <c>has(field)</c> and <c>changed(field)</c> already use. Admitting a general expression later
-        /// accepts strictly more source than this does and so cannot break an authored descriptor; starting
-        /// general and narrowing afterwards would.
-        /// </summary>
-        private CelCall ParseLowerAsciiCall()
-        {
-            Expect(CelTokenKind.LeftParen);
-            var field = ParseFieldRefArgument();
-            ExpectFieldArgumentEnd(CelCall.LowerAscii);
-            return new CelCall(CelCall.LowerAscii, [field]);
         }
 
         /// <summary>
@@ -522,7 +527,7 @@ internal static class CelParser
             return new CelCall(CelCall.Now, []);
         }
 
-        /// <summary>Closes a field-only call (<c>has</c>, <c>changed</c>, <c>lowerAscii</c>) after its one field.</summary>
+        /// <summary>Closes a field-only call (<c>has</c>, <c>changed</c>) after its one field.</summary>
         /// <param name="functionName">The field-only call being parsed.</param>
         private void ExpectFieldArgumentEnd(string functionName)
         {
@@ -532,7 +537,7 @@ internal static class CelParser
         }
 
         /// <summary>
-        /// Refuses a call where a field-only call wants its field — <c>lowerAscii(trim(name))</c>. The message and
+        /// Refuses a call where a field-only call wants its field — <c>changed(trim(name))</c>. The message and
         /// position are exactly the token mismatch this always reported (the corpus pins them); the fix is the point.
         /// </summary>
         /// <param name="functionName">The field-only call being parsed.</param>
@@ -552,19 +557,14 @@ internal static class CelParser
         /// <param name="inner">The name written where the field belongs.</param>
         private string FieldOnlyCallFix(string functionName, string inner)
         {
-            var nestable = catalog.Contains(inner) && inner is not (CelCall.LowerAscii or CelCall.Now);
+            var nestable = catalog.Contains(inner) && inner is not CelCall.Now;
             var reads = nestable ? $"the field {inner}(...) reads" : "the field itself";
             return functionName switch
             {
                 "has" => $"has takes one field reference, never a call: write has(field) for {reads}; a call's result is "
                     + "compared, never tested with has.",
-                "changed" => $"changed takes one field reference, never a call: write changed(field) for {reads}"
+                _ => $"changed takes one field reference, never a call: write changed(field) for {reads}"
                     + (nestable ? $", or compare the results directly, e.g. {inner}(old.field) != {inner}(new.field)." : "."),
-                _ => $"lowerAscii takes a field, never a call: write lowerAscii(field) for {reads}"
-                    + (nestable
-                        ? ". A function takes any expression, so nest the other way when that means the same, e.g. "
-                            + $"{inner}(lowerAscii(field)), or write {inner}(...)'s result into a field with a mutate and fold that field."
-                        : "."),
             };
         }
 
@@ -578,14 +578,34 @@ internal static class CelParser
         }
 
         /// <summary>
-        /// The fix for <c>x.trim()</c> or <c>math.abs(x)</c> — CEL's receiver and namespaced spellings (deviation F1):
-        /// when the member after the dot is a catalogued function followed by <c>(</c>, say how Alvo spells the call.
+        /// The fix for <c>x.trim()</c>, <c>math.rond(x)</c> or another dotted spelling (deviation F1/F11): a catalogued
+        /// member gets the global form (<c>price.abs()</c> gets <c>math.abs</c>); a member of a catalogued namespace gets
+        /// "did you mean" over the known names.
         /// </summary>
-        private string NestedAccessFix() =>
-            ReceiverCallName() is { } function && catalog.Contains(function)
-                ? $"Write {function}(...) with the value as an argument: Alvo calls a function as {function}(x), never "
-                    + $"as x.{function}() or with a namespace such as math.{function}(x)."
-                : MacroNotSupportedSuggestion;
+        private string NestedAccessFix(CelToken first) => ReceiverCallName() switch
+        {
+            { } member when GlobalName(member) is { } global =>
+                $"Write {global}(...) with the value as an argument: Alvo calls a function as {global}(x), never as x.{member}().",
+            { } member when IsNamespace(first.Text) => KnownFunctionsSuggestion($"{first.Text}.{member}"),
+            _ => MacroNotSupportedSuggestion,
+        };
+
+        private bool IsNamespace(string text) => catalog.Names.Any(name => name.StartsWith(text + ".", StringComparison.Ordinal));
+
+        /// <summary>The fix for <c>new.title.trim()</c>: the global call over the same image and field (spec §6.2).</summary>
+        private string? ImageReceiverFix(CelToken image, CelToken field) =>
+            ReceiverCallName() is { } member && GlobalName(member) is { } global
+                ? $"Write {global}({image.Text}.{field.Text}): Alvo calls a function with the value as its first argument, "
+                    + $"never as {image.Text}.{field.Text}.{member}()."
+                : null;
+
+        /// <summary>
+        /// The catalogued name a receiver-style member stands for: itself when catalogued (a host's own <c>abs</c>
+        /// wins), else its <c>math.</c> form when that is catalogued, else <see langword="null"/>.
+        /// </summary>
+        private string? GlobalName(string member) => catalog.Contains(member)
+            ? member
+            : catalog.Contains($"math.{member}") ? $"math.{member}" : null;
 
         private string? ReceiverCallName() =>
             _index + 2 < tokens.Count
@@ -601,7 +621,7 @@ internal static class CelParser
                 throw new CelSyntaxException(
                     "Alvo has no nested field access; use a single field name.",
                     identifierToken.Position,
-                    NestedAccessFix());
+                    NestedAccessFix(identifierToken));
             }
 
             Expect(CelTokenKind.Dot);
@@ -610,7 +630,9 @@ internal static class CelParser
             if (Current.Kind == CelTokenKind.Dot)
             {
                 throw new CelSyntaxException(
-                    "Alvo has no nested field access beyond old./new.; use a single field name.", Current.Position);
+                    "Alvo has no nested field access beyond old./new.; use a single field name.",
+                    Current.Position,
+                    ImageReceiverFix(identifierToken, fieldToken));
             }
 
             var state = identifierToken.Text == "old" ? CelRecordState.Old : CelRecordState.New;

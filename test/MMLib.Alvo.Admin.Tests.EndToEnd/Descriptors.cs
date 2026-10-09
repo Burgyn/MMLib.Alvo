@@ -33,4 +33,11 @@ internal static class Descriptors
     /// </summary>
     public static string BikeWorkshop { get; } = File.ReadAllText(
         Path.Combine(RepositoryRoot.Find(), "examples", "bike-workshop", "bike-workshop.alvo.json"));
+
+    /// <summary>
+    /// The vehicle-registry example, exactly as it sits in the repository — the descriptor the embedded-host sample runs,
+    /// whose <c>vehicles.vin</c> its README registers <c>normalizeVin</c> for.
+    /// </summary>
+    public static string VehicleRegistry { get; } = File.ReadAllText(
+        Path.Combine(RepositoryRoot.Find(), "examples", "vehicle-registry", "vehicles.alvo.json"));
 }

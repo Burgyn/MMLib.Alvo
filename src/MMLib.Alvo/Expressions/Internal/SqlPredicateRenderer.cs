@@ -116,9 +116,9 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     }
 
     /// <summary>
-    /// <b>The interpreter-only profiles — <see cref="CelProfile.Mutate"/> and
+    /// <b>The interpreter-only profiles — <see cref="CelProfile.Mutate"/>, <see cref="CelProfile.Condition"/> and
     /// <see cref="CelProfile.Access"/> — are refused by <em>both</em> entry points, before either walks a
-    /// tree.</b> No entry point will ever render either of them, which is what makes this a
+    /// tree.</b> No entry point will ever render any of them, which is what makes this a
     /// <see cref="NotSupportedException"/> rather than the profile-mismatch
     /// <see cref="InvalidOperationException"/> below it: those two say "you used the wrong one of the two",
     /// and this one says "neither". Shared rather than written twice so the two entry points cannot drift
@@ -133,7 +133,10 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
     /// <c>TRUE</c>, which made the interpreter-only guarantee hold for the shapes the arm happened to name
     /// and not for the profile. Guarding the profile before the tree is walked is what makes the guarantee
     /// structural, and it is also why the per-node arms are gone: with this in place nothing could reach
-    /// them, and an unreachable refusal is one no test can hold to its claim.
+    /// them, and an unreachable refusal is one no test can hold to its claim. <see cref="CelProfile.Condition"/> joined
+    /// for the same reason in slice D (preflight R-16): a hook condition fails closed on the arithmetic the interpreter
+    /// checks, which SQL cannot reproduce, and no product path renders one — before, only the nodes the walk happened to
+    /// refuse (<c>changed</c>, <c>old.</c>) kept a condition out of SQL.
     /// </remarks>
     private static void RefuseInterpreterOnlyProfile(CompiledExpression expression)
     {
@@ -146,6 +149,15 @@ internal sealed class SqlPredicateRenderer : IPredicateRenderer
                 + $"into scope, and '{CelCall.Now}()' would answer with the engine's own clock — "
                 + "PostgreSQL's transaction-start time, SQLite's second-precision text — instead of the "
                 + "instant the write bound once.");
+        }
+
+        if (expression.Profile == CelProfile.Condition)
+        {
+            throw new NotSupportedException(
+                $"'{expression.Source}' was compiled for the {CelProfile.Condition} profile, which is a hook "
+                + "condition evaluated by the in-memory interpreter inside the write transaction and is never "
+                + "rendered to SQL. Its arithmetic fails closed (an overflow or a zero divisor refuses the write), "
+                + "which a WHERE clause cannot reproduce.");
         }
 
         if (expression.Profile != CelProfile.Access)

@@ -134,11 +134,27 @@ internal static class CelTypeChecker
         new HashSet<CelProfile> { CelProfile.Condition, CelProfile.Mutate };
 
     /// <summary>
+    /// Arithmetic's profiles: a computed column (which renders it to SQL and answers null on failure) and the two hook
+    /// slots (interpreter-only, where an overflow or a zero divisor fails closed — spec §5.6, D-7).
+    /// </summary>
+    private static readonly IReadOnlySet<CelProfile> _computedConditionAndMutate =
+        new HashSet<CelProfile> { CelProfile.Computed, CelProfile.Condition, CelProfile.Mutate };
+
+    /// <summary>
+    /// Concatenation's profiles: a computed column (SQL's <c>||</c>, a nullable operand refused at compile) and a mutate
+    /// value (interpreter-only, a null operand makes the value null — spec §5.6, F18).
+    /// </summary>
+    private static readonly IReadOnlySet<CelProfile> _computedAndMutate =
+        new HashSet<CelProfile> { CelProfile.Computed, CelProfile.Mutate };
+
+    /// <summary>
     /// The one positive table that decides where each construct is legal. <see cref="CelProfile.Mutate"/>
-    /// holds five rows today — literals, current-row and <c>old.</c>/<c>new.</c> field references, the
-    /// allow-listed legacy call and catalogued function calls — which is exactly what its functions and their
-    /// arguments need; <see cref="CelProfile.Condition"/> also holds the catalogued function call. The
-    /// remaining rows (logical, comparison, <c>in</c>, <c>has</c>, arithmetic, ternary, <c>changed</c>,
+    /// holds seven rows today — literals, current-row and <c>old.</c>/<c>new.</c> field references, the
+    /// <c>now()</c> call, catalogued function calls, arithmetic and string concatenation — which is exactly what its
+    /// functions, their arguments and a computed value need; <see cref="CelProfile.Condition"/> also holds the
+    /// catalogued function call and arithmetic, whose overflow or zero divisor fails closed in both (spec §5.6, D-7).
+    /// A mutate's concatenation answers null for a null operand rather than being refused (F18). The
+    /// remaining rows (logical, comparison, <c>in</c>, <c>has</c>, ternary, <c>changed</c>,
     /// context references) are <b>not</b> a decision that <c>mutate</c> may never use them; they are simply
     /// not admitted yet, and each arrives with the fact that needs it — a before-hook <c>mutate</c> like
     /// <c>new.stage == 'won'</c> will bring the comparison row with it. Deny-by-default is what makes that
@@ -156,8 +172,8 @@ internal static class CelTypeChecker
             [CelConstructKind.Comparison] = _ruleComputedConditionAndAccess,
             [CelConstructKind.In] = _ruleConditionAndAccess,
             [CelConstructKind.Has] = _ruleComputedCondition,
-            [CelConstructKind.Arithmetic] = _computedOnly,
-            [CelConstructKind.Concatenation] = _computedOnly,
+            [CelConstructKind.Arithmetic] = _computedConditionAndMutate,
+            [CelConstructKind.Concatenation] = _computedAndMutate,
             [CelConstructKind.Conditional] = _computedOnly,
             [CelConstructKind.Changed] = _conditionOnly,
             [CelConstructKind.Call] = _mutateOnly,
@@ -178,6 +194,9 @@ internal static class CelTypeChecker
 
     private sealed class Visitor(string source, EntitySchema entity, CelProfile profile, CelFunctionCatalog catalog)
     {
+        /// <summary>The fix of every "always fails with these constant arguments" refusal (spec §8).</summary>
+        private const string ConstantFixSuggestion = "Correct the constant, or pass a field instead of a literal.";
+
         private const string RoleMembershipFixSuggestion =
             "A caller holds a set of roles; test membership instead, e.g. 'editor' in @user.roles.";
 
@@ -406,7 +425,7 @@ internal static class CelTypeChecker
         {
             var profileBad = CheckConstruct(
                 CelConstructKind.Arithmetic,
-                "Arithmetic negation ('-') is legal only in the Computed profile.",
+                "Arithmetic negation ('-') is legal only in the Computed, Condition and Mutate profiles.",
                 "Move this calculation into a computed field.",
                 position);
             var operandBad = RequireNumeric(operandType, operandError, "Unary '-' operand", position);
@@ -480,7 +499,7 @@ internal static class CelTypeChecker
 
             var profileBad = CheckConstruct(
                 CelConstructKind.Arithmetic,
-                $"Arithmetic is legal only in the Computed profile; '{OperatorText(binary.Operator)}' is not allowed here.",
+                $"Arithmetic is legal only in the Computed, Condition and Mutate profiles; '{OperatorText(binary.Operator)}' is not allowed here.",
                 "Move this calculation into a computed field.",
                 rightPosition);
 
@@ -490,7 +509,32 @@ internal static class CelTypeChecker
                 ? CelValueType.Decimal
                 : CelValueType.Int;
 
-            return (binary, resultType, profileBad || leftBad || rightBad, rightPosition);
+            var bad = profileBad || leftBad || rightBad;
+            return (binary, resultType, bad || RefusesConstantZeroDivisor(binary, rightPosition), rightPosition);
+        }
+
+        /// <summary>
+        /// A literal zero divisor in a hook profile can never produce a value — every write it meets with a present
+        /// dividend fails (Ruling N, preflight S-3) — so it is refused here with the shape of a constant call's refusal
+        /// (§6.4), worded for its one constant operand. Only where division fails closed
+        /// (<see cref="CelHookArithmetic.FailsClosed"/>, the predicate the interpreter's flag reads too); Computed answers
+        /// <see langword="null"/> for it, so there it never fails and stays legal.
+        /// </summary>
+        /// <remarks>
+        /// Called only for a division whose profile admits arithmetic. Shallow by construction: <c>0</c>, <c>0.0</c> and
+        /// <c>0.00</c> are literals; <c>-0</c> and <c>1 - 1</c> are not, and fail each write at run time instead.
+        /// </remarks>
+        private bool RefusesConstantZeroDivisor(CelBinary binary, int position)
+        {
+            if (binary is not { Operator: CelBinaryOperator.Divide, Right: CelLiteral { Value: 0L or 0m } }
+                || !CelHookArithmetic.FailsClosed(profile))
+            {
+                return false;
+            }
+
+            Errors.Add(new CelCompilationError(
+                "'/' always fails with this constant divisor: the divisor is zero.", ConstantFixSuggestion, position));
+            return true;
         }
 
         /// <summary>
@@ -510,14 +554,21 @@ internal static class CelTypeChecker
         /// <remarks>
         /// <para>
         /// <b>No implicit conversion (CEL spec: there is no <c>(int, string)</c> overload).</b> A mixed pair is a type
-        /// error, and its fix says this profile has no <c>string()</c> to reach for.
+        /// error; its fix names <c>string()</c> in a mutate, and says a computed field has none to reach for
+        /// (<see cref="JoinConversionFix"/>).
         /// </para>
         /// <para>
-        /// <b>The null rule is a refusal.</b> CEL's <c>+</c> has no null overload — a null operand is an evaluation
+        /// <b>The null rule is a refusal where SQL renders the join</b> (<see cref="_sqlRenderedProfiles"/>, so a computed
+        /// field). CEL's <c>+</c> has no null overload — a null operand is an evaluation
         /// error — while SQL's <c>||</c> answers <c>NULL</c> for the whole value when any operand is. Rather than
         /// picking one of the two and diverging from the other, an operand that can be null is refused here, with
         /// the explicit fallback in the profile's own syntax as the fix; see <see cref="IsNeverNull"/> for what counts
         /// as never null.
+        /// </para>
+        /// <para>
+        /// <b>In a mutate a null operand makes the value null</b> (spec §5.6, F18): the rule every function's argument
+        /// follows there, and the answer SQL's <c>||</c> gives, so the two semantics still agree. The interpreter caps the
+        /// joined length on that path (preflight S-2).
         /// </para>
         /// </remarks>
         private (CelNode, CelValueType, bool, int) CheckConcatenation(
@@ -525,11 +576,11 @@ internal static class CelTypeChecker
         {
             var profileBad = CheckConstruct(
                 CelConstructKind.Concatenation,
-                "String concatenation ('+' over two strings) is legal only in the Computed profile.",
+                "String concatenation ('+' over two strings) is legal only in the Computed and Mutate profiles.",
                 "Join the text in a computed field, and compare that field here instead.",
                 rightPosition);
             var mismatch = RequireTwoStrings(leftType, rightType, leftError, rightError, rightPosition);
-            var nullBad = !profileBad && !mismatch
+            var nullBad = !profileBad && !mismatch && _sqlRenderedProfiles.Contains(profile)
                 && (RequireNeverNull(binary.Left, leftError, leftPosition) | RequireNeverNull(binary.Right, rightError, rightPosition));
 
             return (binary, CelValueType.String, profileBad || mismatch || nullBad || leftError || rightError, rightPosition);
@@ -545,11 +596,20 @@ internal static class CelTypeChecker
             Errors.Add(new CelCompilationError(
                 $"'+' joins two strings or adds two numbers; found {leftType} and {rightType}, and CEL converts "
                 + "neither implicitly.",
-                "Join two string fields or string constants (first_name + ' ' + last_name). A computed field has no "
-                + "string() conversion, so keep the number in a field of its own.",
+                JoinConversionFix,
                 position));
             return true;
         }
+
+        /// <summary>
+        /// The fix for a string joined with a non-string: a mutate can join and has <c>string()</c> (spec §5.3), so it is
+        /// told to reach for it; elsewhere the computed-field advice stands — a condition has <c>string()</c> but cannot
+        /// join, so that fix would only lead to the gate refusal (preflight R-10).
+        /// </summary>
+        private string JoinConversionFix => profile is CelProfile.Mutate
+            ? "Write string(x) to join a number, a flag, an id or an instant."
+            : "Join two string fields or string constants (first_name + ' ' + last_name). A computed field has no "
+                + "string() conversion, so keep the number in a field of its own.";
 
         private bool RequireNeverNull(CelNode operand, bool operandError, int position)
         {
@@ -906,10 +966,8 @@ internal static class CelTypeChecker
         }
 
         /// <summary>
-        /// Checks one of the two legacy <see cref="CelProfile.Mutate"/> calls (<c>lowerAscii</c>, <c>now</c>). The profile gate
-        /// runs first and unconditionally, so a call outside <see cref="CelProfile.Mutate"/> is reported for
-        /// the profile it is in even when its argument is also wrong — one error per independent problem,
-        /// which is this checker's whole contract.
+        /// Checks <c>now()</c>, the one call left with its own grammar and the <see cref="CelConstructKind.Call"/> row's
+        /// only member, so it is legal in <see cref="CelProfile.Mutate"/> alone.
         /// </summary>
         private (CelNode, CelValueType, bool, int) CheckLegacyCall(CelCall call)
         {
@@ -922,28 +980,17 @@ internal static class CelTypeChecker
 
             return call switch
             {
-                { Name: CelCall.LowerAscii, Arguments: [var argument] } => CheckLowerAsciiCall(call, argument, profileBad, position),
                 { Name: CelCall.Now, Arguments: [] } =>
                     (call with { ResultType = CelValueType.Timestamp }, CelValueType.Timestamp, profileBad, position),
                 _ => UnrecognizedNode(call),
             };
         }
 
-        private (CelNode, CelValueType, bool, int) CheckLowerAsciiCall(
-            CelCall call, CelNode argument, bool profileBad, int position)
-        {
-            var (checkedArgument, argumentType, argumentError, argumentPosition) = CheckNode(argument);
-            var argumentBad = RequireString(
-                argumentType, argumentError, $"{call.Name}(...)'s argument", argumentPosition);
-
-            return (call with { Arguments = [checkedArgument], ResultType = CelValueType.String }, CelValueType.String, profileBad || argumentBad, position);
-        }
-
         private (CelNode, CelValueType, bool, int) CheckCall(CelCall call) =>
-            call.Name is CelCall.LowerAscii or CelCall.Now ? CheckLegacyCall(call) : CheckCatalogCall(call);
+            call.Name is CelCall.Now ? CheckLegacyCall(call) : CheckCatalogCall(call);
 
         /// <summary>
-        /// Checks a call to a catalogued function: the profile gate first (as the legacy calls do), then every argument,
+        /// Checks a call to a catalogued function: the profile gate first (as <c>now()</c>'s check does), then every argument,
         /// then overload resolution. A bad argument stops the call from adding a second, cascading error.
         /// </summary>
         private (CelNode, CelValueType, bool, int) CheckCatalogCall(CelCall call)
@@ -970,10 +1017,90 @@ internal static class CelTypeChecker
         private (CelNode, CelValueType, bool, int) Unbound(CelCall call, int position) =>
             (call, catalog.Overloads(call.Name)[0].ResultType, true, position);
 
-        private (CelNode, CelValueType, bool, int) Bind(CelCall call, CelFunction? overload, bool profileBad, int position) =>
-            overload is null
-                ? Unbound(call, position)
-                : (call with { ResultType = overload.ResultType, Function = overload }, overload.ResultType, profileBad, position);
+        private (CelNode, CelValueType, bool, int) Bind(CelCall call, CelFunction? overload, bool profileBad, int position)
+        {
+            if (overload is null)
+            {
+                return Unbound(call, position);
+            }
+
+            var refused = !profileBad && (RefusesDateText(call, overload, position) || FailsWithConstants(call, overload, position));
+            return (call with { ResultType = overload.ResultType, Function = overload }, overload.ResultType, profileBad || refused, position);
+        }
+
+        /// <summary>
+        /// A built-in call whose literal arguments make it fail (spec E5, §6.4) is one error here instead of a
+        /// function-failed answer on every write. The tree is not rewritten: the value is computed again at run time.
+        /// Host functions are never run at apply — purity is their contract, not a guarantee (C1 X7).
+        /// </summary>
+        private bool FailsWithConstants(CelCall call, CelFunction overload, int position)
+        {
+            if (overload.IsHost || overload.IsLegacy || !call.Arguments.Any(argument => argument is CelLiteral)
+                || ConstantReason(call, overload) is not { } reason)
+            {
+                return false;
+            }
+
+            Errors.Add(new CelCompilationError(
+                $"'{call.Name}(...)' always fails with these constant arguments: {reason}.",
+                ConstantFixSuggestion,
+                position));
+            return true;
+        }
+
+        /// <summary>
+        /// Why the literal arguments make the call fail, or <see langword="null"/>: the overload's declared check first
+        /// (it sees a non-literal argument as <see langword="null"/>), then — only when every argument is a literal — one
+        /// evaluation with exactly those values. Shallow by construction: <c>int(trim('x'))</c> has no literal argument.
+        /// Only a built-in's own refusal, which carries a reason, refuses the apply: a body that threw something else (a
+        /// regex timeout) is wrapped without one, may not fail again, and is left for run time to decide.
+        /// </summary>
+        private static string? ConstantReason(CelCall call, CelFunction overload)
+        {
+            object?[] literals = [.. call.Arguments.Select(argument => argument is CelLiteral literal ? literal.Value : null)];
+            if (overload.ConstantCheck?.Invoke(literals) is { } declared)
+            {
+                return declared;
+            }
+
+            if (!call.Arguments.All(argument => argument is CelLiteral))
+            {
+                return null;
+            }
+
+            try
+            {
+                overload.Invoke(literals);
+                return null;
+            }
+            catch (CelFunctionException failure)
+            {
+                return failure.Reason;
+            }
+        }
+
+        /// <summary>
+        /// <c>string()</c> over a <c>date</c> field (spec §6.5, E18): its value reaches CEL as midnight UTC, and the text
+        /// that would pin is one a later Date type would want to change — after a hook had stored it. A field reference is
+        /// the only way a <c>date</c> reaches a call in Condition or Mutate, so it is the whole surface.
+        /// </summary>
+        private bool RefusesDateText(CelCall call, CelFunction overload, int position)
+        {
+            if (overload is not { Name: "string", IsHost: false, Parameters: [{ Type: CelValueType.Timestamp }] }
+                || call.Arguments is not [CelFieldRef fieldRef]
+                || ResolveField(fieldRef.FieldName) is not { Type: FieldType.Date })
+            {
+                return false;
+            }
+
+            Errors.Add(new CelCompilationError(
+                $"'string(...)' cannot take the date field '{fieldRef.FieldName}' yet: its text form is not settled, and a hook "
+                + "that stored one could not change it later.",
+                $"Store the date's text from the client, or make '{fieldRef.FieldName}' a datetime field, whose text is an RFC "
+                + "3339 instant.",
+                position));
+            return true;
+        }
 
         /// <summary>
         /// The two deny-by-default gates: the <see cref="CelConstructKind.FunctionCall"/> row is the ceiling, and the
@@ -1100,25 +1227,6 @@ internal static class CelTypeChecker
             Errors.Add(new CelCompilationError(
                 $"{subject} must be boolean; found {type}.",
                 "Use a comparison (field == value) or has(field) so this operand evaluates to true/false.",
-                position));
-            return true;
-        }
-
-        private bool RequireString(CelValueType type, bool childError, string subject, int position)
-        {
-            if (childError)
-            {
-                return true;
-            }
-
-            if (type == CelValueType.String)
-            {
-                return false;
-            }
-
-            Errors.Add(new CelCompilationError(
-                $"{subject} must be a string; found {type}.",
-                "Pass a string, text or enum field, or drop the fold.",
                 position));
             return true;
         }

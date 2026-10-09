@@ -21,7 +21,7 @@ the script started. The database, `host.log` and `webhooks.log` live in `${TMPDI
 
 The seed data is `seed/bike-workshop.seed.json`, posted through the public API — six staff accounts
 through the Management API, then one `POST /api/{entity}/batch` per entity: 5 technicians, 15 customers,
-25 bikes, 30 parts, 40 service orders across every status, 75 order lines, 8 rental bikes and 12 rentals.
+25 bikes, 30 parts, 40 service orders across every status, 75 order lines, 8 rental bikes and 13 rentals.
 Dates are relative to today, so the demo never looks stale. Its `$comment` explains the placeholders.
 
 ## What it exercises
@@ -42,10 +42,46 @@ Dates are relative to today, so the demo never looks stale. Its `$comment` expla
 | Field-level `index`, composite `indexes`, a `unique` composite index | `technicians.user_id`; two or three per entity; `rentals (fleet_bike_id, starts_at)` |
 | Role-differentiated rules for all five operations | roles `manager`, `reception`, `technician` plus the built-in `admin`/`authenticated`; a row predicate on `service_orders.update` (`assigned_user_id == @user.id`) |
 | Before-hooks: `reject` and `mutate` with CEL | a collected order cannot be reopened; moving to `ready` stamps `completed_at` with `now()`; only a `received`/`cancelled` order can be deleted; a line needs a positive quantity |
+| Hook functions and operators: `upperAscii`, `trim`, `replace`, `math.round(x, 2)`, string `+`, `endsWith` | a bike's frame number and rack tag, the week discount on a rental, the workshop's own address refused on a customer — see [Hook functions](#hook-functions) |
 | After-hooks: `email` over `templates` | an express intake mails the workshop; `ready` mails the customer (the development sender writes the mail to `host.log`) |
 | After-hook: `webhook` over `webhooks.endpoints` | every new rental posts to `http://127.0.0.1:5081/hooks/rentals` — the script's receiver appends it to `webhooks.log` |
 | `access` (management levels) | `admin` → admin, `manager` → developer, `reception` → viewer |
 | `branding`, `auth.providers`/`roles` | — |
+
+## Hook functions
+
+Four rules, in six before-hooks, call the built-in CEL functions. Each hook is written the way the dashboard draws it,
+so it opens in place in the hook editor, never read-only:
+
+| Hook | What it computes | In the seed |
+|---|---|---|
+| `bikes` `beforeCreate` #0 and `beforeUpdate` #0 | `frame_number` = `upperAscii(replace(trim(new.frame_number), ' ', ''))` — trimmed, without spaces, in capitals, so one bike cannot be registered twice under two spellings. The field's `maxLength: 32` is measured on the payload, before the hook cleans it, so a frame number padded past 32 characters is refused with 422 even if it would fit afterwards | three bikes are posted as `cny23gr7sl04512`, `GNT 21TL 2C1 180447` and ` hai24trk6m00176 `, and stored as `CNY23GR7SL04512`, `GNT21TL2C1180447` and `HAI24TRK6M00176` |
+| `bikes` `beforeCreate` #1 | `rack_tag` = `upperAscii(new.brand) + ' ' + new.frame_number` — the tag hung on the bike in the rack. It runs after #0, so it sees the cleaned frame number. A brand is at most 40 characters and a frame number 32, so the tag always fits its 80. The field is `readOnly`: a caller who sends a `rack_tag` is refused with 422, and the hook still writes it | every bike, as in `TREK WTU312C4471T` |
+| `rentals` `beforeCreate` #0, when `new.days >= 7` | `daily_rate` = `math.round(new.daily_rate * 0.875, 2)` — a week or longer gets an eighth off. Without the rounding, 45 × 0.875 = 39.375 has three decimals, and the field's `scale: 2` would refuse the write | the week-long reservation of `RENT-002`: posted at 45.00 a day, stored at 39.38, a price of 275.66 |
+| `customers` `beforeCreate` #0 and `beforeUpdate` #0, when `endsWith(new.email, '@velo-dielna.example')` | `reject` — the workshop's own address on a customer would send the "your bike is ready" notices back to the workshop. A customer without an e-mail passes, because a test of an empty value does not fire. The test is case-sensitive, so `DIELNA@VELO-DIELNA.EXAMPLE` passes too; `endsWith(lowerAscii(new.email), '@velo-dielna.example')` in text mode would catch it, at the cost of the guided row | no seeded customer trips it; see below |
+
+**See it in the dashboard.** Open **Schema**, pick `bikes`, `rentals` or `customers`, and open the **On write** tab.
+**Edit** on a hook opens it in place. The `rentals` and `customers` conditions open as guided rows: *days is at least 7*,
+and *email ends with @velo-dielna.example*. Under a mutate expression box, and under the condition in text mode, a
+folded **Functions you can call here** lists the built-ins that slot admits, each with its signature, a **built-in**
+badge and an **Insert** button that writes the call at the caret. The stored values are on
+the **Data** pages of `bikes` and `rentals`.
+
+**The refusal.** The seeder posts each entity as one batch, in one transaction, so it cannot carry a row that is meant
+to be refused. Try it against the running demo, with the key it prints:
+
+```bash
+curl -si http://127.0.0.1:5080/api/customers \
+  -H "X-Alvo-Api-Key: <the demo's key>" -H 'Content-Type: application/json' \
+  -d '{"first_name":"Desk","last_name":"Copy","phone":"+421 905 000 222","email":"dielna@velo-dielna.example"}'
+# HTTP/1.1 403 Forbidden — "That is the workshop's own address. ... (refused by the before-hook at
+# '/entities/customers/hooks/beforeCreate/0')"
+```
+
+**A function of your own** — such as `normalizeVin` — is registered from C# in an embedded host. This standalone demo
+cannot do that, by design: the image has no C# extension point. See
+[`samples/MMLib.Alvo.Samples.EmbeddedHost`](../../samples/MMLib.Alvo.Samples.EmbeddedHost/README.md). The dashboard lists
+such a function beside the built-ins, with a **this host** badge.
 
 ## Deliberately left out
 
@@ -56,7 +92,8 @@ Each of these is declared in the schema and **refused at apply** by this build (
 - a `$cel` `default` — the `mutate` hook stamps `completed_at` instead of a `now()` default.
 - `rollup.where` — so there is no "open orders" count on a bike, only a count of all of them.
 - `entity.softDelete` — deletion is guarded by a before-hook instead.
-- `function`, `http.call` and `entity.update` actions, JSONata payloads, `email.data`, `bodyFile`.
+- the `function` action type (an after-hook that runs a script — not the CEL functions above), the `http.call` and
+  `entity.update` actions, JSONata payloads, `email.data`, `bodyFile`.
 
 Also left out on purpose:
 

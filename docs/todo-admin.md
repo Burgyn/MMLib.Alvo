@@ -467,7 +467,8 @@ Entity.razor.cs, `PS` PendingSchema.cs, `WC*` WorkingCopy.*.cs (all `Admin/Compo
 | Key | Build | Dashboard | When it meets one | Evidence |
 |---|---|---|---|---|
 | `beforeCreate` / `beforeUpdate` / `beforeDelete` / `afterCreate` / `afterUpdate` / `afterDelete` (6) | honoured | edit ×6 — add, edit in place (keeps the position), remove | an undrawable hook is read-only with its reason, kept | HooksTab.Edit.cs; WC.Hooks ReplaceHook |
-| before `condition` | honoured | edit | — | `HookBuilder.Condition`, written by `HookPatch.Apply` |
+| before `condition` | honoured | edit — guided rows (for a text field also *starts with*, *ends with* and *contains*, which write `startsWith`/`endsWith`/`contains`) or CEL text | a condition the rows cannot read back opens in text mode | `HookBuilder.Condition`, written by `HookPatch.Apply`; `ConditionTable` |
+| Hook functions — offered in the mutate expression and the condition text box | honoured (built-ins; host functions in an embedded host) | edit — "Functions you can call here", each with its signatures, summary, a built-in / this host badge and Insert at the caret | the list is not drawn when `cel/functions` fails; the box still works | `HooksTab.razor` `FunctionList`; `FunctionOffer` |
 | before `reject` | honoured | edit | — | `HookBuilder.RejectMessage`, refused blank by `HookBuilder.Missing` |
 | before `mutate.<f>` literal | honoured | edit — a value its type holds, checked as typed | — | MutateLiteral.cs |
 | before `mutate.<f>.$cel` | honoured (not under `beforeDelete`) | edit — several fields, field picked from the writable ones | — | HooksTab.Mutate.cs |

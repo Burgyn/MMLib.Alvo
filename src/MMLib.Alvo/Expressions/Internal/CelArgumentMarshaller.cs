@@ -47,11 +47,8 @@ internal static class CelArgumentMarshaller
     private static int? ToInt32(object value) =>
         ToInteger(value) is long whole && whole is >= int.MinValue and <= int.MaxValue ? (int)whole : null;
 
-    private static object? ToInstant(object value) => value switch
-    {
-        DateOnly date => (object)new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero),
-        _ => CelInterpreter.TryToDateTimeOffset(value, out var instant) ? instant : null,
-    };
+    /// <summary>A <c>date</c>'s <see cref="DateOnly"/> becomes midnight UTC — the interpreter's one rule, shared with its comparisons.</summary>
+    private static DateTimeOffset? ToInstant(object value) => CelInterpreter.TryToDateTimeOffset(value, out var instant) ? instant : null;
 
     private static object? ToGuid(object value) => value switch
     {

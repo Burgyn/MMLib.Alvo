@@ -156,12 +156,28 @@ internal sealed partial class AlvoExceptionHandler(ILogger<AlvoExceptionHandler>
         await ProblemResultFactory.FunctionFailed(FunctionFailedDetail(failure)).ExecuteAsync(httpContext).ConfigureAwait(false);
     }
 
+    /// <summary>The caller-facing sentence for a whole condition that evaluated to no Bool.</summary>
+    private const string WholeConditionDetail = "The hook's condition evaluated to a present value that is not a Bool. Nothing was written.";
+
+    /// <summary>The caller-facing sentence for a defect the interpreter caught on a hook's fail-closed path.</summary>
+    private const string HookEvaluationDetail =
+        "An internal error occurred while the hook was evaluated, so nothing was written. Its own error is in the server log.";
+
     /// <summary>The caller-facing sentence for a function failure.</summary>
+    /// <remarks>
+    /// A whole condition that evaluated to no Bool (<see cref="CelInterpreter.WholeCondition"/>) and a defect caught on
+    /// the hook path (<see cref="CelInterpreter.HookEvaluation"/>, Ruling Y-D) are no function, so each answers a
+    /// constant sentence, whatever reason the exception carries.
+    /// </remarks>
     /// <param name="failure">The failure.</param>
     /// <returns>The detail text.</returns>
-    internal static string FunctionFailedDetail(CelFunctionException failure) => failure.Reason is { } reason
-        ? $"The CEL function '{failure.FunctionName}' failed: {reason}. Nothing was written."
-        : $"The CEL function '{failure.FunctionName}' failed while this write was evaluated, so nothing was written. Its own error is in the server log.";
+    internal static string FunctionFailedDetail(CelFunctionException failure) => failure.Reason switch
+    {
+        _ when failure.FunctionName == CelInterpreter.WholeCondition => WholeConditionDetail,
+        _ when failure.FunctionName == CelInterpreter.HookEvaluation => HookEvaluationDetail,
+        { } reason => $"The CEL function '{failure.FunctionName}' failed: {reason}. Nothing was written.",
+        null => $"The CEL function '{failure.FunctionName}' failed while this write was evaluated, so nothing was written. Its own error is in the server log.",
+    };
 
     /// <summary>
     /// Answers a request the server refused before Alvo could read it, at the status the server chose.

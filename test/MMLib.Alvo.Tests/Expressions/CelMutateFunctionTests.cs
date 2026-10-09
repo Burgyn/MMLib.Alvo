@@ -6,10 +6,11 @@ using System.Reflection;
 namespace MMLib.Alvo.Tests.Expressions;
 
 /// <summary>
-/// The two legacy calls of the <see cref="CelProfile.Mutate"/> profile, <c>lowerAscii(field)</c> and
-/// <c>now()</c>: legal in this profile and in no other, with their own narrow grammar. The catalogued
-/// functions (<c>trim</c>, <c>size</c>, ...) are pinned elsewhere; an identifier followed by <c>(</c> that
-/// is in no catalog is still refused everywhere.
+/// <c>now()</c>, the one legacy call of the <see cref="CelProfile.Mutate"/> profile — legal in this profile and in no
+/// other, with its own narrow grammar — and <c>lowerAscii</c>, which began as its partner and is now an ordinary
+/// built-in that takes any String in a condition or a mutate (spec E4). The other catalogued functions
+/// (<c>trim</c>, <c>size</c>, ...) are pinned elsewhere; an identifier followed by <c>(</c> that is in no catalog is
+/// still refused everywhere.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -23,8 +24,8 @@ namespace MMLib.Alvo.Tests.Expressions;
 /// in and write a permanently wrong row.
 /// </para>
 /// <para>
-/// <b>The legacy pair stays closed.</b> New functions join through the function catalog (a built-in or
-/// <c>AddCelFunction</c>), not as further special-cased grammar here; <c>upper</c>, <c>concat</c> and string
+/// <b>The legacy grammar stays closed.</b> New functions join through the function catalog (a built-in or
+/// <c>AddCelFunction</c>), not as further special-cased grammar here — <c>lowerAscii</c> left it for the catalog; <c>upper</c>, <c>concat</c> and string
 /// indexing are still absent from every catalog.
 /// </para>
 /// </remarks>
@@ -86,22 +87,27 @@ public class CelMutateFunctionTests
 
     /// <summary>
     /// Enumerated from the enum rather than listed, so a profile added later cannot quietly inherit the
-    /// allow-list this fact says belongs to <see cref="CelProfile.Mutate"/> alone.
+    /// allow-list this fact says belongs to <see cref="CelProfile.Condition"/> and <see cref="CelProfile.Mutate"/>
+    /// alone. A hook condition joined the mutate in spec E4, when <c>lowerAscii</c> became an ordinary built-in.
     /// </summary>
     [Theory]
-    [MemberData(nameof(EveryProfileButMutate))]
-    public void LowerAscii_is_refused_in_every_profile_but_mutate(CelProfile profile)
+    [MemberData(nameof(EveryProfileButConditionAndMutate))]
+    public void LowerAscii_is_refused_in_every_profile_but_condition_and_mutate(CelProfile profile)
     {
         var refused = Compile("lowerAscii(title)", profile);
 
         refused.IsSuccess.ShouldBeFalse();
-        refused.Errors[0].Message.ShouldContain(nameof(CelProfile.Mutate));
+        refused.Errors[0].Message.ShouldStartWith($"'lowerAscii(...)' is not available in the {profile} profile");
     }
 
-    public static TheoryData<CelProfile> EveryProfileButMutate()
+    public static TheoryData<CelProfile> EveryProfileButMutate() => EveryProfileBut(CelProfile.Mutate);
+
+    public static TheoryData<CelProfile> EveryProfileButConditionAndMutate() => EveryProfileBut(CelProfile.Condition, CelProfile.Mutate);
+
+    private static TheoryData<CelProfile> EveryProfileBut(params CelProfile[] excluded)
     {
         TheoryData<CelProfile> profiles = [];
-        foreach (var profile in Enum.GetValues<CelProfile>().Where(profile => profile != CelProfile.Mutate))
+        foreach (var profile in Enum.GetValues<CelProfile>().Where(profile => !excluded.Contains(profile)))
         {
             profiles.Add(profile);
         }
@@ -109,24 +115,35 @@ public class CelMutateFunctionTests
         return profiles;
     }
 
+    /// <summary>Spec E4: the fold is an ordinary built-in, so a hook condition may compare a folded value.</summary>
+    [Fact]
+    public void LowerAscii_compiles_in_a_condition()
+    {
+        Compile("lowerAscii(new.title) == 'alvo'", CelProfile.Condition).IsSuccess.ShouldBeTrue();
+    }
+
+    /// <summary>
+    /// Still refused at compile time, never left to evaluation — now by overload resolution, as every catalogued
+    /// function is, rather than by a check of its own (spec E4).
+    /// </summary>
     [Fact]
     public void LowerAscii_of_a_non_string_is_refused_at_compile_time_not_left_to_evaluation()
     {
         var refused = Compile("lowerAscii(total)", CelProfile.Mutate);
 
         refused.IsSuccess.ShouldBeFalse();
-        refused.Errors[0].Message.ShouldContain("must be a string");
+        refused.Errors[0].Message.ShouldStartWith("'lowerAscii(...)' accepts no (Decimal); it accepts lowerAscii(text: String) -> String.");
     }
 
     /// <summary>
-    /// The argument is a field reference, never an arbitrary expression — the same narrowing
-    /// <c>has(field)</c>/<c>changed(field)</c> already use. Widening it later accepts more source than
-    /// before and so cannot break an authored descriptor; starting wide and narrowing later would.
+    /// Spec E4: the argument is any String expression, no longer a field reference only. The narrow grammar was
+    /// chosen so that widening it later accepts strictly more source and breaks no authored descriptor; this is that
+    /// widening.
     /// </summary>
     [Fact]
-    public void LowerAscii_takes_a_field_reference_and_not_an_arbitrary_expression()
+    public void LowerAscii_takes_any_string_expression()
     {
-        Compile("lowerAscii('ABC')", CelProfile.Mutate).IsSuccess.ShouldBeFalse();
+        Mutate("lowerAscii('ABC')").ShouldBe("abc");
     }
 
     [Fact]

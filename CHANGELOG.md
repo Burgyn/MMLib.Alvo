@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **CEL functions in hook conditions and before-hook `mutate` values** (slice C1). A host registers
   a typed C# function at startup with `AddCelFunction(name, delegate, summary)` on the Alvo builder.
-  A descriptor's hook conditions and `mutate` values call it by name, and so can five built-ins:
-  `replace`, `trim`, `size`, `abs` and `round`. Apply refuses an unknown name, a wrong argument count
+  A descriptor's hook conditions and `mutate` values call it by name, and so can the built-ins. C1
+  brought five (`replace`, `trim`, `size`, `abs`, `round`); slice D, below, widens the set to 19 and
+  renames the last two to `math.abs` and `math.round` (see *Changed (breaking)*). Apply refuses an unknown name, a wrong argument count
   or a type mismatch, and Rules and computed fields refuse calls for now. A function that throws, or
   an argument that does not fit its parameter, rolls the write back with the new problem type
   `function-failed` (HTTP 500), and the host's own message is never echoed. `GET
@@ -34,6 +35,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`maxLength`, an enum's `values`, a malformed `uuid` or date); and a default on a `computed` or
   `rollup` field, whose value is maintained for it. `GET {m}/capabilities` no longer reports
   `field.default` as wholly refused — only its `$cel` half.
+
+- **Hook functions end to end** (slice D). A before-hook `condition` or `mutate` can now compute:
+  - **19 built-in CEL functions, 32 overloads**, in `Condition` and `Mutate`: text `lowerAscii upperAscii trim replace
+    substring size contains startsWith endsWith`; numbers `math.abs math.round math.ceil math.floor math.greatest
+    math.least` (`math.round(x, digits)` rounds to cents); conversions `string int timestamp`; and `now()` (Mutate only).
+    `cel.md` lists each one's exact semantics, and a doc test holds that table to the catalog. Rules and computed fields
+    do not get them until SQL translation (slice C2) lands.
+  - **Arithmetic in a hook** (`+ - * /`, unary `-`), and string `+` joins in a `mutate`
+    (`upperAscii(new.brand) + ' ' + new.frame_number`). Int stays Int and `/` truncates toward zero, as CEL defines.
+    In those two profiles an overflow, a zero divisor or a present operand nothing can take **fails closed** (see
+    *Changed (breaking)*).
+  - **The dashboard's hook editor lists the callable functions.** Under a mutate value in expression mode, and under a
+    condition in text mode, *Functions you can call here* shows every function with its signature, summary and a
+    **built-in** or **this host** badge. **Insert** writes the call into the box.
+  - **Three guided text operators** in the condition table: *starts with*, *ends with* and *contains*, written as
+    `startsWith`, `endsWith` and `contains`.
+  - **Demo hooks in `examples/bike-workshop`**: a frame number normalised with `upperAscii`/`trim`/`replace`, a
+    `rack_tag` joined with `+`, the week discount on a rental rounded with `math.round(x, 2)`, and the workshop's own
+    address refused on a customer with `endsWith`.
 
 ### Changed (breaking)
 
@@ -104,6 +124,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   store it with a `201`. The check runs once on the final patch, so a later hook may still repair an
   earlier one's value; the refusal names the field and facet only when the descriptor does not flag
   the field `hidden`.
+
+- **Hook arithmetic, comparisons and Boolean positions fail closed** (slice D, Rulings P–R and Y-D). In a before-hook
+  `condition` or `mutate` value — and only there — an Int or Decimal overflow, a zero divisor, or a *present* operand an
+  operator cannot take (a value of an unexpected CLR type, a non-Bool where a Bool is needed, two such values under
+  `changed(f)`) used to answer `null` or `false`, and in a `reject` condition that `false` meant the reject silently never fired. It now refuses the write:
+  HTTP **500 `function-failed`** with nothing written, as a failing function does (an in-process `IAlvoData` caller
+  receives an exception; an after-hook condition drops its hook with a Warning). An exception nothing anticipated inside
+  the interpreter fails the same way, under a constant detail, with the original logged at Error. A **null** operand
+  still answers as before. A literal zero divisor (`x / 0`) in a hook is refused at apply. Rules, `access` and computed
+  fields do not change. Only an embedded caller's own records can reach the operand cases; the HTTP binder types every
+  value.
+
+- **`abs` and `round` are now `math.abs` and `math.round`** (slice D). Both names came in with slice C1, which has not
+  shipped: no released version had them, so this is a break only relative to C1, and C1 and D must ship in the same
+  release.
+
+- **`IPredicateRenderer.Render` refuses a `Condition`-profile expression** (R-16). `SqlPredicateRenderer` now throws
+  `NotSupportedException` for one. It used to render it in part, but a hook condition's functions and fail-closed
+  operators have no SQL backend. No product caller renders a `Condition`, but a host that called the public renderer
+  with one will see the throw.
+
+- **`lowerAscii` is an ordinary built-in**, widened rather than narrowed. It now takes any text expression
+  (`lowerAscii(trim(new.email))`) and is legal in a `condition`. Every source that compiled before compiles and
+  evaluates to the same value. Only the refusal messages of a few computed-field sources changed wording.
+
+- **`examples/bike-workshop`: `rack_tag` is `readOnly`.** A before-hook writes it, so a client that sends it now gets
+  `422 read-only-field`. The seed carries no `rack_tag` and is unaffected.
 
 - **Alvo applies the descriptor on boot by default, and the host no longer applies anything itself.**
   The boot sequence runs as part of the host lifecycle, before the server binds: it loads and

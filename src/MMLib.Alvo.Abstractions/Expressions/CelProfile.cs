@@ -44,7 +44,7 @@ public enum CelProfile
     /// by name rather than falling through a default arm.
     /// </para>
     /// <para>
-    /// <b>It is the only profile that admits the legacy calls</b> <c>lowerAscii(x)</c> and <c>now()</c>;
+    /// <b>It is the only profile that admits the legacy call</b> <c>now()</c>;
     /// <see cref="Condition"/> and this profile also admit the catalogued functions (the built-ins and the host's
     /// own), each within its own profile list. Every other identifier followed by <c>(</c> is still refused,
     /// in this profile as in the others.

@@ -78,6 +78,15 @@ internal enum ConditionOperator
 
     /// <summary><c>!('r' in @user.roles)</c>.</summary>
     LacksRole,
+
+    /// <summary><c>startsWith(f, v)</c> — the cel-spec standard function; false when the field is empty.</summary>
+    StartsWith,
+
+    /// <summary><c>endsWith(f, v)</c> — the cel-spec standard function; false when the field is empty.</summary>
+    EndsWith,
+
+    /// <summary><c>contains(f, v)</c> — the cel-spec standard function; false when the field is empty.</summary>
+    Contains,
 }
 
 /// <summary>Which image of the row a condition reads: the one being written, or the one before the write.</summary>
@@ -117,6 +126,10 @@ internal enum OperandKind
 /// Whether its CEL names an image (<c>new.</c> or <c>old.</c>); <c>changed</c> and the role rows do not, so the form asks for
 /// none and the generator writes none.
 /// </param>
+/// <param name="RefusesEmpty">
+/// Whether an empty value is refused: every text passes a text test (<c>startsWith</c>, <c>endsWith</c>, <c>contains</c>) with
+/// an empty value, so the form asks for a value rather than write a condition that always holds.
+/// </param>
 internal sealed record OperatorSpec(
     ConditionOperator Operator,
     string Words,
@@ -127,7 +140,8 @@ internal sealed record OperatorSpec(
     bool UpdateOnly,
     bool BeforeOnly,
     string WhenEmpty,
-    bool ReadsImage = true);
+    bool ReadsImage = true,
+    bool RefusesEmpty = false);
 
 /// <summary>
 /// The one table of what the guided condition may write: operator × field kind × point × canonical CEL × null semantics.
@@ -141,7 +155,8 @@ internal sealed record OperatorSpec(
 /// <para>
 /// <b>It decides what to offer, never what is valid.</b> The live <c>cel/check</c> and the apply judge the text written.
 /// Narrower than apply on purpose: no after-commit image the point lacks, no string relational, no negative number, no
-/// literal for a moment or an id — each of those is either refused by the core or meaningless, and stays in text mode.
+/// literal for a moment or an id — each of those is refused by the core, meaningless, or (a negative number, which apply
+/// admits since hook arithmetic) a shape the rows do not read back, and stays in text mode.
 /// </para>
 /// </remarks>
 internal static class ConditionTable
@@ -153,6 +168,7 @@ internal static class ConditionTable
     public const int MaxConditionLength = 2000;
 
     private static readonly ConditionFieldKind[] _compared = [ConditionFieldKind.Text, ConditionFieldKind.Choice, ConditionFieldKind.Number];
+    private static readonly ConditionFieldKind[] _text = [ConditionFieldKind.Text];
     private static readonly ConditionFieldKind[] _number = [ConditionFieldKind.Number];
     private static readonly ConditionFieldKind[] _flag = [ConditionFieldKind.Flag];
     private static readonly ConditionFieldKind[] _identity = [ConditionFieldKind.Identity];
@@ -170,6 +186,9 @@ internal static class ConditionTable
         new(ConditionOperator.Is, "is", "{f} == {v}", OperandKind.Literal, _compared, false, false, false, "false: an empty value equals nothing"),
         new(ConditionOperator.IsNot, "is not (and has a value)", "{f} != {v}", OperandKind.Literal, _compared, false, false, false, "false: every comparison with an empty value is false, != included"),
         new(ConditionOperator.IsNotOrEmpty, "is not, or is empty", "!({f} == {v})", OperandKind.Literal, _compared, true, false, false, "true"),
+        new(ConditionOperator.StartsWith, "starts with", "startsWith({f}, {v})", OperandKind.Literal, _text, false, false, false, "false: a test of an empty value is empty, and an empty condition does not fire", RefusesEmpty: true),
+        new(ConditionOperator.EndsWith, "ends with", "endsWith({f}, {v})", OperandKind.Literal, _text, false, false, false, "false: a test of an empty value is empty, and an empty condition does not fire", RefusesEmpty: true),
+        new(ConditionOperator.Contains, "contains", "contains({f}, {v})", OperandKind.Literal, _text, false, false, false, "false: a test of an empty value is empty, and an empty condition does not fire", RefusesEmpty: true),
         new(ConditionOperator.Less, "is less than", "{f} < {v}", OperandKind.Literal, _number, false, false, false, "false"),
         new(ConditionOperator.LessOrEqual, "is at most", "{f} <= {v}", OperandKind.Literal, _number, false, false, false, "false"),
         new(ConditionOperator.Greater, "is more than", "{f} > {v}", OperandKind.Literal, _number, false, false, false, "false"),

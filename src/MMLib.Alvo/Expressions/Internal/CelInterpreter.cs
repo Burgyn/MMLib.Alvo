@@ -33,7 +33,8 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// <b><c>changed(f)</c>.</b> <see langword="false"/> when there is no previous row (a create
 /// changes nothing); otherwise it compares the previous and current values of <c>f</c> with a
 /// null-safe equality distinct from the comparison null rule above — <see langword="null"/> versus
-/// <see langword="null"/> is unchanged, <see langword="null"/> versus a value is changed.
+/// <see langword="null"/> is unchanged, <see langword="null"/> versus a value is changed. Two present
+/// values it cannot compare fail closed on the hook path, the only profile <c>changed</c> compiles in.
 /// </para>
 /// <para>
 /// <b>Numeric widening.</b> A record's values arrive weakly typed, so a numeric comparison widens
@@ -70,7 +71,10 @@ namespace MMLib.Alvo.Expressions.Internal;
 /// </para>
 /// <para>
 /// A <see cref="CelFunctionException"/> escapes <see cref="EvaluatePredicate"/> and <see cref="EvaluateMutation"/>
-/// on purpose — a function failure fails closed; every other surprise still collapses as before: no other exception
+/// on purpose — a function failure fails closed, and so does an operator's overflow or zero divisor in a hook profile
+/// (<see cref="CelHookArithmetic"/>, spec §5.6). On that same fail-closed path an exception nothing anticipated — a
+/// defect — is wrapped as one too (Ruling Y-D), so it rolls the write back rather than switching a <c>reject</c> off.
+/// Outside the hook profiles every other surprise still collapses as before: no other exception
 /// escapes <see cref="EvaluatePredicate"/> or <see cref="EvaluateScalar"/> for
 /// any well-typed <see cref="CompiledExpression"/> and any <see cref="AlvoRecord"/>, including one
 /// whose values are of an unexpected CLR type (a nested dictionary, an array, a
@@ -108,16 +112,35 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(current, previous, context);
-            return AsBoolean(Evaluate(expression.Root, state));
+            var state = new EvalState(current, previous, context, failClosed: FailsClosed(expression));
+            return Truth(Evaluate(expression.Root, state), WholeCondition, state.FailClosed, WholeConditionReason);
         }
 #pragma warning disable CA1031
         catch (Exception failure) when (failure is not CelFunctionException)
 #pragma warning restore CA1031
         {
-            return false;
+            return FailsClosed(expression) ? throw HookDefect(failure) : false;
         }
     }
+
+    /// <summary>
+    /// The name a present non-Bool as the whole condition fails under. No operator is at fault, so it is a token no CEL
+    /// identifier can be: a plain <c>condition</c> reads as a function of that name in "The CEL function '…' failed",
+    /// and could collide with one a host registers.
+    /// </summary>
+    internal const string WholeCondition = "<condition>";
+
+    /// <summary>Why <see cref="WholeCondition"/> failed — it names no value.</summary>
+    internal const string WholeConditionReason = "the hook's condition evaluated to a present value that is not a Bool";
+
+    /// <summary>
+    /// The name an unexpected exception on the fail-closed path is wrapped under (Ruling Y-D). It is a defect, not a
+    /// function's failure, so — like <see cref="WholeCondition"/> — it is a token no CEL identifier can be.
+    /// </summary>
+    internal const string HookEvaluation = "<hook>";
+
+    /// <summary>Why <see cref="HookEvaluation"/> failed — it names no value; the original is the exception's inner one.</summary>
+    internal const string HookEvaluationReason = "an internal error occurred while evaluating the hook";
 
     /// <summary>
     /// Evaluates a field-mask flag (<c>hidden</c>/<c>readOnly</c>) — a context-only Rule-profile
@@ -154,7 +177,8 @@ internal static class CelInterpreter
     /// <summary>
     /// Evaluates a Computed expression's scalar value. Arithmetic on a <see langword="null"/>
     /// operand, and a division by zero, both yield <see langword="null"/> rather than throwing —
-    /// a generated column must never make a write crash.
+    /// a generated column must never make a write crash. Only here: a hook condition or mutate value
+    /// fails closed instead (spec §5.6), and this entry point never sets that flag.
     /// </summary>
     /// <param name="expression">The compiled Computed expression.</param>
     /// <param name="current">The row the computed value is derived from.</param>
@@ -204,14 +228,17 @@ internal static class CelInterpreter
     /// the caller's business whether writing it is allowed.
     /// </returns>
     /// <remarks>
-    /// <b>A <see cref="CelFunctionException"/> escapes on purpose — a function failure fails closed; every other
-    /// surprise still collapses to <see langword="null"/> as before.</b> The two are otherwise indistinguishable to a
+    /// <b>A <see cref="CelFunctionException"/> escapes on purpose — a function failure fails closed, and so does any
+    /// other exception, wrapped as one (Ruling Y-D).</b> The two are otherwise indistinguishable to a
     /// caller, and the create path turns a <see langword="null"/> patch value into an <em>absent</em> key, so a
     /// reachable failure swallowed here would silently store a column default instead of refusing the write. Apart
-    /// from a catalogued function, nothing in a <see cref="CelProfile.Mutate"/> tree can throw: the profile admits
-    /// literals, field references and calls; <see cref="Evaluate"/>'s node switch ends in <c>_ =&gt; null</c>;
-    /// <c>lowerAscii</c> of a non-string is <see langword="null"/>; and <c>now()</c> reads a value the caller already
-    /// bound. The remaining <c>catch</c> is defence-in-depth, as <see cref="EvaluatePredicate"/>'s is.
+    /// from a catalogued function, an operator's overflow, division by zero or present non-number operand (spec §5.6,
+    /// Ruling P) and a join past the text cap (preflight S-2) — each a <see cref="CelFunctionException"/> — nothing in a
+    /// <see cref="CelProfile.Mutate"/> tree can throw: the profile admits literals, field references, calls,
+    /// arithmetic and joins; <see cref="Evaluate"/>'s node switch ends in <c>_ =&gt; null</c>; and <c>now()</c> reads a
+    /// value the caller already bound. The remaining <c>catch</c> is defence-in-depth, as <see cref="EvaluatePredicate"/>'s is,
+    /// and on this path it rethrows what it meets as a <see cref="CelFunctionException"/> rather than answering
+    /// <see langword="null"/>.
     /// </remarks>
     public static object? EvaluateMutation(
         CompiledExpression expression, AlvoRecord current, AlvoRecord? previous, DateTimeOffset now)
@@ -221,16 +248,33 @@ internal static class CelInterpreter
 
         try
         {
-            var state = new EvalState(current, previous, null, now);
+            var state = new EvalState(current, previous, null, now, FailsClosed(expression));
             return Evaluate(expression.Root, state);
         }
 #pragma warning disable CA1031
         catch (Exception failure) when (failure is not CelFunctionException)
 #pragma warning restore CA1031
         {
-            return null;
+            return FailsClosed(expression) ? throw HookDefect(failure) : null;
         }
     }
+
+    /// <summary>
+    /// Whether this expression's arithmetic fails closed — the one place an evaluation reads
+    /// <see cref="CompiledExpression.Profile"/> for it, through <see cref="CelHookArithmetic.FailsClosed"/>, the predicate
+    /// the type checker's literal-zero-divisor refusal reads too.
+    /// </summary>
+    private static bool FailsClosed(CompiledExpression expression) => CelHookArithmetic.FailsClosed(expression.Profile);
+
+    /// <summary>
+    /// Wraps an exception the defence-in-depth catch met on the fail-closed path (Ruling Y-D, final review M1). Such an
+    /// exception is a defect — every reachable failure is already a <see cref="CelFunctionException"/> — and answering
+    /// <see langword="false"/> would switch a <c>reject</c> off silently, <see langword="null"/> would store a column
+    /// default. The write rolls back as <c>function-failed</c> instead; the caller reads only
+    /// <see cref="HookEvaluationReason"/>, and the original rides along as the inner exception the write path logs.
+    /// </summary>
+    /// <param name="failure">What was thrown.</param>
+    private static CelFunctionException HookDefect(Exception failure) => new(HookEvaluation, HookEvaluationReason, failure);
 
     private static object? Evaluate(CelNode node, in EvalState state) => node switch
     {
@@ -247,14 +291,13 @@ internal static class CelInterpreter
     };
 
     /// <summary>
-    /// Evaluates one of the two legacy <see cref="CelProfile.Mutate"/> calls (<c>lowerAscii</c>, <c>now</c>). <c>now()</c> reads the
-    /// instant the caller bound for this write — it is <b>not</b> a clock read, and there is deliberately no
-    /// <see cref="TimeProvider"/> in reach of this class to make one from.
+    /// Evaluates a catalogued call through the overload the type checker bound, or <c>now()</c>, the one call left with
+    /// its own grammar. <c>now()</c> reads the instant the caller bound for this write — it is <b>not</b> a clock read,
+    /// and there is deliberately no <see cref="TimeProvider"/> in reach of this class to make one from.
     /// </summary>
     private static object? EvaluateCall(CelCall call, in EvalState state) => call switch
     {
         { Function: { IsLegacy: false } function } => function.Invoke(EvaluateArguments(call.Arguments, state)),
-        { Name: CelCall.LowerAscii, Arguments: [var argument] } => LowerAscii(Evaluate(argument, state)),
         { Name: CelCall.Now, Arguments: [] } => state.Now,
         _ => null,
     };
@@ -269,47 +312,6 @@ internal static class CelInterpreter
         }
 
         return values;
-    }
-
-    /// <summary>
-    /// Applies <c>lowerAscii</c>. A value that is not a string is <see langword="null"/> rather than an
-    /// error: the type checker already refused a non-string argument, so this can only be reached by a
-    /// record whose stored value disagrees with its declared type, and this class never throws.
-    /// </summary>
-    private static string? LowerAscii(object? value) => value is string text ? FoldAsciiUpperCase(text) : null;
-
-    /// <summary>
-    /// Folds <c>A</c>–<c>Z</c> and nothing else — spelled out character by character, so nothing
-    /// culture- or Unicode-sensitive can creep in later.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b><see cref="string.ToLowerInvariant"/> is not equivalent and must never replace this.</b> It folds
-    /// every non-ASCII letter it has a mapping for — <c>Ž</c>→<c>ž</c>, <c>Ä</c>→<c>ä</c>, <c>Σ</c>→<c>σ</c>,
-    /// and <c>ẞ</c>→<c>ß</c>, which no reverse mapping recovers — and a stored value folded that way is a
-    /// permanently wrong row: fixing the expression afterwards does not restore the bytes.
-    /// </para>
-    /// <para>
-    /// <b>The set of characters it folds is a runtime detail, which is the deeper reason this loop is
-    /// positive rather than a list of exceptions.</b> <c>İ</c> (U+0130) is the famous trap and is exactly
-    /// where the reputation misleads: .NET 10's invariant casing leaves it <em>unchanged</em> (measured, not
-    /// assumed), while a full Unicode case mapping folds it to two code points. Either way an author asked
-    /// for an ASCII fold and must get one on every runtime and ICU version — which "fold A–Z" satisfies by
-    /// construction and "fold, but skip the ones we know about" cannot.
-    /// </para>
-    /// </remarks>
-    private static string FoldAsciiUpperCase(string value)
-    {
-        var folded = value.ToCharArray();
-        for (var index = 0; index < folded.Length; index++)
-        {
-            if (folded[index] is >= 'A' and <= 'Z')
-            {
-                folded[index] = (char)(folded[index] + 32);
-            }
-        }
-
-        return new string(folded);
     }
 
     private static object? ResolveField(CelFieldRef fieldRef, in EvalState state)
@@ -334,39 +336,73 @@ internal static class CelInterpreter
         };
     }
 
-    private static object? EvaluateUnary(CelUnary unary, in EvalState state) => unary.Operator switch
+    private static object? EvaluateUnary(CelUnary unary, in EvalState state)
     {
-        CelUnaryOperator.Not => !AsBoolean(Evaluate(unary.Operand, state)),
-        CelUnaryOperator.Negate => Negate(Evaluate(unary.Operand, state)),
-        _ => null,
-    };
+        var operand = Evaluate(unary.Operand, state);
+        return unary.Operator switch
+        {
+            CelUnaryOperator.Not => state.FailClosed ? NotFailClosed(operand) : !AsBoolean(operand),
+            CelUnaryOperator.Negate => state.FailClosed ? CelHookArithmetic.Negate(operand) : Negate(operand),
+            _ => null,
+        };
+    }
 
     private static object? EvaluateBinary(CelBinary binary, in EvalState state) => binary.Operator switch
     {
         CelBinaryOperator.And or CelBinaryOperator.Or => EvaluateLogical(binary, state),
         CelBinaryOperator.In => EvaluateIn(binary, state),
-        CelBinaryOperator.Add => EvaluateAdd(Evaluate(binary.Left, state), Evaluate(binary.Right, state)),
+        CelBinaryOperator.Add => EvaluateAdd(Evaluate(binary.Left, state), Evaluate(binary.Right, state), state.FailClosed),
         CelBinaryOperator.Subtract or CelBinaryOperator.Multiply or CelBinaryOperator.Divide =>
-            EvaluateArithmetic(binary.Operator, Evaluate(binary.Left, state), Evaluate(binary.Right, state)),
+            EvaluateArithmetic(binary.Operator, Evaluate(binary.Left, state), Evaluate(binary.Right, state), state.FailClosed),
         _ => EvaluateComparison(binary, state),
     };
 
     /// <summary>
     /// CEL's <c>+</c>: two strings concatenate, anything else is arithmetic. A null operand yields
-    /// <see langword="null"/> either way, which is what SQL's <c>||</c> answers too — unreachable for a
-    /// concatenation the compiler admitted, since it refuses an operand that can be null.
+    /// <see langword="null"/> either way, which is what SQL's <c>||</c> answers too — reachable in a mutate value, where
+    /// it is the answer (spec F18); in a computed field the compiler refuses an operand that can be null.
     /// </summary>
-    private static object? EvaluateAdd(object? left, object? right) =>
+    private static object? EvaluateAdd(object? left, object? right, bool failClosed) =>
         left is string leftText && right is string rightText
-            ? string.Concat(leftText, rightText)
-            : EvaluateArithmetic(CelBinaryOperator.Add, left, right);
+            ? Concatenate(leftText, rightText, failClosed)
+            : EvaluateArithmetic(CelBinaryOperator.Add, left, right, failClosed);
 
+    /// <summary>
+    /// Joins two strings. On the fail-closed hook path the joined length is capped at
+    /// <see cref="CelBuiltInFunctions.MaxTextLength"/>, as <c>replace</c>'s is, and checked <b>before</b> allocating
+    /// (preflight S-2): a chain of joins over a large field would otherwise be an out-of-memory inside the write — one
+    /// <see cref="EvaluateMutation"/>'s catch would turn into a silent null write. A computed join keeps SQL's
+    /// <c>||</c>, bounded by its own columns.
+    /// </summary>
+    /// <exception cref="CelFunctionException">The joined text would be longer than the cap.</exception>
+    private static string Concatenate(string left, string right, bool failClosed)
+    {
+        var length = (long)left.Length + right.Length;
+        if (failClosed && length > CelBuiltInFunctions.MaxTextLength)
+        {
+            throw CelBuiltInFunctions.TextCapExceeded("_+_", length);
+        }
+
+        return string.Concat(left, right);
+    }
+
+    /// <summary>
+    /// <c>&amp;&amp;</c> and <c>||</c>, left to right with short-circuit: a left Bool that decides the answer never evaluates
+    /// the right side. Each side is read through <see cref="Truth"/>, so on the hook path a present non-Bool on the side
+    /// that is evaluated fails closed (Ruling R).
+    /// </summary>
+    /// <remarks>
+    /// CEL's own <c>&amp;&amp;</c>/<c>||</c> absorb an error commutatively (<c>error || true</c> is <c>true</c>); Alvo keeps
+    /// its left-to-right short-circuit and fails a hook closed on the first non-Bool it reads. That is stricter, never
+    /// looser: where CEL answers a value, this answers the same value or refuses the write.
+    /// </remarks>
     private static bool EvaluateLogical(CelBinary binary, in EvalState state)
     {
-        var left = AsBoolean(Evaluate(binary.Left, state));
+        var name = binary.Operator == CelBinaryOperator.And ? "_&&_" : "_||_";
+        var left = Truth(Evaluate(binary.Left, state), name, state.FailClosed);
         return binary.Operator == CelBinaryOperator.And
-            ? left && AsBoolean(Evaluate(binary.Right, state))
-            : left || AsBoolean(Evaluate(binary.Right, state));
+            ? left && Truth(Evaluate(binary.Right, state), name, state.FailClosed)
+            : left || Truth(Evaluate(binary.Right, state), name, state.FailClosed);
     }
 
     /// <summary>
@@ -384,11 +420,24 @@ internal static class CelInterpreter
         return left is string text && right is IEnumerable<string> values && values.Contains(text, StringComparer.Ordinal);
     }
 
+    /// <summary>
+    /// The hook path's <c>!</c> (Ruling Q): a null operand answers <see langword="true"/> as everywhere else, a Bool its
+    /// negation, and a <b>present</b> operand that is no Bool fails closed — reading it as <see langword="false"/> would
+    /// turn a reject's <c>!flag</c> into <see langword="true"/> on a value the row never held as a flag.
+    /// </summary>
+    /// <exception cref="CelFunctionException">The operand is present and not a Bool.</exception>
+    private static bool NotFailClosed(object? operand) => operand switch
+    {
+        null => true,
+        bool flag => !flag,
+        _ => throw new CelFunctionException("!_", "the operand is not a Bool"),
+    };
+
     private static bool EvaluateComparison(CelBinary binary, in EvalState state) =>
-        Compare(Evaluate(binary.Left, state), Evaluate(binary.Right, state), binary.Operator);
+        Compare(Evaluate(binary.Left, state), Evaluate(binary.Right, state), binary.Operator, state.FailClosed);
 
     private static object? EvaluateConditional(CelConditional conditional, in EvalState state) =>
-        AsBoolean(Evaluate(conditional.Condition, state))
+        Truth(Evaluate(conditional.Condition, state), "_?_:_", state.FailClosed)
             ? Evaluate(conditional.WhenTrue, state)
             : Evaluate(conditional.WhenFalse, state);
 
@@ -399,16 +448,48 @@ internal static class CelInterpreter
             return false;
         }
 
-        return !ValuesEqual(state.Previous[changed.FieldName], state.Current[changed.FieldName]);
+        return !ValuesEqual(state.Previous[changed.FieldName], state.Current[changed.FieldName], state.FailClosed);
     }
 
     private static bool AsBoolean(object? value) => value is true;
 
     /// <summary>
+    /// Reads a value in a Boolean position — either side of <c>&amp;&amp;</c> or <c>||</c>, a ternary's condition, a
+    /// predicate's own value. A Bool is itself and a null is <see langword="false"/>, everywhere. A <b>present</b> value
+    /// that is no Bool is <see langword="false"/> for a Rule or an Access expression, as it always was; on the fail-closed
+    /// hook path it throws instead (Ruling R, completing Ruling Q's <c>!</c>), because <see langword="false"/> there is a
+    /// reject that never fires.
+    /// </summary>
+    /// <param name="value">The evaluated operand.</param>
+    /// <param name="name">CEL's overload name for the position (<c>_&amp;&amp;_</c>), or <see cref="WholeCondition"/> for the whole.</param>
+    /// <param name="failClosed">Whether this is the hook path, read once from the profile.</param>
+    /// <param name="reason">Why, for the caller — it names no value.</param>
+    /// <exception cref="CelFunctionException"><paramref name="failClosed"/> is set and the value is present and no Bool.</exception>
+    private static bool Truth(object? value, string name, bool failClosed, string reason = "the operand is not a Bool") => value switch
+    {
+        bool flag => flag,
+        null => false,
+        _ when failClosed => throw new CelFunctionException(name, reason),
+        _ => false,
+    };
+
+    /// <summary>
     /// The single place the null rule is expressed: either operand missing collapses the whole
     /// comparison to <see langword="false"/>, for every relational and equality operator alike.
     /// </summary>
-    private static bool Compare(object? left, object? right, CelBinaryOperator op)
+    /// <remarks>
+    /// Two <b>present</b> operands it cannot compare — a NaN, infinite or out-of-range double, a string in a numeric
+    /// field, a value of an unexpected CLR type — throw on the fail-closed hook path (Ruling Q), because
+    /// <see langword="false"/> there is a reject that never fires. A Rule or an Access expression still answers
+    /// <see langword="false"/>: Ruling Q's scope left them where they were, and that is not a claim the answer is safe —
+    /// a bare comparison's <see langword="false"/> denies, but <c>!</c> over it answers <see langword="true"/>, the grant
+    /// direction, where SQL's three-valued logic would deny. That embedded-only residual is #324.
+    /// <paramref name="failClosed"/> is read from the profile once, through <see cref="CelHookArithmetic.FailsClosed"/>.
+    /// </remarks>
+    /// <exception cref="CelFunctionException">
+    /// <paramref name="failClosed"/> is set and the two present operands cannot be compared.
+    /// </exception>
+    private static bool Compare(object? left, object? right, CelBinaryOperator op, bool failClosed)
     {
         if (left is null || right is null)
         {
@@ -417,22 +498,46 @@ internal static class CelInterpreter
 
         if (!TryNormalize(left, right, out var normalizedLeft, out var normalizedRight))
         {
-            return false;
+            return failClosed ? throw Uncomparable(op) : false;
         }
 
         return op switch
         {
             CelBinaryOperator.Equal => ValuesEqualCore(normalizedLeft, normalizedRight),
             CelBinaryOperator.NotEqual => !ValuesEqualCore(normalizedLeft, normalizedRight),
-            CelBinaryOperator.Less => CompareOrder(normalizedLeft, normalizedRight) is int lt && lt < 0,
-            CelBinaryOperator.LessOrEqual => CompareOrder(normalizedLeft, normalizedRight) is int le && le <= 0,
-            CelBinaryOperator.Greater => CompareOrder(normalizedLeft, normalizedRight) is int gt && gt > 0,
-            CelBinaryOperator.GreaterOrEqual => CompareOrder(normalizedLeft, normalizedRight) is int ge && ge >= 0,
-            _ => false,
+            _ => CompareOrder(normalizedLeft, normalizedRight) is int order
+                ? IsInOrder(op, order)
+                : failClosed ? throw Uncomparable(op) : false,
         };
     }
 
-    private static bool ValuesEqual(object? left, object? right)
+    private static bool IsInOrder(CelBinaryOperator op, int order) => op switch
+    {
+        CelBinaryOperator.Less => order < 0,
+        CelBinaryOperator.LessOrEqual => order <= 0,
+        CelBinaryOperator.Greater => order > 0,
+        CelBinaryOperator.GreaterOrEqual => order >= 0,
+        _ => false,
+    };
+
+    /// <summary>The failure of a comparison, named by CEL's own overload name for it (<c>_&lt;_</c>); it names no value.</summary>
+    private static CelFunctionException Uncomparable(CelBinaryOperator op) => new(op switch
+    {
+        CelBinaryOperator.Equal => "_==_",
+        CelBinaryOperator.NotEqual => "_!=_",
+        CelBinaryOperator.Less => "_<_",
+        CelBinaryOperator.LessOrEqual => "_<=_",
+        CelBinaryOperator.Greater => "_>_",
+        _ => "_>=_",
+    }, "the operands cannot be compared");
+
+    /// <summary>
+    /// <c>changed(f)</c>'s null-safe equality. Two present values it cannot normalise read as unequal — "changed" — off
+    /// the hook path; on it they fail closed (final review M2), because <c>!changed(f)</c> would otherwise be
+    /// <see langword="false"/> and a reject gated on it would never fire.
+    /// </summary>
+    /// <exception cref="CelFunctionException"><paramref name="failClosed"/> is set and the two present values cannot be compared.</exception>
+    private static bool ValuesEqual(object? left, object? right, bool failClosed)
     {
         if (left is null && right is null)
         {
@@ -444,8 +549,12 @@ internal static class CelInterpreter
             return false;
         }
 
-        return TryNormalize(left, right, out var normalizedLeft, out var normalizedRight)
-            && ValuesEqualCore(normalizedLeft, normalizedRight);
+        if (!TryNormalize(left, right, out var normalizedLeft, out var normalizedRight))
+        {
+            return failClosed ? throw new CelFunctionException("changed", "the old and new values cannot be compared") : false;
+        }
+
+        return ValuesEqualCore(normalizedLeft, normalizedRight);
     }
 
     private static bool ValuesEqualCore(object left, object right) => (left, right) switch
@@ -543,11 +652,12 @@ internal static class CelInterpreter
 
     private static bool IsTimestampCandidate(object value) => value is DateTimeOffset or DateTime or DateOnly or string;
 
-    /// <summary>The instant a timestamp-typed value denotes, whichever CLR shape a record handed over.</summary>
+    /// <summary>The instant a timestamp-typed value denotes, whichever CLR shape a record or a function handed over.</summary>
     /// <remarks>
     /// A <c>date</c> column arrives as a <see cref="DateOnly"/> on every write path and is the calendar day at midnight
-    /// UTC. Without this arm every comparison over a <c>date</c> answered <see langword="false"/>, so a before-hook reject
-    /// gated on one never fired (security risk S-1, fail-open).
+    /// UTC — the one rule a function argument (<see cref="CelArgumentMarshaller"/>) and a comparison share. Without this
+    /// arm every comparison over a <c>date</c> answered <see langword="false"/>, so a before-hook reject gated on one never
+    /// fired (security risk S-1, fail-open).
     /// </remarks>
     internal static bool TryToDateTimeOffset(object value, out DateTimeOffset result)
     {
@@ -613,7 +723,18 @@ internal static class CelInterpreter
         }
     }
 
-    private static decimal? EvaluateArithmetic(CelBinaryOperator op, object? left, object? right)
+    /// <summary>
+    /// <c>+ - * /</c> over numbers: a hook profile's checked, fail-closed arithmetic (<see cref="CelHookArithmetic"/>), or
+    /// Computed's decimal arithmetic, which answers <see langword="null"/> on every failure.
+    /// </summary>
+    private static object? EvaluateArithmetic(CelBinaryOperator op, object? left, object? right, bool failClosed) =>
+        failClosed ? CelHookArithmetic.Apply(op, left, right) : ComputedArithmetic(op, left, right);
+
+    /// <summary>
+    /// Computed's arithmetic, the one its SQL rendering agrees with: every operand pair on the <see cref="decimal"/>
+    /// path; a null operand, a zero divisor or an overflow answers <see langword="null"/>.
+    /// </summary>
+    private static decimal? ComputedArithmetic(CelBinaryOperator op, object? left, object? right)
     {
         if (!TryPrepareArithmeticOperands(left, right, op, out var leftDecimal, out var rightDecimal))
         {
@@ -658,7 +779,7 @@ internal static class CelInterpreter
         : null;
 
     private readonly struct EvalState(
-        AlvoRecord current, AlvoRecord? previous, AlvoContext? context, DateTimeOffset? now = null)
+        AlvoRecord current, AlvoRecord? previous, AlvoContext? context, DateTimeOffset? now = null, bool failClosed = false)
     {
         public AlvoRecord Current { get; } = current;
 
@@ -675,5 +796,12 @@ internal static class CelInterpreter
         /// value rather than to some substitute instant if a defect ever makes it reachable.
         /// </summary>
         public DateTimeOffset? Now { get; } = now;
+
+        /// <summary>
+        /// Gets a value indicating whether arithmetic fails closed (a hook condition or mutate value, spec §5.6) rather
+        /// than answering <see langword="null"/> (a computed column). Defaults to <see langword="false"/>, so an entry
+        /// point that does not ask for it — <see cref="EvaluateScalar"/>, <see cref="EvaluateMask"/> — cannot throw.
+        /// </summary>
+        public bool FailClosed { get; } = failClosed;
     }
 }

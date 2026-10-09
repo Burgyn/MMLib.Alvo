@@ -87,10 +87,10 @@ public sealed class CelArgumentConversionTests
     [Fact]
     public void A_stored_decimal_with_a_fraction_fails_a_built_in_over_an_int_field()
     {
-        var compiled = TestCelFunctions.Compile("abs(qty)", CelProfile.Mutate);
+        var compiled = TestCelFunctions.Compile("math.abs(qty)", CelProfile.Mutate);
 
         Should.Throw<CelFunctionException>(() => CelInterpreter.EvaluateMutation(compiled, CelFixtures.Row(("qty", 2.5m)), previous: null, _now))
-            .FunctionName.ShouldBe("abs");
+            .FunctionName.ShouldBe("math.abs");
     }
 
     [Fact]
