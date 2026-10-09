@@ -287,6 +287,7 @@ public class AdminWorld : IAsyncLifetime
         /* A minute, for the reason the sign-in wait below carries: a server-interactive circuit's
            first render pays for the browser, the connection and the component tree at once. */
         context.SetDefaultTimeout(60_000);
+        await ScenarioTraces.StartAsync(context).ConfigureAwait(false);
 
         var session = new AdminSession(
             context, await context.NewPageAsync().ConfigureAwait(false), BaseAddress);
