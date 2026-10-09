@@ -1,4 +1,5 @@
 ﻿using Microsoft.Playwright;
+using System.Diagnostics;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -28,9 +29,6 @@ namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 /// </remarks>
 internal static class PageAddress
 {
-    /// <summary>The browser context's own default timeout (<see cref="AdminWorld.SignInAsAsync"/>).</summary>
-    private const float DefaultTimeout = 60_000;
-
     private static readonly TimeSpan _poll = TimeSpan.FromMilliseconds(25);
 
     /// <summary>Waits until the page's address matches <paramref name="glob"/> and the page has loaded.</summary>
@@ -38,7 +36,7 @@ internal static class PageAddress
     /// <param name="glob">The address, as a Playwright glob.</param>
     /// <param name="timeout">How long to wait, in milliseconds.</param>
     /// <returns>A task that completes once the address matches.</returns>
-    public static Task WaitForAddressAsync(this IPage page, string glob, float timeout = DefaultTimeout)
+    public static Task WaitForAddressAsync(this IPage page, string glob, float timeout = AdminWorld.ActionTimeout)
     {
         var pattern = Pattern(glob);
         return WaitForAddressAsync(page, url => pattern.IsMatch(url), glob, timeout);
@@ -49,16 +47,21 @@ internal static class PageAddress
     /// <param name="matches">What the address must satisfy.</param>
     /// <param name="timeout">How long to wait, in milliseconds.</param>
     /// <returns>A task that completes once the address matches.</returns>
-    public static Task WaitForAddressAsync(this IPage page, Func<string, bool> matches, float timeout = DefaultTimeout)
+    public static Task WaitForAddressAsync(this IPage page, Func<string, bool> matches, float timeout = AdminWorld.ActionTimeout)
         => WaitForAddressAsync(page, matches, "the predicate", timeout);
 
     private static async Task WaitForAddressAsync(IPage page, Func<string, bool> matches, string described, float timeout)
     {
         ArgumentNullException.ThrowIfNull(page);
-        var deadline = DateTime.UtcNow.AddMilliseconds(timeout);
+        var waited = Stopwatch.StartNew();
         while (!matches(page.Url))
         {
-            if (DateTime.UtcNow > deadline)
+            if (page.IsClosed)
+            {
+                throw new PlaywrightException($"The page closed while waiting for {described}; it was at {page.Url}.");
+            }
+
+            if (waited.ElapsedMilliseconds > timeout)
             {
                 throw new TimeoutException($"The page never reached {described} in {timeout} ms; it is at {page.Url}.");
             }
@@ -66,7 +69,7 @@ internal static class PageAddress
             await Task.Delay(_poll).ConfigureAwait(false);
         }
 
-        var left = (float)Math.Max(1, (deadline - DateTime.UtcNow).TotalMilliseconds);
+        var left = (float)Math.Max(1, timeout - waited.ElapsedMilliseconds);
         await page.WaitForLoadStateAsync(LoadState.Load, new() { Timeout = left }).ConfigureAwait(false);
     }
 

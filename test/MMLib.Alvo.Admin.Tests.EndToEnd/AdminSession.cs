@@ -724,20 +724,25 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     /// </remarks>
     public async ValueTask DisposeAsync()
     {
-        /* First, so the trace ends on the screen as the scenario left it rather than on about:blank. */
-        await ScenarioTraces.StopAsync(context).ConfigureAwait(false);
-
         try
         {
-            await Page.GotoAsync("about:blank").ConfigureAwait(false);
-        }
-        catch (PlaywrightException)
-        {
-            /* The page is already gone; there is nothing left to disconnect. */
-        }
+            /* First, so the trace ends on the screen as the scenario left it rather than on about:blank. */
+            await ScenarioTraces.StopAsync(context).ConfigureAwait(false);
 
-        await context.CloseAsync().ConfigureAwait(false);
-        await context.DisposeAsync().ConfigureAwait(false);
+            try
+            {
+                await Page.GotoAsync("about:blank").ConfigureAwait(false);
+            }
+            catch (PlaywrightException)
+            {
+                /* The page is already gone; there is nothing left to disconnect. */
+            }
+        }
+        finally
+        {
+            await context.CloseAsync().ConfigureAwait(false);
+            await context.DisposeAsync().ConfigureAwait(false);
+        }
     }
 
 }

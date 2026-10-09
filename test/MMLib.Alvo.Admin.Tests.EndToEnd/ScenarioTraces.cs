@@ -1,5 +1,7 @@
 ﻿using Microsoft.Playwright;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using Xunit.v3;
 
 namespace MMLib.Alvo.Admin.Tests.EndToEnd;
@@ -71,7 +73,7 @@ internal static class ScenarioTraces
         {
             if (failed)
             {
-                File.Move(traces[index], Path.Combine(Folder, $"{Name(test.TestDisplayName)}-{index + 1}.zip"), overwrite: true);
+                File.Move(traces[index], Path.Combine(Folder, $"{Name(test.TestDisplayName)}-{Hash(test.UniqueID)}-{index + 1}.zip"), overwrite: true);
             }
             else
             {
@@ -81,6 +83,13 @@ internal static class ScenarioTraces
     }
 
     private static string Key(string? uniqueId) => uniqueId ?? "no-test";
+
+    /// <summary>
+    /// Eight hex digits of the test's unique id: the name is cut at 150 characters, and two theory rows whose names
+    /// differ only past the cut would otherwise overwrite each other's trace.
+    /// </summary>
+    private static string Hash(string uniqueId)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(uniqueId)))[..8].ToLowerInvariant();
 
     /// <summary>The display name as a file name: a theory's arguments carry characters no file system takes.</summary>
     private static string Name(string displayName)

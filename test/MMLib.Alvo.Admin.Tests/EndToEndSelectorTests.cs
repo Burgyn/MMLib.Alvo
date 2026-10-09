@@ -55,7 +55,6 @@ public sealed partial class EndToEndSelectorTests
     {
         var offenders = Directory.EnumerateFiles(
                 Path.Combine(RepositoryRoot.Find(), "test", "MMLib.Alvo.Admin.Tests.EndToEnd"), "*.cs")
-            .Where(file => Path.GetFileName(file) != "PageAddress.cs")
             .Where(file => WithoutComments(File.ReadAllText(file)).Contains(".WaitForURLAsync(", StringComparison.Ordinal))
             .Select(Path.GetFileName);
 

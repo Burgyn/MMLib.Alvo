@@ -1,6 +1,10 @@
 ﻿namespace MMLib.Alvo.Admin.Tests.EndToEnd;
 
 /// <summary>The globs the scenarios wait for mean what Playwright's own mean (<see cref="PageAddress"/>).</summary>
+/// <remarks>
+/// Here rather than in ring0 because <see cref="PageAddress"/> is this project's, and no ring references it: these run only
+/// in the admin e2e job, which is the only place the glob is used.
+/// </remarks>
 public sealed class PageAddressTests
 {
     [Theory]
