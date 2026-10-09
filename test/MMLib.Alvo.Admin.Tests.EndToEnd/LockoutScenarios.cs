@@ -78,6 +78,11 @@ public sealed class LockoutScenarios(AdminWorld world) : IClassFixture<AdminWorl
     /// "Locked until HH:mm after failed sign-ins", with the lockout's end as the store holds it, in the browser's own
     /// zone: the words the dashboard draws have to agree with both.
     /// </summary>
+    /// <remarks>
+    /// <b>The dashboard's own clock rule, restated</b> (<c>OperatorTime.Clock</c>, internal to the dashboard): the date
+    /// is drawn too when the lockout ends on another local day than today, so a run just before midnight — whose
+    /// five-minute lockout ends after it — expects <c>yyyy-MM-dd HH:mm</c>, not a bare <c>HH:mm</c> the row never says.
+    /// </remarks>
     private async Task<string> ExpectedWordsAsync(AdminSession admin, string email)
     {
         using var scope = world.Services.CreateScope();
@@ -85,7 +90,10 @@ public sealed class LockoutScenarios(AdminWorld world) : IClassFixture<AdminWorl
             .FindByEmailAsync(email, TestContext.Current.CancellationToken);
         var until = stored.ShouldNotBeNull().LockedOutUntil.ShouldNotBeNull("five wrong passwords did not lock them");
         var east = await admin.Page.EvaluateAsync<int>("() => -new Date().getTimezoneOffset()");
-        var clock = until.ToOffset(TimeSpan.FromMinutes(east)).ToString("HH:mm", CultureInfo.InvariantCulture);
+        var zone = TimeSpan.FromMinutes(east);
+        var local = until.ToOffset(zone);
+        var today = DateTimeOffset.UtcNow.ToOffset(zone).Date == local.Date;
+        var clock = local.ToString(today ? "HH:mm" : "yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
         return $"Locked until {clock} after failed sign-ins";
     }
 

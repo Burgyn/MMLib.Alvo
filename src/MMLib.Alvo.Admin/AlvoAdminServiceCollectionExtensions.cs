@@ -57,6 +57,14 @@ public static class AlvoAdminServiceCollectionExtensions
     /// in the host's endpoints and hands over the bare token instead, with one sentence saying the host has no
     /// set-password page — never a link to a form that posts nowhere.
     /// </para>
+    /// <para>
+    /// <b>It leaves the circuit's receive limit alone.</b> SignalR's <c>MaximumReceiveMessageSize</c> for the Blazor
+    /// circuit hub stays at its own 32 KB, or whatever the host set: that hub is shared with an embedding host's own
+    /// server-interactive circuits and applies to a connection before anyone has signed in, so the dashboard does not
+    /// widen it. Import takes a realistic descriptor all the same, because its text never travels in a circuit message:
+    /// the page reads it on submit as a stream from the browser (<c>IJSStreamReference</c>), carried in chunks under
+    /// the hub's limit and bounded by the box's own ceiling (#316).
+    /// </para>
     /// </remarks>
     /// <param name="services">The service collection to register into.</param>
     /// <param name="configure">Configures the dashboard.</param>

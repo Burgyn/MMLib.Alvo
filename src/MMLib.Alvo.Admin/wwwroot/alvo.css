@@ -887,6 +887,16 @@
     border-radius: var(--radius-sm);
   }
 
+  /* An integration row's URL, a template's subject and its "posted to by …" badge break anywhere: a URL or a subject
+     can have no spaces, and a badge does not wrap by default, so any would scroll the page sideways at 375 px. */
+  .a-integration-url,
+  .a-integration-subject,
+  .a-badge.a-integration-uses {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
   /* Signing in: one narrow card, a little above the middle of the screen. */
   .a-signin {
     max-width: 380px;
@@ -1554,7 +1564,7 @@
      sans one beside it.
      --------------------------------------------------------------------------- */
   .a-input,
-  /* prototype-only: the design prototype's textarea; the dashboard's are MudTextField. */
+  /* prototype-only: the design prototype's textarea; the dashboard's are MudTextField, but for Import's (textarea.a-input). */
   .a-textarea,
   /* prototype-only: the design prototype's native select; the dashboard's pickers are MudSelect. */
   .a-select {
@@ -1605,6 +1615,12 @@
   /* prototype-only */
   textarea.a-textarea {
     min-height: 84px;
+    resize: vertical;
+  }
+
+  /* The dashboard's one native textarea, the Import box (Transfer.razor says why it cannot be the library's): drawn as
+     a native input, and dragged taller like the library's own. */
+  textarea.a-input {
     resize: vertical;
   }
 
@@ -1762,7 +1778,7 @@
 
     /* Trailing rather than full-width: a destructive control stretched across the row reads as the
        thing the screen is for. */
-    .a-hookrow__remove {
+    .a-hookrow__actions {
       align-self: flex-end;
     }
   }

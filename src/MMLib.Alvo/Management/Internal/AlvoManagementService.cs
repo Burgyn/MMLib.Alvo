@@ -224,8 +224,11 @@ internal sealed partial class AlvoManagementService(
             ExpressionSlotCheck.Check(validator, request.DescriptorJson, request.Path, request.Source)));
     }
 
-    /// <summary>The most descriptor text a check will parse: the dashboard calls this on every keystroke.</summary>
-    private const int MaxCheckedDescriptorChars = 1_000_000;
+    /// <summary>
+    /// The most descriptor text a check will parse: the dashboard calls this on every keystroke. Internal, not private,
+    /// so Host.Tests can hold the dashboard's Import box (<c>ImportLimit.MaxChars</c>) to the same number.
+    /// </summary>
+    internal const int MaxCheckedDescriptorChars = 1_000_000;
 
     /// <summary>The longest expression a check takes: the schema's own ceiling is 2,000, and an editor needs no more.</summary>
     private const int MaxCheckedSourceChars = 8_000;

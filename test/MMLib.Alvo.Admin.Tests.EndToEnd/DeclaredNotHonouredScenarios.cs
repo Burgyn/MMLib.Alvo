@@ -117,7 +117,7 @@ public sealed class DeclaredNotHonouredScenarios(AdminWorld world) : IClassFixtu
     /// <summary>Stages a descriptor through Import, which lands on Preview without applying.</summary>
     private static async Task StageAsync(AdminSession session, string descriptor)
     {
-        await session.GoAsync("/transfer");
+        await session.GoToImportAsync();
         await session.Page.FillAsync("#import-json", descriptor);
         await session.Page.GetByTestId("import-run").ClickAsync();
 
