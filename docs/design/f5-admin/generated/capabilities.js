@@ -197,6 +197,12 @@ export const CAPABILITIES = {
       "level": "viewer"
     },
     {
+      "verb": "POST",
+      "path": "/projects/{project}/cel/check",
+      "operation": "CheckExpression",
+      "level": "developer"
+    },
+    {
       "verb": "PUT",
       "path": "/projects/{project}/descriptor",
       "operation": "ApplyDescriptor",

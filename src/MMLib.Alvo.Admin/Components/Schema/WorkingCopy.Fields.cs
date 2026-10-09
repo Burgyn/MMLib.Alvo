@@ -93,6 +93,37 @@ internal sealed partial class WorkingCopy
         return true;
     });
 
+    /// <summary>
+    /// Stages what the field editor saved: a new field under its name, or an edited one written over its old name and
+    /// then renamed when the name changed.
+    /// </summary>
+    /// <remarks>
+    /// One writer for Save and for the expression check's candidate (<see cref="ExpressionSlots.ForComputed"/>), so what
+    /// is checked is what would be staged. A rename's refusal is not reported here: the form refuses those names first.
+    /// </remarks>
+    /// <param name="entity">The entity the field is on.</param>
+    /// <param name="editing">The name of the field being edited, or <see langword="null"/> (or empty) for a new one.</param>
+    /// <param name="name">The name the form gives it.</param>
+    /// <param name="facets">Its type and facets, already in the schema's own shape.</param>
+    /// <returns>The places the rename could not carry, or <see langword="null"/> when nothing was renamed.</returns>
+    public IReadOnlyList<DescriptorReference>? SaveField(string entity, string? editing, string name, JsonObject facets)
+    {
+        if (editing is not { Length: > 0 })
+        {
+            AddField(entity, name, facets);
+            return null;
+        }
+
+        AddField(entity, editing, facets);
+        if (string.Equals(editing, name, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        RenameField(entity, editing, name, out var uncarried);
+        return uncarried;
+    }
+
     /// <summary>Removes a field from an entity.</summary>
     public void RemoveField(string entity, string name)
         => Edit(root => (root["entities"]?[entity]?["fields"] as JsonObject)?.Remove(name) is true);

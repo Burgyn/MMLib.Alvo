@@ -13,6 +13,9 @@
     one of them lands the tab stops warning about it without anybody editing this file.
 *@
 @inject AdminInterop Interop
+@inject ManagementGateway Gateway
+@inject ILogger<HooksTab> Logger
+@implements IDisposable
 
 @* A create inside a tab sits in its section's head, right-aligned (spec §3.7). *@
 <SectionHead Title="On write">
@@ -121,8 +124,9 @@ else
         <Field Label="Only when (optional)" For="hook-condition">
             <ChildContent>
                 <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-condition" Class="a-mono"
-                              autocomplete="off" Placeholder="@_hook.Example" aria-describedby="hook-condition-hint"
-                              Value="_hook.Condition" ValueChanged="text => _hook.Condition = text ?? string.Empty" />
+                              autocomplete="off" Placeholder="@_hook.Example" aria-describedby="@Described("hook-condition")"
+                              Value="_hook.Condition" ValueChanged="TypeCondition" />
+                @Findings("hook-condition")
             </ChildContent>
             <Hint>
                 <span data-testid="hook-condition-hint">
@@ -134,7 +138,7 @@ else
 
         <Field Label="Then" LabelId="hook-actions-label">
             <ChipGroup TValue="string" Items="_hook.Kinds" Selected="[_hook.Kind]" aria-labelledby="hook-actions-label"
-                       data-testid="hook-actions" SelectedChanged="kinds => _hook.Kind = kinds[0]" />
+                       data-testid="hook-actions" SelectedChanged="kinds => ChooseKind(kinds[0])" />
         </Field>
 
         @ActionFields
@@ -153,6 +157,24 @@ else
 </AlvoConfirm>
 
 @code {
+    /// <summary>What apply would say about the expression in a box, under it, as its sentences.</summary>
+    private RenderFragment Findings(string id) => @<text>
+        @foreach (var (finding, index) in _check.Findings(id).Select((finding, index) => (finding, index)))
+        {
+            <p class="@ExpressionCheck.ProblemClass(finding)" id="@(index == 0 ? $"{id}-check" : $"{id}-check-{index}")" role="status"
+               data-testid="@($"check-{id}")" data-severity="@finding.Severity">
+                @finding.Message
+                @if (finding.FixSuggestion is { } fix)
+                {
+                    <span class="a-field__fix">@fix</span>
+                }
+            </p>
+        }
+    </text>;
+
+    /// <summary>The box is described by its hint, and by the sentence under it while it has one.</summary>
+    private string Described(string id) => _check.DescribedBy(id) is { } check ? $"{id}-hint {check}" : $"{id}-hint";
+
     /// <summary>The boxes the chosen action takes.</summary>
     private RenderFragment ActionFields => @<text>
         @switch (_hook.Kind)
@@ -175,13 +197,14 @@ else
                     <Field Label="Field" For="hook-mutate-field">
                         <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-mutate-field"
                                       Class="a-mono" autocomplete="off" Placeholder="completed_on"
-                                      Value="_hook.MutateField" ValueChanged="text => _hook.MutateField = text ?? string.Empty" />
+                                      Value="_hook.MutateField" ValueChanged="TypeMutateField" />
                     </Field>
                     <Field Label="Set to" For="hook-mutate-value">
                         <ChildContent>
                             <MudTextField T="string" Variant="Variant.Outlined" Immediate="true" id="hook-mutate-value"
-                                          aria-describedby="hook-mutate-value-hint" Class="a-mono" autocomplete="off" Placeholder="now()"
-                                          Value="_hook.MutateValue" ValueChanged="text => _hook.MutateValue = text ?? string.Empty" />
+                                          aria-describedby="@Described("hook-mutate-value")" Class="a-mono" autocomplete="off" Placeholder="now()"
+                                          Value="_hook.MutateValue" ValueChanged="TypeMutateValue" />
+                            @Findings("hook-mutate-value")
                         </ChildContent>
                         <Hint>
                             A CEL expression, stored as <code class="a-mono">{"$cel": "…"}</code>. Wrap it in

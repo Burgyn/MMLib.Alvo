@@ -1437,6 +1437,21 @@
     font-size: var(--text-sm);
   }
 
+  /* An expression check's warning is not the engine's refusal: the warning tone, not the danger one. */
+  .a-field__problem[data-severity="Warning"] {
+    color: var(--warn-fg);
+  }
+
+  /* "Not checked yet" is not a problem with this box, so it is quiet: the dim text tier, not the danger one. */
+  .a-field__problem--muted {
+    color: var(--dim);
+  }
+
+  /* The suggested fix follows the message, set off from it. */
+  .a-field__fix {
+    margin-inline-start: var(--space-2);
+  }
+
   /* Box, hint, then the refusal, in every field (spec §3.8): the order aria-describedby reads them in. A Field's
      refusal is written inside its content, before the hint the Field draws after it, so it is moved last here. */
   .a-field > .a-field__problem {
