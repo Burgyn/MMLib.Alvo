@@ -8,16 +8,14 @@
       "key": "agent",
       "method": "POST",
       "path": "/api/tickets",
-      "body": { "title": "  Printer on fire  " },
+      "body": { "title": "Printer on fire", "priority": "high" },
       "expect": 201
     },
     {
-      "key": null,
-      "method": "POST",
-      "path": "/api/tickets",
-      "body": { "title": "Brakes squeak" },
-      "expect": 403,
-      "expectType": "forbidden"
+      "key": "agent",
+      "method": "GET",
+      "path": "/api/tickets?priority=eq.high&order=title",
+      "expect": 200
     }
   ]
 }

@@ -1,0 +1,49 @@
+---
+import { getImage } from 'astro:assets';
+import desktopLight from '../../assets/screenshots/rules-editor-light-2x.png';
+import desktopDark from '../../assets/screenshots/rules-editor-dark-2x.png';
+import phoneLight from '../../assets/screenshots/rules-editor-phone-light-2x.png';
+import phoneDark from '../../assets/screenshots/rules-editor-phone-dark-2x.png';
+
+const webp = (src: ImageMetadata, width: number) => getImage({ src, format: 'webp', width });
+const pictures = [
+  { theme: 'light', desktop: await webp(desktopLight, 1920), phone: await webp(phoneLight, 780) },
+  { theme: 'dark', desktop: await webp(desktopDark, 1920), phone: await webp(phoneDark, 780) },
+];
+const points = [
+  'Edit entities, rules and hooks, with every expression checked as you type',
+  'Simulate a policy for any caller before a real request reaches it',
+  'Preview a change before you apply it; roll back from the history',
+  'Ask the schema assistant: it proposes a change, and you review and apply it',
+];
+const alt = 'The dashboard\'s rules editor for the service_orders entity: the list rule has a typo, \'amdin\' in @user.roles, and the live check under the box says \'amdin\' is not a declared role and suggests \'admin\'.';
+---
+<section class="alvo-dash alvo-band" aria-labelledby="dash-title">
+  <div class="alvo-wrap">
+    <div class="alvo-split-head">
+      <div>
+        <p class="alvo-eyebrow">Admin dashboard</p>
+        <h2 id="dash-title">See the whole backend. Change it safely.</h2>
+      </div>
+      <ul class="alvo-checks">
+        {points.map((point) => (
+          <li>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5,12 10,17 19,7"></polyline></svg>
+            <span>{point}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+    <figure>
+      <div class="alvo-shot">
+        {pictures.map(({ theme, desktop, phone }) => (
+          <picture class={`alvo-themed--${theme}`}>
+            <source media="(max-width: 480px)" srcset={`${phone.src} 2x`} width={390} height={520} />
+            <img src={desktop.src} width={960} height={600} loading="lazy" decoding="async" alt={alt} />
+          </picture>
+        ))}
+      </div>
+      <figcaption>The rules editor over the bike-workshop example: each rule is checked as you type, before anything is saved.</figcaption>
+    </figure>
+  </div>
+</section>

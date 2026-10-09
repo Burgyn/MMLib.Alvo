@@ -1,0 +1,43 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../SourceExcerpt.astro';
+import quickStart from '../../snippets/shell/quick-start.sh?raw';
+import sampleHost from '../../../../samples/MMLib.Alvo.Samples.EmbeddedHost/SampleHost.cs?raw';
+---
+<section class="alvo-ways" aria-labelledby="ways-title">
+  <div class="alvo-wrap">
+    <div class="alvo-split-head">
+      <h2 id="ways-title">Same descriptor. Standalone, or inside your app.</h2>
+      <p class="alvo-lede">One engine, two distributions. The embedded sample serves the same descriptor the Docker stack mounts, and its tests check that both expose the same routes.</p>
+    </div>
+    <div class="alvo-ways__grid">
+      <article class="alvo-way">
+        <div class="alvo-way__head">
+          <div class="alvo-card__title"><h3>Standalone</h3><span class="alvo-badge alvo-badge--mono">Docker</span></div>
+          <p>Mount a descriptor, get the API, the dashboard and the interactive API docs. No .NET on the box. <a class="alvo-prose-link" href="/MMLib.Alvo/start-here/run-your-own/">Run your own descriptor</a></p>
+        </div>
+        <div class="alvo-way__code">
+          <Code code={quickStart.trimEnd()} lang="sh" frame="none" wrap />
+        </div>
+      </article>
+      <article class="alvo-way">
+        <div class="alvo-way__head">
+          <div class="alvo-card__title">
+            <h3>Embedded</h3><span class="alvo-badge alvo-badge--mono">ASP.NET Core</span><span class="alvo-badge alvo-badge--warn">Not on NuGet yet</span>
+          </div>
+          <p>A library in your own host: your authentication, your endpoints beside Alvo's, your own C# functions in hooks. <a class="alvo-prose-link" href="/MMLib.Alvo/start-here/embed/">Embed in ASP.NET Core</a></p>
+        </div>
+        <div class="alvo-way__code">
+          <SourceExcerpt
+            code={sampleHost}
+            from="builder.Services.AddAlvo(alvo => alvo"
+            to={'.AddCelFunction("normalizeVin", NormalizeVin, NormalizeVinSummary));'}
+            then={{ from: 'app.MapAlvoDataApi().WithTags("alvo-data-api");', to: 'app.MapAlvoDataApi().WithTags("alvo-data-api");' }}
+            dropComments
+            frame="none"
+          />
+        </div>
+      </article>
+    </div>
+  </div>
+</section>

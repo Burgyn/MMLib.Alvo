@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Regenerates the dashboard screenshots the site and the README show: boots scripts/demo-admin
 # (bike-workshop, seeded) on a private port and directory, captures fixed views in light and dark at
-# 1440x900, and stops the demo. IN NO RING: it binds a port and launches a browser; run it on demand
+# 1440x900 plus 2x crops of the dashboard's content region (screenshots.mjs `crops`; the rules-editor
+# crop is also copied to assets/screenshots/ for the README), and stops the demo. IN NO RING: it binds a port and launches a browser; run it on demand
 # after a dashboard change, then commit the images.
 #
 # Requires: what scripts/demo-admin requires, plus Node 22 and `npm ci` in website/.

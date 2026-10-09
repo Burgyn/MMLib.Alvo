@@ -1,0 +1,8 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import { jsonExcerpt } from '../lib/json-excerpt';
+interface Props { code: string; pointer: string; title?: string; frame?: 'auto' | 'code' | 'terminal' | 'none'; wrap?: boolean }
+const { code, pointer, title, frame, wrap } = Astro.props;
+const excerpt = jsonExcerpt(code, pointer);
+---
+<Code code={excerpt} lang="json" title={title} frame={frame} wrap={wrap} />

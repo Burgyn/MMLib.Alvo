@@ -55,6 +55,22 @@ const current = (link: Link, index: number) => {
     <ThemeSelect />
     <LanguageSelect />
   </div>
+  {isSplash && (
+    <div class="alvo-sheet-host md:sl-hidden print:hidden">
+      <button class="alvo-sheet-toggle" type="button" popovertarget="alvo-sheet" aria-label="Open the menu">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="17" x2="20" y2="17"></line></svg>
+      </button>
+      <div id="alvo-sheet" class="alvo-sheet" popover>
+        <nav aria-label="Menu" class="alvo-sheet__nav">
+          {primary.map((link) => <a href={link.href}>{link.label}</a>)}
+        </nav>
+        <div class="alvo-sheet__prefs mobile-preferences">
+          <div class="social-icons"><SocialIcons /></div>
+          <ThemeSelect />
+        </div>
+      </div>
+    </div>
+  )}
 </div>
 
 <style>
@@ -117,6 +133,49 @@ const current = (link: Link, index: number) => {
   }
 
   .alvo-search { margin-inline-start: auto; }
+
+  /* The landing has no sidebar, so no Starlight drawer: below md it gets this sheet instead (spec §4.3:
+     logo · search · menu, and the menu carries the navigation, GitHub and the theme control). */
+  .alvo-sheet-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .alvo-sheet-toggle:hover { background-color: var(--panel2); }
+  .alvo-sheet {
+    inset: var(--sl-nav-height) 0 auto 0;
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 8px var(--alvo-gutter) 20px;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background-color: var(--bg);
+    color: var(--text);
+    box-shadow: var(--shadow-pop);
+  }
+  .alvo-sheet::backdrop { background: transparent; }
+  .alvo-sheet__nav { display: grid; }
+  .alvo-sheet__nav a {
+    display: flex;
+    align-items: center;
+    min-height: 48px;
+    padding: 0 4px;
+    border-bottom: 1px solid var(--border);
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--text);
+    text-decoration: none;
+  }
+  .alvo-sheet__nav a:hover { color: var(--accentInk); }
+  .alvo-sheet__prefs { margin-top: 16px; padding: 0; border-bottom: 0; }
   .alvo-search :global(button[data-open-modal]) {
     justify-content: center;
     min-width: 44px;

@@ -1,0 +1,16 @@
+{
+  "descriptor": "website/src/snippets/landing/hook-reject.alvo.json",
+  "keys": {
+    "agent": { "roles": ["authenticated"], "scopes": ["*:read", "*:write"] }
+  },
+  "steps": [
+    {
+      "key": "agent",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": { "title": "Help", "priority": "high" },
+      "expect": 403,
+      "expectType": "forbidden"
+    }
+  ]
+}

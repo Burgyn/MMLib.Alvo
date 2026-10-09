@@ -31,7 +31,7 @@ public class ExchangeRunnerTests
     public async Task A_wrong_expectation_fails_the_run()
     {
         var spec = ExchangeSpec.Parse("fixture/wrong", """
-            { "descriptor": "website/src/snippets/landing/hero.alvo.json",
+            { "descriptor": "website/src/snippets/landing/helpdesk.alvo.json",
               "keys": { "agent": { "roles": ["authenticated"], "scopes": ["*:read"] } },
               "steps": [ { "key": "agent", "method": "GET", "path": "/api/tickets", "expect": 418 } ] }
             """);

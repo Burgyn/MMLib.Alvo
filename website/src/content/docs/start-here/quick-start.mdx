@@ -3,4 +3,11 @@ title: Quick start
 description: Run Alvo over a descriptor and call its API in five minutes.
 ---
 
+import { Code } from '@astrojs/starlight/components';
+import quickStart from '../../../snippets/shell/quick-start.sh?raw';
+
 {/* <!-- STUB-F6 --> */}
+
+Clone the repository, start the standalone stack with Docker and call its API:
+
+<Code code={quickStart.trimEnd()} lang="sh" title="Terminal" frame="terminal" />

@@ -1,0 +1,63 @@
+---
+import { getImage } from 'astro:assets';
+import JsonExcerpt from '../JsonExcerpt.astro';
+import SourceExcerpt from '../SourceExcerpt.astro';
+import Exchange from '../Exchange.astro';
+import tasks from '../../../../examples/simple-tasks/tasks.alvo.json?raw';
+import celToSql from '../../../../test/MMLib.Alvo.Data.Sqlite.Tests/cel-to-sql-sqlite.verified.txt?raw';
+import hookReject from '../../snippets/landing/hook-reject.alvo.json?raw';
+import historyLight from '../../assets/screenshots/history-light-2x.png';
+import historyDark from '../../assets/screenshots/history-dark-2x.png';
+
+const shot = (src: ImageMetadata) => getImage({ src, format: 'webp', width: 960 });
+const history = { light: await shot(historyLight), dark: await shot(historyDark) };
+const historyAlt = 'The dashboard\'s configuration history: each applied descriptor is a numbered revision with its date, and picking one shows what it changed.';
+---
+<section class="alvo-diff" aria-labelledby="diff-title">
+  <div class="alvo-wrap">
+    <h2 id="diff-title">What a team would otherwise build by hand.</h2>
+    <p class="alvo-lede">Each of these is a line in the descriptor, and each comes with the proof of what it does.</p>
+    <div class="alvo-diff__grid">
+      <div class="alvo-diff__col">
+      <article class="alvo-card">
+        <h3>Rules compile to SQL</h3>
+        <p>An access rule is CEL. A list rule becomes a parameterised predicate in the query, so a page only ever holds rows the caller may see. No rule, no access.</p>
+        <div class="alvo-proofbox">
+          <JsonExcerpt code={tasks} pointer="/entities/projects/rules/list" frame="none" />
+          <SourceExcerpt code={celToSql} from="Rule: owner_id == @user.id," to="Sql:" pick={/^Sql: (.*),$/} lang="sql" frame="none" />
+          <p class="alvo-proofbox__caption">The SQLite rendering of that rule, from the engine's snapshot test</p>
+        </div>
+        <a class="alvo-textlink" href="/MMLib.Alvo/guides/access-rules/">Access rules →</a>
+      </article>
+
+      <article class="alvo-card">
+        <h3>Audit, history, rollback</h3>
+        <p>Mark an entity audited and every row records who wrote it and when. Every applied descriptor is a revision you can preview and roll back to.</p>
+        <div class="alvo-shot-card">
+          <img class="alvo-themed--light" src={history.light.src} width={960} height={600} loading="lazy" decoding="async" alt={historyAlt} />
+          <img class="alvo-themed--dark" src={history.dark.src} width={960} height={600} loading="lazy" decoding="async" alt={historyAlt} />
+        </div>
+        <a class="alvo-textlink" href="/MMLib.Alvo/guides/audit-row-changes/">Audit row changes →</a>
+      </article>
+      </div>
+      <div class="alvo-diff__col">
+      <article class="alvo-card">
+        <h3>Hooks fail closed</h3>
+        <p>A before-hook refuses or rewrites a write inside its transaction. A refusal, a function that fails or a value its field cannot hold rolls the write back.</p>
+        <div class="alvo-proofbox">
+          <JsonExcerpt code={hookReject} pointer="/entities/tickets/hooks/beforeCreate/1" frame="none" wrap />
+          <Exchange name="landing/hook-reject" form="http" fields={['type', 'status', 'detail']} compact wrap />
+        </div>
+        <a class="alvo-textlink" href="/MMLib.Alvo/guides/before-hooks/">Validate and transform writes →</a>
+      </article>
+
+      <article class="alvo-card alvo-card--planned">
+        <div class="alvo-card__title"><h3>Dynamic entities</h3><span class="alvo-badge alvo-badge--warn">Planned</span></div>
+        <p>Let your own users define record types at runtime, in one shared, partitioned store — never a table per type. Rules and hooks will treat them exactly like declared entities.</p>
+        <p class="alvo-card__fine">Designed, not shipped: nothing on this card runs in this build.</p>
+        <a class="alvo-textlink" href="/MMLib.Alvo/concepts/dynamic-entities/">Dynamic entities (planned) →</a>
+      </article>
+      </div>
+    </div>
+  </div>
+</section>

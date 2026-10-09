@@ -1,5 +1,6 @@
 ---
 import Default from '@astrojs/starlight/components/PageTitle.astro';
+// The splash landing carries its own h1 (id _top) in its hero, so it renders no title here.
 
 const { entry, sidebar } = Astro.locals.starlightRoute;
 const isSplash = entry.data.template === 'splash';
@@ -11,7 +12,7 @@ const holdsCurrent = (item: Item): boolean =>
 const group = sidebar.find((item) => item.type === 'group' && holdsCurrent(item));
 ---
 
-{isSplash ? <Default /> : (
+{isSplash ? null : (
   <div class="alvo-page-title">
     <nav aria-label="Breadcrumb" class="alvo-breadcrumb">
       <a href="/MMLib.Alvo/start-here/why-alvo/">Docs</a>

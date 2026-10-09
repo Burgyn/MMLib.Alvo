@@ -66,7 +66,7 @@ body {
 }
 
 /* Measure (U-S9): prose reads at 68ch; code frames and tables take the full content width. */
-.sl-markdown-content :is(p, ul, ol, blockquote, dl) { max-width: 68ch; }
+.sl-markdown-content :is(p, ul, ol, blockquote, dl):not(:where(.not-content *)) { max-width: 68ch; }
 .sl-markdown-content code { font-variant-ligatures: none; }
 
 /* Headings. */
@@ -103,13 +103,13 @@ site-search button[data-open-modal]:focus-visible {
 }
 
 /* Link affordance (U-C3): prose links are underlined; cards and buttons are not. */
-.sl-markdown-content a:not(.sl-link-button, .card) {
+.sl-markdown-content a:not(.sl-link-button, .card):not(:where(.not-content *)) {
   color: var(--accentInk);
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 0.18em;
 }
-.sl-markdown-content a:not(.sl-link-button, .card):hover { text-decoration-thickness: 2px; }
+.sl-markdown-content a:not(.sl-link-button, .card):not(:where(.not-content *)):hover { text-decoration-thickness: 2px; }
 .sl-markdown-content :is(.card, .sl-link-button) {
   text-decoration: none;
   transition: border-color 0.12s, background-color 0.12s;
@@ -319,12 +319,24 @@ nav.sidebar .sidebar-content > .md\:sl-hidden { order: -1; }
 }
 .mobile-preferences .social-icons a { min-height: 44px; text-decoration: none; }
 .mobile-preferences .social-icons a::after { content: 'GitHub' / ''; margin-inline-start: 8px; font-weight: 600; }
+/* The options read Auto / Light / Dark (Starlight's strings); only this drawer shows a visible "Theme:". */
+.mobile-preferences starlight-theme-select label { position: relative; }
+.mobile-preferences starlight-theme-select label::before {
+  content: 'Theme:' / '';
+  position: absolute;
+  inset-inline-start: 0;
+  width: 50%;
+  padding-inline-end: 4px;
+  text-align: end;
+  font-weight: 600;
+  color: var(--dim);
+  pointer-events: none;
+}
 .mobile-preferences starlight-theme-select select {
   width: 100%;
-  padding-inline: 12px 32px;
+  padding-inline: calc(50% + 2px) 32px;
   font-weight: 600;
-  text-align: center;
-  text-align-last: center;
+  text-align: start;
 }
 .mobile-preferences starlight-theme-select .label-icon { display: none; }
 .mobile-preferences starlight-theme-select .caret { inset-inline-end: 12px; width: 14px; height: 14px; font-size: 14px; }

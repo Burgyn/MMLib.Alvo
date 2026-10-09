@@ -6,6 +6,8 @@ const viewports = [[390, 844], [768, 1024], [1024, 768], [1280, 800], [1440, 900
 const themes = ['light', 'dark'];
 const roadmap = '/MMLib.Alvo/project/roadmap/';
 const tapScopes = ['header.header', 'footer', '.pagination-links', '.sl-menu-button'];
+// Pages whose content is a code-led walkthrough: a missing code frame there is a regression, not a gap.
+const framedPages = new Set(['/start-here/quick-start/']);
 
 const failures = [];
 const notes = new Set();
@@ -42,6 +44,7 @@ async function check(browser, baseUrl, path, width, height, theme) {
     await primaryNav(page, width, fail);
     if (width < 768) await phoneHeader(page, docs, fail);
     if (width === 390) await phoneTargets(page, docs, fail);
+    if (width < 800 && !docs) await landingMenu(page, fail);
     if (width === 390 && docs) await phoneDocsLayout(page, path, fail);
     if (width >= 800 && docs) await sidebarPane(page, fail);
     if (width === 1280) await searchShortcut(page, fail);
@@ -104,6 +107,27 @@ async function phoneTargets(page, docs, fail) {
   await page.locator('.sl-menu-button').click();
 }
 
+// The landing has no sidebar, so no Starlight drawer: its menu sheet must reach the docs, the roadmap,
+// GitHub and the theme control (R-T4-3), each a 44px target.
+async function landingMenu(page, fail) {
+  if (!(await the(page, '.alvo-sheet-toggle', fail))) return;
+  const toggle = await page.locator('.alvo-sheet-toggle').boundingBox();
+  if (!toggle || toggle.width < 44 || toggle.height < 44) fail(`the menu button is ${toggle?.width}×${toggle?.height} (min 44×44)`);
+  await page.locator('.alvo-sheet-toggle').click();
+  await page.waitForFunction(() => document.querySelector('#alvo-sheet')?.matches(':popover-open'));
+  const wanted = [
+    ['the docs', '#alvo-sheet a[href="/MMLib.Alvo/start-here/why-alvo/"]'],
+    ['the roadmap', `#alvo-sheet a[href="${roadmap}"]`],
+    ['GitHub', '#alvo-sheet a[href="https://github.com/Burgyn/MMLib.Alvo"]'],
+    ['the theme control', '#alvo-sheet starlight-theme-select select'],
+  ];
+  for (const [what, selector] of wanted) {
+    if (!(await page.locator(selector).first().isVisible())) fail(`the menu sheet does not show ${what} (${selector})`);
+  }
+  await tallEnough(page, '#alvo-sheet', fail);
+  await page.keyboard.press('Escape');
+}
+
 async function tallEnough(page, scope, fail) {
   const small = await page.evaluate((s) => {
     const roots = [...document.querySelectorAll(s)];
@@ -125,7 +149,8 @@ async function phoneDocsLayout(page, path, fail) {
     if (top >= 240) fail(`the H1 starts at ${top}px (must be < 240: the sidebar is above the article?)`);
   }
   if ((await page.locator('.expressive-code').count()) === 0) {
-    notes.add(`${path}: no code frame yet, the copy-button check waits for its content`);
+    if (framedPages.has(path)) fail('no code frame, so the copy-button check has nothing to check');
+    else notes.add(`${path}: no code frame on this page, the copy-button check does not apply`);
     return;
   }
   const copy = page.locator('.expressive-code .copy button').filter({ visible: true }).first();
@@ -188,7 +213,7 @@ async function keyboardFocus(page, path, fail) {
   }, path);
   await page.waitForFunction(() => !document.querySelector('.main-frame[inert]'));
   await page.evaluate(() => document.activeElement?.blur());
-  if (container === 'main') notes.add(`${path}: no focusable content in the article yet, the keyboard check lands in <main>`);
+  if (container === 'main') fail('no focusable content in the article, so the keyboard check cannot reach it');
   for (let i = 0; i < 80; i++) {
     await page.keyboard.press('Tab');
     const inside = await page.evaluate((c) => Boolean(document.activeElement?.closest(c)), container);

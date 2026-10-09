@@ -1,0 +1,33 @@
+---
+import mark from '../../assets/alvo-mark-on-dark.svg';
+
+const links = [
+  { label: 'Docs', href: '/MMLib.Alvo/start-here/why-alvo/' },
+  { label: 'Reference', href: '/MMLib.Alvo/reference/' },
+  { label: 'Examples', href: '/MMLib.Alvo/examples/' },
+  { label: 'Roadmap', href: '/MMLib.Alvo/project/roadmap/' },
+  { label: 'License', href: '/MMLib.Alvo/project/license/' },
+  { label: 'GitHub', href: 'https://github.com/Burgyn/MMLib.Alvo' },
+];
+---
+<section class="alvo-close alvo-wrap" aria-labelledby="cta-title">
+  <div class="alvo-cta">
+    <div class="alvo-cta__copy">
+      <h2 id="cta-title">Ten minutes to a backend with rules and hooks.</h2>
+      <p>Alvo is pre-v0.1 and runs from source today. Nothing is on NuGet yet; packages and a published image are on the roadmap.</p>
+    </div>
+    <div class="alvo-cta-row">
+      <a class="alvo-btn alvo-btn--primary" href="/MMLib.Alvo/start-here/tutorial/">Start the tutorial <span aria-hidden="true">→</span></a>
+      <a class="alvo-btn alvo-btn--ghost" href="/MMLib.Alvo/reference/">Read the reference</a>
+    </div>
+  </div>
+</section>
+<footer class="alvo-footer">
+  <div class="alvo-footer__row alvo-wrap">
+    <span class="alvo-footer__brand"><img src={mark.src} width="22" height="22" alt="" />Alvo · pre-v0.1 · Apache-2.0</span>
+    <nav class="alvo-footer__links" aria-label="Footer">
+      {links.map((link) => <a href={link.href}>{link.label}</a>)}
+    </nav>
+    <span class="alvo-footer__meta">Built with Starlight</span>
+  </div>
+</footer>
