@@ -32,7 +32,7 @@ namespace MMLib.Alvo.Api.Tests;
 /// are <c>SqliteDataApiTests</c> (ring0, no Docker) and <c>DataApiOnPostgresTests</c> (ring2, Testcontainers).
 /// </para>
 /// </remarks>
-public abstract class DataApiEngineTests
+public abstract partial class DataApiEngineTests
 {
     private static readonly TestApiKey _admin = new("admin-key", ["admin", "authenticated"], ["*:read", "*:write"]);
 
@@ -442,6 +442,34 @@ public abstract class DataApiEngineTests
         second.StatusCode.ShouldBe(
             HttpStatusCode.PreconditionFailed, "the second writer read a version the row no longer has");
         (await ReadOwnerAsync(world, id))["name"]!.GetValue<string>().ShouldBe("Mine", "the first caller's change must survive");
+    }
+
+    /// <summary>
+    /// A before-hook reject over a <c>date</c> field — <c>new.starts_on != old.starts_on</c> — refuses a PATCH that
+    /// moves the date, and lets one that leaves it alone through.
+    /// </summary>
+    /// <remarks>
+    /// Engine-sensitive because the old row is read back out of storage: the date reaches the hook in the shape the
+    /// engine's driver materialises it as, and an interpreter comparison that cannot normalise that shape answers
+    /// <see langword="false"/> — a reject that never fires (issue #317, fail-open). The stored date is read back as
+    /// well as the status, because a refusal reported after the write landed is no refusal. The title-only PATCH is
+    /// the other half: a guard that refused every update would satisfy the first claim alone.
+    /// </remarks>
+    [Fact]
+    public async Task A_before_hook_reject_over_a_date_refuses_a_patch_that_moves_the_date()
+    {
+        await using var world = await AlvoApiWorld.FromDescriptorAsync("dated-bookings.alvo.json", [_admin], engine: Engine);
+        var id = await CreateAsync(world, "bookings", new JsonObject { ["title"] = "Kickoff", ["starts_on"] = "2026-10-05" });
+
+        using var moved = await world.SendAsync(
+            HttpMethod.Patch, $"/api/bookings/{id}", _admin, body: new JsonObject { ["starts_on"] = "2026-10-09" });
+        using var renamed = await world.SendAsync(
+            HttpMethod.Patch, $"/api/bookings/{id}", _admin, body: new JsonObject { ["title"] = "Kickoff, renamed" });
+
+        moved.StatusCode.ShouldBe(HttpStatusCode.Forbidden, await moved.ReadTextAsync());
+        renamed.StatusCode.ShouldBe(HttpStatusCode.OK, await renamed.ReadTextAsync());
+        using var read = await world.SendAsync(HttpMethod.Get, $"/api/bookings/{id}", _admin);
+        (await read.ReadJsonObjectAsync())["starts_on"]!.GetValue<string>().ShouldBe("2026-10-05", "the refused move must not have landed");
     }
 
     /// <summary>

@@ -1,4 +1,6 @@
-﻿namespace MMLib.Alvo.Expressions;
+﻿using System.Text.Json.Serialization;
+
+namespace MMLib.Alvo.Expressions;
 
 /// <summary>
 /// Which slot of the project descriptor a CEL expression was authored for. The profile determines
@@ -6,6 +8,7 @@
 /// <see cref="CelRecordState.Old"/>/<see cref="CelRecordState.New"/> field qualifiers are legal only
 /// in <see cref="Condition"/>.
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<CelProfile>))]
 public enum CelProfile
 {
     /// <summary>A row-level authorization rule (RLS-style <c>USING</c>/<c>WITH CHECK</c>).</summary>
@@ -41,9 +44,10 @@ public enum CelProfile
     /// by name rather than falling through a default arm.
     /// </para>
     /// <para>
-    /// <b>It is the one profile with a function allow-list</b>, and the list is exactly two entries:
-    /// <c>lowerAscii(x)</c> and <c>now()</c>. Every other identifier followed by <c>(</c> is still
-    /// refused, in this profile as in the others.
+    /// <b>It is the only profile that admits the legacy calls</b> <c>lowerAscii(x)</c> and <c>now()</c>;
+    /// <see cref="Condition"/> and this profile also admit the catalogued functions (the built-ins and the host's
+    /// own), each within its own profile list. Every other identifier followed by <c>(</c> is still refused,
+    /// in this profile as in the others.
     /// </para>
     /// </remarks>
     Mutate,

@@ -23,21 +23,31 @@ namespace MMLib.Alvo.Rules;
 /// <see cref="System.Threading.Tasks.Task"/> and takes no <see cref="System.Threading.CancellationToken"/>
 /// cannot await anything, so the shortest path to a network call is already closed at the contract: an
 /// implementation wanting one would have to block a transaction-holding thread on it. The indirect route —
-/// an injected service that itself can reach the network — is closed by an architecture fact over the default
-/// implementation's own dependencies, because a signature cannot express "and nothing you hold may do it
-/// either". After-hooks are where a network call belongs.
+/// an injected service that itself can reach the network — is closed for the default implementation by an
+/// architecture fact over its own dependencies, because a signature cannot express "and nothing you hold may do
+/// it either". <b>That is a property of the runner and of the descriptor's grammar, not of the process:</b> a
+/// network call stays inexpressible for the descriptor author (operator, agent), who can call only what the host
+/// exposed, and is expressible for the host developer, who registers a CEL function (<c>AddCelFunction</c>) that
+/// can hold an <c>HttpClient</c> — host code is trusted code, and the host already owns the process. The
+/// architecture fact stays green because such a function travels in the compiled tree, never as a dependency of
+/// the runner. After-hooks are where a network call belongs.
 /// </para>
 /// <para>
 /// <b>What bounds the time a hook may spend, given there is no cancellation token to bound it with.</b> The
 /// bound is structural, and it is the reason no timeout is offered. A hook is a fixed number of compiled CEL
 /// expressions — the count fixed by the descriptor at apply, never by the request — and the profile they
-/// compile in has no loop, no comprehension macro, no recursion, no user-defined function and no I/O: the
-/// only two calls it allow-lists are an ASCII fold over one string and a read of an instant the caller
-/// already bound. Each expression's tree is walked once, and its node count is bounded by its source length,
-/// which the frozen schema caps at 2000 characters. So the work is O(descriptor), not O(caller input): no
-/// request can make a hook slower, and a wall-clock budget could only fire on a machine that had already
-/// stopped serving. A timeout would add a clock read per hook plus a second failure mode inside a
-/// transaction, to guard against an overrun the grammar cannot express.
+/// compile in has no loop, no comprehension macro, no recursion, no user-defined function of the descriptor's
+/// own and no I/O: a host-registered function (<c>AddCelFunction</c>) is host code the host vouches for —
+/// synchronous and once per evaluation, but bounded only by the host's own contract — and the rest of what it
+/// allow-lists is an ASCII fold over one string and a read of an instant the caller already bound. Each
+/// expression's tree is walked once, and its node count is bounded by its source length, which the frozen schema
+/// caps at 2000 characters. So, <b>for everything Alvo itself evaluates</b>, the work is O(descriptor), not
+/// O(caller input): no request can make a hook slower, and a wall-clock budget could only fire on a machine that
+/// had already stopped serving. A timeout would add a clock read per hook plus a second failure mode inside a
+/// transaction, to guard against an overrun the grammar cannot express. <b>A host function is the one exception
+/// and the bound does not extend to it:</b> its cost may depend on the caller's input and it may block, so it is
+/// the host developer's contract to keep it synchronous, fast and free of side effects — Alvo offers no timeout
+/// around it.
 /// </para>
 /// <para>
 /// <b>A refusal is an exception and the patch is a return value, deliberately in that asymmetry.</b> A
@@ -81,9 +91,18 @@ public interface IBeforeHookRunner
     /// </param>
     /// <returns>
     /// The fields a <c>mutate</c> set, keyed by field name, and empty when no hook fired or none mutated. A
-    /// <see langword="null"/> value is a value — "store nothing here" — and not an absence.
+    /// <see langword="null"/> value is a value — "store nothing here" — and not an absence. <b>Every value honours its
+    /// target field's declared facets</b> (<c>maxLength</c>, enum, <c>format</c>, decimal precision and scale,
+    /// <c>required</c>), measured once on the final patch after the whole chain; drivers apply the patch and do not
+    /// re-check, so an implementation that returns a value outside them gives each engine a different answer.
     /// </returns>
-    /// <exception cref="AlvoAuthorizationException">A hook's <c>reject</c> fired; the write must not proceed.</exception>
+    /// <exception cref="AlvoAuthorizationException">
+    /// A hook's <c>reject</c> fired, or the value the chain would store breaks its target field's declared facets; the
+    /// write must not proceed. The message names the hook whose value it is and never the value; it names the field and
+    /// the facet unless the descriptor flags the field <c>hidden</c> (statically or per role), whose name the data API
+    /// never publishes.
+    /// </exception>
+    /// <exception cref="Exception">A CEL function failed (an internal fail-closed type); the write must not proceed.</exception>
     IReadOnlyDictionary<string, object?> Run(
         string entity,
         DataOperation operation,

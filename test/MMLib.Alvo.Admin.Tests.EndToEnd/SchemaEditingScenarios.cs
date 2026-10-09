@@ -283,7 +283,7 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
 
         await session.Page.GetByTestId("hook-points")
             .GetByRole(AriaRole.Radio, new() { Name = "beforeUpdate", Exact = true }).ClickAsync();
-        await session.Page.FillAsync("#hook-condition", "old.status == 'completed'");
+        await session.TypeConditionAsync("old.status == 'completed'");
         await session.Page.FillAsync("#hook-reject", "A completed work order cannot be reopened.");
         await session.Page.ClickAsync("[data-testid='hook-add']");
 
@@ -483,7 +483,7 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.GetByTestId("hook-new").ClickAsync();
 
         await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeUpdate", Exact = true }).ClickAsync();
-        await session.Page.FillAsync("#hook-condition", "old.status == 'completed' && new.status != 'completed'");
+        await session.TypeConditionAsync("old.status == 'completed' && new.status != 'completed'");
         await session.Page.FillAsync("#hook-reject", "A completed work order cannot be reopened.");
         await session.Page.ClickAsync("[data-testid='hook-add']");
 
@@ -513,7 +513,7 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Page.GetByTestId("hook-new").ClickAsync();
 
         await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeUpdate", Exact = true }).ClickAsync();
-        await session.Page.FillAsync("#hook-condition", "old.status == 'completed' && new.status != 'completed'");
+        await session.TypeConditionAsync("old.status == 'completed' && new.status != 'completed'");
         await session.Page.FillAsync("#hook-reject", "A completed work order cannot be reopened.");
         await session.Page.ClickAsync("[data-testid='hook-add']");
 
@@ -543,22 +543,27 @@ public sealed class HookEditingScenarios(AdminWorld world) : IClassFixture<Admin
         var rows = session.Page.Locator("[data-testid='hook-row']");
         var before = await rows.CountAsync();
 
-        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "afterDelete", Exact = true }).ClickAsync();
-        await session.Page.FillAsync("#hook-endpoint", "dispatch");
+        /* A reject, not a webhook: an endpoint is picked from the declared ones (plan Task 10), and this world declares none.
+           beforeDelete is shared with other scenarios of this world, so the row is found by its own message, not as the last. */
+        const string message = "Removing this hook is what the scenario asks for.";
+        await session.Page.GetByTestId("hook-points").GetByRole(AriaRole.Radio, new() { Name = "beforeDelete", Exact = true }).ClickAsync();
+        await session.Page.FillAsync("#hook-reject", message);
         await session.Page.ClickAsync("[data-testid='hook-add']");
         await rows.Nth(before).WaitForAsync();
+        var remove = rows.Filter(new() { HasText = message }).GetByTestId("hook-remove");
 
         /* Cancel keeps it; the verb removes it, once, however fast it is pressed twice (spec §3.2, §3.4). */
-        await session.Page.Locator("[data-testid='hook-remove']").Last.ClickAsync();
+        await remove.ClickAsync();
         await session.Dialog("remove-hook").GetByTestId("remove-hook-cancel").ClickAsync();
         (await rows.CountAsync()).ShouldBe(before + 1);
 
-        await session.Page.Locator("[data-testid='hook-remove']").Last.ClickAsync();
+        await remove.ClickAsync();
         await session.Dialog("remove-hook").GetByTestId("remove-hook-run").DblClickAsync();
         await rows.Nth(before).WaitForAsync(
             new() { State = Microsoft.Playwright.WaitForSelectorState.Detached });
         await session.SettleAsync();
         (await rows.CountAsync()).ShouldBe(before);
+        (await rows.Filter(new() { HasText = message }).CountAsync()).ShouldBe(0, "the row removed is the one asked for");
         (await session.SnackbarCountAsync("Removed from the working copy")).ShouldBe(1);
 
         session.AssertConsoleClean();

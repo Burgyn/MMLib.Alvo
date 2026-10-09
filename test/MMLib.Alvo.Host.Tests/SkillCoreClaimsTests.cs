@@ -37,7 +37,11 @@ public sealed class SkillCoreClaimsTests
         ("project-access", "cel-access", CelProfile.Access, Project),
     ];
 
-    private static readonly string[] _mutateFunctions = [CelCall.LowerAscii, CelCall.Now];
+    /// <summary>The built-ins the catalog admits in a <c>mutate</c>, in its order — the region must list exactly these.</summary>
+    private static IEnumerable<string> MutateFunctions => CelFunctionCatalog.BuiltIns.Functions
+        .Where(function => function.Profiles.Contains(CelProfile.Mutate))
+        .Select(function => function.Name)
+        .Distinct(StringComparer.Ordinal);
 
     /// <summary>
     /// The field each allowed <c>cel-computed</c> example is declared on for the real dry run. The compiler is not the
@@ -96,7 +100,7 @@ public sealed class SkillCoreClaimsTests
 
     [Fact]
     public void The_mutate_functions_are_the_ones_the_profile_allow_lists() =>
-        SkillCatalogue.Tokens(Region("hooks", "mutate-functions")).ShouldBe(_mutateFunctions);
+        SkillCatalogue.Tokens(Region("hooks", "mutate-functions")).ShouldBe(MutateFunctions);
 
     [Fact]
     public void The_honoured_blocks_are_the_capability_reports() =>

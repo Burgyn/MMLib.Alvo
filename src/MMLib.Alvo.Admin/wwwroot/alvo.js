@@ -371,6 +371,95 @@
     }
   };
 
+  /* --- The import box --------------------------------------------------
+     A server-interactive box sends its whole text to the circuit on every
+     input, and the circuit's hub takes 32 KB a message (#316). A box that
+     carries data-alvo-streamed therefore never sends its text over the
+     circuit: its input and change events are stopped here, on the window in
+     the capture phase, ahead of the framework's own listener on the document,
+     and the circuit hears only alvo:measured, "<lines> <1 when it holds more
+     than whitespace, else 0>". The text travels once, on submit, as a stream
+     the page asks for (streamOf), which Blazor carries in chunks.
+
+     A box that also carries data-alvo-max-chars refuses an input over it:
+     the box gets back its last text within the ceiling, and alvo:oversized
+     carries the paste's character count to the screen, which draws the
+     refusal. A submit over it is refused the same way, and streams nothing. One UTF-16 unit is at most three UTF-8 bytes, so the character
+     ceiling bounds the stream's bytes too (ImportLimit says why).
+     ---------------------------------------------------------------------- */
+
+  const withinCeiling = new WeakMap();
+
+  const isStreamed = (target) =>
+    (target instanceof HTMLTextAreaElement || target instanceof HTMLInputElement) && target.dataset.alvoStreamed !== undefined;
+
+  const maxCharsOf = (box) => (box.dataset.alvoMaxChars === undefined ? Infinity : Number(box.dataset.alvoMaxChars));
+
+  const lineCount = (text) => {
+    if (text.length === 0) {
+      return 0;
+    }
+
+    let lines = 1;
+    for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) {
+      lines += 1;
+    }
+
+    return lines;
+  };
+
+  const measureBox = (box) => `${lineCount(box.value)} ${/\S/.test(box.value) ? 1 : 0}`;
+
+  const refuseOversized = (length) => emit('oversized', { value: String(length) });
+
+  const onBoxFocus = (event) => {
+    if (isStreamed(event.target) && !withinCeiling.has(event.target)) {
+      withinCeiling.set(event.target, event.target.value);
+    }
+  };
+
+  const guardStreamedBox = (event) => {
+    const box = event.target;
+    if (!isStreamed(box)) {
+      return;
+    }
+
+    event.stopImmediatePropagation();
+    if (box.value.length > maxCharsOf(box)) {
+      const length = box.value.length;
+      box.value = withinCeiling.get(box) ?? '';
+      refuseOversized(length);
+      return;
+    }
+
+    withinCeiling.set(box, box.value);
+    emit('measured', { value: measureBox(box) });
+  };
+
+  const streamedBox = (id) => {
+    const box = document.getElementById(id);
+    return isStreamed(box) ? box : null;
+  };
+
+  /* What the page reads once its subscription is up, so an input made before it was is not missed. */
+  const measureOf = (id) => {
+    const box = streamedBox(id);
+    return box ? measureBox(box) : null;
+  };
+
+  /* The box's text as it is now, for the page to read as a stream (the framework wraps what this answers in a stream
+     reference). Empty for a box that is gone, or over its ceiling, which is refused here instead: the page reads an empty
+     text as nothing to import. */
+  const streamOf = (id) => {
+    const box = streamedBox(id);
+    if (box && box.value.length > maxCharsOf(box)) {
+      refuseOversized(box.value.length);
+    }
+
+    const text = box && box.value.length <= maxCharsOf(box) ? box.value : '';
+    return new Blob([text], { type: 'text/plain;charset=utf-8' });
+  };
+
   /* --- Tab strip names ---------------------------------------------------
      MudTabs puts its own attributes on its outer frame and draws role=tablist a
      level inside, where no parameter reaches, so the strip would lose the name
@@ -391,6 +480,9 @@
   document.addEventListener('keydown', onHandleKey);
   document.addEventListener('dblclick', onHandleDoubleClick);
   document.addEventListener('focusin', onHandleFocus);
+  window.addEventListener('focusin', onBoxFocus, true);
+  window.addEventListener('input', guardStreamedBox, true);
+  window.addEventListener('change', guardStreamedBox, true);
 
-  window.alvo = { toggleTheme, toggleDensity, resolvedTheme, nameTablist };
+  window.alvo = { toggleTheme, toggleDensity, resolvedTheme, nameTablist, measureOf, streamOf };
 })();

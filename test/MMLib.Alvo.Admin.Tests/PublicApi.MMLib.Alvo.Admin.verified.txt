@@ -594,13 +594,42 @@ namespace MMLib.Alvo.Admin.Components.Home
 }
 namespace MMLib.Alvo.Admin.Components.Integrations
 {
+    public class EndpointEditor : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public EndpointEditor() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Editing { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnClose { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> OnSaved { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Warning { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnInitialized() { }
+    }
     [Microsoft.AspNetCore.Authorization.Authorize]
     [Microsoft.AspNetCore.Components.Route("/admin/integrations")]
-    public class Integrations : Microsoft.AspNetCore.Components.ComponentBase
+    public class Integrations : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public Integrations() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
+    }
+    public class TemplateEditor : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public TemplateEditor() { }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Editing { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback OnClose { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> OnSaved { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string? Warning { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnInitialized() { }
     }
 }
 namespace MMLib.Alvo.Admin.Components.Rules
@@ -631,7 +660,7 @@ namespace MMLib.Alvo.Admin.Components.Rules
         public void Dispose() { }
         protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
     }
-    public class RulesTab : Microsoft.AspNetCore.Components.ComponentBase
+    public class RulesTab : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public RulesTab() { }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -648,6 +677,7 @@ namespace MMLib.Alvo.Admin.Components.Rules
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, string>> Rules { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
     }
 }
 namespace MMLib.Alvo.Admin.Components.Schema
@@ -659,6 +689,22 @@ namespace MMLib.Alvo.Admin.Components.Schema
         [Microsoft.AspNetCore.Components.Parameter]
         public MMLib.Alvo.Schema.EntitySchema Entity { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+    }
+    public class ConditionBuilder : Microsoft.AspNetCore.Components.ComponentBase
+    {
+        public ConditionBuilder() { }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Entity { get; set; }
+        [Microsoft.AspNetCore.Components.EditorRequired]
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Point { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Value { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public Microsoft.AspNetCore.Components.EventCallback<string> ValueChanged { get; set; }
+        protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        protected override void OnParametersSet() { }
     }
     public class DescriptorDiff : Microsoft.AspNetCore.Components.ComponentBase
     {
@@ -699,7 +745,7 @@ namespace MMLib.Alvo.Admin.Components.Schema
         public void Dispose() { }
         protected override System.Threading.Tasks.Task OnParametersSetAsync() { }
     }
-    public class FieldEditor : Microsoft.AspNetCore.Components.ComponentBase
+    public class FieldEditor : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public FieldEditor() { }
         [Microsoft.AspNetCore.Components.Parameter]
@@ -721,6 +767,7 @@ namespace MMLib.Alvo.Admin.Components.Schema
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<string> Targets { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
         protected override void OnParametersSet() { }
         public sealed class NewField : System.IEquatable<MMLib.Alvo.Admin.Components.Schema.FieldEditor.NewField>
         {
@@ -743,11 +790,13 @@ namespace MMLib.Alvo.Admin.Components.Schema
         public Microsoft.AspNetCore.Components.EventCallback<string> OnRemove { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
     }
-    public class HooksTab : Microsoft.AspNetCore.Components.ComponentBase
+    public class HooksTab : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
     {
         public HooksTab() { }
         [Microsoft.AspNetCore.Components.Parameter]
         public bool Editable { get; set; }
+        [Microsoft.AspNetCore.Components.Parameter]
+        public string Entity { get; set; }
         [Microsoft.AspNetCore.Components.EditorRequired]
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<System.Collections.Generic.KeyValuePair<string, string>> Hooks { get; set; }
@@ -758,6 +807,7 @@ namespace MMLib.Alvo.Admin.Components.Schema
         [Microsoft.AspNetCore.Components.Parameter]
         public System.Collections.Generic.IReadOnlyList<MMLib.Alvo.Management.ManagementRefusedFeature> Refused { get; set; }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
+        public void Dispose() { }
         public sealed class HookAt : System.IEquatable<MMLib.Alvo.Admin.Components.Schema.HooksTab.HookAt>
         {
             public HookAt(string Point, int Position) { }
@@ -832,11 +882,12 @@ namespace MMLib.Alvo.Admin.Components.Schema
     }
     [Microsoft.AspNetCore.Authorization.Authorize]
     [Microsoft.AspNetCore.Components.Route("/admin/transfer")]
-    public class Transfer : Microsoft.AspNetCore.Components.ComponentBase, System.IDisposable
+    public class Transfer : Microsoft.AspNetCore.Components.ComponentBase, System.IAsyncDisposable
     {
         public Transfer() { }
         protected override void BuildRenderTree(Microsoft.AspNetCore.Components.Rendering.RenderTreeBuilder @__builder) { }
-        public void Dispose() { }
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        protected override System.Threading.Tasks.Task OnAfterRenderAsync(bool firstRender) { }
         protected override System.Threading.Tasks.Task OnInitializedAsync() { }
     }
 }

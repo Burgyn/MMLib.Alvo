@@ -36,6 +36,11 @@ namespace MMLib.Alvo.Tests.Rules;
 /// which by construction holds only committed events, so that is where a network call belongs. A hook that
 /// needs one is a hook on the wrong rung.
 /// </para>
+/// <para>
+/// <b>Host functions do not change this.</b> A descriptor author cannot express I/O in a hook (inexpressible,
+/// as above); a host developer who registers a CEL function writes host code, and that code is the host's
+/// responsibility. It reaches a hook through the compiled tree, never as a dependency of the runner.
+/// </para>
 /// </remarks>
 public class BeforeHookIsolationArchitectureTests
 {
@@ -56,6 +61,15 @@ public class BeforeHookIsolationArchitectureTests
         "MMLib.Alvo.Events.IEmailSender",
         "MMLib.Alvo.Events.Internal.WebhookDelivery",
     ];
+
+    /// <summary>
+    /// A host function reaches a hook through the compiled tree (the overload bound into the call node), never as a
+    /// dependency of the runner — so the walk above still measures everything the runner itself can reach.
+    /// </summary>
+    [Fact]
+    public void A_host_function_reaches_a_hook_through_the_compiled_tree_not_the_runners_constructor() =>
+        typeof(BeforeHookRunner).GetConstructors().ShouldHaveSingleItem().GetParameters()
+            .Select(parameter => parameter.ParameterType).ShouldBe([typeof(IPolicyCatalogProvider)]);
 
     /// <summary>
     /// The fact. Nothing reachable from <c>BeforeHookRunner</c>'s constructor closure can reach a network.

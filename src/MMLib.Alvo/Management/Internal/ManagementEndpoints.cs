@@ -57,7 +57,9 @@ internal static class ManagementEndpoints
         MapRevision(group);
         MapSchema(group);
         MapCapabilities(group);
+        MapCelFunctions(group);
         MapPolicySimulation(group);
+        MapExpressionCheck(group);
         MapApply(group);
         MapRollback(group);
 
@@ -259,6 +261,18 @@ internal static class ManagementEndpoints
             new ManagementRoute(nameof(IAlvoManagement.GetCapabilitiesAsync), ManagementOperation.GetCapabilities));
 
     /// <summary>
+    /// <c>GET {prefix}/projects/{project}/cel/functions</c> — <see cref="IAlvoManagement.GetCelFunctionsAsync"/>.
+    /// </summary>
+    /// <param name="group">The group to map into.</param>
+    private static void MapCelFunctions(RouteGroupBuilder group) =>
+        Gate(
+            group.MapGet(
+                "/projects/{project}/cel/functions",
+                (string project, IAlvoManagement management, CancellationToken ct) =>
+                    Answer(() => management.GetCelFunctionsAsync(project, ct))),
+            new ManagementRoute(nameof(IAlvoManagement.GetCelFunctionsAsync), ManagementOperation.GetCelFunctions));
+
+    /// <summary>
     /// <c>POST {prefix}/projects/{project}/policy/simulate</c> —
     /// <see cref="IAlvoManagement.SimulatePolicyAsync"/>.
     /// </summary>
@@ -286,6 +300,25 @@ internal static class ManagementEndpoints
                     CancellationToken ct) =>
                     Answer(() => management.SimulatePolicyAsync(project, simulation!, ct))),
             new ManagementRoute(nameof(IAlvoManagement.SimulatePolicyAsync), ManagementOperation.SimulatePolicy));
+
+    /// <summary>
+    /// <c>POST {prefix}/projects/{project}/cel/check</c> — <see cref="IAlvoManagement.CheckExpressionAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// The body binds as nullable for the reason <see cref="MapPolicySimulation"/> documents: a required body
+    /// answers a framework 400 before the gate, and the gate must answer first.
+    /// </remarks>
+    /// <param name="group">The group to map into.</param>
+    private static void MapExpressionCheck(RouteGroupBuilder group) =>
+        Gate(
+            group.MapPost(
+                "/projects/{project}/cel/check",
+                (string project,
+                    ManagementExpressionCheck? request,
+                    IAlvoManagement management,
+                    CancellationToken ct) =>
+                    Answer(() => management.CheckExpressionAsync(project, request!, ct))),
+            new ManagementRoute(nameof(IAlvoManagement.CheckExpressionAsync), ManagementOperation.CheckExpression));
 
     /// <summary>
     /// <c>PUT {prefix}/projects/{project}/descriptor</c> — <see cref="IAlvoManagement.ApplyDescriptorAsync"/>.

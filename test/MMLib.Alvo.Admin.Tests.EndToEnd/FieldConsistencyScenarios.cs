@@ -37,11 +37,13 @@ public sealed class FieldConsistencyScenarios(AdminWorld world) : IClassFixture<
 
         await session.Button("New entity", exact: true).ClickAsync();
         await fields.ReadAsync(session.Dialog("new-entity"), "the new entity editor", expect: ["Name"]);
+        await session.WaitForFocusInsideAsync("new-entity", FocusScope.Dialog);
         await session.Page.Keyboard.PressAsync("Escape");
 
         await session.GoAsync("/schema/work_orders");
         await session.Page.GetByTestId("add-field").ClickAsync();
         await fields.ReadAsync(session.Dialog("field-sheet"), "the new field editor", expect: ["Name", "Max length"]);
+        await session.WaitForFocusInsideAsync("field-sheet", FocusScope.Dialog);
         await session.Page.Keyboard.PressAsync("Escape");
 
         await session.OpenTabAsync("Rules");
@@ -64,6 +66,7 @@ public sealed class FieldConsistencyScenarios(AdminWorld world) : IClassFixture<
         await fields.ReadAsync(session.Content, "the data search", expect: ["Search regions"]);
         await session.Button("New record", exact: true).ClickAsync();
         await fields.ReadAsync(session.Dialog("record-sheet"), "the record editor", expect: ["Code", "Name"]);
+        await session.WaitForFocusInsideAsync("record-sheet", FocusScope.Dialog);
         await session.Page.Keyboard.PressAsync("Escape");
 
         var email = $"look-{scheme}@example.com".ToLowerInvariant();
@@ -151,6 +154,7 @@ public sealed class ConfirmFieldConsistencyScenarios(AdminWorld world) : IClassF
         await session.Page.GetByTestId("rollback-run").ClickAsync();
         var confirm = session.Dialog("rollback-confirm");
         await fields.ReadAsync(confirm, $"the rollback confirm ({scheme})", expect: [TypeTheName]);
+        await session.WaitForFocusInsideAsync("rollback-confirm", FocusScope.Dialog);
         await session.Page.Keyboard.PressAsync("Escape");
         await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
     }
@@ -162,6 +166,7 @@ public sealed class ConfirmFieldConsistencyScenarios(AdminWorld world) : IClassF
         await session.Button("Apply these changes").ClickAsync();
         var confirm = session.Dialog("apply-confirm");
         await fields.ReadAsync(confirm, $"the apply confirm ({scheme})", expect: [TypeTheName]);
+        await session.WaitForFocusInsideAsync("apply-confirm", FocusScope.Dialog);
         await session.Page.Keyboard.PressAsync("Escape");
         await confirm.WaitForAsync(new() { State = WaitForSelectorState.Detached });
     }

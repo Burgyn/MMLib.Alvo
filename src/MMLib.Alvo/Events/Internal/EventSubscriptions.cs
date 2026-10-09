@@ -2,6 +2,7 @@
 
 using MMLib.Alvo.Data;
 using MMLib.Alvo.Expressions;
+using MMLib.Alvo.Expressions.Internal;
 using MMLib.Alvo.Rules;
 
 using System.Globalization;
@@ -107,11 +108,18 @@ internal static class EventSubscriptions
     /// always holds.
     /// </summary>
     /// <remarks>
-    /// A condition that throws selects <b>nothing</b> and does not take the batch down: a broken predicate is a
+    /// <para>
+    /// A CEL function that fails is the one reachable throw: it drops the hook like any other, but at Warning with
+    /// the function's name (<see cref="EventLog.ConditionFunctionFailed"/>), because the dropped hook may be an
+    /// audit webhook.
+    /// </para>
+    /// <para>
+    /// Any other condition that throws selects <b>nothing</b> and does not take the batch down: a broken predicate is a
     /// fail-closed refusal, exactly as an unprimed catalog denies every operation. It is recorded at Debug
     /// rather than Warning because the loud version is per event, which is the noise the whole execution-log
     /// criterion exists to prevent — and because a condition compiled at apply time cannot fail on an author's
     /// mistake, so this is an internal invariant rather than something a descriptor can cause.
+    /// </para>
     /// </remarks>
     private static bool Selects(
         CompiledAfterHook hook,
@@ -135,6 +143,12 @@ internal static class EventSubscriptions
         {
             return evaluator.Evaluate(
                 hook.Condition, @event.Data.Record ?? AlvoRecord.Empty, @event.Data.OldRecord, context);
+        }
+        catch (CelFunctionException failure)
+        {
+            EventLog.ConditionFunctionFailed(
+                logger, hook.Path, failure.FunctionName, @event.Id, failure.InnerException ?? failure);
+            return false;
         }
         catch (Exception failure)
         {

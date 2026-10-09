@@ -158,6 +158,25 @@ internal static partial class EventLog
     internal static partial void ConditionRefusedTheHook(
         ILogger logger, string hook, Guid eventId, Exception failure);
 
+    /// <summary>A CEL function failed inside an after-hook's condition, so the hook was not selected.</summary>
+    /// <remarks>
+    /// Warning, unlike <see cref="ConditionRefusedTheHook"/>: this one is reachable — a host function can throw —
+    /// and the dropped hook may be an audit webhook an operator relies on. It names the hook, the function and the
+    /// event, and carries the host's exception; the event's own record data is never logged (the event id is the
+    /// join key to the outbox row).
+    /// </remarks>
+    /// <param name="logger">The logger the dispatcher writes through.</param>
+    /// <param name="hook">The hook's own JSON pointer.</param>
+    /// <param name="function">The failed function's name.</param>
+    /// <param name="eventId">The event whose subscription was being decided.</param>
+    /// <param name="failure">The host's exception, or the built-in's refusal.</param>
+    [LoggerMessage(
+        Level = LogLevel.Warning,
+        Message = "Alvo did not select after-hook {Hook} for event {EventId}: the CEL function {Function} failed "
+            + "while its condition was evaluated. The event is not retried for this hook.")]
+    internal static partial void ConditionFunctionFailed(
+        ILogger logger, string hook, string function, Guid eventId, Exception failure);
+
     /// <summary>A hook's condition reads <c>@user.id</c> and the event records no actor, so it was not selected.</summary>
     /// <remarks>
     /// Debug for <see cref="ConditionRefusedTheHook"/>'s reasons, and separate from it because the cause is
