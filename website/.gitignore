@@ -8,3 +8,4 @@ src/content/docs/project/contributing.md
 public/llms.txt
 public/llms-full.txt
 .lighthouse/
+src/styles/alvo-tokens.generated.css

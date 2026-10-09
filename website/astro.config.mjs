@@ -1,13 +1,21 @@
 // @ts-check
+import { readFileSync } from 'node:fs';
 import { defineConfig, fontProviders } from 'astro/config';
 import { unified } from '@astrojs/markdown-remark';
 import starlight from '@astrojs/starlight';
+import { ExpressiveCodeTheme } from '@astrojs/starlight/expressive-code';
 import starlightLinksValidator from 'starlight-links-validator';
 import rehypeMermaid from 'rehype-mermaid';
 import { remarkMermaidPre } from './plugins/remark-mermaid-pre.mjs';
+import { rehypeTableWrap } from './plugins/rehype-table-wrap.mjs';
 
 const description =
   'Describe your backend in one JSON file. Get a secure, production-shaped API — standalone in Docker or embedded in your ASP.NET Core app.';
+
+const codeTheme = (name) =>
+  ExpressiveCodeTheme.fromJSONString(readFileSync(new URL(`./src/styles/code-themes/${name}.json`, import.meta.url), 'utf8'));
+
+const page = (label, slug) => ({ label, slug });
 
 export default defineConfig({
   site: 'https://burgyn.github.io',
@@ -16,7 +24,7 @@ export default defineConfig({
   fonts: [
     {
       provider: fontProviders.fontsource(), name: 'Public Sans', cssVariable: '--font-public-sans',
-      weights: [400, 500, 600, 700], styles: ['normal'], subsets: ['latin', 'latin-ext'],
+      weights: [400, 500, 600, 700, 800], styles: ['normal'], subsets: ['latin', 'latin-ext'],
       fallbacks: ['system-ui', 'sans-serif'],
     },
     {
@@ -28,7 +36,7 @@ export default defineConfig({
   markdown: {
     processor: unified({
       remarkPlugins: [remarkMermaidPre],
-      rehypePlugins: [[rehypeMermaid, { strategy: 'img-svg', dark: true }]],
+      rehypePlugins: [rehypeTableWrap, [rehypeMermaid, { strategy: 'img-svg', dark: true }]],
     }),
   },
   vite: { server: { fs: { allow: ['..'] } } },
@@ -36,18 +44,107 @@ export default defineConfig({
     starlight({
       title: 'Alvo',
       description,
-      logo: { src: './src/assets/alvo-mark.svg', alt: 'Alvo' },
+      logo: { light: './src/assets/alvo-mark.svg', dark: './src/assets/alvo-mark-on-dark.svg', alt: 'Alvo' },
       favicon: '/favicon.svg',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/Burgyn/MMLib.Alvo' }],
       editLink: { baseUrl: 'https://github.com/Burgyn/MMLib.Alvo/edit/main/website/' },
-      customCss: ['./src/styles/theme.css'],
-      components: { Head: './src/components/Head.astro' },
+      customCss: ['./src/styles/alvo-tokens.generated.css', './src/styles/theme.css'],
+      expressiveCode: {
+        themes: [codeTheme('alvo-dark'), codeTheme('alvo-light')],
+        minSyntaxHighlightingColorContrast: 0,
+        styleOverrides: {
+          codeBackground: 'var(--codeBg)',
+          borderColor: 'var(--alvo-code-border)',
+          borderRadius: 'var(--radius-md)',
+          codeFontFamily: 'var(--font-ibm-plex-mono)',
+          codeFontSize: '0.8125rem',
+          codeLineHeight: '1.7',
+          uiFontFamily: 'var(--font-public-sans)',
+          frames: {
+            editorBackground: 'var(--codeBg)',
+            terminalBackground: 'var(--codeBg)',
+            editorTabBarBackground: 'var(--codeBg)',
+            editorActiveTabBackground: 'var(--codeBg)',
+            editorActiveTabForeground: 'var(--text)',
+            editorActiveTabIndicatorTopColor: 'transparent',
+            editorActiveTabIndicatorBottomColor: 'transparent',
+            editorTabBarBorderBottomColor: 'var(--alvo-code-border)',
+            terminalTitlebarBackground: 'var(--codeBg)',
+            terminalTitlebarForeground: 'var(--dim)',
+            terminalTitlebarBorderBottomColor: 'var(--alvo-code-border)',
+            terminalTitlebarDotsForeground: 'var(--border2)',
+            inlineButtonForeground: 'var(--dim)',
+            inlineButtonBorder: 'var(--alvo-control-border)',
+            frameBoxShadowCssValue: 'none',
+          },
+        },
+      },
+      components: {
+        Head: './src/components/Head.astro',
+        Header: './src/components/Header.astro',
+        Banner: './src/components/Banner.astro',
+      },
       plugins: [starlightLinksValidator()],
       sidebar: [
-        { label: 'Start here', items: ['start-here/why-alvo', 'start-here/quick-start', 'start-here/tutorial', 'start-here/embed'] },
-        { label: 'Guides', items: [{ autogenerate: { directory: 'guides' } }] },
-        { label: 'Concepts', items: [{ autogenerate: { directory: 'concepts' } }] },
-        { label: 'Project', items: ['project/roadmap', 'project/changelog', 'project/contributing', 'project/license'] },
+        { label: 'Start here', items: [
+          page('Why Alvo', 'start-here/why-alvo'),
+          page('Quick start', 'start-here/quick-start'),
+          page('Tutorial: your first backend', 'start-here/tutorial'),
+          page('Run your own descriptor', 'start-here/run-your-own'),
+          page('Embed in ASP.NET Core', 'start-here/embed'),
+          page('For coding agents', 'start-here/coding-agents'),
+          page('What works today', 'start-here/what-works-today'),
+        ] },
+        { label: 'Model your data', collapsed: true, items: [
+          page('Entities and fields', 'guides/entities-and-fields'),
+          page('Computed fields and rollups', 'guides/computed-and-rollups'),
+          page('Indexes and uniqueness', 'guides/indexes'),
+          page('Apply and evolve your descriptor', 'guides/apply-and-evolve'),
+        ] },
+        { label: 'Secure it', collapsed: true, items: [
+          page('Authentication and API keys', 'guides/authentication'),
+          page('Access rules', 'guides/access-rules'),
+          page('Multi-tenancy', 'guides/multi-tenancy'),
+        ] },
+        { label: 'Add behaviour', collapsed: true, items: [
+          page('Validate and transform writes (before-hooks)', 'guides/before-hooks'),
+          page('After-hooks, events and webhooks', 'guides/after-hooks-and-webhooks'),
+          page('Audit row changes', 'guides/audit-row-changes'),
+        ] },
+        { label: 'Use the API', collapsed: true, items: [
+          page('Read data: filter, sort, page', 'guides/read-data'),
+          page('Write data safely', 'guides/write-data'),
+          page('Handle errors', 'guides/handle-errors'),
+        ] },
+        { label: 'Extend in C#', collapsed: true, items: [
+          page('Use your own authentication', 'guides/own-authentication'),
+          page('Call Alvo from your endpoints', 'guides/call-from-endpoints'),
+          page('Custom CEL functions', 'guides/custom-cel-functions'),
+        ] },
+        { label: 'Operate', collapsed: true, items: [
+          page('Running in production', 'guides/production'),
+          page('The admin dashboard', 'guides/admin-dashboard'),
+          page('The schema assistant', 'guides/schema-assistant'),
+        ] },
+        { label: 'Concepts', collapsed: true, items: [
+          page('The project descriptor', 'concepts/descriptor'),
+          page('CEL in Alvo', 'concepts/cel'),
+          page('Security model', 'concepts/security-model'),
+          page('Standalone and embedded', 'concepts/modes'),
+          page('Architecture', 'concepts/architecture'),
+          page('Dynamic entities (planned)', 'concepts/dynamic-entities'),
+          page('Glossary', 'concepts/glossary'),
+        ] },
+        { label: 'Reference', collapsed: true, items: [
+          page('Data API conventions', 'data-api/conventions'),
+        ] },
+        { label: 'Project', collapsed: true, items: [
+          page('Roadmap and status', 'project/roadmap'),
+          page('Changelog', 'project/changelog'),
+          page('Contributing', 'project/contributing'),
+          page('License', 'project/license'),
+          page('FAQ', 'project/faq'),
+        ] },
       ],
     }),
   ],
