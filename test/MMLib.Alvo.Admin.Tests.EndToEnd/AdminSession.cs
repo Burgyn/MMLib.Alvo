@@ -315,7 +315,7 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
         await Button("New entity", exact: true).ClickAsync().ConfigureAwait(false);
         await Page.FillAsync("#new-entity-name", name).ConfigureAwait(false);
         await Page.Keyboard.PressAsync("Enter").ConfigureAwait(false);
-        await Page.WaitForURLAsync($"**/schema/{name}").ConfigureAwait(false);
+        await Page.WaitForAddressAsync($"**/schema/{name}").ConfigureAwait(false);
         await PreviewPendingAsync().ConfigureAwait(false);
         await Page.FillAsync("#apply-reason", $"Add {name}").ConfigureAwait(false);
         await Button("Apply these changes").ClickAsync().ConfigureAwait(false);
@@ -422,7 +422,18 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     public async Task PreviewPendingAsync()
     {
         await Page.ClickAsync("[data-testid='pending-preview']").ConfigureAwait(false);
-        await Page.WaitForURLAsync("**/changes").ConfigureAwait(false);
+        try
+        {
+            await Page.WaitForAddressAsync("**/changes").ConfigureAwait(false);
+        }
+        catch (TimeoutException timeout)
+        {
+            var links = await Page.Locator("[data-testid='pending-preview']").CountAsync().ConfigureAwait(false);
+            throw new TimeoutException(
+                $"Preview never reached /changes; the page is at {Page.Url}, {links} preview link(s), focus {await FocusedAsync().ConfigureAwait(false)}, "
+                + $"console: {string.Join(" | ", _noise)}", timeout);
+        }
+
         await WaitForPlanAsync().ConfigureAwait(false);
     }
 
@@ -466,7 +477,7 @@ public sealed class AdminSession(IBrowserContext context, IPage page, string bas
     {
         try
         {
-            await Page.WaitForURLAsync("**/changes").ConfigureAwait(false);
+            await Page.WaitForAddressAsync("**/changes").ConfigureAwait(false);
         }
         catch (TimeoutException timeout)
         {

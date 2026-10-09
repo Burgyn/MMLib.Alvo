@@ -45,6 +45,23 @@ public sealed partial class EndToEndSelectorTests
     public void The_scenarios_match_no_more_copy_with_has_text_than_they_did()
         => Ratchet(HasTextSelector().Count(_scenarios), HasTextSelectors, ":has-text( selectors");
 
+    /// <summary>
+    /// No end-to-end code waits for an address with Playwright's own <c>WaitForURLAsync</c>, which misses a navigation that
+    /// lands between its read of the address and its subscription to the next one; <c>PageAddress.WaitForAddressAsync</c>
+    /// is the one way, and says why.
+    /// </summary>
+    [Fact]
+    public void The_scenarios_wait_for_an_address_only_through_PageAddress()
+    {
+        var offenders = Directory.EnumerateFiles(
+                Path.Combine(RepositoryRoot.Find(), "test", "MMLib.Alvo.Admin.Tests.EndToEnd"), "*.cs")
+            .Where(file => Path.GetFileName(file) != "PageAddress.cs")
+            .Where(file => WithoutComments(File.ReadAllText(file)).Contains(".WaitForURLAsync(", StringComparison.Ordinal))
+            .Select(Path.GetFileName);
+
+        offenders.ShouldBeEmpty("Playwright's WaitForURLAsync races the navigation it waits for; use WaitForAddressAsync");
+    }
+
     /// <summary>The counts see what they are meant to, and nothing the policy prefers, and no comment.</summary>
     [Fact]
     public void The_counts_see_a_class_and_a_has_text_and_not_a_test_id_a_role_or_a_comment()

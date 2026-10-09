@@ -304,8 +304,8 @@ public class AdminWorld : IAsyncLifetime
                cold browser process and for the first render of a server-interactive circuit at
                once, and a suite that fails one run in ten for that reason teaches everyone to
                re-run it instead of reading it. */
-            await session.Page.WaitForURLAsync(
-                $"**{AlvoAdmin.BasePath}", new() { Timeout = 60_000 }).ConfigureAwait(false);
+            await session.Page.WaitForAddressAsync(
+                $"**{AlvoAdmin.BasePath}").ConfigureAwait(false);
         }
         catch (TimeoutException)
         {

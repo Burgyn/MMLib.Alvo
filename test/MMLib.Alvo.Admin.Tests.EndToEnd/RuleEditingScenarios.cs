@@ -95,7 +95,7 @@ public sealed class RuleEditingScenarios(AdminWorld world) : IClassFixture<Admin
 
         await schema.ClickAsync();
         await session.Dialog("unsaved-rules").GetByTestId("unsaved-rules-discard").ClickAsync();
-        await session.Page.WaitForURLAsync("**/admin/schema");
+        await session.Page.WaitForAddressAsync("**/admin/schema");
         await session.FocusAfterConfirmAsync("unsaved-rules", "h1");
 
         await session.GoAsync("/schema/work_orders?tab=rules");
@@ -143,7 +143,7 @@ public sealed class RuleEditingScenarios(AdminWorld world) : IClassFixture<Admin
         await using var session = await world.SignInAsync(TestContext.Current.CancellationToken);
         await session.GoAsync("/schema");
         await session.Page.GetByTestId("entity-row-customers").ClickAsync();
-        await session.Page.WaitForURLAsync("**/schema/customers");
+        await session.Page.WaitForAddressAsync("**/schema/customers");
         await session.OpenTabAsync("Rules");
         await session.Page.FillAsync("#rule-delete", "false");
         await session.Page.GetByTestId("rule-dirty-delete").WaitForAsync();
@@ -258,7 +258,7 @@ public sealed class RenameOverUnsavedRuleScenarios(AdminWorld world) : IClassFix
         editor = await OpenRenameAsync(session);
         await session.Page.FillAsync("#rename-entity-name", "clients");
         await editor.GetByTestId("rename-save").ClickAsync();
-        await session.Page.WaitForURLAsync("**/schema/clients");
+        await session.Page.WaitForAddressAsync("**/schema/clients");
         await session.SnackbarAsync("Renamed to clients in the working copy");
         await session.OpenTabAsync("Rules");
         (await session.Page.InputValueAsync("#rule-list")).ShouldNotBe(typed, "the unsaved rule was discarded, as it said");

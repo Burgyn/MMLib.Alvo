@@ -39,7 +39,7 @@ public sealed class RevokedSessionScenarios(AdminWorld world) : IClassFixture<Ad
         /* A reload rather than GoAsync: that one waits for the shell to settle, and the point is that
            there is no shell to settle. */
         await session.Page.ReloadAsync();
-        await session.Page.WaitForURLAsync("**/admin/sign-in**");
+        await session.Page.WaitForAddressAsync("**/admin/sign-in**");
         (await session.Page.GetByTestId("error-panel").CountAsync()).ShouldBe(
             0, "a disabled operator's cookie is refused before the shell renders, not answered with a refused screen");
     }
@@ -111,7 +111,7 @@ public sealed class OpenCircuitRevocationScenarios(AdminWorld world) : IClassFix
         await session.Button("New entity", exact: true).ClickAsync();
         await session.Page.FillAsync("#new-entity-name", "tickets");
         await session.Page.Keyboard.PressAsync("Enter");
-        await session.Page.WaitForURLAsync("**/schema/tickets");
+        await session.Page.WaitForAddressAsync("**/schema/tickets");
         await session.PreviewPendingAsync();
         await session.Page.FillAsync("#apply-reason", "Add tickets");
 
@@ -129,7 +129,7 @@ public sealed class OpenCircuitRevocationScenarios(AdminWorld world) : IClassFix
         await RevokedSessionScenarios.SetOperatorDisabledAsync(world, disabled: false);
         (await CurrentRevisionAsync()).ShouldBe(before, "the refused apply must not have appended a revision");
         await exit.First.ClickAsync();
-        await session.Page.WaitForURLAsync("**/admin/sign-in**");
+        await session.Page.WaitForAddressAsync("**/admin/sign-in**");
     }
 
     /// <summary>

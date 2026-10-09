@@ -108,7 +108,7 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await page.FillAsync("#email", AdminWorld.AdminEmail);
         await page.FillAsync("#password", "not-the-password");
         await page.ClickAsync("button[type=submit]");
-        await page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}?**");
+        await page.WaitForAddressAsync($"**{AlvoAdmin.SignInPath}?**");
 
         var message = await page.GetByTestId("error-title").InnerTextAsync();
         message.ShouldContain("do not match");
@@ -128,7 +128,7 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
         await page.FillAsync("#email", "nobody@alvo.test");
         await page.FillAsync("#password", AdminWorld.AdminPassword);
         await page.ClickAsync("button[type=submit]");
-        await page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}?**");
+        await page.WaitForAddressAsync($"**{AlvoAdmin.SignInPath}?**");
 
         (await page.GetByTestId("error-title").InnerTextAsync()).ShouldContain("do not match");
     }
@@ -209,7 +209,7 @@ public sealed class SignInScenarios(AdminWorld world) : IClassFixture<AdminWorld
 
         await session.Page.GetByTestId("account-menu").ClickAsync();
         await session.Page.GetByRole(AriaRole.Menuitem, new() { Name = "Sign out" }).ClickAsync();
-        await session.Page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}");
+        await session.Page.WaitForAddressAsync($"**{AlvoAdmin.SignInPath}");
 
         await session.Page.GotoAsync($"{world.BaseAddress}{AlvoAdmin.BasePath}");
         session.Page.Url.ShouldContain(AlvoAdmin.SignInPath);
