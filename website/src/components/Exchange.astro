@@ -9,6 +9,7 @@ if (!name) throw new Error('Exchange: the "name" prop is required');
 const all = import.meta.glob<CapturedExchange>('../generated/exchanges/**/*.json', { eager: true, import: 'default' });
 const exchange = all[`../generated/exchanges/${name}.json`];
 if (!exchange) throw new Error(`Exchange: no captured exchange "${name}" (run npm run gen)`);
+if (steps && steps.length === 0) throw new Error(`Exchange: "${name}" was given an empty steps list`);
 const chosen = (steps ?? exchange.steps.map((_, i) => i)).map((i) => {
   if (!exchange.steps[i]) throw new Error(`Exchange: "${name}" has no step ${i}`);
   return exchange.steps[i];

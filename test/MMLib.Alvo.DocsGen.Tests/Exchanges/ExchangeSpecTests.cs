@@ -30,6 +30,22 @@ public class ExchangeSpecTests
             { "descriptor": "d.alvo.json", "keys": {}, "steps": [ { "method": "GET", "path": "/api/x", "expcet": 200, "expect": 200 } ] }
             """)).Message.ShouldBe("fixture/typo: unknown member 'expcet' in step 0");
 
+    [Theory]
+    [InlineData("X-Alvo-Api-Key", "'key'")]
+    [InlineData("content-type", "'contentType'")]
+    public void A_header_the_runner_owns_is_refused(string header, string member) =>
+        Should.Throw<InvalidOperationException>(() => ExchangeSpec.Parse("fixture/owned", $$"""
+            { "descriptor": "d.alvo.json", "keys": {},
+              "steps": [ { "method": "POST", "path": "/api/x", "body": {}, "headers": { "{{header}}": "x" }, "expect": 201 } ] }
+            """)).Message.ShouldContain(member);
+
+    [Fact]
+    public void A_content_type_without_a_body_is_refused() =>
+        Should.Throw<InvalidOperationException>(() => ExchangeSpec.Parse("fixture/nobody", """
+            { "descriptor": "d.alvo.json", "keys": {},
+              "steps": [ { "method": "GET", "path": "/api/x", "contentType": "text/plain", "expect": 200 } ] }
+            """)).Message.ShouldBe("fixture/nobody: step 0 sets 'contentType' but sends no 'body' or 'bodyFile'");
+
     [Fact]
     public void A_missing_expectation_throws() =>
         Should.Throw<InvalidOperationException>(() => ExchangeSpec.Parse("fixture/missing", """

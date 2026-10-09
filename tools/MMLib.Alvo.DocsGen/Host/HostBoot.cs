@@ -18,6 +18,8 @@ internal static class HostBoot
 
     internal static TimeSpan BootTimeout { get; } = TimeSpan.FromMinutes(2);
 
+    internal static TimeSpan RequestTimeout { get; } = TimeSpan.FromSeconds(30);
+
     private const int SecretBytes = 24;
 
     internal static async Task<BootedHost> StartAsync(string descriptorPath, IReadOnlyDictionary<string, ExchangeKey> keys, CancellationToken ct)
@@ -142,6 +144,7 @@ internal sealed class BootedHost : IAsyncDisposable
     internal HttpClient Client(string? keyId)
     {
         var client = App.GetTestClient();
+        client.Timeout = HostBoot.RequestTimeout;
         if (keyId is not null)
         {
             client.DefaultRequestHeaders.Add(HostBoot.ApiKeyHeader, $"{keyId}.{SecretOf(keyId)}");

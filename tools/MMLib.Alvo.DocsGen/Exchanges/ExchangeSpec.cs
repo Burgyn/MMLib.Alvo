@@ -22,6 +22,7 @@ internal sealed record ExchangeStep(
 internal sealed record ExchangeSpec(string Name, string Descriptor, IReadOnlyDictionary<string, ExchangeKey> Keys, IReadOnlyList<ExchangeStep> Steps)
 {
     private static readonly string[] _specMembers = ["descriptor", "keys", "steps"];
+    private static readonly (string Header, string Member)[] _ownedHeaders = [("X-Alvo-Api-Key", "key"), ("Content-Type", "contentType")];
     private static readonly string[] _keyMembers = ["roles", "scopes", "tenant", "secretVariable"];
     private static readonly string[] _stepMembers =
         ["key", "method", "path", "body", "bodyFile", "headers", "contentType", "expect", "expectType", "showHeaders"];
@@ -61,11 +62,33 @@ internal sealed record ExchangeSpec(string Name, string Descriptor, IReadOnlyDic
                 throw Fail($"{where} uses key '{key}', which 'keys' does not declare");
             }
 
+            var headers = Headers(step["headers"]);
+            RefuseOwnedHeaders(headers, where);
+            RefuseContentTypeWithoutBody(step, where);
             return new ExchangeStep(
                 key, String(step, "method", where).ToUpperInvariant(), String(step, "path", where),
-                step["body"]?.DeepClone(), step["bodyFile"]?.GetValue<string>(), Headers(step["headers"]),
+                step["body"]?.DeepClone(), step["bodyFile"]?.GetValue<string>(), headers,
                 step["contentType"]?.GetValue<string>(), Required(step, "expect", where).GetValue<int>(),
                 step["expectType"]?.GetValue<string>(), Strings(step["showHeaders"]));
+        }
+
+        private void RefuseOwnedHeaders(Dictionary<string, string> headers, string where)
+        {
+            foreach (var (header, member) in _ownedHeaders)
+            {
+                if (headers.Keys.Any(name => string.Equals(name, header, StringComparison.OrdinalIgnoreCase)))
+                {
+                    throw Fail($"{where} sets '{header}' in 'headers'; use '{member}' instead");
+                }
+            }
+        }
+
+        private void RefuseContentTypeWithoutBody(JsonObject step, string where)
+        {
+            if (step["contentType"] is not null && step["body"] is null && step["bodyFile"] is null)
+            {
+                throw Fail($"{where} sets 'contentType' but sends no 'body' or 'bodyFile'");
+            }
         }
 
         internal void RefuseUnknown(JsonObject node, string[] known, string where)

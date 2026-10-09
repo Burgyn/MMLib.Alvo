@@ -11,6 +11,8 @@ internal static class ExchangeRunner
     internal const string JsonContentType = "application/json";
 
     private const string TestServerBase = "http://localhost";
+    private const string ProblemContentType = "application/problem+json";
+    private const string TraceIdMember = "traceId";
 
     private static readonly string[] _renderedHeaders = ["Content-Type", "ETag", "Location", "Preference-Applied"];
 
@@ -82,7 +84,20 @@ internal static class ExchangeRunner
         using var response = await client.SendAsync(message, ct).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         var status = (int)response.StatusCode;
-        return new CapturedResponse(status, ReasonPhrases.GetReasonPhrase(status), RenderedHeaders(response, step.ShowHeaders), body.Length == 0 ? null : body);
+        var headers = RenderedHeaders(response, step.ShowHeaders);
+        return new CapturedResponse(status, ReasonPhrases.GetReasonPhrase(status), headers, WithoutVolatile(body.Length == 0 ? null : body, response.Content.Headers.ContentType?.MediaType));
+    }
+
+    internal static string? WithoutVolatile(string? body, string? mediaType)
+    {
+        if (!string.Equals(mediaType, ProblemContentType, StringComparison.OrdinalIgnoreCase)
+            || ExchangeRenderer.ParseJson(body) is not JsonObject problem
+            || !problem.Remove(TraceIdMember))
+        {
+            return body;
+        }
+
+        return problem.ToJsonString(ExchangeRenderer.Compact);
     }
 
     private static HttpRequestMessage Message(CapturedRequest request)
