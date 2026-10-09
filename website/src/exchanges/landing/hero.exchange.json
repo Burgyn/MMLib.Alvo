@@ -1,0 +1,23 @@
+{
+  "descriptor": "website/src/snippets/landing/hero.alvo.json",
+  "keys": {
+    "agent": { "roles": ["authenticated"], "scopes": ["*:read", "*:write"] }
+  },
+  "steps": [
+    {
+      "key": "agent",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": { "title": "  Printer on fire  " },
+      "expect": 201
+    },
+    {
+      "key": null,
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": { "title": "Brakes squeak" },
+      "expect": 403,
+      "expectType": "forbidden"
+    }
+  ]
+}
