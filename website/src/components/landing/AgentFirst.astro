@@ -1,36 +1,39 @@
 ---
 import JsonExcerpt from '../JsonExcerpt.astro';
 import Exchange from '../Exchange.astro';
+import { page } from '../../lib/links';
 import typo from '../../snippets/landing/typo/helpdesk.alvo.json?raw';
 
 const points = [
-  { n: '1', lead: 'A JSON Schema with a description on every key,', rest: 'and descriptor skills written for models.' },
-  { n: '2', lead: 'Problem documents with a pointer and a fix suggestion,', rest: 'keyed by a stable type.' },
-  { n: '3', lead: 'A Management API with dry runs and If-Match,', rest: 'and Idempotency-Key on Data API writes.' },
+  { lead: 'Problem documents, RFC 9457.', rest: 'An invalid descriptor or record names the JSON pointer and, where it can, a fix, keyed by a stable type.' },
+  { lead: 'Dry runs and If-Match', rest: 'on the Management API: see the plan before anything is applied.' },
+  { lead: 'Idempotency-Key on every write:', rest: 'retry without writing twice.' },
+  { lead: 'A JSON Schema with a description on every key,', rest: 'and the same descriptor skills the dashboard’s assistant loads.' },
 ];
 ---
-<section class="alvo-agent" aria-labelledby="agent-title">
-  <div class="alvo-agent__grid alvo-wrap">
+<section class="alvo-section alvo-section--band" aria-labelledby="agent-title">
+  <div class="alvo-agent alvo-wrap">
     <div>
       <p class="alvo-eyebrow">Agent-first</p>
       <h2 id="agent-title">Your coding agent can drive it.</h2>
-      <p class="alvo-lede">Configuration an agent can write, refusals it can act on, and changes it can preview before anything is applied.</p>
-      <ul class="alvo-numbered">
+      <p class="alvo-lede">The whole backend is one file an agent can validate and dry-run, and every refusal is something it can act on.</p>
+      <ul class="alvo-points">
         {points.map((point) => (
-          <li><span class="alvo-numbered__n" aria-hidden="true">{point.n}</span><span><b>{point.lead}</b> {point.rest}</span></li>
+          <li><span><b>{point.lead}</b> {point.rest}</span></li>
         ))}
+        <li><span>The docs as <a class="alvo-prose-link" href={page('/llms.txt')}>llms.txt</a> and <a class="alvo-prose-link" href={page('/llms-full.txt')}>llms-full.txt</a>.</span></li>
       </ul>
-      <a class="alvo-textlink" href="/MMLib.Alvo/start-here/coding-agents/">For coding agents →</a>
+      <a class="alvo-textlink" href={page('/start-here/coding-agents/')}>For coding agents <span aria-hidden="true">→</span></a>
     </div>
     <div class="alvo-codecard" role="group" aria-label="A dry run that catches a typo">
-      <div class="alvo-pane__head">
-        <span class="alvo-pane__file">A dry run catches a typo</span>
-        <span class="alvo-pane__end alvo-pane__note">nothing is applied</span>
+      <div class="alvo-codecard__head">
+        <span class="alvo-codecard__title">A dry run catches a typo</span>
+        <span class="alvo-codecard__note">captured · nothing applied</span>
       </div>
-      <div class="alvo-pane__body">
-        <p class="alvo-agent__note">The descriptor it sends has one typo in a before-hook:</p>
-        <JsonExcerpt code={typo} pointer="/entities/tickets/hooks/beforeCreate/0/action/mutate" frame="none" />
-        <div class="alvo-agent__call">
+      <div class="alvo-codecard__body">
+        <p class="alvo-codecard__caption">The descriptor it sends has one typo in a before-hook:</p>
+        <JsonExcerpt code={typo} pointer="/entities/tickets/hooks/beforeCreate/0/action/mutate" frame="none" wrap />
+        <div class="alvo-codecard__call">
           <Exchange name="landing/agent-dry-run" form="http" steps={[1]} requestBody={false} fields={['type', 'violations']} compact flow={false} wrap />
         </div>
       </div>

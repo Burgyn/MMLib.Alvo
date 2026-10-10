@@ -1,9 +1,11 @@
-/* The landing page (design/Main.dc.html is the layout authority). Tokens only: every colour comes from
-   alvo-tokens.generated.css or theme.css. Breakpoints follow the design: < 1200 one column, < 1024 the
-   hero panes stack, < 768 the phone layout, < 480 full-width CTAs. */
+/* The landing page. The hero follows design B2 (a dark, typographic band with a stepped build loop); the sections
+   below sit on the site's own theme. Tokens only: every colour comes from alvo-tokens.generated.css or theme.css.
+   The tokens are light-dark() pairs, so a band that sets `color-scheme: dark` (the hero, the closing call) resolves
+   every token to its dark value in both themes; nothing here repeats a hex value.
+   Breakpoints: < 1200 the hero and the two-column sections stack, < 768 the phone layout, < 480 full-width CTAs. */
 
-/* The splash page hands its whole width to the landing; Starlight's title panel is not used (the hero
-   carries the page's only h1, with id _top for the skip link). */
+/* The splash page hands its whole width to the landing; Starlight's title panel is not used (the hero carries the
+   page's only h1, with id _top for the skip link). */
 main:has(.alvo-landing) .content-panel:first-child { display: none; }
 main:has(.alvo-landing) .content-panel { padding: 0; }
 main:has(.alvo-landing) .sl-container { max-width: none; margin: 0; }
@@ -16,31 +18,38 @@ main:has(.alvo-landing) .content-panel > .sl-container > footer { display: none;
   font-size: 1rem;
   line-height: 1.55;
 }
-.alvo-landing :where(h1, h2, h3, p, ul, ol, figure) { margin: 0; max-width: none; }
+.alvo-landing :where(h1, h2, h3, p, ul, ol, dl, dd, figure) { margin: 0; max-width: none; }
 .alvo-landing :where(ul, ol) { padding: 0; list-style: none; }
 .alvo-landing :where(li + li) { margin-top: 0; }
 :where(.alvo-landing) a { text-decoration: none; color: inherit; }
 .alvo-landing :where(h1, h2, h3) { color: var(--text); text-wrap: balance; }
 .alvo-landing h2 { font-size: clamp(26px, 3.2vw, 40px); font-weight: 800; letter-spacing: -0.025em; line-height: 1.15; }
-.alvo-landing h3 { font-size: 20px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.3; }
+.alvo-landing h3 { font-size: 18px; font-weight: 700; letter-spacing: -0.015em; line-height: 1.3; }
+.alvo-landing :not(pre) > code {
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--panel2);
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 0.875em;
+  font-variant-ligatures: none;
+  overflow-wrap: anywhere;
+}
 
 .alvo-wrap {
   max-width: var(--alvo-measure);
   margin-inline: auto;
   padding-inline: var(--alvo-gutter);
 }
-.alvo-band {
-  border-block: 1px solid var(--border);
-  background: var(--panel);
-}
 .alvo-eyebrow {
   font-family: var(--font-ibm-plex-mono);
   font-size: 13px;
-  letter-spacing: 0.09em;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--accentInk);
 }
 .alvo-lede { font-size: 18px; color: var(--dim); }
+.alvo-fine { font-size: 14px; color: var(--dim); }
 .alvo-landing .alvo-prose-link {
   color: var(--accentInk);
   text-decoration: underline;
@@ -51,8 +60,9 @@ main:has(.alvo-landing) .content-panel > .sl-container > footer { display: none;
 .alvo-textlink {
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   min-height: 44px;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--accentInk);
 }
@@ -76,9 +86,11 @@ main:has(.alvo-landing) .content-panel > .sl-container > footer { display: none;
 .alvo-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   min-height: 48px;
   padding: 0 22px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   font-weight: 700;
   white-space: nowrap;
@@ -86,315 +98,396 @@ main:has(.alvo-landing) .content-panel > .sl-container > footer { display: none;
 }
 .alvo-btn--primary { background: var(--accent); color: var(--accentText); }
 .alvo-btn--primary:hover { filter: brightness(1.07); }
-.alvo-btn--ghost { border: 1px solid var(--border2); color: var(--text); font-weight: 600; }
+.alvo-btn--ghost { border-color: var(--border2); color: var(--text); font-weight: 600; }
 .alvo-btn--ghost:hover { background: var(--panel2); border-color: var(--alvo-control-border); }
-.alvo-btn svg { flex: none; }
 
-/* Code inside landing panes: Expressive Code without its own frame. */
-.alvo-landing .expressive-code {
-  --ec-codePadBlk: 0px;
-  --ec-codePadInl: 0px;
-  margin: 0;
-}
-.alvo-landing .expressive-code pre {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-}
-.alvo-landing .expressive-code pre > code { font-size: 13px; line-height: 1.55; }
+/* Sections. */
+.alvo-section { padding-block: clamp(56px, 8vw, 96px); }
+.alvo-section--band { border-block: 1px solid var(--border); background: var(--panel); }
+.alvo-head { display: grid; gap: 12px; max-width: 780px; margin-bottom: clamp(28px, 4vw, 44px); }
 
-/* Hero. */
-.alvo-hero { padding-top: 56px; }
-.alvo-hero__intro {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 440px);
-  align-items: end;
-  gap: 28px 56px;
-}
-.alvo-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 36px;
-  padding: 0 14px;
-  border: 1px solid var(--border2);
-  border-radius: var(--radius-pill);
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--dim);
-  transition: border-color 0.12s, color 0.12s;
-}
-.alvo-landing .alvo-pill:hover { border-color: var(--alvo-control-border); color: var(--text); }
-.alvo-pill__dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--warn-fg); }
-.alvo-landing .alvo-hero h1 {
-  margin-top: 20px;
-  font-size: clamp(40px, 6vw, 64px);
-  font-weight: 800;
-  line-height: 1.04;
-  letter-spacing: -0.03em;
-}
-.alvo-accent { color: var(--accent); }
-.alvo-hero__lead {
-  margin-top: 18px;
-  max-width: 640px;
-  font-size: 20px;
-  line-height: 1.5;
-  color: var(--dim);
-}
-.alvo-hero__actions { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; min-width: 0; }
-.alvo-clone__label { margin-bottom: 6px; font-size: 13px; color: var(--faint); }
-.alvo-clone__box {
-  display: flex;
-  align-items: center;
-  min-height: 48px;
-  padding-inline-start: 14px;
-  border: 1px solid var(--alvo-code-border);
-  border-radius: var(--radius-sm);
-  background: var(--codeBg);
-  font-family: var(--font-ibm-plex-mono);
-  font-size: 13px;
-}
-.alvo-clone__box code {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 0;
-  background: transparent;
-  font: inherit;
+/* Expressive Code frames on the landing: no outer margin; the frame keeps its own border and copy button. */
+.alvo-landing .expressive-code { margin: 0; }
+.alvo-landing .expressive-code pre > code { font-size: 13px; }
+/* A 44px copy target (WCAG 2.5.5) instead of Expressive Code's 32–40px. */
+.alvo-landing .expressive-code .copy button { width: 2.75rem; height: 2.75rem; }
+
+/* ---------------------------------------------------------------------------------------------------------------
+   Hero (design B2). Dark in both themes.
+   --------------------------------------------------------------------------------------------------------------- */
+.alvo-hero {
+  color-scheme: dark;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
   color: var(--text);
 }
-.alvo-clone__prompt { color: var(--faint); }
-.alvo-copy {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border: 0;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--faint);
-  cursor: pointer;
-}
-.alvo-copy:hover { color: var(--text); background: var(--panel2); }
-.alvo-copy[data-copied] { color: var(--ok-fg); }
-.alvo-copy .alvo-copy__done { display: none; }
-.alvo-copy[data-copied] .alvo-copy__done { display: block; }
-.alvo-copy[data-copied] .alvo-copy__idle { display: none; }
-
-.alvo-hero__card {
-  position: relative;
+.alvo-hero__grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  margin-top: 32px;
-  border: 1px solid var(--alvo-code-border);
-  border-radius: var(--radius-lg);
-  background: var(--codeBg);
-  box-shadow: var(--shadow-pop);
+  grid-template-columns: minmax(0, 540px) minmax(0, 1fr);
+  gap: 40px 64px;
+  align-items: start;
+  padding-block: 56px 48px;
 }
-.alvo-pane { min-width: 0; }
-.alvo-pane + .alvo-pane { border-inline-start: 1px solid var(--alvo-code-border); }
-.alvo-pane__head {
+.alvo-hero__pitch { display: flex; flex-direction: column; gap: 24px; }
+.alvo-hero__eyebrow {
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.alvo-hero__eyebrow > span:first-child { color: var(--accent); }
+.alvo-hero__status { white-space: nowrap; }
+.alvo-landing .alvo-hero h1 {
+  font-size: clamp(2.25rem, 1.5rem + 2.6vw, 3.25rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+}
+.alvo-hero__accent { color: var(--accent); }
+.alvo-hero__lead { max-width: 60ch; font-size: 18px; line-height: 1.6; color: var(--dim); }
+.alvo-hero__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.7;
+  color: var(--faint);
+}
+
+/* The build: four steps, then what comes after v0.1. */
+.alvo-build {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  font-family: var(--font-ibm-plex-mono);
+}
+.alvo-build__steps { display: flex; flex-direction: column; gap: 12px; }
+
+/* --lit is 1 for the step in focus and 0 for the rest; every highlight is derived from it. It is registered so the
+   loop can step it, and its static value (no animation, or reduced motion) is the final frame: step 4 lit. */
+@property --lit {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+.alvo-step {
+  --lit: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px 20px 16px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) calc(var(--lit) * 100%), var(--border2));
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: 0 0 0 calc(var(--lit) * 4px) var(--accentSoft);
+}
+.alvo-step--3 { background: var(--codeBg); }
+.alvo-step--4 { --lit: 1; padding-block: 16px 18px; }
+.alvo-step::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  pointer-events: none;
+}
+.alvo-step__label {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 40px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--alvo-code-border);
-  font-family: var(--font-ibm-plex-mono);
-  font-size: 13px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--faint);
 }
-.alvo-pane__file { color: var(--text); }
-.alvo-pane__end { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 6px; }
-.alvo-pane__ok { color: var(--ok-fg); }
-.alvo-pane__body { padding: 16px 18px 18px; }
-.alvo-pane__body .alvo-exchange + .alvo-exchange {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px dashed var(--alvo-code-border);
-}
-.alvo-exchange--compact .alvo-exchange__status {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 10px;
-  margin: 8px 0 6px;
-}
-.alvo-exchange__request { position: relative; }
-.alvo-exchange__note {
-  font-family: var(--font-ibm-plex-mono);
-  font-size: 13px;
-  color: var(--faint);
-}
-.alvo-exchange__note--request { position: absolute; top: 0; right: 0; line-height: 1.55; }
-.alvo-exchange--compact .alvo-status { font-size: 13px; }
-
-/* The descriptor → API connector: the seam between the panes, an accent line that sweeps once. */
-.alvo-hero__connector {
-  position: absolute;
-  top: 40px;
-  bottom: 0;
-  left: 50%;
-  width: 2px;
-  transform: translateX(-1px);
-  background: linear-gradient(to bottom, transparent, var(--accent) 50%, transparent);
-  background-size: 100% 200%;
-  background-position: 0 100%;
-  opacity: 0.55;
-  pointer-events: none;
-}
-.alvo-hero__chip {
-  position: absolute;
-  top: 50%;
-  left: 50%;
+.alvo-step__n {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  transform: translate(-50%, -50%);
+  width: 22px;
+  height: 22px;
   border: 1px solid var(--accentBorder);
   border-radius: var(--radius-pill);
-  background: var(--codeBg);
-  color: var(--accent);
-  pointer-events: none;
+  background: color-mix(in srgb, var(--accent) calc(var(--lit) * 100%), transparent);
+  color: color-mix(in srgb, var(--accentText) calc(var(--lit) * 100%), var(--accent));
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
 }
-@media (prefers-reduced-motion: no-preference) {
-  .alvo-hero__connector { animation: alvo-sweep 1.6s ease-out 0.4s 1 both; }
-  @keyframes alvo-sweep {
-    from { background-position: 0 100%; }
-    to { background-position: 0 -100%; }
-  }
+.alvo-step__prompt {
+  font-family: var(--font-public-sans);
+  font-size: 17px;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--text) calc(var(--lit) * 100%), var(--dim));
+}
+.alvo-step__code {
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  background: transparent;
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  font-variant-ligatures: none;
+  white-space: pre;
+  color: var(--text);
+}
+.alvo-step__code code { font: inherit; background: none; padding: 0; }
+.alvo-step__line { display: block; }
+.alvo-tk--key { color: var(--text); }
+.alvo-tk--str { color: var(--dim); }
+.alvo-tk--acc { color: var(--accent); }
+.alvo-tk--dim { color: var(--faint); }
+.alvo-step__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
+.alvo-step__claim {
+  font-family: var(--font-public-sans);
+  font-size: clamp(19px, 2.4cqi, 24px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  color: color-mix(in srgb, var(--accent) calc(var(--lit) * 100%), var(--text));
+}
+.alvo-tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.alvo-tiles li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.alvo-tiles__note { color: var(--faint); overflow-wrap: anywhere; }
+@container (max-width: 520px) {
+  .alvo-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-.alvo-proof {
+.alvo-coming {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center;
   align-items: center;
-  gap: 8px 14px;
-  padding: 22px 0 8px;
-  font-size: 14px;
+  gap: 8px 10px;
+  padding: 10px 12px 10px 20px;
+  border: 1px dashed var(--border2);
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+}
+.alvo-coming__label {
+  margin-inline-end: 4px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.alvo-coming__list { display: contents; }
+.alvo-coming__list li {
+  padding: 3px 12px;
+  border: 1px dashed var(--alvo-control-border);
+  border-radius: var(--radius-pill);
   color: var(--dim);
 }
-.alvo-proof li { display: inline-flex; align-items: center; gap: 8px; }
-.alvo-proof .alvo-proof__sep { color: var(--faint); }
-
-/* How it works: a 4/8 split with a numbered rail. */
-.alvo-how { margin-top: 72px; }
-.alvo-how__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 4fr) minmax(0, 8fr);
-  gap: 40px 64px;
-  padding-block: 80px;
-}
-.alvo-how h2 { margin: 12px 0 16px; }
-.alvo-rail li {
-  position: relative;
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  gap: 20px;
-  padding-bottom: 32px;
-}
-.alvo-rail li:last-child { padding-bottom: 0; }
-.alvo-rail li:not(:last-child)::before {
-  content: '';
-  position: absolute;
-  left: 21px;
-  top: 44px;
-  bottom: 0;
-  width: 2px;
-  background: var(--border2);
-}
-.alvo-rail__n {
+.alvo-landing .alvo-coming__link {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
+  gap: 6px;
+  min-height: 44px;
+  margin-inline-start: auto;
+  padding: 0 8px;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-public-sans);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+}
+.alvo-landing .alvo-coming__link:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+.alvo-build__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+}
+.alvo-build__note { font-family: var(--font-public-sans); font-size: 13px; color: var(--faint); }
+.alvo-build__pause {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border2);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-public-sans);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--dim);
+  cursor: pointer;
+  user-select: none;
+}
+.alvo-build__pause:hover { border-color: var(--alvo-control-border); color: var(--text); }
+.alvo-build__toggle:focus-visible + .alvo-build__pause { box-shadow: var(--focus-ring); }
+.alvo-build__toggle:checked + .alvo-build__pause { border-color: var(--accentBorder); background: var(--accentSoft); color: var(--text); }
+.alvo-build__icon-play,
+.alvo-build__toggle:checked + .alvo-build__pause .alvo-build__icon-pause { display: none; }
+.alvo-build__toggle:checked + .alvo-build__pause .alvo-build__icon-play { display: block; }
+
+/* The loop: 11 s, four windows (0–20 %, 22–42 %, 44–60 %, 62–100 %). --lit steps; the 2px bar runs across the top of
+   the step in focus. Only under no-preference: reduced motion keeps the final frame and hides the pause control. */
+@media (prefers-reduced-motion: no-preference) {
+  /* Longhands: a shorthand without a name minifies to `animation: none`. */
+  .alvo-step { animation-duration: 11s; animation-timing-function: steps(1, end); animation-iteration-count: infinite; }
+  .alvo-step::before { animation-duration: 11s; animation-timing-function: linear; animation-iteration-count: infinite; }
+  .alvo-step--1 { animation-name: alvo-lit-1; }
+  .alvo-step--2 { animation-name: alvo-lit-2; }
+  .alvo-step--3 { animation-name: alvo-lit-3; }
+  .alvo-step--4 { animation-name: alvo-lit-4; }
+  .alvo-step--1::before { animation-name: alvo-run-1; }
+  .alvo-step--2::before { animation-name: alvo-run-2; }
+  .alvo-step--3::before { animation-name: alvo-run-3; }
+  .alvo-step--4::before { animation-name: alvo-run-4; }
+  .alvo-build:has(.alvo-build__toggle:checked) .alvo-step,
+  .alvo-build:has(.alvo-build__toggle:checked) .alvo-step::before { animation-play-state: paused; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .alvo-build__toggle,
+  .alvo-build__pause { display: none; }
+}
+@keyframes alvo-lit-1 { 0%, 20% { --lit: 1; } 22%, 100% { --lit: 0; } }
+@keyframes alvo-lit-2 { 0%, 20% { --lit: 0; } 22%, 42% { --lit: 1; } 44%, 100% { --lit: 0; } }
+@keyframes alvo-lit-3 { 0%, 42% { --lit: 0; } 44%, 60% { --lit: 1; } 62%, 100% { --lit: 0; } }
+@keyframes alvo-lit-4 { 0%, 60% { --lit: 0; } 62%, 100% { --lit: 1; } }
+@keyframes alvo-run-1 { 0% { transform: scaleX(0); opacity: 1; } 20% { transform: scaleX(1); opacity: 1; } 22% { transform: scaleX(1); opacity: 0; } 22.01%, 100% { transform: scaleX(0); opacity: 0; } }
+@keyframes alvo-run-2 { 0%, 22% { transform: scaleX(0); opacity: 1; } 42% { transform: scaleX(1); opacity: 1; } 44% { transform: scaleX(1); opacity: 0; } 44.01%, 100% { transform: scaleX(0); opacity: 0; } }
+@keyframes alvo-run-3 { 0%, 44% { transform: scaleX(0); opacity: 1; } 60% { transform: scaleX(1); opacity: 1; } 62% { transform: scaleX(1); opacity: 0; } 62.01%, 100% { transform: scaleX(0); opacity: 0; } }
+@keyframes alvo-run-4 { 0%, 62% { transform: scaleX(0); opacity: 1; } 100% { transform: scaleX(1); opacity: 1; } }
+
+/* ---------------------------------------------------------------------------------------------------------------
+   Quick start.
+   --------------------------------------------------------------------------------------------------------------- */
+.alvo-qs { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 40px 56px; align-items: start; }
+.alvo-qs__steps { display: grid; gap: 24px; counter-reset: alvo-qs; }
+.alvo-qs__steps > li {
+  counter-increment: alvo-qs;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 8px 14px;
+}
+.alvo-qs__steps > li > * { grid-column: 2; min-width: 0; }
+.alvo-qs__steps > li::before {
+  content: counter(alvo-qs);
+  grid-column: 1;
+  grid-row: 1 / span 3;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
   border: 1px solid var(--accentBorder);
   border-radius: var(--radius-pill);
   background: var(--accentSoft);
   color: var(--accentInk);
   font-family: var(--font-ibm-plex-mono);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
 }
-.alvo-rail__body { min-width: 0; padding-top: 8px; }
-.alvo-rail__body p { margin: 6px 0 12px; color: var(--dim); }
-.alvo-chip {
-  display: block;
-  padding: 10px 14px;
-  border: 1px solid var(--alvo-code-border);
-  border-radius: var(--radius-sm);
-  background: var(--codeBg);
-  font-family: var(--font-ibm-plex-mono);
-  font-size: 13px;
-  color: var(--text);
-  overflow-x: auto;
-  white-space: nowrap;
+.alvo-qs__steps h3 { font-size: 16px; line-height: 30px; }
+.alvo-qs__steps p { font-size: 15px; color: var(--dim); }
+.alvo-qs__side { display: grid; gap: 18px; align-content: start; }
+.alvo-kv { display: grid; border-top: 1px solid var(--border); }
+.alvo-kv > div {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  gap: 4px 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
 }
-.alvo-chip__verb { color: var(--accentInk); font-weight: 600; }
+.alvo-kv dt { font-family: var(--font-ibm-plex-mono); font-size: 13px; line-height: 1.75; color: var(--faint); }
+.alvo-kv dd { min-width: 0; overflow-wrap: anywhere; }
 
-/* Differentiators: four cards, each a proof instead of an icon. */
-.alvo-diff { padding-block: 88px 24px; }
-.alvo-diff > .alvo-wrap > h2 { max-width: 760px; margin-bottom: 12px; }
-.alvo-diff .alvo-lede { max-width: 640px; margin-bottom: 36px; }
-.alvo-diff__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
-.alvo-card {
-  min-width: 0;
+/* ---------------------------------------------------------------------------------------------------------------
+   One descriptor.
+   --------------------------------------------------------------------------------------------------------------- */
+.alvo-one { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 40px 56px; align-items: start; }
+.alvo-one__code { min-width: 0; }
+.alvo-yields { border-top: 1px solid var(--border); }
+.alvo-yields > li {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 4px 18px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 15px;
+}
+.alvo-yields__k {
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.95;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.alvo-yields p { color: var(--dim); }
+.alvo-yields code.alvo-break { display: inline; word-break: break-all; }
+.alvo-routes { display: grid; gap: 2px; font-family: var(--font-ibm-plex-mono); font-size: 13px; line-height: 1.7; }
+.alvo-routes > div { display: flex; flex-wrap: wrap; gap: 0 12px; }
+.alvo-routes dt { min-width: 13.5em; font-weight: 600; color: var(--accentInk); }
+.alvo-routes dd { color: var(--text); overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------------------------------------------------------
+   Capabilities.
+   --------------------------------------------------------------------------------------------------------------- */
+.alvo-caps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.alvo-cap {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 26px;
+  min-width: 0;
+  padding: 20px 20px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--panel);
-  transition: border-color 0.12s;
 }
-.alvo-card:hover { border-color: var(--alvo-control-border); }
-.alvo-card > p { color: var(--dim); }
-.alvo-card__title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.alvo-card--planned { border-style: dashed; border-color: var(--border2); background: transparent; }
-.alvo-card__fine { font-size: 14px; color: var(--faint); }
-.alvo-card .alvo-textlink { margin-top: auto; }
-.alvo-proofbox {
-  margin-top: 6px;
+.alvo-cap__n { font-family: var(--font-ibm-plex-mono); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: var(--faint); }
+.alvo-landing code.alvo-cap__code {
+  display: block;
+  padding: 8px 10px;
   border: 1px solid var(--alvo-code-border);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   background: var(--codeBg);
-  overflow: hidden;
-}
-.alvo-proofbox > * { padding: 10px 14px; }
-.alvo-proofbox > * + * { border-top: 1px dashed var(--alvo-code-border); }
-.alvo-proofbox__caption { font-size: 13px; color: var(--faint); font-family: var(--font-ibm-plex-mono); }
-.alvo-proofbox .alvo-exchange--compact .alvo-exchange__status { margin: 8px 0; }
-.alvo-proofline {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-}
-.alvo-proofline code {
-  min-width: 0;
-  padding: 0;
-  background: transparent;
-  font-family: var(--font-ibm-plex-mono);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.55;
   color: var(--text);
+  white-space: normal;
   overflow-wrap: anywhere;
 }
-.alvo-proofline__verb { color: var(--accentInk); font-weight: 600; }
-.alvo-proofline .alvo-status { font-size: 13px; }
+.alvo-cap > p { font-size: 15px; color: var(--dim); }
+.alvo-cap__status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-family: var(--font-ibm-plex-mono); font-size: 12px; color: var(--faint); }
+.alvo-cap__status .alvo-status { font-size: 12px; }
+.alvo-cap .alvo-textlink { margin-top: auto; }
 
-/* Two ways to run it. */
-.alvo-ways { padding-block: 72px 88px; }
+/* ---------------------------------------------------------------------------------------------------------------
+   Dashboard.
+   --------------------------------------------------------------------------------------------------------------- */
 .alvo-split-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -402,114 +495,125 @@ main:has(.alvo-landing) .content-panel > .sl-container > footer { display: none;
   align-items: end;
   margin-bottom: 32px;
 }
-.alvo-ways__grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 20px; }
-.alvo-way {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--panel);
-  overflow: hidden;
-}
-.alvo-way__head { padding: 24px 24px 18px; }
-.alvo-way__head p { margin-top: 8px; color: var(--dim); }
-.alvo-way__code {
-  margin-top: auto;
-  padding: 16px 24px 20px;
-  border-top: 1px solid var(--alvo-code-border);
-  background: var(--codeBg);
-}
-.alvo-way__code .expressive-code pre { overflow-x: auto; }
-
-/* Dashboard. */
-.alvo-dash .alvo-wrap { padding-block: 80px; }
 .alvo-dash h2 { margin-top: 12px; }
 .alvo-checks { display: grid; gap: 10px; color: var(--dim); }
 .alvo-checks li { display: flex; gap: 10px; }
 .alvo-checks svg { flex: none; margin-top: 4px; color: var(--accentInk); }
 .alvo-shot {
   position: relative;
+  overflow: hidden;
   border: 1px solid var(--border2);
   border-radius: var(--radius-lg);
-  overflow: hidden;
-  box-shadow: var(--shadow-pop);
   background: var(--bg);
+  box-shadow: var(--shadow-pop);
 }
 .alvo-shot img { display: block; width: 100%; height: auto; }
-.alvo-landing figcaption { margin-top: 12px; font-size: 14px; color: var(--faint); }
-
-/* Theme-paired screenshots: the site's theme is an attribute, not the OS preference, so each theme's
-   picture is shown by the attribute (a lazy image that is not displayed is not fetched). */
+.alvo-landing figcaption { margin-top: 12px; font-size: 14px; color: var(--dim); }
+/* Theme-paired screenshots: the site's theme is an attribute, not the OS preference, so each theme's picture is
+   shown by the attribute (a lazy image that is not displayed is not fetched). */
 .alvo-landing .alvo-themed--dark { display: none; }
 :root[data-theme='dark'] .alvo-landing .alvo-themed--dark { display: block; }
 :root[data-theme='dark'] .alvo-landing .alvo-themed--light { display: none; }
 
-/* Agent-first. */
-.alvo-agent { padding-block: 88px; }
-.alvo-agent__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
-  gap: 40px 56px;
-  align-items: center;
+/* ---------------------------------------------------------------------------------------------------------------
+   Two modes.
+   --------------------------------------------------------------------------------------------------------------- */
+.alvo-modes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 20px; }
+.alvo-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 24px 24px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
 }
+.alvo-mode__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.alvo-mode > p { color: var(--dim); }
+.alvo-mode__code { min-width: 0; }
+.alvo-mode .alvo-textlink { margin-top: auto; }
+
+/* ---------------------------------------------------------------------------------------------------------------
+   Agent-first.
+   --------------------------------------------------------------------------------------------------------------- */
+.alvo-agent { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 40px 56px; align-items: start; }
 .alvo-agent h2 { margin: 12px 0 16px; }
-.alvo-agent .alvo-lede { margin-bottom: 24px; }
-.alvo-numbered { display: grid; gap: 14px; }
-.alvo-numbered li { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; }
-.alvo-numbered__n {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-xs);
-  background: var(--accentSoft);
-  color: var(--accentInk);
-  font-family: var(--font-ibm-plex-mono);
-  font-size: 13px;
-  font-weight: 600;
+.alvo-points { display: grid; gap: 14px; margin: 24px 0 8px; }
+.alvo-points li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 10px; color: var(--dim); }
+.alvo-points li::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  margin-top: 9px;
+  border: 1.5px solid var(--accent);
+  transform: rotate(45deg);
 }
-.alvo-agent .alvo-textlink { margin-top: 12px; font-size: 1rem; }
+.alvo-points b { color: var(--text); font-weight: 600; }
 .alvo-codecard {
   min-width: 0;
+  overflow: hidden;
   border: 1px solid var(--alvo-code-border);
   border-radius: var(--radius-lg);
   background: var(--codeBg);
-  overflow: hidden;
 }
+.alvo-codecard__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-height: 44px;
+  padding: 6px 18px;
+  border-bottom: 1px solid var(--alvo-code-border);
+  font-family: var(--font-ibm-plex-mono);
+  font-size: 13px;
+  color: var(--faint);
+}
+.alvo-codecard__title { color: var(--text); }
+.alvo-codecard__note { margin-inline-start: auto; }
+.alvo-codecard__body { padding: 16px 18px 18px; }
+.alvo-codecard__caption { margin-bottom: 8px; font-family: var(--font-ibm-plex-mono); font-size: 13px; color: var(--faint); }
+.alvo-codecard__call { margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--alvo-code-border); }
+/* Inside the card, Expressive Code drops its own frame: the card is the frame. */
+.alvo-codecard .expressive-code { --ec-codePadBlk: 0px; --ec-codePadInl: 0px; }
+.alvo-codecard .expressive-code pre { border: 0; border-radius: 0; background: transparent; }
+.alvo-codecard .expressive-code pre > code { line-height: 1.55; }
+.alvo-exchange--compact .alvo-exchange__status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 8px 0 6px; }
+.alvo-exchange--compact .alvo-status { font-size: 13px; }
 
-/* Closing CTA: the band is dark in both themes, so its tokens resolve through a dark color-scheme. */
-.alvo-close { padding-bottom: 88px; }
-.alvo-cta {
+/* ---------------------------------------------------------------------------------------------------------------
+   Closing call and footer. The closing band is dark in both themes, like the hero.
+   --------------------------------------------------------------------------------------------------------------- */
+.alvo-close {
   color-scheme: dark;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+.alvo-close__row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 28px;
-  padding: clamp(28px, 5vw, 56px) clamp(20px, 4.5vw, 48px);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--codeBg);
-  color: var(--text);
+  gap: 28px 48px;
+  padding-block: clamp(48px, 7vw, 80px);
 }
-.alvo-cta__copy { flex: 1 1 460px; min-width: 0; }
-.alvo-landing .alvo-cta h2 { color: var(--text); font-size: clamp(26px, 3vw, 40px); }
-.alvo-cta p { margin-top: 12px; max-width: 620px; font-size: 18px; color: var(--dim); }
+.alvo-close__copy { flex: 1 1 520px; min-width: 0; }
+.alvo-landing .alvo-close h2 { max-width: 22ch; font-size: clamp(26px, 3vw, 38px); }
+.alvo-close p { max-width: 64ch; margin-top: 12px; font-size: 17px; color: var(--dim); }
 
 .alvo-footer { border-top: 1px solid var(--border); }
 .alvo-footer__row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 16px 40px;
-  padding-block: 32px 40px;
+  gap: 12px 40px;
+  padding-block: 28px 40px;
   font-size: 14px;
   color: var(--dim);
 }
 .alvo-footer__brand { display: inline-flex; align-items: center; gap: 10px; }
-.alvo-footer__links { display: flex; flex-wrap: wrap; gap: 0 4px; }
+.alvo-footer__links { display: flex; flex-wrap: wrap; gap: 0 4px; margin-inline-start: auto; }
 .alvo-footer__links a {
   display: inline-flex;
   align-items: center;
@@ -518,40 +622,44 @@ main:has(.alvo-landing) .content-panel > .sl-container > footer { display: none;
   border-radius: var(--radius-xs);
 }
 .alvo-landing .alvo-footer__links a:hover { color: var(--text); background: var(--panel2); }
-.alvo-footer__meta { margin-inline-start: auto; color: var(--faint); }
 
+/* ---------------------------------------------------------------------------------------------------------------
+   Responsive.
+   --------------------------------------------------------------------------------------------------------------- */
 @media (max-width: 1199px) {
-  .alvo-hero__intro,
-  .alvo-how__grid,
-  .alvo-ways__grid,
-  .alvo-agent__grid { grid-template-columns: minmax(0, 1fr); }
-  .alvo-hero__actions { max-width: 560px; }
+  .alvo-hero__grid,
+  .alvo-qs,
+  .alvo-one,
+  .alvo-agent { grid-template-columns: minmax(0, 1fr); }
+  .alvo-hero__pitch { max-width: 680px; }
+  .alvo-caps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@media (max-width: 1023px) {
-  .alvo-hero__card,
+@media (max-width: 959px) {
+  .alvo-modes,
   .alvo-split-head { grid-template-columns: minmax(0, 1fr); }
-  .alvo-pane + .alvo-pane { border-inline-start: 0; border-top: 1px solid var(--alvo-code-border); }
-  .alvo-hero__connector,
-  .alvo-hero__chip { display: none; }
 }
 @media (max-width: 767px) {
-  .alvo-hero { padding-top: 32px; }
-  .alvo-diff__grid { grid-template-columns: minmax(0, 1fr); }
-  .alvo-proof { justify-content: flex-start; }
-  .alvo-proof .alvo-proof__sep { display: none; }
-  .alvo-pane__note,
-  .alvo-exchange__note--request { display: none; }
-  .alvo-how__grid, .alvo-dash .alvo-wrap { padding-block: 56px; }
-  .alvo-diff, .alvo-agent { padding-block: 64px 24px; }
-  .alvo-ways { padding-block: 48px 64px; }
+  .alvo-hero__grid { gap: 32px; padding-block: 32px 36px; }
+  .alvo-hero__pitch { gap: 20px; }
+  .alvo-hero__lead { font-size: 17px; }
+  .alvo-step { padding: 12px 14px 14px; }
+  .alvo-qs__steps > li { grid-template-columns: 30px minmax(0, 1fr); gap: 10px 12px; }
+  .alvo-qs__steps > li::before { grid-row: 1; }
+  .alvo-qs__steps > li > :not(h3) { grid-column: 1 / -1; }
+  .alvo-step__prompt { font-size: 16px; }
+  .alvo-step__code { font-size: 12px; }
+  .alvo-coming { padding-inline-start: 14px; }
+  .alvo-caps { grid-template-columns: minmax(0, 1fr); }
+  .alvo-lede { font-size: 17px; }
+  .alvo-kv > div,
+  .alvo-yields > li { grid-template-columns: minmax(0, 1fr); }
+  .alvo-routes dt { min-width: 0; }
+  .alvo-mode { padding: 20px 16px 8px; }
+  .alvo-codecard__body { padding: 14px; }
+  .alvo-codecard__note { margin-inline-start: 0; }
+  .alvo-footer__links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; margin-inline-start: 0; }
   .alvo-landing .expressive-code pre > code { font-size: 12px; }
-  .alvo-footer__links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
-  .alvo-footer__meta { margin-inline-start: 0; }
-  .alvo-chip { white-space: pre-wrap; word-break: break-all; }
 }
 @media (max-width: 479px) {
-  .alvo-cta-row > a { flex: 1 1 100%; justify-content: center; }
+  .alvo-cta-row > a { flex: 1 1 100%; }
 }
-
-.alvo-agent__note { margin-bottom: 8px; font-family: var(--font-ibm-plex-mono); font-size: 13px; color: var(--faint); }
-.alvo-agent__call { margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--alvo-code-border); }

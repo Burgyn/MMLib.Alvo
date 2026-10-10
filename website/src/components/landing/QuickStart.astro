@@ -1,0 +1,58 @@
+---
+// The quick start without a clone: the same shared snippet the Quick start page and the README run, split into its
+// steps here. A line added to or removed from the snippet fails the build instead of silently dropping out.
+import { Code } from '@astrojs/starlight/components';
+import { page } from '../../lib/links';
+import quickStart from '../../snippets/shell/quick-start.sh?raw';
+import tearDown from '../../snippets/shell/quick-start-tear-down.sh?raw';
+
+const lines = quickStart.trimEnd().split('\n');
+const pick = (pattern: RegExp) => {
+  const found = lines.filter((line) => pattern.test(line));
+  if (found.length === 0) throw new Error(`QuickStart: no line of quick-start.sh matches ${pattern}`);
+  return found.join('\n');
+};
+const steps = [
+  { title: 'Download the compose file', code: pick(/^curl -fsSLO /) },
+  { title: 'Set the two secrets', code: pick(/^export /), note: 'The image ships no credential: the API key secret and the dashboard password both come from your shell. Keep <code>ALVO_DEMO_KEY_SECRET</code> exported for <code>down</code> as well.' },
+  { title: 'Start it', code: pick(/^docker compose .* up /), note: '<code>--wait</code> returns once <code>/health/ready</code> answers, which is after the descriptor is applied.' },
+  { title: 'Call it', code: pick(/^curl -sS /) },
+];
+const used = steps.reduce((n, step) => n + step.code.split('\n').length, 0);
+if (used !== lines.length) throw new Error(`QuickStart: quick-start.sh has ${lines.length} lines, the landing shows ${used}`);
+const image = 'ghcr.io/burgyn/alvo:edge';
+---
+<section class="alvo-section" aria-labelledby="qs-title">
+  <div class="alvo-wrap">
+    <div class="alvo-head">
+      <p class="alvo-eyebrow">Quick start · no clone</p>
+      <h2 id="qs-title">One compose file, two secrets, one command.</h2>
+      <p class="alvo-lede">The published image over PostgreSQL, serving the <code>vehicle-registry</code> example it ships with. No clone and no .NET: Docker and one downloaded file.</p>
+    </div>
+    <div class="alvo-qs">
+      <ol class="alvo-qs__steps">
+        {steps.map((step) => (
+          <li>
+            <h3>{step.title}</h3>
+            <Code code={step.code} lang="sh" frame="terminal" title="Terminal" wrap />
+            {step.note && <p set:html={step.note} />}
+          </li>
+        ))}
+      </ol>
+      <div class="alvo-qs__side">
+        <dl class="alvo-kv">
+          <div><dt>API reference</dt><dd><code>http://localhost:8080/scalar</code></dd></div>
+          <div><dt>Dashboard</dt><dd><code>http://localhost:8080/admin</code>, as <code>admin@alvo.local</code> with <code>$ALVO_ADMIN_PASSWORD</code></dd></div>
+          <div><dt>Image</dt><dd><code>{image}</code>, built from <code>main</code> for linux/amd64 and linux/arm64</dd></div>
+          <div><dt>Listens on</dt><dd><code>127.0.0.1:8080</code> only</dd></div>
+          <div><dt>Tear down</dt><dd><code>{tearDown.trim()}</code></dd></div>
+        </dl>
+        <p class="alvo-fine">
+          <code>ALVO_DESCRIPTOR</code> switches to another example the image ships, or to your own file mounted read-only.{' '}
+          <a class="alvo-prose-link" href={page('/start-here/run-your-own/')}>Run your own descriptor</a>
+        </p>
+        <a class="alvo-textlink" href={page('/start-here/quick-start/')}>The full quick start <span aria-hidden="true">→</span></a>
+      </div>
+    </div>
+  </div>
+</section>

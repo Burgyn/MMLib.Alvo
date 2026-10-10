@@ -1,0 +1,40 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "help-desk",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["agent"]
+  },
+  "webhooks": {
+    "endpoints": {
+      "ops-board": {
+        "url": "https://ops.example.com/hooks/alvo",
+        "secretRef": "ops-board-signing-key"
+      }
+    }
+  },
+  "entities": {
+    "tickets": {
+      "audit": true,
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 120 },
+        "priority": { "type": "enum", "values": ["low", "normal", "high"], "default": "normal" }
+      },
+      "rules": {
+        "list": "created_by == @user.id",
+        "get": "created_by == @user.id",
+        "create": "'agent' in @user.roles",
+        "update": "created_by == @user.id"
+      },
+      "hooks": {
+        "afterCreate": [
+          {
+            "condition": "new.priority == 'high'",
+            "action": { "type": "webhook", "endpoint": "ops-board" }
+          }
+        ]
+      }
+    }
+  }
+}
