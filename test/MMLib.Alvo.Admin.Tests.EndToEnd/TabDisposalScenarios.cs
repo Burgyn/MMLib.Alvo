@@ -39,12 +39,12 @@ public sealed class TabDisposalScenarios(NavigationLogWorld world) : IClassFixtu
         await using (session)
         {
             await session.GoAsync(route);
-            await session.Page.WaitForURLAsync(address);
+            await session.Page.WaitForAddressAsync(address);
             await session.Page.GetByRole(AriaRole.Tab, new() { Selected = true }).WaitForAsync();
 
             await session.Page.GetByTestId("sidebar")
                 .GetByRole(AriaRole.Link, new() { Name = "Configuration history", Exact = true }).ClickAsync();
-            await session.Page.WaitForURLAsync("**/admin/history");
+            await session.Page.WaitForAddressAsync("**/admin/history");
             await session.Page.GetByRole(AriaRole.Heading, new() { Name = "Configuration history" }).WaitForAsync();
             await session.Page.WaitForTimeoutAsync(500);
 

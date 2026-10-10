@@ -45,6 +45,13 @@ public class AdminWorld : IAsyncLifetime
     /// </remarks>
     public const int ScenarioTimeout = 150_000;
 
+    /// <summary>How long one browser action or wait may take: every session's context default, and every wait's.</summary>
+    /// <remarks>
+    /// A minute rather than Playwright's thirty seconds: a server-interactive circuit's first render pays for the
+    /// browser, the connection and the component tree at once. <see cref="PageAddress"/> waits for an address with it.
+    /// </remarks>
+    public const int ActionTimeout = 60_000;
+
     /// <summary>The address the bootstrap administrator signs in with.</summary>
     public const string AdminEmail = "admin@alvo.test";
 
@@ -286,7 +293,8 @@ public class AdminWorld : IAsyncLifetime
 
         /* A minute, for the reason the sign-in wait below carries: a server-interactive circuit's
            first render pays for the browser, the connection and the component tree at once. */
-        context.SetDefaultTimeout(60_000);
+        context.SetDefaultTimeout(ActionTimeout);
+        await ScenarioTraces.StartAsync(context).ConfigureAwait(false);
 
         var session = new AdminSession(
             context, await context.NewPageAsync().ConfigureAwait(false), BaseAddress);
@@ -304,8 +312,8 @@ public class AdminWorld : IAsyncLifetime
                cold browser process and for the first render of a server-interactive circuit at
                once, and a suite that fails one run in ten for that reason teaches everyone to
                re-run it instead of reading it. */
-            await session.Page.WaitForURLAsync(
-                $"**{AlvoAdmin.BasePath}", new() { Timeout = 60_000 }).ConfigureAwait(false);
+            await session.Page.WaitForAddressAsync(
+                $"**{AlvoAdmin.BasePath}").ConfigureAwait(false);
         }
         catch (TimeoutException)
         {

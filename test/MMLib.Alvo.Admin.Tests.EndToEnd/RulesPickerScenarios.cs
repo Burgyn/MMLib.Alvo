@@ -20,7 +20,7 @@ public sealed class RulesPickerScenarios(AdminWorld world) : IClassFixture<Admin
 
         await session.Page.GetByRole(AriaRole.Tab, new() { Name = "customers", Exact = true }).ClickAsync();
 
-        await session.Page.WaitForURLAsync("**/rules/customers");
+        await session.Page.WaitForAddressAsync("**/rules/customers");
         await session.Page.GetByRole(AriaRole.Tab, new() { Name = "customers", Selected = true }).WaitForAsync();
         session.AssertConsoleClean();
     }
@@ -37,12 +37,12 @@ public sealed class RulesPickerScenarios(AdminWorld world) : IClassFixture<Admin
         await session.Button("New entity", exact: true).ClickAsync();
         await session.Dialog("new-entity").GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync("invoices");
         await session.Button("Add to the working copy").ClickAsync();
-        await session.Page.WaitForURLAsync("**/schema/invoices");
+        await session.Page.WaitForAddressAsync("**/schema/invoices");
 
         await session.GoAsync("/rules/work_orders");
         await session.Page.GetByRole(AriaRole.Tab, new() { Name = "invoices", Exact = true }).ClickAsync();
 
-        await session.Page.WaitForURLAsync("**/rules/invoices");
+        await session.Page.WaitForAddressAsync("**/rules/invoices");
         await session.Page.GetByTestId("rules-pending").WaitForAsync();
         await session.Page.GetByTestId("simulate-pending").WaitForAsync();
         session.AssertConsoleClean();
@@ -61,7 +61,7 @@ public sealed class RulesPickerScenarios(AdminWorld world) : IClassFixture<Admin
         await remover.Button("New entity", exact: true).ClickAsync();
         await remover.Dialog("new-entity").GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync("quotes");
         await remover.Button("Add to the working copy").ClickAsync();
-        await remover.Page.WaitForURLAsync("**/schema/quotes");
+        await remover.Page.WaitForAddressAsync("**/schema/quotes");
 
         await watcher.GoAsync("/rules/quotes");
         await watcher.Page.GetByTestId("rules-pending").WaitForAsync();
@@ -69,9 +69,9 @@ public sealed class RulesPickerScenarios(AdminWorld world) : IClassFixture<Admin
         await remover.Page.GetByTestId("remove-entity").ClickAsync();
         await remover.Dialog("remove-entity-sheet").GetByRole(AriaRole.Textbox).FillAsync("quotes");
         await remover.Dialog("remove-entity-sheet").GetByTestId("remove-entity-confirm").ClickAsync();
-        await remover.Page.WaitForURLAsync("**/admin/schema");
+        await remover.Page.WaitForAddressAsync("**/admin/schema");
 
-        await watcher.Page.WaitForURLAsync(url => url.EndsWith("/admin/rules", StringComparison.Ordinal));
+        await watcher.Page.WaitForAddressAsync(url => url.EndsWith("/admin/rules", StringComparison.Ordinal));
         await watcher.Page.GetByRole(AriaRole.Tab, new() { Name = "quotes", Exact = true })
             .WaitForAsync(new() { State = WaitForSelectorState.Detached });
         watcher.AssertConsoleClean();
@@ -92,7 +92,7 @@ public sealed class ManyEntitiesRulesScenarios(ManyEntitiesWorld world) : IClass
         /* The test id lands on both of the library's combobox elements; the visible one is the one a person uses. */
         await session.ChooseAsync(session.Page.GetByRole(AriaRole.Combobox, new() { Name = "Entity" }), "depots");
 
-        await session.Page.WaitForURLAsync("**/rules/depots");
+        await session.Page.WaitForAddressAsync("**/rules/depots");
         await session.Content.GetByText("/api/depots").First.WaitForAsync();
         session.AssertConsoleClean();
     }

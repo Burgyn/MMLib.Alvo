@@ -9,3 +9,6 @@
 // Spelled the way MMLib.Alvo.Api.Tests.Integration spells it: the CollectionBehavior
 // property is obsolete in xunit.v3 and this repository builds warnings as errors.
 [assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]
+
+// A failed scenario keeps its Playwright trace in playwright-traces/, which CI uploads (ScenarioTraces).
+[assembly: MMLib.Alvo.Admin.Tests.EndToEnd.KeepTracesOfFailedScenarios]
