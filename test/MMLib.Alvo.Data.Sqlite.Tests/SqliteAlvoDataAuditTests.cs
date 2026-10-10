@@ -48,6 +48,49 @@ public sealed class SqliteAlvoDataAuditTests : IAsyncDisposable
     }
 
     /// <summary>
+    /// A batch update stamps exactly what a single update does — <c>updated_at</c> from the injected clock and
+    /// <c>updated_by</c> from the caller — and leaves the creation record alone (issue #349).
+    /// </summary>
+    [Fact]
+    public async Task A_batch_update_advances_only_the_updated_columns()
+    {
+        var host = await StartAsync(new SteppingTimeProvider(Created, Updated));
+        var creator = Caller;
+        var updater = Caller;
+        var created = await host.Data.CreateAsync("invoices", Payload("first"), creator, cancellationToken: Cancellation);
+
+        var batch = await host.Data.UpdateManyAsync(
+            "invoices", [new AlvoRowPatch((Guid)created["id"]!, Payload("second"))], updater,
+            cancellationToken: Cancellation);
+
+        var updated = batch.Rows.ShouldHaveSingleItem();
+        updated[AlvoManagedColumns.CreatedAt].ShouldBe(Created);
+        updated[AlvoManagedColumns.CreatedBy].ShouldBe(creator.User.Value);
+        updated[AlvoManagedColumns.UpdatedAt].ShouldBe(Updated);
+        updated[AlvoManagedColumns.UpdatedBy].ShouldBe(updater.User.Value);
+    }
+
+    /// <summary>A batch create stamps all four audit columns from the one instant the batch is written at.</summary>
+    [Fact]
+    public async Task A_batch_create_stamps_all_four_audit_columns_from_the_injected_clock()
+    {
+        var host = await StartAsync(new SteppingTimeProvider(Created, Updated));
+        var caller = Caller;
+
+        var batch = await host.Data.CreateManyAsync(
+            "invoices", [Payload("a"), Payload("b")], caller, cancellationToken: Cancellation);
+
+        batch.Rows.Count.ShouldBe(2);
+        foreach (var row in batch.Rows)
+        {
+            row[AlvoManagedColumns.CreatedAt].ShouldBe(Created);
+            row[AlvoManagedColumns.UpdatedAt].ShouldBe(Created);
+            row[AlvoManagedColumns.CreatedBy].ShouldBe(caller.User.Value);
+            row[AlvoManagedColumns.UpdatedBy].ShouldBe(caller.User.Value);
+        }
+    }
+
+    /// <summary>
     /// The anonymous caller's all-zero <see cref="UserId"/> is reserved to mean "no identity", so the
     /// actor columns stay <see langword="null"/> rather than asserting that the anonymous caller authored
     /// the row — which would make it the recorded owner of every audited row it created.
