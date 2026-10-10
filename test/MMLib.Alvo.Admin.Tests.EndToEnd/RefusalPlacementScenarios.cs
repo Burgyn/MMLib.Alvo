@@ -98,7 +98,7 @@ public sealed class PendingSoftDeleteScenarios(AdminWorld world) : IClassFixture
         await session.GoToImportAsync();
         await session.Page.FillAsync("#import-json", WithSoftDeletedArchive());
         await session.Page.GetByTestId("import-run").ClickAsync();
-        await session.Page.WaitForURLAsync("**/changes");
+        await session.Page.WaitForAddressAsync("**/changes");
 
         await session.GoAsync("/schema/archives");
         var refusal = session.Page.GetByTestId("refused-entity.softDelete");

@@ -52,7 +52,7 @@ public sealed class KeyboardConsistencyScenarios(AdminWorld world) : IClassFixtu
         await session.Button("New entity", exact: true).ClickAsync();
         await session.Page.FillAsync("#new-entity-name", "enter_applies");
         await session.Page.Keyboard.PressAsync("Enter");
-        await session.Page.WaitForURLAsync("**/schema/enter_applies");
+        await session.Page.WaitForAddressAsync("**/schema/enter_applies");
         await session.PreviewPendingAsync();
 
         await session.Page.FillAsync("#apply-reason", "Enter applies");

@@ -70,7 +70,7 @@ public sealed class SetPasswordScenarios(SetPasswordWorld world) : IClassFixture
         var page = await OpenLinkAsync(context, handover.Link, email);
         await SubmitPasswordAsync(page, SecondPassword);
 
-        await page.WaitForURLAsync($"**{AlvoAdmin.SetPasswordPath}?failed=true");
+        await page.WaitForAddressAsync($"**{AlvoAdmin.SetPasswordPath}?failed=true");
         (await page.GetByTestId("error-title").InnerTextAsync()).ShouldContain("This link does not work.");
         (await page.EvaluateAsync<string>("() => window.location.hash")).ShouldBeEmpty("a refusal carries no link back");
 
@@ -144,7 +144,7 @@ public sealed class SetPasswordScenarios(SetPasswordWorld world) : IClassFixture
         var second = await IssueAsync(email);
         await SetPasswordFromLinkAsync(second.Link, email, SecondPassword);
 
-        await person.Page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}**", new() { Timeout = RevalidationWait });
+        await person.Page.WaitForAddressAsync($"**{AlvoAdmin.SignInPath}**", timeout: RevalidationWait);
 
         /* And the new password is the one that works now. */
         await using var again = await world.SignInAsAsync(email, SecondPassword, TestContext.Current.CancellationToken);
@@ -239,7 +239,7 @@ public sealed class SetPasswordScenarios(SetPasswordWorld world) : IClassFixture
     /// <summary>The post landed on sign-in, which says the password is set.</summary>
     private static async Task AssertPasswordSetAsync(IPage page)
     {
-        await page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}?passwordSet=true");
+        await page.WaitForAddressAsync($"**{AlvoAdmin.SignInPath}?passwordSet=true");
         (await page.GetByTestId("sign-in-password-set").InnerTextAsync())
             .ShouldContain("Your password is set. Sign in with it.");
     }

@@ -36,7 +36,7 @@ public sealed class AssistantScenarios(AssistantWorld world) : IClassFixture<Ass
             .ShouldContain("propose_change");
 
         await session.Page.ClickAsync("[data-testid='assistant-review']");
-        await session.Page.WaitForURLAsync("**/changes");
+        await session.Page.WaitForAddressAsync("**/changes");
 
         await session.WaitForPlanAsync();
         await session.Page.GetByText("against the database").First.WaitForAsync();
@@ -269,17 +269,17 @@ public sealed class ProposalOverEditsScenarios(AssistantWorld world) : IClassFix
 
         await session.Page.GetByTestId("assistant-review").ClickAsync();
         await confirm.GetByTestId("assistant-replace-run").ClickAsync();
-        await session.Page.WaitForURLAsync("**/changes");
+        await session.Page.WaitForAddressAsync("**/changes");
         await session.WaitForPlanAsync();
         await session.FocusAfterConfirmAsync("assistant-replace-confirm", "h1");
         (await session.Content.InnerTextAsync()).ShouldNotContain("vendors");
 
         await session.Page.GetByTestId("discard").First.ClickAsync();
         await session.Dialog("discard-sheet").GetByTestId("discard-confirm").ClickAsync();
-        await session.Page.WaitForURLAsync("**/schema");
+        await session.Page.WaitForAddressAsync("**/schema");
         await session.FocusAfterConfirmAsync("discard-sheet@Preview", "h1");
         await session.Page.GetByTestId("assistant-review").ClickAsync();
-        await session.Page.WaitForURLAsync("**/changes");
+        await session.Page.WaitForAddressAsync("**/changes");
         await session.WaitForPlanAsync();
         (await confirm.CountAsync()).ShouldBe(0, "a clean copy has nothing to lose");
         session.AssertConsoleClean();
