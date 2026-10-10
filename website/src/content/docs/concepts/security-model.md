@@ -24,7 +24,7 @@ What Alvo guarantees, for every access that goes through it:
 - **Nothing the descriptor can express reaches the network inside a write's transaction**, by construction rather than
   by convention. The one exception is a function a host developer registers in C#, which is host code.
 - **Policy refusals disclose kinds, not data.** A refused read or write says what kind of refusal it is; a row a rule
-  hides answers the same as a row that does not exist, with two deliberate exceptions listed below.
+  hides answers the same as a row that does not exist, except that a constraint conflict can reveal it (below).
 - **Every request is bounded**: page size, body size and depth, filter depth and width, batch rows. The values are in
   [Limits and budgets](/MMLib.Alvo/reference/limits/).
 
@@ -36,11 +36,17 @@ Where the guarantees stop:
 - **Host code is trusted.** A C# function or endpoint a host developer adds runs with the host's power, not within the
   descriptor's grammar. Who the caller of a custom endpoint is, and any database access that does not go through Alvo's
   data port, is the host's responsibility.
-- **Two conflicts reveal that a hidden row exists**, deliberately. A `PUT` create-or-replace on an id held by a row the
-  caller's rule hides answers `409`, because a primary key cannot collide silently; the caller must already hold that
-  UUID to ask. And a `unique` field on an entity that is not tenant-scoped is unique across the whole instance, so a
-  `409` tells a caller that some row, perhaps one it cannot see, holds that value. Do not make a guessable value, such
-  as an e-mail address, `unique` on such an entity if its existence is confidential.
+- **A constraint conflict (`409`) can reveal rows a rule hides**, because the database enforces a constraint over every
+  row, not over the rows a caller may see:
+  - a `PUT` create-or-replace on an id held by a row the caller's rule hides, or by another tenant's row, answers
+    `409`, because the primary key is the id alone and cannot collide silently; the caller must already hold that
+    UUID to ask;
+  - a value a `unique` field already holds answers `409`, and that row may be one the caller cannot see: uniqueness is
+    instance-wide on an entity that is not tenant-scoped, and tenant-wide on a scoped one;
+  - a delete refused because a `ref` with `onDelete: restrict` still points at the row answers `409` (`referenced`):
+    it tells the caller that some record references it, which the caller may not be allowed to read.
+
+  Do not make a guessable value, such as an e-mail address, `unique` if its existence is confidential.
 - **The schema's shape is public.** Which entities exist and their non-hidden fields are published by the routes and
   the OpenAPI document. Data and the names of hidden fields are not.
 
@@ -57,7 +63,7 @@ Every layer starts closed and opens only on an explicit declaration:
 - **The Management API** answers every route with `403` except to the bootstrap administrator, until the descriptor's
   `access` block maps roles to a level.
 - **The image ships no credential**: no API key and no administrator password. A host with none configured still
-  starts, and refuses every operation.
+  starts, and refuses every operation no rule opens to the anonymous caller.
 - **An unknown construct in an expression** compiles nowhere, and a refused descriptor feature is refused at apply
   rather than accepted and ignored.
 
@@ -148,8 +154,9 @@ returns no task and takes no cancellation token, so it cannot await anything, an
 if anything it depends on can reach an HTTP client, a socket or a mail sender. A hook's run time is bounded by its
 grammar, not by a timeout: a fixed number of expressions, each without loops or I/O. **The exception is a host
 function** registered with `AddCelFunction`: it is host code, runs inside the transaction with no time budget and no
-cancellation, and is trusted to be pure and fast; Alvo cannot check that it is. Network work belongs in an after-hook, which runs after the commit from the outbox, holds no lock, and is
-retried; a webhook is delivered only to a publicly reachable address unless the operator allows a network.
+cancellation, and is trusted to be pure and fast; Alvo cannot check that it is. Network work belongs in an
+after-hook, which runs after the commit from the outbox, holds no lock, and is retried; a webhook is delivered only to
+a publicly reachable address unless the operator allows a network.
 
 ## What an error discloses
 
@@ -162,14 +169,15 @@ reason a client could parse would hand back what the prose is written to withhol
   is hidden.
 - **`not-found` is one type for "absent" and "excluded by your rule"**, so reading, updating or deleting by id cannot
   probe for rows a caller may not see. A `list` rule that excludes rows answers `200` with fewer rows, the way a row
-  filter does. The two `409` conflicts under [Where the guarantees stop](#in-short) are the deliberate exceptions.
+  filter does. The constraint conflicts under [Where the guarantees stop](#in-short) are the exceptions: a `409` can
+  reveal a row a rule hides.
 - **`out-of-scope` is a second `403`** only because it is a fact about the caller's own key, with a different fix.
 - **A `hidden` field's name** is indistinguishable from a field that does not exist on the read surface and in the
   published document. A caller who may write can still tell the two apart, because a write to a hidden field is
   accepted and a write to an undeclared one is refused; what it learns is a name, never a value.
 - **A unique value** on a tenant-scoped entity is unique within its tenant, so a conflict never tells one tenant what
-  another holds. On an entity that is not tenant-scoped it is unique instance-wide, which is the second exception
-  above.
+  another holds; it can still tell a caller about rows of its own tenant a rule hides from it. On an entity that is
+  not tenant-scoped it is unique instance-wide. Both are among the conflicts above.
 - **A `500 internal`** carries a constant message; the exception goes to the host's log only. The readiness probe
   answers with a bare phase word, never the failure's text, because it is unauthenticated.
 

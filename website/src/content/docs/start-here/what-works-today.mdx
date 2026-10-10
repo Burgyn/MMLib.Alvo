@@ -70,8 +70,10 @@ They describe that machine, not a throughput claim; the full table, how it was m
 
 - **Default-deny.** An entity operation without a rule is refused for everyone, and the Management API admits nobody
   but the bootstrap administrator until the descriptor's `access` block grants a level.
-- **Rules run in the database.** A rule is compiled to a parameterized SQL predicate, so it filters every list and
-  guards every write, never as a check on rows already loaded.
+- **Rules filter in the database.** For `list`, `get`, `update` and `delete`, a rule is compiled to a parameterized
+  SQL predicate in the statement that reads or changes the rows, never a check on rows already loaded. On a `create`,
+  and for the check on the row an `update` stores, the same rule is evaluated in memory over that row, inside the
+  write's transaction. [CEL](/MMLib.Alvo/concepts/cel/#how-a-rule-becomes-sql) has the table.
 - **Hooks fail closed.** A before-hook runs inside the write's transaction; if a function in it fails, nothing is
   written.
 - **No default credential.** The image ships no API key and no administrator password; each comes from your

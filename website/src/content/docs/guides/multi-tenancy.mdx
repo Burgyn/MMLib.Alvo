@@ -124,9 +124,11 @@ has the details.
 
 - **A tenant cannot see, change or delete another tenant's rows.** Every attempt is the answer for a row that does
   not exist: an empty page or a 404.
-- **A tenant cannot learn that another tenant's row exists.** A reference to a row in another tenant is refused like a
-  reference to nothing (`unresolved-reference`), and a `unique` field is unique per tenant, so two tenants may hold
-  the same value and a duplicate tells you only about your own rows.
+- **A tenant cannot learn that another tenant's row exists**, with one exception. A reference to a row in another
+  tenant is refused like a reference to nothing (`unresolved-reference`), and a `unique` field is unique per tenant,
+  so two tenants may hold the same value and a duplicate tells you only about your own rows. The exception: a `PUT`
+  create-or-replace on a UUID you already hold answers `409` if a row of any tenant has that id, because the primary
+  key is the id alone.
 - **A row cannot move.** `tenant_id` is set once, on create, and checked against the key.
 - **A key acts in one tenant.** The tenant header can confirm it, never widen it.
 

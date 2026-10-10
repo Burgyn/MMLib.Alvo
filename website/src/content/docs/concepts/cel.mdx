@@ -16,8 +16,9 @@ grammar, one parser and one type checker serve all of them.
 
 CEL was designed for exactly this job: small expressions that decide something, evaluated where a mistake must not
 cost more than a wrong answer. It has no loops, no recursion, no I/O and no way to define a function, so an expression
-always finishes, and its cost is bounded by its length, not by the data or the caller. That is what lets Alvo run a
-rule inside the database query and a hook inside the write's transaction.
+always finishes, and its cost is bounded by its length, not by the data or the caller; a function the host registers
+in C# is the one exception. That is what lets Alvo run a rule inside the database query and a hook inside the write's
+transaction.
 
 Alvo adopts the CEL specification rather than inventing a language, so a coding agent recognizes it from its training
 data. Where Alvo differs from the specification, it says so: see [Deviations](#deviations-from-the-cel-specification)
