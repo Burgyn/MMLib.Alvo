@@ -966,7 +966,7 @@ only (SQLite serialises writers, so a lost update is structurally impossible the
 report a guarantee it never tested), and with the window widened, because without the widening the naive
 implementation measured 40 of 40 and looked correct.
 
-Five consequences worth naming:
+Six consequences worth naming:
 
 - **Both statements are narrowed by `tenant_id` when the pair is tenant-scoped, and neither may lean on the
   foreign key.** A `ref` is a foreign key on the parent's `id` alone — not on `(tenant_id, id)` — so a child row
@@ -1001,6 +1001,14 @@ Five consequences worth naming:
 - **Parents are locked in id order, in one place.** An update recomputes *both* the parent a child left and the
   one it joined — the foreign key is writable — and a deterministic order is what stops two writers moving
   children between the same two parents in opposite directions from deadlocking.
+- **A payload naming a rollup is refused, and here the port's refusal is the only one** (#342). Unlike a
+  computed column, a rollup is an ordinary column the recompute writes with its own statement, so nothing in
+  either engine stops another writer. `WritePayloadGuard` therefore refuses the key on every write method —
+  create, idempotent create, update, both branches of a replace, and every batch row — with the computed
+  field's answer: `AlvoAuthorizationException`, rendered `403` `forbidden` (a batch row: code `forbidden` at
+  `/rows/{index}`). Before the fix a `PATCH {"net_total": 1}` answered `200` and stored the `1`, and a computed
+  field reading the rollup followed it. The recompute never passes through the guard, so the maintainer is
+  unaffected.
 
 The empty answer is the engine's: `0` for `count` and `NULL` for the other four. A `COALESCE(…, 0)` here would
 make "no children yet" indistinguishable from "children summing to zero" on a field an author declared
@@ -1106,8 +1114,8 @@ The ruling on which columns are written when:
 
 | Path | Stamped | Why |
 |---|---|---|
-| `create` | `created_at`, `created_by`, `updated_at`, `updated_by` | `updated_at` is `required`, so a row whose first write left it empty violates its own `NOT NULL`; and "last written" really is the creation instant for a row that has only been created |
-| `update` | `updated_at`, `updated_by` | rewriting the creation record on every write erases the authorship the audit trail exists to hold |
+| `create` (single and batch) | `created_at`, `created_by`, `updated_at`, `updated_by` | `updated_at` is `required`, so a row whose first write left it empty violates its own `NOT NULL`; and "last written" really is the creation instant for a row that has only been created |
+| `update` (single and batch) | `updated_at`, `updated_by` | rewriting the creation record on every write erases the authorship the audit trail exists to hold. The batch update once skipped the stamp, so its rows kept their `ETag` and a stale `If-Match` won (#349) |
 | `delete` | nothing | soft delete is refused at apply time (see *`softDelete` is refused, not silently ignored*), so `deleted_at` has no writer |
 
 The instant comes from an injected `TimeProvider` (registered `TryAddSingleton(TimeProvider.System)`, so a

@@ -64,7 +64,7 @@ public sealed class ShellScenarios(AdminWorld world) : IClassFixture<AdminWorld>
         await Selected(palette, "Data").WaitForAsync();
         await session.Page.Keyboard.PressAsync("Enter");
 
-        await session.Page.WaitForURLAsync("**/admin/data");
+        await session.Page.WaitForAddressAsync("**/admin/data");
         await palette.WaitForAsync(new() { State = WaitForSelectorState.Detached });
         session.AssertConsoleClean();
     }
@@ -162,7 +162,7 @@ public sealed class ShellScenarios(AdminWorld world) : IClassFixture<AdminWorld>
         await session.Page.GetByTestId("more-sections").ClickAsync();
         await sidebar.GetByRole(AriaRole.Link, new() { Name = "Configuration history", Exact = true }).ClickAsync();
 
-        await session.Page.WaitForURLAsync("**/history");
+        await session.Page.WaitForAddressAsync("**/history");
         await sidebar.WaitForAsync(new() { State = WaitForSelectorState.Hidden });
         await session.AssertNoHorizontalScrollAsync();
     }
@@ -260,7 +260,7 @@ public sealed class ShellScenarios(AdminWorld world) : IClassFixture<AdminWorld>
         await session.Page.GetByText(AdminWorld.AdminEmail).First.WaitForAsync();
         await session.Page.GetByRole(AriaRole.Menuitem, new() { Name = "Sign out" }).ClickAsync();
 
-        await session.Page.WaitForURLAsync("**/admin/sign-in**");
+        await session.Page.WaitForAddressAsync("**/admin/sign-in**");
     }
 
     /// <summary>
@@ -313,7 +313,7 @@ public sealed class ShellScenarios(AdminWorld world) : IClassFixture<AdminWorld>
         await session.Page.WaitForFunctionAsync("() => document.activeElement?.getAttribute('role') === 'menuitem'");
         await session.Page.Keyboard.PressAsync("Enter");
 
-        await session.Page.WaitForURLAsync("**/admin/sign-in**");
+        await session.Page.WaitForAddressAsync("**/admin/sign-in**");
     }
 
     private static Task<bool> IsFocused(ILocator locator) => locator.EvaluateAsync<bool>("e => e === document.activeElement");

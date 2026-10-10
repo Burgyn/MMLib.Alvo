@@ -86,31 +86,31 @@ public class EfAlvoDataRollupWritePathTests
         parent[TotalAmount].ShouldBe(12L);
     }
 
-    private const string Invoices = "invoice";
+    internal const string Invoices = "invoice";
 
-    private const string Items = "invoice_item";
+    internal const string Items = "invoice_item";
 
-    private const string Invoice = "invoice_id";
+    internal const string Invoice = "invoice_id";
 
-    private const string Amount = "amount";
+    internal const string Amount = "amount";
 
     private const string ItemCount = "item_count";
 
-    private const string TotalAmount = "total_amount";
+    internal const string TotalAmount = "total_amount";
 
-    private static Task<WritePathWorld> StartAsync() => WritePathWorld.StartAsync(Descriptor, Schema);
+    internal static Task<WritePathWorld> StartAsync() => WritePathWorld.StartAsync(Descriptor, Schema);
 
-    private static async Task<Guid> InvoiceAsync(WritePathWorld world) =>
+    internal static async Task<Guid> InvoiceAsync(WritePathWorld world) =>
         (Guid)(await world.Data.CreateAsync(
             Invoices,
             new Dictionary<string, object?>(StringComparer.Ordinal) { ["reference"] = "INV-1" },
             world.Caller,
             cancellationToken: Ct))["id"]!;
 
-    private static async Task<AlvoRecord> ReadInvoiceAsync(WritePathWorld world, Guid id) =>
+    internal static async Task<AlvoRecord> ReadInvoiceAsync(WritePathWorld world, Guid id) =>
         (await world.Data.GetAsync(Invoices, id, world.Caller, Ct))!;
 
-    private static Dictionary<string, object?> Item(Guid invoice, int amount) =>
+    internal static Dictionary<string, object?> Item(Guid invoice, int amount) =>
         new(StringComparer.Ordinal) { [Invoice] = invoice, [Amount] = amount };
 
     private static AlvoIdempotency Token() => new(Guid.NewGuid().ToString(), "fingerprint");

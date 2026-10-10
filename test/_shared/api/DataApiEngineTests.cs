@@ -445,6 +445,37 @@ public abstract partial class DataApiEngineTests
     }
 
     /// <summary>
+    /// A batch PATCH advances the version of every row it writes, so a single-row PATCH carrying a tag read
+    /// before the batch is refused rather than silently overwriting the batch's change (issue #349).
+    /// </summary>
+    /// <remarks>
+    /// The lost update over the batch route: before the fix the batch left <c>updated_at</c> untouched, so the
+    /// pre-batch tag still matched and the stale write answered 200. The final value is asserted as well as
+    /// the status, because "the stale write was refused" and "the batch's change survived" are two claims.
+    /// </remarks>
+    [Fact]
+    public async Task A_batch_patch_advances_the_etag_so_a_stale_if_match_is_refused()
+    {
+        await using var world = await StartAsync();
+        var id = await CreateOwnerAsync(world, Owner("Before batch"));
+        var stale = await ETagOfAsync(world, id, _admin);
+
+        using var batch = await world.SendAsync(
+            HttpMethod.Patch, "/api/owners/batch", _admin,
+            body: new JsonObject { ["rows"] = new JsonArray(new JsonObject { ["id"] = id, ["name"] = "Batched" }) });
+        batch.StatusCode.ShouldBe(HttpStatusCode.OK, await batch.ReadTextAsync());
+        (await ETagOfAsync(world, id, _admin)).ShouldNotBe(stale, "a batch write must advance the row's version");
+
+        using var late = await world.SendAsync(
+            HttpMethod.Patch, $"/api/owners/{id}", _admin, body: new JsonObject { ["name"] = "Late" },
+            headers: IfMatch(stale));
+
+        late.StatusCode.ShouldBe(
+            HttpStatusCode.PreconditionFailed, "the caller read a version the batch has since replaced");
+        (await ReadOwnerAsync(world, id))["name"]!.GetValue<string>().ShouldBe("Batched", "the batch's change must survive");
+    }
+
+    /// <summary>
     /// A before-hook reject over a <c>date</c> field — <c>new.starts_on != old.starts_on</c> — refuses a PATCH that
     /// moves the date, and lets one that leaves it alone through.
     /// </summary>

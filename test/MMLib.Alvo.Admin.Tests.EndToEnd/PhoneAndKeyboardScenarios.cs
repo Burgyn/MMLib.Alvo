@@ -205,7 +205,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         }
 
         await drawer.Locator("a[href$='/history']").ClickAsync();
-        await session.Page.WaitForURLAsync("**/admin/history");
+        await session.Page.WaitForAddressAsync("**/admin/history");
         await session.SettleAsync();
         await session.AssertRenderedAsync();
 
@@ -299,7 +299,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
             .WaitForAsync();
 
         await session.Page.Keyboard.PressAsync("Enter");
-        await session.Page.WaitForURLAsync("**/admin/access");
+        await session.Page.WaitForAddressAsync("**/admin/access");
         await session.SettleAsync();
         session.AssertConsoleClean();
     }
@@ -321,7 +321,7 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
            is what settling measures, is true the whole time a WebSocket is quiet. Reading the URL
            straight after a settle therefore reads it before the navigation has happened, and the
            test fails for its own impatience. */
-        await session.Page.WaitForURLAsync("**/admin/schema");
+        await session.Page.WaitForAddressAsync("**/admin/schema");
         await session.SettleAsync();
 
         /* Waiting for the element rather than counting it, for the reason above: the palette opens
@@ -349,12 +349,12 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
 
         await session.Page.Keyboard.PressAsync("g");
         await session.Page.Keyboard.PressAsync("d");
-        await session.Page.WaitForURLAsync("**/admin/data");
+        await session.Page.WaitForAddressAsync("**/admin/data");
         await session.SettleAsync();
 
         await session.Page.Keyboard.PressAsync("g");
         await session.Page.Keyboard.PressAsync(",");
-        await session.Page.WaitForURLAsync("**/admin/settings");
+        await session.Page.WaitForAddressAsync("**/admin/settings");
         await session.SettleAsync();
 
         session.AssertConsoleClean();
@@ -446,16 +446,16 @@ public sealed class PhoneAndKeyboardScenarios(AdminWorld world) : IClassFixture<
         /* The move is the circuit's, so Enter waits for it: pressed at once, it would open the tab still focused. */
         await session.Page.WaitForFunctionAsync("() => document.activeElement?.textContent?.trim() === 'On write'");
         await session.Page.Keyboard.PressAsync("Enter");
-        await session.Page.WaitForURLAsync("**/admin/schema/work_orders?tab=on-write");
+        await session.Page.WaitForAddressAsync("**/admin/schema/work_orders?tab=on-write");
         await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Tab, new() { Name = "On write", Selected = true }).WaitForAsync();
         (await session.Page.EvaluateAsync<string>("document.activeElement.textContent.trim()")).ShouldBe("On write");
 
         /* Each opened tab is one step, so Back from Indexes returns to On write, not Rules. */
         await session.OpenTabAsync("Indexes");
-        await session.Page.WaitForURLAsync("**/admin/schema/work_orders?tab=indexes");
+        await session.Page.WaitForAddressAsync("**/admin/schema/work_orders?tab=indexes");
 
         await session.Page.GoBackAsync();
-        await session.Page.WaitForURLAsync("**/admin/schema/work_orders?tab=on-write");
+        await session.Page.WaitForAddressAsync("**/admin/schema/work_orders?tab=on-write");
         await session.Page.GetByRole(Microsoft.Playwright.AriaRole.Tab, new() { Name = "On write", Selected = true }).WaitForAsync();
 
         session.AssertConsoleClean();

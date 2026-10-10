@@ -43,7 +43,7 @@ public sealed class SystemMapScenarios(AdminWorld world) : IClassFixture<AdminWo
 
         await Box(session, "regions").ClickAsync();
 
-        await session.Page.WaitForURLAsync("**/schema/regions");
+        await session.Page.WaitForAddressAsync("**/schema/regions");
         session.AssertConsoleClean();
     }
 
@@ -55,9 +55,18 @@ public sealed class SystemMapScenarios(AdminWorld world) : IClassFixture<AdminWo
         await session.GoAsync("/schema?view=map");
 
         await Box(session, "regions").FocusAsync();
+        var before = await session.FocusedAsync();
         await session.Page.Keyboard.PressAsync("Enter");
 
-        await session.Page.WaitForURLAsync("**/schema/regions");
+        try
+        {
+            await session.Page.WaitForAddressAsync("**/schema/regions");
+        }
+        catch (TimeoutException timeout)
+        {
+            throw new TimeoutException(
+                $"Enter on the box did not open regions; the page is at {session.Page.Url}, focus before Enter {before}, now {await session.FocusedAsync()}", timeout);
+        }
         session.AssertConsoleClean();
     }
 
@@ -72,9 +81,9 @@ public sealed class SystemMapScenarios(AdminWorld world) : IClassFixture<AdminWo
         await session.GoAsync("/schema?view=map");
 
         await Chip(session, "Actual size").ClickAsync();
-        await session.Page.WaitForURLAsync("**zoom=actual**");
+        await session.Page.WaitForAddressAsync("**zoom=actual**");
         await Reactions(session).CheckAsync();
-        await session.Page.WaitForURLAsync("**layers=reactions**");
+        await session.Page.WaitForAddressAsync("**layers=reactions**");
         session.Page.Url.ShouldContain("zoom=actual");
 
         var history = await HistoryLengthAsync(session);
@@ -98,7 +107,7 @@ public sealed class SystemMapScenarios(AdminWorld world) : IClassFixture<AdminWo
         await session.Page.GetByRole(AriaRole.Button, new() { Name = "New entity", Exact = true }).ClickAsync();
         await session.Page.FillAsync("#new-entity-name", "invoices");
         await session.Page.GetByRole(AriaRole.Button, new() { Name = "Add to the working copy" }).ClickAsync();
-        await session.Page.WaitForURLAsync("**/schema/invoices");
+        await session.Page.WaitForAddressAsync("**/schema/invoices");
 
         await session.GoAsync("/schema?view=map");
 
@@ -118,7 +127,7 @@ public sealed class SystemMapScenarios(AdminWorld world) : IClassFixture<AdminWo
 
         await session.GoAsync("/schema?view=map");
         await Reactions(session).CheckAsync();
-        await session.Page.WaitForURLAsync("**layers=reactions**");
+        await session.Page.WaitForAddressAsync("**layers=reactions**");
 
         await session.Page.ReloadAsync();
         await session.SettleAsync();

@@ -24,7 +24,7 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
         await session.Page.Keyboard.TypeAsync("tickets");
         await session.Page.Keyboard.PressAsync("Enter");
 
-        await session.Page.WaitForURLAsync("**/schema/tickets");
+        await session.Page.WaitForAddressAsync("**/schema/tickets");
         await session.SnackbarAsync("Entity tickets added to the working copy");
     }
 
@@ -114,7 +114,7 @@ public sealed class SchemaListScenarios(AdminWorld world) : IClassFixture<AdminW
         await session.Button("New entity", exact: true).ClickAsync();
         await session.Page.FillAsync("#new-entity-name", "depots");
         await session.Dialog("new-entity").GetByRole(AriaRole.Button, new() { Name = "Add to the working copy" }).ClickAsync();
-        await session.Page.WaitForURLAsync("**/schema/depots");
+        await session.Page.WaitForAddressAsync("**/schema/depots");
 
         await session.Page.GoBackAsync();
 

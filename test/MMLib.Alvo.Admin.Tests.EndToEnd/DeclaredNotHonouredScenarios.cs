@@ -122,7 +122,7 @@ public sealed class DeclaredNotHonouredScenarios(AdminWorld world) : IClassFixtu
         await session.Page.GetByTestId("import-run").ClickAsync();
 
         var replace = session.Page.GetByTestId("import-replace-run");
-        var arrived = session.Page.WaitForURLAsync("**/changes");
+        var arrived = session.Page.WaitForAddressAsync("**/changes");
         await Task.WhenAny(arrived, replace.WaitForAsync());
         if (!arrived.IsCompleted)
         {

@@ -628,7 +628,24 @@ declared the endpoint" — the premise the paragraph above rests on. So the comp
 proved the secret-shaped segment really was on the wire, over the message **and** the attached exception —
 because that is what a pipeline ships. What is still disclosed, and accepted: `HttpRequestException` carries
 framework-supplied `host:port` on a DNS or connection failure. The host is not the secret; the path and the
-query are.
+query are. Two host-owned paths still carry the path, and Alvo does not close them: HttpClient tracing (the
+`System.Net.Http` `Activity`'s `url.full` tag, path in clear and query masked) and any `EventSource` listener
+on the networking event sources.
+
+**The transport's own logging broke it a second time, from outside this subsystem (#347).**
+`IHttpClientFactory` gives every named client two default logging handlers, and they write the request URI
+under `System.Net.Http.HttpClient.MMLib.Alvo.Events.Webhook.*` — `Start processing HTTP request POST
+https://…/services/T…/B…/XXXX?*` at **Information**, the same URI in the structured state (`Uri=…`) and in an
+`HTTP POST …` scope. Since .NET 9 the query is masked as `?*`; the **path** is not, and the path is the Slack
+credential. None of Alvo's own lines was involved, which is why the facts above — written over a stub
+`IHttpClientFactory` — never saw it. So `AddAlvoEvents` registers the named client with
+`RemoveAllLoggers()`. It is done **where the library registers the client**, not in the standalone host's
+logging configuration, because an embedded host owns its own logging and Alvo cannot require a filter from
+it; nothing is lost, since Alvo's own lines already record each attempt under the endpoint's name. The
+removal is an ordinary configuration by name and is order-sensitive: a host that wants transport logging back
+adds its own logger to the client after `AddAlvo`, and owns that logger's redaction.
+`WebhookClientLoggingTests` pins it over the real registration at `Trace`, reading messages, structured state
+and scopes, after proving the secret-shaped path really went out.
 
 **The endpoint's URL is validated at apply, and cleartext is refused.** `schema/project.schema.json`'s
 `"format": "uri"` is an annotation and asserts nothing, so a relative or malformed URL used to become a
@@ -1250,7 +1267,7 @@ line, and the failure would surface as missing downstream state rather than as a
 | 10 000 events lose nothing, **with the retry backoff in force** | `OutboxChaosCriteriaTests` — `accepted=10000 distinct=10000 attempts=10526 refused=526 abandoned=20 claims=108 pending=0 retired=10000`, identical on both engines; one line per run in `artifacts/criteria/events.md`. The world advances its fake clock one poll interval per batch, without which the backoff strands the redeliveries (measured: 186 pending) |
 | kill between commit and publish → delivered after restart; kill mid-action → the action repeats | `KilledHostRecoveryTests`, against a real child process, exit code **137** on Unix / **-1** on Windows — neither reachable by the host's own exits (0, 78) |
 | what the in-process harness does **not** prove | `OutboxRecoveryTests`' own name and remarks; the two files exist separately so neither can be mistaken for the other |
-| **no log line carries a webhook URL** that could be a secret | `EventActionExecutorTests.No_log_line_carries_a_webhook_url_that_could_be_a_secret` — the absence is asserted only after the same run proved the secret-shaped segment was on the wire, over the message **and** the attached exception |
+| **no log line carries a webhook URL** that could be a secret | `EventActionExecutorTests.No_log_line_carries_a_webhook_url_that_could_be_a_secret` — the absence is asserted only after the same run proved the secret-shaped segment was on the wire, over the message **and** the attached exception; the transport's own lines (`System.Net.Http.HttpClient.*`) by `WebhookClientLoggingTests`, over the real registration at `Trace` — messages, structured state and scopes |
 | **`@tenant.id`/`@user.roles` are refused** in an after-hook condition, positive and negated form alike | `AfterHookCompilerTests.A_condition_naming_provenance_the_envelope_lacks_is_refused_at_apply`, with `A_condition_reading_user_id_compiles_and_records_that_it_needs_an_actor` as the control that keeps it from being "refuse every `@`" |
 | a condition's **`@user.id` is the envelope's actor**, and an actorless event selects no hook that reads it | `EventSubscriptionsTests` — three facts, including the non-vacuity control that a hook reading no caller value is still selected |
 | **`email.data` is refused** whatever it carries | `UnhonouredJsonataTests.An_email_data_slot_is_refused_at_apply_whatever_it_carries` (both spellings) + the `UnhonouredFeatures` slot baseline |

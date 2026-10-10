@@ -47,7 +47,7 @@ public sealed class RemoveEntityScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Button("New entity", exact: true).ClickAsync();
         await session.Dialog("new-entity").GetByRole(AriaRole.Textbox, new() { Name = "Name", Exact = true }).FillAsync("tickets");
         await session.Button("Add to the working copy").ClickAsync();
-        await session.Page.WaitForURLAsync("**/schema/tickets");
+        await session.Page.WaitForAddressAsync("**/schema/tickets");
 
         await session.Page.GetByTestId("remove-entity").ClickAsync();
         var confirm = session.Dialog("remove-entity-sheet");
@@ -60,7 +60,7 @@ public sealed class RemoveEntityScenarios(AdminWorld world) : IClassFixture<Admi
         await confirm.GetByRole(AriaRole.Textbox).FillAsync("tickets");
         await verb.ClickAsync();
 
-        await session.Page.WaitForURLAsync("**/admin/schema");
+        await session.Page.WaitForAddressAsync("**/admin/schema");
         await session.SnackbarAsync("Entity tickets removed from the working copy");
         await session.FocusAfterConfirmAsync("remove-entity-sheet", "h1");
         (await session.Page.GetByTestId("entity-row-tickets").CountAsync()).ShouldBe(0);
@@ -171,6 +171,6 @@ public sealed class RemoveAppliedEntityScenarios(AdminWorld world) : IClassFixtu
         (await confirm.InnerTextAsync()).ShouldContain("its table and every row in it are dropped");
         await confirm.GetByRole(AriaRole.Textbox).FillAsync("work_orders");
         await session.Page.Keyboard.PressAsync("Enter");
-        await session.Page.WaitForURLAsync("**/admin/schema");
+        await session.Page.WaitForAddressAsync("**/admin/schema");
     }
 }

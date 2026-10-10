@@ -230,7 +230,7 @@ public sealed class RecordEditorScenarios(AdminWorld world) : IClassFixture<Admi
         await session.Page.GetByTestId("data-entity").Filter(new() { HasText = "regions" })
             .GetByRole(AriaRole.Cell).Nth(1).ClickAsync();
 
-        await session.Page.WaitForURLAsync("**/data/regions");
+        await session.Page.WaitForAddressAsync("**/data/regions");
         session.AssertConsoleClean();
     }
 

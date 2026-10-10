@@ -77,7 +77,7 @@ public sealed class RouteScenarios(AdminWorld world) : IClassFixture<AdminWorld>
         await session.Page.GetByRole(AriaRole.Button, new() { Name = "New entity", Exact = true }).ClickAsync();
         await session.Page.FillAsync("#new-entity-name", name);
         await session.Page.GetByRole(AriaRole.Button, new() { Name = "Add to the working copy" }).ClickAsync();
-        await session.Page.WaitForURLAsync($"**/schema/{name}");
+        await session.Page.WaitForAddressAsync($"**/schema/{name}");
         await session.SettleAsync();
     }
 }
