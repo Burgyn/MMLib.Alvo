@@ -1,9 +1,8 @@
 ---
 import { Code } from '@astrojs/starlight/components';
-import SourceExcerpt from '../SourceExcerpt.astro';
 import { page } from '../../lib/links';
 import compose from '../../../../docker-compose.quickstart.yml?raw';
-import sampleHost from '../../../../samples/MMLib.Alvo.Samples.EmbeddedHost/SampleHost.cs?raw';
+import program from '../../snippets/embed/minimal/Program.cs?raw';
 
 // Your own descriptor in the standalone image: the two lines the quick-start compose file itself documents.
 const composeLines = compose.replace(/\r\n/g, '\n').split('\n').map((line) => line.replace(/^\s*#\s*/, ''));
@@ -21,7 +20,7 @@ const standalone = `# uncomment in the compose file, under alvo:\n#   volumes:\n
     <div class="alvo-head">
       <p class="alvo-eyebrow">Two modes, one engine</p>
       <h2 id="ways-title">Same descriptor. In a container, or inside your app.</h2>
-      <p class="alvo-lede">The embedded sample serves the same <code>vehicle-registry</code> descriptor the image does, and its tests check that both expose the same routes. Moving between them is carrying the file.</p>
+      <p class="alvo-lede">The repository's embedded sample serves the same <code>vehicle-registry</code> descriptor the image does, and its tests check that both expose the same routes. Moving between them is carrying the file.</p>
     </div>
     <div class="alvo-modes">
       <article class="alvo-mode">
@@ -36,16 +35,9 @@ const standalone = `# uncomment in the compose file, under alvo:\n#   volumes:\n
         <div class="alvo-mode__head">
           <h3>Embedded</h3><span class="alvo-badge alvo-badge--mono">ASP.NET Core</span><span class="alvo-badge alvo-badge--warn">Not on NuGet yet</span>
         </div>
-        <p>A library in your own host: your authentication, your endpoints beside Alvo's, your own C# functions callable from hooks. Today through project references or a local package feed.</p>
+        <p>A library in your own host, set up in one <code>Program.cs</code>: your authentication, your endpoints beside Alvo's, your own C# functions callable from hooks. Today through project references or a local package feed.</p>
         <div class="alvo-mode__code">
-          <SourceExcerpt
-            code={sampleHost}
-            from="builder.Services.AddAlvo(alvo => alvo"
-            to={'.AddCelFunction("normalizeVin", NormalizeVin, NormalizeVinSummary));'}
-            then={{ from: 'app.MapAlvoDataApi().WithTags("alvo-data-api");', to: 'app.MapAlvoDataApi().WithTags("alvo-data-api");' }}
-            dropComments
-            title="SampleHost.cs"
-          />
+          <Code code={program.trimEnd()} lang="csharp" title="Program.cs" />
         </div>
         <a class="alvo-textlink" href={page('/start-here/embed/')}>Embed in ASP.NET Core <span aria-hidden="true">→</span></a>
       </article>

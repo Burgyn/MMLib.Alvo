@@ -4,7 +4,7 @@ description: "Read and write Alvo's data from your own minimal-API endpoints, in
 ---
 
 import SourceExcerpt from '../../../components/SourceExcerpt.astro';
-import sampleHost from '../../../../../samples/MMLib.Alvo.Samples.EmbeddedHost/SampleHost.cs?raw';
+import program from '../../../snippets/embed/own-users/Program.cs?raw';
 
 :::tip[What you will achieve]
 Your own endpoints that query and update Alvo's rows with no HTTP round trip and no authorization code of their own,
@@ -14,9 +14,10 @@ minutes, starting from an app that embeds Alvo as in [Embed Alvo in ASP.NET Core
 
 ## Before you start
 
-- The embedded sample from [Embed Alvo in ASP.NET Core](/start-here/embed/); this page reads its code.
+- An app that embeds Alvo as in [Embed Alvo in ASP.NET Core](/start-here/embed/). This page reads one `Program.cs`
+  that adds a cookie sign-in and two endpoints of its own.
 - A way to build an `AlvoContext` for your signed-in user:
-  [Use your own authentication](/guides/own-authentication/) builds one in a helper called `AsCaller`.
+  [Use your own authentication](/guides/own-authentication/) shows the lines that build one.
 - To try the endpoints, the commands in [Use your own authentication, step 4](/guides/own-authentication/#4-try-it),
   or a descriptor of your own from [Run your own descriptor](/start-here/run-your-own/).
 
@@ -25,7 +26,7 @@ minutes, starting from an app that embeds Alvo as in [Embed Alvo in ASP.NET Core
 `IAlvoData` is the one port every Alvo read and write goes through, the same one the generated API calls. Resolve it
 in a minimal-API delegate like any service, and pass the caller you built. A read:
 
-<SourceExcerpt code={sampleHost} from="app.MapGet(" to=".RequireAuthorization();" dropComments={true} title="SampleHost.cs" />
+<SourceExcerpt code={program} from="app.MapGet(" to="}).RequireAuthorization();" dropComments={true} title="Program.cs" />
 
 `QueryAsync` takes an `AlvoQuery`: `Entity`, and optionally `Filter`, `Sort`, `Select`, `Limit`, `After` (a keyset
 cursor) or `Offset`, and `IncludeTotalCount`. It returns an `AlvoPage` with `Items`, `NextCursor` and `TotalCount`;
@@ -35,7 +36,7 @@ the whole visible set, which the HTTP API never allows.
 
 A write takes your own request type and maps it to the field dictionary Alvo expects:
 
-<SourceExcerpt code={sampleHost} from="app.MapPatch(" to=".RequireAuthorization();" dropComments={true} title="SampleHost.cs" />
+<SourceExcerpt code={program} from="app.MapPatch(" to="}).RequireAuthorization();" dropComments={true} title="Program.cs" />
 
 Map your DTO to a `Dictionary<string, object?>` yourself rather than binding one straight from JSON: a dictionary bound
 from JSON carries `JsonElement` values, which `IAlvoData` has no field type for and refuses. `UpdateAsync` also takes
@@ -50,12 +51,12 @@ The before-hooks, the rules and the after-hook events all run inside these calls
 The generated Data API defaults to `/api`. An embedded host usually moves it out of its own way with
 `AlvoApiOptions.RoutePrefix`, set where Alvo is registered:
 
-<SourceExcerpt code={sampleHost} from=".AddDataApi(api =>" to="})" dropComments={true} title="SampleHost.cs" />
+<SourceExcerpt code={program} from="builder.Services.AddAlvo(alvo => alvo" to=".AddDataApi(" title="Program.cs" />
 
 Then map it. `MapAlvoDataApi()` returns a convention builder over Alvo's generated routes and nothing else, so a
-convention you attach reaches those routes only. The sample groups them under one tag in its OpenAPI document:
+convention you attach reaches those routes only. Here they are grouped under one tag in the OpenAPI document:
 
-<SourceExcerpt code={sampleHost} from="private static void MapAlvoEndpoints" to="app.MapAlvoDataApi().WithTags" dropComments={true} title="SampleHost.cs" />
+<SourceExcerpt code={program} from="app.MapAlvoHealth();" to="app.MapAlvoDataApi().WithTags" title="Program.cs" />
 
 - **Attach conventions before the first request.** The route table is built once, at the first request; a convention
   attached later throws, rather than being silently ignored like a late `RequireRateLimiting` would be.
@@ -69,13 +70,13 @@ convention you attach reaches those routes only. The sample groups them under on
 ## 3. Render what `IAlvoData` refuses
 
 `IAlvoData` refuses by throwing, one exception type per kind of refusal. The generated API turns them into problem
-documents; your endpoint decides what to answer. The sample renders three kinds as its own responses:
+documents; your endpoint decides what to answer. The write above renders three kinds as its own responses:
 
-<SourceExcerpt code={sampleHost} from="private static async Task<IResult> Answered" to="The fixed set of users" dropComments={true} title="SampleHost.cs" />
+<SourceExcerpt code={program} from="var record = await data.UpdateAsync" to="statusCode: StatusCodes.Status422UnprocessableEntity);" title="Program.cs" />
 
-Both endpoints go through the same helper. A denied `list` throws exactly as a denied `update` does, so a helper around
-the write alone would ship a 500 for the first descriptor with a narrower read rule. The complete list, with what the
-generated API answers for each:
+The read catches `AlvoAuthorizationException` too: a denied `list` throws exactly as a denied `update` does, so an
+endpoint that catches only around its writes ships a 500 for the first descriptor with a narrower read rule. The
+complete list, with what the generated API answers for each:
 
 | Exception | Means | The generated API answers |
 |---|---|---|
@@ -88,7 +89,7 @@ generated API answers for each:
 | `InvalidOperationException`, `ArgumentNullException` | An invariant inside Alvo, or your call, is broken. | 500 `internal`, with `AddAlvoProblemDetails()` |
 | `Exception` | A CEL function failed: a built-in refused its input, or a custom function threw. | 500 `function-failed`, with `AddAlvoProblemDetails()` |
 
-Catch the ones your endpoint can cause. The sample sends no precondition, no idempotency key and no unique field, so
+Catch the ones your endpoint can cause. The write sends no precondition, no idempotency key and no unique field, so
 it catches three. Let `InvalidOperationException` and `ArgumentNullException` propagate: they mean a bug, and your
 logging needs the stack trace. A CEL function that fails during your write (a built-in refusing its input, or a
 [custom function](/guides/custom-cel-functions/) that throws) reaches you as a plain `Exception`, outside

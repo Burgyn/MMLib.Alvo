@@ -5,7 +5,7 @@ description: "Let the users who sign in to your embedded app read and write Alvo
 
 import { Code } from '@astrojs/starlight/components';
 import SourceExcerpt from '../../../components/SourceExcerpt.astro';
-import sampleHost from '../../../../../samples/MMLib.Alvo.Samples.EmbeddedHost/SampleHost.cs?raw';
+import program from '../../../snippets/embed/own-users/Program.cs?raw';
 import run from '../../../snippets/shell/own-authentication-run.sh?raw';
 import tryIt from '../../../snippets/shell/own-authentication-try.sh?raw';
 import cookie from '../../../snippets/shell/own-authentication-cookie.sh?raw';
@@ -18,8 +18,9 @@ Alvo as in [Embed Alvo in ASP.NET Core](/start-here/embed/).
 
 ## Before you start
 
-- The embedded sample from [Embed Alvo in ASP.NET Core](/start-here/embed/), run from a clone with the
-  .NET 10 SDK, plus `curl` and `jq`. Its code is the pattern this page walks through.
+- An app that embeds Alvo as in [Embed Alvo in ASP.NET Core](/start-here/embed/). This page walks through one
+  `Program.cs`; to try it, step 4 runs the repository's embedded sample, which has the same endpoints, from a clone
+  with the .NET 10 SDK, plus `curl` and `jq`.
 - Its descriptor, [`examples/vehicle-registry`](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/vehicle-registry/vehicles.alvo.json),
   the same one [Run your own descriptor](/start-here/run-your-own/) serves from Docker. It lets `admin` and
   `inspector` update a vehicle and every authenticated caller read one.
@@ -39,31 +40,31 @@ the descriptor's `rules` decide.
 
 ## 2. Sign your users in, your way
 
-Alvo adds no authentication middleware to your app. The sample signs its users in with an ordinary ASP.NET Core
+Alvo adds no authentication middleware to your app. This one signs its users in with an ordinary ASP.NET Core
 cookie, and sets the cookie's options explicitly: `SameSite=Lax` keeps a cross-site form from carrying it, `Secure` is
 required outside development, and a session ends after eight hours.
 
-<SourceExcerpt code={sampleHost} from="builder.Services" to="builder.Services.AddAuthorization();" title="SampleHost.cs" />
+<SourceExcerpt code={program} from="builder.Services" to="builder.Services.AddAuthorization();" title="Program.cs" />
 
 Its sign-in endpoint, `/app/login`, exists only in the `Development` environment and checks no password: it takes a
 demo user's name and reads that user's roles from a table on the server. It never takes a role list from the request,
 because a sign-in that lets callers name their own roles lets anyone become an administrator:
 
-<SourceExcerpt code={sampleHost} from="private static IReadOnlyDictionary<string, DemoUser> DemoUsers" to="};" title="SampleHost.cs" />
+<SourceExcerpt code={program} from="var demoUsers =" to="return Results.SignIn(" title="Program.cs" />
 
 Replace it with your own identity provider. What has to survive the replacement is that **the roles come from somewhere
 the caller does not control**.
 
 ## 3. Turn a signed-in user into an `AlvoContext`
 
-Every `/app` endpoint wraps its work in one helper that builds the caller Alvo will judge:
+Every `/app` endpoint starts by building the caller Alvo will judge:
 
-<SourceExcerpt code={sampleHost} from="private static Task<IResult> AsCaller(" to="Renders the refusals" dropComments={true} title="SampleHost.cs" />
+<SourceExcerpt code={program} from="if (roles.DeclaredRoles is not { } catalog)" to="};" title="Program.cs" />
 
 - **Roles go through the role catalog.** `IRoleCatalogProvider.DeclaredRoles` holds the three built-in roles plus the
   applied descriptor's `auth.roles`. `RoleCatalog.Resolve` mints roles only from that set and throws
   `UnknownRoleException` for any other name, so a typo is refused where it arrives instead of silently matching no
-  rule. The sample filters your app's roles with `TryGet` first: a role your app knows and the descriptor does not is
+  rule. The code filters your app's roles with `TryGet` first: a role your app knows and the descriptor does not is
   dropped, because only the overlap means anything to Alvo's rules.
 - **`authenticated` is added for every signed-in user**, because the descriptor's read rules key on it.
 - **No descriptor yet is a 503, not a 401.** `DeclaredRoles` is `null` until Alvo has applied the descriptor at start,
@@ -129,7 +130,7 @@ protect: a cookie-authenticated `/app` route that changes data needs the same ca
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
 | 401 | [`unauthenticated`](/reference/problem-types/#unauthenticated) | An API key sent to `/api/alvo` cannot be used. | Use the configured secret; give the key only roles the descriptor declares. | every host |
-| 403 | none, your app's own | A rule or a before-hook refused (`AlvoAuthorizationException`); the sample renders it as a problem document with the exception's message. | Check the rule against the user's roles. | your endpoints |
+| 403 | none, your app's own | A rule or a before-hook refused (`AlvoAuthorizationException`); the code above renders it as a problem document with the exception's message. | Check the rule against the user's roles. | your endpoints |
 | 404 | none, your app's own | A rule excludes the row for this user (`AlvoRecordNotFoundException`). | Check the rule and the user's roles. | your endpoints |
 | 503 | none, your app's own | `DeclaredRoles` is `null`: no descriptor has been applied yet. | Wait for `/health/ready`; read the log if it never turns ready. | your endpoints |
 | none | none | The host stops at start: `Alvo:Auth:HeaderName` or `TenantHeaderName` is `Cookie`, or a dev key's secret is missing or shorter than 32 characters. | Use a header only script can set; supply a secret of at least 32 characters (`openssl rand -hex 16`). | startup |
@@ -140,8 +141,7 @@ protect: a cookie-authenticated `/app` route that changes data needs the same ca
   [`IAlvoContextAccessor`](/reference/csharp/mmlib-alvo-abstractions/#ialvocontextaccessor),
   [`IAlvoContextResolver`](/reference/csharp/mmlib-alvo-abstractions/#ialvocontextresolver).
 - Configuration: [`Alvo:Auth`](/reference/configuration/#alvoauth).
-- The sample: [`SampleHost.cs`](https://github.com/Burgyn/MMLib.Alvo/blob/main/samples/MMLib.Alvo.Samples.EmbeddedHost/SampleHost.cs)
-  and [its README](https://github.com/Burgyn/MMLib.Alvo/tree/main/samples/MMLib.Alvo.Samples.EmbeddedHost).
+- The runnable sample step 4 starts: [`samples/MMLib.Alvo.Samples.EmbeddedHost`](https://github.com/Burgyn/MMLib.Alvo/tree/main/samples/MMLib.Alvo.Samples.EmbeddedHost).
 - Design notes: [the identity seam in `extensibility.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/extensibility.md#the-runnable-example)
   and [why a media type is a CSRF control](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#why-a-media-type-is-a-csrf-control-at-all).
 

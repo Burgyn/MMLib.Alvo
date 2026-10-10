@@ -45,7 +45,7 @@ Your app owns the process, and Alvo is a part of it.
   ([Custom CEL functions](/guides/custom-cel-functions/)).
 
 The dashboard (`MMLib.Alvo.Admin`) and the schema assistant (`MMLib.Alvo.Ai`) are separate packages a host can add;
-the embedded sample uses neither.
+the one-file host in [Embed Alvo in ASP.NET Core](/start-here/embed/) adds them as an optional step.
 
 ## The same descriptor runs in both
 
@@ -65,7 +65,7 @@ functions, endpoints, identity or providers. That is an upgrade path, not a limi
 | Distribution | the container image `ghcr.io/burgyn/alvo` (`edge` until v0.1) | NuGet packages, project references until v0.1 |
 | Descriptor | the file mounted at `/alvo/descriptor.json` | the path you pass to `FromDescriptor` |
 | Database | PostgreSQL or SQLite, chosen by `Alvo:Database:Provider` | the provider package you register |
-| Generated API | at `/api` | under the prefix you choose (`/api/alvo` in the sample), with your own conventions attached |
+| Generated API | at `/api` | under the prefix you choose (`/api/alvo` in [Embed Alvo in ASP.NET Core](/start-here/embed/)), with your own conventions attached |
 | Who calls the generated API | API keys from configuration | API keys; your own users go through your endpoints |
 | Custom CEL functions | built-in functions only | built-ins plus your `AddCelFunction` registrations |
 | Your own endpoints | none | yes, through `IAlvoData` |

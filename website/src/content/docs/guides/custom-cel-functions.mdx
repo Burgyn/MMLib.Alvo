@@ -6,7 +6,7 @@ description: Register a function written in C# in your embedded host, and call i
 import { Code } from '@astrojs/starlight/components';
 import SourceExcerpt from '../../../components/SourceExcerpt.astro';
 import JsonExcerpt from '../../../components/JsonExcerpt.astro';
-import sampleHost from '../../../../../samples/MMLib.Alvo.Samples.EmbeddedHost/SampleHost.cs?raw';
+import program from '../../../snippets/embed/cel-function/Program.cs?raw';
 import withHook from '../../../snippets/custom-cel-functions/host-only/vehicles.alvo.json?raw';
 import run from '../../../snippets/shell/custom-cel-functions-run.sh?raw';
 import tryIt from '../../../snippets/shell/custom-cel-functions-try.sh?raw';
@@ -19,24 +19,19 @@ number in one canonical form. About fifteen minutes, starting from an app that e
 
 ## Before you start
 
-- The embedded sample from [Embed Alvo in ASP.NET Core](/start-here/embed/), run from a clone with the
+- The repository's embedded sample, which registers this same function, from [Embed Alvo in ASP.NET Core](/start-here/embed/), run from a clone with the
   .NET 10 SDK, plus `curl` and `jq`. A custom function exists only in a host that registers it: the Docker image of
   [Run your own descriptor](/start-here/run-your-own/) knows the built-in functions only.
 - [Before-hooks](/guides/before-hooks/): a function is called from a hook's `condition` or `mutate`.
 
 ## 1. Register the function
 
-Add it at the end of the `AddAlvo` chain with `AddCelFunction(name, function, summary)`:
+Add it at the end of the `AddAlvo` chain with `AddCelFunction(name, function, summary)`. The function can be a lambda,
+inline in `Program.cs`, and the summary is one sentence about it:
 
-<SourceExcerpt code={sampleHost} from="builder.Services.AddAlvo(alvo => alvo" to="NormalizeVinSummary));" dropComments={true} title="SampleHost.cs" />
+<Code code={program.trimEnd()} lang="csharp" title="Program.cs" />
 
-The function is an ordinary static method, and the summary is one sentence about it:
-
-<SourceExcerpt code={sampleHost} from="public const string NormalizeVinSummary =" to="Upper-cases a vehicle identification number" title="SampleHost.cs" wrap />
-
-<SourceExcerpt code={sampleHost} from="private static string NormalizeVin(string vin) =>" to="new string([.. vin.Where" title="SampleHost.cs" />
-
-Alvo reads the signature off the delegate: each parameter's name (`vin`) and type, and whether a parameter or the
+Alvo reads the signature off the delegate, lambda or method alike: each parameter's name (`vin`) and type, and whether a parameter or the
 result may be `null`, from the nullable annotations. Everything is checked at the call, so a mistake is an
 `ArgumentException` while the host starts, never a surprise inside a write:
 
