@@ -1,8 +1,165 @@
 ---
 title: Custom CEL functions
-description: Register your own CEL functions from C# and use them in rules and hooks.
+description: Register a function written in C# in your embedded host, and call it from your descriptor's hook conditions and mutate values.
 sidebar:
   order: 4
 ---
 
-{/* <!-- STUB-F6 --> */}
+import { Code } from '@astrojs/starlight/components';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import JsonExcerpt from '../../../components/JsonExcerpt.astro';
+import sampleHost from '../../../../../samples/MMLib.Alvo.Samples.EmbeddedHost/SampleHost.cs?raw';
+import withHook from '../../../snippets/custom-cel-functions/host-only/vehicles.alvo.json?raw';
+import run from '../../../snippets/shell/custom-cel-functions-run.sh?raw';
+import tryIt from '../../../snippets/shell/custom-cel-functions-try.sh?raw';
+
+:::tip[What you will achieve]
+A C# function, `normalizeVin`, that your descriptor's before-hook calls by name to store every vehicle identification
+number in one canonical form. About fifteen minutes, starting from an app that embeds Alvo as in
+[Embed Alvo in ASP.NET Core](/MMLib.Alvo/start-here/embed/).
+:::
+
+## Before you start
+
+- The embedded sample from [Embed Alvo in ASP.NET Core](/MMLib.Alvo/start-here/embed/), run from a clone with the
+  .NET 10 SDK, plus `curl` and `jq`. A custom function exists only in a host that registers it: the Docker image of
+  [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/) knows the built-in functions only.
+- [Before-hooks](/MMLib.Alvo/guides/before-hooks/): a function is called from a hook's `condition` or `mutate`.
+
+## 1. Register the function
+
+Add it at the end of the `AddAlvo` chain with `AddCelFunction(name, function, summary)`:
+
+<SourceExcerpt code={sampleHost} from="builder.Services.AddAlvo(alvo => alvo" to="NormalizeVinSummary));" dropComments={true} title="SampleHost.cs" />
+
+The function is an ordinary static method, and the summary is one sentence about it:
+
+<SourceExcerpt code={sampleHost} from="public const string NormalizeVinSummary =" to="Upper-cases a vehicle identification number" title="SampleHost.cs" wrap />
+
+<SourceExcerpt code={sampleHost} from="private static string NormalizeVin(string vin) =>" to="new string([.. vin.Where" title="SampleHost.cs" />
+
+Alvo reads the signature off the delegate: each parameter's name (`vin`) and type, and whether a parameter or the
+result may be `null`, from the nullable annotations. Everything is checked at the call, so a mistake is an
+`ArgumentException` while the host starts, never a surprise inside a write:
+
+| What | Allowed |
+|---|---|
+| Name | A lower-case ASCII letter, then letters, digits or `_`; at most 64 characters; not a built-in function, a CEL keyword or macro, or a reserved name such as `has`, `now`, `old`, `new` or `math`. |
+| Parameters | At most four, each `string`, `long`, `int`, `decimal`, `bool`, `DateTimeOffset` or `Guid`, or a nullable one of those. |
+| Result | One of the same types. |
+| Shape | A synchronous delegate: no `Task`, `ref`, `out` or `params`, and not a multicast delegate. |
+
+The name and the summary are visible to everyone with Viewer access to the Management API, so put no secret or
+internal-only wording in them.
+
+## 2. Call it from a hook
+
+A hook's `condition` and a before-hook's `mutate` value call a custom function exactly like a built-in one. This copy of
+the vehicle-registry descriptor rewrites `vin` on every create:
+
+<JsonExcerpt code={withHook} pointer="/entities/vehicles/hooks" title="vehicles.alvo.json" />
+
+It works in a condition too, such as `"condition": "normalizeVin(new.vin) != new.vin"`. A rule, a computed field and
+the `access` block refuse it when the descriptor is applied, with the recipe in the refusal: store the value in a field
+with a `mutate`, then compare that field.
+
+The shared `examples/vehicle-registry/vehicles.alvo.json` deliberately has no such hook. The Docker image serves the
+same file, and a hook calling `normalizeVin` would make the image refuse it as calling an unknown function. A
+descriptor that calls a custom function only runs in hosts that register it.
+
+## 3. Try it
+
+Start the sample over the descriptor with the hook, in the background and over a fresh database:
+
+<Code code={run.trimEnd()} lang="sh" title="Terminal (in the clone)" frame="terminal" />
+
+Create an owner, then two vehicles: one with a lower-case VIN, one with dashes in it:
+
+<Code code={tryIt.trimEnd()} lang="sh" title="Terminal (in the clone)" frame="terminal" />
+
+The first vehicle is stored with `vin` `1HGCM82633A004352`: the row holds what the hook computed, not what the caller
+sent. The second is refused with a 422 `validation` whose violation is `max-length` on `/vin`. The caller's body is
+checked against the field before any hook runs, so a function cannot rescue a value that is too long for its field.
+Whatever a hook writes is then checked against the same field, and a value that does not fit refuses the write with a
+403 `forbidden` naming the hook and the field, never the value.
+
+## 4. Find it in the catalog
+
+Every function a descriptor may call in a host is listed in that host's function catalog, built-ins and yours alike:
+`GET /management/projects/<project>/cel/functions` over HTTP, or `IAlvoManagement.GetCelFunctionsAsync` in process.
+A custom function's entry carries its signature, its summary, the provenance `Host` and the profiles `Condition` and
+`Mutate`. The sample maps no Management API, so it does not answer that route.
+
+A host that mounts the [admin dashboard](/MMLib.Alvo/guides/admin-dashboard/) offers the function in the hook editor,
+under **Functions you can call here**, with a **this host** badge where a built-in has **built-in**. The
+[schema assistant](/MMLib.Alvo/guides/schema-assistant/) learns the same list through its `get_cel_functions` tool. The
+built-ins are in the [CEL function catalog](/MMLib.Alvo/reference/cel-functions/).
+
+## 5. Keep the function's promises
+
+Alvo cannot check these, and breaking one breaks writes, not only your function.
+
+- **Pure.** The same arguments give the same result, with no side effects. It runs inside the write's transaction,
+  and a write that rolls back must leave nothing behind. Sending mail or calling a service belongs in an
+  [after-hook](/MMLib.Alvo/guides/after-hooks-and-webhooks/).
+- **Fast.** It runs while the row's locks are held, with no time budget and no `CancellationToken`. No network calls,
+  no unbounded loops.
+- **Thread-safe.** One instance serves every request at once, and it cannot use a scoped service: it is a singleton
+  closure.
+- **Tenant-aware.** Alvo's tenant filter does not reach inside your code. A function that reads stored data must take
+  the tenant as a parameter and filter by it: on a tenant-scoped entity, pass `new.tenant_id`, which a condition and a
+  `mutate` can both read. `@tenant.id` works in a condition only.
+- **Throw when you cannot answer; return `null` only when there is no value.** A throw refuses the write and rolls it
+  back. A `null` makes the call `null`, a condition over `null` does not fire, and a `reject` guarded by your function
+  would let the bad input through.
+- **No caller data in exceptions.** What a function throws, message and stack trace, is logged at Error and never
+  shown to the caller, so a value in the message ends up in every log sink you ship to.
+- **A new meaning gets a new name.** A descriptor stores names, not versions: register `vatRate2` beside `vatRate`.
+  Removing a function a stored descriptor still calls makes the next start refuse that descriptor.
+
+## How it works
+
+The registration adds the function to the catalog the descriptor is compiled against, so an unknown name, a wrong
+number of arguments or a type mismatch is refused when the descriptor is applied, not when a write runs. Hook
+conditions and `mutate` values are evaluated in memory inside the write's transaction, which is why they can call C#;
+rules and computed fields are compiled to SQL, which is why they cannot.
+[CEL in Alvo](/MMLib.Alvo/concepts/cel/) explains the profiles.
+
+:::caution[Not in this build]
+A rule or a computed field cannot call a function, custom or built-in, because neither is translated to SQL yet. A
+custom function runs with no time budget and no cancellation, so a slow one holds the write's transaction and its row
+locks ([#309](https://github.com/Burgyn/MMLib.Alvo/issues/309)). The standalone image and `alvo validate` know the
+built-in functions only. See [Capabilities in this build](/MMLib.Alvo/reference/capabilities/) for the descriptor
+blocks this build does not run.
+:::
+
+## What can go wrong
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 500 | [`function-failed`](/MMLib.Alvo/reference/problem-types/#function-failed) | The function threw, or a present argument does not fit its parameter (a fraction for an `int`, a text that is no `Guid`). Nothing was written; the detail names the function and never your exception's text. | Fix the input the function reads, or guard the call with a `condition`; the exception is in the host's log. | standalone; embedded only with `AddAlvoProblemDetails()` |
+| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | The value a `mutate` computed breaks a facet of its field, such as `maxLength`. | Make the function's result fit the field. | every host |
+| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | The caller's own value breaks the field before the hook runs. | Send a value that fits the field. | every host |
+
+Without `AddAlvoProblemDetails()`, a function failure on a generated route reaches your app's own error handling as an
+exception, and an in-process `IAlvoData` caller receives it as an `Exception`
+([Call Alvo from your endpoints](/MMLib.Alvo/guides/call-from-endpoints/#3-render-what-ialvodata-refuses)).
+
+Two failures stop the host instead. A registration Alvo cannot accept throws `ArgumentException` at the
+`AddCelFunction` call. A descriptor that calls a function the host does not register, with the wrong number of
+arguments, or from a rule or a computed field, is refused when it is applied: at start, the host does not start; through
+the Management API, the apply answers 422 `validation`.
+
+## Reference
+
+- C# API: [`AddCelFunction`](/MMLib.Alvo/reference/csharp/mmlib-alvo/#addcelfunction).
+- Functions: [the CEL function catalog](/MMLib.Alvo/reference/cel-functions/).
+- Problem types: [`function-failed`](/MMLib.Alvo/reference/problem-types/#function-failed),
+  [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
+  [`validation`](/MMLib.Alvo/reference/problem-types/#validation).
+- Design notes: [host functions in `cel.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/cel.md#host-functions)
+  and [registering a CEL function in `extensibility.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/extensibility.md#registering-a-cel-function).
+
+## Next
+
+**[Running in production](/MMLib.Alvo/guides/production/)**: take a backend from a laptop to a server.

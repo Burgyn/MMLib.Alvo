@@ -1,8 +1,211 @@
 ---
 title: "Read data: filter, sort, page"
-description: Filter, sort and page through rows with the Data API's query syntax.
+description: "Filter, sort and page through rows with the Data API's PostgREST-style query string, count the matches, and send a long query as a JSON body."
 sidebar:
   order: 14
 ---
 
-{/* <!-- STUB-F6 --> */}
+import { Code } from '@astrojs/starlight/components';
+import Exchange from '../../../components/Exchange.astro';
+import start from '../../../snippets/shell/use-the-api-start.sh?raw';
+
+:::tip[What you will achieve]
+A list request that returns exactly the rows and fields you asked for, in the order you asked for, one page at a time,
+with a total count when you want one. About fifteen minutes, starting from the vehicle-registry stack of
+[Quick start](/MMLib.Alvo/start-here/quick-start/).
+:::
+
+## Before you start
+
+- The stack from [Quick start](/MMLib.Alvo/start-here/quick-start/) or
+  [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), serving
+  [`examples/vehicle-registry`](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/vehicle-registry/vehicles.alvo.json),
+  with `ALVO_DEMO_KEY_SECRET` exported in this shell.
+- The `demo` key (roles `admin`, `authenticated`, `inspector`). Any authenticated caller may list vehicles.
+
+Start from an empty database so your results match the ones below. The first command **deletes the stack's
+database**:
+
+<Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+The responses below were captured from a real host when the site was built, so your ids, timestamps and cursors will
+differ.
+
+## 1. Add rows to query
+
+Create an owner under an id you choose, then five vehicles in one request:
+
+<Exchange name="read-data/01-query" wrap steps={[0]} fields={["id", "name", "email"]} />
+
+<Exchange name="read-data/01-query" wrap steps={[1]} fields={["affected"]} />
+
+`PUT` with an id creates the row when it does not exist, and the batch writes every row or none.
+[Write data safely](/MMLib.Alvo/guides/write-data/) covers both.
+
+## 2. Filter rows
+
+A filter is a query parameter named after a field: `?<field>=<operator>.<value>`. Every parameter must hold, and a
+field may appear more than once (`year=gte.2019&year=lte.2022`). The examples add `select` to keep the responses
+short; step 4 explains it.
+
+<Exchange name="read-data/01-query" wrap steps={[2]} />
+
+`or=(…)` matches when any of its terms holds, and `and=(…)` groups terms that must all hold. Inside a group, a term is
+written `field.operator.value`:
+
+<Exchange name="read-data/01-query" wrap steps={[3]} />
+
+`is.null` finds rows where a field has no value:
+
+<Exchange name="read-data/01-query" wrap steps={[4]} />
+
+`like` and `ilike` match a pattern: `%` stands for any run of characters and `_` for one, and `ilike` ignores case. In
+a URL, `%` is written `%25`:
+
+<Exchange name="read-data/01-query" wrap steps={[5]} />
+
+To negate a term, put `not.` in front of the parameter name (`not.make=eq.Skoda`) or in front of a group member
+(`or=(not.color.eq.red,…)`):
+
+<Exchange name="read-data/01-query" wrap steps={[14]} />
+
+Each term takes one operator from this list, and the field's type decides which ones it accepts:
+
+| Operator | Matches | Field types |
+|---|---|---|
+| `eq`, `neq` | equal, not equal | every type |
+| `in` | one of a list: `in.(Skoda,Renault)` | every type |
+| `gt`, `gte`, `lt`, `lte` | greater, at least, less, at most | `string`, `text`, `enum`, `integer`, `decimal`, `date`, `datetime` |
+| `like`, `ilike` | a pattern, case-sensitive or not | `string`, `text`, `enum` |
+| `is` | `null`; `true` or `false` on a `boolean` | every type for `null` |
+
+A parameter that is not a field is refused, never ignored, so a typo such as `?oder=year` cannot quietly return rows in
+some other order. That is also why `order`, `limit`, `offset`, `after`, `select`, `or`, `and` and `not` are reserved:
+a descriptor cannot declare a field with one of those names.
+
+## 3. Sort, and choose where nulls go
+
+`order` takes a comma-separated list of fields, each with an optional `.asc` (the default) or `.desc`, and an optional
+`.nullsfirst` or `.nullslast`. Rows without a value sort last unless you say otherwise. Colours in reverse alphabetical
+order, vehicles without a colour first, ties broken by year:
+
+<Exchange name="read-data/01-query" wrap steps={[6]} />
+
+Alvo decides where a `null` sorts, not the database, so SQLite and PostgreSQL return the same order. Sorting by a field
+that can be empty costs more than sorting by a `required` one, because no index serves it yet
+([#178](https://github.com/Burgyn/MMLib.Alvo/issues/178)).
+
+## 4. Choose the fields: `select`
+
+`select` names the fields each row carries, and the database stops reading the others. `alias:field` renames a field
+in the response:
+
+<Exchange name="read-data/01-query" wrap steps={[7]} />
+
+Without `select`, a row carries every field the caller may read, including the columns Alvo manages: `id`, and with
+`audit` the `created_*` and `updated_*` stamps. A field that is `hidden` for the caller is refused in `select`, in a
+filter and in `order` exactly like a field that does not exist.
+
+## 5. Page through the results
+
+Every list is paged. Without `limit` a page holds 50 rows; `limit` may ask for up to 200, and a larger value is
+refused rather than quietly reduced ([Limits and budgets](/MMLib.Alvo/reference/limits/)). The response always carries
+`items`, `next` and `count`:
+
+<Exchange name="read-data/01-query" wrap steps={[8]} />
+
+`next` is a cursor for the following page. Send the same request again with `after` set to it:
+
+<Exchange name="read-data/01-query" wrap steps={[9]} />
+
+On the last page `next` is `null`. Treat the cursor as an opaque string of at most 512 characters: it carries no data,
+and a stale or forged one returns an empty page. Cursor paging neither skips nor repeats a row while other callers
+write. `offset=<n>` is the alternative, but a request may not send both `after` and `offset`.
+
+## 6. Count the matches
+
+Send `Prefer: count=exact` to fill `count` with the number of rows the whole query matches, not the number on this
+page. `Preference-Applied` confirms it:
+
+<Exchange name="read-data/01-query" wrap steps={[10]} />
+
+A count is a second query over every matching row, so ask for it only when you show it. It counts only the rows your
+rules let you see. Because it runs beside the page rather than in the same statement, a write in between can make it
+differ from the rows by one. `count=planned` and `count=estimated` are accepted and return the exact count; any other
+preference is ignored, and `Preference-Applied` is then absent.
+
+## 7. Send a long query as a body
+
+Proxies limit a URL to a few kilobytes, and a filter over a few hundred ids is longer than that. `POST
+/api/<entity>/query` takes the same parameters as a JSON object, each value written exactly as it would follow the `=`
+in the URL:
+
+<Exchange name="read-data/01-query" wrap steps={[11]} />
+
+The body carries decoded values, so `%` is just `%` here, not `%25`. To repeat a parameter, give it an array of
+values. It is still a read: the caller needs the `list` rule, `Prefer: count=exact` works, and like every request with
+a body it needs `Content-Type: application/json`.
+
+## How it works
+
+Alvo compiles the query together with the entity's `list` rule into one SQL statement, with every value bound as a
+parameter. The rule is part of the `WHERE` clause, so a row your rule excludes is never in a page, never counted and
+never reachable through a cursor. That is why a caller the rule shuts out gets an empty page rather than a 403;
+[Security model](/MMLib.Alvo/concepts/security-model/) explains the design.
+
+## Options and variations
+
+| Parameter | Example | Notes |
+|---|---|---|
+| a field name | `year=gte.2020` | Repeat it for a range: `year=gte.2019&year=lte.2022`. |
+| `not.` + a field name | `not.make=eq.Skoda` | One `not.` only; `not.not.` is refused. |
+| `or`, `and` | `or=(color.eq.red,color.eq.blue)` | Nest a group with `=` inside it: `or=(make.eq.Skoda,and=(year.gte.2020,color.eq.red))`. |
+| `order` | `order=year.desc.nullslast,plate` | Several keys, comma-separated. |
+| `select` | `select=plate,label:make` | At most as many keys as you can read fields. |
+| `limit` | `limit=100` | 1 to 200, default 50. |
+| `after` | `after=<next>` | The cursor from the previous page. |
+| `offset` | `offset=100` | Not together with `after`. |
+
+The full grammar, headers and route shapes are in [Data API conventions](/MMLib.Alvo/data-api/conventions/), and the
+routes and fields this descriptor generates are in [Data API: example](/MMLib.Alvo/reference/data-api/).
+
+:::caution[Not in this build]
+`gt`, `gte`, `lt` and `lte` are refused on `uuid`, `ref` and `boolean` fields, so the common `id=gt.<uuid>` paging idiom
+does not work; use `after` instead ([#95](https://github.com/Burgyn/MMLib.Alvo/issues/95)). On a sort over several
+fields, the cost of a page grows the deeper you page ([#100](https://github.com/Burgyn/MMLib.Alvo/issues/100)). Neither
+appears on [Capabilities in this build](/MMLib.Alvo/reference/capabilities/), which lists descriptor blocks only.
+:::
+
+## What can go wrong
+
+A malformed query is refused with every reason at once, each pointing at the parameter it is about:
+
+<Exchange name="read-data/01-query" wrap steps={[12]} />
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 422 | [`malformed-query`](/MMLib.Alvo/reference/problem-types/#malformed-query) | A parameter names no readable field, an operator does not fit the field's type, `limit` is over 200, `after` and `offset` are both sent, or a filter is deeper or wider than the [limits](/MMLib.Alvo/reference/limits/). | Fix the parameter each violation's `pointer` names. | every host |
+| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | The entity has no `list` rule, or the rule reads `@user.id` and the request carries no key. | Add the rule, or send a key. | every host |
+| 403 | [`out-of-scope`](/MMLib.Alvo/reference/problem-types/#out-of-scope) | The key's scopes do not cover reading this entity. | Grant the key a read scope. | every host |
+| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | The key cannot be used. | See [Authentication and API keys](/MMLib.Alvo/guides/authentication/). | every host |
+| 414 | none | A proxy refused a URL that was too long, before Alvo saw it. | Send the query as a body to `POST …/query`. | a proxy, not Alvo |
+
+An empty page is not an error: either nothing matches, or your `list` rule excludes the rows.
+[Handle errors](/MMLib.Alvo/guides/handle-errors/) tells the two apart.
+
+## Reference
+
+- [Data API conventions](/MMLib.Alvo/data-api/conventions/): the grammar, paging and headers, one table each.
+- [Limits and budgets](/MMLib.Alvo/reference/limits/): page size, filter depth and terms, `in` candidates, body size.
+- Problem types: [`malformed-query`](/MMLib.Alvo/reference/problem-types/#malformed-query),
+  [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
+  [`out-of-scope`](/MMLib.Alvo/reference/problem-types/#out-of-scope),
+  [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated).
+- Design notes: [the URL grammar and its allow-lists](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#the-url-grammar-and-the-two-allow-lists-that-bound-it),
+  [keyset paging](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#paging-keyset-over-an-opaque-cursor-and-its-real-cost)
+  and [the opt-in count](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#the-count-is-opt-in-prefer-countexact-110).
+
+## Next
+
+**[Write data safely](/MMLib.Alvo/guides/write-data/)**: create, replace and update rows without losing a concurrent
+change, and retry a create without writing it twice.

@@ -1,6 +1,174 @@
 ---
 title: "Data API conventions"
-description: "Learn the URL, header, paging and error conventions every generated endpoint follows."
+description: "The routes, query grammar, paging, headers, statuses and problem documents every generated Data API endpoint follows."
 ---
 
-{/* <!-- STUB-F6 --> */}
+Every entity in an applied descriptor gets the same ten routes, the same query grammar and the same headers. This page
+lists them. The guides show them in use: [Read data](/MMLib.Alvo/guides/read-data/),
+[Write data safely](/MMLib.Alvo/guides/write-data/) and [Handle errors](/MMLib.Alvo/guides/handle-errors/).
+
+## OpenAPI document
+
+Every descriptor generates its own OpenAPI document. The standalone host serves it at `GET /openapi/v1.json`, with an
+API browser at `/scalar`; both are readable without a key. [Data API: example](/MMLib.Alvo/reference/data-api/) is the
+document for `examples/vehicle-registry`. An embedded host that calls ASP.NET Core's `AddOpenApi()` and `MapOpenApi()`
+gets Alvo's routes and schemas in its own document; Alvo does not add an OpenAPI document on its own.
+
+## Base path and routes
+
+The routes sit under `AlvoApiOptions.RoutePrefix` (configuration key
+[`Alvo:Api:RoutePrefix`](/MMLib.Alvo/reference/configuration/#alvoapi)), default `/api`; an empty prefix mounts them at
+the root. `{entity}` is the entity's name as the descriptor declares it, and `{id}` is a row's UUID.
+
+| Method and path | Does | Gated by the rule | Success |
+|---|---|---|---|
+| `GET {prefix}/{entity}` | List rows, filtered, sorted and paged | `list` | 200, a page |
+| `POST {prefix}/{entity}/query` | The same list, with the query as a JSON body | `list` | 200, a page |
+| `GET {prefix}/{entity}/{id}` | Read one row | `get` | 200, the row; 304 on a matching `If-None-Match` |
+| `POST {prefix}/{entity}` | Create a row with a generated id | `create` | 201, `Location` and the row |
+| `PUT {prefix}/{entity}/{id}` | Create the row under this id, or replace it | `create` and `update` | 201 on create, 200 on replace |
+| `PATCH {prefix}/{entity}/{id}` | Merge the body into the row | `update` | 200, the row |
+| `DELETE {prefix}/{entity}/{id}` | Delete the row | `delete` | 204, no body |
+| `POST {prefix}/{entity}/batch` | Create many rows in one transaction | `create` | 200, `items` and `affected` |
+| `PATCH {prefix}/{entity}/batch` | Update many rows in one transaction | `update` | 200, `items` and `affected` |
+| `DELETE {prefix}/{entity}/batch` | Delete many rows in one transaction | `delete` | 200, empty `items` and `affected` |
+
+An entity the descriptor does not declare has no route, so it answers the router's 404 with no problem document. A
+write answers with the row as a `GET` by the same caller would show it, or with its `id` alone when the caller may not
+read the row. Every response from these routes carries `Cache-Control: no-store`.
+
+## Query grammar
+
+PostgREST's syntax, so that a client or an agent recognises it. One parameter per term; every term must hold.
+
+| Form | Means |
+|---|---|
+| `{field}={op}.{value}` | A filter: `year=gte.2020`. The parameter name is a field; an unknown name is refused, never ignored. |
+| `not.{field}={op}.{value}` | The negated filter. One `not.` at most. |
+| `or=({term},{term},…)` | Any term holds. A term inside a group is `{field}.{op}.{value}`, optionally prefixed with `not.`. |
+| `and=({term},{term},…)` | Every term holds. A group nests with `=` inside it: `or=(a.eq.1,and=(b.eq.2,c.eq.3))`. |
+| `order={field}[.asc\|.desc][.nullsfirst\|.nullslast],…` | Sort keys, comma-separated. Ascending and nulls last unless stated. |
+| `select={field},{alias}:{field},…` | The fields each row carries, optionally renamed. |
+| `limit={n}` | Page size, 1 to 200; default 50. |
+| `after={cursor}` | Continue from the page whose `next` this is. |
+| `offset={n}` | Skip `n` rows; not together with `after`. |
+
+Reserved, so no descriptor may declare a field with these names: `order`, `limit`, `offset`, `after`, `select`, `or`,
+`and`, `not`.
+
+**Deviation from PostgREST:** a nested group is written `and=(…)` inside the outer group, where PostgREST writes
+`and(…)`, and negation is a prefix on the parameter name (`not.make=eq.Skoda`) rather than on the value
+(`make=not.eq.Skoda`, which is refused).
+
+### Operators per field type
+
+| Operator | Matches | Allowed on |
+|---|---|---|
+| `eq`, `neq` | equal, not equal | every field type |
+| `in` | one of a list, `in.(a,b,c)` | every field type |
+| `gt`, `gte`, `lt`, `lte` | ordering | `string`, `text`, `enum`, `integer`, `decimal`, `date`, `datetime` |
+| `like`, `ilike` | a pattern with `%` and `_`; `ilike` ignores case | `string`, `text`, `enum` |
+| `is` | `null` on any field; `true` or `false` | `null`: every type; `true`, `false`: `boolean` |
+
+An operator is matched exactly: `EQ` is not an operator. In a URL, a literal `%` in a pattern is written `%25`.
+
+### The query as a body
+
+`POST {prefix}/{entity}/query` takes a JSON object whose members are the parameters above, each value written as it
+would follow `=` in the URL: `{"make": "in.(Skoda,Renault)", "order": "year", "limit": 100}`. Values are decoded, so
+`%` is literal. An array repeats a parameter. Member names compare case-insensitively, and a name that appears twice is
+refused. `{}` is the empty query. It is a read gated by `list`, honours `Prefer: count`, and ignores `If-Match`,
+`If-None-Match` and `Idempotency-Key`.
+
+## Pages
+
+A list always answers one page, as an object with exactly these members:
+
+| Member | Holds |
+|---|---|
+| `items` | The rows of this page. |
+| `next` | The cursor for the next page, or `null` on the last one. Opaque, at most 512 characters. |
+| `count` | The number of rows the whole query matches when the request sent `Prefer: count=exact`, otherwise `null`. |
+
+The cursor carries no data; a stale, forged or foreign cursor returns an empty page. `count` covers only the rows the
+caller's rules admit, and is computed in a second statement, so a concurrent write can make it differ from the rows by
+one. `Prefer: count=planned` and `count=estimated` return the exact count; an unrecognised preference is ignored.
+Sizes and budgets are in [Limits and budgets](/MMLib.Alvo/reference/limits/).
+
+## Headers
+
+| Header | Direction | Meaning |
+|---|---|---|
+| `X-Alvo-Api-Key` | request | The API key, `<keyId>.<secret>`. The name is [`Alvo:Auth:HeaderName`](/MMLib.Alvo/reference/configuration/#alvoauth); `Cookie` is refused. |
+| `X-Alvo-Tenant` | request | The tenant the caller asks to act in. The name is `Alvo:Auth:TenantHeaderName`; `Cookie` is refused. |
+| `Content-Type` | request | `application/json` or any `application/*+json`, on every request with a body. |
+| `If-Match` | request | The `ETag` a `PATCH`, `PUT` or `DELETE` expects the row to have. `*` asks only that the row exist. |
+| `If-None-Match` | request | On a read of one row, the `ETag` you hold; 304 when it is current. Refused on a write. |
+| `Idempotency-Key` | request | Makes a `POST`, `PUT` or batch request safe to retry; at most 255 UTF-8 bytes. Ignored on `PATCH` and `DELETE`. |
+| `Prefer` | request | `count=exact` fills the page's `count`. |
+| `ETag` | response | The row's version, on an entity with `audit`; strong, opaque. |
+| `Location` | response | On a 201, the new row's URL, including any path base or route-group prefix. |
+| `Preference-Applied` | response | Which preference was honoured, such as `count=exact`. |
+| `Accept-Post`, `Accept-Patch` | response | On a 415, the media types the route accepts. |
+| `Cache-Control` | response | `no-store`, on every response from a generated route. |
+
+## Versions and `If-Match`
+
+| Situation | Answer |
+|---|---|
+| `If-Match` equals the row's `ETag` | The write proceeds. |
+| `If-Match` names an older version | 412 `precondition-failed` |
+| A weak tag, several tags, or a tag on an entity without `audit` | 412 `precondition-failed` |
+| `If-Match: *` | Accepted on every entity; asks only that the row exist. |
+| `If-None-Match` on a write, or any precondition on a create | 412 `precondition-failed` |
+| No `If-Match` | The write proceeds without a check. |
+
+## Batches
+
+| | `POST …/batch` | `PATCH …/batch` | `DELETE …/batch` |
+|---|---|---|---|
+| Body | `{"rows": [ {fields}, … ]}` | `{"rows": [ {"id": …, fields}, … ]}` | `{"rows": [ "id", … ]}` |
+| Answer | 200, `items` and `affected` | 200, `items` and `affected` | 200, empty `items` and `affected` |
+
+Every row is checked before any row is written, and one transaction writes all of them or none. Up to 1000 rows; a row
+named twice is refused; no `If-Match`. A refusal lists every bad row: a 422 whose pointers start with `/rows/<index>/`,
+or a 403 whose `violations` name each row a rule refused. A `409 conflict` names the field and no row index.
+
+## `Idempotency-Key`
+
+| Situation | Answer |
+|---|---|
+| A new key | The request runs, and the key is stored with the created row's id, scoped to the caller. |
+| The same key and the same request again | No second write; the original status, with the row read again under the caller's current rules. A replayed `PUT` answers 200 without `Location`. |
+| The same key with a different request | 409 `idempotency-conflict` |
+| A key from a caller without an API key | 422 `malformed-query` |
+| A key over 255 bytes | 422 `malformed-query` |
+
+## Statuses
+
+| Status | When |
+|---|---|
+| 200 | A row, a page, or a batch result. |
+| 201 | Created, with `Location`. |
+| 204 | Deleted. |
+| 304 | `If-None-Match` matches the current version (a read of one audited row). |
+| 401 | A key was presented and cannot be used. A request without a key is judged by the rules instead. |
+| 403 | A rule or a before-hook refused (`forbidden`), or the key's scopes do not cover it (`out-of-scope`). |
+| 404 | The row does not exist or the caller's rules exclude it; or, without a problem document, the entity does not exist. |
+| 405 | A verb the route does not have, such as `GET …/query`; from routing, without a problem document. |
+| 409 | A `unique` or `restrict` conflict (`conflict`), or a reused `Idempotency-Key` (`idempotency-conflict`). |
+| 412 | A precondition that does not hold or cannot be evaluated. |
+| 415 | A body not declared as JSON. |
+| 422 | A malformed body (`validation`) or query (`malformed-query`). |
+| 413, 408, 400 | The web server refused the request before Alvo read it (`unreadable-request`). |
+| 500 | `internal` or `function-failed`. |
+
+## Problem documents
+
+Every refusal is an RFC 9457 problem document, `application/problem+json`, with `type`, `title`, `status`, `detail`
+and, when there are reasons to itemise, `violations`: each with `pointer`, `code`, `message` and `fixSuggestion`. Branch
+on the slug at the end of `type`. Every slug, its causes and its fix are in [Problem types](/MMLib.Alvo/reference/problem-types/);
+`unreadable-request`, `internal` and `function-failed` come only from a host that called `AddAlvoProblemDetails()`,
+which the standalone host does.
+
+Design notes: [`docs/architecture/data-api.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md).

@@ -1,6 +1,134 @@
 ---
 title: "Call Alvo from your endpoints"
-description: "Read and write Alvo data from your own minimal-API endpoints with the same rules."
+description: "Read and write Alvo's data from your own minimal-API endpoints, in process and under the descriptor's rules, and mount the generated API beside them under your own prefix."
 ---
 
-{/* <!-- STUB-F6 --> */}
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import sampleHost from '../../../../../samples/MMLib.Alvo.Samples.EmbeddedHost/SampleHost.cs?raw';
+
+:::tip[What you will achieve]
+Your own endpoints that query and update Alvo's rows with no HTTP round trip and no authorization code of their own,
+the generated API mounted under a prefix you choose, and refusals rendered as your app's own responses. About fifteen
+minutes, starting from an app that embeds Alvo as in [Embed Alvo in ASP.NET Core](/MMLib.Alvo/start-here/embed/).
+:::
+
+## Before you start
+
+- The embedded sample from [Embed Alvo in ASP.NET Core](/MMLib.Alvo/start-here/embed/); this page reads its code.
+- A way to build an `AlvoContext` for your signed-in user:
+  [Use your own authentication](/MMLib.Alvo/guides/own-authentication/) builds one in a helper called `AsCaller`.
+- To try the endpoints, the commands in [Use your own authentication, step 4](/MMLib.Alvo/guides/own-authentication/#4-try-it),
+  or a descriptor of your own from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+
+## 1. Call `IAlvoData` from an endpoint
+
+`IAlvoData` is the one port every Alvo read and write goes through, the same one the generated API calls. Resolve it
+in a minimal-API delegate like any service, and pass the caller you built. A read:
+
+<SourceExcerpt code={sampleHost} from="app.MapGet(" to=".RequireAuthorization();" dropComments={true} title="SampleHost.cs" />
+
+`QueryAsync` takes an `AlvoQuery`: the entity, and optionally a filter, a sort, a projection, a page size, a cursor
+and whether to count. It
+returns an `AlvoPage`, whose `Items` are records and whose `Values` hold each record's fields. The rows are the ones the
+`list` rule admits for this caller; the endpoint filters nothing itself. In process, `Limit` may be left `null` to read
+the whole visible set, which the HTTP API never allows.
+
+A write takes your own request type and maps it to the field dictionary Alvo expects:
+
+<SourceExcerpt code={sampleHost} from="app.MapPatch(" to=".RequireAuthorization();" dropComments={true} title="SampleHost.cs" />
+
+Map your DTO to a `Dictionary<string, object?>` yourself rather than binding one straight from JSON: a dictionary bound
+from JSON carries `JsonElement` values, which `IAlvoData` has no field type for and refuses. `UpdateAsync` also takes
+an optional precondition (the `If-Match` of the HTTP API) and an idempotency token. `CreateAsync`, `GetAsync`,
+`ReplaceAsync`, `DeleteAsync` and the three batch methods follow the same shape; each is in the
+[C# API reference](/MMLib.Alvo/reference/csharp/mmlib-alvo-abstractions/#ialvodata).
+
+The before-hooks, the rules and the after-hook events all run inside these calls, exactly as for an HTTP request.
+
+## 2. Mount the generated API under your prefix
+
+The generated Data API defaults to `/api`. An embedded host usually moves it out of its own way with
+`AlvoApiOptions.RoutePrefix`, set where Alvo is registered:
+
+<SourceExcerpt code={sampleHost} from=".AddDataApi(api =>" to="})" dropComments={true} title="SampleHost.cs" />
+
+Then map it. `MapAlvoDataApi()` returns a convention builder over Alvo's generated routes and nothing else, so a
+convention you attach reaches those routes only. The sample groups them under one tag in its OpenAPI document:
+
+<SourceExcerpt code={sampleHost} from="private static void MapAlvoEndpoints" to="app.MapAlvoDataApi().WithTags" dropComments={true} title="SampleHost.cs" />
+
+- **Attach conventions before the first request.** The route table is built once, at the first request; a convention
+  attached later throws, rather than being silently ignored like a late `RequireRateLimiting` would be.
+- **Health maps first and takes no conventions.** `MapAlvoHealth()` is not chainable, so an authorization policy can
+  never reach `/health/live`, which a container probe calls without a credential.
+- **A route group works too.** `app.MapGroup("/backend").MapAlvoDataApi()` mounts the API under the group's prefix,
+  and a created row's `Location` header carries it, as it carries a path base set with `UsePathBase`.
+
+`RoutePrefix` is also the configuration key `Alvo:Api:RoutePrefix`; an empty string mounts the API at the root.
+
+## 3. Render what `IAlvoData` refuses
+
+`IAlvoData` refuses by throwing, one exception type per kind of refusal. The generated API turns them into problem
+documents; your endpoint decides what to answer. The sample renders three kinds as its own responses:
+
+<SourceExcerpt code={sampleHost} from="private static async Task<IResult> Answered" to="The fixed set of users" dropComments={true} title="SampleHost.cs" />
+
+Both endpoints go through the same helper. A denied `list` throws exactly as a denied `update` does, so a helper around
+the write alone would ship a 500 for the first descriptor with a narrower read rule. The complete list, with what the
+generated API answers for each:
+
+| Exception | Means | The generated API answers |
+|---|---|---|
+| `AlvoAuthorizationException` | No rule allows the operation, or the row a write would store fails the rule or a before-hook. | 403 `forbidden` |
+| `AlvoRecordNotFoundException` | The row of an update or delete does not exist, or the rule hides it. `GetAsync` returns `null` instead. | 404 `not-found` |
+| `ArgumentException`, except `ArgumentNullException` | The query or the values are malformed. | 422 `validation` or `malformed-query` |
+| `AlvoPreconditionFailedException` | The precondition names a version the row no longer has. | 412 `precondition-failed` |
+| `AlvoIdempotencyConflictException` | The idempotency key was used for a different request. | 409 `idempotency-conflict` |
+| `AlvoConstraintViolationException` | A `unique` value or a `restrict` reference is in the way. | 409 `conflict` |
+| `InvalidOperationException`, `ArgumentNullException` | An invariant inside Alvo, or your call, is broken. | 500 `internal`, with `AddAlvoProblemDetails()` |
+
+Catch the ones your endpoint can cause. The sample sends no precondition, no idempotency key and no unique field, so
+it catches three. Let `InvalidOperationException` and `ArgumentNullException` propagate: they mean a bug, and your
+logging needs the stack trace. A [custom CEL function](/MMLib.Alvo/guides/custom-cel-functions/) that throws during
+your write reaches you as a plain `Exception`, outside these families, and nothing is written.
+
+The messages of `AlvoAuthorizationException` and `AlvoRecordNotFoundException` are safe to pass on: they never name
+the entity, the row or whether it exists.
+
+## How it works
+
+The generated API's endpoints are thin: each resolves its caller from the API key, calls `IAlvoData`, and maps the
+exception families to problem documents. Your endpoint does the same with a caller of its own, which is why both
+surfaces enforce identical rules. Because `IAlvoData` takes the caller as a parameter instead of reading it from the
+request, the same call works from a background job or a message handler, where no HTTP request exists.
+[Architecture](/MMLib.Alvo/concepts/architecture/) shows where the port sits.
+
+## What can go wrong
+
+The generated routes under your prefix answer with Alvo's problem types; your own endpoints answer with whatever you
+render.
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | `AlvoAuthorizationException`: no rule allows it, or the row fails the rule or a hook. | Check the rule against the roles in your `AlvoContext`. | every host |
+| 404 | [`not-found`](/MMLib.Alvo/reference/problem-types/#not-found) | `AlvoRecordNotFoundException`: the row is absent or hidden by the rule. | Check the id and the rule. | every host |
+| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | `ArgumentException`: a value does not fit its field, or a field is unknown. | Map your DTO to the entity's declared fields and types. | every host |
+| 500 | [`internal`](/MMLib.Alvo/reference/problem-types/#internal) | `InvalidOperationException` or `ArgumentNullException`: a broken invariant. | Read the stack trace in your log. | standalone; embedded only with `AddAlvoProblemDetails()` |
+
+If the app stops at startup instead, `MapAlvoDataApi()` was called on a host whose Data API services are missing
+(call `AddAlvo` first), or a convention threw while the routes were built; the message names the call to fix.
+
+## Reference
+
+- C# API: [`IAlvoData`](/MMLib.Alvo/reference/csharp/mmlib-alvo-abstractions/#ialvodata),
+  [`MapAlvoDataApi`](/MMLib.Alvo/reference/csharp/mmlib-alvo/#mapalvodataapi),
+  [`AlvoApiOptions`](/MMLib.Alvo/reference/csharp/mmlib-alvo/#alvoapioptions),
+  [`AddAlvoProblemDetails`](/MMLib.Alvo/reference/csharp/mmlib-alvo/#addalvoproblemdetails).
+- Configuration: [`Alvo:Api`](/MMLib.Alvo/reference/configuration/#alvoapi).
+- Design notes: [what a host may attach to the generated routes](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#what-a-host-may-attach-to-the-generated-routes-182)
+  and [endpoints as a separate seam](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/extensibility.md#strict-rules).
+
+## Next
+
+**[Custom CEL functions](/MMLib.Alvo/guides/custom-cel-functions/)**: give your descriptor's hooks a function written
+in C#.

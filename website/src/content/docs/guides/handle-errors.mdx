@@ -1,6 +1,206 @@
 ---
 title: "Handle errors"
-description: "Read Alvo's problem documents and branch on the problem type, not the message."
+description: "Read Alvo's problem documents, branch on the problem type rather than the message, and tell a refusal from an empty page or a missing row."
 ---
 
-{/* <!-- STUB-F6 --> */}
+import { Code } from '@astrojs/starlight/components';
+import Exchange from '../../../components/Exchange.astro';
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import start from '../../../snippets/shell/handle-errors-start.sh?raw';
+import helpDesk from '../../../snippets/handle-errors/01-help-desk.alvo.json?raw';
+import alvoHost from '../../../../../src/MMLib.Alvo.Host/AlvoHost.cs?raw';
+
+:::tip[What you will achieve]
+A client that reacts to every refusal by its problem type, knows the four causes of a 403, and does not mistake an
+empty page or a 404 for an error in Alvo. About fifteen minutes, starting from the stack in
+[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+:::
+
+## Before you start
+
+- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), with `ALVO_AGENT_KEY_SECRET` and
+  `ALVO_ADMIN_KEY_SECRET` exported in this shell.
+- The `reader` key from [Authentication and API keys](/MMLib.Alvo/guides/authentication/#3-narrow-a-key-with-scopes)
+  (roles `agent`, `authenticated`; read scope only), with `ALVO_READER_KEY_SECRET` exported.
+- This page's descriptor: tickets that each caller sees only when they filed them, no `delete` rule, a hook that refuses
+  to close a ticket without a resolution, and a hook that writes a slug of at most 40 characters:
+
+<Code code={helpDesk} lang="json" title="help-desk.alvo.json" />
+
+Start the stack over it. The first command **deletes the stack's database**:
+
+<Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+The responses below were captured from a real host when the site was built, so your ids will differ.
+
+## 1. Read a problem document
+
+Every refusal is an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem document, sent as
+`application/problem+json`. Send a field the entity does not declare:
+
+<Exchange name="handle-errors/01-errors" wrap steps={[0]} />
+
+| Member | What it is | Use it for |
+|---|---|---|
+| `type` | `https://alvo.dev/errors/<slug>`, one per kind of refusal | Branching in code. |
+| `status` | The HTTP status, repeated | Logging. |
+| `title` | The status's standard phrase | Nothing; it repeats `status`. |
+| `detail` | A sentence for a person | Showing or logging, never parsing. |
+| `violations` | One entry per reason, when there are reasons to itemise | Fixing the request. |
+
+Each violation has a `pointer`, a stable kebab-case `code`, a `message` and a `fixSuggestion`. A `pointer` that is
+empty or starts with `/` is a JSON pointer into the request body (`/priority`, `/rows/1/year`); any other value names
+the query parameter it is about (`filter`, `order`, `limit`, `offset`, `after`, `select`). No violation ever repeats a
+value you sent. A standalone host also adds `traceId`, the request's trace identifier; the responses on this site leave
+it out.
+
+## 2. Branch on the slug, never on `detail`
+
+The slug at the end of `type` is the contract. `detail` is written for people and may change in any release; a
+violation's `code` is stable. Take the part after the last `/` and switch on it:
+
+| Slug | Status | What happened | What to do |
+|---|---|---|---|
+| [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | 422 | The body breaks the entity's declared fields. | Fix each field a violation points at. |
+| [`malformed-query`](/MMLib.Alvo/reference/problem-types/#malformed-query) | 422 | The query string or query body is malformed. | Fix the parameter the violation names. |
+| [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | 401 | A key was sent and cannot be used. | Fix the key; retrying will not help. |
+| [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | 403 | A rule or a before-hook refused. | Change the request, or call with a role the rules grant. |
+| [`out-of-scope`](/MMLib.Alvo/reference/problem-types/#out-of-scope) | 403 | The key's scopes do not cover this. | Grant the key the scope. |
+| [`not-found`](/MMLib.Alvo/reference/problem-types/#not-found) | 404 | No such row, or your rules hide it. | Check the id and the rules. |
+| [`conflict`](/MMLib.Alvo/reference/problem-types/#conflict) | 409 | A `unique` value or a `restrict` reference is in the way. | Send another value, or remove the reference. |
+| [`idempotency-conflict`](/MMLib.Alvo/reference/problem-types/#idempotency-conflict) | 409 | The `Idempotency-Key` was used for a different request. | Send a new key. |
+| [`precondition-failed`](/MMLib.Alvo/reference/problem-types/#precondition-failed) | 412 | The row changed since you read it. | Read it again, reapply, resend. |
+| [`unsupported-media-type`](/MMLib.Alvo/reference/problem-types/#unsupported-media-type) | 415 | The body was not declared as JSON. | Send `Content-Type: application/json`. |
+| [`unreadable-request`](/MMLib.Alvo/reference/problem-types/#unreadable-request) | 413, 408, 400 | The web server refused the body. | Send a smaller body, in one go. |
+| [`function-failed`](/MMLib.Alvo/reference/problem-types/#function-failed) | 500 | A CEL function failed while the write was checked; nothing was written. | Check the input the function reads. |
+| [`internal`](/MMLib.Alvo/reference/problem-types/#internal) | 500 | Something inside Alvo broke. | Nothing in the request is at fault; the host's log has the details. |
+
+The `type` URIs do not resolve yet. Each slug is an anchor on the [Problem types](/MMLib.Alvo/reference/problem-types/)
+page: `https://alvo.dev/errors/forbidden` is
+[`/reference/problem-types/#forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden). An embedded host can compare
+against the public constants in `AlvoProblemTypes` instead of copying strings.
+
+## 3. Know the four causes of a 403
+
+The Data API's status catalogue names four causes of a 403, and three of them share the slug `forbidden`.
+
+**A rule refused.** The operation has no rule, the row a write would store fails the rule, or the rule reads `@user.id`
+or `@tenant.id` and the caller has neither. The `detail` never says which rule. This descriptor has no `delete` rule
+for tickets, so even an administrator is refused:
+
+<Exchange name="handle-errors/01-errors" wrap steps={[4]} />
+
+A request without a key is judged by the rules too. These rules read `@user.id`, which such a caller lacks:
+
+<Exchange name="handle-errors/01-errors" wrap steps={[5]} />
+
+**A before-hook's `reject` fired.** Its text is the `detail`, followed by the hook's place in the descriptor. Create a
+ticket, then close it without a resolution:
+
+<Exchange name="handle-errors/01-errors" wrap steps={[1]} fields={["id", "title", "status", "slug"]} />
+
+<Exchange name="handle-errors/01-errors" wrap steps={[2]} />
+
+**A before-hook computed a value its field cannot hold.** The slug of a long title is longer than 40 characters. The
+caller never sent `slug`, so this is not a 422: the `detail` names the hook, the field and the facet, never the value:
+
+<Exchange name="handle-errors/01-errors" wrap steps={[3]} />
+
+**The key's scopes do not cover the operation.** This is the one 403 with its own slug, because its fix is different:
+change the key, not a rule. The `reader` key may read and not write:
+
+<Exchange name="handle-errors/01-errors" wrap steps={[6]} />
+
+The Management API also answers `forbidden` when a caller lacks the project access level a route needs; see
+[Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/). Writing a computed field is also a 403
+`forbidden`, while writing a `readOnly` field is a 422 `validation`
+([#344](https://github.com/Burgyn/MMLib.Alvo/issues/344)).
+
+## 4. An empty page is not a 403
+
+A `list` rule is a filter, not a gate. A caller whose rule matches no row gets 200 and an empty page, the way
+PostgreSQL row-level security behaves. The reader has filed no tickets, so its list is empty even though one exists:
+
+<Exchange name="handle-errors/01-errors" wrap steps={[7]} />
+
+So: if you wrote a rule and a caller gets an empty page, it is your rule. If a caller gets a 403 on a read, it is one of
+the causes in step 3, not the condition you wrote. [Access rules](/MMLib.Alvo/guides/access-rules/#3-know-when-alvo-answers-403)
+has the full table.
+
+## 5. A 404 can be your rules
+
+The `get`, `update` and `delete` rules filter rows the same way, so a row the caller may not see is answered exactly
+like a row that does not exist. The administrator files a ticket; the agent asks for it by id:
+
+<Exchange name="handle-errors/01-errors" wrap steps={[8]} fields={["id", "title", "created_by"]} />
+
+<Exchange name="handle-errors/01-errors" wrap steps={[9]} />
+
+The two cases are one answer on purpose: a different answer would tell anyone holding an id that the row exists. To
+check a rule without a request as that caller, ask the Management API's `policy/simulate`
+([Access rules](/MMLib.Alvo/guides/access-rules/#5-test-a-rule-with-policysimulate)).
+
+## 6. A 415 is a missing header
+
+A body that is not declared as `application/json`, or a request with no `Content-Type` at all, is refused before the
+body is read. Nothing in the body is wrong, so there are no `violations`; the header in the answer names the accepted
+type:
+
+<Exchange name="handle-errors/01-errors" wrap steps={[10]} />
+
+The fix is the header. Many HTTP clients send `text/plain` when you pass a string as the body, or no type at all; set
+the header yourself. [Write data safely](/MMLib.Alvo/guides/write-data/#5-send-json-and-say-so) explains why the
+requirement exists.
+
+## 7. A 401 means the key, not the caller
+
+`unauthenticated` means a key was sent and cannot be used: a wrong secret, a revoked or expired key, or a key with a role
+the descriptor does not declare. A request without any key is not a 401; the rules judge it, as step 3 showed.
+
+<Exchange name="handle-errors/01-errors" wrap steps={[11]} />
+
+## Errors in an embedded host
+
+Three problem types come from Alvo's exception handler rather than from an endpoint: `unreadable-request`, `internal`
+and `function-failed`. The standalone host registers that handler:
+
+<SourceExcerpt code={alvoHost} from="builder.Services.AddAlvoProblemDetails();" to="builder.Services.AddAlvoProblemDetails();" title="AlvoHost.cs (registration)" />
+
+<SourceExcerpt code={alvoHost} from="app.UseExceptionHandler();" to="app.UseExceptionHandler();" title="AlvoHost.cs (pipeline)" />
+
+An embedded host decides for itself. With both calls, those three failures on Alvo's own routes get the documents
+above, and a failure on the host's own routes is left to the host's handlers. Without them, which is the default, Alvo
+writes nothing for them: the exception reaches your own error handling and logging, and your app renders the 500 or 400
+it always would. Every other problem type on this page comes from the endpoints themselves and is the same in both
+modes.
+
+Your own endpoints that call `IAlvoData` get exceptions rather than problem documents, one exception type per family
+above; [Call Alvo from your endpoints](/MMLib.Alvo/guides/call-from-endpoints/#3-render-what-ialvodata-refuses) shows
+how to render them.
+
+## What can go wrong
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | The body names an unknown field, misses a required one or breaks a facet. | Fix each field a violation points at. | every host |
+| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | A rule refused, a `reject` fired, or a hook's value broke a facet. | Read the `detail`; change the request or the descriptor. | every host |
+| 403 | [`out-of-scope`](/MMLib.Alvo/reference/problem-types/#out-of-scope) | The key's scopes do not cover the operation. | Grant the key the scope. | every host |
+| 404 | [`not-found`](/MMLib.Alvo/reference/problem-types/#not-found) | The row does not exist, or the rules hide it. | Check the id, then the rule with `policy/simulate`. | every host |
+| 415 | [`unsupported-media-type`](/MMLib.Alvo/reference/problem-types/#unsupported-media-type) | The body is not declared as JSON. | Send `Content-Type: application/json`. | every host |
+| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | The key cannot be used. | Check the secret and the key's roles. | every host |
+| 413, 408, 400 | [`unreadable-request`](/MMLib.Alvo/reference/problem-types/#unreadable-request) | The web server refused the body before Alvo read it. | Send a smaller body, in one go. | standalone; embedded only with `AddAlvoProblemDetails()` |
+| 500 | [`function-failed`](/MMLib.Alvo/reference/problem-types/#function-failed) | A CEL function failed during a write. | Check the function's input; the exception is in the host's log. | standalone; embedded only with `AddAlvoProblemDetails()` |
+| 500 | [`internal`](/MMLib.Alvo/reference/problem-types/#internal) | An invariant inside Alvo broke. | Read the host's log. | standalone; embedded only with `AddAlvoProblemDetails()` |
+
+## Reference
+
+- [Problem types](/MMLib.Alvo/reference/problem-types/): every slug, its causes, fix and violation codes.
+- C# API: [`AddAlvoProblemDetails`](/MMLib.Alvo/reference/csharp/mmlib-alvo/#addalvoproblemdetails).
+- Design notes: [the status and slug catalogue](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#the-status-and-type-slug-catalogue),
+  [the RLS surprise](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#the-rls-surprise-a-configured-rule-that-excludes-you-is-200-with-an-empty-page-not-403)
+  and [what Alvo treats as confidential](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/data-api.md#position-a-the-declared-schema-shape-is-public-data-and-a-hidden-fields-name-are-not).
+
+## Next
+
+**[Use your own authentication](/MMLib.Alvo/guides/own-authentication/)**: let your app's signed-in users reach Alvo's
+data under the descriptor's rules.

@@ -1,0 +1,226 @@
+{
+  "descriptor": "examples/vehicle-registry/vehicles.alvo.json",
+  "keys": {
+    "demo": {
+      "roles": [
+        "admin",
+        "authenticated",
+        "inspector"
+      ],
+      "scopes": [
+        "*:read",
+        "*:write"
+      ],
+      "secretVariable": "ALVO_DEMO_KEY_SECRET"
+    }
+  },
+  "steps": [
+    {
+      "key": "demo",
+      "method": "PUT",
+      "path": "/api/owners/2c4e6a80-1b3d-4f5a-8c7e-9d0f1a2b3c4d",
+      "body": {
+        "name": "Fleet Desk Ltd",
+        "email": "office@fleetdesk.example"
+      },
+      "expect": 201
+    },
+    {
+      "key": "demo",
+      "method": "PUT",
+      "path": "/api/owners/2c4e6a80-1b3d-4f5a-8c7e-9d0f1a2b3c4d",
+      "body": {
+        "name": "Fleet Desk Limited"
+      },
+      "expect": 200
+    },
+    {
+      "key": "demo",
+      "method": "POST",
+      "path": "/api/vehicles",
+      "headers": {
+        "Idempotency-Key": "import-2026-10-10-row-1"
+      },
+      "body": {
+        "vin": "TMBJJ7NE8L0123456",
+        "plate": "BA-101AA",
+        "make": "Skoda",
+        "model": "Octavia",
+        "year": 2020,
+        "owner_id": "2c4e6a80-1b3d-4f5a-8c7e-9d0f1a2b3c4d"
+      },
+      "expect": 201
+    },
+    {
+      "key": "demo",
+      "method": "POST",
+      "path": "/api/vehicles",
+      "headers": {
+        "Idempotency-Key": "import-2026-10-10-row-1"
+      },
+      "body": {
+        "vin": "TMBJJ7NE8L0123456",
+        "plate": "BA-101AA",
+        "make": "Skoda",
+        "model": "Octavia",
+        "year": 2020,
+        "owner_id": "2c4e6a80-1b3d-4f5a-8c7e-9d0f1a2b3c4d"
+      },
+      "expect": 201
+    },
+    {
+      "key": "demo",
+      "method": "POST",
+      "path": "/api/vehicles",
+      "headers": {
+        "Idempotency-Key": "import-2026-10-10-row-1"
+      },
+      "body": {
+        "vin": "TMBEG7NJ1N0234567",
+        "plate": "BA-202BB",
+        "make": "Skoda",
+        "model": "Fabia",
+        "year": 2022,
+        "owner_id": "2c4e6a80-1b3d-4f5a-8c7e-9d0f1a2b3c4d"
+      },
+      "expect": 409,
+      "expectType": "idempotency-conflict"
+    },
+    {
+      "key": "demo",
+      "method": "PATCH",
+      "path": "/api/vehicles/{2.body.id}",
+      "headers": {
+        "If-Match": "{2.header.ETag}"
+      },
+      "body": {
+        "color": "green"
+      },
+      "expect": 200
+    },
+    {
+      "key": "demo",
+      "method": "PATCH",
+      "path": "/api/vehicles/{2.body.id}",
+      "headers": {
+        "If-Match": "{2.header.ETag}"
+      },
+      "body": {
+        "color": "black"
+      },
+      "expect": 412,
+      "expectType": "precondition-failed"
+    },
+    {
+      "key": "demo",
+      "method": "POST",
+      "path": "/api/vehicles/batch",
+      "body": {
+        "rows": [
+          {
+            "vin": "WVWZZZAUZKW345678",
+            "plate": "KE-303CC",
+            "make": "Volkswagen",
+            "model": "Golf",
+            "year": 2019,
+            "owner_id": "2c4e6a80-1b3d-4f5a-8c7e-9d0f1a2b3c4d"
+          },
+          {
+            "vin": "WVWZZZ3CZPE456789",
+            "plate": "KE-404DD",
+            "make": "Volkswagen",
+            "model": "Passat",
+            "year": 2023,
+            "owner_id": "2c4e6a80-1b3d-4f5a-8c7e-9d0f1a2b3c4d"
+          }
+        ]
+      },
+      "expect": 200
+    },
+    {
+      "key": "demo",
+      "method": "PATCH",
+      "path": "/api/vehicles/batch",
+      "body": {
+        "rows": [
+          {
+            "id": "{7.body.items.0.id}",
+            "color": "silver"
+          },
+          {
+            "id": "{7.body.items.1.id}",
+            "color": "silver"
+          }
+        ]
+      },
+      "expect": 200
+    },
+    {
+      "key": "demo",
+      "method": "DELETE",
+      "path": "/api/vehicles/batch",
+      "body": {
+        "rows": [
+          "{7.body.items.0.id}",
+          "{7.body.items.1.id}"
+        ]
+      },
+      "expect": 200
+    },
+    {
+      "key": "demo",
+      "method": "POST",
+      "path": "/api/vehicles/batch",
+      "body": {
+        "rows": [
+          {
+            "vin": "VF1RJA00X67567890",
+            "plate": "ZA-505EE",
+            "make": "Renault",
+            "model": "Clio",
+            "year": 2017,
+            "owner_id": "2c4e6a80-1b3d-4f5a-8c7e-9d0f1a2b3c4d"
+          },
+          {
+            "vin": "VF1RJA00X67567891",
+            "plate": "ZA-606FF",
+            "make": "Renault",
+            "model": "Captur",
+            "owner_id": "2c4e6a80-1b3d-4f5a-8c7e-9d0f1a2b3c4d"
+          }
+        ]
+      },
+      "expect": 422,
+      "expectType": "validation"
+    },
+    {
+      "key": "demo",
+      "method": "POST",
+      "path": "/api/vehicles",
+      "body": {
+        "vin": "TMBJJ7NE8L0999999",
+        "plate": "BA-101AA",
+        "make": "Skoda",
+        "model": "Superb",
+        "year": 2024,
+        "owner_id": "2c4e6a80-1b3d-4f5a-8c7e-9d0f1a2b3c4d"
+      },
+      "expect": 409,
+      "expectType": "conflict"
+    },
+    {
+      "key": "demo",
+      "method": "POST",
+      "path": "/api/owners",
+      "contentType": "text/plain",
+      "body": {
+        "name": "Fleet Desk Ltd"
+      },
+      "expect": 415,
+      "expectType": "unsupported-media-type",
+      "showHeaders": [
+        "Accept-Post"
+      ]
+    }
+  ]
+}

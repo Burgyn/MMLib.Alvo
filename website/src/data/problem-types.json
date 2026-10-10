@@ -56,7 +56,7 @@
     ],
     "fix": "Grant the key the scope it needs, such as `*:read` or `*:write`. This is a different fix from `forbidden`, which is a rule.",
     "violationCodes": [],
-    "guides": ["guides/authentication"],
+    "guides": ["guides/authentication", "guides/handle-errors"],
     "needsProblemDetails": false
   },
   "not-found": {
@@ -66,7 +66,7 @@
     ],
     "fix": "Check the id, and check that the caller's rules let it read the row.",
     "violationCodes": [],
-    "guides": ["guides/read-data", "guides/access-rules"],
+    "guides": ["guides/read-data", "guides/access-rules", "guides/handle-errors"],
     "needsProblemDetails": false
   },
   "precondition-failed": {
@@ -126,7 +126,7 @@
     ],
     "fix": "Send a valid key in the header the `WWW-Authenticate` challenge names, `X-Alvo-Api-Key` by default.",
     "violationCodes": [],
-    "guides": ["guides/authentication"],
+    "guides": ["guides/authentication", "guides/handle-errors"],
     "needsProblemDetails": false
   },
   "unreadable-request": {
@@ -135,7 +135,7 @@
     ],
     "fix": "Send a different request: a smaller body, sent in one go, with valid framing.",
     "violationCodes": [],
-    "guides": ["guides/handle-errors"],
+    "guides": ["guides/write-data", "guides/handle-errors"],
     "needsProblemDetails": true
   },
   "unsupported-media-type": {
@@ -144,7 +144,7 @@
     ],
     "fix": "Send `Content-Type: application/json`. The fix is the header, not the body.",
     "violationCodes": [],
-    "guides": ["guides/write-data"],
+    "guides": ["guides/write-data", "guides/handle-errors"],
     "needsProblemDetails": false
   },
   "internal": {
