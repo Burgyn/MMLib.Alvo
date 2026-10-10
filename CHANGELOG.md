@@ -650,6 +650,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A batch `PATCH` stamps `updated_at` and `updated_by`, so its rows get a new `ETag`** (#349). The EF
+  driver's batch update did not apply the audit stamp that the single-row update applies. A batch-updated row
+  kept its old `updated_at` and `updated_by`, so its `ETag` did not change. A later single-row `PATCH` sent
+  with an `If-Match` from before the batch then got `200` instead of `412`, and silently overwrote the
+  batch's change (a lost update). Each batch row is now stamped exactly like a single update, on SQLite and
+  PostgreSQL alike. The stamp is applied after the payload guard and before the hooks and `WITH CHECK`, the
+  same order the single-row path uses. As a result, a hook or an update rule that reads `updated_by` or
+  `updated_at` now sees the stamped values on a batch too. The in-memory reference implementation already
+  stamped; batch create was not affected.
+
 - **A `date` field now compares in memory** (#317). The CEL interpreter did not normalise a `DateOnly`, so every
   in-memory comparison involving a `date` field answered `false`. A `date` now compares as **midnight UTC**, the same
   rule the database uses. Guards that were silently dead start working on upgrade, in both directions:
