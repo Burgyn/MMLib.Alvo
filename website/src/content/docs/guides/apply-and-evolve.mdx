@@ -60,11 +60,11 @@ The rest of this page uses the Management API, which applies without a restart. 
 in-process, so it plans, refuses and records exactly the same way.
 
 :::caution[Known issue in this build]
-A change applied through the Management API or the dashboard is recorded and migrated at once, but not all of it is
-served at once. Rule and hook changes take effect on the next request. A new entity gets no Data API route until the
-host restarts ([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103)), and a write naming a new field is refused as
-`unknown-field` until then ([#353](https://github.com/Burgyn/MMLib.Alvo/issues/353)). The recipe below downloads the new
-descriptor over the mounted file, so a restart serves it.
+A change applied through the Management API or the dashboard is recorded and migrated at once, and almost all of it is
+served at once: rules, hooks and an existing entity's fields and facets (a new field, a shorter `maxLength`, a newly
+`required` field) take effect on the next request. A new entity gets no Data API route until the host restarts
+([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103)). The recipe below downloads the new descriptor over the
+mounted file, so a restart serves the same descriptor.
 :::
 
 ## 1. Give the API a way in

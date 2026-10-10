@@ -44,11 +44,11 @@ dashboard, which calls the same API in process. Every door leads to the same ste
 4. **Prime.** The rules, hooks and role catalog are compiled from the accepted descriptor into the policy catalog every
    request reads.
 
-The generated routes are built from the applied schema when the first request arrives, and then kept. A change to rules
-or hooks applied at runtime takes effect on the next request. A change to the **shape** applied at runtime does not
-reach the Data API until the process restarts: an entity added through the Management API or the dashboard gets no route
-([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103)), and a field added to an existing entity is refused as
-`unknown-field` until then ([#353](https://github.com/Burgyn/MMLib.Alvo/issues/353)).
+The generated routes are built from the applied schema when the first request arrives, and then kept. Everything a
+route reads per request follows a runtime apply on the next request: rules, hooks, and an entity's fields, facets and
+formats, read from the same revision the request's policy decision was taken against. Only the routes themselves are
+fixed: an entity added through the Management API or the dashboard gets no route until the process restarts
+([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103)).
 
 ## The runtime path
 

@@ -86,8 +86,7 @@ every request, including a list that matches thousands of rows.
 
 2. Apply it by recreating the `alvo` container. On start, Alvo applies a descriptor change that discards nothing, and
    refuses one that would. ([Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/) covers the other
-   ways to apply a change, including the Management API without a restart; in this build a new field applied that way
-   is served only after a restart, [#353](https://github.com/Burgyn/MMLib.Alvo/issues/353).)
+   ways to apply a change, including the Management API without a restart.)
 
    <Code code={step2.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 

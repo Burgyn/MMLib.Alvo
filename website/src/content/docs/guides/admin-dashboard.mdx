@@ -165,10 +165,9 @@ verified ([#344](https://github.com/Burgyn/MMLib.Alvo/issues/344)); a dashboard 
 :::
 
 :::caution[Known issue in this build]
-A rule or hook you apply takes effect on the next request, but a new entity or field reaches the Data API only after
-the host restarts. A new entity has no route until then ([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103)),
-and a write naming a new field is refused as `unknown-field`
-([#353](https://github.com/Burgyn/MMLib.Alvo/issues/353)).
+A rule, a hook or a change to an existing entity's fields takes effect on the next request, but a new entity reaches
+the Data API only after the host restarts: it has no route until then
+([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103)).
 :::
 
 ## What can go wrong

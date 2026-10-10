@@ -75,6 +75,7 @@ RUN mkdir -p /alvo/data && chown -R $APP_UID:$APP_UID /alvo
 # ring0 until this list follows.
 COPY examples/bike-workshop/bike-workshop.alvo.json /alvo/examples/bike-workshop/
 COPY examples/field-service/field-service.alvo.json /alvo/examples/field-service/
+COPY examples/help-desk/help-desk.alvo.json /alvo/examples/help-desk/
 COPY examples/simple-tasks/tasks.alvo.json /alvo/examples/simple-tasks/
 COPY examples/vehicle-registry/vehicles.alvo.json /alvo/examples/vehicle-registry/
 

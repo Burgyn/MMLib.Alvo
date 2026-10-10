@@ -40,8 +40,8 @@ the test gates. A release does not go out with a known hole.
 - **The schema's URL.** A descriptor's `$schema` and the schema's own `$id`, `https://alvo.dev/schema/v1/project.json`,
   do not resolve either. This site serves a copy at `https://burgyn.github.io/MMLib.Alvo/schema/v1/project.json`; the
   canonical address may still change.
-- **The environment-variable names** of the container, which become a breaking change once an image is published
-  ([#233](https://github.com/Burgyn/MMLib.Alvo/issues/233)).
+- **The environment-variable names** of the container, which become a breaking change once a release tag of the image
+  is published ([#233](https://github.com/Burgyn/MMLib.Alvo/issues/233)).
 
 ## What is stable
 
@@ -63,7 +63,7 @@ for the published packages appear only in tabs marked *available from v0.1*.
 
 ## Known issues
 
-Open defects the documentation pages point to. A fix is in progress for #353.
+Open defects the documentation pages point to.
 
 | Issue | What happens |
 |---|---|
@@ -74,7 +74,6 @@ Open defects the documentation pages point to. A fix is in progress for #353.
 | [#345](https://github.com/Burgyn/MMLib.Alvo/issues/345) | A before-hook may `mutate` a rollup or computed field, which the apply should refuse. |
 | [#350](https://github.com/Burgyn/MMLib.Alvo/issues/350) | Filter negation is spelled `not.field=op.value`, not PostgREST's `field=not.op.value`. |
 | [#351](https://github.com/Burgyn/MMLib.Alvo/issues/351) | A write to a child row recomputes the parent's rollups without advancing the parent's `ETag`, so an `If-Match` or `If-None-Match` taken before it still matches. |
-| [#353](https://github.com/Burgyn/MMLib.Alvo/issues/353) | A field added through the Management API or the dashboard is refused as `unknown-field` until the host restarts. |
 | [#354](https://github.com/Burgyn/MMLib.Alvo/issues/354) | A request that races a runtime apply can be judged by the old policy and read with the new schema, so a field the apply just made `hidden` can be returned once. |
 | [#355](https://github.com/Burgyn/MMLib.Alvo/issues/355) | A write that reaches a database `NOT NULL` constraint the API did not check first answers 500 instead of a structured refusal. |
 
