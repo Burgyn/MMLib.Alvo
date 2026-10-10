@@ -2659,6 +2659,12 @@ internal sealed class EfAlvoData : IAlvoData
     /// <see cref="AlvoAuthorizationException.RowUnavailable"/>. Telling them apart would let one request ask
     /// as many existence questions as it carries rows.
     /// </para>
+    /// <para>
+    /// <b>Each patch is stamped exactly where <see cref="WrittenAsync"/> stamps a single one</b> — after the
+    /// payload guard has judged the caller's own keys, before the hooks and <c>WITH CHECK</c> see the row
+    /// that will be stored. Leaving the stamp out (issue #349) left <c>updated_at</c> unmoved, so the row's
+    /// <c>ETag</c> survived the batch and a stale <c>If-Match</c> overwrote the batch's change.
+    /// </para>
     /// </remarks>
     /// <inheritdoc cref="CreatedRowsAsync"/>
     /// <param name="db">The store this attempt runs against.</param>
@@ -2702,7 +2708,8 @@ internal sealed class EfAlvoData : IAlvoData
             IReadOnlyDictionary<string, object?> vetted;
             try
             {
-                vetted = RunBeforeUpdate(schema, context, preImage, patch.Values, now);
+                vetted = RunBeforeUpdate(
+                    schema, context, preImage, Stamped(schema, patch.Values, context, now, isUpdate: true), now);
             }
             catch (AlvoAuthorizationException refusedByHook)
             {

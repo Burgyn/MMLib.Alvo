@@ -1114,8 +1114,8 @@ The ruling on which columns are written when:
 
 | Path | Stamped | Why |
 |---|---|---|
-| `create` | `created_at`, `created_by`, `updated_at`, `updated_by` | `updated_at` is `required`, so a row whose first write left it empty violates its own `NOT NULL`; and "last written" really is the creation instant for a row that has only been created |
-| `update` | `updated_at`, `updated_by` | rewriting the creation record on every write erases the authorship the audit trail exists to hold |
+| `create` (single and batch) | `created_at`, `created_by`, `updated_at`, `updated_by` | `updated_at` is `required`, so a row whose first write left it empty violates its own `NOT NULL`; and "last written" really is the creation instant for a row that has only been created |
+| `update` (single and batch) | `updated_at`, `updated_by` | rewriting the creation record on every write erases the authorship the audit trail exists to hold. The batch update once skipped the stamp, so its rows kept their `ETag` and a stale `If-Match` won (#349) |
 | `delete` | nothing | soft delete is refused at apply time (see *`softDelete` is refused, not silently ignored*), so `deleted_at` has no writer |
 
 The instant comes from an injected `TimeProvider` (registered `TryAddSingleton(TimeProvider.System)`, so a
