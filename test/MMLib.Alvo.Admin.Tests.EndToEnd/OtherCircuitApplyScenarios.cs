@@ -42,7 +42,7 @@ public sealed class OtherCircuitApplyScenarios(AdminWorld world) : IClassFixture
 
         await bystander.Page.GetByTestId("sidebar")
             .GetByRole(AriaRole.Link, new() { Name = "Overview", Exact = true }).ClickAsync();
-        await bystander.Page.WaitForURLAsync("**/admin");
+        await bystander.Page.WaitForAddressAsync("**/admin");
 
         await bystander.Page.Locator("main").GetByText($"Revision {applied} applied").WaitForAsync();
         await Card(bystander).Filter(new() { HasText = $"revision {applied}" }).WaitForAsync();

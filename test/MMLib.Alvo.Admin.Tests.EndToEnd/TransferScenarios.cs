@@ -90,7 +90,7 @@ public sealed class ImportOverEditsScenarios(AdminWorld world) : IClassFixture<A
 
         await session.Page.GetByTestId("import-run").ClickAsync();
         await confirm.GetByTestId("import-replace-run").ClickAsync();
-        await session.Page.WaitForURLAsync("**/changes");
+        await session.Page.WaitForAddressAsync("**/changes");
         await session.WaitForPlanAsync();
         await session.FocusAfterConfirmAsync("import-replace-confirm", "h1");
         var plan = await session.Content.InnerTextAsync();
@@ -102,11 +102,11 @@ public sealed class ImportOverEditsScenarios(AdminWorld world) : IClassFixture<A
         await session.FocusAfterConfirmAsync("discard-sheet@Preview", "[data-testid='discard']");
         await session.Page.GetByTestId("discard").First.ClickAsync();
         await session.Dialog("discard-sheet").GetByTestId("discard-confirm").ClickAsync();
-        await session.Page.WaitForURLAsync("**/schema");
+        await session.Page.WaitForAddressAsync("**/schema");
         await session.GoToImportAsync();
         await PasteAsync(session, "Imported over a clean copy.");
         await session.Page.GetByTestId("import-run").ClickAsync();
-        await session.Page.WaitForURLAsync("**/changes");
+        await session.Page.WaitForAddressAsync("**/changes");
         (await confirm.CountAsync()).ShouldBe(0, "a clean copy has nothing to lose");
         session.AssertConsoleClean();
     }
