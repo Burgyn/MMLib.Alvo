@@ -9,6 +9,7 @@ import starlightOpenAPI, { openAPISidebarGroups } from 'starlight-openapi';
 import rehypeMermaid from 'rehype-mermaid';
 import { remarkMermaidPre } from './plugins/remark-mermaid-pre.mjs';
 import { rehypeTableWrap } from './plugins/rehype-table-wrap.mjs';
+import { rehypeMermaidTheme } from './plugins/rehype-mermaid-theme.mjs';
 
 const description =
   'Describe your backend in one JSON file. Get a secure, production-shaped API — standalone in Docker or embedded in your ASP.NET Core app.';
@@ -37,7 +38,7 @@ export default defineConfig({
   markdown: {
     processor: unified({
       remarkPlugins: [remarkMermaidPre],
-      rehypePlugins: [rehypeTableWrap, [rehypeMermaid, { strategy: 'img-svg', dark: true }]],
+      rehypePlugins: [rehypeTableWrap, [rehypeMermaid, { strategy: 'img-svg', dark: true }], rehypeMermaidTheme],
     }),
   },
   vite: { server: { fs: { allow: ['..'] } } },

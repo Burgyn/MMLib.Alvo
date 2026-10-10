@@ -1,8 +1,158 @@
 ---
 title: CEL in Alvo
-description: "How Alvo uses CEL: the Rule, Computed, Condition, Mutate and Access profiles, and why evaluation fails closed."
+description: "Understand how Alvo uses CEL: one grammar in five profiles, each limited to what its place in the descriptor needs, compiled at apply, rendered into SQL where it filters rows, and failing closed."
 sidebar:
   order: 2
 ---
 
-{/* <!-- STUB-F6 --> */}
+import SourceExcerpt from '../../../components/SourceExcerpt.astro';
+import sql from '../../../../../test/MMLib.Alvo.Data.PostgreSql.Tests/cel-to-sql-postgresql.verified.txt?raw';
+
+Every condition and every derived value in a descriptor is written in [CEL](https://cel.dev), the Common Expression
+Language: an access rule, a hook's condition, a `mutate` value, a computed field, a management access level. One
+grammar, one parser and one type checker serve all of them.
+
+## Why CEL
+
+CEL was designed for exactly this job: small expressions that decide something, evaluated where a mistake must not
+cost more than a wrong answer. It has no loops, no recursion, no I/O and no way to define a function, so an expression
+always finishes, and its cost is bounded by its length, not by the data or the caller. That is what lets Alvo run a
+rule inside the database query and a hook inside the write's transaction.
+
+Alvo adopts the CEL specification rather than inventing a language, so a coding agent recognizes it from its training
+data. Where Alvo differs from the specification, it says so: see [Deviations](#deviations-from-the-cel-specification)
+below. Transformations of a payload are a different job, for JSONata, which is not in this build.
+
+## The five profiles
+
+What an expression may contain depends on where it stands. Each place in the descriptor compiles its expressions in one
+**profile**, and a construct a profile does not list is refused there. The default is to refuse: a construct missing
+from the table compiles nowhere, not everywhere.
+
+| Construct | Rule | Computed | Condition | Mutate | Access |
+|---|---|---|---|---|---|
+| Literal | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Field of the current row (`owner_id`) | ✓ | ✓ | ✓ | ✓ | ✗ |
+| Field of the row before or after the write (`old.status`, `new.status`) | ✗ | ✗ | ✓ | ✓ | ✗ |
+| `@user` | ✓ | ✗ | ✓ | ✗ | ✓ |
+| `@tenant` | ✓ | ✗ | ✓ | ✗ | ✗ |
+| `&&`, `\|\|`, `!` | ✓ | ✓ | ✓ | ✗ | ✓ |
+| Comparison (`==`, `!=`, `<`, `<=`, `>`, `>=`) | ✓ | ✓ | ✓ | ✗ | ✓ |
+| `in` (role membership) | ✓ | ✗ | ✓ | ✗ | ✓ |
+| `has(field)` | ✓ | ✓ | ✓ | ✗ | ✗ |
+| Arithmetic (`+`, `-`, `*`, `/`, unary `-`) | ✗ | ✓ | ✓ | ✓ | ✗ |
+| Joining two strings with `+` | ✗ | ✓ | ✗ | ✓ | ✗ |
+| Conditional (`a ? b : c`) | ✗ | ✓ | ✗ | ✗ | ✗ |
+| `changed(field)` | ✗ | ✗ | ✓ | ✗ | ✗ |
+| `now()` | ✗ | ✗ | ✗ | ✓ | ✗ |
+| A [catalogued function](/MMLib.Alvo/reference/cel-functions/), built in or registered by the host | ✗ | ✗ | ✓ | ✓ | ✗ |
+
+Each function narrows that last row further with its own list of profiles. Where each profile applies, and what it must
+produce:
+
+- **Rule**: an entity's `rules` and a field's `hidden` and `readOnly` flags. A boolean over the current row, `@user` and
+  `@tenant`. It is a filter, not a calculation, so there is no arithmetic, and there is no row "before" an
+  authorization check, so no `old.` or `new.`.
+- **Computed**: a `computed` field. A value (a number, text, an instant or an id, never a bare boolean) the database
+  computes from the same row, with no caller: no `@user`, no `@tenant`. The only profile with the conditional, which is
+  how a computed field picks between two values.
+- **Condition**: a hook's `condition`. A boolean that sees the row before and after the write, and the only profile
+  with `changed(field)`.
+- **Mutate**: the values of a before-hook's `mutate`. A value a field can hold, booleans included, computed from the
+  row, the functions and arithmetic; no comparisons yet.
+- **Access**: the `access` block's three management levels. A boolean over `@user` alone: there is no row, and no
+  tenant, because the levels apply to the whole project.
+
+The context is a closed set: `@user.id`, `@user.roles` and `@tenant.id`. Anything else after `@` is refused with a fix,
+for example `@user.role` (test membership with `'admin' in @user.roles` instead).
+
+## Compiled when the descriptor is applied
+
+Every expression is compiled when the descriptor is applied, against the entity it belongs to. An unknown field, a
+type mismatch, a construct the profile refuses, or a role literal `auth.roles` does not declare (`'amdin' in
+@user.roles` would otherwise never match, and negated, match everyone) fails the apply with a pointer to the place and
+a fix. Nothing is parsed when a request arrives.
+
+## How a Rule becomes SQL
+
+A rule is not checked against rows after they are loaded. It is rendered into the `WHERE` clause of the one statement
+that reads them, with every value from the caller bound as a parameter, never written into the SQL text. Postgres's own
+row-level security model gives the shape:
+
+| Operation | Row filter (`USING`) | Check on the row being written (`WITH CHECK`) |
+|---|---|---|
+| `list`, `get`, `delete` | ✓ | — |
+| `create` | — | ✓ |
+| `update` | ✓ | ✓, the same compiled rule |
+
+An operation with no rule is refused outright; a missing rule never means "no restriction". A tenant-scoped entity adds
+`tenant_id == @tenant.id` to every operation, compiled the same way. This is what the PostgreSQL renderer produces for a
+rule that admits public rows and the caller's own, captured by the repository's snapshot test:
+
+<SourceExcerpt code={sql} from="Rule: is_public || owner_id == @user.id," to="]" lang="txt" title="cel-to-sql-postgresql.verified.txt" />
+
+A role test names no column, so it is decided from the caller's roles when the statement is built. For the snapshot's
+caller, who holds `admin`, it leaves a constant:
+
+<SourceExcerpt code={sql} from="Rule: 'admin' in @user.roles," to="Sql: TRUE" lang="txt" title="cel-to-sql-postgresql.verified.txt" />
+
+On a `create`, there is no stored row to filter, so the same rule is evaluated in memory over the row about to be
+written. A test runs both evaluators over generated expressions to prove they always agree.
+
+## Two-valued: a comparison with null is false
+
+SQL's comparisons have a third answer, "unknown", whenever one side is `null`. Alvo's do not: **a comparison where
+either side is `null` is `false`**, in SQL and in memory alike, and `!` applies to that answer. That is what each
+`COALESCE(…, FALSE)` above does.
+
+It has one consequence worth remembering. `!(owner_id == @user.id)` over a row whose `owner_id` is `null` is
+`!(false)`, so `true`: a rule meant as "everyone but the owner" also admits rows with no owner. Test presence with
+`has(owner_id)` when it matters. For the same reason `owner_id == null` is refused outright, with `has()` as the fix,
+since it would always be false.
+
+## Fail closed
+
+When an expression cannot give a trustworthy answer, the answer is "no":
+
+- **A missing caller value refuses the call.** If a rule reads `@user.id` and the caller has no identity, or reads
+  `@tenant.id` and the caller has no tenant, the operation is refused before any SQL is built, instead of comparing
+  against an empty value. For a `hidden` or `readOnly` flag, the field simply stays hidden or read-only.
+- **A failing function aborts the write.** A function that fails while a hook is evaluated (a host function that
+  throws, a built-in given a value it refuses) stops the whole evaluation and nothing is written. CEL's rule that
+  `f(x) && false` may still answer `false` is not modelled; the write fails instead.
+- **Arithmetic that overflows or divides by zero** fails in a hook the same way, rather than storing a wrong value.
+- **A construct nobody listed** compiles in no profile.
+
+## Deviations from the CEL specification
+
+Each deviation is deliberate and recorded, so a reader can tell a decision from an oversight. The complete numbered list
+with the reason for each is in
+[`docs/architecture/cel.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/cel.md#deliberate-deviations-from-cel).
+
+**Additions**, which conformant CEL does not have:
+
+- the `@user` and `@tenant` context, written with `@`;
+- `changed(field)`, and the `old.` and `new.` prefixes for the row before and after a write;
+- `now()`, a call rather than a variable. It returns the instant the write is stamped with, not a fresh clock read.
+
+**Narrowings**, constructs CEL has that Alvo refuses:
+
+- no list or map literals (`[1, 2]`, `{…}`) and no comprehension macros (`all`, `exists`, `map`, `filter`);
+- field access is flat: a bare field name, or one level of `old.` or `new.`; `has()` takes exactly one such name;
+- comparing with a `null` literal is refused in favour of `has()`;
+- `<`, `<=`, `>` and `>=` on text only in a computed field, where the database compares by its own collation;
+- no `%`; numbers are plain decimal digits, with no hexadecimal, exponent or unsigned suffix;
+- string escapes are limited to `\n`, `\t`, `\r`, `\\`, `\'` and `\"`.
+
+**Function calls**: catalogued functions are called globally, `trim(new.title)` rather than `new.title.trim()`; a
+`null` argument makes the result `null`; decimals stay decimals (Alvo has no `double`), so `math.round` returns a
+decimal and takes an optional number of digits. The [CEL functions](/MMLib.Alvo/reference/cel-functions/) reference
+lists every function with its profiles.
+
+## Put it to work
+
+- [Access rules](/MMLib.Alvo/guides/access-rules/): the Rule profile, and what a caller sees when a rule excludes them.
+- [Validate and transform writes (before-hooks)](/MMLib.Alvo/guides/before-hooks/): the Condition and Mutate profiles.
+- [Computed fields and rollups](/MMLib.Alvo/guides/computed-and-rollups/): the Computed profile.
+- [Custom CEL functions](/MMLib.Alvo/guides/custom-cel-functions/): add a function from your own C# host.
+- [CEL functions](/MMLib.Alvo/reference/cel-functions/): the catalog.

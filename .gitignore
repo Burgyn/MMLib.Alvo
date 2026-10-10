@@ -10,6 +10,8 @@
 docker-compose.override.yml
 # ...and the dashboard bootstrap administrator's password file that override mounts
 .alvo-admin-password
+# ...and the secret store's encryption key file the docs' production override mounts
+.alvo-encryption-key
 # ...and the descriptors the docs' tutorial and "Run your own descriptor" copy into the clone root
 /*.alvo.json
 

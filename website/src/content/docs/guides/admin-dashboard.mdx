@@ -1,8 +1,191 @@
 ---
 title: The admin dashboard
-description: Manage entities, rules and data from the Alvo admin dashboard.
+description: "Sign in to the admin dashboard, change the schema, rules and hooks with every edit checked as you type, browse the data under your own rules, and roll a change back."
 sidebar:
   order: 11
 ---
 
-{/* <!-- STUB-F6 --> */}
+import { Code } from '@astrojs/starlight/components';
+import ThemedShot from '../../../components/ThemedShot.astro';
+import demoAdmin from '../../../snippets/shell/demo-admin.sh?raw';
+import password from '../../../snippets/shell/admin-password.sh?raw';
+import overviewLight from '../../../assets/screenshots/overview-light.png';
+import overviewDark from '../../../assets/screenshots/overview-dark.png';
+import schemaLight from '../../../assets/screenshots/schema-editor-light.png';
+import schemaDark from '../../../assets/screenshots/schema-editor-dark.png';
+import mapLight from '../../../assets/screenshots/schema-map-light.png';
+import mapDark from '../../../assets/screenshots/schema-map-dark.png';
+import rulesLight from '../../../assets/screenshots/rules-editor-light.png';
+import rulesDark from '../../../assets/screenshots/rules-editor-dark.png';
+import checkLight from '../../../assets/screenshots/rules-editor-light-2x.png';
+import checkDark from '../../../assets/screenshots/rules-editor-dark-2x.png';
+import phoneLight from '../../../assets/screenshots/rules-editor-phone-light-2x.png';
+import phoneDark from '../../../assets/screenshots/rules-editor-phone-dark-2x.png';
+import dataLight from '../../../assets/screenshots/data-browser-light.png';
+import dataDark from '../../../assets/screenshots/data-browser-dark.png';
+import historyLight from '../../../assets/screenshots/history-light.png';
+import historyDark from '../../../assets/screenshots/history-dark.png';
+
+:::tip[What you will achieve]
+A tour of the dashboard by doing: sign in, read what the backend is, change a rule with the dashboard checking it as
+you type, preview and apply the change, browse records as yourself, and roll the change back. About fifteen minutes,
+starting from a clone of the repository.
+:::
+
+## Before you start
+
+- The dashboard's own demo: a bicycle workshop's backend (`examples/bike-workshop`) seeded with realistic data. It needs
+  the .NET SDK the repository pins in `global.json`, plus `curl` and `jq`. Or the stack from
+  [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), which creates a bootstrap administrator too.
+- An account with a management level. The bootstrap administrator has `admin`, whatever the descriptor says.
+
+The dashboard is a client of the [Management API](/MMLib.Alvo/reference/management-api/) and the Data API, never a
+second way in: every screen does what an agent could do over HTTP, under the same checks.
+
+## 1. Sign in
+
+Start the demo:
+
+<Code code={demoAdmin.trimEnd()} lang="sh" title="Terminal (in the clone)" frame="terminal" />
+
+It builds the host, starts it on `http://127.0.0.1:5080` over a fresh SQLite file, seeds the workshop and prints the
+dashboard address, the administrator's address and a password for this run. On the stack from *Run your own
+descriptor*, open `http://localhost:8080/admin` and sign in as `admin@example.com` with the generated password:
+
+<Code code={password.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+The dashboard takes an address and a password, never an API key. The first administrator comes from configuration;
+everyone else is created on **Access**, which hands you a one-time set-password link to pass on, because this build
+sends no email. [Authentication and API keys](/MMLib.Alvo/guides/authentication/#people-sign-in-to-the-dashboard) covers
+both. What you may do once signed in is your management level, decided by the descriptor's `access` block from your
+roles: a `viewer` reads, a `developer` also applies and rolls back, an `admin` also changes `access`, the people and
+the AI connection.
+
+## 2. Read the overview
+
+**Overview** answers "what is this backend": the applied revision, how the host starts, how many entities, revisions
+and honoured blocks there are, and the latest configuration change.
+
+<ThemedShot light={overviewLight} dark={overviewDark} alt="The Overview screen of the bike-workshop project: revision 1 applied, 8 entities, 1 revision, 5 honoured blocks, and a panel listing the declared blocks this build does not honour, templates and webhooks, each with the sentence saying what does not happen." />
+
+The panel *Declared, not honoured by this build* lists only the blocks your descriptor declares that this build parses
+and does not run, each with the framework's own sentence for what does not happen. It is the same answer
+[Capabilities in this build](/MMLib.Alvo/reference/capabilities/) is generated from. **Automations** and **Functions**
+in the navigation carry a *Not yet* badge for the same reason.
+
+## 3. Change the schema
+
+**Schema** lists the entities. Open one to see its tabs: *Fields*, *Relationships*, *Rules*, *On write* (the hooks),
+*Indexes* and *API*, the routes the Data API generates for it.
+
+<ThemedShot light={schemaLight} dark={schemaDark} alt="The service_orders entity on the Schema screen: badges for global tenancy, audited and physical table, tabs for fields, relationships, rules, on write, indexes and API, and the declared fields with their types, facets and descriptions." />
+
+Every edit, here or on any other screen, goes into one **working copy** of the descriptor. Nothing changes in the
+database until you apply it. A bar shows how many changes are unapplied, and its action is always **Preview changes**:
+
+1. **Preview** shows the descriptor diff and the migration plan Alvo would run. A rules-only change has an empty plan,
+   which means "no schema step", not "nothing to apply".
+2. Type the reason under **Why**. Configuration history shows it on the revision forever.
+3. **Apply these changes** applies against the revision you started from. If somebody applied first, yours is refused
+   rather than written over theirs. A plan that destroys data asks you to type the project's name first.
+
+The *Map* view draws every entity and relation, read-only; a relation is added as a `ref` field in the entity's own
+editor. *Import / export* downloads the stored descriptor byte for byte, or loads a pasted one into the working copy,
+where it goes through the same preview.
+
+<ThemedShot light={mapLight} dark={mapDark} alt="The read-only Map view of the bike-workshop schema: each entity as a card listing its fields, with lines from every ref field to the entity it points at and its onDelete behaviour." />
+
+## 4. Edit rules and hooks, checked as you type
+
+**Rules** shows, per entity, the rule for each operation beside the route it guards, and a simulator.
+
+<ThemedShot light={rulesLight} dark={rulesDark} alt="The Rules screen for service_orders: a CEL rule for list, get, create, update and delete, each beside its route, and a Simulate a policy panel with caller and operation choices and the resulting read predicate." />
+
+Change a rule and pause: after about 300 milliseconds the dashboard asks the Management API's `cel/check` what an
+apply would say about exactly that expression, in exactly that place, and shows the answer under the box. A typo in a
+role name is caught before you save, with the declared roles listed:
+
+<ThemedShot light={checkLight} dark={checkDark} alt="A rule box holding 'amdin' in @user.roles, marked unsaved, with the check's answer underneath: 'amdin' is not a declared role, so this membership test can never match; did you mean 'admin', followed by the declared roles." />
+
+**Save rule** (or Ctrl+Enter, ⌘+Enter) puts the rule in the working copy; Escape puts back the saved one. The *On
+write* tab edits the before-hooks and after-hooks with the same check on every condition and `mutate` value. The
+simulator answers what the policy engine decides for a caller and an operation, from the same engine the Data API uses:
+it hands back the predicate that will filter the rows, never a verdict on one row. Every screen works at phone width:
+
+<ThemedShot light={phoneLight} dark={phoneDark} alt="The same rule box and check on a phone-width screen: the misspelled role, the red explanation and the Save rule button." />
+
+## 5. Browse the data as yourself
+
+**Data** lists the entities; open one to page, search, create, edit and delete records.
+
+<ThemedShot light={dataLight} dark={dataDark} alt="The service_orders records in the data browser: a note saying the page reads as admin@alvo.demo with no tenant, exactly the rows this credential sees through /api/service_orders, a search box and a table of orders with status, priority, bike, technician and totals." />
+
+The browser reads through the ordinary Data API under **your** identity and your rules, so you see exactly the rows you
+would see over HTTP; there is no administrator bypass. A signed-in person acts in at most one tenant, set on
+**Access**. Without one, tenant-scoped entities are closed to you, and the screen says so.
+
+## 6. Roll back a change
+
+**Configuration history** lists every revision: who applied it, when, why, and what changed. Every apply appends one,
+and none is ever rewritten.
+
+<ThemedShot light={historyLight} dark={historyDark} alt="The Configuration history screen for the bike-workshop project: one revision, r1 Initial descriptor, and a note that an audit trail of the data does not exist yet." />
+
+Select an older revision and choose **Plan the rollback** to see the reverse migration, then **Roll back**. A rollback
+always asks you to type the project's name, because it replaces the whole configuration, and it warns when the reverse
+migration would discard data added since. It is appended as a new revision; nothing is erased. On a stack that serves
+a descriptor file, put the restored descriptor back in the file afterwards:
+[Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/) explains why.
+
+## The other screens
+
+- **Access**: people, their roles and their tenant, which take effect at once; and the role catalogue and the three
+  management levels, which are part of the descriptor and wait for an apply. A role the descriptor does not declare is
+  never given to a signed-in person, so assigning one does nothing. Locked accounts can be unlocked here.
+- **Integrations**: the descriptor's webhook endpoints and templates, beside what this build does not run for them.
+- **Settings**: what is running and how it starts, where the API documentation is, and the
+  [schema assistant](/MMLib.Alvo/guides/schema-assistant/)'s connection.
+- **Search** (Ctrl+K, ⌘K) jumps to any screen or entity.
+
+:::caution[Not in this build]
+There is no danger zone: deleting a project has no route. API keys are neither issued nor revoked here, because no
+endpoint does that yet ([#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)). There is no audit trail of data
+changes, only of configuration, and no automations or functions screen beyond the *Not yet* placeholder
+([Capabilities in this build](/MMLib.Alvo/reference/capabilities/)). The *author* a Management API caller sends is not
+verified ([#344](https://github.com/Burgyn/MMLib.Alvo/issues/344)); a dashboard apply records the signed-in person.
+:::
+
+:::caution[Known issues in this build]
+- Over PostgreSQL, the dashboard can answer every screen with "Something went wrong" while the API keeps working
+  ([#339](https://github.com/Burgyn/MMLib.Alvo/issues/339)). Over SQLite, which the demo uses, it works as described.
+- A rule or hook you apply takes effect on the next request, but a new entity or field reaches the Data API only after
+  the host restarts. A new entity has no route until then ([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103)),
+  and a write naming a new field is refused as `unknown-field`.
+:::
+
+## What can go wrong
+
+The dashboard runs the Management API's operations in process, so it refuses for the same reasons; the table names the
+problem type the same refusal carries over HTTP.
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | Your roles reach no level the action needs, or a `developer` applies a change to `access`. | Ask an `admin` to grant the level, or to make the access change. | every host |
+| 412 | [`precondition-failed`](/MMLib.Alvo/reference/problem-types/#precondition-failed) | Somebody applied a revision after the one your working copy started from. | Start again from the new revision and redo your edits. | every host |
+| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | The working copy would not apply, for example an expression that does not compile. | Follow the refusal's pointer and fix; the live check usually shows it before you save. | every host |
+
+## Reference
+
+- [Management API](/MMLib.Alvo/reference/management-api/): the operations every screen calls, and their levels.
+- Descriptor keys: [`access`](/MMLib.Alvo/reference/descriptor/access/),
+  [`auth`](/MMLib.Alvo/reference/descriptor/auth/).
+- Configuration: [`Alvo:Admin`](/MMLib.Alvo/reference/configuration/#alvoadmin),
+  [`Alvo:Admin:Dashboard`](/MMLib.Alvo/reference/configuration/#alvoadmindashboard).
+- Problem types: [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
+  [`precondition-failed`](/MMLib.Alvo/reference/problem-types/#precondition-failed),
+  [`validation`](/MMLib.Alvo/reference/problem-types/#validation).
+
+## Next
+
+**[The schema assistant](/MMLib.Alvo/guides/schema-assistant/)**: describe a change in words and review the proposal
+the assistant checks for you.

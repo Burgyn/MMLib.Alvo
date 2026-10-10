@@ -438,3 +438,10 @@ footer .meta a { color: var(--dim); gap: 8px; }
   .alvo-banner__long { display: none; }
   .alvo-banner__short { display: inline; }
 }
+
+/* Mermaid diagrams: rehype-mermaid-theme emits a light and a dark image; the site's theme shows one. */
+.alvo-mermaid { margin: 1.5rem 0; }
+.alvo-mermaid__img { display: block; width: 100%; height: auto; }
+.alvo-mermaid__img--dark { display: none; }
+:root[data-theme='dark'] .alvo-mermaid__img--dark { display: block; }
+:root[data-theme='dark'] .alvo-mermaid__img--light { display: none; }

@@ -1,8 +1,219 @@
 ---
 title: Running in production
-description: Run Alvo in Docker on PostgreSQL or SQLite, with configuration and secrets.
+description: "Run the standalone host the way production should: on PostgreSQL, with secrets in files, a startup mode that never migrates by surprise, behind a proxy, with probes your orchestrator can trust."
 sidebar:
   order: 15
 ---
 
-{/* <!-- STUB-F6 --> */}
+import { Code } from '@astrojs/starlight/components';
+import buildImage from '../../../snippets/shell/production-build-image.sh?raw';
+import override from '../../../snippets/shell/production.compose.override.yml?raw';
+import start from '../../../snippets/shell/production-start.sh?raw';
+import probes from '../../../snippets/shell/production-probes.sh?raw';
+import tearDown from '../../../snippets/shell/production-tear-down.sh?raw';
+
+:::tip[What you will achieve]
+A standalone host configured the way a production deployment should be: PostgreSQL, every secret in a mounted file, the
+`Verify` startup mode, the right probe for each job, and a clear list of what to decide before you expose it. About
+twenty minutes, starting from a clone of the repository with Docker running.
+:::
+
+## Before you start
+
+- Docker and a clone of the repository: [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/) shows the
+  stack this page builds on.
+- The descriptor you will serve, already working on that stack. This page uses the default, `examples/vehicle-registry`,
+  and the stack's `demo` key (`ALVO_DEMO_KEY_SECRET`).
+
+:::caution[Not in this build]
+Alvo is pre-v0.1, so **no container image is published yet**: you build it from the clone, as step 1 does. There is
+also no endpoint that issues or revokes API keys; keys come from `Alvo:Auth:DevKeys` in configuration until
+[#36](https://github.com/Burgyn/MMLib.Alvo/issues/36) lands. The environment-variable names below may still change
+before the image is published ([#233](https://github.com/Burgyn/MMLib.Alvo/issues/233)).
+:::
+
+## 1. Build the image
+
+The image builds from the repository root, because the build needs the root's package and build settings:
+
+<Code code={buildImage.trimEnd()} lang="sh" title="Terminal (in the clone)" frame="terminal" />
+
+It runs as a non-root user, listens on port **8080**, reads the descriptor from `/alvo/descriptor.json`, and ships no
+API key and no administrator password. It runs without ICU, so culture-sensitive comparison and formatting use the
+invariant culture. `docker compose up --build`, used below, builds the same image.
+
+## 2. Choose the database
+
+The host registers exactly one database driver, chosen by name with
+[`Alvo:Database:Provider`](/MMLib.Alvo/reference/configuration/#alvo). An unknown name stops the host rather than
+falling back to a default.
+
+| | PostgreSQL | SQLite |
+|---|---|---|
+| Provider name | `postgresql` | `sqlite`, the default |
+| Connection string | `ConnectionStrings__Alvo`; without one the host refuses to start | optional; without one, a file inside the container at `/alvo/data/alvo.db` |
+| Published latency numbers | measured on it | not measured |
+
+Use PostgreSQL. The SQLite default exists so a first `docker run` needs nothing, and its file is lost with the
+container unless you mount `/alvo/data`. That is also why a PostgreSQL host with no connection string is refused: the
+alternative would be writing your rows to a file that disappears. The repository's `docker-compose.yml` already runs
+the host on PostgreSQL 16; its database password is a demo value, so give your own deployment a real one.
+
+## 3. Keep every secret in a file
+
+Three kinds of secret reach the host, and two of them are accepted **only** as the path of a mounted file. Passing the
+value itself in an environment variable is refused at startup, because an environment variable shows up in a process
+listing, in a crash dump and in `docker inspect`.
+
+- **The dashboard's first administrator**: `Alvo__Admin__BootstrapEmail`, and the password file in
+  `Alvo__Admin__BootstrapPasswordFile`. `Alvo__Admin__BootstrapPassword` is refused.
+- **The key the database-backed secret store encrypts with**, 32 bytes in base64: the file in
+  `Alvo__Secrets__EncryptionKeyFile`. `Alvo__Secrets__EncryptionKey` is refused.
+- **Each named secret**, such as the AI connection's key: `Alvo__Secrets__Values__<name>`, from any configuration
+  source the host reads.
+
+A secret in configuration wins over one saved in the database, and saving one under a name configuration already
+carries is refused. Without an encryption key file there is no writable store at all rather than a fallback key, so
+nothing can be saved from the dashboard. The bootstrap administrator is created once: a changed password file does not
+change an existing account's password. The image runs as a non-root user, so the files must be readable by it.
+
+This override puts the production settings on top of the repository's stack, the secrets among them:
+
+<Code code={override} lang="yaml" title="docker-compose.override.yml" />
+
+## 4. Set the startup mode
+
+[`Alvo:Schema:Startup`](/MMLib.Alvo/reference/configuration/#alvoschema) decides what a boot does when the mounted
+descriptor no longer matches the schema in the database. The default is `Apply`, which suits editing a descriptor and
+restarting. Production should set `Verify`, as the override does, and apply descriptor changes from one place: a single
+migration job, the [Management API](/MMLib.Alvo/guides/apply-and-evolve/) or the dashboard.
+
+| Mode | When the descriptor has drifted | What it costs |
+|---|---|---|
+| `Apply` (default) | applies the plan | every replica of a rolling deploy attempts the change, and the application needs rights to change its own database's schema |
+| `Verify` | refuses to start, printing the steps it would take and the fix | a descriptor change takes effect only once it is applied from that one place |
+| `Skip` | serves the schema as it is | the schema is entirely someone else's job |
+
+An empty database is initialized in every mode but `Skip`, so the first start works under `Verify`. No mode ever
+discards data on boot: a plan that drops or narrows something is refused unless
+`Alvo__Schema__AllowDestructive=true`.
+
+The sharper cost of `Apply` is the rollback. A forward deploy under `Apply` changes the schema without anyone deciding
+to. Redeploying the previous descriptor then plans a drop against that schema, and the drop is refused, so **the
+rollback cannot start**. A host holding a descriptor older than the database's history starts but reports not ready,
+with a log line naming both revisions. Under `Verify` you applied the forward change on purpose and can plan the way
+back.
+
+## 5. Start it and probe it
+
+Generate the two secret files, then start the stack with the override in place. The first command copies the override
+into the clone root:
+
+<Code code={start.trimEnd()} lang="sh" title="Terminal (in the clone)" frame="terminal" />
+
+`--wait` returns once the stack's health check passes, and that check asks readiness. Then ask both probes yourself:
+
+<Code code={probes.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+Both answer `200`. They are configured oppositely on purpose:
+
+| Probe | Answers | Use it for |
+|---|---|---|
+| `/health/live` | `200` for any process that is up; it checks nothing at all | the liveness probe: a failure restarts the container |
+| `/health/ready` | `200` once the descriptor applied and while the database answers within two seconds; `503` otherwise | the readiness probe and the compose health check: a failure only takes the instance out of traffic |
+
+A database outage therefore drains the instance and never restarts it in a loop. The readiness body is the bare phase
+word in plain text; the reason for a failure goes to the log, never to this unauthenticated route. Readiness opens a
+database connection per request, so keep the probe port away from untrusted callers
+([#183](https://github.com/Burgyn/MMLib.Alvo/issues/183)).
+
+When you are done, stop the stack and delete its volumes and the three generated files, in the same shell:
+
+<Code code={tearDown.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+## 6. Put it behind a reverse proxy
+
+Two settings, both off by default:
+
+- [`Alvo:PathBase`](/MMLib.Alvo/reference/configuration/#alvo) serves the whole application under a prefix, for a proxy
+  that does not strip it. The dashboard always lives at `/admin` under that base; it has no mount point of its own.
+- `Alvo:ForwardedHeaders:Enabled` honours `X-Forwarded-For`, `-Proto`, `-Host` and `-Prefix`. A created row's
+  `Location` header is built from them. With it on, the host trusts those headers **from anyone**, because a container
+  cannot know its proxy's address. **The host must then be reachable only through the proxy**: a client that reaches
+  it directly chooses the URL your next client is sent to, and its own rate-limit partition on the dashboard's sign-in
+  form.
+
+ASP.NET Core's own `ASPNETCORE_FORWARDEDHEADERS_ENABLED` does not grant this trust; only the Alvo setting does. The
+API browser at `/scalar` behind a path base has not been verified
+([#134](https://github.com/Burgyn/MMLib.Alvo/issues/134)).
+
+## 7. Decide what to expose
+
+- **The API's shape.** `/scalar` and `/openapi/v1.json` are anonymous. They publish which entities exist and their
+  non-hidden fields, never data. [`Alvo:Docs:Enabled`](/MMLib.Alvo/reference/configuration/#alvo) set to `false`
+  removes both routes, as the override does.
+- **The Management API** at `/management` is closed by default: until the descriptor's `access` block grants a level,
+  only the bootstrap administrator gets in. Nothing logs or rate-limits it, so rate-limit it at the proxy (or, in an
+  embedded host, on the routes you map).
+- **The dashboard** is on by default. `Alvo__Admin__Dashboard__Enabled=false` removes it, together with its sign-in and
+  set-password endpoints. Both forms are rate-limited per subject and per client; the keys and defaults are in
+  [Configuration keys](/MMLib.Alvo/reference/configuration/#keys-read-outside-an-options-type). Behind a proxy without
+  forwarded headers, every client shares the proxy's one budget.
+
+## Run more than one instance
+
+- **One instance drains the outbox.** Per-row event order holds only while a single process delivers events, and no
+  lock enforces it: run one instance with [`Alvo:Events:Enabled`](/MMLib.Alvo/reference/configuration/#alvoevents) on
+  and the rest off. Switching it off stops delivery, never the recording of events.
+- **Keep the data-protection keys.** Dashboard sessions and set-password links are protected with keys the host keeps
+  in its user's home directory, `/home/app`. A recreated container loses them, and every session and outstanding link
+  with them; a second instance cannot read the first one's. That fails closed: people sign in again or ask for a new
+  link. The override mounts a volume at `/home/app`, so the keys survive a recreated container. They are stored there
+  unencrypted, so protect the volume.
+- **Replicas racing the same schema change converge** rather than crash, but `Verify` with one writer is the shape that
+  never races at all.
+
+## Measured performance
+
+The published numbers were measured over PostgreSQL 16 with 200 000 rows, on one laptop with the load generator on the
+same machine: about 5 ms p95 to read one row, about 16 ms for a filtered, sorted list on an indexed column, and about
+12 ms to create a row. The full table, the method and how to reproduce it are in
+[`docs/performance.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/performance.md). They describe that machine,
+not a throughput promise.
+
+:::caution[Known issue in this build]
+Over PostgreSQL the dashboard can answer every screen with "Something went wrong" while the API keeps working
+([#339](https://github.com/Burgyn/MMLib.Alvo/issues/339)). Until that fix ships, use the dashboard against a SQLite host
+or drive changes through the Management API.
+:::
+
+## What can go wrong
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 500 | [`internal`](/MMLib.Alvo/reference/problem-types/#internal) | Something Alvo relies on broke while it served a generated route. The answer carries a constant detail, never the exception. | Read the host's log, which has the exception and its stack trace. | standalone; embedded only with `AddAlvoProblemDetails()` |
+| 503 | — | `/health/ready` before the descriptor applied, while the database does not answer, or when the host holds a descriptor older than the database's history. | Read the log: it names the failure, or the two revisions. | every host |
+
+**The host refuses to start.** A configuration it cannot accept stops it with one sentence per problem on stderr and
+exit code **78**, so a script can tell "an operator must change something" from a crash. That covers a missing
+descriptor, an unknown database provider, a PostgreSQL host with no connection string, a secret passed as a value, a
+dev key secret under 32 characters, drift under `Verify` and a plan that would discard data. A descriptor that fails
+validation currently exits with code 139 instead ([#340](https://github.com/Burgyn/MMLib.Alvo/issues/340)).
+
+**The first log lines on PostgreSQL say `libgssapi_krb5.so.2` cannot be loaded.** The database driver looks for
+Kerberos support, which the image does not carry; the host starts and serves normally.
+
+## Reference
+
+- Configuration: [`Alvo`](/MMLib.Alvo/reference/configuration/#alvo) (descriptor, database, path base, forwarded
+  headers, docs), [`Alvo:Schema`](/MMLib.Alvo/reference/configuration/#alvoschema),
+  [`Alvo:Secrets`](/MMLib.Alvo/reference/configuration/#alvosecrets),
+  [`Alvo:Events`](/MMLib.Alvo/reference/configuration/#alvoevents),
+  [keys read outside an options type](/MMLib.Alvo/reference/configuration/#keys-read-outside-an-options-type), and
+  [Limits and budgets](/MMLib.Alvo/reference/limits/).
+- Problem types: [`internal`](/MMLib.Alvo/reference/problem-types/#internal).
+- Design note: [the standalone host](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/host.md).
+
+## Next
+
+**[The admin dashboard](/MMLib.Alvo/guides/admin-dashboard/)**: sign in and manage the backend you just deployed.

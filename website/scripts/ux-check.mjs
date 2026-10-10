@@ -1,13 +1,13 @@
 import { chromium } from 'playwright';
 import { withPreview } from './preview-server.mjs';
 
-const pages = ['/', '/start-here/quick-start/', '/start-here/run-your-own/', '/start-here/tutorial/', '/guides/entities-and-fields/', '/guides/computed-and-rollups/', '/guides/indexes/', '/guides/apply-and-evolve/', '/guides/access-rules/', '/guides/before-hooks/', '/guides/read-data/', '/guides/handle-errors/', '/data-api/conventions/', '/reference/cel-functions/', '/reference/data-api/operations/ownerslist/', '/examples/'];
+const pages = ['/', '/start-here/quick-start/', '/start-here/run-your-own/', '/start-here/tutorial/', '/guides/entities-and-fields/', '/guides/computed-and-rollups/', '/guides/indexes/', '/guides/apply-and-evolve/', '/guides/access-rules/', '/guides/before-hooks/', '/guides/read-data/', '/guides/handle-errors/', '/data-api/conventions/', '/guides/production/', '/guides/admin-dashboard/', '/concepts/cel/', '/concepts/architecture/', '/concepts/glossary/', '/project/roadmap/', '/reference/cel-functions/', '/reference/data-api/operations/ownerslist/', '/examples/'];
 const viewports = [[390, 844], [768, 1024], [1024, 768], [1280, 800], [1440, 900]];
 const themes = ['light', 'dark'];
 const roadmap = '/MMLib.Alvo/project/roadmap/';
 const tapScopes = ['header.header', 'footer', '.pagination-links', '.sl-menu-button'];
 // Pages whose content is a code-led walkthrough: a missing code frame there is a regression, not a gap.
-const framedPages = new Set(['/start-here/quick-start/', '/start-here/run-your-own/', '/start-here/tutorial/', '/guides/entities-and-fields/', '/guides/computed-and-rollups/', '/guides/indexes/', '/guides/apply-and-evolve/', '/guides/access-rules/', '/guides/before-hooks/', '/guides/read-data/', '/guides/handle-errors/', '/examples/']);
+const framedPages = new Set(['/start-here/quick-start/', '/start-here/run-your-own/', '/start-here/tutorial/', '/guides/entities-and-fields/', '/guides/computed-and-rollups/', '/guides/indexes/', '/guides/apply-and-evolve/', '/guides/access-rules/', '/guides/before-hooks/', '/guides/read-data/', '/guides/handle-errors/', '/guides/production/', '/guides/admin-dashboard/', '/examples/']);
 
 const failures = [];
 const notes = new Set();

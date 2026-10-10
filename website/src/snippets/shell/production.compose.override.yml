@@ -1,0 +1,30 @@
+# Saved as docker-compose.override.yml in the clone root, compose merges this into docker-compose.yml,
+# which already runs the host on PostgreSQL. Every secret is a mounted file, never a value in the environment.
+services:
+  alvo:
+    environment:
+      # Refuse to start on a drifted schema; apply descriptor changes from one place.
+      Alvo__Schema__Startup: Verify
+      # The dashboard's first administrator. The password is read from the mounted file.
+      Alvo__Admin__BootstrapEmail: admin@example.com
+      Alvo__Admin__BootstrapPasswordFile: /run/secrets/alvo_admin_password
+      # The key the database-backed secret store encrypts with: 32 bytes, base64.
+      Alvo__Secrets__EncryptionKeyFile: /run/secrets/alvo_encryption_key
+      # Publishing the API's shape is your call: false removes /scalar and /openapi/v1.json.
+      Alvo__Docs__Enabled: "false"
+    secrets:
+      - alvo_admin_password
+      - alvo_encryption_key
+    volumes:
+      # The data-protection key ring lives in the app user's home: keep it, and sessions and
+      # set-password links survive a recreated container.
+      - alvo-home:/home/app
+
+secrets:
+  alvo_admin_password:
+    file: ./.alvo-admin-password
+  alvo_encryption_key:
+    file: ./.alvo-encryption-key
+
+volumes:
+  alvo-home:
