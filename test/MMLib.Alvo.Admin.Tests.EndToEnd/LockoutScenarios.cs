@@ -108,7 +108,7 @@ public sealed class LockoutScenarios(AdminWorld world) : IClassFixture<AdminWorl
             await page.FillAsync("#email", email);
             await page.FillAsync("#password", "not-their-password");
             await page.ClickAsync("button[type=submit]");
-            await page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}?**");
+            await page.WaitForAddressAsync($"**{AlvoAdmin.SignInPath}?**");
         }
     }
 
@@ -156,6 +156,6 @@ public sealed class LockoutScenarios(AdminWorld world) : IClassFixture<AdminWorl
         await page.GetByLabel("New password", new() { Exact = true }).FillAsync(password);
         await page.GetByLabel("Repeat it", new() { Exact = true }).FillAsync(password);
         await page.GetByRole(AriaRole.Button, new() { Name = "Set password", Exact = true }).ClickAsync();
-        await page.WaitForURLAsync($"**{AlvoAdmin.SignInPath}?passwordSet=true");
+        await page.WaitForAddressAsync($"**{AlvoAdmin.SignInPath}?passwordSet=true");
     }
 }

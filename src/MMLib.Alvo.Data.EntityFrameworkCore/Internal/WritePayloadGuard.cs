@@ -5,7 +5,8 @@ namespace MMLib.Alvo.Data.EntityFrameworkCore;
 
 /// <summary>
 /// Refuses a write payload before any row is looked up: a key the entity does not declare, a field the
-/// policy marks read-only, and the framework-managed columns a caller may never set.
+/// policy marks read-only, the framework-managed columns a caller may never set, and a field whose value is
+/// maintained for it — a <c>computed</c> field by the engine, a <c>rollup</c> by the framework.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -63,7 +64,7 @@ internal static class WritePayloadGuard
     /// </summary>
     /// <remarks>
     /// <para>
-    /// <b>The one evaluation of these four rules; <see cref="EnsureWritable"/> is a caller of it.</b> A batch
+    /// <b>The one evaluation of these five rules; <see cref="EnsureWritable"/> is a caller of it.</b> A batch
     /// reports every bad row rather than the first, so it needs the verdict without a throw — and a second,
     /// collecting copy of a rule is how two copies of one rule come to differ.
     /// </para>
@@ -96,6 +97,7 @@ internal static class WritePayloadGuard
 
         return ManagedColumnRefusal(values, entity, isUpdate)
             ?? ComputedRefusal(values, entity)
+            ?? RollupRefusal(values, entity)
             ?? ReadOnlyRefusal(values, decision.ReadOnlyFields);
     }
 
@@ -134,6 +136,48 @@ internal static class WritePayloadGuard
             : $"Field '{computed.Name}' is computed by the database and cannot be written: it is a stored "
             + "generated column, so the engine itself refuses every write to it. Remove it from the "
             + "payload — its value follows from the fields the expression reads.";
+    }
+
+    /// <summary>
+    /// Refuses a payload that names a <c>rollup</c> field. The value is maintained by <b>the framework</b> from the
+    /// child rows, so a caller has nothing to write there (#342).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This arm is the whole guarantee, which is what separates it from <see cref="ComputedRefusal"/>.</b> A
+    /// computed field is a stored generated column, so the engine refuses a write the port let through. A rollup is
+    /// an <em>ordinary</em> column: <c>RollupRecompute</c> keeps it with a raw <c>UPDATE</c> inside a child write's
+    /// transaction, and no constraint on either engine stops anything else writing it. Without this arm a
+    /// <c>PATCH {"net_total": 1}</c> answered <c>200</c> and stored the <c>1</c>, every computed field reading the
+    /// rollup followed it, and the forged total stood until some later child write happened to recompute it — a
+    /// stored number that looks like data, the exact failure the rollup design exists to prevent.
+    /// </para>
+    /// <para>
+    /// <b>The maintainer is unaffected because it is not a caller.</b> The recompute never passes through this
+    /// type — it writes the column with its own statement, after the child row is stored — and a before-hook's
+    /// patch is not re-judged here either (see <c>EfAlvoData.RunBeforeCreate</c>), so this refuses exactly the keys
+    /// a caller sent and nothing the framework writes for itself.
+    /// </para>
+    /// <para>
+    /// <b>The answer a caller sees is the computed field's, by design.</b> The port raises
+    /// <see cref="AlvoAuthorizationException"/>, which the Data API renders as <c>403</c> with the problem type
+    /// <c>forbidden</c> and this message as its <c>detail</c>; inside a batch it is a row refusal with the code
+    /// <c>forbidden</c> at that row's pointer (<c>/rows/{index}</c>). An explicit <see langword="null"/> is
+    /// refused too: it is a write, and the column's value is still not the caller's to choose. The message names
+    /// the field and not the child entity it aggregates, which this caller may have no rule to read.
+    /// </para>
+    /// </remarks>
+    private static string? RollupRefusal(IReadOnlyDictionary<string, object?> values, EntitySchema? entity)
+    {
+        var rollup = entity?.Fields
+            .Where(field => field.Rollup is not null)
+            .FirstOrDefault(field => values.ContainsKey(field.Name));
+
+        return rollup is null
+            ? null
+            : $"Field '{rollup.Name}' is a rollup maintained by Alvo and cannot be written: it is recomputed from its "
+            + "child rows inside every write to them, so a value sent here would be a stored total that is not the "
+            + "children's. Remove it from the payload — its value follows from the rows it aggregates.";
     }
 
     /// <summary>

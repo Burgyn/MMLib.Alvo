@@ -215,6 +215,6 @@ public sealed class KeptFollowScenarios(HeldApplyWorld world) : IClassFixture<He
         await session.Button("New entity", exact: true).ClickAsync();
         await session.Page.FillAsync("#new-entity-name", name);
         await session.Page.Keyboard.PressAsync("Enter");
-        await session.Page.WaitForURLAsync($"**/schema/{name}");
+        await session.Page.WaitForAddressAsync($"**/schema/{name}");
     }
 }
