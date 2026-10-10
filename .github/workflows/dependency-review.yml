@@ -46,11 +46,12 @@ jobs:
           #   - tslib: 0BSD; robust-predicates: Unlicense (both public-domain-equivalent).
           #   - @fortawesome/fontawesome-free: CC-BY-4.0 AND OFL-1.1 AND MIT (the icon
           #     font mermaid-isomorphic loads into its build-time headless renderer).
-          #   - dompurify: MPL-2.0 OR Apache-2.0 (Mermaid's sanitizer; named in case the
-          #     dependency graph reports only the MPL half).
-          #   - axe-core, @axe-core/playwright: MPL-2.0 (the site's local a11y check only).
-          #   - khroma (no licence field in its manifest; MIT upstream) and pause-stream
-          #     ("MIT,Apache2", not an SPDX expression): would otherwise be "unresolved".
+          #   - lodash-es: CC0-1.0 AND MIT, as the dependency graph reports it (Mermaid's
+          #     utility library).
+          # The list is what GitHub's dependency graph reports for this lockfile — the data the
+          # action reads, which differs from the lockfile's own licence fields in places. Only
+          # runtime-scope packages are licence-checked (`fail-on-scopes` defaults to runtime), so
+          # the site's dev-only check tooling (axe-core, MPL-2.0) needs no entry.
           allow-dependencies-licenses: >-
             pkg:githubactions/actions/checkout,
             pkg:githubactions/actions/dependency-review-action,
@@ -89,8 +90,4 @@ jobs:
             pkg:npm/tslib,
             pkg:npm/robust-predicates,
             pkg:npm/%40fortawesome/fontawesome-free,
-            pkg:npm/dompurify,
-            pkg:npm/axe-core,
-            pkg:npm/%40axe-core/playwright,
-            pkg:npm/khroma,
-            pkg:npm/pause-stream
+            pkg:npm/lodash-es
