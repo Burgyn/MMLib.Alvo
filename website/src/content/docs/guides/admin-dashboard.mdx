@@ -9,6 +9,7 @@ import { Code } from '@astrojs/starlight/components';
 import ThemedShot from '../../../components/ThemedShot.astro';
 import demoAdmin from '../../../snippets/shell/demo-admin.sh?raw';
 import password from '../../../snippets/shell/admin-password.sh?raw';
+import workshop from '../../../snippets/shell/admin-dashboard-workshop.sh?raw';
 import overviewLight from '../../../assets/screenshots/overview-light.png';
 import overviewDark from '../../../assets/screenshots/overview-dark.png';
 import schemaLight from '../../../assets/screenshots/schema-editor-light.png';
@@ -29,14 +30,15 @@ import historyDark from '../../../assets/screenshots/history-dark.png';
 :::tip[What you will achieve]
 A tour of the dashboard by doing: sign in, read what the backend is, change a rule with the dashboard checking it as
 you type, preview and apply the change, browse records as yourself, and roll the change back. About fifteen minutes,
-starting from a clone of the repository.
+starting from the [Quick start](/MMLib.Alvo/start-here/quick-start/)'s compose file.
 :::
 
 ## Before you start
 
-- The dashboard's own demo: a bicycle workshop's backend (`examples/bike-workshop`) seeded with realistic data. It needs
-  the .NET SDK the repository pins in `global.json`, plus `curl` and `jq`. Or the stack from
-  [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), which creates a bootstrap administrator too.
+- A running dashboard. The screenshots show a bicycle workshop's backend, `examples/bike-workshop`, which the image
+  carries; the quick start's stack serves it with no clone. Its records are empty there. The seeded demo, with
+  realistic data, runs from a clone and needs the .NET SDK the repository pins in `global.json`, plus `curl` and
+  `jq`.
 - An account with a management level. The bootstrap administrator has `admin`, whatever the descriptor says.
 
 The dashboard is a client of the [Management API](/MMLib.Alvo/reference/management-api/) and the Data API, never a
@@ -44,15 +46,21 @@ second way in: every screen does what an agent could do over HTTP, under the sam
 
 ## 1. Sign in
 
-Start the demo:
+Start the quick start's stack over the workshop, in the directory that holds `docker-compose.quickstart.yml` and with
+`ALVO_DEMO_KEY_SECRET` and `ALVO_ADMIN_PASSWORD` exported. The `down` deletes the database of the descriptor it served
+before:
 
-<Code code={demoAdmin.trimEnd()} lang="sh" title="Terminal (in the clone)" frame="terminal" />
+<Code code={workshop.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
-It builds the host, starts it on `http://127.0.0.1:5080` over a fresh SQLite file, seeds the workshop and prints the
-dashboard address, the administrator's address and a password for this run. On the stack from *Run your own
-descriptor*, open `http://localhost:8080/admin` and sign in as `admin@example.com` with the generated password:
+Open `http://localhost:8080/admin` and sign in as `admin@alvo.local` with the password you exported:
 
 <Code code={password.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+For the seeded demo instead, run this in a clone of the repository. It builds the host, starts it on
+`http://127.0.0.1:5080` over a fresh SQLite file, seeds the workshop and prints the dashboard address, the
+administrator's address and a password for this run:
+
+<Code code={demoAdmin.trimEnd()} lang="sh" title="Terminal (in the clone)" frame="terminal" />
 
 The dashboard takes an address and a password, never an API key. The first administrator comes from configuration;
 everyone else is created on **Access**, which hands you a one-time set-password link to pass on, because this build

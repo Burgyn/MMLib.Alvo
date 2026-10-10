@@ -3,9 +3,9 @@ title: Roadmap and status
 description: "See where Alvo is before v0.1, what may still change before the release and what you can rely on, what v0.1 means, and what is planned after it."
 ---
 
-Alvo is **pre-v0.1**. Everything this site documents runs today, from a clone of the repository, and is tested on
-every change. Nothing is published yet: no NuGet package and no container image. This page says what that means for
-you. The live plan is [`docs/PLAN.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/PLAN.md) on GitHub; where the
+Alvo is **pre-v0.1**. Everything this site documents runs today and is tested on every change. The standalone image is
+published from `main` as `ghcr.io/burgyn/alvo:edge`, with no release tag yet; no NuGet package is published, so an
+embedded host references the projects from a clone. This page says what that means for you. The live plan is [`docs/PLAN.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/PLAN.md) on GitHub; where the
 two disagree, it wins.
 
 ## Where we are
@@ -55,9 +55,10 @@ The Data API's URL grammar follows PostgREST on purpose, and its known deviation
 
 ## What v0.1 means
 
-v0.1 is the first release: publishing the `MMLib.Alvo.*` packages on NuGet and the standalone container image, with
-this documentation. Until then, [Quick start](/MMLib.Alvo/start-here/quick-start/) runs the image from the clone and
-[Embed in ASP.NET Core](/MMLib.Alvo/start-here/embed/) references the projects or a local package feed. Install commands
+v0.1 is the first release: publishing the `MMLib.Alvo.*` packages on NuGet and a versioned tag of the standalone image,
+with this documentation. Until then, [Quick start](/MMLib.Alvo/start-here/quick-start/) runs the image's `edge` tag,
+built from `main`, and [Embed in ASP.NET Core](/MMLib.Alvo/start-here/embed/) references the projects or a local
+package feed. Install commands
 for the published packages appear only in tabs marked *available from v0.1*.
 
 ## Known issues

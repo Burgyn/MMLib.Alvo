@@ -1,9 +1,12 @@
-# Saved as docker-compose.override.yml in the clone root, it replaces the one from "Run your own descriptor"
-# and keeps its keys. Keys 3 and 4 each belong to one tenant: every row they write lands in that tenant, and
-# they never see another tenant's rows.
+# Saved as docker-compose.override.yml, it replaces the one from "Run your own descriptor" and keeps everything
+# that one sets. Keys 3 and 4 each belong to one tenant: every row they write lands in that tenant, and they never
+# see another tenant's rows.
+name: alvo-help-desk
+
 services:
   alvo:
     environment:
+      Alvo__DescriptorPath: /alvo/descriptor.json
       Alvo__Auth__DevKeys__1__KeyId: agent
       Alvo__Auth__DevKeys__1__Secret: ${ALVO_AGENT_KEY_SECRET:?set ALVO_AGENT_KEY_SECRET before starting the stack}
       Alvo__Auth__DevKeys__1__User: 3f2b8c1e-7a4d-4e9b-9c21-5d6e7f8a9b01
@@ -34,11 +37,5 @@ services:
       Alvo__Auth__DevKeys__4__Roles__1: authenticated
       Alvo__Auth__DevKeys__4__Scopes__0: "*:read"
       Alvo__Auth__DevKeys__4__Scopes__1: "*:write"
-      Alvo__Admin__BootstrapEmail: admin@example.com
-      Alvo__Admin__BootstrapPasswordFile: /run/secrets/alvo_admin_password
-    secrets:
-      - alvo_admin_password
-
-secrets:
-  alvo_admin_password:
-    file: ./.alvo-admin-password
+    volumes:
+      - ./help-desk.alvo.json:/alvo/descriptor.json:ro

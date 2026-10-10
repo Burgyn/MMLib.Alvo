@@ -4,8 +4,7 @@
     "demo": {
       "roles": [
         "admin",
-        "authenticated",
-        "inspector"
+        "authenticated"
       ],
       "scopes": [
         "*:read",

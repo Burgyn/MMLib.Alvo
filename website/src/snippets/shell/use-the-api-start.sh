@@ -1,3 +1,3 @@
-docker compose down --volumes
+docker compose -f docker-compose.quickstart.yml down --volumes
 unset ALVO_DESCRIPTOR
-docker compose up --build --wait --wait-timeout 60
+docker compose -f docker-compose.quickstart.yml up --wait --wait-timeout 90

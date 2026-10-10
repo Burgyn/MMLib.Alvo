@@ -20,21 +20,23 @@ import helpDesk from '../../../../../examples/help-desk/help-desk.alvo.json?raw'
 
 :::tip[What you will achieve]
 A working help-desk API: tickets that support agents can file and edit, that only an administrator can delete, whose
-title is trimmed on the way in, and whose cost is computed from the estimate. About ten minutes, starting from a clone
-of the repository with Docker running.
+title is trimmed on the way in, and whose cost is computed from the estimate. About ten minutes, starting from Docker
+and an empty directory: no clone, no build.
 :::
 
 ## Before you start
 
-- Docker and git, and a clone of the repository. You run the stack the way
+- Docker with Compose v2, `curl` and `openssl`, and port 8080 free (stop the
+  [Quick start](/MMLib.Alvo/start-here/quick-start/)'s stack if it still runs). You run the published image the way
   [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/) explains; this page gives you every command.
-- Two API keys, declared by the override file the first step copies: `agent` (roles `agent`, `authenticated`) and
+- Two API keys, declared by the override file the first step downloads: `agent` (roles `agent`, `authenticated`) and
   `admin` (roles `admin`, `authenticated`). Their secrets are the variables `ALVO_AGENT_KEY_SECRET` and
-  `ALVO_ADMIN_KEY_SECRET`. Run every command on this page in the same shell, so they stay exported.
+  `ALVO_ADMIN_KEY_SECRET`. Run every command on this page in the same shell and directory, so they stay exported.
 
-Each step changes one file, `help-desk.alvo.json` in the clone root (the repository ignores it). Edit it by hand to
-match the descriptor shown, or copy the finished step with the command beside it. The responses on this page were
-captured from a real run when the site was built, so the ids, timestamps and ETags you get will differ.
+Each step changes one file, `help-desk.alvo.json` in the `alvo-help-desk` directory the first step creates; the stack
+mounts it read-only. Edit it by hand to match the descriptor shown, or download the finished step with the command
+beside it. The responses on this page were captured from a real run when the site was built, so the ids, timestamps
+and ETags you get will differ.
 
 ## 1. Describe an entity
 
@@ -43,8 +45,8 @@ A descriptor names the project, the roles its callers can hold, and its entities
 
 <Steps>
 
-1. Start the stack over the first version of the descriptor. The commands copy the descriptor and the key override
-   into the clone, generate the secrets, and wait until the API answers:
+1. Start the stack over the first version of the descriptor. The commands create the directory, download the quick
+   start's compose file, the key override and the descriptor, generate the secrets, and wait until the API answers:
 
    <Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
@@ -161,8 +163,8 @@ A `computed` field is derived from the row's own fields, stored as a generated c
 
 ## 5. See it in the dashboard
 
-The stack also serves the admin dashboard at `http://localhost:8080/admin`. The override created a bootstrap
-administrator, `admin@example.com`, whose password is in the file the first step generated:
+The stack also serves the admin dashboard at `http://localhost:8080/admin`. The compose file created a bootstrap
+administrator, `admin@alvo.local`, whose password is the `ALVO_ADMIN_PASSWORD` the first step generated:
 
 <Code code={password.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
@@ -170,9 +172,8 @@ Sign in and open **Schema**, then **tickets**. The *Fields* tab lists the seven 
 marks `estimate_cost` as computed; *Rules* holds the five rules and *On write* the two before-hooks. **Data** browses
 the tickets you created through the API.
 
-When you are done, go back to the demo: stop the stack, delete its database, and remove the override, the password
-file and `ALVO_DESCRIPTOR`, so a plain `docker compose up` serves the [Quick start](/MMLib.Alvo/start-here/quick-start/)'s
-vehicle registry again:
+When you are done, stop the stack and delete its database. The files stay in `alvo-help-desk` for next time; the
+`unset` makes a plain `docker compose` in this shell stop reaching for the override:
 
 <Code code={goBack.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 

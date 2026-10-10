@@ -1,1 +1,1 @@
-cat .alvo-admin-password
+echo "$ALVO_ADMIN_PASSWORD"

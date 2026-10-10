@@ -5,16 +5,18 @@ description: "Find short answers to the questions people ask first about Alvo: i
 
 ## Is Alvo production-ready?
 
-Not yet: Alvo is pre-v0.1, nothing is published, and the descriptor format's unfinished parts and the Management API
+Not yet: Alvo is pre-v0.1, nothing is released, and the descriptor format's unfinished parts and the Management API
 may still change. What it runs is tested on every change, and [Running in production](/MMLib.Alvo/guides/production/)
 shows how to configure it for real use; [Roadmap and status](/MMLib.Alvo/project/roadmap/) lists what may change and
 the known issues.
 
 ## Is there a NuGet package or a Docker image?
 
-Not yet. Publishing the `MMLib.Alvo.*` packages and the container image is the v0.1 release; until then you build the
-image from the clone ([Quick start](/MMLib.Alvo/start-here/quick-start/)) or reference the projects or a local package
-feed ([Embed in ASP.NET Core](/MMLib.Alvo/start-here/embed/)).
+The image, yes; the packages, not yet. The standalone image is published as `ghcr.io/burgyn/alvo`, for `linux/amd64`
+and `linux/arm64`, with an `edge` tag built from `main`; [Quick start](/MMLib.Alvo/start-here/quick-start/) runs it
+with one downloaded compose file. Publishing the `MMLib.Alvo.*` packages, and the first versioned image tag, is the
+v0.1 release; until then an embedded host references the projects or a local package feed
+([Embed in ASP.NET Core](/MMLib.Alvo/start-here/embed/)).
 
 ## Can I use my own authentication?
 

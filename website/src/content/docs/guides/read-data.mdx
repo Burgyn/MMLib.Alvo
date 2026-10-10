@@ -15,11 +15,11 @@ with a total count when you want one. About fifteen minutes, starting from the v
 
 ## Before you start
 
-- The stack from [Quick start](/MMLib.Alvo/start-here/quick-start/) or
-  [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), serving
+- The stack from [Quick start](/MMLib.Alvo/start-here/quick-start/), serving
   [`examples/vehicle-registry`](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/vehicle-registry/vehicles.alvo.json),
-  with `ALVO_DEMO_KEY_SECRET` exported in this shell.
-- The `demo` key (roles `admin`, `authenticated`, `inspector`). Any authenticated caller may list vehicles.
+  run from the directory that holds `docker-compose.quickstart.yml`, with `ALVO_DEMO_KEY_SECRET` and
+  `ALVO_ADMIN_PASSWORD` exported in this shell.
+- The `demo` key (roles `admin`, `authenticated`). Any authenticated caller may list vehicles.
 
 Start from an empty database so your results match the ones below. The first command **deletes the stack's
 database**:

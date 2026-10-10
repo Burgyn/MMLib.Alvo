@@ -18,8 +18,8 @@ served, anonymous, `401 unauthenticated` and `403 out-of-scope`. About ten minut
 
 ## Before you start
 
-- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), serving `examples/help-desk`, with
-  `ALVO_DEMO_KEY_SECRET`, `ALVO_AGENT_KEY_SECRET` and `ALVO_ADMIN_KEY_SECRET` exported in this shell.
+- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), serving `examples/help-desk`, run
+  from its `alvo-help-desk` directory with `COMPOSE_FILE` and that page's secrets exported in this shell.
 - This page adds a fourth key, `reader` (roles `agent`, `authenticated`; scope `*:read` only), and also uses `agent`
   and the stack's own `demo` key.
 
@@ -37,11 +37,12 @@ not show up in `docker inspect`, such as a mounted file or a secret store.
 
 <Steps>
 
-1. Replace `docker-compose.override.yml` with this one. It keeps the `agent` and `admin` keys and adds `reader`:
+1. Replace `docker-compose.override.yml` with this one. It keeps everything the first one sets, adds `reader`, and
+   gives the `demo` key a third role, `inspector`, which section 2 uses:
 
-   <Code code={override} lang="yaml" title="docker-compose.override.yml" ins={[{ range: '20-25' }]} />
+   <Code code={override} lang="yaml" title="docker-compose.override.yml" ins={[10, { range: '25-30' }]} />
 
-2. Generate the new secret and recreate the `alvo` container:
+2. Download it, generate the new secret and recreate the `alvo` container:
 
    <Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
@@ -89,7 +90,7 @@ Alvo tells three cases apart: no key, a key that cannot be used, and a key that 
 
    <Exchange name="authentication/01-keys" wrap steps={[2]} />
 
-3. The stack's `demo` key holds the role `inspector`, which `help-desk` does not declare. One undeclared role is
+3. The override gave the `demo` key the role `inspector`, which `help-desk` does not declare. One undeclared role is
    enough for the whole key to authenticate nothing:
 
    <Exchange name="authentication/01-keys" wrap steps={[3]} />
@@ -131,8 +132,8 @@ The dashboard at `/admin` does not take API keys. People sign in with an email a
 holds; this build has no other sign-in provider.
 
 - **The first administrator** comes from configuration: `Alvo__Admin__BootstrapEmail`, and
-  `Alvo__Admin__BootstrapPasswordFile`, the path of a mounted file that holds the password. The override from
-  [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/) sets both. Passing the password itself in
+  `Alvo__Admin__BootstrapPasswordFile`, the path of a mounted file that holds the password. The quick start's compose
+  file sets both, and turns `ALVO_ADMIN_PASSWORD` into that file. Passing the password itself in
   `Alvo__Admin__BootstrapPassword` is refused at startup, because an environment variable shows up in a process
   listing and in `docker inspect`. The account is created once; changing the file later does not change its password.
 - **Everyone else** is created by an administrator on the dashboard's *Access* screen, which issues a set-password

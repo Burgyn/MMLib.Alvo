@@ -107,15 +107,17 @@ and names the hook that refused.
 ## Quick start
 
 Alvo is pre-v0.1: the descriptor format and the APIs may still change before the first tagged release. The quickest way
-to see it is the standalone stack, built from a clone with Docker; the first build takes a few minutes.
+to see it is the published standalone image, `ghcr.io/burgyn/alvo`, run by one downloaded compose file with Docker; no
+clone and no build.
 
 ```bash
-git clone https://github.com/Burgyn/MMLib.Alvo && cd MMLib.Alvo
+curl -fsSLO https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/docker-compose.quickstart.yml
 export ALVO_DEMO_KEY_SECRET="$(openssl rand -hex 16)"
-docker compose up --build --wait --wait-timeout 60
-curl -s localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET" \
+export ALVO_ADMIN_PASSWORD="$(openssl rand -hex 12)"
+docker compose -f docker-compose.quickstart.yml up --wait --wait-timeout 90
+curl -sS localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET" \
   -H "Content-Type: application/json" -d '{"name":"Ada Lovelace"}'
-curl -s localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET"
+curl -sS localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET"
 ```
 
 ## Learn more

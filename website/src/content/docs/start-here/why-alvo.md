@@ -43,8 +43,8 @@ runs as a Docker container or as a library inside your own app.
 
 ## When not to use it
 
-- **You need it in production today.** Alvo is pre-v0.1: no NuGet package or container image is published, and the
-  format and APIs may still change. See [What works today](/MMLib.Alvo/start-here/what-works-today/).
+- **You need it in production today.** Alvo is pre-v0.1: no NuGet package and no versioned image is released, and
+  the format and APIs may still change. See [What works today](/MMLib.Alvo/start-here/what-works-today/).
 - **You need realtime subscriptions, file storage or automation rules (the `automation` block).** None of them runs in
   this build; after-hooks that send e-mail and webhooks on a write do.
 - **You need sign-in through Google, Microsoft or another identity provider.** Only local accounts and API keys exist

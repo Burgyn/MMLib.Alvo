@@ -6,6 +6,7 @@ sidebar:
 ---
 
 import { Code } from '@astrojs/starlight/components';
+import pullImage from '../../../snippets/shell/production-pull-image.sh?raw';
 import buildImage from '../../../snippets/shell/production-build-image.sh?raw';
 import override from '../../../snippets/shell/production.compose.override.yml?raw';
 import start from '../../../snippets/shell/production-start.sh?raw';
@@ -15,32 +16,45 @@ import tearDown from '../../../snippets/shell/production-tear-down.sh?raw';
 :::tip[What you will achieve]
 A standalone host configured the way a production deployment should be: PostgreSQL, every secret in a mounted file, the
 `Verify` startup mode, the right probe for each job, and a clear list of what to decide before you expose it. About
-twenty minutes, starting from a clone of the repository with Docker running.
+twenty minutes, starting from the published image with Docker running.
 :::
 
 ## Before you start
 
-- Docker and a clone of the repository: [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/) shows the
-  stack this page builds on.
-- The descriptor you will serve, already working on that stack. This page uses the default, `examples/vehicle-registry`,
-  and the stack's `demo` key (`ALVO_DEMO_KEY_SECRET`).
+- Docker with Compose v2, `curl` and `openssl`: [Quick start](/MMLib.Alvo/start-here/quick-start/) and
+  [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/) show the compose file this page builds on.
+- The descriptor you will serve, already working on that stack. This page uses the quick start's default,
+  `examples/vehicle-registry`, and its `demo` key (`ALVO_DEMO_KEY_SECRET`).
 
 :::caution[Not in this build]
-Alvo is pre-v0.1, so **no container image is published yet**: you build it from the clone, as step 1 does. There is
+Alvo is pre-v0.1, so **there is no release tag yet**: the only published tag is `edge`, which follows `main`. There is
 also no endpoint that issues or revokes API keys; keys come from `Alvo:Auth:DevKeys` in configuration until
 [#36](https://github.com/Burgyn/MMLib.Alvo/issues/36) lands. The environment-variable names below may still change
-before the image is published ([#233](https://github.com/Burgyn/MMLib.Alvo/issues/233)).
+before the first release ([#233](https://github.com/Burgyn/MMLib.Alvo/issues/233)).
 :::
 
-## 1. Build the image
+## 1. Get the image
 
-The image builds from the repository root, because the build needs the root's package and build settings:
+The image is published as `ghcr.io/burgyn/alvo`, for `linux/amd64` and `linux/arm64`:
 
-<Code code={buildImage.trimEnd()} lang="sh" title="Terminal (in the clone)" frame="terminal" />
+<Code code={pullImage.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
-It runs as a non-root user, listens on port **8080**, reads the descriptor from `/alvo/descriptor.json`, and ships no
-API key and no administrator password. It runs without ICU, so culture-sensitive comparison and formatting use the
-invariant culture. `docker compose up --build`, used below, builds the same image.
+`edge` is built from every push to `main`, and `sha-` with the commit's first seven characters names one build for
+good. A release tag `v1.2.3` will
+publish `1.2.3`, `1.2` and `latest`; pin a version, never `edge`, once one exists. The compose file reads the image
+from `ALVO_IMAGE`, so `ALVO_IMAGE=ghcr.io/burgyn/alvo:<tag>` pins one.
+
+It runs as a non-root user, listens on port **8080**, reads the descriptor from `Alvo__DescriptorPath`
+(`/alvo/descriptor.json` when you mount your own), and ships no API key and no administrator password. It also carries
+the examples that apply, read-only under `/alvo/examples/`. It runs without ICU, so culture-sensitive comparison and
+formatting use the invariant culture.
+
+To build the same image from source instead, from the repository root, because the build needs the root's package and
+build settings:
+
+<Code code={buildImage.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+Then set `ALVO_IMAGE=alvo:local` for the compose commands below.
 
 ## 2. Choose the database
 
@@ -56,8 +70,8 @@ falling back to a default.
 
 Use PostgreSQL. The SQLite default exists so a first `docker run` needs nothing, and its file is lost with the
 container unless you mount `/alvo/data`. That is also why a PostgreSQL host with no connection string is refused: the
-alternative would be writing your rows to a file that disappears. The repository's `docker-compose.yml` already runs
-the host on PostgreSQL 16; its database password is a demo value, so give your own deployment a real one.
+alternative would be writing your rows to a file that disappears. The quick start's `docker-compose.quickstart.yml`
+already runs the host on PostgreSQL 16; its database password is a demo value, so give your own deployment a real one.
 
 ## 3. Keep every secret in a file
 
@@ -77,9 +91,11 @@ carries is refused. Without an encryption key file there is no writable store at
 nothing can be saved from the dashboard. The bootstrap administrator is created once: a changed password file does not
 change an existing account's password. The image runs as a non-root user, so the files must be readable by it.
 
-This override puts the production settings on top of the repository's stack, the secrets among them:
+The quick start's compose file already hands the bootstrap administrator's password over as a mounted file, from
+`ALVO_ADMIN_PASSWORD`. This override puts the rest of the production settings on top of it, the encryption key among
+them:
 
-<Code code={override} lang="yaml" title="docker-compose.override.yml" />
+<Code code={override} lang="yaml" title="docker-compose.production.yml" />
 
 ## 4. Set the startup mode
 
@@ -106,10 +122,10 @@ back.
 
 ## 5. Start it and probe it
 
-Generate the two secret files, then start the stack with the override in place. The first command copies the override
-into the clone root:
+Make a directory, download the compose file and the override, generate the encryption key file and the two secrets,
+then start the stack with both files. `COMPOSE_FILE` names them, so every compose command in this shell uses both:
 
-<Code code={start.trimEnd()} lang="sh" title="Terminal (in the clone)" frame="terminal" />
+<Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
 `--wait` returns once the stack's health check passes, and that check asks readiness. Then ask both probes yourself:
 
@@ -127,7 +143,7 @@ word in plain text; the reason for a failure goes to the log, never to this unau
 database connection per request, so keep the probe port away from untrusted callers
 ([#183](https://github.com/Burgyn/MMLib.Alvo/issues/183)).
 
-When you are done, stop the stack and delete its volumes and the three generated files, in the same shell:
+When you are done, stop the stack and delete its volumes and the generated key file, in the same shell:
 
 <Code code={tearDown.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 

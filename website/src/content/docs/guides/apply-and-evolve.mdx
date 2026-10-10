@@ -25,8 +25,8 @@ stack in [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
 
 ## Before you start
 
-- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), with `ALVO_ADMIN_KEY_SECRET`
-  exported in this shell, plus `curl` and `jq`.
+- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), run from its `alvo-help-desk`
+  directory with `COMPOSE_FILE` and that page's secrets exported in this shell, plus `curl` and `jq`.
 - The `admin` key (roles `admin`, `authenticated`). This page's descriptor grants that role the `developer` level of
   the Management API.
 
@@ -63,7 +63,7 @@ in-process, so it plans, refuses and records exactly the same way.
 A change applied through the Management API or the dashboard is recorded and migrated at once, but not all of it is
 served at once. Rule and hook changes take effect on the next request. A new entity gets no Data API route until the
 host restarts ([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103)), and a write naming a new field is refused as
-`unknown-field` until then ([#353](https://github.com/Burgyn/MMLib.Alvo/issues/353)). The recipe below copies the new
+`unknown-field` until then ([#353](https://github.com/Burgyn/MMLib.Alvo/issues/353)). The recipe below downloads the new
 descriptor over the mounted file, so a restart serves it.
 :::
 
@@ -125,7 +125,7 @@ replay.
 
    <Exchange name="apply-and-evolve/03-apply" wrap steps={[1]} form="http" requestBody={false} />
 
-   The recipe copies the new descriptor over the mounted file first, so the file and the database agree and the next
+   The recipe downloads the new descriptor over the mounted file first, so the file and the database agree and the next
    restart has nothing to apply.
 
 3. The history lists every revision. Revision 1 is the one the host recorded when it started, with no author or
@@ -222,7 +222,7 @@ A rollback restores an earlier revision's descriptor. It does not rewrite histor
 </Steps>
 
 After a rollback through the API, put the restored descriptor back in the file the stack mounts, `help-desk.alvo.json`
-in the clone root. Here the restored revision is the page's first descriptor:
+in the `alvo-help-desk` directory. Here the restored revision is the page's first descriptor:
 
 <Code code={restoreFile.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 

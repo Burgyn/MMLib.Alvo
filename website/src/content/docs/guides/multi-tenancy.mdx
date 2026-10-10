@@ -19,9 +19,9 @@ and no request can move a row from one to the other. About fifteen minutes, star
 
 ## Before you start
 
-- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), with `ALVO_DEMO_KEY_SECRET`,
-  `ALVO_AGENT_KEY_SECRET` and `ALVO_ADMIN_KEY_SECRET` exported in this shell. Step 1 adds `ALVO_ACME_KEY_SECRET` and
-  `ALVO_GLOBEX_KEY_SECRET`; every compose command needs all five while this page's override is in place.
+- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), run from its `alvo-help-desk`
+  directory with `COMPOSE_FILE` and that page's secrets exported in this shell. Step 1 adds `ALVO_ACME_KEY_SECRET` and
+  `ALVO_GLOBEX_KEY_SECRET`; every compose command needs them too while this page's override is in place.
 - This page adds two keys that each belong to a tenant: `acme` and `globex` (roles `agent`, `authenticated`). It also
   uses `admin`, which belongs to no tenant.
 - [Access rules](/MMLib.Alvo/guides/access-rules/), for how rules filter rows.
@@ -38,7 +38,7 @@ The tenant comes from the API key, never from the request or the descriptor. In 
 
 1. Give each new key a `Tenant`. This override replaces the one from Run your own descriptor and keeps its keys:
 
-   <Code code={override} lang="yaml" title="docker-compose.override.yml" ins={[{ range: '21-36' }]} />
+   <Code code={override} lang="yaml" title="docker-compose.override.yml" ins={[{ range: '24-39' }]} />
 
 2. Turn tenancy on for the whole project, and keep `categories` shared:
 
@@ -47,12 +47,12 @@ The tenant comes from the API key, never from the request or the descriptor. In 
    With `"tenancy": { "enabled": true }` every entity is scoped unless it says `"tenancy": "global"`. Without the
    project switch, mark single entities with `"tenancy": "scoped"`.
 
-3. Copy the override, generate the two secrets, and start the stack over this descriptor. The `down` **deletes the
+3. Download the override, generate the two secrets, and start the stack over this descriptor. The `down` **deletes the
    stack's database**:
 
    <Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
-   Every compose command reads the override, so keep all five secrets exported in this shell.
+   Every compose command reads the override, so keep its secrets exported in this shell.
 
 </Steps>
 

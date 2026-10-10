@@ -1,6 +1,6 @@
 ---
 title: "Run your own descriptor"
-description: "Run the standalone stack over a descriptor you wrote, with API keys for the roles it declares, using Docker and git only."
+description: "Run the published standalone image over a descriptor you wrote, with API keys for the roles it declares, using Docker and three downloaded files."
 sidebar:
   order: 4
 ---
@@ -17,64 +17,62 @@ import goBack from '../../../snippets/shell/go-back-to-demo.sh?raw';
 
 :::tip[What you will achieve]
 Your own descriptor behind the standalone stack (Alvo over PostgreSQL), with API keys that work for the roles it
-declares. A few minutes with Docker and git, and no .NET SDK, starting from a clone of the repository.
+declares. A few minutes with Docker and three downloaded files: no clone, no build and no .NET SDK.
 :::
 
 ## Before you start
 
-- Docker with Compose v2, git, `openssl`, and a clone of the repository: `git clone https://github.com/Burgyn/MMLib.Alvo`.
-  Run every command from the clone root.
+- Docker with Compose v2, `curl` and `openssl`, and port 8080 free. If the
+  [Quick start](/MMLib.Alvo/start-here/quick-start/)'s stack is still running, stop it first: both listen on
+  `127.0.0.1:8080`.
 - A descriptor file. If you do not have one yet, the commands below use
   [`examples/help-desk`](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/help-desk/help-desk.alvo.json), and
-  [Start from an example](#start-from-an-example) copies `examples/simple-tasks` as a starting point.
+  [Start from an example](#start-from-an-example) takes `examples/simple-tasks` as a starting point.
 
 ## 1. Declare keys your descriptor knows
 
-The stack's `docker-compose.yml` defines one dev key, `demo`, for the vehicle-registry demo. It carries the roles
-`admin`, `authenticated` and `inspector`, and **a key with one role the descriptor does not declare authenticates
-nothing**: every request with it is a 401 `unauthenticated`. A key's roles must be listed in the descriptor's
-`auth.roles` or be built in (`authenticated` and `admin` are). So declare keys for your own roles in a compose
-override.
-
-Save this as `docker-compose.override.yml` in the clone root. Compose merges that file into `docker-compose.yml`
-automatically, and the repository ignores it, so your keys never show up in `git status`:
+The quick start's `docker-compose.quickstart.yml` defines one dev key, `demo`. Its roles are the built-in `admin` and
+`authenticated`, so it authenticates against any descriptor, but **a key with one role the descriptor does not declare
+authenticates nothing**: every request with it is a 401 `unauthenticated`. A key's roles must be listed in the
+descriptor's `auth.roles` or be built in (`authenticated` and `admin` are). So declare keys for your own roles in a
+compose override, a second file that compose merges over the first:
 
 <Code code={override} lang="yaml" title="docker-compose.override.yml" />
 
 It adds two keys for `help-desk`, whose `auth.roles` are `admin` and `agent`: `agent` (roles `agent`,
-`authenticated`) and `admin` (roles `admin`, `authenticated`). Change the `KeyId`s and roles to your
-descriptor's. Each secret is read from a variable, and the `:?` form makes compose refuse to start without it
-rather than invent one; a secret must be at least 32 characters.
+`authenticated`) and `admin` (roles `admin`, `authenticated`). Change the `KeyId`s and roles to your descriptor's.
+Each secret is read from a variable, and the `:?` form makes compose refuse to start rather than invent one; a secret
+must be at least 32 characters.
 
-The same file sets up the dashboard's bootstrap administrator, `admin@example.com`. Its password is read from a mounted
-file, `.alvo-admin-password` in the clone root, never from a variable; the repository ignores that file too.
+The override also mounts `./help-desk.alvo.json` read-only at `/alvo/descriptor.json` and points the host at it, so
+the stack serves your file instead of an example inside the image. To serve a file with another name, change the left
+side of that `volumes` line. `name: alvo-help-desk` gives this stack its own database, apart from the quick start's.
 
-## 2. Point the stack at your descriptor
-
-`ALVO_DESCRIPTOR` picks the descriptor the stack mounts. Unset, it is `examples/vehicle-registry`, the
-[Quick start](/MMLib.Alvo/start-here/quick-start/)'s demo. The path is relative to the clone root, or absolute.
+## 2. Start the stack over your descriptor
 
 <Steps>
 
-1. Copy the override, generate the password file and the three secrets, choose the descriptor, and start the stack:
+1. Make a directory for the stack, download the compose file, the override and the descriptor, generate the secrets,
+   and start it:
 
    <Code code={runYourOwn.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
-   `--wait` returns once the API is ready, which means the descriptor is applied. The last command lists the tickets
-   with the `agent` key: an empty page, because nothing has been written yet.
+   `COMPOSE_FILE` names both files, so every plain `docker compose` command in this shell uses them together. `--wait`
+   returns once the API is ready, which means the descriptor is applied. The last command lists the tickets with the
+   `agent` key: an empty page, because nothing has been written yet.
 
-2. Every compose command reads `docker-compose.yml` again, `down` included, so keep these variables exported in the
-   shell you use for the stack, or put them in a `.env` file in the clone root (also ignored).
+2. Every compose command reads both files again, `down` included, so keep these variables exported in the shell you
+   use for the stack, or put them in a `.env` file next to the compose files, which compose reads by itself.
 
 </Steps>
 
 The API is at `http://localhost:8080/api/<entity>`, its OpenAPI document at `/openapi/v1.json`, an API browser at
-`/scalar`, and the dashboard at `/admin`. The
+`/scalar`, and the dashboard at `/admin`, where you sign in as `admin@alvo.local` with `ALVO_ADMIN_PASSWORD`. The
 [Tutorial](/MMLib.Alvo/start-here/tutorial/) walks through this exact stack one change at a time.
 
 ## 3. Change it
 
-Edit the descriptor, then recreate the `alvo` container so it reads the file again:
+Edit `help-desk.alvo.json`, then recreate the `alvo` container so it reads the file again:
 
 <Code code={applyChange.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
@@ -88,23 +86,21 @@ restart ([#103](https://github.com/Burgyn/MMLib.Alvo/issues/103), [#353](https:/
 ## Start from an example
 
 `examples/simple-tasks` is the smallest real backend: projects and the tasks inside them, owned by the user who created
-them. Copy it, and from then on it is your descriptor:
+them. Download it over the mounted file, and from then on it is your descriptor:
 
 <Code code={simpleTasks.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
-`my.alvo.json` in the clone root is ignored by the repository, like any `*.alvo.json` there. The first line deletes
-the stack's database. A database holds the schema of the descriptor it served; starting a
+The first line deletes the stack's database. A database holds the schema of the descriptor it served; starting a
 different descriptor over it would drop the old tables, and Alvo refuses that (see [What can go wrong](#what-can-go-wrong)).
 
 `simple-tasks` declares no `auth.roles`, so of the override's keys only `admin` works there (its roles are both built
-in); the `agent` key answers 401 until you add `"roles": ["agent"]` to the descriptor's `auth` block, or remove `agent`
-from the key.
+in, like the `demo` key's); the `agent` key answers 401 until you add `"roles": ["agent"]` to the descriptor's `auth`
+block, or remove `agent` from the key.
 
-## Go back to the demo
+## Tear it down
 
-The override, the password file and `ALVO_DESCRIPTOR` stay in effect for every compose command in the clone. To serve
-the [Quick start](/MMLib.Alvo/start-here/quick-start/)'s vehicle registry again, stop the stack, delete its database
-and remove all three:
+Stop the stack and delete its database, in the same shell. The `unset` makes a plain `docker compose` in this shell
+stop reaching for the override; the quick start's commands name their file with `-f` anyway:
 
 <Code code={goBack.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
@@ -113,9 +109,10 @@ and remove all three:
 <details>
 <summary>Run the host with the .NET SDK and SQLite instead</summary>
 
-The same descriptor and the same two keys, on the host process directly. You need the .NET SDK the repository's
-`global.json` pins. The database is a SQLite file in your temporary directory, and the host listens on the address the
-stack uses, so stop the stack first.
+The same descriptor and the same two keys, on the host process directly, from a clone of the repository
+(`git clone https://github.com/Burgyn/MMLib.Alvo`; run the commands in its root). You need the .NET SDK the
+repository's `global.json` pins. The database is a SQLite file in your temporary directory, and the host listens on
+the address the stack uses, so stop the stack first.
 
 <Code code={dotnetRun.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
@@ -127,7 +124,7 @@ stack uses, so stop the stack first.
 
 | Status | Problem type | When | Fix | Returned by |
 |---|---|---|---|---|
-| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | The key carries a role the descriptor does not declare (the built-in `demo` key over any descriptor without `inspector`), or the secret is wrong. | Give the key only declared or built-in roles; export the same secret the stack was started with. | every host |
+| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | The key carries a role the descriptor does not declare (the `agent` key over a descriptor without `agent`), or the secret is wrong. | Give the key only declared or built-in roles; export the same secret the stack was started with. | every host |
 
 **The stack does not start.** `docker compose up --wait` fails and the `alvo` container has exited. Read why:
 
@@ -159,7 +156,8 @@ The end of the log says what to change. The common reasons:
   [the dev-key secret minimum](/MMLib.Alvo/reference/limits/).
 - Descriptor keys: [`auth.roles`](/MMLib.Alvo/reference/descriptor/auth/).
 - Problem types: [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated).
-- The compose stack and the startup mode, in depth:
+- The compose file: [`docker-compose.quickstart.yml`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docker-compose.quickstart.yml);
+  the host and the startup mode, in depth:
   [`docs/architecture/host.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/host.md).
 
 ## Next

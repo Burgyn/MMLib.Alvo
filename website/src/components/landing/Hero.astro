@@ -4,7 +4,7 @@ import Exchange from '../Exchange.astro';
 import helpdesk from '../../snippets/landing/helpdesk.alvo.json?raw';
 import quickStart from '../../snippets/shell/quick-start.sh?raw';
 
-const clone = quickStart.split('\n')[0];
+const firstStep = quickStart.split('\n')[0];
 const quickStartHref = '/MMLib.Alvo/start-here/quick-start/';
 const github = 'https://github.com/Burgyn/MMLib.Alvo';
 ---
@@ -27,16 +27,16 @@ const github = 'https://github.com/Burgyn/MMLib.Alvo';
         </a>
       </div>
       <div>
-        <p class="alvo-clone__label">Runs from source today — Docker and git are all you need</p>
+        <p class="alvo-clone__label">Runs the published image — Docker and one file are all you need</p>
         <div class="alvo-clone__box">
-          <code title={clone}><span class="alvo-clone__prompt" aria-hidden="true">$ </span>{clone}</code>
-          <button class="alvo-copy" type="button" data-copy={clone} aria-label="Copy the clone command">
+          <code title={firstStep}><span class="alvo-clone__prompt" aria-hidden="true">$ </span>{firstStep}</code>
+          <button class="alvo-copy" type="button" data-copy={firstStep} aria-label="Copy the download command">
             <svg class="alvo-copy__idle" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>
             <svg class="alvo-copy__done" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="5,12 10,17 19,7"></polyline></svg>
           </button>
           <span class="sr-only" role="status" data-copy-status></span>
         </div>
-        <a class="alvo-textlink" href={quickStartHref}>3 more steps →</a>
+        <a class="alvo-textlink" href={quickStartHref}>4 more steps →</a>
       </div>
     </div>
   </div>

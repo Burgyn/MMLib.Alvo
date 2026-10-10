@@ -1,7 +1,7 @@
 {
   "descriptor": "examples/vehicle-registry/vehicles.alvo.json",
   "keys": {
-    "demo": { "roles": ["admin", "authenticated", "inspector"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_DEMO_KEY_SECRET" }
+    "demo": { "roles": ["admin", "authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_DEMO_KEY_SECRET" }
   },
   "steps": [
     {

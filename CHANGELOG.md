@@ -63,7 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HTTP exchange a guide shows run against a real host rather than written by hand. It also renders the changelog,
   the contributing guide and the examples page, and publishes `llms.txt` / `llms-full.txt`. Snippets are validated
   against the schema and applied in ring0; `.github/workflows/docs.yml` builds it on every PR that can change it and
-  deploys `main` to GitHub Pages.
+  deploys `main` to GitHub Pages. The first-run pages (Quick start, Run your own descriptor, the Tutorial) and the
+  guides built on them run the published `ghcr.io/burgyn/alvo` image through `docker-compose.quickstart.yml`, with a
+  downloaded compose override and descriptor where a page needs its own keys: no clone. Cloning stays the path for
+  building from source and for the embedded samples.
 
 - **`ALVO_DESCRIPTOR` picks the descriptor the root compose stack runs.** `ALVO_DESCRIPTOR=./my.alvo.json docker
   compose up --build --wait` mounts that file instead of `examples/vehicle-registry`; unset, nothing changes. A

@@ -121,21 +121,27 @@ and names the hook that refused.
 
 ## Quick start
 
-You need Docker with Compose v2, git and `openssl`. Nothing is published yet, so the stack builds the image from the
-clone and serves the [`vehicle-registry`](examples/vehicle-registry/vehicles.alvo.json) example over PostgreSQL. The
-first build downloads the .NET and PostgreSQL images and takes a few minutes; later runs take seconds.
+No clone needed: you need Docker with Compose v2, `curl` and `openssl`. One compose file runs the published image,
+`ghcr.io/burgyn/alvo` (`linux/amd64` and `linux/arm64`), over PostgreSQL, serving the
+[`vehicle-registry`](examples/vehicle-registry/vehicles.alvo.json) example the image carries. The first run pulls the
+Alvo and PostgreSQL images; later runs start in seconds.
 
 ```bash
-git clone https://github.com/Burgyn/MMLib.Alvo && cd MMLib.Alvo
+curl -fsSLO https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/docker-compose.quickstart.yml
 export ALVO_DEMO_KEY_SECRET="$(openssl rand -hex 16)"
-docker compose up --build --wait --wait-timeout 60
-curl -s localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET" \
+export ALVO_ADMIN_PASSWORD="$(openssl rand -hex 12)"
+docker compose -f docker-compose.quickstart.yml up --wait --wait-timeout 90
+curl -sS localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET" \
   -H "Content-Type: application/json" -d '{"name":"Ada Lovelace"}'
-curl -s localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET"
+curl -sS localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET"
 ```
 
-The API browser is at `http://localhost:8080/scalar`. Keep the variable exported for the session; tear down with
-`docker compose down --volumes`.
+The API browser is at `http://localhost:8080/scalar`, and the dashboard at `http://localhost:8080/admin`, signed in as
+`admin@alvo.local` with `$ALVO_ADMIN_PASSWORD`. `ALVO_DESCRIPTOR` switches to another example inside the image or to
+your own file; the compose file's header lists what to change. `edge` follows `main`; `ALVO_IMAGE` pins another tag.
+Keep the variables exported for the session; tear down with
+`docker compose -f docker-compose.quickstart.yml down --volumes`. To build the image from source instead, see
+[Running in production](https://burgyn.github.io/MMLib.Alvo/guides/production/#1-get-the-image).
 
 Next: [the 10-minute tutorial →](https://burgyn.github.io/MMLib.Alvo/start-here/tutorial/) · [run your own descriptor](https://burgyn.github.io/MMLib.Alvo/start-here/run-your-own/)
 
@@ -148,7 +154,7 @@ Next: [the 10-minute tutorial →](https://burgyn.github.io/MMLib.Alvo/start-her
 - **[Audit](https://burgyn.github.io/MMLib.Alvo/guides/audit-row-changes/) and [history](https://burgyn.github.io/MMLib.Alvo/guides/apply-and-evolve/)** — audit columns per entity, and every applied descriptor kept as a revision you can roll back to.
 - **[Agent-first](https://burgyn.github.io/MMLib.Alvo/start-here/coding-agents/)** — problem documents with a pointer and a fix suggestion for invalid input, dry runs, `Idempotency-Key`, and `llms.txt`.
 - **[Admin dashboard](https://burgyn.github.io/MMLib.Alvo/guides/admin-dashboard/)** — schema, rule and hook editors, a data browser, history and rollback, and a schema assistant.
-- **[Standalone or embedded](https://burgyn.github.io/MMLib.Alvo/concepts/modes/)** — a Docker image built from this repository, or a library in your ASP.NET Core host, on SQLite or PostgreSQL.
+- **[Standalone or embedded](https://burgyn.github.io/MMLib.Alvo/concepts/modes/)** — the published Docker image, or a library in your ASP.NET Core host, on SQLite or PostgreSQL.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/rules-editor-dark-2x.png">
@@ -194,12 +200,12 @@ Nothing is on NuGet yet. Until v0.1, reference the projects from a clone, or pac
 | `MMLib.Alvo.Admin` | The Alvo admin dashboard: server-interactive Blazor components and the design system they ship with. |
 | `MMLib.Alvo.Ai` | The Alvo schema assistant: an agent that reads a project and proposes a descriptor change, and cannot apply one. |
 
-The standalone host, `MMLib.Alvo.Host`, is not a package: it ships as the `mmlib/alvo` container image, which is not
-published yet either.
+The standalone host, `MMLib.Alvo.Host`, is not a package: it ships as the `ghcr.io/burgyn/alvo` container image, published
+from `main` as `edge` until the first release tag.
 
 ## Status and roadmap
 
-Alvo is **pre-v0.1**. Everything above runs from a clone today and is tested on every change, but the descriptor format
+Alvo is **pre-v0.1**. Everything above runs today and is tested on every change, but the descriptor format
 and the APIs may still change before the first tagged release. Some declared blocks parse without running yet, and
 dynamic entities — record types your end users define at runtime — are planned, not shipped.
 [What works today](https://burgyn.github.io/MMLib.Alvo/start-here/what-works-today/) says exactly what runs;
