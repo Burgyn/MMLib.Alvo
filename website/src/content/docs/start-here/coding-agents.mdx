@@ -1,8 +1,171 @@
 ---
 title: For coding agents
-description: Give a coding agent the schema, llms.txt and the Management API, and rely on idempotent operations.
+description: Give a coding agent what it needs to change an Alvo backend safely, from llms.txt and the JSON Schema to a checked, previewed and idempotent apply.
 sidebar:
   order: 6
 ---
 
-{/* <!-- STUB-F6 --> */}
+import { Code, Steps } from '@astrojs/starlight/components';
+import Exchange from '../../../components/Exchange.astro';
+import JsonExcerpt from '../../../components/JsonExcerpt.astro';
+import vscode from '../../../snippets/shell/vscode-settings.json?raw';
+import base from '../../../snippets/coding-agents/01-base.alvo.json?raw';
+import addField from '../../../snippets/coding-agents/02-add-field.alvo.json?raw';
+
+:::tip[What you will achieve]
+A coding agent that knows the descriptor format, edits a descriptor with the schema checking it, and applies a change
+to a running backend the safe way: check, preview, apply once. About ten minutes, starting from a stack serving your
+descriptor.
+:::
+
+Alvo is built to be configured by an agent. The whole backend is one JSON file with a published schema, every refusal
+says what to fix, and every write to the configuration can be previewed and retried safely.
+
+## Before you start
+
+- A stack serving your descriptor: [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).
+- An API key whose roles reach a management level in the descriptor's `access` block. This page uses `admin` (roles
+  `admin`, `authenticated`; secret `ALVO_ADMIN_KEY_SECRET`) and grants that role the `developer` level.
+
+## 1. Point your agent at the docs
+
+Two plain-text files describe this site for a model:
+
+- `https://burgyn.github.io/MMLib.Alvo/llms.txt`: an index of every page, one line each.
+- `https://burgyn.github.io/MMLib.Alvo/llms-full.txt`: the pages themselves as Markdown, with every descriptor,
+  request and captured response inline.
+
+Give your agent the first one in its instructions, and let it fetch the second when it needs the detail.
+
+## 2. Give the editor the schema
+
+The descriptor format is a JSON Schema with a description on every key, served at
+`https://burgyn.github.io/MMLib.Alvo/schema/v1/project.json`. A descriptor's own `$schema` value,
+`https://alvo.dev/schema/v1/project.json`, does not resolve yet, so an editor does not find the schema from it. Map the
+file pattern to the served URL instead. In VS Code, add this to `.vscode/settings.json`:
+
+<Code code={vscode} lang="json" title=".vscode/settings.json" />
+
+Every `*.alvo.json` file then gets completion, hover text and errors while you or your agent type. The same URL works
+in any editor that maps JSON files to a schema. The schema is also published key by key in the
+[descriptor reference](/MMLib.Alvo/reference/descriptor/).
+
+## 3. Load the shared skills
+
+The dashboard's schema assistant learns the descriptor from nine skills, and they are plain Markdown your agent can
+load too. Each one teaches one part of the format and the mistakes Alvo refuses:
+
+- [Entities and fields](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-entities-and-fields/SKILL.md)
+- [Field types and formats](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-field-types-and-formats/SKILL.md)
+- [Rules and CEL](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-rules-and-cel/SKILL.md)
+- [Hooks](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-hooks/SKILL.md)
+- [Computed fields and rollups](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-computed-and-rollups/SKILL.md)
+- [Indexes](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-indexes/SKILL.md)
+- [Traits and tenancy](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-traits-and-tenancy/SKILL.md)
+- [Project access](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-project-access/SKILL.md)
+- [Capabilities and limits](https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/.claude/skills/alvo-descriptor-capabilities-and-limits/SKILL.md)
+
+In a clone of the repository they are under `.claude/skills/`, where Claude Code picks them up by itself.
+
+## 4. Read errors by their type
+
+Every refusal, from the Data API and the Management API alike, is an RFC 9457 problem document. Its `type` is
+`https://alvo.dev/errors/<slug>`; branch on the slug, never on `detail`, which is prose. Those URIs do not resolve yet:
+the slug is the anchor on the [Problem types](/MMLib.Alvo/reference/problem-types/) page, so `https://alvo.dev/errors/forbidden`
+is documented at `/MMLib.Alvo/reference/problem-types/#forbidden`. A violation adds a JSON `pointer`, a stable `code`
+and a `fixSuggestion` an agent can act on.
+
+## 5. Change a running backend
+
+The [Management API](/MMLib.Alvo/reference/management-api/) changes what the project is. Every route is closed until the
+descriptor's `access` block grants a level, so this descriptor, the help desk from the
+[Tutorial](/MMLib.Alvo/start-here/tutorial/), adds one:
+
+<JsonExcerpt code={base} pointer="/access" title="help-desk.alvo.json" />
+
+The agent's change adds one field, `due_on`:
+
+<Code code={addField} lang="json" title="help-desk.alvo.json (the change)" ins={[23]} />
+
+<Steps>
+
+1. **Check an expression.** While it edits, the agent can ask what the apply would say about one expression, without
+   applying anything. The body carries the working copy as `descriptorJson`, the JSON pointer of the slot (`path`,
+   here `/entities/tickets/rules/update`) and the candidate (`source`). A typo in a role:
+
+   <Exchange name="coding-agents/01-check" wrap steps={[0]} form="http" requestBody={false} />
+
+   An expression that does not compile is a 200 with findings, not an error. The corrected expression comes back
+   clean:
+
+   <Exchange name="coding-agents/01-check" wrap steps={[1]} form="http" request={false} />
+
+2. **Preview the apply.** Read the current revision, then send the whole descriptor with `?dryRun=true`. The answer is
+   the migration plan, and nothing is applied:
+
+   <Exchange name="coding-agents/02-dry-run" wrap steps={[0]} form="http" fields={["project", "revision"]} />
+
+   <Exchange name="coding-agents/02-dry-run" wrap steps={[1]} form="http" requestBody={false} />
+
+3. **Apply it.** A write must say which revision it replaces, in `If-Match`. Without it, the API refuses rather than
+   risk a lost update:
+
+   <Exchange name="coding-agents/03-apply" wrap steps={[1]} form="http" requestBody={false} />
+
+   With `If-Match` and an `Idempotency-Key`, the change is applied and the revision advances:
+
+   <Exchange name="coding-agents/03-apply" wrap steps={[2]} form="http" requestBody={false} />
+
+4. **Retry safely.** If the response is lost and the agent sends the same request again, with the same key, the API
+   does not apply it twice. It answers with the revision the first request appended, and `replayed: true` says this is
+   that earlier result:
+
+   <Exchange name="coding-agents/03-apply" wrap steps={[3]} form="http" request={false} />
+
+   On a replay the plan is empty: it describes what this request did, which is nothing. Read what a revision applied
+   from `GET …/revisions/{n}`.
+
+</Steps>
+
+Rollback, destructive changes and revision history are in [Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/).
+
+## Access levels
+
+The `access` block maps the caller's roles to three levels; the highest one that matches wins. A descriptor without
+`access` admits nobody but the deployment's bootstrap administrator.
+
+| Level | May |
+|---|---|
+| `viewer` | read the descriptor, its revisions, the resolved schema, the capabilities and the CEL function catalog, and simulate a policy |
+| `developer` | everything a viewer may, plus check an expression, apply a descriptor and roll back, as long as the `access` block itself stays the same |
+| `admin` | everything, including a change to the `access` block, the AI connection and the people who may sign in |
+
+An API key's scopes limit only the Data API; on the Management API, a key reaches whatever its roles reach. The
+per-route table is in [`docs/architecture/management-api.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/management-api.md#the-surface).
+
+## What can go wrong
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | The key's roles reach no level the route requires, or a `developer` changed the `access` block. | Grant the role a level in `access`; have an `admin` make access changes. | every host |
+| 409 | [`idempotency-conflict`](/MMLib.Alvo/reference/problem-types/#idempotency-conflict) | The `Idempotency-Key` was already used by this caller for a different request. | Use a fresh key for a new request. | every host |
+| 412 | [`precondition-failed`](/MMLib.Alvo/reference/problem-types/#precondition-failed) | `If-Match` names a revision that is no longer current. | Read the descriptor again, reapply your change to it, and send the new revision. | every host |
+| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | The descriptor is refused, for example an expression that does not compile; the violation's `pointer` names the place. | Fix what the violation's `fixSuggestion` says, and check the slot with `cel/check` first. | every host |
+| 428 | [`precondition-required`](/MMLib.Alvo/reference/problem-types/#precondition-required) | The write carried no `If-Match`. | Read the current revision and send it as `If-Match: "<revision>"`. | every host |
+
+## Reference
+
+- [Management API](/MMLib.Alvo/reference/management-api/): every route and its body.
+- Descriptor keys: [`access`](/MMLib.Alvo/reference/descriptor/access/), and the [whole schema](/MMLib.Alvo/reference/descriptor/).
+- [CEL functions](/MMLib.Alvo/reference/cel-functions/) and [Capabilities in this build](/MMLib.Alvo/reference/capabilities/),
+  which an agent should read before proposing a key this build does not run.
+- Problem types: [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
+  [`idempotency-conflict`](/MMLib.Alvo/reference/problem-types/#idempotency-conflict),
+  [`precondition-failed`](/MMLib.Alvo/reference/problem-types/#precondition-failed),
+  [`precondition-required`](/MMLib.Alvo/reference/problem-types/#precondition-required),
+  [`validation`](/MMLib.Alvo/reference/problem-types/#validation).
+
+## Next
+
+**[Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/)**: the full lifecycle of a change, from a
+dry run to a rollback.

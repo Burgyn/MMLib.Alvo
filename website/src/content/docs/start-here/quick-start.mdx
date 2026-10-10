@@ -1,15 +1,108 @@
 ---
 title: Quick start
-description: Run Alvo over a descriptor and call its API in five minutes.
+description: Start the standalone stack with Docker, create a record and read it back, in five minutes.
 sidebar:
   order: 2
 ---
 
 import { Code } from '@astrojs/starlight/components';
+import Exchange from '../../../components/Exchange.astro';
 import quickStart from '../../../snippets/shell/quick-start.sh?raw';
+import demoAdmin from '../../../snippets/shell/demo-admin.sh?raw';
+import tearDown from '../../../snippets/shell/tear-down.sh?raw';
 
-{/* <!-- STUB-F6 --> */}
+:::tip[What you will achieve]
+A running Alvo backend over PostgreSQL, and a record you created through its API. About five minutes, starting from
+nothing but Docker.
+:::
 
-Clone the repository, start the standalone stack with Docker and call its API:
+Alvo is pre-v0.1: no container image is published yet, so the stack builds the image from a clone of the repository.
+
+## Before you start
+
+- Docker with Compose v2, git and `openssl`.
+- Port 8080 free on this machine. The stack listens on `127.0.0.1:8080` only.
+
+## Run it
 
 <Code code={quickStart.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+Line by line: clone the repository; generate the secret of the stack's one API key (compose refuses to start without
+it, because the image ships no credential); build the image and start Alvo next to PostgreSQL, waiting up to 60 seconds
+until the descriptor is applied; list the owners, which is an empty page for now.
+
+**How long the first run takes.** On an Apple M4 laptop with Docker Desktop (10 CPUs), building the image takes about
+35 seconds and the stack is ready about 7 seconds after that. The first run also downloads the .NET SDK, the ASP.NET
+Core runtime and PostgreSQL images, about 1.5 GB on disk, so add the time your connection needs for that. Later runs
+reuse all of it.
+
+## Create, then list
+
+The stack's key is `demo`, with the roles `admin`, `authenticated` and `inspector`; its secret is the
+`ALVO_DEMO_KEY_SECRET` you exported. Create an owner, then list the owners again:
+
+<Exchange name="quick-start/01-create-and-list" wrap />
+
+The `Location` header points at the new record, and the list now holds it. Every write needs the
+`Content-Type: application/json` header as well as the key.
+
+## What just happened
+
+The stack mounted [`examples/vehicle-registry/vehicles.alvo.json`](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/vehicle-registry/vehicles.alvo.json),
+a descriptor with three entities: `owners`, their `vehicles`, and the vehicles' `inspections`. From that one file Alvo
+created the tables in PostgreSQL and serves a REST API for each entity, with the access rules the descriptor declares:
+any authenticated caller may read owners, and only an `admin` may create one. Nobody wrote a controller, a migration or
+an authorization check.
+
+## Explore the API
+
+Each descriptor generates its own OpenAPI document. While the stack runs:
+
+- `http://localhost:8080/scalar` is an API browser over every route this descriptor produced.
+- `http://localhost:8080/openapi/v1.json` is the document itself, for a client generator or a coding agent.
+
+Both are readable without a key; every data route needs one.
+
+## Open the dashboard
+
+The admin dashboard has its own demo, over a bicycle workshop's backend (`examples/bike-workshop`, eight entities with
+rules, hooks and computed fields) seeded with realistic data. It runs the host directly, so it needs the .NET SDK the
+repository pins in `global.json`, plus `curl` and `jq`:
+
+<Code code={demoAdmin.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+It builds the host, starts it on `http://127.0.0.1:5080` over a fresh SQLite file, seeds the workshop through the
+public API, and prints the dashboard address, the sign-in address and a password for this run. `--no-ai` skips the
+schema assistant, which would otherwise ask for a model connection. `Ctrl+C` stops it.
+
+## Tear down
+
+Stop the stack and delete its database volume. Run it in the same shell, because compose reads
+`ALVO_DEMO_KEY_SECRET` for every command, `down` included:
+
+<Code code={tearDown.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+## What can go wrong
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | The `X-Alvo-Api-Key` header was sent but cannot be used: a typo, or a secret from another shell. | Send `demo.` followed by the secret the stack was started with. | every host |
+
+A request with no key at all is anonymous, not unauthenticated: it reads an empty page or is refused with 403
+[`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden), because no rule admits an anonymous caller.
+
+If `docker compose up` fails with `required variable ALVO_DEMO_KEY_SECRET is missing a value`, export the secret in
+this shell first.
+
+## Reference
+
+- The descriptor: [`examples/vehicle-registry`](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/vehicle-registry/vehicles.alvo.json),
+  and the [API it generates](/MMLib.Alvo/data-api/conventions/).
+- Problem types: [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated),
+  [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden).
+- The compose stack in depth: [`docs/architecture/host.md`](https://github.com/Burgyn/MMLib.Alvo/blob/main/docs/architecture/host.md#the-compose-stack).
+
+## Next
+
+**[Tutorial: your first backend](/MMLib.Alvo/start-here/tutorial/)**: write a descriptor of your own, one step at a
+time. To serve a descriptor you already have, see [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/).

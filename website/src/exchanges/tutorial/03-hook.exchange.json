@@ -1,0 +1,24 @@
+{
+  "descriptor": "website/src/snippets/tutorial/03-hook.alvo.json",
+  "keys": {
+    "agent": { "roles": ["agent", "authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_AGENT_KEY_SECRET" },
+    "admin": { "roles": ["admin", "authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_ADMIN_KEY_SECRET" }
+  },
+  "steps": [
+    {
+      "key": "agent",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": { "title": "   VPN drops every hour   " },
+      "expect": 201
+    },
+    {
+      "key": "agent",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": { "title": "Server room is flooding", "priority": "high" },
+      "expect": 403,
+      "expectType": "forbidden"
+    }
+  ]
+}

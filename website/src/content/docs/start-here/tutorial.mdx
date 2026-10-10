@@ -1,8 +1,220 @@
 ---
 title: "Tutorial: your first backend"
-description: "Build a small descriptor step by step: an entity, a rule, a before-hook, a computed field, then see it in the dashboard."
+description: "Build a help desk's backend in four small steps: an entity, access rules, a before-hook and a computed field, then look at it in the dashboard."
 sidebar:
   order: 3
 ---
 
-{/* <!-- STUB-F6 --> */}
+import { Code, Steps } from '@astrojs/starlight/components';
+import Exchange from '../../../components/Exchange.astro';
+import start from '../../../snippets/shell/tutorial-start.sh?raw';
+import step2 from '../../../snippets/shell/tutorial-step-2.sh?raw';
+import step3 from '../../../snippets/shell/tutorial-step-3.sh?raw';
+import step4 from '../../../snippets/shell/tutorial-step-4.sh?raw';
+import password from '../../../snippets/shell/admin-password.sh?raw';
+import tearDown from '../../../snippets/shell/tear-down.sh?raw';
+import entity from '../../../snippets/tutorial/01-entity.alvo.json?raw';
+import rules from '../../../snippets/tutorial/02-rules.alvo.json?raw';
+import hook from '../../../snippets/tutorial/03-hook.alvo.json?raw';
+import helpDesk from '../../../../../examples/help-desk/help-desk.alvo.json?raw';
+
+:::tip[What you will achieve]
+A working help-desk API: tickets that support agents can file and edit, that only an administrator can delete, whose
+title is trimmed on the way in, and whose cost is computed from the estimate. About ten minutes, starting from a clone
+of the repository with Docker running.
+:::
+
+## Before you start
+
+- Docker and git, and a clone of the repository. You run the stack the way
+  [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/) explains; this page gives you every command.
+- Two API keys, declared by the override file the first step copies: `agent` (roles `agent`, `authenticated`) and
+  `admin` (roles `admin`, `authenticated`). Their secrets are the variables `ALVO_AGENT_KEY_SECRET` and
+  `ALVO_ADMIN_KEY_SECRET`. Run every command on this page in the same shell, so they stay exported.
+
+Each step changes one file, `help-desk.alvo.json` in the clone root. Edit it by hand to match the descriptor shown, or
+copy the finished step with the command beside it.
+
+## 1. Describe an entity
+
+A descriptor names the project, the roles its callers can hold, and its entities. This one has a single entity,
+`tickets`, with five fields and `audit: true`, which records who created and changed each row, and when.
+
+<Steps>
+
+1. Start the stack over the first version of the descriptor. The commands copy the descriptor and the key override
+   into the clone, generate the secrets, and wait until the API answers:
+
+   <Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+2. This is the descriptor the stack now serves:
+
+   <Code code={entity} lang="json" title="help-desk.alvo.json" />
+
+   Each entity has `rules`, one CEL condition per operation. Alvo is **default-deny**: an operation with no rule is
+   refused for everyone, so an entity without `rules` answers nothing at all. Here any authenticated caller may list,
+   read and create tickets, and nobody may update or delete them yet.
+
+3. File a ticket as the `agent` key, then list the tickets:
+
+   <Exchange name="tutorial/01-entity" wrap steps={[0, 1]} />
+
+   The response carries the defaults (`priority`, `status`) and the audit columns Alvo maintains.
+
+4. Leave out the required `title`, and the write is refused before anything is stored:
+
+   <Exchange name="tutorial/01-entity" wrap steps={[2]} />
+
+   Every refusal is a problem document like this one: `type` says what kind of refusal it is, and each violation names
+   the field, a stable `code` and a fix.
+
+</Steps>
+
+## 2. Decide who may do what
+
+Rules are CEL expressions over the caller (`@user`) and the row. Alvo compiles them to SQL predicates, so they hold for
+every request, including a list that matches thousands of rows.
+
+<Steps>
+
+1. Let agents and administrators create and update tickets, and let only an administrator delete one:
+
+   <Code code={rules} lang="json" title="help-desk.alvo.json" ins={[{ range: '22-24' }]} />
+
+2. Apply it by recreating the `alvo` container. On start, Alvo applies a descriptor change that discards nothing, and
+   refuses one that would. ([Apply and evolve your descriptor](/MMLib.Alvo/guides/apply-and-evolve/) covers the other
+   ways to apply a change, including the Management API without a restart.)
+
+   <Code code={step2.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+3. An agent files a ticket, then tries to delete it:
+
+   <Exchange name="tutorial/02-rules" wrap steps={[0]} fields={["id", "title", "status"]} />
+
+   <Exchange name="tutorial/02-rules" wrap steps={[1]} />
+
+   A **404, not a 403**. A `delete` rule works like a row filter: a caller it excludes cannot see the row, and Alvo
+   answers as if the row were not there, so nobody learns which rows exist that they may not touch.
+   [Access rules](/MMLib.Alvo/guides/access-rules/) lists exactly when Alvo answers 403 instead.
+
+4. The `admin` key deletes the same ticket:
+
+   <Exchange name="tutorial/02-rules" wrap steps={[2]} />
+
+</Steps>
+
+## 3. Clean up and check every write
+
+Before-hooks run inside the write's transaction, before the row is stored. A `mutate` action rewrites a field from a
+CEL expression over `new`, the row being written. A `reject` action refuses the write when its `condition` is true.
+
+<Steps>
+
+1. Trim every new ticket's title with the built-in `trim` function, and refuse a high-priority ticket that has no
+   body:
+
+   <Code code={hook} lang="json" title="help-desk.alvo.json" ins={[{ range: '26-33' }]} />
+
+2. Apply it:
+
+   <Code code={step3.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+3. A padded title comes back trimmed:
+
+   <Exchange name="tutorial/03-hook" wrap steps={[0]} fields={["id", "title", "priority"]} />
+
+4. A high-priority ticket without a body is refused, with the hook's own text in `detail`:
+
+   <Exchange name="tutorial/03-hook" wrap steps={[1]} />
+
+   A `reject` is a policy refusal, so its status is 403 `forbidden`, the same as a rule's. The detail also names the
+   hook that refused, so you can find it in the descriptor.
+
+</Steps>
+
+## 4. Compute a value
+
+A `computed` field is derived from the row's own fields, stored as a generated column, and never written by a caller.
+
+<Steps>
+
+1. Add an hourly rate and a computed cost. This is the finished descriptor, the same file as
+   [`examples/help-desk`](https://github.com/Burgyn/MMLib.Alvo/blob/main/examples/help-desk/help-desk.alvo.json):
+
+   <Code code={helpDesk} lang="json" title="help-desk.alvo.json" ins={[{ range: '18-19' }]} />
+
+   A computed expression may only combine the row's own fields. A constant, as in `estimate_hours * 60`, is refused
+   when the descriptor is applied, because a generated column cannot take a parameter. Keep such a value in a field of
+   its own, as `hourly_rate` does here.
+
+2. Apply it:
+
+   <Code code={step4.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+3. File a ticket with an estimate and a rate. The response carries `estimate_cost`:
+
+   <Exchange name="tutorial/04-computed" wrap fields={["id", "title", "estimate_hours", "hourly_rate", "estimate_cost"]} />
+
+</Steps>
+
+## 5. See it in the dashboard
+
+The stack also serves the admin dashboard at `http://localhost:8080/admin`. The override created a bootstrap
+administrator, `admin@example.com`, whose password is in the file the first step generated:
+
+<Code code={password.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+Sign in and open **Schema**, then **tickets**. The *Fields* tab lists the seven declared fields with their facets and
+marks `estimate_cost` as computed; *Rules* holds the five rules and *On write* the two before-hooks. **Data** browses
+the tickets you created through the API.
+
+:::caution[Known issue in this build]
+Over the compose stack's PostgreSQL, the dashboard can answer every screen with "Something went wrong" while the API
+keeps working; the server log shows `A second operation was started on this context instance` from
+`AlvoIdentityDbContext`. Over SQLite the dashboard renders as described: start it with the
+[*Without Docker*](/MMLib.Alvo/start-here/run-your-own/#without-docker) recipe.
+:::
+
+When you are done, stop the stack and delete its database:
+
+<Code code={tearDown.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
+
+## What can go wrong
+
+| Status | Problem type | When | Fix | Returned by |
+|---|---|---|---|---|
+| 401 | [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated) | A key was sent and cannot be used: a wrong secret, or a role the descriptor does not declare. | Check that the secret variables are still exported in this shell, and that every role on the key is in `auth.roles` or built in. | every host |
+| 403 | [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden) | The operation has no rule, a `create` rule refused the row, or a before-hook's `reject` fired. | Add or widen the rule, or send a row the hook's condition does not match. | every host |
+| 404 | [`not-found`](/MMLib.Alvo/reference/problem-types/#not-found) | The row does not exist, or the `get`, `update` or `delete` rule excludes it for this caller. | Check the rule for that operation. | every host |
+| 422 | [`validation`](/MMLib.Alvo/reference/problem-types/#validation) | The body breaks the entity's declared shape, such as a missing required `title`. | Follow the violation's `pointer` and `fixSuggestion`. | every host |
+
+If `docker compose up` fails after you change the descriptor, the new version did not apply. The reason is at the end
+of `docker compose logs alvo`; see [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/#what-can-go-wrong).
+
+## What you built
+
+- An entity, `tickets`, with a required, length-limited title, two enums with defaults, two decimals and audit
+  columns.
+- Access rules per operation: reads for any authenticated caller, writes for agents and administrators, deletes for
+  administrators only.
+- Two before-hooks: one normalises the title with a built-in function, one refuses an incomplete urgent ticket.
+- A computed field derived from two others.
+
+## Reference
+
+- Descriptor keys: [`entities`](/MMLib.Alvo/reference/descriptor/entities/),
+  [fields](/MMLib.Alvo/reference/descriptor/entities-fields/),
+  [rules](/MMLib.Alvo/reference/descriptor/entities-rules/),
+  [hooks](/MMLib.Alvo/reference/descriptor/entities-hooks/),
+  [computed fields](/MMLib.Alvo/reference/descriptor/entities-computed-and-rollups/),
+  [`auth`](/MMLib.Alvo/reference/descriptor/auth/).
+- CEL functions: `trim`, in the [CEL function catalog](/MMLib.Alvo/reference/cel-functions/).
+- Problem types: [`unauthenticated`](/MMLib.Alvo/reference/problem-types/#unauthenticated),
+  [`forbidden`](/MMLib.Alvo/reference/problem-types/#forbidden),
+  [`not-found`](/MMLib.Alvo/reference/problem-types/#not-found),
+  [`validation`](/MMLib.Alvo/reference/problem-types/#validation).
+
+## Next
+
+**[Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/)**: point the same stack at a file you wrote, with
+keys for the roles it declares.

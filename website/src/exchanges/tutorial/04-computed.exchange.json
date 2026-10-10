@@ -1,0 +1,16 @@
+{
+  "descriptor": "examples/help-desk/help-desk.alvo.json",
+  "keys": {
+    "agent": { "roles": ["agent", "authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_AGENT_KEY_SECRET" },
+    "admin": { "roles": ["admin", "authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_ADMIN_KEY_SECRET" }
+  },
+  "steps": [
+    {
+      "key": "agent",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": { "title": "Replace the office router", "estimate_hours": 2.5, "hourly_rate": 40 },
+      "expect": 201
+    }
+  ]
+}

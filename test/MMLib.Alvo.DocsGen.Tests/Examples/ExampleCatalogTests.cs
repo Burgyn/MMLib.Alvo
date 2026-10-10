@@ -65,7 +65,8 @@ public class ExampleCatalogTests
     public void The_page_runs_field_service_on_its_own_stack_and_says_it_is_multi_tenant()
     {
         var page = ExamplesGenerator.Render(ExampleCatalog.Read(_root)).Content;
-        var section = page[page.IndexOf("## field-service", StringComparison.Ordinal)..page.IndexOf("## simple-tasks", StringComparison.Ordinal)];
+        var start = page.IndexOf("## field-service", StringComparison.Ordinal);
+        var section = page[start..page.IndexOf("\n## ", start, StringComparison.Ordinal)];
 
         section.ShouldContain("**Tenancy:** multi-tenant");
         section.ShouldContain("-f docker-compose.field-service.yml up --build --wait");

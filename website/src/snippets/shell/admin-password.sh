@@ -1,0 +1,1 @@
+cat .alvo-admin-password

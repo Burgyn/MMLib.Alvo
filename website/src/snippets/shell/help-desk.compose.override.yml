@@ -1,0 +1,29 @@
+# Saved as docker-compose.override.yml in the clone root, compose merges this into docker-compose.yml.
+# Two dev keys for examples/help-desk, beside the built-in demo key (index 0). Every role a key carries
+# must be declared in the descriptor's auth.roles or be built in (authenticated, admin): a key with one
+# undeclared role authenticates nothing. The bootstrap administrator signs in to the dashboard at /admin.
+services:
+  alvo:
+    environment:
+      Alvo__Auth__DevKeys__1__KeyId: agent
+      Alvo__Auth__DevKeys__1__Secret: ${ALVO_AGENT_KEY_SECRET:?set ALVO_AGENT_KEY_SECRET before starting the stack}
+      Alvo__Auth__DevKeys__1__User: 3f2b8c1e-7a4d-4e9b-9c21-5d6e7f8a9b01
+      Alvo__Auth__DevKeys__1__Roles__0: agent
+      Alvo__Auth__DevKeys__1__Roles__1: authenticated
+      Alvo__Auth__DevKeys__1__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__1__Scopes__1: "*:write"
+      Alvo__Auth__DevKeys__2__KeyId: admin
+      Alvo__Auth__DevKeys__2__Secret: ${ALVO_ADMIN_KEY_SECRET:?set ALVO_ADMIN_KEY_SECRET before starting the stack}
+      Alvo__Auth__DevKeys__2__User: 8d4e2a6c-1b3f-4c5d-8e7a-9f0b1c2d3e02
+      Alvo__Auth__DevKeys__2__Roles__0: admin
+      Alvo__Auth__DevKeys__2__Roles__1: authenticated
+      Alvo__Auth__DevKeys__2__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__2__Scopes__1: "*:write"
+      Alvo__Admin__BootstrapEmail: admin@example.com
+      Alvo__Admin__BootstrapPasswordFile: /run/secrets/alvo_admin_password
+    secrets:
+      - alvo_admin_password
+
+secrets:
+  alvo_admin_password:
+    file: ./.alvo-admin-password

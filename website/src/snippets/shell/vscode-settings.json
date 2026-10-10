@@ -1,0 +1,5 @@
+{
+  "json.schemas": [
+    { "fileMatch": ["*.alvo.json"], "url": "https://burgyn.github.io/MMLib.Alvo/schema/v1/project.json" }
+  ]
+}

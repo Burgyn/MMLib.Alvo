@@ -14,6 +14,11 @@ Reference descriptors validated against `schema/project.schema.json`
   one composite index. **Applies as it stands.** It deliberately leaves out
   rollups, defaults and hooks, because the smallest starting point is the point;
   the other examples show those.
+- **`help-desk/`** — **applies as it stands.** A support desk's `tickets`: an `enum` priority and status
+  with literal `default`s, a `decimal` estimate and a `computed` field over it, `audit`, role-differentiated
+  rules, and two before-hooks (a `mutate` that trims the title with `trim`, a `reject` for a high-priority
+  ticket without a body). It declares the roles `admin` and `agent`. It is the end state of the docs
+  site's tutorial (*Tutorial: your first backend*) and the source of the README's "See it" section.
 - **`complex-crm/`** — **a format showcase, not a runnable backend** (see
   `complex-crm/NOT-RUNNABLE.md`): a CRM written in the v1 format, exercising
   most of the surface *including keys this build refuses*, which is exactly why

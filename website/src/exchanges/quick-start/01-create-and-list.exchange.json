@@ -1,0 +1,21 @@
+{
+  "descriptor": "examples/vehicle-registry/vehicles.alvo.json",
+  "keys": {
+    "demo": { "roles": ["admin", "authenticated", "inspector"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_DEMO_KEY_SECRET" }
+  },
+  "steps": [
+    {
+      "key": "demo",
+      "method": "POST",
+      "path": "/api/owners",
+      "body": { "name": "Fleet Desk Ltd", "email": "office@fleetdesk.example" },
+      "expect": 201
+    },
+    {
+      "key": "demo",
+      "method": "GET",
+      "path": "/api/owners",
+      "expect": 200
+    }
+  ]
+}

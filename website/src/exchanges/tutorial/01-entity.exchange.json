@@ -1,0 +1,30 @@
+{
+  "descriptor": "website/src/snippets/tutorial/01-entity.alvo.json",
+  "keys": {
+    "agent": { "roles": ["agent", "authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_AGENT_KEY_SECRET" },
+    "admin": { "roles": ["admin", "authenticated"], "scopes": ["*:read", "*:write"], "secretVariable": "ALVO_ADMIN_KEY_SECRET" }
+  },
+  "steps": [
+    {
+      "key": "agent",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": { "title": "Printer on fire", "estimate_hours": 1.5 },
+      "expect": 201
+    },
+    {
+      "key": "agent",
+      "method": "GET",
+      "path": "/api/tickets",
+      "expect": 200
+    },
+    {
+      "key": "agent",
+      "method": "POST",
+      "path": "/api/tickets",
+      "body": { "priority": "high" },
+      "expect": 422,
+      "expectType": "validation"
+    }
+  ]
+}
