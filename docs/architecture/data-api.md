@@ -1248,6 +1248,22 @@ Three properties of that data source are requirements rather than implementation
 - **The table is built once and frozen**, and that is correctness, not economy: a source that rebuilt per
   enumeration would let the document — generated per request, enumerating afresh — advertise a
   runtime-applied entity that the matcher, cached behind an unfired change token, does not route.
+- **What is frozen is the set of route literals, never an entity's fields (#353).** Each endpoint keeps the
+  entity's *name* (its literal, tag and response metadata) from that one reading; every request reads the
+  entity's fields, facets and compiled formats afresh through `AppliedSchemaView`, from **the same applied
+  revision its policy decision was taken against** — a seqlock over the registry's one published reference
+  (`PolicyCatalogProvider` serves the rules and the schema off one `PolicyCatalog`), retaken if an apply lands
+  in between, so a field *added* as `readOnly`/`hidden` can never be judged by the previous revision's masks.
+  Before this, every delegate closed over the boot-time `EntitySchema`: a field added at runtime was refused
+  as `unknown-field` until a restart, a removed one was admitted here and refused by the port as `403`, and a
+  narrowed `maxLength` or a newly `required` field was enforced by nothing. The snapshot (guards run, formats
+  compiled) is built once per `SchemaModel` instance in the steady state (two requests first seeing a new
+  revision at once may each build it), so a request costs two volatile reads and a lookup. The seqlock relies
+  on **no `SchemaModel` instance ever being published twice**; every publisher maps a fresh one except a
+  rollback, which publishes a copy of the stored schema — the invariant and who keeps it are on
+  `PolicyCatalogProvider.SetCurrent`.
+  Pinned on both engines by `DataApiEngineTests`' runtime-apply facts and, for the interleaving, by
+  `AppliedSchemaViewTests`.
 - **`GetGroupedEndpoints` forwards to the nested sources** rather than using the base implementation,
   because `app.MapGroup(prefix).MapAlvoDataApi()` is supported and a created row's `Location` is read off
   the matched endpoint's combined pattern (#121).

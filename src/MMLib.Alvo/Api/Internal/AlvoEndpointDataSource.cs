@@ -38,6 +38,13 @@ namespace MMLib.Alvo.Api.Internal;
 /// a change token, not a second enumeration.
 /// </para>
 /// <para>
+/// <b>What is frozen is the set of route literals, not the entities' fields.</b> The endpoints carry the
+/// entity's <em>name</em> and its documentation metadata from this one reading; every request reads the
+/// entity's fields, formats and facets afresh through <see cref="AppliedSchemaView"/>, from the same applied
+/// revision its policy decision was taken against — so a runtime apply that adds, removes, hides, freezes or
+/// narrows a field governs the next request without a restart (#353).
+/// </para>
+/// <para>
 /// <b><see cref="GetChangeToken"/> never fires.</b> When #103 grows the mutable half, the new token must be
 /// published <em>before</em> the old one is cancelled: the reverse order re-enters the invalidation and
 /// overflows the stack (aspnetcore#44392).
@@ -85,7 +92,7 @@ namespace MMLib.Alvo.Api.Internal;
 /// </remarks>
 internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
 {
-    private readonly EntityRouteCatalog _catalog;
+    private readonly AppliedSchemaView _applied;
     private readonly AlvoApiOptions _options;
     private readonly AlvoContextFilterFactory _filters;
     private readonly IServiceProvider _services;
@@ -125,7 +132,7 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
         ArgumentNullException.ThrowIfNull(boot);
         ArgumentNullException.ThrowIfNull(logger);
 
-        _catalog = catalog;
+        _applied = new AppliedSchemaView(catalog);
         _options = options;
         _filters = filters;
         _services = services;
@@ -269,20 +276,18 @@ internal sealed partial class AlvoEndpointDataSource : EndpointDataSource
     /// <c>Map*</c> helpers produced.
     /// </summary>
     /// <remarks>
-    /// The schema is read into a local first, so the guard below, the endpoints and the format catalogue are
-    /// all built from <em>one</em> reading of <see cref="EntityRouteCatalog.Entities"/> — a second reading is
-    /// how a table comes to carry a route for an entity the guard never saw.
+    /// The schema is read into one <see cref="AppliedSchemaView.Snapshot"/> first, so the guards and the
+    /// endpoints are all built from <em>one</em> reading of the applied schema — a second reading is how a table
+    /// comes to carry a route for an entity the guard never saw.
     /// </remarks>
     private RouteTable Build()
     {
-        var entities = _catalog.Entities;
-        ReservedQueryKeys.EnsureNoneIsShadowed(entities);
-
-        var formats = FormatCatalog.Build(entities);
+        // Snapshot runs both schema guards, so a refused schema is still refused here, once, before any route.
+        var snapshot = _applied.Current;
         var inner = new NestedRouteBuilder(_services);
-        foreach (var entity in entities)
+        foreach (var entity in snapshot.Schema.Entities)
         {
-            DataApiEndpoints.Map(inner, entity, _prefix, _options, _filters, formats, _conventions);
+            DataApiEndpoints.Map(inner, entity, _prefix, _options, _filters, _applied, _conventions);
         }
 
         return RouteTable.Of(inner);
