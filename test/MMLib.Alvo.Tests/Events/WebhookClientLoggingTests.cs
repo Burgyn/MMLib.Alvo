@@ -35,25 +35,68 @@ public sealed class WebhookClientLoggingTests
     [Fact]
     public async Task A_delivery_through_the_registered_client_logs_neither_the_path_nor_the_query()
     {
+        var shipped = await DeliverAndCapture(before: _ => { }, after: _ => { });
+
+        shipped.ShouldAllBe(text => !text.Contains("SecretToken", StringComparison.Ordinal));
+        shipped.ShouldAllBe(text => !text.Contains("SecretQueryValue", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The paired control: a host that adds the default logger back <em>after</em> <c>AddAlvo</c> gets the path in
+    /// its log. It proves the capture sees transport lines at all, and pins the documented way back in.
+    /// </summary>
+    [Fact]
+    public async Task A_host_that_adds_the_default_logger_after_the_framework_gets_transport_lines_back()
+    {
+        var shipped = await DeliverAndCapture(
+            before: _ => { },
+            after: services => services.AddHttpClient(WebhookDelivery.HttpClientName).AddDefaultLogger());
+
+        shipped.ShouldContain(text => text.Contains("SecretToken", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Client defaults are applied before any configuration by name, so a host-wide default logger registered
+    /// before <c>AddAlvo</c> does not reach the webhook client.
+    /// </summary>
+    [Fact]
+    public async Task A_host_wide_default_logger_registered_before_the_framework_does_not_reach_the_webhook_client()
+    {
+        var shipped = await DeliverAndCapture(
+            before: services => services.ConfigureHttpClientDefaults(builder => builder.AddDefaultLogger()),
+            after: _ => { });
+
+        shipped.ShouldAllBe(text => !text.Contains("SecretToken", StringComparison.Ordinal));
+        shipped.ShouldAllBe(text => !text.Contains("SecretQueryValue", StringComparison.Ordinal));
+    }
+
+    private static async Task<IReadOnlyList<string>> DeliverAndCapture(
+        Action<IServiceCollection> before, Action<IServiceCollection> after)
+    {
         var logs = new StructuredLogCapture();
         var receiver = new AcceptingReceiver();
-        await using var provider = Services(logs, receiver).BuildServiceProvider();
+        await using var provider = Services(logs, receiver, before, after).BuildServiceProvider();
 
         await provider.GetRequiredService<WebhookDelivery>().PostAsync(
             new WebhookTarget("crm-sync", new Uri(SecretUrl)), "{}", TestContext.Current.CancellationToken);
 
         receiver.Targets.ShouldHaveSingleItem().AbsoluteUri.ShouldBe(
             SecretUrl, "the positive control: the secret really was on the wire this run");
-        logs.Shipped.ShouldAllBe(text => !text.Contains("SecretToken", StringComparison.Ordinal));
-        logs.Shipped.ShouldAllBe(text => !text.Contains("SecretQueryValue", StringComparison.Ordinal));
+        return logs.Shipped;
     }
 
-    private static ServiceCollection Services(StructuredLogCapture logs, HttpMessageHandler receiver)
+    private static ServiceCollection Services(
+        StructuredLogCapture logs,
+        HttpMessageHandler receiver,
+        Action<IServiceCollection> before,
+        Action<IServiceCollection> after)
     {
         var services = new ServiceCollection();
         services.AddLogging(builder => builder.SetMinimumLevel(LogLevel.Trace).AddProvider(logs));
+        before(services);
         services.AddAlvoEvents();
         services.AddHttpClient(WebhookDelivery.HttpClientName).ConfigurePrimaryHttpMessageHandler(() => receiver);
+        after(services);
         return services;
     }
 

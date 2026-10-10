@@ -628,7 +628,9 @@ declared the endpoint" — the premise the paragraph above rests on. So the comp
 proved the secret-shaped segment really was on the wire, over the message **and** the attached exception —
 because that is what a pipeline ships. What is still disclosed, and accepted: `HttpRequestException` carries
 framework-supplied `host:port` on a DNS or connection failure. The host is not the secret; the path and the
-query are.
+query are. Two host-owned paths still carry the path, and Alvo does not close them: HttpClient tracing (the
+`System.Net.Http` `Activity`'s `url.full` tag, path in clear and query masked) and any `EventSource` listener
+on the networking event sources.
 
 **The transport's own logging broke it a second time, from outside this subsystem (#347).**
 `IHttpClientFactory` gives every named client two default logging handlers, and they write the request URI
