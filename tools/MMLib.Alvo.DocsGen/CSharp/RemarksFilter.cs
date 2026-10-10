@@ -69,7 +69,7 @@ internal static partial class RemarksFilter
         }
     }
 
-    [GeneratedRegex(@"§|(?<![&\w])#\d+\b|\bPRs?\b|\bRulings?\b|[\w./-]+\.md\b")]
+    [GeneratedRegex(@"(?<!\bRFC \d+ )§|(?<![&\w])#\d+\b|\bPRs?\b|\bRulings?\b|[\w./-]+\.md\b")]
     private static partial Regex ContributorReference();
 
     [GeneratedRegex("`(?<code>[^`]+)`")]

@@ -33,7 +33,7 @@ public sealed class AlvoApiOptions
 
     /// <summary>
     /// The largest page a request may ask for. Default 200. Server-enforced rather than advisory:
-    /// §2.1 requires a maximum, because an unbounded limit is a denial-of-service one query long.
+    /// a maximum is required, because an unbounded limit is a denial-of-service one query long.
     /// </summary>
     public int MaxPageSize { get; set; } = 200;
 

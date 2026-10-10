@@ -11,6 +11,7 @@ public class RemarksFilterTests
     [Theory]
     [InlineData("As spec §X.1 sketches, this binds once.")]
     [InlineData("Issue #233 owns the vocabulary.")]
+    [InlineData("RFC 9457 §3.1 agrees, and so does spec §4.")]
     [InlineData("Review on the PR rejected the other shape.")]
     [InlineData("Ruling V settles the status.")]
     [InlineData("See `docs/architecture/host.md` for the history.")]
@@ -22,6 +23,7 @@ public class RemarksFilterTests
     [Theory]
     [InlineData("**Keyed, and that is a security decision.** The header path cannot resolve it.")]
     [InlineData("Use `IAlvoContextResolver` for keys; `C#` and `&#123;` are not references.")]
+    [InlineData("A resolvable URI, as RFC 9457 §3.1.1 asks for.")]
     public void A_paragraph_for_host_authors_is_kept(string paragraph) =>
         RemarksFilter.ForReaders(paragraph, _internal).ShouldBe(paragraph);
 
@@ -43,7 +45,20 @@ public class RemarksFilterTests
     }
 
     [Fact]
-    public void No_rendered_remarks_cite_a_spec_section_or_an_issue()
+    public void No_rendered_csharp_page_cites_a_section_other_than_an_rfc_one()
+    {
+        var docs = XmlDocs.Load(ShippedPackages.All.Select(p => p.Assembly));
+
+        var leaks = ShippedPackages.All
+            .Select((p, index) => CSharpApiGenerator.RenderPackage(p.Package, p.Assembly, docs, index))
+            .SelectMany(page => page.Content.Split('\n').Where(line => Regex.IsMatch(line, @"(?<!\bRFC \d+ )§")).Select(line => $"{page.RelativePath}: {line}"))
+            .ToList();
+
+        leaks.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void No_rendered_remarks_cite_a_non_rfc_section_or_an_issue()
     {
         var docs = XmlDocs.Load(ShippedPackages.All.Select(p => p.Assembly));
         var ids = ShippedPackages.All
@@ -52,7 +67,7 @@ public class RemarksFilterTests
 
         var leaks = ids
             .Select(id => (id, Text: RemarksFilter.ForReaders(docs.Remarks(id))))
-            .Where(remarks => remarks.Text.Contains('§', StringComparison.Ordinal) || Regex.IsMatch(remarks.Text, @"(?<![&\w])#\d+"))
+            .Where(remarks => Regex.IsMatch(remarks.Text, @"(?<!\bRFC \d+ )§|(?<![&\w])#\d+"))
             .Select(remarks => remarks.id)
             .ToList();
 
