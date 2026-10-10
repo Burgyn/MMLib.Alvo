@@ -58,7 +58,7 @@ internal static class AlvoHostConfiguration
     /// <param name="path">The path the host was told to read, quoted so the typo is visible.</param>
     internal static string NoDescriptorAt(string path) => Sentence(
         $"Alvo cannot start: no project descriptor at {path}.",
-        "  Mount one:  docker run -v ./project.alvo.json:/alvo/descriptor.json mmlib/alvo",
+        "  Mount one:  docker run -v ./project.alvo.json:/alvo/descriptor.json ghcr.io/burgyn/alvo",
         $"  Or set:     {DescriptorPathVariable}=/path/to/descriptor.json");
 
     /// <summary>The refusal for a driver name this host does not ship.</summary>

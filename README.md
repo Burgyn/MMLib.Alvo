@@ -138,8 +138,9 @@ curl -sS localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRE
 
 The API browser is at `http://localhost:8080/scalar`, and the dashboard at `http://localhost:8080/admin`, signed in as
 `admin@alvo.local` with `$ALVO_ADMIN_PASSWORD`. `ALVO_DESCRIPTOR` switches to another example inside the image or to
-your own file; the compose file's header lists what to change. `edge` follows `main`; `ALVO_IMAGE` pins another tag.
-Keep the variables exported for the session; tear down with
+your own file; the demo key still authenticates, but field-service needs a tenant on it and your own roles need
+adding, and the compose file's header lists exactly what to change. `edge` follows `main`; `ALVO_IMAGE` pins
+another tag. Keep the variables exported for the session; tear down with
 `docker compose -f docker-compose.quickstart.yml down --volumes`. To build the image from source instead, see
 [Running in production](https://burgyn.github.io/MMLib.Alvo/guides/production/#1-get-the-image).
 

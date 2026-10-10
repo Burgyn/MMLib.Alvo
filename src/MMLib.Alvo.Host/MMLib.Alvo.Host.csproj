@@ -2,7 +2,7 @@
 
   <!--
     The standalone host (spec §2.14 mode 1, §X.1). Not packable: it is distributed as the
-    `mmlib/alvo` container image, not as a NuGet package, so a .nupkg of an entry point would
+    `ghcr.io/burgyn/alvo` container image, not as a NuGet package, so a .nupkg of an entry point would
     publish a surface no consumer references. package-boundary.md records the project and the
     rule that earns it.
   -->

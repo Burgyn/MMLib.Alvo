@@ -1,6 +1,6 @@
 ﻿using System.Runtime.CompilerServices;
 
-// The host is an entry point, not a package: it ships as the mmlib/alvo image and nothing references it, so
+// The host is an entry point, not a package: it ships as the ghcr.io/burgyn/alvo image and nothing references it, so
 // its only consumer is its own suite. That is why the exit contract and the refusal wording stay internal —
 // making them public would publish a surface no consumer can reach — and why the suite is granted access to
 // them rather than the facts being routed through HTTP, which cannot observe a process's exit code at all.

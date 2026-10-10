@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The standalone image is published to GitHub Container Registry as `ghcr.io/burgyn/alvo`**, for
+  `linux/amd64` and `linux/arm64` (`.github/workflows/image.yml`). Every push to `main` publishes
+  `:edge` and `:sha-<7>`; a `v*` tag publishes `:<major>.<minor>.<patch>`, `:<major>.<minor>` and
+  `:latest`. The image now carries the runnable examples' descriptors under `/alvo/examples/` and OCI
+  labels (source, licence, version, revision); it still ships no credential. **`docker-compose.quickstart.yml`**
+  is the no-clone quick start: download that one file, export `ALVO_DEMO_KEY_SECRET` and
+  `ALVO_ADMIN_PASSWORD`, `docker compose -f docker-compose.quickstart.yml up --wait` — Alvo over
+  PostgreSQL on `127.0.0.1:8080`, serving the in-image `vehicle-registry` example, with `/scalar` and
+  the dashboard at `/admin`. `ALVO_DESCRIPTOR` switches to another shipped example or to your own file
+  mounted read-only; the demo key (built-in roles `admin` + `authenticated` only) authenticates against
+  all of them, and the file's header says what to add for field-service's tenants or your own roles.
+  Before publishing, the workflow smoke-tests the linux/amd64 build of the same commit through that
+  file (`scripts/test-quickstart`); the pushed two-arch image is a rebuild from the same cache, and the
+  arm64 variant is not smoke-tested in CI.
+  The startup refusals that suggested `docker run … mmlib/alvo` now name the published image.
+
 - **CEL functions in hook conditions and before-hook `mutate` values** (slice C1). A host registers
   a typed C# function at startup with `AddCelFunction(name, delegate, summary)` on the Alvo builder.
   A descriptor's hook conditions and `mutate` values call it by name, and so can the built-ins. C1
@@ -677,6 +693,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comment-style rules).
 
 ### Fixed
+
+- **A runtime apply now changes the Data API's fields at once, not after a restart** (#353). Every generated
+  endpoint used to keep the entity's fields from the moment its route was built. Rules followed a
+  `PUT …/descriptor` straight away, but the body reader, the validator and the query parser did not:
+  - a field added at runtime was refused with `422 unknown-field` until the host restarted;
+  - a removed field was let through here and then refused by the data port with a `403`;
+  - a shorter `maxLength` or a newly `required` field was not enforced at all.
+
+  Each request now reads the entity's fields, facets and formats from the revision its policy decision was
+  taken against. If an apply lands between the two reads, the decision is taken again. This holds on SQLite
+  and PostgreSQL. Route literals are still fixed at startup, so an entity *added* at runtime still has no
+  route until a restart (#103).
 
 - **A batch `PATCH` stamps `updated_at` and `updated_by`, so its rows get a new `ETag`** (#349). The EF
   driver's batch update did not apply the audit stamp that the single-row update applies. A batch-updated row

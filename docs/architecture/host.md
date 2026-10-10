@@ -115,7 +115,7 @@ the process, including the refusal an operator reads and the code they get.
 
 That closes **#132**: a mis-typed mount now reads
 `Alvo cannot start: no project descriptor at /alvo/descriptor.json.` followed by the two
-fixes (`docker run -v ./project.alvo.json:/alvo/descriptor.json mmlib/alvo`, or
+fixes (`docker run -v ./project.alvo.json:/alvo/descriptor.json ghcr.io/burgyn/alvo`, or
 `Alvo__DescriptorPath=…`), and exits 78. The refusals are written in one place
 (`AlvoHostConfiguration`) because the same wording has to be raised from two moments — the
 driver is chosen while the container is still being built, and every value is validated again
@@ -764,8 +764,51 @@ Measured rather than assumed. Without them the build **succeeds** but emits 17 w
 `Microsoft.Build.Tasks.Git`, 6× `Microsoft.SourceLink.Common`): none is promoted by `TreatWarningsAsErrors`,
 because that property governs the C# compiler and these are MSBuild *task* warnings. `-p:MinVerSkip=true` also
 builds clean and warns about nothing — but it leaves every assembly stamped `1.0.0`, a version this pre-1.0
-project has never released, so the version is stated instead of skipped. The `ARG` is how F4's publish
-pipeline hands in the real MinVer version once #24 ships an image.
+project has never released, so the version is stated instead of skipped. The `ARG` is where the publish
+workflow hands in the real MinVer version — see *The published image* below.
+
+### The published image
+
+`.github/workflows/image.yml` publishes the image as **`ghcr.io/burgyn/alvo`**, for `linux/amd64` and
+`linux/arm64`: every push to `main` as `:edge` and `:sha-<7>`, every `v*` tag as `:<major>.<minor>.<patch>`,
+`:<major>.<minor>` and `:latest` (a pre-release tag moves neither of the last two). It is the only workflow that
+pushes the image; `release.yml` stays NuGet-only. The version handed to `ARG VERSION` is `minver-cli`'s over
+the checkout — the same tag prefix and major as the MinVer package — so an image and the packages of one commit
+carry one version; `ARG REVISION` is the commit. Both land in the OCI labels, beside `source`, which is what
+links the package GitHub Container Registry creates to this repository.
+
+The build stage runs on the **builder's** platform (`FROM --platform=$BUILDPLATFORM`) and publishes RID-less
+with `UseAppHost=false`: the output is managed assemblies plus every native `runtimes/<rid>/` asset, so one
+compile serves both architectures and QEMU only ever runs the final stage's one `RUN`. Checked locally on an
+arm64 machine: the two-platform build ran `dotnet publish` once, and the emulated amd64 variant boots ready and
+answers an authenticated read.
+
+The image also carries the **runnable examples' descriptors** at `/alvo/examples/<example>/<file>.alvo.json` —
+descriptors only, root-owned and read-only to the process — so `docker-compose.quickstart.yml` can point
+`Alvo__DescriptorPath` at one with nothing on the reader's disk but that file. Which examples is the same
+marker `AlvoExamples.Runnable()` reads (`_negative/` and `complex-crm/` are out), and `QuickStartImageTests`
+holds the Dockerfile's list equal to it. Nothing here changes the credential contract: the image still ships
+no key and no bootstrap administrator, and the quick start demands both from the reader's shell —
+`ALVO_DEMO_KEY_SECRET` with `:?`, and `ALVO_ADMIN_PASSWORD` as a compose secret, because the host takes the
+bootstrap password only as a mounted file. The demo key carries only the built-in roles `admin` and
+`authenticated`, so it authenticates against every shipped example (`QuickStartImageTests` pins that against
+the default descriptor; #131 is why a key naming an undeclared role would not). The publish job runs only after
+`scripts/test-quickstart` passed over the **linux/amd64** build of the same commit through that very compose
+file; what it pushes is a two-arch rebuild from the same cache, and arm64 is not run in CI.
+
+**The name deviates from the spec on purpose.** The spec and the analysis name the image `mmlib/alvo` (Docker
+Hub); it is published as `ghcr.io/burgyn/alvo` instead, because GitHub Container Registry authenticates with
+the workflow's own `GITHUB_TOKEN` and needs neither a Docker Hub organisation nor a long-lived registry secret
+in the repository. Decided with the maintainer and tracked in #358; the spec and the analysis still say
+`mmlib/alvo`, and this paragraph is the record that the difference is a decision, not an oversight.
+
+**One manual step after the first publish.** GHCR creates the package on the first push from `main`, and
+creates it **private**, whatever the repository's visibility — the `source` label links the package to the
+repository for access, not for visibility. Until the maintainer opens the package (GitHub → Packages → `alvo` →
+Package settings), chooses *Change visibility → Public*, and confirms `docker pull ghcr.io/burgyn/alvo:edge`
+works logged out, the README's no-clone quick start answers `denied` to everyone else. If the package's
+settings do not list this repository under *Manage Actions access* with the **Write** role, later pushes from
+the workflow fail with 403; add it there.
 
 ## The compose stack
 
@@ -914,8 +957,6 @@ served until the process restarts, and the entity's API tab says so.
 
 Still owed on the standalone side:
 
-- the **published multi-arch image** (`mmlib/alvo`, amd64 + arm64) and the release pipeline that pushes it —
-  the Dockerfile's `ARG VERSION` is where that pipeline hands in the real MinVer version;
 - the **`alvo` CLI** (`alvo apply vehicles.alvo.json`) — one of the descriptor's doors that PR4 does not open
   (`PLAN.md` §2: Docker mount = CLI apply = Management API = `FromDescriptor()` = admin UI export);
 - the rest of **§2.12** — OpenTelemetry, rate limiting (**#112**), usage metering. The **database half of

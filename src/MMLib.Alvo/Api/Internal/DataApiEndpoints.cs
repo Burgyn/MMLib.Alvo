@@ -72,7 +72,10 @@ internal static class DataApiEndpoints
     /// <param name="prefix">The normalized route prefix, with no trailing slash.</param>
     /// <param name="options">The API options the delegates read paging defaults from.</param>
     /// <param name="filters">Builds the authorization filter each endpoint carries.</param>
-    /// <param name="formats">The applied descriptor's compiled field formats, shared by every endpoint.</param>
+    /// <param name="applied">
+    /// The applied schema every request reads the entity's fields and formats from, live — <paramref name="entity"/>
+    /// supplies only the route literal and the documentation metadata (#353).
+    /// </param>
     /// <param name="conventions">The conventions the host attached to <c>MapAlvoDataApi()</c>.</param>
     internal static void Map(
         IEndpointRouteBuilder endpoints,
@@ -80,7 +83,7 @@ internal static class DataApiEndpoints
         string prefix,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters,
-        FormatCatalog formats,
+        AppliedSchemaView applied,
         AlvoDataApiConventions conventions)
     {
         var collection = $"{prefix}/{entity.Name}";
@@ -88,14 +91,14 @@ internal static class DataApiEndpoints
         var query = $"{collection}/query";
         var batch = $"{collection}/batch";
 
-        MapList(endpoints, entity, collection, options, filters, conventions);
-        MapQuery(endpoints, entity, query, options, filters, conventions);
-        MapGet(endpoints, entity, item, filters, conventions);
-        MapCreate(endpoints, entity, collection, options, filters, formats, conventions);
-        MapUpdate(endpoints, entity, item, options, filters, formats, conventions);
-        MapReplace(endpoints, entity, item, collection, options, filters, formats, conventions);
+        MapList(endpoints, entity, collection, options, filters, applied, conventions);
+        MapQuery(endpoints, entity, query, options, filters, applied, conventions);
+        MapGet(endpoints, entity, item, filters, applied, conventions);
+        MapCreate(endpoints, entity, collection, options, filters, applied, conventions);
+        MapUpdate(endpoints, entity, item, options, filters, applied, conventions);
+        MapReplace(endpoints, entity, item, collection, options, filters, applied, conventions);
         MapDelete(endpoints, entity, item, options, filters, conventions);
-        MapBatch(endpoints, entity, batch, options, filters, formats, conventions);
+        MapBatch(endpoints, entity, batch, options, filters, applied, conventions);
     }
 
     /// <summary>The three batch routes: one path, three verbs, three endpoint kinds.</summary>
@@ -117,7 +120,7 @@ internal static class DataApiEndpoints
     /// <param name="pattern">The batch path.</param>
     /// <param name="options">The API options the delegates read their bounds from.</param>
     /// <param name="filters">Builds the authorization filter each endpoint carries.</param>
-    /// <param name="formats">The applied descriptor's compiled field formats.</param>
+    /// <param name="applied">The applied schema each request reads the entity's fields and formats from.</param>
     /// <param name="conventions">The conventions the host attached to <c>MapAlvoDataApi()</c>.</param>
     private static void MapBatch(
         IEndpointRouteBuilder endpoints,
@@ -125,7 +128,7 @@ internal static class DataApiEndpoints
         string pattern,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters,
-        FormatCatalog formats,
+        AppliedSchemaView applied,
         AlvoDataApiConventions conventions)
     {
         Map(endpoints.MapPost, DataApiEndpointKind.BatchCreate);
@@ -141,7 +144,7 @@ internal static class DataApiEndpoints
                         IAlvoContextAccessor caller,
                         CancellationToken ct) =>
                     ProblemResultFactory.GuardAsync(() =>
-                        BatchAsync(http, entity, kind, options, formats, data, policies, caller, filters, ct)))
+                        BatchAsync(http, entity.Name, kind, options, applied, data, policies, caller, filters, ct)))
                 .Protect(entity, kind, filters, conventions);
     }
 
@@ -160,10 +163,10 @@ internal static class DataApiEndpoints
     /// </para>
     /// </remarks>
     /// <param name="http">The request.</param>
-    /// <param name="entity">The entity being written.</param>
+    /// <param name="entityName">The entity being written, as its route names it.</param>
     /// <param name="kind">Which batch verb this is.</param>
     /// <param name="options">The API options the bounds come from.</param>
-    /// <param name="formats">The applied descriptor's compiled field formats.</param>
+    /// <param name="applied">The applied schema the entity's fields and formats are read from.</param>
     /// <param name="data">The store.</param>
     /// <param name="policies">The policy engine.</param>
     /// <param name="caller">The caller accessor.</param>
@@ -171,10 +174,10 @@ internal static class DataApiEndpoints
     /// <param name="ct">A token to cancel the operation.</param>
     private static async Task<IResult> BatchAsync(
         HttpContext http,
-        EntitySchema entity,
+        string entityName,
         DataApiEndpointKind kind,
         AlvoApiOptions options,
-        FormatCatalog formats,
+        AppliedSchemaView applied,
         IAlvoData data,
         IPolicyEngine policies,
         IAlvoContextAccessor caller,
@@ -182,7 +185,7 @@ internal static class DataApiEndpoints
         CancellationToken ct)
     {
         var context = Caller(caller);
-        var decision = EnsureOperationIsAllowed(policies, entity.Name, kind.ToDataOperation(), context);
+        var (decision, (entity, formats)) = Allowed(applied, policies, entityName, kind.ToDataOperation(), context);
 
         if (JsonContentType.Refuse(http.Request) is { } unsupported)
         {
@@ -285,6 +288,7 @@ internal static class DataApiEndpoints
         string pattern,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters,
+        AppliedSchemaView applied,
         AlvoDataApiConventions conventions) =>
         endpoints.MapGet(pattern, (
                     HttpContext http,
@@ -295,11 +299,11 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    var decision = EnsureOperationIsAllowed(
-                        policies, entity.Name, DataApiEndpointKind.List.ToDataOperation(), context);
+                    var (decision, current) = Allowed(
+                        applied, policies, entity.Name, DataApiEndpointKind.List.ToDataOperation(), context);
 
                     return await PageAsync(
-                        http, data, entity, options, decision, http.Request.Query, context, ct)
+                        http, data, current.Schema, options, decision, http.Request.Query, context, ct)
                         .ConfigureAwait(false);
                 }))
             .Protect(entity, DataApiEndpointKind.List, filters, conventions);
@@ -340,6 +344,7 @@ internal static class DataApiEndpoints
         string pattern,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters,
+        AppliedSchemaView applied,
         AlvoDataApiConventions conventions) =>
         endpoints.MapPost(pattern, (
                     HttpContext http,
@@ -350,8 +355,8 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    var decision = EnsureOperationIsAllowed(
-                        policies, entity.Name, DataApiEndpointKind.Query.ToDataOperation(), context);
+                    var (decision, current) = Allowed(
+                        applied, policies, entity.Name, DataApiEndpointKind.Query.ToDataOperation(), context);
 
                     if (JsonContentType.Refuse(http.Request) is { } unsupported)
                     {
@@ -364,7 +369,7 @@ internal static class DataApiEndpoints
                         return ProblemResultFactory.MalformedQuery(body.Violations);
                     }
 
-                    return await PageAsync(http, data, entity, options, decision, parameters, context, ct)
+                    return await PageAsync(http, data, current.Schema, options, decision, parameters, context, ct)
                         .ConfigureAwait(false);
                 }))
             .Protect(entity, DataApiEndpointKind.Query, filters, conventions);
@@ -450,6 +455,7 @@ internal static class DataApiEndpoints
         EntitySchema entity,
         string pattern,
         AlvoContextFilterFactory filters,
+        AppliedSchemaView applied,
         AlvoDataApiConventions conventions) =>
         endpoints.MapGet(pattern, (
                     Guid id,
@@ -477,9 +483,11 @@ internal static class DataApiEndpoints
 
                     // A row the caller's policy excludes reads exactly like one that was never there, so
                     // this 404 is the same 404 AlvoRecordNotFoundException produces.
+                    // Read after the port call and from the current revision, like every other route's fields:
+                    // whether the row carries an entity tag is a property of the entity's traits as applied now.
                     return record is null
                         ? ProblemResultFactory.NotFound()
-                        : Representation(http.Request, record, entity);
+                        : Representation(http.Request, record, applied.Current.Entity(entity.Name).Schema);
                 }))
             .Protect(entity, DataApiEndpointKind.Get, filters, conventions);
 
@@ -489,7 +497,7 @@ internal static class DataApiEndpoints
         string pattern,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters,
-        FormatCatalog formats,
+        AppliedSchemaView applied,
         AlvoDataApiConventions conventions) =>
         endpoints.MapPost(pattern, (
                     HttpContext http,
@@ -500,8 +508,8 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    var decision = EnsureOperationIsAllowed(
-                        policies, entity.Name, DataApiEndpointKind.Create.ToDataOperation(), context);
+                    var (decision, current) = Allowed(
+                        applied, policies, entity.Name, DataApiEndpointKind.Create.ToDataOperation(), context);
 
                     if (JsonContentType.Refuse(http.Request) is { } unsupported)
                     {
@@ -512,7 +520,7 @@ internal static class DataApiEndpoints
                     var key = IdempotencyKey(http.Request, context, options);
 
                     var (body, violations) = await ReadAndValidateAsync(
-                        http, entity, options, decision, isCreate: true, formats, data, context, ct)
+                        http, current, options, decision, isCreate: true, data, context, ct)
                         .ConfigureAwait(false);
                     if (violations.Count > 0)
                     {
@@ -523,7 +531,7 @@ internal static class DataApiEndpoints
                         key, http.Request.Method, entity, id: null, precondition: null, body.Document);
                     var record = await data.CreateAsync(entity.Name, body.Values, context, token, ct)
                         .ConfigureAwait(false);
-                    return Created(pattern, Echoed(record, caller, entity, filters), entity);
+                    return Created(pattern, Echoed(record, caller, entity, filters), current.Schema);
                 }))
             .Protect(entity, DataApiEndpointKind.Create, filters, conventions);
 
@@ -549,7 +557,7 @@ internal static class DataApiEndpoints
         string collection,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters,
-        FormatCatalog formats,
+        AppliedSchemaView applied,
         AlvoDataApiConventions conventions) =>
         endpoints.MapPut(pattern, (
                     Guid id,
@@ -561,8 +569,11 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    var creating = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Create, context);
-                    var decision = EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Update, context);
+                    var ((creating, decision), current) = applied.Decide(
+                        entity.Name,
+                        () => (
+                            EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Create, context),
+                            EnsureOperationIsAllowed(policies, entity.Name, DataOperation.Update, context)));
 
                     if (JsonContentType.Refuse(http.Request) is { } unsupported)
                     {
@@ -573,7 +584,7 @@ internal static class DataApiEndpoints
                     var key = IdempotencyKey(http.Request, context, options);
 
                     var (body, violations) = await ReadAndValidateAsync(
-                        http, entity, options, decision, isCreate: true, formats, data, context, ct,
+                        http, current, options, decision, isCreate: true, data, context, ct,
                         alsoFrozenBy: creating)
                         .ConfigureAwait(false);
                     if (violations.Count > 0)
@@ -588,7 +599,9 @@ internal static class DataApiEndpoints
                         .ConfigureAwait(false);
 
                     var echoed = Echoed(result.Row, caller, entity, filters);
-                    return result.Created ? Created(collection, echoed, entity) : Row(echoed, entity);
+                    return result.Created
+                        ? Created(collection, echoed, current.Schema)
+                        : Row(echoed, current.Schema);
                 }))
             .Protect(entity, DataApiEndpointKind.Replace, filters, conventions);
 
@@ -598,7 +611,7 @@ internal static class DataApiEndpoints
         string pattern,
         AlvoApiOptions options,
         AlvoContextFilterFactory filters,
-        FormatCatalog formats,
+        AppliedSchemaView applied,
         AlvoDataApiConventions conventions) =>
         endpoints.MapPatch(pattern, (
                     Guid id,
@@ -610,8 +623,8 @@ internal static class DataApiEndpoints
                 ProblemResultFactory.GuardAsync(async () =>
                 {
                     var context = Caller(caller);
-                    var decision = EnsureOperationIsAllowed(
-                        policies, entity.Name, DataApiEndpointKind.Update.ToDataOperation(), context);
+                    var (decision, current) = Allowed(
+                        applied, policies, entity.Name, DataApiEndpointKind.Update.ToDataOperation(), context);
 
                     if (JsonContentType.Refuse(http.Request) is { } unsupported)
                     {
@@ -622,7 +635,7 @@ internal static class DataApiEndpoints
                     var key = IdempotencyKey(http.Request, context, options);
 
                     var (body, violations) = await ReadAndValidateAsync(
-                        http, entity, options, decision, isCreate: false, formats, data, context, ct)
+                        http, current, options, decision, isCreate: false, data, context, ct)
                         .ConfigureAwait(false);
                     if (violations.Count > 0)
                     {
@@ -634,7 +647,7 @@ internal static class DataApiEndpoints
                     var record = await data
                         .UpdateAsync(entity.Name, id, body.Values, context, precondition, token, ct)
                         .ConfigureAwait(false);
-                    return Row(Echoed(record, caller, entity, filters), entity);
+                    return Row(Echoed(record, caller, entity, filters), current.Schema);
                 }))
             .Protect(entity, DataApiEndpointKind.Update, filters, conventions);
 
@@ -838,6 +851,31 @@ internal static class DataApiEndpoints
     }
 
     /// <summary>
+    /// <see cref="EnsureOperationIsAllowed"/>, plus the entity's fields and formats from the <b>same</b> applied
+    /// revision the decision was taken against.
+    /// </summary>
+    /// <remarks>
+    /// Every route that reads a field resolves through here rather than through the <see cref="EntitySchema"/>
+    /// it was mapped with: a runtime apply changes the fields of an entity whose route already exists, and a
+    /// request judged by today's rules against the boot-time field set is the split #353 was.
+    /// <see cref="AppliedSchemaView.Decide{TDecision}"/> carries why the two reads are taken as one.
+    /// </remarks>
+    /// <param name="applied">The applied schema.</param>
+    /// <param name="policies">The policy engine.</param>
+    /// <param name="entity">The entity the route serves.</param>
+    /// <param name="operation">The operation the route is gated as.</param>
+    /// <param name="context">The caller.</param>
+    /// <returns>The allow decision and the entity as the same revision declares it.</returns>
+    /// <exception cref="AlvoAuthorizationException">No policy allows this operation for this caller.</exception>
+    private static (PolicyDecision Decision, AppliedEntity Entity) Allowed(
+        AppliedSchemaView applied,
+        IPolicyEngine policies,
+        string entity,
+        DataOperation operation,
+        AlvoContext context) =>
+        applied.Decide(entity, () => EnsureOperationIsAllowed(policies, entity, operation, context));
+
+    /// <summary>
     /// Reads the request body and validates it against the entity's declared shape, returning what the port
     /// would be called with plus <b>every</b> reason it must not be.
     /// </summary>
@@ -859,18 +897,17 @@ internal static class DataApiEndpoints
     private static async Task<(JsonPayloadReader.Payload Body, IReadOnlyList<AlvoViolation> Violations)>
         ReadAndValidateAsync(
             HttpContext http,
-            EntitySchema entity,
+            AppliedEntity entity,
             AlvoApiOptions options,
             PolicyDecision decision,
             bool isCreate,
-            FormatCatalog formats,
             IAlvoData data,
             AlvoContext context,
             CancellationToken ct,
             PolicyDecision? alsoFrozenBy = null)
     {
         var payload = await JsonPayloadReader
-            .ReadAsync(http.Request, entity, options, ct).ConfigureAwait(false);
+            .ReadAsync(http.Request, entity.Schema, options, ct).ConfigureAwait(false);
         if (!payload.BoundAsAnObject)
         {
             return (payload, payload.Violations);
@@ -878,12 +915,12 @@ internal static class DataApiEndpoints
 
         var validated = await RecordValidator.ValidateAsync(
             new RecordValidationRequest(
-                entity,
+                entity.Schema,
                 payload.Values,
                 isCreate,
                 FrozenByEither(decision, alsoFrozenBy),
                 RefusedFields(payload.Violations),
-                formats,
+                entity.Formats,
                 data,
                 context),
             ct).ConfigureAwait(false);

@@ -122,6 +122,33 @@ public sealed class RuntimeSchemaServiceTests
         reverted.DescriptorJson.ShouldBe(TasksV1);
     }
 
+    /// <summary>
+    /// A rollback publishes a <see cref="SchemaModel"/> instance never published before, even when the store hands
+    /// back the very instance an earlier revision published.
+    /// </summary>
+    /// <remarks>
+    /// The Data API keys its "one revision per request" check on the published instance (<c>AppliedSchemaView</c>),
+    /// so republishing an old instance is an ABA: a decision taken against revision 2 would pass the check against
+    /// revision 1's fields because the instance before and after it is the same object.
+    /// <c>InMemoryDescriptorVersionStore</c> returns the stored instance, which is what makes this reachable.
+    /// </remarks>
+    [Fact]
+    public async Task Rollback_publishes_a_schema_instance_no_earlier_revision_published()
+    {
+        var ct = TestContext.Current.CancellationToken;
+        var world = RuntimeSchemaWorld.Empty();
+        await world.Service.ApplyAsync(RuntimeSchemaWorld.Project, TasksV1, 0, new MigrationOptions(), ct);
+        var first = world.PolicyCatalogs.GetSchema();
+        await world.Service.ApplyAsync(RuntimeSchemaWorld.Project, TasksV2, 1, new MigrationOptions(), ct);
+
+        await world.Service.RollbackAsync(
+            RuntimeSchemaWorld.Project, targetRevision: 1, new MigrationOptions { AllowDestructive = true }, ct);
+
+        var republished = world.PolicyCatalogs.GetSchema();
+        republished.ShouldNotBeSameAs(first, "republishing an old instance would let a stale decision pass");
+        republished.Entities.ShouldBe(first.Entities, "it is the same schema, only a fresh instance of it");
+    }
+
     [Fact]
     public async Task Rollback_without_AllowDestructive_is_refused_when_destructive()
     {

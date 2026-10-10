@@ -37,7 +37,7 @@
 - `src/MMLib.Alvo.Host` — the standalone host (spec §2.14 mode 1): a `WebApplication`
   that turns a mounted project descriptor into a running backend, plus Scalar as its
   docs UI. **Earned by rule (c)** — a different distribution: it ships as the
-  `mmlib/alvo` container image, not as a NuGet package, so it is
+  `ghcr.io/burgyn/alvo` container image, not as a NuGet package, so it is
   `IsPackable=false`. Rule (a) applies to its Scalar dependency as well: a docs UI is
   a hosting decision, and most embedded consumers do not want the package. It is the
   only project allowed to reference more than one `MMLib.Alvo.Data.*` provider — it
