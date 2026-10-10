@@ -59,7 +59,7 @@ How Alvo answers the same questions as the platforms closest to it:
 |---|---|---|---|---|---|
 | **Alvo** | .NET: a Docker image, or a library in your host | CEL compiled to SQL predicates, inside the database query | one JSON descriptor | C# functions, endpoints and providers in the embedded mode | yes, in an ASP.NET Core app |
 | **Supabase** | about seven services around PostgreSQL (gateway, auth, PostgREST, realtime, storage, functions, studio) | PostgreSQL row-level security policies, in the database | SQL: schema, policies and migrations | a community C# client; server-side logic in Deno edge functions | no |
-| **PocketBase** | a single Go binary over SQLite | API rules per collection and operation, in the application | collections with their API rules | no; extended in Go or with JavaScript hooks | yes, in a Go app |
+| **PocketBase** | a single Go binary over SQLite | API rules per collection and operation, in PocketBase's filter syntax, applied as a filter on the record query (superusers bypass them) | collections with their API rules | no; extended in Go or with JavaScript hooks | yes, in a Go app |
 | **Hand-written ASP.NET Core** | your own .NET app | a check in each endpoint, written by you | C# code | everything is .NET | it is your app |
 
 ## Status
