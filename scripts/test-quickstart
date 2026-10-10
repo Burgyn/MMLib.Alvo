@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# test-quickstart — the no-clone quick start, as a reader would run it, against a given image.
+#
+# In NO ring, like scripts/test-e2e and for the same reason: it starts a multi-service stack.
+# .github/workflows/image.yml runs it over the linux/amd64 build of a commit and publishes that commit
+# (rebuilt for amd64 + arm64) only if it passed; a human runs the same thing with
+#
+#   docker build -f src/MMLib.Alvo.Host/Dockerfile -t alvo:local .
+#   ALVO_IMAGE=alvo:local scripts/test-quickstart
+#
+# What it proves, each against docker-compose.quickstart.yml and nothing else from the repository:
+#   - the stack reaches /health/ready (the descriptor in the IMAGE was found and applied — there is
+#     no bind mount in that file, so a missing example fails here);
+#   - the demo key authenticates (GET /api/owners is 200 with it) and default-deny holds without one
+#     (an anonymous POST /api/owners is refused);
+#   - /scalar and /admin answer, and the bootstrap administrator signs in to the dashboard with the
+#     password compose handed over as a secret file.
+#
+# Requires: docker (compose v2), curl, openssl. Always tears the stack down, volumes included.
+set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$DIR/.." && pwd)"
+
+: "${ALVO_IMAGE:?set ALVO_IMAGE to the image under test (e.g. a local build or ghcr.io/burgyn/alvo:edge)}"
+export ALVO_IMAGE
+export ALVO_DEMO_KEY_SECRET="${ALVO_DEMO_KEY_SECRET:-$(openssl rand -hex 16)}"
+export ALVO_ADMIN_PASSWORD="${ALVO_ADMIN_PASSWORD:-$(openssl rand -hex 12)}"
+admin_email="${ALVO_ADMIN_EMAIL:-admin@alvo.local}"
+
+base="http://127.0.0.1:8080"
+# Its own project name: the file's own (alvo-quickstart) is the one a reader's stack runs under, and the
+# `down --volumes` below would otherwise delete that reader's database. Port 8080 is still shared, so a
+# running quick start makes this fail loudly at `up` instead of losing data.
+compose=(docker compose -p alvo-quickstart-test -f "$ROOT/docker-compose.quickstart.yml")
+jar="$(mktemp -d)"
+
+say() { printf '[quickstart] %s\n' "$*"; }
+fail() { printf '[quickstart] FAIL: %s\n' "$*" >&2; exit 1; }
+
+teardown() {
+  local status=$?
+  if [ "$status" -ne 0 ]; then
+    "${compose[@]}" logs --no-color alvo >&2 || true
+  fi
+  "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+  rm -rf "$jar"
+  exit "$status"
+}
+trap teardown EXIT
+
+status_of() { curl -sS -o /dev/null -w '%{http_code}' "$@"; }
+
+expect() {
+  local want="$1" what="$2"; shift 2
+  local got
+  got="$(status_of "$@" || true)"
+  [ "$got" = "$want" ] || fail "$what: expected $want, got $got"
+  say "$what: $got"
+}
+
+say "image: $ALVO_IMAGE"
+"${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+"${compose[@]}" up --wait --wait-timeout 120
+
+expect 200 "GET /health/ready" "$base/health/ready"
+expect 200 "GET /api/owners with the demo key" "$base/api/owners" -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET"
+# A WRITE, not a read: an anonymous list is an honest 200 with zero rows (the rules filter it), so it
+# would prove nothing about default-deny. An anonymous create has to be refused.
+anonymous="$(status_of -X POST "$base/api/owners" -H 'Content-Type: application/json' -d '{"name":"Quickstart"}')"
+case "$anonymous" in
+  2??) fail "POST /api/owners without a key answered $anonymous — default-deny is not holding" ;;
+  *) say "POST /api/owners without a key: $anonymous" ;;
+esac
+expect 200 "GET /scalar" -L "$base/scalar"
+curl -fsS -c "$jar/cookies" -o "$jar/sign-in.html" "$base/admin/sign-in" || fail "GET /admin/sign-in did not answer 2xx"
+say "GET /admin/sign-in: 200"
+
+# The dashboard sign-in, the way a browser does it: the antiforgery token from the form, then a real
+# form post. Both outcomes answer 302 — a failed sign-in redirects back to the form — so the
+# alvo.session cookie is the signed-in evidence, not the status (checked: a wrong password fails on it).
+token="$(sed -n 's/.*name="__RequestVerificationToken"[^>]*value="\([^"]*\)".*/\1/p' "$jar/sign-in.html" | head -n 1 || true)"
+[ -n "$token" ] || fail "the sign-in page carries no antiforgery token"
+expect 302 "POST /admin/sign-in/submit as $admin_email" -b "$jar/cookies" -c "$jar/cookies" \
+  --data-urlencode "__RequestVerificationToken=$token" \
+  --data-urlencode "email=$admin_email" \
+  --data-urlencode "password=$ALVO_ADMIN_PASSWORD" \
+  "$base/admin/sign-in/submit"
+grep -q 'alvo.session' "$jar/cookies" || fail "the sign-in answered 302 but set no alvo.session cookie"
+expect 200 "GET /admin signed in" -b "$jar/cookies" "$base/admin"
+
+say "OK"

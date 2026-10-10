@@ -10,7 +10,25 @@ The full delivery strategy and technical spec live in
 [`docs/product/alvo-specifikacia.md`](docs/product/alvo-specifikacia.md); the domain analysis
 behind it is in [`docs/product/baas-analyza.md`](docs/product/baas-analyza.md).
 
-## Run the demo backend (standalone)
+## Quick start — no clone
+
+One compose file, the published image (`ghcr.io/burgyn/alvo`, amd64 + arm64) and PostgreSQL:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/docker-compose.quickstart.yml
+export ALVO_DEMO_KEY_SECRET="$(openssl rand -hex 16)" ALVO_ADMIN_PASSWORD="$(openssl rand -hex 12)"
+docker compose -f docker-compose.quickstart.yml up --wait --wait-timeout 90
+curl -sS http://localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET"
+```
+
+API reference at <http://localhost:8080/scalar>; the dashboard at <http://localhost:8080/admin>, signed in as
+`admin@alvo.local` with `$ALVO_ADMIN_PASSWORD`. It serves the `vehicle-registry` example shipped inside the
+image. `ALVO_DESCRIPTOR` points it at another shipped example or at your own file; the demo key then
+still authenticates, but field-service needs a tenant on it and your own roles need adding — the compose
+file's header lists exactly what to change. `:edge`
+follows `main`; set `ALVO_IMAGE=ghcr.io/burgyn/alvo:<version>` for a release.
+
+## Run the demo backend from a clone (standalone)
 
 ```bash
 export ALVO_DEMO_KEY_SECRET="$(openssl rand -hex 16)"

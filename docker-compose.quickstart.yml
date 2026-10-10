@@ -1,0 +1,110 @@
+# Alvo in one file: the published standalone image over PostgreSQL, with nothing else on your disk.
+#
+#   curl -fsSLO https://raw.githubusercontent.com/Burgyn/MMLib.Alvo/main/docker-compose.quickstart.yml
+#   export ALVO_DEMO_KEY_SECRET="$(openssl rand -hex 16)"
+#   export ALVO_ADMIN_PASSWORD="$(openssl rand -hex 12)"
+#   docker compose -f docker-compose.quickstart.yml up --wait --wait-timeout 90
+#
+#   curl -sS http://localhost:8080/api/owners -H "X-Alvo-Api-Key: demo.$ALVO_DEMO_KEY_SECRET"
+#   API reference: http://localhost:8080/scalar
+#   Dashboard:     http://localhost:8080/admin  (admin@alvo.local / $ALVO_ADMIN_PASSWORD)
+#
+#   docker compose -f docker-compose.quickstart.yml down --volumes
+#
+# The image ships no credential of its own (§2.14: "image nikdy nedodáva prednastavené prihlásenie"),
+# so both secrets come from your shell: ALVO_DEMO_KEY_SECRET is required with compose's `:?` form, the
+# same contract as the repository's docker-compose.yml, and ALVO_ADMIN_PASSWORD (15 characters or
+# more) is required by the secret that carries it. Every compose command interpolates this file, so
+# keep ALVO_DEMO_KEY_SECRET exported (or in a .env next to the file) for `down` as well.
+#
+# Which backend runs is ONE variable, ALVO_DESCRIPTOR — the descriptor's path inside the container.
+# The demo key's roles are `admin` and `authenticated`, the two built-in roles every descriptor knows
+# (a key naming a role the running descriptor does not declare is refused whole, with a bare 401 —
+# #131), so the key authenticates against each of these. What it may then do is the descriptor's rules:
+#
+#   * an example shipped in the image (the default is the first):
+#       /alvo/examples/vehicle-registry/vehicles.alvo.json   owners, vehicles, inspections — works as is
+#       /alvo/examples/simple-tasks/tasks.alvo.json          projects and tasks — works as is
+#       /alvo/examples/bike-workshop/bike-workshop.alvo.json the dashboard's demo workshop — works as is
+#       /alvo/examples/field-service/field-service.alvo.json two tenants. Without a tenant on the key only
+#           the global `regions` answer; `customers` and `work_orders` are 403. Add under `environment:`
+#             Alvo__Auth__DevKeys__0__Tenant: 7e9a1c00-0001-4000-8000-00000000000a
+#           (any UUID; that one is the repository's "north" tenant)
+#   * your own file: uncomment the `volumes:` entry under `alvo` below, then
+#       ALVO_DESCRIPTOR=/alvo/descriptor.json docker compose -f docker-compose.quickstart.yml up --wait
+#     A rule that names one of YOUR roles needs that role on a key: add a Roles__2 line naming a role
+#     your `auth.roles` declares. The dashboard does not issue keys.
+#
+# ALVO_IMAGE replaces the image, e.g. a release tag (ghcr.io/burgyn/alvo:0.1) instead of the moving
+# `edge` build of main, or a local build — scripts/test-quickstart drives this very file that way, and
+# .github/workflows/image.yml runs it over every image it builds.
+name: alvo-quickstart
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    # Not published: only the alvo service reaches it, over the stack's own network, so the fixed
+    # password below guards nothing an outside caller can get to.
+    environment:
+      POSTGRES_DB: alvo
+      POSTGRES_USER: alvo
+      POSTGRES_PASSWORD: alvo
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U alvo -d alvo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  alvo:
+    image: ${ALVO_IMAGE:-ghcr.io/burgyn/alvo:edge}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      Alvo__DescriptorPath: ${ALVO_DESCRIPTOR:-/alvo/examples/vehicle-registry/vehicles.alvo.json}
+      Alvo__Database__Provider: postgresql
+      ConnectionStrings__Alvo: Host=postgres;Port=5432;Database=alvo;Username=alvo;Password=alvo
+      Alvo__Auth__DevKeys__0__KeyId: demo
+      Alvo__Auth__DevKeys__0__Secret: ${ALVO_DEMO_KEY_SECRET:?set ALVO_DEMO_KEY_SECRET before starting the stack}
+      Alvo__Auth__DevKeys__0__User: 6f9619ff-8b86-d011-b42d-00c04fc964ff
+      Alvo__Auth__DevKeys__0__Roles__0: admin
+      Alvo__Auth__DevKeys__0__Roles__1: authenticated
+      Alvo__Auth__DevKeys__0__Scopes__0: "*:read"
+      Alvo__Auth__DevKeys__0__Scopes__1: "*:write"
+      # The dashboard's bootstrap administrator. The host takes the password only as a mounted FILE —
+      # an environment variable is readable from `docker inspect` and a process listing — so compose
+      # turns ALVO_ADMIN_PASSWORD into one (the `secrets:` block at the bottom) and the host reads it
+      # from there. Created on the first start against an empty database only.
+      # The demo key's secret above stays an environment variable on purpose: dev keys are bound from
+      # configuration only (no file form), exactly as in docker-compose.yml, and a throwaway demo key on a
+      # loopback-only port is a different risk from a human's long-lived password.
+      Alvo__Admin__BootstrapEmail: ${ALVO_ADMIN_EMAIL:-admin@alvo.local}
+      Alvo__Admin__BootstrapPasswordFile: /run/secrets/alvo_admin_password
+    secrets:
+      - alvo_admin_password
+    # Your own descriptor instead of a shipped example (see the header): mount it read-only and set
+    # ALVO_DESCRIPTOR=/alvo/descriptor.json.
+    # volumes:
+    #   - ./my-backend.alvo.json:/alvo/descriptor.json:ro
+    #
+    # Loopback only. "8080:8080" binds 0.0.0.0, and Docker's DOCKER-USER iptables chain sits ahead of
+    # UFW — so on a cloud VM it would publish an admin + *:read + *:write key to the internet, with
+    # /openapi/v1.json and /scalar anonymous to describe the surface.
+    ports:
+      - "127.0.0.1:8080:8080"
+    # /health/ready, not /health/live: readiness is 503 until the boot has applied the descriptor and
+    # primed the policy catalog, which is what `up --wait` should wait for.
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health/ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 45
+
+volumes:
+  postgres-data:
+
+secrets:
+  alvo_admin_password:
+    environment: ALVO_ADMIN_PASSWORD

@@ -34,7 +34,7 @@ internal static class AlvoIdentityConfiguration
     internal static string NoPasswordFile(string email) => Sentence(
         $"Alvo cannot start: a bootstrap administrator '{email}' is configured with no password file, "
             + "so the account could never be seeded.",
-        "  Mount one:  docker run -v ./admin-password:/run/secrets/alvo-admin mmlib/alvo",
+        "  Mount one:  docker run -v ./admin-password:/run/secrets/alvo-admin ghcr.io/burgyn/alvo",
         $"  And set:    {PasswordFileVariable}=/run/secrets/alvo-admin",
         $"  Or unset:   {EmailVariable}, for a deployment with no bootstrap administrator.");
 
@@ -61,7 +61,7 @@ internal static class AlvoIdentityConfiguration
     /// <returns>The refusal.</returns>
     internal static string NoPasswordFileAt(string passwordFile) => Sentence(
         $"Alvo cannot start: no bootstrap password file at {passwordFile}.",
-        $"  Mount one:  docker run -v ./admin-password:{passwordFile} mmlib/alvo",
+        $"  Mount one:  docker run -v ./admin-password:{passwordFile} ghcr.io/burgyn/alvo",
         $"  Or set:     {PasswordFileVariable} to where the secret is mounted.");
 
     /// <summary>The refusal for an address nothing could ever sign in with.</summary>
