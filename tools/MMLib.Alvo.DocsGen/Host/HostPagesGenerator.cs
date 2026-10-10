@@ -19,7 +19,7 @@ internal sealed partial class HostPagesGenerator : IPageGenerator
 
     private const string DataApiDocumentPath = "openapi/data-api.json";
 
-    private static readonly JsonSerializerOptions _indented = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions _indented = new() { WriteIndented = true, NewLine = "\n" };
 
     public async Task<IReadOnlyList<GeneratedPage>> GenerateAsync(DocsGenContext context, CancellationToken ct)
     {

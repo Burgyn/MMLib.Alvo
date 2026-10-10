@@ -10,7 +10,7 @@ namespace MMLib.Alvo.DocsGen.Llms;
 
 internal static partial class ContentBody
 {
-    private static readonly JsonSerializerOptions _indented = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    private static readonly JsonSerializerOptions _indented = new() { WriteIndented = true, NewLine = "\n", Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     private static readonly Dictionary<string, string> _languages = new(StringComparer.Ordinal)
     {

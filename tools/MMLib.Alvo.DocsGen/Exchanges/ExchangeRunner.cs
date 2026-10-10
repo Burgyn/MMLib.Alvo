@@ -74,7 +74,7 @@ internal static class ExchangeRunner
             return step.Body?.ToJsonString(ExchangeRenderer.Compact);
         }
 
-        var text = (await File.ReadAllTextAsync(Path.Combine(repoRoot, step.BodyFile), ct).ConfigureAwait(false)).TrimEnd();
+        var text = (await File.ReadAllTextAsync(Path.Combine(repoRoot, step.BodyFile), ct).ConfigureAwait(false)).Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd();
         return step.BodyFileAs is null ? text : Wrapped(step.BodyFileAs, text, step.Body).ToJsonString(ExchangeRenderer.Compact);
     }
 

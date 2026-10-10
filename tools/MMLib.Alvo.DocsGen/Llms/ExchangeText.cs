@@ -12,7 +12,7 @@ namespace MMLib.Alvo.DocsGen.Llms;
 /// </summary>
 internal static class ExchangeText
 {
-    private static readonly JsonSerializerOptions _indented = new() { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    private static readonly JsonSerializerOptions _indented = new() { WriteIndented = true, NewLine = "\n", Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     internal static string Render(string attrs, string generatedDir)
     {
