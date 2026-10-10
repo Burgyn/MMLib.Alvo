@@ -650,6 +650,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A rollup field is no longer caller-writable** (#342). A payload naming a `rollup` field was accepted and
+  stored: `PATCH /api/invoices/{id}` with `{"net_total": 1}` answered `200`, kept the `1`, and a computed field
+  reading the rollup followed the forged value until a later child write recomputed it. Every write path now
+  refuses it exactly like a write to a `computed` field — `403` with problem type `forbidden`, the detail naming
+  the field — on `POST`, `PUT` (both branches), `PATCH` and every batch row (code `forbidden` at
+  `/rows/{index}`), on SQLite and PostgreSQL alike; an explicit `null` is refused too. The framework's own
+  recompute is unaffected. A client that echoed a read row back into a write must now drop its rollup fields,
+  as it already had to for computed ones.
+
 - **A `date` field now compares in memory** (#317). The CEL interpreter did not normalise a `DateOnly`, so every
   in-memory comparison involving a `date` field answered `false`. A `date` now compares as **midnight UTC**, the same
   rule the database uses. Guards that were silently dead start working on upgrade, in both directions:
