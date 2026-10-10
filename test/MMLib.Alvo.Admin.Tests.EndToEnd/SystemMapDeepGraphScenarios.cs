@@ -48,7 +48,7 @@ public sealed class SystemMapDeepGraphScenarios(AdminWorld world) : IClassFixtur
         await session.Page.FillAsync("#import-json", Descriptors.ComplexCrm);
         await session.Button("Load it into the working copy").ClickAsync();
 
-        await session.Page.WaitForURLAsync("**/changes**");
+        await session.Page.WaitForAddressAsync("**/changes**");
         (await session.Page.GetByTestId("import-replace-confirm").CountAsync()).ShouldBe(0, "a clean copy is not asked about");
     }
 

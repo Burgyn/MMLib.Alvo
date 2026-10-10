@@ -666,6 +666,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A runtime apply now changes the Data API's fields at once, not after a restart** (#353). Every generated
+  endpoint used to keep the entity's fields from the moment its route was built. Rules followed a
+  `PUT …/descriptor` straight away, but the body reader, the validator and the query parser did not:
+  - a field added at runtime was refused with `422 unknown-field` until the host restarted;
+  - a removed field was let through here and then refused by the data port with a `403`;
+  - a shorter `maxLength` or a newly `required` field was not enforced at all.
+
+  Each request now reads the entity's fields, facets and formats from the revision its policy decision was
+  taken against. If an apply lands between the two reads, the decision is taken again. This holds on SQLite
+  and PostgreSQL. Route literals are still fixed at startup, so an entity *added* at runtime still has no
+  route until a restart (#103).
+
+- **A batch `PATCH` stamps `updated_at` and `updated_by`, so its rows get a new `ETag`** (#349). The EF
+  driver's batch update did not apply the audit stamp that the single-row update applies. A batch-updated row
+  kept its old `updated_at` and `updated_by`, so its `ETag` did not change. A later single-row `PATCH` sent
+  with an `If-Match` from before the batch then got `200` instead of `412`, and silently overwrote the
+  batch's change (a lost update). Each batch row is now stamped exactly like a single update, on SQLite and
+  PostgreSQL alike. The stamp is applied after the payload guard and before the hooks and `WITH CHECK`, the
+  same order the single-row path uses. As a result, a hook or an update rule that reads `updated_by` or
+  `updated_at` now sees the stamped values on a batch too. The in-memory reference implementation already
+  stamped; batch create was not affected.
+
+- **Webhook deliveries no longer log the endpoint's URL** (#347, security). `IHttpClientFactory`'s default
+  logging handlers on the named webhook client wrote every delivery's full request URI, path included, at
+  `Information` under `System.Net.Http.HttpClient.MMLib.Alvo.Events.Webhook.*`, and a webhook URL's path is
+  often its only credential (a Slack incoming webhook's is). The library now registers that client with
+  `RemoveAllLoggers()`, so the fix holds in an embedded host as well as the standalone one, with no logging
+  configuration required; the `Logging__LogLevel__System.Net.Http.HttpClient=Warning` workaround is no longer
+  needed. Alvo's own lines still record each attempt by endpoint name. A host that wants transport logging
+  back adds its own logger to the client after `AddAlvo`, and owns its redaction.
+
+- **A rollup field is no longer caller-writable** (#342). A payload naming a `rollup` field was accepted and
+  stored: `PATCH /api/invoices/{id}` with `{"net_total": 1}` answered `200`, kept the `1`, and a computed field
+  reading the rollup followed the forged value until a later child write recomputed it. Every write path now
+  refuses it exactly like a write to a `computed` field — `403` with problem type `forbidden`, the detail naming
+  the field — on `POST`, `PUT` (both branches), `PATCH` and every batch row (code `forbidden` at
+  `/rows/{index}`), on SQLite and PostgreSQL alike; an explicit `null` is refused too. The framework's own
+  recompute is unaffected. A client that echoed a read row back into a write must now drop its rollup fields,
+  as it already had to for computed ones.
+
+- **The dashboard works over PostgreSQL** (#339). Every screen showed *"Something went wrong"*, with EF's
+  *"a second operation was started on this context instance"* on the identity store. A Blazor circuit is one
+  DI scope for as long as the tab is open, and its components initialise concurrently — the overview, the
+  pending bar and the project switcher each resolve the signed-in operator at the same time — so the cookie
+  resolver's membership store shared one `DbContext` between overlapping queries. SQLite hid it, because its
+  reads complete synchronously and never interleave. The resolver now reads the store from a scope of its
+  own on every call, the rule the guarded user administration and the session revalidation already follow.
+  Caller resolution is otherwise unchanged: still re-read on every call, so a disable, a role revoke or a
+  tenant move still takes effect on the operator's next click.
+
 - **A `date` field now compares in memory** (#317). The CEL interpreter did not normalise a `DateOnly`, so every
   in-memory comparison involving a `date` field answered `false`. A `date` now compares as **midnight UTC**, the same
   rule the database uses. Guards that were silently dead start working on upgrade, in both directions:

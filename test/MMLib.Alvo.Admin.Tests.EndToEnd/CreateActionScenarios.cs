@@ -89,7 +89,18 @@ public sealed class CreateActionScenarios(AdminWorld world) : IClassFixture<Admi
             : dialog.GetByTestId(submitTestId);
         (await button.InnerTextAsync()).Trim().ShouldBe(submit);
         await session.WaitForFocusInsideAsync(editor, FocusScope.Dialog);
+        var focusedBefore = await session.FocusedAsync();
         await session.Page.Keyboard.PressAsync("Escape");
-        await dialog.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        try
+        {
+            await dialog.WaitForAsync(new() { State = WaitForSelectorState.Detached });
+        }
+        catch (TimeoutException timeout)
+        {
+            var asking = await session.Page.GetByTestId("editor-discard-question").CountAsync();
+            throw new TimeoutException(
+                $"Escape did not close {editor}. Focus before it was {focusedBefore}, now {await session.FocusedAsync()}; "
+                + $"discard question drawn: {asking > 0}; the sheet says: {await dialog.InnerTextAsync()}", timeout);
+        }
     }
 }

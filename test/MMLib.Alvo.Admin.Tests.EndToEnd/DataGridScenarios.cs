@@ -59,7 +59,7 @@ public sealed class DataGridScenarios(AdminWorld world) : IClassFixture<AdminWor
 
         // --- the name is a link to that customer, opened in its sheet on the customers screen
         await customer.ClickAsync();
-        await session.Page.WaitForURLAsync($"**/admin/data/customers?record={ada}");
+        await session.Page.WaitForAddressAsync($"**/admin/data/customers?record={ada}");
         await session.Page.Locator("#rf-name").WaitForAsync();
         (await session.Page.InputValueAsync("#rf-name")).ShouldBe("Ada Lovelace");
 

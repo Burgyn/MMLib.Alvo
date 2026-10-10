@@ -298,7 +298,7 @@ public sealed class RenameAndOverflowScenarios(AdminWorld world) : IClassFixture
         await session.Dialog("rename-sheet").GetByTestId("rename-save").ClickAsync();
 
         await session.SnackbarAsync("Renamed to service_areas in the working copy");
-        await session.Page.WaitForURLAsync("**/schema/service_areas");
+        await session.Page.WaitForAddressAsync("**/schema/service_areas");
         session.AssertConsoleClean();
     }
 
@@ -367,7 +367,7 @@ public sealed class RenameAndOverflowScenarios(AdminWorld world) : IClassFixture
             null,
             new() { PollingInterval = 100 });
         await session.Page.Keyboard.PressAsync("Enter");
-        await session.Page.WaitForURLAsync("**/data/work_orders");
+        await session.Page.WaitForAddressAsync("**/data/work_orders");
 
         await session.GoAsync("/schema/work_orders");
         await trigger.FocusAsync();

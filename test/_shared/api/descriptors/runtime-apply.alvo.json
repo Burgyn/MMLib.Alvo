@@ -1,0 +1,31 @@
+{
+  "$schema": "https://alvo.dev/schema/v1/project.json",
+  "apiVersion": "alvo.dev/v1",
+  "name": "runtime-apply",
+  "description": "One entity whose fields a runtime apply (PUT .../descriptor) adds, removes, hides, freezes and narrows, so the Data API can be measured following the applied revision without a restart (#353). Every field starts plain and writable; the facts change one at a time.",
+  "auth": {
+    "providers": ["local"],
+    "roles": ["editor"]
+  },
+  "access": {
+    "developer": "'editor' in @user.roles"
+  },
+  "entities": {
+    "tickets": {
+      "description": "A ticket with a field for each kind of change a runtime apply can make.",
+      "fields": {
+        "title": { "type": "string", "required": true, "maxLength": 80 },
+        "notes": { "type": "string", "maxLength": 200 },
+        "secret": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "maxLength": 20 }
+      },
+      "rules": {
+        "list": "true",
+        "get": "true",
+        "create": "true",
+        "update": "true",
+        "delete": "true"
+      }
+    }
+  }
+}

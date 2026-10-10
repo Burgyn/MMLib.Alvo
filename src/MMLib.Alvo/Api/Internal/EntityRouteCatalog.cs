@@ -18,14 +18,18 @@ namespace MMLib.Alvo.Api.Internal;
 /// <c>MapAlvoDataApi</c>.</b> <see cref="AlvoEndpointDataSource"/> reads this once, on its first
 /// enumeration, which is after Alvo's boot has primed the schema and therefore removes the old
 /// obligation to apply the descriptor before mapping. A descriptor applied <em>later still</em> at runtime
-/// (<c>RuntimeSchemaService</c>) changes policy and validation immediately but cannot add a route literal
-/// to a table that has already materialised; F7's dynamic entities will need an endpoint data source that
-/// can change, which is deliberately not built here (#103).
+/// (<c>RuntimeSchemaService</c>) changes policy, fields and validation immediately — every request reads its
+/// entity live, through <see cref="AppliedSchemaView"/> (#353) — but cannot add a route literal to a table
+/// that has already materialised; F7's dynamic entities will need an endpoint data source that can change,
+/// which is deliberately not built here (#103).
 /// </para>
 /// </remarks>
 /// <param name="schema">The applied schema registry — the same instance the policy catalog serves, by construction.</param>
 internal sealed class EntityRouteCatalog(ISchemaRegistry schema)
 {
+    /// <summary>The applied model as it stands now — one read, so a caller can key work on the instance.</summary>
+    internal SchemaModel Schema => schema.GetSchema();
+
     /// <summary>Every entity the applied descriptor declares, in the schema's own order.</summary>
-    internal IReadOnlyList<EntitySchema> Entities => schema.GetSchema().Entities;
+    internal IReadOnlyList<EntitySchema> Entities => Schema.Entities;
 }
