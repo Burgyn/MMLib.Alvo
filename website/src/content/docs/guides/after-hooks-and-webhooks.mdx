@@ -83,6 +83,9 @@ envelope in JSON. This one is pinned by the test suite; an update carries both i
 
 <SourceExcerpt code={envelope} from="specversion" to="specversion" lang="json" title="An entity.vehicles.updated event" wrap />
 
+In this build `authid` is the id of the user the key acts as, not the key's id: the sample's `key-42` is a
+placeholder, and the design note's wording is tracked in [#344](https://github.com/Burgyn/MMLib.Alvo/issues/344).
+
 | Member | What it holds |
 |---|---|
 | `id` | The event's id. Delivery is at least once, so **deduplicate on `id`**: it is the one value that stays the same across retries. |
@@ -148,9 +151,10 @@ Know what a custom event is not, before you build on it:
 - **It carries no tenant.**
 
 :::caution[Known issue in this build]
-The host's HTTP client logging writes each webhook request's full URL, path included, at `Information`, for example
-*Sending HTTP request POST https://ops.example.com/hooks/alvo*. An endpoint whose secret is part of its URL, such as a
-chat service's incoming webhook, puts that secret in your logs. Until it is fixed, set the log level of
+The host's HTTP client logging writes each webhook request's URL at `Information`: the scheme, host and path, for
+example *Sending HTTP request POST https://ops.example.com/hooks/alvo*. The query string is redacted to `?*`, but an
+endpoint whose secret is part of its path, such as a chat service's incoming webhook, puts that secret in your logs
+([#347](https://github.com/Burgyn/MMLib.Alvo/issues/347)). Until it is fixed, set the log level of
 `System.Net.Http.HttpClient` to `Warning`: in the container, the environment variable
 `Logging__LogLevel__System.Net.Http.HttpClient=Warning`.
 :::
@@ -158,7 +162,8 @@ chat service's incoming webhook, puts that secret in your logs. Until it is fixe
 :::caution[Not in this build]
 - **Signing.** No delivery is signed: `secretRef` is not read and no Standard Webhooks `webhook-signature` header is
   sent, so a receiver cannot verify that a request came from Alvo. Put the receiver where only Alvo can reach it, or
-  give it a URL nobody can guess.
+  give it a URL nobody can guess, and lower the HTTP client's log level as in the known issue above
+  ([#347](https://github.com/Burgyn/MMLib.Alvo/issues/347)): until then the URL's path is in your logs.
 - **Projection.** The body is the whole envelope or the whole rendered `payload`; there is no per-endpoint selection
   of fields ([#152](https://github.com/Burgyn/MMLib.Alvo/issues/152)).
 - **Mail.** The only mail provider writes to the log. An embedded host can register its own `IEmailSender`.

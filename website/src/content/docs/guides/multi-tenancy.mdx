@@ -19,8 +19,9 @@ and no request can move a row from one to the other. About fifteen minutes, star
 
 ## Before you start
 
-- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), with `ALVO_AGENT_KEY_SECRET` and
-  `ALVO_ADMIN_KEY_SECRET` exported in this shell.
+- The stack from [Run your own descriptor](/MMLib.Alvo/start-here/run-your-own/), with `ALVO_DEMO_KEY_SECRET`,
+  `ALVO_AGENT_KEY_SECRET` and `ALVO_ADMIN_KEY_SECRET` exported in this shell. Step 1 adds `ALVO_ACME_KEY_SECRET` and
+  `ALVO_GLOBEX_KEY_SECRET`; every compose command needs all five while this page's override is in place.
 - This page adds two keys that each belong to a tenant: `acme` and `globex` (roles `agent`, `authenticated`). It also
   uses `admin`, which belongs to no tenant.
 - [Access rules](/MMLib.Alvo/guides/access-rules/), for how rules filter rows.
@@ -30,7 +31,8 @@ The responses below were captured from a real host when the site was built, so y
 ## 1. Turn tenancy on
 
 A tenant-scoped entity gets a `tenant_id` column, and every read and write of it is limited to the caller's tenant.
-The tenant comes from the API key, never from the request or the descriptor.
+The tenant comes from the API key, never from the request or the descriptor. In an embedded host that calls
+`IAlvoData` from its own endpoints, it comes from the `AlvoContext` the host passes.
 
 <Steps>
 

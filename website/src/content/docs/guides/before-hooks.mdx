@@ -101,7 +101,7 @@ A value a hook writes is checked against its field exactly like a value a caller
 <Exchange name="before-hooks/02-mutate" wrap steps={[2]} />
 
 The refusal is a 403 `forbidden`, not a 422 `validation`, because the caller did not send the field and cannot fix it
-by changing the body. It names the hook, the field and the facet, never the value. To make the value fit, cut it:
+by changing the body. It names the hook, the field and the facet, never the value; for a field that is `hidden`, statically or for some role, it names the hook only, so the refusal does not reveal the field. To make the value fit, cut it:
 `substring(x, 0, math.least(size(x), 40))`, where `x` is the slug expression. A `substring` past the end of the text
 fails the write, which is why the cut needs `math.least`.
 
@@ -111,7 +111,7 @@ Before-hooks run inside the write's own transaction, after the caller's body is 
 on update and delete over the locked row as it was, so `old.` is exactly what will be replaced. After a `mutate`, the
 `create` or `update` rule is checked again over the changed row, so a hook can never place a row the rules refuse;
 a hook may, however, set a field that is read-only for callers. A refusal rolls everything back: no row, no event. A
-hook has no network access and no clock budget; its work is bounded by the expression language, which has no loops.
+hook has no network access and no clock budget; the work of a descriptor's expressions is bounded by the language, which has no loops. A custom function an embedded host registers is host code and not bounded that way.
 [CEL in Alvo](/MMLib.Alvo/concepts/cel/) explains the profiles.
 
 ## Options and variations

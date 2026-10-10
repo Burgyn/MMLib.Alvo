@@ -35,6 +35,12 @@ An entity's `rules` hold one CEL condition per operation: `list`, `get`, `create
 operation without a rule is denied to everyone**, administrators included. A rule reads the caller as `@user.id` and
 `@user.roles`, the caller's tenant as `@tenant.id`, and the row's own fields by name.
 
+:::caution[Rules also judge callers without a key]
+A request without a key is judged by the same rules, as a caller who holds only the `anon` role and has no
+`@user.id`. A rule that tests neither a role nor `@user.id`, such as `status == 'open'`, admits that caller too. Start
+every rule with `'authenticated' in @user.roles` (or a narrower role) unless the data is meant to be public.
+:::
+
 <Steps>
 
 1. Start the stack over this page's first descriptor. The first command **deletes the stack's database**:
@@ -181,7 +187,8 @@ through the Data API with that caller's key. The dashboard's rules screen runs t
 | Anyone signed in | `'authenticated' in @user.roles` | Reference data every caller reads. |
 | Creator only | `created_by == @user.id` | `list`, `get`, `update`, `delete` on an entity with `audit`. |
 | Assigned user | `assignee_id == @user.id` | A `ref` to `users`; also as the `create` rule. |
-| Public or own | `is_public \|\| owner_id == @user.id` | A boolean field read as a condition. |
+| Public to everyone, including no key | `'anon' in @user.roles \|\| 'authenticated' in @user.roles` | Data meant for the open internet; `list` and `get` only. |
+| Public or own | `is_public \|\| owner_id == @user.id` | A boolean field read as a condition. Because it reads `@user.id`, a caller without a key is refused with a 403 even for public rows. |
 | Combined | `created_by == @user.id \|\| 'admin' in @user.roles` | Keep earlier grants by adding a clause with `\|\|`. |
 
 Each rule's slot is in the reference: [`list`](/MMLib.Alvo/reference/descriptor/entities-rules/#entities.rules.list),

@@ -29,7 +29,11 @@ The responses below were captured from a real host when the site was built, so y
 
 A key is configuration, not data: the host reads a fixed list from `Alvo:Auth:DevKeys`, and each entry names the user
 the key acts as, the roles it holds and the scopes it may use. This build has no endpoint that issues or revokes keys,
-so treat it as a development mechanism: the secret lives in the process's configuration.
+so treat it as a development mechanism: the secret lives in the process's configuration, and when it is passed as an
+environment variable it is readable from a process listing and from `docker inspect`. Until a real issuance path
+lands ([#36](https://github.com/Burgyn/MMLib.Alvo/issues/36)) these keys are the only way to call a standalone host,
+so generate every secret, never reuse one across keys or environments, and prefer a configuration source that does
+not show up in `docker inspect`, such as a mounted file or a secret store.
 
 <Steps>
 
@@ -41,6 +45,7 @@ so treat it as a development mechanism: the secret lives in the process's config
 
    <Code code={start.trimEnd()} lang="sh" title="Terminal" frame="terminal" />
 
+   While this override is in place, every compose command reads it, so keep `ALVO_READER_KEY_SECRET` exported too.
    A secret shorter than 32 characters is refused at startup, and the container does not come back.
    `openssl rand -hex 16` produces exactly 32.
 
@@ -56,8 +61,8 @@ Every setting of a key:
 |---|---|
 | `KeyId` | The public half of the key. Unique, and without a `.`, because the header is split at the first `.`. |
 | `Secret` | The private half, at least 32 characters. Generate it; never choose it. |
-| `User` | The id the caller acts as: what a rule reads as `@user.id`, and what the audit columns record. |
-| `Roles` | What a rule tests, as in `'agent' in @user.roles`. Each role must be declared in the descriptor's [`auth.roles`](/MMLib.Alvo/reference/descriptor/auth/#auth.roles) or be built in (`authenticated`, `admin`). `authenticated` is not added for you: list it. |
+| `User` | The id the caller acts as: what a rule reads as `@user.id`, and what the audit columns record. Set it: a key without one has no identity, so a rule that reads `@user.id` refuses it with a 403 and the audit columns record `null`. |
+| `Roles` | What a rule tests, as in `'agent' in @user.roles`. Each role must be declared in the descriptor's [`auth.roles`](/MMLib.Alvo/reference/descriptor/auth/#auth.roles) or be built in (`anon`, `authenticated`, `admin`). `authenticated` is not added for you: list it. |
 | `Scopes` | Which entities the key may read or write, as `<entity\|*>:<read\|write>`. |
 | `Tenant` | The one tenant the key acts in; see [Multi-tenancy](/MMLib.Alvo/guides/multi-tenancy/). |
 | `ExpiresAt` | The instant after which the key is refused. Unset, it never expires. |
