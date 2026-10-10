@@ -31,4 +31,66 @@ jobs:
           # the engine landed; the host's reference became DIRECT in the PR that added the
           # database selector, and dependency-review inspects changed edges, so an existing
           # licence surfaced as a new finding.
-          allow-dependencies-licenses: "pkg:githubactions/actions/checkout, pkg:githubactions/actions/dependency-review-action, pkg:nuget/Npgsql.EntityFrameworkCore.PostgreSQL"
+          #
+          # The npm entries below are the documentation site's build tooling (`website/`,
+          # driven by `website/package-lock.json`). None of them is shipped: no NuGet package
+          # and not the container image (`.dockerignore` excludes `website/` and `tools/`)
+          # contains a byte of them; they run on a CI runner to turn Markdown into static
+          # HTML. Each is named per package, by the same rule as Npgsql above:
+          #   - lightningcss, lightningcss-<platform>: MPL-2.0 (Astro/Vite's CSS minifier).
+          #   - @img/sharp-libvips-<platform>, @img/sharp-win32-<arch>, @img/sharp-wasm32:
+          #     LGPL-3.0-or-later (libvips binaries behind sharp, Astro's image pipeline).
+          #   - lru-cache, sax, common-ancestor-path: BlueOak-1.0.0 (permissive).
+          #   - mdn-data: CC0-1.0 (public-domain CSS data, via css-tree).
+          #   - argparse: Python-2.0 (permissive; js-yaml's CLI parser).
+          #   - tslib: 0BSD; robust-predicates: Unlicense (both public-domain-equivalent).
+          #   - @fortawesome/fontawesome-free: CC-BY-4.0 AND OFL-1.1 AND MIT (the icon
+          #     font mermaid-isomorphic loads into its build-time headless renderer).
+          #   - dompurify: MPL-2.0 OR Apache-2.0 (Mermaid's sanitizer; named in case the
+          #     dependency graph reports only the MPL half).
+          #   - axe-core, @axe-core/playwright: MPL-2.0 (the site's local a11y check only).
+          #   - khroma (no licence field in its manifest; MIT upstream) and pause-stream
+          #     ("MIT,Apache2", not an SPDX expression): would otherwise be "unresolved".
+          allow-dependencies-licenses: >-
+            pkg:githubactions/actions/checkout,
+            pkg:githubactions/actions/dependency-review-action,
+            pkg:nuget/Npgsql.EntityFrameworkCore.PostgreSQL,
+            pkg:npm/lightningcss,
+            pkg:npm/lightningcss-android-arm64,
+            pkg:npm/lightningcss-darwin-arm64,
+            pkg:npm/lightningcss-darwin-x64,
+            pkg:npm/lightningcss-freebsd-x64,
+            pkg:npm/lightningcss-linux-arm-gnueabihf,
+            pkg:npm/lightningcss-linux-arm64-gnu,
+            pkg:npm/lightningcss-linux-arm64-musl,
+            pkg:npm/lightningcss-linux-x64-gnu,
+            pkg:npm/lightningcss-linux-x64-musl,
+            pkg:npm/lightningcss-win32-arm64-msvc,
+            pkg:npm/lightningcss-win32-x64-msvc,
+            pkg:npm/%40img/sharp-libvips-darwin-arm64,
+            pkg:npm/%40img/sharp-libvips-darwin-x64,
+            pkg:npm/%40img/sharp-libvips-linux-arm,
+            pkg:npm/%40img/sharp-libvips-linux-arm64,
+            pkg:npm/%40img/sharp-libvips-linux-ppc64,
+            pkg:npm/%40img/sharp-libvips-linux-riscv64,
+            pkg:npm/%40img/sharp-libvips-linux-s390x,
+            pkg:npm/%40img/sharp-libvips-linux-x64,
+            pkg:npm/%40img/sharp-libvips-linuxmusl-arm64,
+            pkg:npm/%40img/sharp-libvips-linuxmusl-x64,
+            pkg:npm/%40img/sharp-wasm32,
+            pkg:npm/%40img/sharp-win32-arm64,
+            pkg:npm/%40img/sharp-win32-ia32,
+            pkg:npm/%40img/sharp-win32-x64,
+            pkg:npm/lru-cache,
+            pkg:npm/sax,
+            pkg:npm/common-ancestor-path,
+            pkg:npm/mdn-data,
+            pkg:npm/argparse,
+            pkg:npm/tslib,
+            pkg:npm/robust-predicates,
+            pkg:npm/%40fortawesome/fontawesome-free,
+            pkg:npm/dompurify,
+            pkg:npm/axe-core,
+            pkg:npm/%40axe-core/playwright,
+            pkg:npm/khroma,
+            pkg:npm/pause-stream
