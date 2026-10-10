@@ -23,15 +23,20 @@ internal static class ExchangeRenderer
 
     internal static string Curl(CapturedRequest request)
     {
-        var parts = new List<string> { $"curl -sS -X {request.Method} {DisplayBase}{request.Path}" };
+        var parts = new List<string> { $"curl -sS -X {request.Method} {ShellWord(DisplayBase + request.Path)}" };
         parts.AddRange(request.Headers.Select(header => $"-H \"{DoubleQuoted(header.Key)}: {DoubleQuoted(header.Value)}\""));
         if (request.Body is not null)
         {
-            parts.Add($"-d '{request.Body.Replace("'", "'\\''", StringComparison.Ordinal)}'");
+            parts.Add($"-d {SingleQuoted(request.Body)}");
         }
 
         return string.Join(Continuation, parts);
     }
+
+    private static string ShellWord(string value) =>
+        value.All(c => char.IsAsciiLetterOrDigit(c) || "/:.-_~".Contains(c, StringComparison.Ordinal)) ? value : SingleQuoted(value);
+
+    private static string SingleQuoted(string value) => $"'{value.Replace("'", "'\\''", StringComparison.Ordinal)}'";
 
     internal static string HttpRequest(CapturedRequest request) =>
         Message($"{request.Method} {request.Path} HTTP/1.1", request.Headers, request.Body);

@@ -23,6 +23,11 @@ public class ExchangeRendererTests
             .ShouldBe("curl -sS -X GET http://localhost:8080/api/tickets/abc \\\n  -H \"If-None-Match: \\\"r1\\\"\"");
 
     [Fact]
+    public void Curl_quotes_a_url_whose_query_the_shell_would_read() =>
+        ExchangeRenderer.Curl(new CapturedRequest("GET", "/api/vehicles?or=(color.eq.red,color.eq.blue)&model=ilike.%25a%25", [], null))
+            .ShouldBe("curl -sS -X GET 'http://localhost:8080/api/vehicles?or=(color.eq.red,color.eq.blue)&model=ilike.%25a%25'");
+
+    [Fact]
     public void The_request_is_an_http_message_with_indented_json() =>
         ExchangeRenderer.HttpRequest(_post).ShouldBe(
             "POST /api/tickets HTTP/1.1\nX-Alvo-Api-Key: agent.$ALVO_KEY_SECRET\nContent-Type: application/json\n\n{\n  \"title\": \"It's  late\"\n}");

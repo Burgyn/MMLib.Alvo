@@ -14,6 +14,16 @@ public class PlaceholdersTests
             .ShouldBe("/api/tickets/abc?v=\"r1\"&i=x");
 
     [Fact]
+    public void A_placeholder_in_a_body_string_resolves_and_keeps_the_json_valid()
+    {
+        var body = System.Text.Json.Nodes.JsonNode.Parse("""{ "rows": [ { "id": "{0.body.id}", "tag": "{0.header.ETag}", "n": 1 } ] }""");
+
+        var row = System.Text.Json.Nodes.JsonNode.Parse(Placeholders.ResolveIn(body, [_created])!.ToJsonString())!["rows"]![0]!;
+
+        (row["id"]!.GetValue<string>(), row["tag"]!.GetValue<string>(), row["n"]!.GetValue<int>()).ShouldBe(("abc", "\"r1\"", 1));
+    }
+
+    [Fact]
     public void An_unresolvable_placeholder_throws() =>
         Should.Throw<InvalidOperationException>(() => Placeholders.Resolve("/api/{0.body.missing}", [_created]))
             .Message.ShouldContain("{0.body.missing}");

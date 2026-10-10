@@ -16,6 +16,15 @@ internal static partial class Placeholders
     internal static string Resolve(string template, IReadOnlyList<CapturedStep> earlier) =>
         PlaceholderPattern().Replace(template, match => ValueOf(match, earlier));
 
+    internal static JsonNode? ResolveIn(JsonNode? node, IReadOnlyList<CapturedStep> earlier) => node switch
+    {
+        null => null,
+        JsonObject obj => new JsonObject(obj.Select(member => KeyValuePair.Create(member.Key, ResolveIn(member.Value, earlier)))),
+        JsonArray array => new JsonArray([.. array.Select(item => ResolveIn(item, earlier))]),
+        JsonValue value when value.GetValueKind() == JsonValueKind.String => JsonValue.Create(Resolve(value.GetValue<string>(), earlier)),
+        _ => node.DeepClone(),
+    };
+
     private static string ValueOf(Match match, IReadOnlyList<CapturedStep> earlier)
     {
         var step = int.Parse(match.Groups["step"].Value, CultureInfo.InvariantCulture);

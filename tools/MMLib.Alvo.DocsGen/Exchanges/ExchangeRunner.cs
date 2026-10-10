@@ -53,7 +53,7 @@ internal static class ExchangeRunner
             }
 
             headers.AddRange(step.Headers.Select(header => new KeyValuePair<string, string>(header.Key, Placeholders.Resolve(header.Value, earlier))));
-            var body = await BodyOf(step, repoRoot, ct).ConfigureAwait(false);
+            var body = await BodyOf(step with { Body = Placeholders.ResolveIn(step.Body, earlier) }, repoRoot, ct).ConfigureAwait(false);
             if (body is not null)
             {
                 headers.Add(new("Content-Type", step.ContentType ?? JsonContentType));
