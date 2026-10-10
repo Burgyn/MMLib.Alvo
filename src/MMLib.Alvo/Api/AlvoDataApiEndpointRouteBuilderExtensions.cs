@@ -27,8 +27,9 @@ public static class AlvoDataApiEndpointRouteBuilderExtensions
     /// and Alvo's boot primes the schema afterwards, before the server binds:
     /// <c>register → map → boot → listen → first request materialises the routes</c>. An entity the applied
     /// schema does not declare still has no route, which is the fail-closed direction. A descriptor applied
-    /// <em>later</em> at runtime still takes effect for policy and validation immediately; it cannot add a route
-    /// literal to an endpoint table that has already materialised (#103).
+    /// <em>later</em> at runtime still takes effect for policy, fields and validation immediately — each request
+    /// reads its entity's fields from the applied revision it was authorized under (#353) — but it cannot add a
+    /// route literal to an endpoint table that has already materialised (#103).
     /// </para>
     /// <para>
     /// <b>The data source is registered even when the schema declares nothing</b>, and that is load-bearing:

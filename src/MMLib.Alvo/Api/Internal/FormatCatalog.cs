@@ -36,12 +36,12 @@ namespace MMLib.Alvo.Api.Internal;
 ///   </item>
 /// </list>
 /// <para>
-/// <b>Compiled once per applied descriptor, when the endpoint table materialises.</b>
-/// <see cref="AlvoEndpointDataSource"/> builds exactly one catalogue from the applied schema and hands it to
-/// every endpoint it maps, so no request compiles a pattern and a format shared by twenty fields is one
-/// <see cref="Regex"/>. It is captured for the lifetime of the endpoint table, which is the same lifetime the
-/// route literals and the <see cref="EntitySchema"/> the endpoints bind against already have — a descriptor
-/// re-applied at runtime cannot change any of the three, exactly as <c>EntityRouteCatalog</c> records.
+/// <b>Compiled once per applied revision.</b> <see cref="AppliedSchemaView"/> builds exactly one catalogue
+/// per applied <see cref="SchemaModel"/> instance and every endpoint reads it from there, so no request
+/// compiles a pattern and a format shared by twenty fields is one <see cref="Regex"/>. It is <em>not</em>
+/// captured for the lifetime of the endpoint table any more: a descriptor re-applied at runtime can add,
+/// change or remove a format, and the next request is validated against the revision it was authorized under
+/// (#353). Only the route literals stay frozen, as <c>EntityRouteCatalog</c> records.
 /// </para>
 /// <para>
 /// <b>An unparseable pattern is refused twice, and the second time is not redundant.</b>
@@ -134,9 +134,9 @@ internal sealed class FormatCatalog
 
     /// <summary>Compiles every format the applied schema's fields name.</summary>
     /// <remarks>
-    /// Called once per endpoint table, from <see cref="AlvoEndpointDataSource"/>, beside the other schema guard
-    /// route materialisation makes — so a pattern this build cannot compile is refused once rather than per
-    /// request. The descriptor path is refused earlier, at boot stage 0.
+    /// Called once per applied revision, from <see cref="AppliedSchemaView"/>, beside the other schema guard —
+    /// so a pattern this build cannot compile is refused once per revision rather than per request. The
+    /// descriptor path is refused earlier, at boot stage 0 and by the runtime apply's mapper.
     /// </remarks>
     /// <param name="entities">The applied schema's entities.</param>
     /// <exception cref="InvalidOperationException">
