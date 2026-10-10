@@ -55,6 +55,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `rack_tag` joined with `+`, the week discount on a rental rounded with `math.round(x, 2)`, and the workshop's own
     address refused on a customer with `endsWith`.
 
+- **A documentation site** at <https://burgyn.github.io/MMLib.Alvo/> (`website/`, Astro Starlight). Task-phrased
+  guides — start here, data modelling, security, behaviour, API usage, C# extension, operations — sit beside a
+  reference generated at build time by `tools/MMLib.Alvo.DocsGen`: the descriptor reference from
+  `schema/project.schema.json`, the problem types, configuration keys and limits from the code, the Data API,
+  Management API, CEL catalogue and capabilities captured from a real host, the C# API from the XML docs, and every
+  HTTP exchange a guide shows run against a real host rather than written by hand. It also renders the changelog,
+  the contributing guide and the examples page, and publishes `llms.txt` / `llms-full.txt`. Snippets are validated
+  against the schema and applied in ring0; `.github/workflows/docs.yml` builds it on every PR that can change it and
+  deploys `main` to GitHub Pages.
+
+- **`ALVO_DESCRIPTOR` picks the descriptor the root compose stack runs.** `ALVO_DESCRIPTOR=./my.alvo.json docker
+  compose up --build --wait` mounts that file instead of `examples/vehicle-registry`; unset, nothing changes. A
+  descriptor whose roles the demo key does not hold adds keys in a gitignored `docker-compose.override.yml`, as the
+  docs' *Run your own descriptor* shows. `scripts/test-e2e` ignores the variable, from the shell and from a root
+  `.env`, so the suite always runs the stack it was written for.
+
+- **`examples/help-desk`**, a support desk's `tickets` with enum priority and status, literal defaults, a computed
+  field, `audit`, role-differentiated rules and two before-hooks. It applies as it stands, and it is the end state of
+  the docs site's tutorial and the source of the README's "See it" section.
+
 ### Changed (breaking)
 
 - **`IAlvoManagement` gains `GetCelFunctionsAsync`** (slice C1). A caller is unaffected. An
@@ -273,6 +293,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the warning is dropped silently — a startup crash traded for a silent drop.
 
 ### Changed
+
+- **The README is rewritten, and NuGet packages carry a readme of their own.** The repository `README.md` now
+  leads with what Alvo is, a runnable example and links into the docs site. nuget.org renders no Mermaid,
+  `<picture>`, raw HTML or relative image, so every package now packs `PACKAGE_README.md` (`PackageReadmeFile` in
+  `Directory.Build.props`) instead of the repository README.
 
 - **Serving the OpenAPI document no longer costs `O(N²)` per request** (#126). The document is rebuilt on
   every request to `/openapi/v1.json`, which needs no credential, and the transformer resolved each

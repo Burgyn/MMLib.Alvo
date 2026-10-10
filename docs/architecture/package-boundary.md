@@ -104,9 +104,11 @@
   breaking change to the seam breaks the sample in the same build instead of
   rotting until someone runs it. Details in
   [`extensibility.md`](./extensibility.md), *The runnable example*.
-- `tools/MMLib.Alvo.DocsGen` — the documentation site's generator: an `Exe` that writes the
-  site's reference section (the descriptor schema reference today) from the sources of truth, run
-  by `website`'s `prebuild`, with its output gitignored. **Not a package** — `IsPackable=false`
+- `tools/MMLib.Alvo.DocsGen` — the documentation site's generator: an `Exe` that writes, from the
+  sources of truth, the site's whole reference section (descriptor, problem types, configuration,
+  limits, Data and Management API, CEL catalogue, capabilities, C# API), the captured HTTP
+  exchanges, `llms.txt` / `llms-full.txt`, and the examples, changelog and contributing pages. It
+  is run by `website`'s `prebuild`, and its output is gitignored. **Not a package** — `IsPackable=false`
   (`tools/Directory.Build.props`), in no package's dependency graph, run and never referenced, so
   the (a)/(b)/(c) rule below is not engaged, by the same reasoning as `eval/MMLib.Alvo.Ai.Eval`. It
   references `MMLib.Alvo.Host` so that it can boot the real composition. Its suite,
